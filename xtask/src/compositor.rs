@@ -6778,11 +6778,36 @@ pub(crate) fn test_xwindow(args: &Args) -> Result<()> {
     let mut screen: Option<Image> = None;
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
-        let ended = watching.read_more(Instant::now() + CHROME_WINDOW_PATIENCE, |lines| {
-            lines
-                .iter()
-                .any(|line| line.contains(crate::yserver::XWINDOW_END))
-        })?;
+        let script = |ending: &'static str| {
+            move |lines: &[String]| {
+                lines
+                    .iter()
+                    .any(|line| line.contains(ending) || line.contains(crate::yserver::XWINDOW_END))
+            }
+        };
+        let _ = watching.read_more(
+            Instant::now() + CHROME_WINDOW_PATIENCE,
+            script(crate::yserver::XWINDOW_LOOK),
+        )?;
+        // The script leaves the screen alone for eight seconds from here:
+        // the screen until xev's window is on it, or the time is up.
+        let deadline = Instant::now() + Duration::from_secs(6);
+        loop {
+            qmp.screendump(Some(DEVICE_ID), &dump)?;
+            let bytes = std::fs::read(&dump)
+                .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
+            let shown = parse_ppm(&bytes)?;
+            let found = crate::yserver::find_xev(&shown).is_some();
+            screen = Some(shown);
+            if found || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let ended = watching.read_more(
+            Instant::now() + CHROME_WINDOW_PATIENCE,
+            script(crate::yserver::XWINDOW_END),
+        )?;
         said = watching
             .lines()
             .iter()
@@ -6795,25 +6820,12 @@ pub(crate) fn test_xwindow(args: &Args) -> Result<()> {
                 watching,
             ));
         }
-        // xev is still running: the screen until its window is on it, or
-        // the time is up.
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            qmp.screendump(Some(DEVICE_ID), &dump)?;
-            let bytes = std::fs::read(&dump)
-                .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
-            let shown = parse_ppm(&bytes)?;
-            let found = crate::yserver::find_xev(&shown).is_some();
-            screen = Some(shown);
-            if found || Instant::now() >= deadline {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
+        Ok(())
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
     crate::yserver::judge_xwindow(arch, &said)?;
-    crate::yserver::judge_xev(arch, &said, screen.as_ref(), &dump)
+    crate::yserver::judge_xev(arch, &said, screen.as_ref(), &dump)?;
+    crate::yserver::judge_windows(arch, &said, screen.as_ref())
 }
 
 /// The input of [`BENCH_PHASES`], ten seconds each: nothing, the wheel

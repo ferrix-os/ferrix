@@ -174,15 +174,26 @@ pub(crate) fn test_yserver(args: &Args) -> Result<()> {
 /// Where [`XWINDOW_SCRIPT`] is in `test-xwindow`'s image.
 pub(crate) const XWINDOW_PATH: &str = "etc/xwindow.sh";
 
-/// `test-xwindow`'s script, started by the compositor: yserver as its client
-/// on `:0`, then `xdpyinfo`, whose screen line says whether the root took the
-/// compositor's screen for its own (docs/YSERVER.md, Y2), then `xev`, whose
-/// window must become one of the compositor's (Y3): `hyprctl clients` lists
-/// it, and xtask looks for it on the screen once the script has ended, while
-/// `xev` still runs. xev names its window but gives it no class, so the
-/// script sets `WM_CLASS` once it is up, which is also how a program
-/// renaming its window reaches the compositor. Every line of its own starts `xwindow:`, and it ends
-/// with `xwindow: end` whatever happened.
+/// `test-xwindow`'s script, started by the compositor. yserver runs as its
+/// client on `:0`, and then:
+///
+/// * `xdpyinfo`, whose screen line says whether the root took the
+///   compositor's screen for its own (docs/YSERVER.md, Y2);
+/// * `xev`, whose window must become one of the compositor's (Y3), at the
+///   size the compositor tiles it at (Y5). xev names its window but gives
+///   it no class, so the script sets `WM_CLASS` once it is up, which is
+///   also how a program renaming its window reaches the compositor;
+/// * a second `xev`, made a transient of the first -- unmapped, given
+///   `WM_TRANSIENT_FOR` and its own size back, and mapped again with
+///   `xdotool` -- which the compositor must float as a dialog at that size
+///   (Y5);
+/// * `hyprctl clients`, and each window's size as X has it;
+/// * [`XWINDOW_LOOK`], after which xtask looks for xev's window on the
+///   screen while the script waits;
+/// * the compositor's `closewindow` on xev, which must end it (Y5).
+///
+/// Every line of its own starts `xwindow:`, and it ends with
+/// `xwindow: end` whatever happened.
 pub(crate) const XWINDOW_SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp RUST_LOG=info
 echo "xwindow: start"
 YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1 /data/yserver/yserver :0 -nolisten tcp \
@@ -197,28 +208,59 @@ export DISPLAY=:0
 xdpyinfo > /tmp/xdpyinfo.txt 2>&1
 echo "xwindow: xdpyinfo exited $?"
 grep dimensions: /tmp/xdpyinfo.txt | sed 's/^/xwindow: /'
+# Wait up to 30 s for the window named $1 to be viewable.
+viewable() {
+    waited=0
+    until xwininfo -name "$1" 2>/dev/null | grep -q IsViewable || [ $waited -ge 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "xwindow: $1 was viewable after ${waited}s"
+}
+# The window id xwininfo gives for the window named $1.
+id_of() {
+    xwininfo -name "$1" | sed -n 's/.*Window id: \(0x[0-9a-f]*\).*/\1/p'
+}
 xev > /tmp/xev.txt 2>&1 &
+xev=$!
+viewable "Event Tester"
+xprop -name "Event Tester" -f WM_CLASS 8s -set WM_CLASS Xev
+xprop -name "Event Tester" WM_NAME WM_CLASS | sed 's/^/xwindow: /'
+xev -name "Xev Dialog" > /tmp/xev-dialog.txt 2>&1 &
+viewable "Xev Dialog"
+dialog=$(id_of "Xev Dialog")
+xdotool windowunmap --sync $dialog
+xprop -id $dialog -f WM_TRANSIENT_FOR 32x -set WM_TRANSIENT_FOR $(id_of "Event Tester")
+# Back to its own size, which the tile it had until now changed.
+xdotool windowsize --sync $dialog 178 178
+xdotool windowmap --sync $dialog
+xprop -id $dialog WM_TRANSIENT_FOR | sed 's/^/xwindow: dialog /'
+sleep 2
+/bin/hyprctl clients | sed 's/^/xwindow: clients: /'
+for name in "Event Tester" "Xev Dialog"; do
+    size=$(xwininfo -name "$name" | sed -n 's/^ *Width: \([0-9]*\)$/\1/p;s/^ *Height: \([0-9]*\)$/\1/p' | tr '\n' ' ')
+    echo "xwindow: X size of $name: $size"
+done
+echo "xwindow: look"
+sleep 8
+/bin/hyprctl dispatch closewindow 'title:^Event Tester$' | sed 's/^/xwindow: close: /'
 waited=0
-until xwininfo -name "Event Tester" 2>/dev/null | grep -q IsViewable || [ $waited -ge 30 ]; do
+while kill -0 $xev 2>/dev/null && [ $waited -lt 10 ]; do
     sleep 1
     waited=$((waited + 1))
 done
-echo "xwindow: xev's window was viewable after ${waited}s"
-xprop -name "Event Tester" -f WM_CLASS 8s -set WM_CLASS Xev
-xprop -name "Event Tester" WM_NAME WM_CLASS | sed 's/^/xwindow: /'
-sleep 2
-# hyprix answers a request that is slow to arrive as an empty one
-# (docs/BACKLOG.md, P1 flakes), so ask again if it did.
-tries=0
-until /bin/hyprctl clients > /tmp/clients.txt && grep -q '^Window' /tmp/clients.txt \
-    || [ $tries -ge 2 ]; do
-    sleep 1
-    tries=$((tries + 1))
-done
-sed 's/^/xwindow: clients: /' /tmp/clients.txt
+if kill -0 $xev 2>/dev/null; then
+    echo "xwindow: xev is still running after ${waited}s"
+else
+    echo "xwindow: xev exited after ${waited}s"
+fi
 sed 's/^/xwindow: yserver: /' /tmp/yserver.log
 echo "xwindow: end"
 "#;
+
+/// The line after which xtask looks at the screen, which the script then
+/// leaves alone for eight seconds.
+pub(crate) const XWINDOW_LOOK: &str = "xwindow: look";
 
 /// The line [`XWINDOW_SCRIPT`] ends with.
 pub(crate) const XWINDOW_END: &str = "xwindow: end";
@@ -259,6 +301,8 @@ pub(crate) fn judge_xwindow(arch: Arch, lines: &[String]) -> Result<()> {
 const XEV_TITLE: &str = "Event Tester";
 /// See [`XEV_TITLE`].
 const XEV_CLASS: &str = "Xev";
+/// The second xev's name, the one made a transient of the first.
+const XEV_DIALOG: &str = "Xev Dialog";
 
 /// xev's window as X draws it: white, with a white 50×50 subwindow at
 /// (10, 10) inside a black border 4 pixels wide. The subwindow is drawn into
@@ -350,6 +394,113 @@ pub(crate) fn judge_xev(
     }
 }
 
+/// `hyprctl clients`' windows among the script's lines: each one's title,
+/// from its `Window … -> TITLE:` line, and the `key: value` lines under it.
+fn listed_windows(lines: &[String]) -> Vec<(String, Vec<(String, String)>)> {
+    let mut windows: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for line in lines {
+        let Some((_, rest)) = line.split_once("xwindow: clients:") else {
+            continue;
+        };
+        if let Some((_, title)) = rest.trim().split_once(" -> ") {
+            windows.push((title.trim_end_matches(':').to_owned(), Vec::new()));
+        } else if let (Some((key, value)), Some((_, fields))) =
+            (rest.trim().split_once(':'), windows.last_mut())
+        {
+            fields.push((key.trim().to_owned(), value.trim().to_owned()));
+        }
+    }
+    windows
+}
+
+/// Whether the compositor's sizes, floating and closing reached the X
+/// windows (docs/YSERVER.md, Y5): xev's X size is the size hyprix tiled it
+/// at, and its white background reaches the far corner of the tile on the
+/// screen, so the area the grow exposed was painted; the transient second
+/// xev floats at its own size; and hyprix's `closewindow` ended xev.
+pub(crate) fn judge_windows(
+    arch: Arch,
+    lines: &[String],
+    screen: Option<&crate::display::Image>,
+) -> Result<()> {
+    let windows = listed_windows(lines);
+    let field = |title: &str, key: &str| {
+        windows
+            .iter()
+            .find(|(named, _)| named == title)
+            .and_then(|(_, fields)| fields.iter().find(|(name, _)| name == key))
+            .map(|(_, value)| value.clone())
+    };
+    let x_size = |title: &str| {
+        let prefix = format!("xwindow: X size of {title}:");
+        lines.iter().find_map(|line| {
+            let (_, size) = line.split_once(prefix.as_str())?;
+            let mut numbers = size.split_whitespace();
+            Some(format!("{},{}", numbers.next()?, numbers.next()?))
+        })
+    };
+    let fail = |why: String| {
+        Err(Error::new(format!(
+            "{arch}: {why}; the `xwindow:` lines say more"
+        )))
+    };
+
+    let tiled = field(XEV_TITLE, "size");
+    if tiled.is_none() || tiled != x_size(XEV_TITLE) {
+        return fail(format!(
+            "hyprix tiled xev at {tiled:?}, and X has it at {:?}",
+            x_size(XEV_TITLE)
+        ));
+    }
+    // The tile's far corner, a few pixels in from hyprix's border.
+    let corner = field(XEV_TITLE, "at")
+        .zip(tiled.clone())
+        .and_then(|(at, size)| {
+            let (x, y) = at.split_once(',')?;
+            let (width, height) = size.split_once(',')?;
+            let x = x.trim().parse::<usize>().ok()? + width.trim().parse::<usize>().ok()?;
+            let y = y.trim().parse::<usize>().ok()? + height.trim().parse::<usize>().ok()?;
+            Some((x.checked_sub(5)?, y.checked_sub(5)?))
+        });
+    let white = |(x, y): (usize, usize)| {
+        let screen = screen?;
+        let at = (y.checked_mul(screen.width)?.checked_add(x)?).checked_mul(3)?;
+        let rgb = screen.pixels.get(at..at.checked_add(3)?)?;
+        Some(rgb.iter().all(|&c| c >= 0xf0))
+    };
+    if corner.and_then(white) != Some(true) {
+        return fail(format!(
+            "xev's tile is not white at its far corner {corner:?}: the area its grow exposed \
+             was not painted with its background"
+        ));
+    }
+    if field(XEV_DIALOG, "floating").as_deref() != Some("1") {
+        return fail(format!(
+            "the transient {XEV_DIALOG:?} is not floating: {:?}",
+            field(XEV_DIALOG, "floating")
+        ));
+    }
+    let floated = field(XEV_DIALOG, "size");
+    if floated.as_deref() != Some("178,178") || floated != x_size(XEV_DIALOG) {
+        return fail(format!(
+            "the transient floats at {floated:?}, not at its own 178,178 ({:?} in X)",
+            x_size(XEV_DIALOG)
+        ));
+    }
+    if !lines
+        .iter()
+        .any(|line| line.contains("xwindow: xev exited after"))
+    {
+        return fail("hyprix's closewindow did not end xev".to_owned());
+    }
+    println!(
+        "  {arch}: xev is X's size of its tile ({}), the transient floats at its own \
+         178x178, and closing xev in hyprix ended it",
+        tiled.unwrap_or_default()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +553,61 @@ mod tests {
             }
         }
         assert_eq!(find_xev(&screen), None);
+    }
+
+    #[test]
+    fn the_windows_follow_the_compositor() {
+        let mut lines: Vec<String> = [
+            "Window 1 -> Event Tester:",
+            "\tat: 21,21",
+            "\tsize: 982,726",
+            "\tfloating: 0",
+            "Window 2 -> Xev Dialog:",
+            "\tsize: 178,178",
+            "\tfloating: 1",
+        ]
+        .iter()
+        .map(|line| format!("xwindow: clients: {line}"))
+        .collect();
+        lines.push("xwindow: X size of Event Tester: 982 726 ".to_owned());
+        lines.push("xwindow: X size of Xev Dialog: 178 178 ".to_owned());
+        let mut closed = lines.clone();
+        closed.push("xwindow: xev exited after 1s".to_owned());
+        let white = Image {
+            width: 1024,
+            height: 768,
+            pixels: vec![0xff; 1024 * 768 * 3],
+        };
+        let screen = Some(&white);
+        assert!(judge_windows(Arch::X86_64, &closed, screen).is_ok());
+        assert!(
+            judge_windows(Arch::X86_64, &lines, screen).is_err(),
+            "xev must have exited"
+        );
+        let black = Image {
+            width: 1024,
+            height: 768,
+            pixels: vec![0; 1024 * 768 * 3],
+        };
+        assert!(
+            judge_windows(Arch::X86_64, &closed, Some(&black)).is_err(),
+            "the grown area must be painted"
+        );
+        let mut untiled = closed.clone();
+        untiled.retain(|line| !line.contains("X size of Event Tester"));
+        untiled.push("xwindow: X size of Event Tester: 178 178 ".to_owned());
+        assert!(
+            judge_windows(Arch::X86_64, &untiled, screen).is_err(),
+            "xev must take the tile's size"
+        );
+        let tiled_dialog: Vec<String> = closed
+            .iter()
+            .map(|line| line.replace("floating: 1", "floating: 0"))
+            .collect();
+        assert!(
+            judge_windows(Arch::X86_64, &tiled_dialog, screen).is_err(),
+            "the dialog must float"
+        );
     }
 
     #[test]
