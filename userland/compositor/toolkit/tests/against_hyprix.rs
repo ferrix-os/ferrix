@@ -620,3 +620,41 @@ fn a_dialog_floats_at_its_own_size_over_its_parent() {
         "the dialog is centred over its parent: {centre} and {parent_centre}"
     );
 }
+
+/// A program whose own loop polls the socket (`Client::as_raw_fd`) and then
+/// dispatches with a zero timeout must get what arrived, even with events
+/// still queued from before: `connect`'s round trips leave each screen's
+/// arrival queued. An edge-triggered poll does not wake again for bytes
+/// left unread, so a dispatch that handed back only the queued events
+/// stalled the program until the compositor happened to send more --
+/// yserver under sway, which sends a window's configure and a ping once and
+/// then waits for the answer.
+#[test]
+fn a_zero_timeout_dispatch_reads_what_arrived_behind_queued_events() {
+    let (answer, _) =
+        with_compositor("queued", 2000, |socket| {
+            let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+            let window = client
+                .toplevel(&ToplevelOptions {
+                    title: "queued".to_owned(),
+                    app_id: "toolkit-test".to_owned(),
+                    size: (100, 100),
+                    parent: None,
+                })
+                .map_err(|error| error.to_string())?;
+            client.flush().map_err(|error| error.to_string())?;
+            // The configure is on the socket by now; one dispatch, as a
+            // program does when its poll says the socket is readable.
+            std::thread::sleep(Duration::from_millis(500));
+            let events = client
+                .dispatch(Some(Duration::ZERO))
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>(events.iter().any(
+                |event| matches!(event, Event::Configure { surface, .. } if *surface == window),
+            ))
+        });
+    assert!(
+        answer.expect("the client worked"),
+        "the configure waiting on the socket was not read"
+    );
+}

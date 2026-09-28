@@ -1409,9 +1409,15 @@ impl Client {
         if let Some(error) = self.deferred.take() {
             return Err(error);
         }
-        if self.pending.is_empty() {
-            self.pump(timeout)?;
-        }
+        // With events queued already there is no waiting, but what the
+        // socket holds is still read: a program polling `as_raw_fd` with an
+        // edge-triggered poll is not woken again for bytes left unread.
+        let wait = if self.pending.is_empty() {
+            timeout
+        } else {
+            Some(Duration::ZERO)
+        };
+        self.pump(wait)?;
         Ok(core::mem::take(&mut self.pending))
     }
 
