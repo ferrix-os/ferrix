@@ -456,6 +456,8 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
     // a dispatcher should be there before anything presses it, and after the
     // sockets, because it connects to one as soon as it runs.
     let mut plugins = crate::plugins::Plugins::new();
+    // `hyprctl` connections accepted and not answered yet.
+    let mut requests: Vec<crate::control::Pending> = Vec::new();
     for command in &config.plugins {
         match start(command, listener.path(), options.instance.as_deref()) {
             Ok(pid) => report(&format!("hyprix: plugin {command} started as {pid}")),
@@ -693,8 +695,28 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
             && ready
                 .as_ref()
                 .is_none_or(|fds| fds.contains(&control.raw_fd()))
-            && let Some(mut stream) = control.accept()
         {
+            while let Some(stream) = control.accept() {
+                if let Ok(pending) = crate::control::Pending::new(stream) {
+                    requests.push(pending);
+                }
+            }
+        }
+        // Each request as it arrives, answered once it is whole.
+        let now = Instant::now();
+        let mut whole = Vec::new();
+        for mut pending in std::mem::take(&mut requests) {
+            let readable = ready
+                .as_ref()
+                .is_none_or(|fds| fds.contains(&pending.raw_fd()))
+                || now >= pending.deadline();
+            match readable.then(|| pending.read(now)) {
+                Some(Some(true)) => whole.push(pending),
+                Some(None) => {}
+                Some(Some(false)) | None => requests.push(pending),
+            }
+        }
+        if !whole.is_empty() {
             let snapshot = crate::control::snapshot(
                 &state,
                 &slots,
@@ -712,11 +734,13 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
                     started.elapsed().as_secs(),
                 ),
             );
-            match crate::control::serve(&mut stream, &snapshot, &mut plugins) {
-                Ok(todo) => asked.extend(todo),
-                Err(_) => {
-                    // A client that went away mid-request is not the
-                    // compositor's problem.
+            for pending in whole {
+                match crate::control::serve(pending, &snapshot, &mut plugins) {
+                    Ok(todo) => asked.extend(todo),
+                    Err(_) => {
+                        // A client that went away mid-request is not the
+                        // compositor's problem.
+                    }
                 }
             }
         }
@@ -1793,6 +1817,12 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
         // the next frame or client message, which on a quiet desktop is
         // never.
         let injected_wait = (!injected.is_empty()).then_some(Duration::ZERO);
+        // A request that has said nothing is given up on at its deadline.
+        let request_wait = requests
+            .iter()
+            .map(crate::control::Pending::deadline)
+            .min()
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
         let timeout = [
             frame_wait,
             idle_wait,
@@ -1800,6 +1830,7 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
             overlay_wait,
             rescan_wait,
             injected_wait,
+            request_wait,
         ]
         .into_iter()
         .flatten()
@@ -1810,7 +1841,8 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
                 + devices.len()
                 + usize::from(control.is_some())
                 + usize::from(events.is_some())
-                + plugins.len(),
+                + plugins.len()
+                + requests.len(),
         );
         fds.push(listener.as_raw_fd());
         fds.extend(slots.iter().map(Slot::raw_fd));
@@ -1822,6 +1854,7 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
             fds.push(socket.raw_fd());
         }
         fds.extend(plugins.raw_fds());
+        fds.extend(requests.iter().map(crate::control::Pending::raw_fd));
         // A card's descriptor: readable when its driver dies, so a screen
         // nothing is redrawn on still finds out.
         fds.extend(screens.iter().filter_map(|screen| screen.backend.raw_fd()));

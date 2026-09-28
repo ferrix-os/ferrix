@@ -16,7 +16,7 @@ use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use compositor_ipc::{Monitor, Request, Snapshot, Window, Workspace};
 use compositor_layout::{State, WindowId};
@@ -112,16 +112,105 @@ impl Drop for Control {
     }
 }
 
-/// Read one request from `stream`, answer it, and close.
+/// A request connection accepted and not answered yet.
+///
+/// A client connects and then writes, and the two are not one call, so the
+/// request is read as it arrives, with the connection polled beside every
+/// other descriptor, while the compositor goes on drawing. Reading it in one
+/// blocking go lost it whenever the client was slower than the wait: first
+/// as `Broken pipe` with no wait at all, then, with a 250 ms one, as an
+/// empty request (`unknown request`) or a `Broken pipe` again whenever the
+/// guest did not run `hyprctl` for a quarter of a second between its
+/// `connect` and its `write` (docs/BACKLOG.md, P1 flakes, 2026-09-28).
+#[derive(Debug)]
+pub struct Pending {
+    stream: UnixStream,
+    line: String,
+    whole: bool,
+    since: Instant,
+}
+
+/// How long a connection may take to send its request. What it sent by then
+/// is answered, and a connection that sent nothing is closed.
+const PATIENCE: Duration = Duration::from_secs(5);
+
+impl Pending {
+    /// A connection just accepted.
+    ///
+    /// # Errors
+    ///
+    /// Making it non-blocking failing.
+    pub fn new(stream: UnixStream) -> std::io::Result<Self> {
+        stream.set_nonblocking(true)?;
+        Ok(Self {
+            stream,
+            line: String::new(),
+            whole: false,
+            since: Instant::now(),
+        })
+    }
+
+    /// Its descriptor, for the compositor's event wait.
+    #[must_use]
+    pub fn raw_fd(&self) -> i32 {
+        self.stream.as_raw_fd()
+    }
+
+    /// When it stops being waited for.
+    #[must_use]
+    pub fn deadline(&self) -> Instant {
+        self.since + PATIENCE
+    }
+
+    /// Read what has arrived. Gives whether the request is ready to answer:
+    /// its first line has come, the client shut its end (which is what
+    /// `hyprctl` does after its line), or the time is up with something
+    /// said. `None` is a connection to close unanswered: one that failed,
+    /// or said nothing in time.
+    pub fn read(&mut self, now: Instant) -> Option<bool> {
+        let mut buffer = [0u8; 4096];
+        while !self.whole {
+            match self.stream.read(&mut buffer) {
+                Ok(0) => self.whole = true,
+                Ok(read) => {
+                    self.line
+                        .push_str(&String::from_utf8_lossy(buffer.get(..read).unwrap_or(&[])));
+                    self.whole = self.line.contains('\n');
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        }
+        if self.whole {
+            return Some(true);
+        }
+        if now >= self.deadline() {
+            return (!self.line.is_empty()).then_some(true);
+        }
+        Some(false)
+    }
+}
+
+/// Answer a request `Pending::read` says is ready, and close.
 ///
 /// Gives back the requests that change something, which the caller runs: this
 /// function holds no compositor.
+///
+/// # Errors
+///
+/// Writing the answer failing.
 pub fn serve(
-    stream: &mut UnixStream,
+    pending: Pending,
     snapshot: &Snapshot,
     plugins: &mut crate::plugins::Plugins,
 ) -> std::io::Result<Vec<compositor_ipc::Reply>> {
-    let line = first_request(stream)?;
+    let Pending {
+        mut stream, line, ..
+    } = pending;
+    // Back to blocking for the answer; a plugin's reads are made
+    // non-blocking again when it is taken.
+    stream.set_nonblocking(false)?;
 
     // A connection that opens with `[[PLUGIN]]` is a plugin, and is kept
     // rather than answered and closed.
@@ -151,54 +240,6 @@ pub fn serve(
     stream.write_all(answer.as_bytes())?;
     stream.flush()?;
     Ok(todo)
-}
-
-/// How long the compositor waits for a request on a connection that has
-/// just been accepted.
-///
-/// A client connects and then writes, and the two are not one call: a
-/// compositor that read once and closed would lose the request whenever it
-/// won that race, which is what `hyprctl` saw as `Broken pipe` about half
-/// the time on an emulated guest. Long enough that a program which is
-/// merely slow is heard; short enough that a connection which says nothing
-/// at all does not hold up a frame.
-const PATIENCE: Duration = Duration::from_millis(250);
-
-/// Read the first whole line a connection sends.
-///
-/// Gives what arrived, which is empty for a connection that said nothing:
-/// the caller answers that as it answers an unknown request.
-fn first_request(stream: &mut UnixStream) -> std::io::Result<String> {
-    let _ = stream.set_read_timeout(Some(PATIENCE));
-    let mut line = String::new();
-    let mut buffer = [0u8; 4096];
-    loop {
-        match stream.read(&mut buffer) {
-            // End of file: the client shut its write half, which is what
-            // `hyprctl` does after its line.
-            Ok(0) => break,
-            Ok(read) => {
-                line.push_str(&String::from_utf8_lossy(buffer.get(..read).unwrap_or(&[])));
-                if line.contains('\n') {
-                    break;
-                }
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
-    }
-    // The connection goes back to blocking for the answer, and a plugin's
-    // reads are made non-blocking when it is taken.
-    let _ = stream.set_read_timeout(None);
-    Ok(line)
 }
 
 /// Describe the compositor for an answer.

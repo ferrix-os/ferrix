@@ -707,6 +707,59 @@ fn an_unknown_request_is_answered_rather_than_hanging_hyprctl() {
     );
 }
 
+/// A request that arrives well after its connection is still heard.
+///
+/// A client connects and then writes, and a guest that did not run
+/// `hyprctl` for a quarter of a second between the two had its request
+/// answered as an empty one, `unknown request`, or its write refused with
+/// `Broken pipe` (docs/BACKLOG.md, P1 flakes, 2026-09-28). The compositor
+/// now reads a request as it arrives, beside everything else it waits on.
+#[test]
+fn a_request_that_is_slow_to_arrive_is_still_answered() {
+    let work = workspace("slow-request");
+    let runtime = work.join("runtime");
+    let instance = runtime.join("hypr").join("ferrix-test");
+    std::fs::create_dir_all(&instance).expect("an instance directory");
+    let requests = instance.join(compositor_ipc::REQUEST_SOCKET);
+    let options = Options {
+        display: work.join("wayland").to_string_lossy().into_owned(),
+        headless: Some((WIDTH, HEIGHT)),
+        instance: Some(instance.to_string_lossy().into_owned()),
+        deadline: Some(2500),
+        ..Options::default()
+    };
+    let asker = std::thread::spawn(move || {
+        use std::io::{Read as _, Write as _};
+        for _ in 0..400 {
+            if requests.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut stream = std::os::unix::net::UnixStream::connect(&requests)
+            .map_err(|error| format!("connecting: {error}"))?;
+        // Well past the quarter of a second the compositor used to wait.
+        std::thread::sleep(Duration::from_millis(600));
+        stream
+            .write_all(b"version\n")
+            .map_err(|error| format!("writing: {error}"))?;
+        stream
+            .shutdown(std::net::Shutdown::Write)
+            .map_err(|error| format!("finishing: {error}"))?;
+        let mut answer = String::new();
+        let _ = stream
+            .read_to_string(&mut answer)
+            .map_err(|error| format!("reading: {error}"))?;
+        Ok::<_, String>(answer)
+    });
+    let _ = hyprix::run(&options).expect("the compositor ran");
+    let answer = asker.join().expect("the asker finished").expect("asked");
+    assert!(
+        !answer.contains("unknown request") && answer.contains("hyprix"),
+        "the request was not heard: {answer:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The event socket
 //
