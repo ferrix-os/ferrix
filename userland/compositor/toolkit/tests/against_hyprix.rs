@@ -178,6 +178,7 @@ fn a_window_is_tiled_by_the_compositor_and_drawn_there() {
                 title: "toolkit test".to_owned(),
                 app_id: "toolkit-test".to_owned(),
                 size: (200, 100),
+                parent: None,
             })
             .map_err(|error| error.to_string())?;
         let mut size = None;
@@ -442,6 +443,7 @@ fn a_cursor_picture_is_taken_replaced_and_given_up_without_a_protocol_error() {
                 title: "cursor".to_owned(),
                 app_id: "toolkit-test".to_owned(),
                 size: (100, 100),
+                parent: None,
             })
             .map_err(|error| error.to_string())?;
         let arrow = [0xff_u8; 2 * 3 * 4];
@@ -460,4 +462,161 @@ fn a_cursor_picture_is_taken_replaced_and_given_up_without_a_protocol_error() {
         client.roundtrip().map_err(|error| error.to_string())
     });
     let _ = answer.expect("the compositor took every request");
+}
+
+/// Where the frame's first pixel of `colour` is, reading rows top down.
+fn first(frame: &[u8], colour: (u8, u8, u8)) -> Option<(u32, u32)> {
+    (0..HEIGHT)
+        .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
+        .find(|&(x, y)| pixel(frame, x, y) == colour)
+}
+
+/// A window with a menu: the popup hangs from a point of the window, as an
+/// X server's override-redirect menu is placed (docs/YSERVER.md §4.2). The
+/// window draws at a size of its own rather than the tile's, which hyprix
+/// stretches to the tile.
+#[test]
+fn a_menu_hangs_from_the_point_of_the_window_it_was_opened_at() {
+    let (answer, frame) = with_compositor("menu", 3000, |socket| {
+        let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+        let window = client
+            .toplevel(&ToplevelOptions {
+                title: "toolkit menu test".to_owned(),
+                app_id: "toolkit-test".to_owned(),
+                size: (200, 100),
+                parent: None,
+            })
+            .map_err(|error| error.to_string())?;
+        let mut menu = None;
+        let mut placed = None;
+        let _ = until(&mut client, Duration::from_secs(2), |client, event| {
+            if let Event::Configure {
+                surface,
+                width,
+                height,
+            } = event
+            {
+                if *surface == window {
+                    draw_own_size(client, window);
+                    menu = menu.or_else(|| open_menu(client, window));
+                } else if Some(*surface) == menu {
+                    placed = Some((*width, *height));
+                    fill(client, *surface, (0, 200, 0));
+                }
+            }
+            false
+        });
+        let _ = until(&mut client, Duration::from_secs(5), |_, _| false);
+        Ok::<_, String>(placed)
+    });
+    let placed = answer.expect("the client worked");
+    assert_eq!(
+        placed,
+        Some((60, 40)),
+        "the menu was configured at its size"
+    );
+    let window = first(&frame, (0, 0, 200)).expect("the window is drawn");
+    let menu = first(&frame, (0, 200, 0)).expect("the menu is drawn");
+    assert_eq!(
+        (menu.0 - window.0, menu.1 - window.1),
+        (20, 30),
+        "the menu hangs from the point it was opened at"
+    );
+}
+
+/// Blue, at the window's own 200x100 whatever the tile is.
+fn draw_own_size(client: &mut Client, window: compositor_toolkit::SurfaceId) {
+    let _ = client.draw_sized(window, (200, 100), |pixmap| {
+        pixmap.fill(tiny_skia::Color::from_rgba8(0, 0, 200, 255));
+    });
+}
+
+/// A 60x40 menu hanging from (20, 30) of `window`: the top left of that
+/// point, growing right and down, and never moved.
+fn open_menu(
+    client: &mut Client,
+    window: compositor_toolkit::SurfaceId,
+) -> Option<compositor_toolkit::SurfaceId> {
+    use compositor_toolkit::{PopupOptions, Rect};
+    client
+        .popup(
+            window,
+            &PopupOptions {
+                size: (60, 40),
+                anchor_rect: Rect {
+                    x: 20,
+                    y: 30,
+                    width: 1,
+                    height: 1,
+                },
+                anchor: 5,
+                gravity: 8,
+                constraint_adjustment: 0,
+                ..PopupOptions::default()
+            },
+        )
+        .ok()
+}
+
+/// A dialog, a window with a parent, floats at the size it draws, centred
+/// over its parent, as in Hyprland; an X server's transient windows are
+/// such dialogs.
+#[test]
+fn a_dialog_floats_at_its_own_size_over_its_parent() {
+    let (answer, frame) = with_compositor("dialog", 3000, |socket| {
+        let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+        let window = client
+            .toplevel(&ToplevelOptions {
+                title: "toolkit parent".to_owned(),
+                app_id: "toolkit-test".to_owned(),
+                size: (200, 100),
+                parent: None,
+            })
+            .map_err(|error| error.to_string())?;
+        let dialog = client
+            .toplevel(&ToplevelOptions {
+                title: "toolkit dialog".to_owned(),
+                app_id: "toolkit-test".to_owned(),
+                size: (120, 80),
+                parent: Some(window),
+            })
+            .map_err(|error| error.to_string())?;
+        let mut configured = None;
+        let _ = until(&mut client, Duration::from_secs(2), |client, event| {
+            if let Event::Configure {
+                surface,
+                width,
+                height,
+            } = event
+            {
+                if *surface == window {
+                    fill(client, window, (0, 0, 200));
+                } else if *surface == dialog {
+                    configured = Some((*width, *height));
+                    fill(client, dialog, (0, 200, 0));
+                }
+            }
+            false
+        });
+        let _ = until(&mut client, Duration::from_secs(5), |_, _| false);
+        Ok::<_, String>(configured)
+    });
+    let configured = answer.expect("the client worked");
+    assert_eq!(configured, Some((120, 80)), "the dialog chose its own size");
+    let (left, top) = first(&frame, (0, 200, 0)).expect("the dialog is drawn");
+    let wide = (left..WIDTH)
+        .take_while(|&x| pixel(&frame, x, top + 40) == (0, 200, 0))
+        .count();
+    assert_eq!(wide, 120, "the dialog floats at the width it drew");
+    // The parent's top row, which the dialog, centred, does not reach.
+    let (parent_left, parent_top) = first(&frame, (0, 0, 200)).expect("the parent is drawn");
+    let parent_wide = (parent_left..WIDTH)
+        .take_while(|&x| pixel(&frame, x, parent_top) == (0, 0, 200))
+        .count();
+    let centre = left + 60;
+    let parent_centre = parent_left + u32::try_from(parent_wide / 2).expect("a width");
+    assert!(
+        centre.abs_diff(parent_centre) <= 2,
+        "the dialog is centred over its parent: {centre} and {parent_centre}"
+    );
 }

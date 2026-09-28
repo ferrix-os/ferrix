@@ -594,22 +594,26 @@ impl Client {
         self.sync_and_wait()
     }
 
-    /// An `xdg_popup` on `parent`, which must be a layer surface (through
-    /// `zwlr_layer_surface_v1.get_popup`), placed by an `xdg_positioner`
-    /// built from `options`. A grab is taken if `options.grab` and there is
-    /// a button serial to take it with.
+    /// An `xdg_popup` on `parent`, placed by an `xdg_positioner` built from
+    /// `options`. The parent is a layer surface (through
+    /// `zwlr_layer_surface_v1.get_popup`), a window or another popup (its
+    /// `xdg_surface`, a menu's submenu). A grab is taken if `options.grab`
+    /// and there is a button serial to take it with.
     ///
     /// # Errors
     ///
-    /// [`Error::Missing`] without `xdg_wm_base`, or a parent that is not a
-    /// layer surface.
+    /// [`Error::Missing`] without `xdg_wm_base`, or a parent that is a lock
+    /// surface or not there.
     pub fn popup(&mut self, parent: SurfaceId, options: &PopupOptions) -> Result<SurfaceId, Error> {
         let (base, version) = self.global("xdg_wm_base")?;
-        let layer = match self.surfaces.get(&parent).map(|state| &state.kind) {
-            Some(Kind::Layer { role, .. }) => *role,
+        // The layer surface that takes the popup, or the xdg_surface it is
+        // made on.
+        let (layer, parent_xdg) = match self.surfaces.get(&parent).map(|state| &state.kind) {
+            Some(Kind::Layer { role, .. }) => (Some(*role), ObjectId::NULL),
+            Some(Kind::Toplevel { xdg, .. } | Kind::Popup { xdg, .. }) => (None, *xdg),
             _ => {
                 return Err(Error::Other(
-                    "a popup's parent must be a layer surface".to_owned(),
+                    "a popup's parent must be a layer surface, a window or a popup".to_owned(),
                 ));
             }
         };
@@ -628,15 +632,17 @@ impl Client {
             xdg_surface::request::GET_POPUP,
             &[
                 Arg::NewId(popup),
-                Arg::Object(ObjectId::NULL),
+                Arg::Object(parent_xdg),
                 Arg::Object(positioner),
             ],
         )?;
-        self.send(
-            layer,
-            zwlr_layer_surface_v1::request::GET_POPUP,
-            &[Arg::Object(popup)],
-        )?;
+        if let Some(layer) = layer {
+            self.send(
+                layer,
+                zwlr_layer_surface_v1::request::GET_POPUP,
+                &[Arg::Object(popup)],
+            )?;
+        }
         self.destroy_object(positioner, xdg_positioner::request::DESTROY);
         if options.grab
             && let Some(seat) = self.seat.seat
@@ -690,6 +696,22 @@ impl Client {
             xdg_surface::request::GET_TOPLEVEL,
             &[Arg::NewId(toplevel)],
         )?;
+        // Before the first commit, where a compositor decides whether the
+        // window floats.
+        if let Some(Kind::Toplevel {
+            toplevel: parent, ..
+        }) = options
+            .parent
+            .and_then(|parent| self.surfaces.get(&parent))
+            .map(|state| &state.kind)
+        {
+            let parent = *parent;
+            self.send(
+                toplevel,
+                xdg_toplevel::request::SET_PARENT,
+                &[Arg::Object(parent)],
+            )?;
+        }
         self.send(
             toplevel,
             xdg_toplevel::request::SET_TITLE,
@@ -727,6 +749,32 @@ impl Client {
     /// window is left alone.
     pub fn set_app_id(&mut self, window: SurfaceId, app_id: &str) {
         let result = self.toplevel_text(window, xdg_toplevel::request::SET_APP_ID, app_id);
+        self.defer(result);
+    }
+
+    /// Make a window a dialog of another (`xdg_toplevel.set_parent`), or,
+    /// with `None`, a window of its own again. Anything but two windows is
+    /// left alone.
+    pub fn set_parent(&mut self, window: SurfaceId, parent: Option<SurfaceId>) {
+        let toplevel_of = |id: SurfaceId| match self.surfaces.get(&id).map(|state| &state.kind) {
+            Some(Kind::Toplevel { toplevel, .. }) => Some(*toplevel),
+            _ => None,
+        };
+        let Some(toplevel) = toplevel_of(window) else {
+            return;
+        };
+        let parent = match parent {
+            Some(parent) => match toplevel_of(parent) {
+                Some(object) => object,
+                None => return,
+            },
+            None => ObjectId::NULL,
+        };
+        let result = self.send(
+            toplevel,
+            xdg_toplevel::request::SET_PARENT,
+            &[Arg::Object(parent)],
+        );
         self.defer(result);
     }
 
@@ -878,7 +926,7 @@ impl Client {
         surface: SurfaceId,
         paint: impl FnOnce(&mut tiny_skia::PixmapMut<'_>),
     ) -> Result<bool, Error> {
-        let Some(state) = self.surfaces.get_mut(&surface) else {
+        let Some(state) = self.surfaces.get(&surface) else {
             return Ok(false);
         };
         let Some((width, height)) = state.configured else {
@@ -890,7 +938,51 @@ impl Client {
         else {
             return Ok(false);
         };
+        self.present(surface, (pixel_width, pixel_height), scale, paint)
+    }
+
+    /// Draw a frame of a size of the program's own rather than the
+    /// configured one: `width` × `height` buffer pixels at a buffer scale
+    /// of 1, which is also the surface's size in logical pixels. For a
+    /// program whose windows have sizes of their own that the compositor's
+    /// configures only ask it to change, as an X server's do: until the
+    /// window has taken the size asked for, it shows at the size it has.
+    ///
+    /// As [`Client::draw`], nothing is drawn before the first
+    /// [`Event::Configure`] or at a size of zero.
+    ///
+    /// # Errors
+    ///
+    /// Shared memory that cannot be made.
+    pub fn draw_sized(
+        &mut self,
+        surface: SurfaceId,
+        (width, height): (u32, u32),
+        paint: impl FnOnce(&mut tiny_skia::PixmapMut<'_>),
+    ) -> Result<bool, Error> {
+        if self
+            .surfaces
+            .get(&surface)
+            .is_none_or(|state| state.configured.is_none())
+        {
+            return Ok(false);
+        }
+        self.present(surface, (width, height), 1, paint)
+    }
+
+    /// Paint a `pixel_width` × `pixel_height` frame, copy it into a free
+    /// buffer, and attach, damage and commit it at buffer scale `scale`.
+    fn present(
+        &mut self,
+        surface: SurfaceId,
+        (pixel_width, pixel_height): (u32, u32),
+        scale: u32,
+        paint: impl FnOnce(&mut tiny_skia::PixmapMut<'_>),
+    ) -> Result<bool, Error> {
         let Some(len) = buffer::length(pixel_width, pixel_height) else {
+            return Ok(false);
+        };
+        let Some(state) = self.surfaces.get_mut(&surface) else {
             return Ok(false);
         };
         let mut scratch = core::mem::take(&mut state.scratch);
@@ -942,7 +1034,12 @@ impl Client {
             self.send(
                 object,
                 wl_surface::request::DAMAGE,
-                &[Arg::Int(0), Arg::Int(0), int(width), int(height)],
+                &[
+                    Arg::Int(0),
+                    Arg::Int(0),
+                    int(pixel_width / scale),
+                    int(pixel_height / scale),
+                ],
             )?;
         }
         self.send(object, wl_surface::request::COMMIT, &[])?;

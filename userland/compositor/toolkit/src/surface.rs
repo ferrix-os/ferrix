@@ -153,6 +153,9 @@ pub struct ToplevelOptions {
     /// compositor's configures say `0x0` ("choose yourself"). A tiling
     /// compositor gives its own size instead.
     pub size: (u32, u32),
+    /// `xdg_toplevel.set_parent`, sent before the first commit: the window
+    /// this one is a dialog of, which a compositor may float it over.
+    pub parent: Option<SurfaceId>,
 }
 
 /// A rectangle in a surface's logical pixels.

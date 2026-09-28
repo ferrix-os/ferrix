@@ -50,6 +50,7 @@ pub(crate) fn run(options: &Options, video: Video<'_>) {
             title: "Bad Apple!!".to_owned(),
             app_id: "badapple".to_owned(),
             size: ASKED,
+            ..ToplevelOptions::default()
         })
         .unwrap_or_else(|error| fail(&format!("a window: {error}")));
     let mut window = Window::default();

@@ -55,6 +55,9 @@ pub struct Slot {
     /// then the title. A client may rename a window afterwards, and
     /// `initialclass:` and `initialtitle:` are what it was called first.
     firsts: BTreeMap<WindowId, (String, String)>,
+    /// Dialogs floated when they mapped, still waiting for their first
+    /// buffer: its size is the size they float at (`fit_dialog`).
+    unsized_dialogs: std::collections::BTreeSet<WindowId>,
     /// The process that opened the connection, or 0 where the kernel would
     /// not say.
     pid: i32,
@@ -96,6 +99,7 @@ impl Slot {
             layers: Vec::new(),
             layer_rects: BTreeMap::new(),
             firsts: BTreeMap::new(),
+            unsized_dialogs: std::collections::BTreeSet::new(),
             pid: 0,
             gone: false,
             serial: 1,
@@ -645,6 +649,7 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
                         layers: Vec::new(),
                         layer_rects: BTreeMap::new(),
                         firsts: BTreeMap::new(),
+                        unsized_dialogs: std::collections::BTreeSet::new(),
                         gone: false,
                     }),
                     Err(_) => continue,
@@ -2389,7 +2394,13 @@ fn serve(
                         );
                         let _ = slot.firsts.insert(window, called);
                         let _ = apply_rules(rules, &slot.client, toplevel, window, state, report);
-                        configure(&mut slot.client, state, toplevel, window);
+                        configure_first(
+                            &mut slot.client,
+                            &mut slot.unsized_dialogs,
+                            toplevel,
+                            window,
+                            state,
+                        );
                         let _ = sources.insert(
                             window,
                             Source {
@@ -2397,6 +2408,23 @@ fn serve(
                                 surface,
                             },
                         );
+                    }
+                    if change.mapped
+                        && let Some((toplevel, window)) = slot
+                            .windows
+                            .iter()
+                            .find(|(top, window)| {
+                                slot.unsized_dialogs.contains(window)
+                                    && slot
+                                        .client
+                                        .toplevel(*top)
+                                        .is_some_and(|state| state.surface == surface)
+                            })
+                            .copied()
+                    {
+                        let _ = slot.unsized_dialogs.remove(&window);
+                        fit_dialog(&slot.client, &slot.windows, toplevel, window, state);
+                        configure(&mut slot.client, state, toplevel, window);
                     }
                     changed = true;
                     // What the client says it drew, which is the only thing
@@ -2637,6 +2665,119 @@ fn serve(
         slot.gone = true;
     }
     Ok(changed)
+}
+
+/// The first configure of a window that has just mapped: its place in the
+/// layout, or, for a dialog `float_dialog` floats, 0x0, so that it chooses
+/// its own size, which its first buffer then says.
+fn configure_first(
+    client: &mut Client,
+    unsized_dialogs: &mut std::collections::BTreeSet<WindowId>,
+    toplevel: ObjectId,
+    window: WindowId,
+    state: &mut State,
+) {
+    if float_dialog(client, toplevel, window, state) {
+        let _ = unsized_dialogs.insert(window);
+        let focused = state.focused_window() == Some(window);
+        client.configure_toplevel(toplevel, 0, 0, &states(focused));
+    } else {
+        configure(client, state, toplevel, window);
+    }
+}
+
+/// Float a window that has just mapped if it is a dialog, as Hyprland
+/// does: one with a parent (`xdg_toplevel.set_parent`), which is also what
+/// an X server's transient windows become. A window a rule floated already
+/// is left where the rule put it. Floats it, for now, centred at half the
+/// monitor, until its first buffer gives its size (`fit_dialog`); gives
+/// whether it did.
+fn float_dialog(client: &Client, toplevel: ObjectId, window: WindowId, state: &mut State) -> bool {
+    let parented = client
+        .toplevel(toplevel)
+        .is_some_and(|top| top.parent.is_some());
+    if !parented || state.is_floating(window) {
+        return false;
+    }
+    let Some(monitor) = monitor_rect(state, window) else {
+        return false;
+    };
+    let (width, height) = (monitor.width / 2, monitor.height / 2);
+    let rect = Rect::new(
+        monitor
+            .x
+            .saturating_add(monitor.width.saturating_sub(width) / 2),
+        monitor
+            .y
+            .saturating_add(monitor.height.saturating_sub(height) / 2),
+        width.max(1),
+        height.max(1),
+    );
+    state.float_window(window, rect).is_ok()
+}
+
+/// Give a dialog `float_dialog` floated the size of the buffer it has just
+/// drawn, centred over its parent where the parent is one of this client's
+/// windows, else over its monitor.
+fn fit_dialog(
+    client: &Client,
+    windows: &[(ObjectId, WindowId)],
+    toplevel: ObjectId,
+    window: WindowId,
+    state: &mut State,
+) {
+    let Some(top) = client.toplevel(toplevel) else {
+        return;
+    };
+    let size = client
+        .window_geometry(top.surface)
+        .map(|(_, _, width, height)| (i64::from(width), i64::from(height)))
+        .or_else(|| {
+            let surface = client.surface(top.surface)?;
+            let buffer = client.buffer(surface.current.buffer?)?;
+            let scale = i64::from(surface.current.scale.max(1));
+            Some((
+                i64::from(buffer.width) / scale,
+                i64::from(buffer.height) / scale,
+            ))
+        });
+    let Some((width, height)) = size.filter(|&(width, height)| width > 0 && height > 0) else {
+        return;
+    };
+    let placed = |wanted: WindowId| {
+        state
+            .layout()
+            .iter()
+            .flat_map(|output| output.windows.iter())
+            .find(|placed| placed.window == wanted)
+            .map(|placed| placed.rect)
+    };
+    let over = top
+        .parent
+        .and_then(|parent| windows.iter().find(|(object, _)| *object == parent))
+        .and_then(|(_, parent)| placed(*parent))
+        .or_else(|| monitor_rect(state, window));
+    let Some(over) = over else {
+        return;
+    };
+    let rect = Rect::new(
+        over.x.saturating_add(over.width.saturating_sub(width) / 2),
+        over.y
+            .saturating_add(over.height.saturating_sub(height) / 2),
+        width,
+        height,
+    );
+    let _ = state.float_window(window, rect);
+}
+
+/// The rectangle of the monitor a window's workspace is on.
+fn monitor_rect(state: &State, window: WindowId) -> Option<Rect> {
+    let workspace = state.workspace_of(window)?;
+    let monitor = state.workspace_monitor(workspace)?;
+    state
+        .monitors()
+        .find(|found| found.id == monitor)
+        .map(|found| found.rect)
 }
 
 /// Apply the `windowrule` lines to a window that has just mapped.
