@@ -312,6 +312,10 @@ fn merge(from: &Path, into: &Path) -> Result<u64> {
                 if there.as_ref() == Some(&link) {
                     continue;
                 }
+                if is_alternative(&target) {
+                    say_kept(&target, "the earlier volume's, one provider of the command");
+                    continue;
+                }
                 match there
                     .as_deref()
                     .and_then(|there| newer_soname(&target, there, &link))
@@ -408,6 +412,19 @@ enum Keep {
     There,
     /// The one arriving: a later volume's, Chrome's or yserver's.
     Here,
+}
+
+/// Commands Debian lets several packages provide, whose link a volume's
+/// script makes to whichever provider its tree has: `awk` is `gawk` in the
+/// rustc volume's and `mawk` in the Steam window volume's. Either runs what
+/// asks for `awk`, so the first volume's link is kept.
+const ALTERNATIVES: &[&str] = &["usr/bin/awk"];
+
+/// Whether `target`, a path in the merged tree, is one of [`ALTERNATIVES`].
+fn is_alternative(target: &Path) -> bool {
+    ALTERNATIVES
+        .iter()
+        .any(|path| target.ends_with(Path::new(path)))
 }
 
 /// Say which copy of a file the volume took, and why, in one line.
