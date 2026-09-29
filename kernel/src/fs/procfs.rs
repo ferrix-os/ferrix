@@ -537,7 +537,22 @@ impl Tree {
 /// every cursor [`TOP`] could use, so a listing resumed after the last table
 /// entry begins at the lowest pid, and a cursor never names a pid and a table
 /// entry both.
-const PID_CURSORS: u64 = 1 << 32;
+///
+/// Every cursor stays below 2³¹, as Linux's `/proc` offsets do: a cursor is
+/// the entry's `d_off`, and a 32-bit program's `readdir` without large-file
+/// support fails with `EOVERFLOW` on one that does not fit its `off_t`. At
+/// 2³² every process's entry had such a cursor, and the Steam client, which
+/// is one, listed `/proc` up to its first pid and found no processes.
+const PID_CURSORS: u64 = 1 << 16;
+
+const _: () = assert!(
+    FIRST_CURSOR + TOP.len() as u64 <= PID_CURSORS,
+    "/proc's own entries run into the process directories' cursors"
+);
+const _: () = assert!(
+    PID_CURSORS + registry::PID_MAX as u64 + 1 <= i32::MAX as u64,
+    "a process directory's cursor does not fit a 32-bit off_t"
+);
 
 /// `statfs`'s `f_type` for procfs.
 const PROC_SUPER_MAGIC: u64 = 0x9fa0;

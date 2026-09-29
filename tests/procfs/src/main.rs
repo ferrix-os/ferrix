@@ -16,14 +16,16 @@
 //!   to carry the inode number `stat` gave.
 //! * **inodes**: every name under `/proc`, listed recursively with
 //!   `getdents64` and `lstat`ed, has an inode number that fits 32 bits, and
-//!   no two names share one. A 32-bit glibc program's `readdir` and `stat`
-//!   without large-file support fail with `EOVERFLOW` on a wider number;
-//!   built for `i686`, this program is one, and its calls take the kernel's
-//!   32-bit x86 paths.
+//!   no two names share one; and every entry's `d_off` fits a 32-bit
+//!   `off_t`. A 32-bit glibc program's `readdir` and `stat` without
+//!   large-file support fail with `EOVERFLOW` on a wider number or offset,
+//!   and the Steam client then lists no processes; built for `i686`, this
+//!   program is one, and its calls take the kernel's 32-bit x86 paths.
 //!
 //! Built with `negative-fd`, the link steps `lstat` where they mean `stat`
 //! and must fail on the first; with `negative-ino`, the inode step holds the
-//! numbers to 16 bits and must fail.
+//! numbers to 16 bits and must fail; with `negative-off`, it holds the
+//! offsets to 16 bits, and must fail at the first process.
 
 use std::collections::BTreeMap;
 use std::ffi::CString;
@@ -46,6 +48,16 @@ const WIDEST: u64 = if cfg!(feature = "negative-ino") {
     0xffff
 } else {
     0xffff_ffff
+};
+
+/// The furthest directory offset the inode step accepts: `i32::MAX`, as a
+/// 32-bit `off_t` holds, or 16 bits for the negative control. A 32-bit
+/// glibc program's `readdir` fails with `EOVERFLOW` on an entry whose
+/// `d_off` does not fit, as it does on a wide `d_ino`.
+const FURTHEST: i64 = if cfg!(feature = "negative-off") {
+    0xffff
+} else {
+    0x7fff_ffff
 };
 
 /// More names than the boot's `/proc` can honestly have: a walk past it does
@@ -303,9 +315,9 @@ fn memfd() -> Step {
     .map(drop)
 }
 
-/// A directory's entries through `getdents64`: name, `d_ino` and `d_type`,
-/// `.` and `..` left out.
-fn list(dir: &str) -> Result<Vec<(String, u64, u8)>, String> {
+/// A directory's entries through `getdents64`: name, `d_ino`, `d_type` and
+/// `d_off`, `.` and `..` left out.
+fn list(dir: &str) -> Result<Vec<(String, u64, u8, i64)>, String> {
     let c = c_path(dir)?;
     // SAFETY: `c` is NUL-terminated.
     let fd = owned(
@@ -344,11 +356,14 @@ fn list(dir: &str) -> Result<Vec<(String, u64, u8)>, String> {
             let ino = field(0, 8)
                 .and_then(|bytes| bytes.try_into().ok())
                 .map(u64::from_ne_bytes);
+            let off = field(8, 8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(i64::from_ne_bytes);
             let reclen = field(16, 2)
                 .and_then(|bytes| bytes.try_into().ok())
                 .map(u16::from_ne_bytes);
             let kind = field(18, 1).and_then(|bytes| bytes.first().copied());
-            let (Some(ino), Some(reclen), Some(kind)) = (ino, reclen, kind) else {
+            let (Some(ino), Some(off), Some(reclen), Some(kind)) = (ino, off, reclen, kind) else {
                 return Err(format!("getdents64 of {dir} returned a short record"));
             };
             let reclen = usize::from(reclen);
@@ -360,7 +375,7 @@ fn list(dir: &str) -> Result<Vec<(String, u64, u8)>, String> {
             }
             at += reclen;
             if name != "." && name != ".." {
-                entries.push((name, ino, kind));
+                entries.push((name, ino, kind, off));
             }
         }
     }
@@ -401,11 +416,16 @@ fn walk_proc() -> Result<(usize, u64), String> {
             Err(_) if dir != "/proc" => continue,
             Err(why) => return Err(why),
         };
-        for (name, ino, kind) in entries {
+        for (name, ino, kind, off) in entries {
             let path = format!("{dir}/{name}");
             if ino > WIDEST {
                 return Err(format!(
                     "getdents64 lists {path} with inode {ino:#x}, wider than {WIDEST:#x}"
+                ));
+            }
+            if !(0..=FURTHEST).contains(&off) {
+                return Err(format!(
+                    "getdents64 lists {path} with offset {off:#x}, past {FURTHEST:#x}"
                 ));
             }
             let Ok(stat) = stat_path(&path, false) else {

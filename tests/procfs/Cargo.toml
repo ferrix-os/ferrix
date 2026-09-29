@@ -27,6 +27,9 @@ negative-fd = []
 # Hold /proc's inode numbers to 16 bits instead of 32, so the inode step must
 # fail: every process's numbers are above 2^17.
 negative-ino = []
+# Hold /proc's directory offsets to 16 bits instead of 31, so the inode step
+# must fail: the process directories' offsets start at 2^16.
+negative-off = []
 
 # ---------------------------------------------------------------------------
 # Lints

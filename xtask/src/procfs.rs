@@ -9,13 +9,15 @@
 //! row for the listening port to carry the socket's inode number, which is
 //! how `lsof -i` finds the process that Steam asks it for. Then it lists
 //! `/proc` recursively and requires every inode number to fit 32 bits and
-//! be a name's own. It prints a line per step and `procfs: all ok`, and exits
-//! 0; this requires every one of those lines, in order, and the status.
+//! be a name's own, and every entry's offset to fit a 32-bit `off_t`. It
+//! prints a line per step and `procfs: all ok`, and exits 0; this requires
+//! every one of those lines, in order, and the status.
 //!
-//! Then two negative controls, one per half: the program built to `lstat`
-//! the links where it means `stat` must fail on the first link step, and
-//! built to hold inode numbers to 16 bits must fail on the inode step. A
-//! check that could not fail would pass those builds too.
+//! Then three negative controls: the program built to `lstat` the links
+//! where it means `stat` must fail on the first link step, built to hold
+//! inode numbers to 16 bits must fail on the inode step, and built to hold
+//! offsets to 16 bits must fail there at `/proc/1`. A check that could not
+//! fail would pass those builds too.
 
 use crate::args::Args;
 use crate::paths;
@@ -45,6 +47,11 @@ const NEGATIVE: &[(&str, &str, &str)] = &[
     (
         "negative-ino",
         "procfs: FAILED inodes: getdents64 lists /proc/",
+        "procfs: inodes ok",
+    ),
+    (
+        "negative-off",
+        "procfs: FAILED inodes: getdents64 lists /proc/1 with offset",
         "procfs: inodes ok",
     ),
 ];
