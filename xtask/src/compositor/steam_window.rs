@@ -63,8 +63,19 @@ const LOGGER: &[u8] = include_bytes!("../../../scripts/steam/logger-0.bash");
 /// `lsof` where the client looks for it, running the volume's.
 const LSOF: &[u8] = include_bytes!("../../../scripts/steam/lsof");
 
+/// The `--everything` desktop's script, in `RUN`'s place.
+const DESKTOP: &[u8] = include_bytes!("../../../scripts/steam/desktop.sh");
+
+/// Where [`DESKTOP`] is in the image.
+const DESKTOP_PATH: &str = "steam/desktop.sh";
+
+/// Where `crate::steam::UNAME` is: a directory `client.sh` alone puts first
+/// in `PATH`, so the desktop's own `uname` still says Ferrix.
+const UNAME_PATH: &str = "steam/bin/uname";
+
 /// Where each is carried, with its mode. `client.sh` names the stand-ins'
-/// directories in `STEAM_RUNTIME_STEAMRT` and `STEAM_RUNTIME_SCOUT`.
+/// directories in `STEAM_RUNTIME_STEAMRT` and `STEAM_RUNTIME_SCOUT`; all but
+/// `run.sh` go on the `--everything` desktop too.
 const SCRIPTS: &[(&str, &[u8], u32)] = &[
     ("steam/run.sh", RUN, 0o644),
     ("steam/client.sh", CLIENT, 0o644),
@@ -94,7 +105,7 @@ const DRAWN_COLOURS: usize = 64;
 
 /// Memory for the guest. At 8 GiB, processes died of `SIGBUS` on library
 /// pages while Chromium started (steam-sigbus); 16 GiB has not shown it.
-const MEMORY: u32 = 16384;
+pub(crate) const MEMORY: u32 = 16384;
 
 /// Seconds: the download and install of the client (about nine minutes
 /// under KVM), a restart, and Chromium's start in software.
@@ -102,7 +113,7 @@ const TIMEOUT: u64 = 2400;
 
 /// Where `scripts/fetch/fetch-steam-window.sh` writes, unless
 /// `FERRIX_STEAM_WINDOW_VOLUME` names another directory.
-fn volume() -> Result<PathBuf> {
+pub(crate) fn volume() -> Result<PathBuf> {
     let directory = match std::env::var_os("FERRIX_STEAM_WINDOW_VOLUME") {
         Some(directory) => PathBuf::from(directory),
         None => paths::volume_directory("steam-window")?,
@@ -127,12 +138,18 @@ fn files() -> Vec<File> {
     }
     let mut files = crate::rustc::files(&links);
     files.extend(crate::chrome::window_files());
-    files.push(File {
-        path: crate::steam::UNAME_PATH.to_owned(),
+    files.extend(scripts(SCRIPTS));
+    files
+}
+
+/// `crate::steam::UNAME` and each of `scripts`, as files of the archive.
+fn scripts(scripts: &[(&str, &[u8], u32)]) -> Vec<File> {
+    let mut files = vec![File {
+        path: UNAME_PATH.to_owned(),
         mode: 0o755,
         content: Content::Bytes(crate::steam::UNAME.as_bytes().to_vec()),
-    });
-    for (path, bytes, mode) in SCRIPTS {
+    }];
+    for (path, bytes, mode) in scripts {
         files.push(File {
             path: (*path).to_owned(),
             mode: *mode,
@@ -140,6 +157,50 @@ fn files() -> Vec<File> {
         });
     }
     files
+}
+
+/// What `run-compositor --everything` adds to the archive for Steam, when
+/// the volume `scripts/fetch/fetch-steam-window.sh` makes is merged into
+/// its own: [`SCRIPTS`] but `run.sh`, [`DESKTOP`], and Steam's links less
+/// any path `carried` already has -- Chrome's, the compiler's and yserver's
+/// name the same Debian's paths.
+pub(crate) fn desktop_files(carried: &[File]) -> Vec<File> {
+    let taken = |path: &str| {
+        carried.iter().any(|file| {
+            file.path == path
+                || file
+                    .path
+                    .strip_prefix(path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+                || path
+                    .strip_prefix(&file.path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+    };
+    let links: Vec<(&str, &str)> = crate::steam::LINKS
+        .iter()
+        .copied()
+        .filter(|(path, _)| !taken(path))
+        .collect();
+    let mut files = crate::rustc::files(&links);
+    let mut desktop: Vec<(&str, &[u8], u32)> = SCRIPTS
+        .iter()
+        .copied()
+        .filter(|(path, _, _)| *path != "steam/run.sh" && !taken(path))
+        .collect();
+    desktop.push((DESKTOP_PATH, DESKTOP, 0o644));
+    files.extend(scripts(&desktop));
+    files
+}
+
+/// What `run-compositor --everything` adds to the desktop's configuration
+/// for Steam: [`DESKTOP`] from `exec-once`, which waits for the desktop's
+/// yserver and starts the client.
+pub(crate) fn desktop_config() -> String {
+    format!(
+        "# Added by `cargo xtask run-compositor --everything`: Valve's Steam client \
+         (docs/STEAM.md).\nexec-once = /bin/busybox sh /{DESKTOP_PATH}\n"
+    )
 }
 
 /// `run-steam`, or `test-steam-window` when `gate`.
@@ -322,5 +383,28 @@ mod tests {
         let client = std::str::from_utf8(CLIENT).expect("client.sh is text");
         assert!(client.contains("STEAM_RUNTIME_STEAMRT=/steam/steamrt"));
         assert!(client.contains("STEAM_RUNTIME_SCOUT=/steam/scout"));
+        assert!(
+            client.contains("export PATH=/steam/bin:"),
+            "Linux's uname first"
+        );
+    }
+
+    /// The `--everything` desktop gets the client's half and the stand-ins
+    /// without `run.sh`, whose yserver the desktop already starts, and no
+    /// path a volume's link already has.
+    #[test]
+    fn the_desktop_carries_the_client_without_run_sh() {
+        let carried = crate::rustc::files(&[("usr/bin", "/data/usr/bin")]);
+        let files = desktop_files(&carried);
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert!(paths.contains(&DESKTOP_PATH));
+        assert!(paths.contains(&"steam/client.sh"));
+        assert!(paths.contains(&UNAME_PATH));
+        assert!(!paths.contains(&"steam/run.sh"));
+        assert!(!paths.contains(&"usr/bin/lsof"), "under a link: {paths:?}");
+        assert!(desktop_config().contains(&format!("exec-once = /bin/busybox sh /{DESKTOP_PATH}")));
+        let desktop = std::str::from_utf8(DESKTOP).expect("desktop.sh is text");
+        assert!(desktop.contains("/steam/client.sh"));
+        assert!(desktop.contains("/tmp/.X11-unix/X0"));
     }
 }

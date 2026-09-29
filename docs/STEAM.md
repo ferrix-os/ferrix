@@ -38,6 +38,16 @@ What shows: the sign-in window ("SIGN IN WITH ACCOUNT NAME", the password
 field, "Sign in", and the QR code for the mobile app), top left in a tile of
 hyprix's that fills the screen, the rest of the tile black.
 
+**On the desktop.** Once the volume has been made, `cargo xtask
+run-compositor --everything` merges its tree into the desktop's volume and
+starts Steam beside Chrome and a terminal: `scripts/steam/desktop.sh` waits
+for the desktop's yserver on `:0` and runs the client's half as uid 1000,
+its output in the guest's `/tmp/steam.log`. The guest has 16 GiB then,
+unless `--memory` says otherwise. Steam's tree carries its own yserver, so
+the desktop takes it in yserver's own volume's place; make both volumes at
+the same pin. The first start installs the client, as above, and the
+desktop's volume is attached under `snapshot=on` too, so every boot does.
+
 ## 2. How the pieces fit
 
 | Piece | Where | What |

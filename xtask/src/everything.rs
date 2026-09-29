@@ -25,6 +25,11 @@
 //! again, with the server at `/yserver/yserver`. Where it holds libstdc++'s
 //! gdb pretty-printers of gcc 14 beside the rustc volume's of gcc 16, the ones
 //! of the newer libstdc++ the volume keeps are kept ([`pretty_printers`]).
+//!
+//! The Steam window's tree (`docs/STEAM.md`), when
+//! `scripts/fetch/fetch-steam-window.sh` has made it, comes last in yserver's
+//! place: it is yserver's tree with Valve's bootstrap, the client's i386 and
+//! amd64 libraries and `lsof` on top, and its own build of the server.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,6 +49,11 @@ const STEAMCMD_SPARE_MIB: u64 = 512;
 /// Room for the X server's log and its clients' files.
 const YSERVER_SPARE_MIB: u64 = 256;
 
+/// Room for what the Steam client writes beside its bootstrap: the packages
+/// it downloads (about 500 MB), the client they unpack to, and its
+/// browser's cache.
+const STEAM_SPARE_MIB: u64 = 4096;
+
 /// The volume, made or made again from the two trees when it is missing or
 /// older than either of the images they were packed into.
 ///
@@ -55,36 +65,13 @@ pub(crate) fn volume() -> Result<PathBuf> {
     if cfg!(windows) {
         return volume_in_wsl();
     }
-    let rustc_tree = crate::rustc::tree()?;
-    let rustc_image = crate::rustc::volume()?;
-    let chrome_image = crate::chrome::volume()?;
-    let chrome_tree = chrome_image
-        .parent()
-        .map(|directory| directory.join("tree"))
-        .filter(|tree| tree.is_dir())
-        .ok_or_else(|| {
-            Error::new(format!(
-                "no tree beside {}: scripts/fetch/fetch-chrome.sh keeps one there",
-                chrome_image.display()
-            ))
-        })?;
-    let steamcmd = steamcmd()?;
-    let yserver = yserver()?;
+    let (sources, spare) = sources()?;
     let directory = directory()?;
     let image = directory.join("everything.img");
-    let mut images = vec![&rustc_image, &chrome_image];
-    let mut trees = vec![&rustc_tree, &chrome_tree];
-    if let Some((steamcmd_image, steamcmd_tree)) = &steamcmd {
-        images.push(steamcmd_image);
-        trees.push(steamcmd_tree);
-    }
-    if let Some((yserver_image, yserver_tree)) = &yserver {
-        images.push(yserver_image);
-        trees.push(yserver_tree);
-    }
-    let newest = images
-        .into_iter()
-        .map(|path| modified(path))
+    let trees: Vec<&PathBuf> = sources.iter().map(|(_, tree)| tree).collect();
+    let newest = sources
+        .iter()
+        .map(|(image, _)| modified(image))
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .max();
@@ -123,13 +110,7 @@ pub(crate) fn volume() -> Result<PathBuf> {
         bytes += merge(from, &tree)?;
     }
 
-    let mut size = bytes.div_ceil(1 << 20) + SPARE_MIB;
-    if steamcmd.is_some() {
-        size += STEAMCMD_SPARE_MIB;
-    }
-    if yserver.is_some() {
-        size += YSERVER_SPARE_MIB;
-    }
+    let size = bytes.div_ceil(1 << 20) + spare;
     let _ = std::fs::remove_file(&stamp);
     let _ = std::fs::remove_file(&image);
     let file = std::fs::File::create(&image)
@@ -156,6 +137,41 @@ pub(crate) fn volume() -> Result<PathBuf> {
         .map_err(|error| Error::new(format!("writing {}: {error}", stamp.display())))?;
     println!("  everything: {} ({size} MiB)", image.display());
     Ok(image)
+}
+
+/// Each volume merged, as its image and the tree beside it, in the order
+/// they are merged, and the MiB of room the volume leaves for what they
+/// write.
+fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
+    let rustc = (crate::rustc::volume()?, crate::rustc::tree()?);
+    let chrome_image = crate::chrome::volume()?;
+    let chrome_tree = chrome_image
+        .parent()
+        .map(|directory| directory.join("tree"))
+        .filter(|tree| tree.is_dir())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "no tree beside {}: scripts/fetch/fetch-chrome.sh keeps one there",
+                chrome_image.display()
+            ))
+        })?;
+    let mut sources = vec![rustc, (chrome_image, chrome_tree)];
+    let mut spare = SPARE_MIB;
+    if let Some(steamcmd) = steamcmd()? {
+        sources.push(steamcmd);
+        spare += STEAMCMD_SPARE_MIB;
+    }
+    // Steam's tree is yserver's with Valve's bootstrap and the client's
+    // libraries on top, and its yserver was built by its own run of
+    // fetch-yserver.sh: two servers at one path would stop the merge.
+    if let Some(steam) = steam()? {
+        sources.push(steam);
+        spare += YSERVER_SPARE_MIB + STEAM_SPARE_MIB;
+    } else if let Some(yserver) = yserver()? {
+        sources.push(yserver);
+        spare += YSERVER_SPARE_MIB;
+    }
+    Ok((sources, spare))
 }
 
 /// [`volume`] on Windows, where the trees are WSL's, full of symbolic links,
@@ -233,6 +249,29 @@ pub(crate) fn yserver() -> Result<Option<(PathBuf, PathBuf)>> {
         .ok_or_else(|| {
             Error::new(format!(
                 "no tree with yserver beside {}: scripts/fetch/fetch-yserver.sh keeps one there",
+                image.display()
+            ))
+        })?;
+    Ok(Some((image, tree)))
+}
+
+/// The Steam window volume's image and the tree beside it
+/// (`scripts/fetch/fetch-steam-window.sh`, `docs/STEAM.md`), or `None` when
+/// it has not been made: the desktop is whole without Steam, and says how to
+/// add it.
+pub(crate) fn steam() -> Result<Option<(PathBuf, PathBuf)>> {
+    let Ok(image) = crate::compositor::steam_window::volume() else {
+        println!("  everything: no Steam; scripts/fetch/fetch-steam-window.sh adds the client");
+        return Ok(None);
+    };
+    let tree = image
+        .parent()
+        .map(|directory| directory.join("tree"))
+        .filter(|tree| tree.join("steam/ubuntu12_32/steam").is_file())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "no tree with Steam's bootstrap beside {}: \
+                 scripts/fetch/fetch-steam-window.sh keeps one there",
                 image.display()
             ))
         })?;
