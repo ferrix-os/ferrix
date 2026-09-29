@@ -7,7 +7,7 @@
 # scout's user-namespace check (docs/I386.md, I5b). From the bootstrap the
 # first start downloads and installs the client and exits 42 to be started
 # again, as steam.sh would.
-export PATH=/usr/local/bin:/bin:/data/usr/bin HOME=/data/home USER=ferrix LANG=C.UTF-8
+export PATH=/steam/bin:/bin:/data/usr/bin HOME=/data/home USER=ferrix LANG=C.UTF-8
 export DISPLAY=:0
 S=/data/steam
 RT=$S/ubuntu12_32/steam-runtime

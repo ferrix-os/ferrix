@@ -38,6 +38,16 @@ What shows: the sign-in window ("SIGN IN WITH ACCOUNT NAME", the password
 field, "Sign in", and the QR code for the mobile app), top left in a tile of
 hyprix's that fills the screen, the rest of the tile black.
 
+**On the desktop.** Once the volume has been made, `cargo xtask
+run-compositor --everything` merges its tree into the desktop's volume and
+starts Steam beside Chrome and a terminal: `scripts/steam/desktop.sh` waits
+for the desktop's yserver on `:0` and runs the client's half as uid 1000,
+its output in the guest's `/tmp/steam.log`. The guest has 16 GiB then,
+unless `--memory` says otherwise. Steam's tree carries its own yserver, so
+the desktop takes it in yserver's own volume's place; make both volumes at
+the same pin. The first start installs the client, as above, and the
+desktop's volume is attached under `snapshot=on` too, so every boot does.
+
 ## 2. How the pieces fit
 
 | Piece | Where | What |
@@ -79,8 +89,12 @@ One was preloaded into `lsof`, because `stat` through `/proc/<pid>/fd/<n>`
 of a socket was `ENOENT`, so `lsof` could not tie the client's websocket to
 the web helper and the client rejected it ("Unexpected Transport Error
 0x3008"). The other was preloaded into the client, because `/proc`'s inode
-numbers did not fit 32 bits, so the client's `readdir` there was
-`EOVERFLOW` and it found no web helper process at all.
+numbers and its entries' offsets did not fit 32 bits, so the client's
+`readdir` there was `EOVERFLOW` and it found no web helper process at all.
+The inode numbers were fixed first (f577b9b1); the offsets only after the
+client, without the shim, still logged `Checked: <pid>/<pid>` and rejected
+the connection, since the shim had truncated `d_off` as well (320f54bf).
+cgroupfs and sysfs have offsets past 2³¹ too; nothing 32-bit lists them yet.
 
 ## 4. What the sprint found, in order (2026-09-28 and 29)
 
@@ -94,7 +108,7 @@ numbers did not fit 32 bits, so the client's `readdir` there was
 5. The web helper's websocket was rejected: `accept` gave the new socket the
    listener's `O_NONBLOCK` (fixed, 18388c70); `/proc/net/tcp` named the
    stack's socket id as the inode (fixed, 5b14b91b); `stat` through a socket's
-   descriptor link, and 32-bit `readdir` on `/proc` (worked around, then
-   fixed by `test-procfs`'s landing).
+   descriptor link, and 32-bit `readdir` on `/proc`, both its inode numbers
+   and its offsets (worked around, then fixed; `test-procfs` checks both).
 6. The client looks for `lsof` only at `/sbin`, `/bin`, `/usr/sbin` and
    `/usr/bin`, and says so nowhere visible when it finds none.

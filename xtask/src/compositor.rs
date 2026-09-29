@@ -2232,7 +2232,11 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
             crate::chrome::volume_for(arch)?
         });
         if !args.memory_given {
-            args.memory = crate::chrome::MEMORY;
+            args.memory = if with_steam_volume(&args, arch) {
+                steam_window::MEMORY
+            } else {
+                crate::chrome::MEMORY
+            };
         }
         // Chrome, and with `--everything` the compiler, run on ferrousli.
         chrome_libc(&mut args);
@@ -2245,14 +2249,26 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
         crate::rustc::prepare_default(arch, &mut args)?;
     }
     let config = match everything_config(&mut args)? {
-        Some(config) => config,
+        // A terminal as the desktop starts, beside Chrome and Steam, as
+        // `RUN_CONFIG`'s desktop has one; the host's own config names a
+        // terminal Ferrix may not have. Not in `everything_config`, which the
+        // `everything-desktop` boot shares: its first window must be the one
+        // its SUPER Q opens.
+        Some(config) => format!(
+            "{config}# Appended by `cargo xtask run-compositor --everything`: a shell to \
+             start with.\nexec-once = /bin/term /bin/zinc\n"
+        ),
         None => match &args.config {
             Some(path) => std::fs::read_to_string(path)
                 .map_err(|error| Error::new(format!("reading {path}: {error}")))?,
             None => RUN_CONFIG.to_owned(),
         },
     };
-    let config = with_yserver(with_chrome(config, &args, arch), &args, arch);
+    let config = with_steam(
+        with_yserver(with_chrome(config, &args, arch), &args, arch),
+        &args,
+        arch,
+    );
     // A watched boot has a network unless it was told not to: a person at a
     // screen expects a machine that can fetch something, and finding out
     // that `ping` says `bad address` for want of a device is nobody's
@@ -2546,8 +2562,13 @@ fn desktop(
                 let files = crate::steamcmd::desktop_files(&carried.ports);
                 carried.ports.extend(files);
             }
-            if arch == Arch::X86_64 && crate::yserver::volume().is_ok() {
+            let steam = with_steam_volume(args, arch);
+            if arch == Arch::X86_64 && (crate::yserver::volume().is_ok() || steam) {
                 let files = crate::yserver::desktop_files(&carried.ports);
+                carried.ports.extend(files);
+            }
+            if steam {
+                let files = steam_window::desktop_files(&carried.ports);
                 carried.ports.extend(files);
             }
         }
@@ -6339,12 +6360,31 @@ fn with_chrome(config: String, args: &Args, arch: Arch) -> String {
 /// yserver, on `/data`.
 fn with_yserver(config: String, args: &Args, arch: Arch) -> String {
     if !(args.everything && args.chrome && arch == Arch::X86_64)
-        || crate::yserver::volume().is_err()
+        || (crate::yserver::volume().is_err() && !with_steam_volume(args, arch))
     {
         return config;
     }
     println!("  {arch}: yserver, the X server, on :0 beside the compositor");
     format!("{config}\n{}", crate::yserver::desktop_config())
+}
+
+/// Whether `run-compositor --everything` merges the volume
+/// `scripts/fetch/fetch-steam-window.sh` makes into its own
+/// (`crate::everything::steam`), and so starts Steam: x86-64 only, as the
+/// client is, and with Chrome, whose flag `--everything` sets.
+fn with_steam_volume(args: &Args, arch: Arch) -> bool {
+    args.everything && args.chrome && arch == Arch::X86_64 && steam_window::volume().is_ok()
+}
+
+/// What `run-compositor --everything` adds to the desktop's configuration
+/// for Steam when its volume is merged: `steam_window::desktop_config`,
+/// after yserver's, whose `:0` it waits for.
+fn with_steam(config: String, args: &Args, arch: Arch) -> String {
+    if !with_steam_volume(args, arch) {
+        return config;
+    }
+    println!("  {arch}: Steam, from its bootstrap, as uid 1000 on yserver's :0 (docs/STEAM.md)");
+    format!("{config}\n{}", steam_window::desktop_config())
 }
 
 /// How many pixels of a screen are Chrome's page yellow, or none when the
