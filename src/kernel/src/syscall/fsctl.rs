@@ -57,13 +57,15 @@
 //! for, not Linux's default `relatime`, because none of them is kept.
 //! `/proc/mounts`, `/proc/<pid>/mountinfo` and `statfs`'s `f_flags` show them.
 //!
-//! `MS_REMOUNT` changes them on the mount whose root the target is, and
-//! `MS_REMOUNT | MS_BIND` does the same, as Linux's `do_reconfigure_mnt`; a
-//! remount that names no access-time flag keeps the old one. No filesystem
-//! here keeps flags apart from its mounts, so a plain remount's read-only is
-//! the mount's too; before a mount goes read-only its filesystem is written
-//! out, as `umount2` writes it, so a btrfs `/` or `/data` remounted read-only
-//! at shutdown is committed and then takes no more writes (finding F-53:
+//! `MS_REMOUNT | MS_BIND` changes them on the mount whose root the target
+//! is and on no other, as Linux's `do_reconfigure_mnt`; a remount that names
+//! no access-time flag keeps the old one. A plain `MS_REMOUNT` does the same
+//! and also makes the filesystem itself read-only or writable -- Linux's
+//! `SB_RDONLY` -- so that every bind of it refuses writes, or takes them
+//! again. Before a mount or its filesystem goes read-only the filesystem is
+//! written out, as `umount2` writes it, so a btrfs `/` or `/data` remounted
+//! read-only at shutdown is committed and then takes no more writes (finding
+//! F-53:
 //! `docs/INIT.md` §8.2 said init did this, and until then the kernel refused
 //! the remount). Linux refuses a read-only remount while a file is open for
 //! writing (`EBUSY`); nothing here counts writers, so it is accepted, and a
@@ -72,9 +74,19 @@
 //!
 //! The options string -- tmpfs's `size=`, procfs's `hidepid=` -- is not read
 //! for any type, so an option is never refused and never has an effect.
-//! `MS_BIND`, `MS_MOVE` and the propagation flags are `EINVAL`, because the
-//! mount table has no operation that does them yet (`docs/NAMESPACES.md`,
-//! N2).
+//!
+//! # Binds, propagation, and what stays refused
+//!
+//! `MS_BIND` mounts the place the source names -- a directory, a
+//! subdirectory, a file or a socket -- on the target, with `MS_REC` the
+//! mounts below it too (`ferrix_vfs::Namespace::bind`); the new mount has
+//! the source mount's flags, whatever else `mount` was passed, as on Linux,
+//! where a bind read-only takes a remount after it. `MS_PRIVATE`,
+//! `MS_SLAVE` and `MS_UNBINDABLE`, with or without `MS_REC`, are accepted on
+//! a mount's root and change nothing: no mount here is ever shared, so every
+//! mount already is what they ask. `MS_SHARED` and `MS_MOVE` are `EINVAL`
+//! (`docs/NAMESPACES.md` §1.5). `umount2` with `MNT_DETACH` takes the mounts
+//! inside the target with it; without, they make it `EBUSY`.
 //!
 //! # No extended attributes
 //!
@@ -91,8 +103,8 @@ use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
     ARM_STATFS64_UNPACKED_SIZE, AT_FDCWD, AT_SYMLINK_NOFOLLOW, FALLOC_FL_KEEP_SIZE, MNT_DETACH,
     MNT_EXPIRE, MNT_FORCE, MS_BIND, MS_MGC_MSK, MS_MGC_VAL, MS_MOVE, MS_NOATIME, MS_NODEV,
-    MS_NODIRATIME, MS_NOEXEC, MS_NOSUID, MS_PRIVATE, MS_RDONLY, MS_RELATIME, MS_REMOUNT, MS_SHARED,
-    MS_SLAVE, MS_STRICTATIME, MS_UNBINDABLE, UMOUNT_NOFOLLOW,
+    MS_NODIRATIME, MS_NOEXEC, MS_NOSUID, MS_PRIVATE, MS_RDONLY, MS_REC, MS_RELATIME, MS_REMOUNT,
+    MS_SHARED, MS_SILENT, MS_SLAVE, MS_STRICTATIME, MS_UNBINDABLE, UMOUNT_NOFOLLOW,
 };
 use ferrix_vfs::access::{MAY_EXEC, MAY_WRITE};
 use ferrix_vfs::statfs::StatfsLayout;
@@ -107,11 +119,8 @@ use crate::syscall::process::Process;
 use crate::syscall::{fd, pipe, uaccess};
 use crate::trap::Abi;
 
-/// The `mount` flags that ask for an operation the mount table does not have
-/// yet: a bind, a move, and the propagation changes. See the module
-/// documentation.
-const REFUSED_MOUNT_FLAGS: u32 =
-    MS_BIND | MS_MOVE | MS_UNBINDABLE | MS_PRIVATE | MS_SLAVE | MS_SHARED;
+/// The propagation changes, one of which a `mount` call names alone.
+const PROPAGATION_FLAGS: u32 = MS_UNBINDABLE | MS_PRIVATE | MS_SLAVE | MS_SHARED;
 
 /// The access-time flags, which a remount naming none of them keeps.
 const ATIME_FLAGS: u32 = MS_NOATIME | MS_NODIRATIME | MS_RELATIME | MS_STRICTATIME;
@@ -229,7 +238,7 @@ fn write_statfs(
 ) -> Result<usize, Errno> {
     let at = target.location();
     let flags = at.mount.flags();
-    let flags = if at.mount.filesystem().read_only() {
+    let flags = if at.mount.filesystem_read_only() {
         flags.union(MountFlags::READ_ONLY)
     } else {
         flags
@@ -503,8 +512,8 @@ fn filesystem_named(
 /// not read, and the source only to btrfs; see the module documentation.
 ///
 /// In Linux's order (`path_mount`): the type is copied in before the target
-/// is looked up; then the flags the table cannot act on are refused,
-/// privilege is asked, a remount is done, and for a new mount the type is
+/// is looked up; then privilege is asked, the flags the table cannot act on
+/// are refused, a remount is done, and for a new mount the type is
 /// looked for last, with the source resolved inside it.
 pub(crate) fn sys_mount(
     process: &Process,
@@ -528,16 +537,45 @@ pub(crate) fn sys_mount(
     } else {
         flags
     };
+    // `path_mount`'s order: a remount (with `MS_BIND`, of the one mount),
+    // then a bind, then a propagation change, then a move, then a new
+    // mount. Each ignores the flags that name the ones after it.
+    // `may_mount`: `CAP_SYS_ADMIN`, asked before any flag is judged.
+    credentials::require_privilege(process)?;
     let remount = flags & MS_REMOUNT != 0;
-    // A remount ignores the operation flags, as Linux's does: `MS_REMOUNT |
-    // MS_BIND` is one operation, and bwrap passes it.
-    if !remount && flags & REFUSED_MOUNT_FLAGS != 0 {
+    let bind = !remount && flags & MS_BIND != 0;
+    let propagation = !remount && !bind && flags & PROPAGATION_FLAGS != 0;
+    if !remount && !bind && !propagation && flags & MS_MOVE != 0 {
         return Err(Errno::EINVAL);
     }
-    // `may_mount`: `CAP_SYS_ADMIN`.
-    credentials::require_privilege(process)?;
+    // `flags_to_propagation_type`: exactly one type, and never shared.
+    if propagation {
+        let kind = flags & !(MS_REC | MS_SILENT);
+        if !kind.is_power_of_two() || kind == MS_SHARED {
+            return Err(Errno::EINVAL);
+        }
+    }
     if remount {
         return remount_at(&place, flags);
+    }
+    if bind {
+        // `do_loopback`: no source, or an empty one, is `EINVAL`.
+        if source == 0 || fd::user_path(process, source)?.is_empty() {
+            return Err(Errno::EINVAL);
+        }
+        let from = path::target(process, AT_FDCWD, source, 0)?
+            .location()
+            .clone();
+        let _ = fs::namespace().bind(&from, &place, flags & MS_REC != 0)?;
+        return Ok(0);
+    }
+    if propagation {
+        // Nothing is ever shared, so nothing changes; Linux's
+        // `do_change_type` still wants a mount's root in this tree.
+        if !place.is_mount_root() || !fs::namespace().owns(&place.mount) {
+            return Err(Errno::EINVAL);
+        }
+        return Ok(0);
     }
     let read_only = flags & MS_RDONLY != 0;
     let filesystem = filesystem_named(process, &kind.ok_or(Errno::EINVAL)?, source, read_only)?;
@@ -547,7 +585,8 @@ pub(crate) fn sys_mount(
 
 /// `MS_REMOUNT`, with or without `MS_BIND`: the mount whose root `place` is
 /// takes the flags `flags` names, keeping its access-time flags if `flags`
-/// names none of them (Linux's `path_mount`).
+/// names none of them (Linux's `path_mount`). Without `MS_BIND` the
+/// filesystem itself turns read-only or writable too, for every bind of it.
 ///
 /// A mount going read-only has its filesystem written out first, as
 /// `umount2` writes it: a write-out that fails leaves the mount as it was
@@ -563,18 +602,25 @@ fn remount_at(place: &Location, flags: u32) -> Result<usize, Errno> {
         let kept_atime = old.without(old.without(MountFlags::ATIME));
         wanted = wanted.union(kept_atime);
     }
-    if wanted.contains(MountFlags::READ_ONLY) && !place.mount.read_only() {
+    let going_read_only = wanted.contains(MountFlags::READ_ONLY)
+        && (!place.mount.read_only() || !place.mount.filesystem_read_only());
+    if going_read_only {
         place.mount.filesystem().sync()?;
     }
-    fs::namespace().remount(place, wanted)?;
+    if flags & MS_BIND != 0 {
+        fs::namespace().remount(place, wanted)?;
+    } else {
+        fs::namespace().remount_filesystem(place, wanted)?;
+    }
     Ok(0)
 }
 
 /// `umount2`: unmount the mount whose root `target` names.
 ///
-/// Every unmount here is what `MNT_DETACH` asks for: the mount leaves the tree
-/// at once and goes when the last open file on it closes. So a busy mount is
-/// not `EBUSY`. `MNT_EXPIRE` marks a mount for a later call to remove if
+/// Every unmount here is lazy, as `MNT_DETACH` is: the mount leaves the tree
+/// at once and goes when the last open file on it closes, so a busy mount is
+/// not `EBUSY`. What `MNT_DETACH` adds is the mounts inside it: they leave
+/// with it, where without it they make it `EBUSY`. `MNT_EXPIRE` marks a mount for a later call to remove if
 /// nobody used it in between, and there is no use count to decide that by,
 /// so it is `EINVAL`.
 ///
@@ -600,12 +646,29 @@ pub(crate) fn sys_umount2(process: &Process, target: u64, flags: u32) -> Result<
     let place = path::target(process, AT_FDCWD, target, follow)?
         .location()
         .clone();
-    if let Err(error) = place.mount.filesystem().sync()
-        && flags & MNT_FORCE == 0
-    {
-        return Err(error);
+    let detach = flags & MNT_DETACH != 0;
+    // With `MNT_DETACH` every filesystem mounted inside goes too, so each is
+    // written out, once however many binds of it there are; a mount made
+    // inside after this and before the unmount is not, as a write after
+    // the one sync is not.
+    let going = if detach {
+        fs::namespace().subtree(&place)?
+    } else {
+        alloc::vec![Arc::clone(&place.mount)]
+    };
+    for (index, mount) in going.iter().enumerate() {
+        let first_of_its_filesystem = going
+            .iter()
+            .take(index)
+            .all(|earlier| !earlier.shares_filesystem(mount));
+        if first_of_its_filesystem
+            && let Err(error) = mount.filesystem().sync()
+            && flags & MNT_FORCE == 0
+        {
+            return Err(error);
+        }
     }
-    fs::namespace().unmount(&place)?;
+    fs::namespace().unmount_with(&place, detach)?;
     Ok(0)
 }
 

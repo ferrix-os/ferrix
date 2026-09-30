@@ -887,6 +887,216 @@ fn a_mount_point_is_shown_from_the_readers_root_or_not_at_all() {
     assert_eq!(Namespace::root_path(&a), b"/");
 }
 
+/// `/src` a tmpfs holding `f` and `a/deep`, with a second tmpfs on
+/// `a/deep` holding `inner`; `/d1`, `/d2` empty directories and `/file` an
+/// empty file on the root.
+fn bind_fixture() -> (Namespace, Context) {
+    let (ns, ctx) = fresh();
+    for dir in ["/src", "/d1", "/d2"] {
+        ns.mkdir(&ctx, None, dir.as_bytes(), 0o755).unwrap();
+    }
+    write_file(&ns, &ctx, "/file", b"");
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let _ = ns.mount(tmpfs(2), &src).unwrap();
+    write_file(&ns, &ctx, "/src/f", b"bind");
+    ns.mkdir(&ctx, None, b"/src/a", 0o755).unwrap();
+    ns.mkdir(&ctx, None, b"/src/a/deep", 0o755).unwrap();
+    let deep = ns.resolve(&ctx, None, b"/src/a/deep", true).unwrap();
+    let _ = ns.mount(tmpfs(3), &deep).unwrap();
+    write_file(&ns, &ctx, "/src/a/deep/inner", b"in");
+    (ns, ctx)
+}
+
+#[test]
+fn a_bind_shows_its_source_and_mrec_copies_what_is_mounted_below() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let d2 = ns.resolve(&ctx, None, b"/d2", true).unwrap();
+    let plain = ns.bind(&src, &d1, false).unwrap();
+    assert_eq!(read_file(&ns, &ctx, "/d1/f").unwrap(), b"bind");
+    assert_eq!(
+        read_file(&ns, &ctx, "/d1/a/deep/inner").unwrap_err(),
+        Errno::ENOENT
+    );
+    let _ = ns.bind(&src, &d2, true).unwrap();
+    assert_eq!(read_file(&ns, &ctx, "/d2/a/deep/inner").unwrap(), b"in");
+    // A write through one shows through the other: one filesystem.
+    write_file(&ns, &ctx, "/d2/f", b"both");
+    assert_eq!(read_file(&ns, &ctx, "/src/f").unwrap(), b"both");
+    // Each bind is a mount of its own, with its own id, on its place.
+    let d1_root = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    assert!(Arc::ptr_eq(&d1_root.mount, &plain));
+    assert!(plain.shares_filesystem(&src.mount));
+    assert_ne!(plain.id(), src.mount.id());
+    assert_eq!(ns.path_of(&d1_root, &ctx.root), b"/d1");
+    // `..` from the bind's root climbs to where it is mounted.
+    let up = ns.resolve(&ctx, None, b"/d1/..", true).unwrap();
+    assert!(up.same(&ctx.root));
+}
+
+#[test]
+fn a_mount_point_reached_through_another_bind_can_be_neither_removed_nor_renamed() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let _ = ns.bind(&src, &d1, false).unwrap();
+    // `/d1/a/deep` is the submount's place, reached through a bind that
+    // crosses no mount there.
+    assert_eq!(
+        ns.rmdir(&ctx, None, b"/d1/a/deep").unwrap_err(),
+        Errno::EBUSY
+    );
+    assert_eq!(
+        ns.rename(
+            &ctx,
+            (None, b"/d1/a/deep"),
+            (None, b"/d1/a/moved"),
+            RenameMode::Replace
+        )
+        .unwrap_err(),
+        Errno::EBUSY
+    );
+    ns.mkdir(&ctx, None, b"/d1/a/other", 0o755).unwrap();
+    assert_eq!(
+        ns.rename(
+            &ctx,
+            (None, b"/d1/a/other"),
+            (None, b"/d1/a/deep"),
+            RenameMode::Replace
+        )
+        .unwrap_err(),
+        Errno::EBUSY
+    );
+    assert_eq!(read_file(&ns, &ctx, "/src/a/deep/inner").unwrap(), b"in");
+    // A file bound over a file is a mount point the same way.
+    let f = ns.resolve(&ctx, None, b"/src/f", true).unwrap();
+    let file = ns.resolve(&ctx, None, b"/file", true).unwrap();
+    let _ = ns.bind(&f, &file, false).unwrap();
+    let root = ns.resolve(&ctx, None, b"/", true).unwrap();
+    let d2 = ns.resolve(&ctx, None, b"/d2", true).unwrap();
+    let _ = ns.bind(&root, &d2, false).unwrap();
+    assert_eq!(
+        ns.unlink(&ctx, None, b"/d2/file").unwrap_err(),
+        Errno::EBUSY
+    );
+}
+
+#[test]
+fn subtree_lists_a_mount_and_everything_inside_it_parents_first() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let all = ns.subtree(&src).unwrap();
+    assert_eq!(all.len(), 2);
+    assert!(Arc::ptr_eq(&all[0], &src.mount));
+    assert!(
+        all[1]
+            .parent()
+            .is_some_and(|(above, _)| Arc::ptr_eq(&above, &src.mount))
+    );
+    let inside = ns.resolve(&ctx, None, b"/src/a", true).unwrap();
+    assert_eq!(ns.subtree(&inside).unwrap_err(), Errno::EINVAL);
+}
+
+#[test]
+fn a_subdirectory_and_a_file_bind_and_the_kinds_must_agree() {
+    let (ns, ctx) = bind_fixture();
+    let a = ns.resolve(&ctx, None, b"/src/a", true).unwrap();
+    let f = ns.resolve(&ctx, None, b"/src/f", true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let file = ns.resolve(&ctx, None, b"/file", true).unwrap();
+    assert_eq!(ns.bind(&f, &d1, false).unwrap_err(), Errno::ENOTDIR);
+    assert_eq!(ns.bind(&a, &file, false).unwrap_err(), Errno::ENOTDIR);
+    let sub = ns.bind(&a, &d1, false).unwrap();
+    assert_eq!(Namespace::root_path(&sub), b"/a");
+    assert!(ns.resolve(&ctx, None, b"/d1/deep", true).is_ok());
+    let one = ns.bind(&f, &file, false).unwrap();
+    assert_eq!(Namespace::root_path(&one), b"/f");
+    assert_eq!(read_file(&ns, &ctx, "/file").unwrap(), b"bind");
+}
+
+#[test]
+fn a_bind_remount_reaches_one_mount_and_a_plain_one_every_bind() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let _ = ns.bind(&src, &d1, true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let writable = |path: &[u8]| ns.open(&ctx, None, path, &WRITE, 0).map(drop);
+
+    ns.remount(&d1, crate::MountFlags::READ_ONLY).unwrap();
+    assert_eq!(writable(b"/d1/f").unwrap_err(), Errno::EROFS);
+    assert!(writable(b"/src/f").is_ok());
+    ns.remount(&d1, crate::MountFlags::NONE).unwrap();
+
+    ns.remount_filesystem(&d1, crate::MountFlags::READ_ONLY)
+        .unwrap();
+    assert_eq!(writable(b"/d1/f").unwrap_err(), Errno::EROFS);
+    assert_eq!(writable(b"/src/f").unwrap_err(), Errno::EROFS);
+    // Another filesystem, mounted inside, is not touched.
+    assert!(writable(b"/d1/a/deep/inner").is_ok());
+    assert!(src.mount.filesystem_read_only() && !src.mount.read_only());
+    // A bind remount does not undo the filesystem's read-only; a plain one does.
+    ns.remount(&d1, crate::MountFlags::NONE).unwrap();
+    assert_eq!(writable(b"/src/f").unwrap_err(), Errno::EROFS);
+    ns.remount_filesystem(&d1, crate::MountFlags::NONE).unwrap();
+    assert!(writable(b"/src/f").is_ok() && writable(b"/d1/f").is_ok());
+}
+
+#[test]
+fn detach_takes_the_subtree_and_leaves_its_top_without_a_parent() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let d1 = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let _ = ns.bind(&src, &d1, true).unwrap();
+    let kept = ns.resolve(&ctx, None, b"/d1/a/deep", true).unwrap();
+    let top = ns.resolve(&ctx, None, b"/d1", true).unwrap();
+    let before = ns.mounts().len();
+    assert_eq!(ns.unmount(&top).unwrap_err(), Errno::EBUSY);
+    let inside = ns.resolve(&ctx, None, b"/d1/a", true).unwrap();
+    assert_eq!(ns.unmount_with(&inside, true).unwrap_err(), Errno::EINVAL);
+    ns.unmount_with(&top, true).unwrap();
+    assert_eq!(ns.mounts().len(), before - 2);
+    assert_eq!(
+        read_file(&ns, &ctx, "/d1/a/deep/inner").unwrap_err(),
+        Errno::ENOENT
+    );
+    // What was held keeps working, and `..` stops at its mount's root.
+    assert!(kept.mount.parent().is_none() && top.mount.parent().is_none());
+    assert!(kept.parent().same(&kept));
+    assert!(!ns.owns(&kept.mount));
+    // Nothing of it binds, and it cannot be unmounted again.
+    let d2 = ns.resolve(&ctx, None, b"/d2", true).unwrap();
+    assert_eq!(ns.bind(&kept, &d2, false).unwrap_err(), Errno::EINVAL);
+    assert_eq!(ns.unmount_with(&top, true).unwrap_err(), Errno::EINVAL);
+    // The source's own mounts are untouched.
+    assert_eq!(read_file(&ns, &ctx, "/src/a/deep/inner").unwrap(), b"in");
+}
+
+#[test]
+fn a_directory_binds_onto_itself_and_a_recursive_bind_into_itself_ends() {
+    let (ns, ctx) = bind_fixture();
+    let src = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let _ = ns.bind(&src, &src, true).unwrap();
+    assert_eq!(read_file(&ns, &ctx, "/src/a/deep/inner").unwrap(), b"in");
+    // A bind of the tree into a directory of itself copies what was below
+    // it once, not the copy too.
+    let a = ns.resolve(&ctx, None, b"/src/a", true).unwrap();
+    let whole = ns.resolve(&ctx, None, b"/src", true).unwrap();
+    let before = ns.mounts().len();
+    let _ = ns.bind(&whole, &a, true).unwrap();
+    assert_eq!(ns.mounts().len(), before + 2);
+    assert_eq!(read_file(&ns, &ctx, "/src/a/a/deep/inner").unwrap(), b"in");
+    for mount in ns.mounts() {
+        let mut parent = mount.parent();
+        for _ in 0..=64 {
+            let Some((above, _)) = parent else { break };
+            parent = above.parent();
+        }
+        assert!(parent.is_none(), "a mount's parents do not end");
+    }
+}
+
 #[test]
 fn a_mount_covers_a_directory_and_dotdot_climbs_out_of_it() {
     let (ns, ctx) = fresh();

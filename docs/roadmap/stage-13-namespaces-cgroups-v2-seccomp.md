@@ -141,7 +141,26 @@ and `MS_REMOUNT | MS_BIND` change a mount's flags, writing its filesystem
 out before it goes read-only, so init's shutdown remount of `/` and `/data`
 now happens (F-53); `/proc/<pid>/mountinfo` exists, and `/proc/mounts` and
 `statfs` show the flags. The `mounts` boot line (FX-0885) and `test-init`'s
-shutdown lines prove it. Next is N2, binds.
+shutdown lines prove it.
+
+**Done -- N2, binds (2026-09-30, 6 points).** `MS_BIND` mounts a
+directory, a subdirectory, a file or a socket on a place of the same kind
+(`ENOTDIR` otherwise), with the source mount's flags; `MS_REC` copies the
+mounts below it too. `umount2` with `MNT_DETACH` takes a subtree at once,
+each mount of it left without a parent, so `..` from inside stops at its
+root and a bind from it is `EINVAL`. `MS_PRIVATE`, `MS_SLAVE` and
+`MS_UNBINDABLE` are accepted and change nothing, since no mount is ever
+shared; `MS_SHARED` and `MS_MOVE` stay `EINVAL`. The binds of a filesystem
+share its superblock: a plain `MS_REMOUNT` read-only reaches every bind of
+it, and `MS_REMOUNT | MS_BIND` only the one mount, as the interim reviewer
+asked. Mount ids, the dentry cache and the rename lock are the kernel's,
+shared by every namespace to come; a mount's parent can change, under the
+table lock. A mount point reached through another bind can be neither
+removed nor renamed (`EBUSY`), and `MNT_DETACH` writes out every
+filesystem of the subtree first. The `binds` boot line (FX-0886), seven
+host tests and the
+`vfs_ops` fuzzer's bind, detach and remount operations prove it. Next is
+N3, mount namespaces.
 
 **Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
 reclaiming inside the job before it OOM-kills (M2), then freezing,

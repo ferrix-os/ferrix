@@ -25,6 +25,7 @@
 //! decide what to do about a filesystem that does not exist.
 
 pub(crate) mod anon;
+pub(crate) mod bind_check;
 pub(crate) mod block;
 pub(crate) mod btrfs;
 pub(crate) mod btrfs_check;

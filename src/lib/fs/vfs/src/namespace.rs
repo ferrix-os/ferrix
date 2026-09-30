@@ -5,7 +5,7 @@ use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint};
 use ferrix_linux_abi::errno::Errno;
@@ -138,6 +138,31 @@ impl MountFlags {
     }
 }
 
+/// A filesystem as every mount of it shares it: Linux's superblock, less
+/// everything a filesystem here keeps for itself.
+///
+/// What it adds is the one state a plain `MS_REMOUNT` changes for the whole
+/// filesystem rather than for the one mount it names: read-only. A bind of
+/// the filesystem, and every copy `MS_REC` makes, share it with the mount
+/// they came from, so a plain remount read-only through any of them refuses
+/// writes through all of them, while `MS_REMOUNT | MS_BIND` changes only the
+/// mount's own [`MountFlags`] (`docs/NAMESPACES.md` §2.1, N2).
+struct Superblock {
+    fs: Arc<dyn FileSystem>,
+    /// Set by a plain remount read-only, cleared by a plain remount without.
+    read_only: AtomicBool,
+}
+
+impl Superblock {
+    /// A new one for `fs`, writable.
+    fn new(fs: Arc<dyn FileSystem>) -> Arc<Superblock> {
+        Arc::new(Superblock {
+            fs,
+            read_only: AtomicBool::new(false),
+        })
+    }
+}
+
 /// A filesystem instance attached to the tree.
 pub struct Mount {
     id: u64,
@@ -145,10 +170,19 @@ pub struct Mount {
     /// that every check reads them without a lock and sees one remount
     /// whole.
     flags: AtomicU32,
-    fs: Arc<dyn FileSystem>,
+    sb: Arc<Superblock>,
+    /// Where in its filesystem it starts: the filesystem's root for a mount
+    /// made by `mount(2)`, any directory or file of it for a bind.
     root: Arc<Dentry>,
-    /// The mount it is on and the dentry it covers; `None` for the root.
-    parent: Option<(Arc<Mount>, Arc<Dentry>)>,
+    /// The mount it is on and the dentry it covers; `None` for the root and
+    /// for a mount `MNT_DETACH` took out of the tree.
+    ///
+    /// Written only while the namespace's table lock is held, so that the
+    /// table and every parent pointer change together; its own lock, a leaf,
+    /// is what lets a walk read it without the table's. Every change keeps
+    /// the graph of parents acyclic at each step, so a walk going `..` never
+    /// meets a cycle, whenever it reads.
+    parent: SpinLock<Option<(Arc<Mount>, Arc<Dentry>)>>,
     /// Where a sleeping lock made for something on this mount waits: the
     /// namespace's, so that an open file reaches it through its location
     /// and nothing that opens a file has to be told.
@@ -168,7 +202,22 @@ impl Mount {
     /// The filesystem mounted here.
     #[must_use]
     pub fn filesystem(&self) -> &Arc<dyn FileSystem> {
-        &self.fs
+        &self.sb.fs
+    }
+
+    /// Whether the filesystem, as every mount of it shares it, is read-only:
+    /// what a plain `MS_REMOUNT` with `MS_RDONLY` set, or the filesystem
+    /// itself refusing every write. `mountinfo`'s last field.
+    #[must_use]
+    pub fn filesystem_read_only(&self) -> bool {
+        self.sb.read_only.load(Ordering::Acquire) || self.sb.fs.read_only()
+    }
+
+    /// Whether `other` is a mount of the same filesystem: a bind of it, or
+    /// what it was bound from.
+    #[must_use]
+    pub fn shares_filesystem(&self, other: &Mount) -> bool {
+        Arc::ptr_eq(&self.sb, &other.sb)
     }
 
     /// The dentry of the filesystem's root directory.
@@ -179,8 +228,17 @@ impl Mount {
 
     /// The mount this one is on, and the dentry it covers.
     #[must_use]
-    pub fn parent(&self) -> Option<&(Arc<Mount>, Arc<Dentry>)> {
-        self.parent.as_ref()
+    pub fn parent(&self) -> Option<(Arc<Mount>, Arc<Dentry>)> {
+        self.parent.lock().clone()
+    }
+
+    /// Make `parent` its parent, answering the old one for the caller to
+    /// drop after every lock is released. The table lock is held.
+    fn set_parent(
+        &self,
+        parent: Option<(Arc<Mount>, Arc<Dentry>)>,
+    ) -> Option<(Arc<Mount>, Arc<Dentry>)> {
+        core::mem::replace(&mut *self.parent.lock(), parent)
     }
 
     /// Where a sleeping lock for something on this mount waits.
@@ -227,7 +285,7 @@ impl fmt::Debug for Mount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Mount")
             .field("id", &self.id)
-            .field("fs", &self.fs.name())
+            .field("fs", &self.sb.fs.name())
             .finish_non_exhaustive()
     }
 }
@@ -288,14 +346,14 @@ impl Location {
         name: &[u8],
         parker: Arc<dyn Parker>,
     ) -> Result<Location> {
-        let charge = crate::charge(arc_footprint::<Mount>())?;
+        let charge = crate::charge(mount_footprint())?;
         let dentry = Dentry::named_root(Box::from(name), inode)?;
         let mount = Arc::new(Mount {
             id: DETACHED_MOUNT,
             flags: AtomicU32::new(0),
-            fs,
+            sb: Superblock::new(fs),
             root: Arc::clone(&dentry),
-            parent: None,
+            parent: SpinLock::new(None),
             parker,
             _charge: charge,
         });
@@ -315,7 +373,7 @@ impl Location {
     ///
     /// `EROFS`.
     pub fn require_writable(&self) -> Result<()> {
-        if self.mount.read_only() {
+        if self.mount.read_only() || self.mount.sb.read_only.load(Ordering::Acquire) {
             Err(Errno::EROFS)
         } else {
             Ok(())
@@ -330,9 +388,16 @@ impl Location {
     }
 }
 
-/// The mount identifier every [`Location::detached`] mount carries. A
-/// namespace numbers its own from one, so no mount in a tree is ever this.
+/// The mount identifier every [`Location::detached`] mount carries. Mounts
+/// in a tree are numbered from one, so no mount in a tree is ever this.
 const DETACHED_MOUNT: u64 = 0;
+
+/// What one mount holds of the kernel heap, as it is charged: the mount, and
+/// the superblock a mount made by `mount(2)` brings (a bind shares one, and
+/// is charged the same, which over-counts by a superblock).
+fn mount_footprint() -> usize {
+    arc_footprint::<Mount>() + arc_footprint::<Superblock>()
+}
 
 /// The two places a relative and an absolute path start from, and who is
 /// walking.
@@ -369,15 +434,21 @@ pub enum RenameMode {
     NoReplace,
 }
 
-/// A mount table with a root.
-pub struct Namespace {
-    root: Arc<Mount>,
-    /// Keyed by the mount a mount point is in and the mount point's dentry.
-    mounts: SpinLock<BTreeMap<(u64, u64), Arc<Mount>>>,
+/// What every mount namespace of the kernel shares: the mount ids, the
+/// rename lock and the dentry cache (`docs/NAMESPACES.md` §2.1).
+///
+/// A cache per namespace would keep an unlinked file's dentry, and its
+/// pages, alive in every namespace but the one that unlinked it; a rename
+/// lock per namespace would let two renames on one filesystem, from two
+/// namespaces, each invalidate the other's ancestry check. So they are the
+/// kernel's, and a namespace holds them through an `Arc`.
+struct Shared {
+    /// The next mount's id: one counter for the kernel, so that a table's
+    /// key, which names a mount by id, never names another namespace's.
     next_mount: AtomicU64,
     /// Held across a rename, so that the ancestry checks it makes are not
     /// invalidated by another rename moving a directory underneath it.
-    /// Linux's `s_vfs_rename_mutex`, one per namespace rather than per
+    /// Linux's `s_vfs_rename_mutex`, one for the kernel rather than per
     /// filesystem because renames across filesystems are refused anyway.
     ///
     /// A sleeping lock, because it is held across both of the rename's path
@@ -385,11 +456,27 @@ pub struct Namespace {
     /// for a disk. The kernel lends the wait through the namespace's
     /// [`Parker`]; on the host it spins.
     rename_lock: SleepLock<()>,
+    cache: SpinLock<VecDeque<Arc<Dentry>>>,
+    cache_limit: usize,
+}
+
+/// A mount table with a root.
+pub struct Namespace {
+    root: Arc<Mount>,
+    /// Keyed by the mount a mount point is in and the mount point's dentry.
+    /// Its lock is also the one every mount's parent pointer is written
+    /// under ([`Mount::set_parent`]).
+    mounts: SpinLock<BTreeMap<(u64, u64), Arc<Mount>>>,
+    /// Held across every change to the tree -- a mount, a bind, an unmount
+    /// -- so that one change sees the table the last one left, and what it
+    /// allocates it allocates before the table's spin lock is taken
+    /// (`docs/NAMESPACES.md` §6). Taken before the rename lock, never two at
+    /// once.
+    change: SleepLock<()>,
+    shared: Arc<Shared>,
     /// Where a lock that sleeps waits: lent by the kernel, and handed on to
     /// every lock this namespace and its open files make.
     parker: Arc<dyn Parker>,
-    cache: SpinLock<VecDeque<Arc<Dentry>>>,
-    cache_limit: usize,
 }
 
 impl fmt::Debug for Namespace {
@@ -423,18 +510,22 @@ impl Namespace {
             id: 1,
             flags: AtomicU32::new(0),
             root: Dentry::uncharged_root(fs.root()),
-            fs,
-            parent: None,
+            sb: Superblock::new(fs),
+            parent: SpinLock::new(None),
             parker: Arc::clone(&parker),
             _charge: Charge::none(),
         });
-        Namespace {
-            root,
-            mounts: SpinLock::new(BTreeMap::new()),
+        let shared = Arc::new(Shared {
             next_mount: AtomicU64::new(2),
             rename_lock: SleepLock::new((), parker.as_ref()),
             cache: SpinLock::new(VecDeque::new()),
             cache_limit,
+        });
+        Namespace {
+            root,
+            mounts: SpinLock::new(BTreeMap::new()),
+            change: SleepLock::new((), parker.as_ref()),
+            shared,
             parker,
         }
     }
@@ -477,14 +568,14 @@ impl Namespace {
     /// How many unused dentries the cache is holding.
     #[must_use]
     pub fn cached(&self) -> usize {
-        self.cache.lock().len()
+        self.shared.cache.lock().len()
     }
 
     pub(crate) fn remember(&self, dentry: &Arc<Dentry>) {
         let evicted = {
-            let mut cache = self.cache.lock();
+            let mut cache = self.shared.cache.lock();
             cache.push_back(Arc::clone(dentry));
-            if cache.len() > self.cache_limit {
+            if cache.len() > self.shared.cache_limit {
                 cache.pop_front()
             } else {
                 None
@@ -504,7 +595,8 @@ impl Namespace {
     /// operations that remove a name. The caller still holds the dentry, so
     /// nothing is freed under the lock.
     fn forget(&self, dentry: &Arc<Dentry>) {
-        self.cache
+        self.shared
+            .cache
             .lock()
             .retain(|cached| !Arc::ptr_eq(cached, dentry));
     }
@@ -523,7 +615,7 @@ impl Namespace {
     /// the children taken out are dropped after the lock is released.
     fn forget_with_children(&self, directory: &Arc<Dentry>) {
         let released: Vec<Arc<Dentry>> = {
-            let mut cache = self.cache.lock();
+            let mut cache = self.shared.cache.lock();
             let mut released = Vec::new();
             cache.retain(|cached| {
                 let gone = Arc::ptr_eq(cached, directory)
@@ -577,7 +669,7 @@ impl Namespace {
     /// `ENOENT` for a negative dentry.
     pub fn stat(&self, at: &Location) -> Result<Stat> {
         Ok(Stat {
-            dev: at.mount.fs.device(),
+            dev: at.mount.sb.fs.device(),
             metadata: at.inode()?.metadata(),
         })
     }
@@ -585,7 +677,7 @@ impl Namespace {
     /// `statfs` on a location: the filesystem it is on.
     #[must_use]
     pub fn statfs(&self, at: &Location) -> StatFs {
-        at.mount.fs.statfs()
+        at.mount.sb.fs.statfs()
     }
 
     /// A symbolic link's target, without following it.
@@ -627,12 +719,9 @@ impl Namespace {
                 break;
             }
             if Arc::ptr_eq(&here.dentry, &here.mount.root) {
-                match &here.mount.parent {
+                match here.mount.parent() {
                     Some((mount, dentry)) => {
-                        here = Location {
-                            mount: Arc::clone(mount),
-                            dentry: Arc::clone(dentry),
-                        };
+                        here = Location { mount, dentry };
                         continue;
                     }
                     None => break,
@@ -1034,7 +1123,7 @@ impl Namespace {
         new: (Option<&Location>, &[u8]),
         mode: RenameMode,
     ) -> Result<()> {
-        let _serialised = self.rename_lock.lock();
+        let _serialised = self.shared.rename_lock.lock();
         let source = self.walk(ctx, Self::start(ctx, old.0), old.1, false)?;
         let dest = self.walk(ctx, Self::start(ctx, new.0), new.1, false)?;
         let old_name = source.name_or(Errno::EBUSY)?;
@@ -1145,8 +1234,9 @@ impl Namespace {
     ///
     /// # Errors
     ///
-    /// `ENOTDIR` if `at` is not a directory, `EBUSY` if something is already
-    /// mounted exactly there, `ENOMEM` past the job's memory limit.
+    /// `ENOTDIR` if `at` is not a directory, `EINVAL` if it is not in this
+    /// namespace's tree, `EBUSY` if something is already mounted exactly
+    /// there, `ENOMEM` past the job's memory limit.
     pub fn mount(&self, fs: Arc<dyn FileSystem>, at: &Location) -> Result<Arc<Mount>> {
         self.mount_with(fs, at, MountFlags::NONE)
     }
@@ -1165,70 +1255,340 @@ impl Namespace {
         if at.inode()?.metadata().kind != FileType::Directory {
             return Err(Errno::ENOTDIR);
         }
-        let key = (at.mount.id, at.dentry.id());
-        // Charged before the table is locked: a refusal drops `fs`, which
-        // may be its last reference.
-        let charge = crate::charge(arc_footprint::<Mount>())?;
-        let root = Dentry::root(fs.root())?;
-        let mut mounts = self.mounts.lock();
-        if mounts.contains_key(&key) {
-            return Err(Errno::EBUSY);
+        let _changing = self.change.lock();
+        if !self.owns(&at.mount) {
+            return Err(Errno::EINVAL);
         }
+        // Charged and made before the table is locked: a refusal drops `fs`,
+        // which may be its last reference, with no lock held.
+        let charge = crate::charge(mount_footprint())?;
+        let root = Dentry::root(fs.root())?;
         let mount = Arc::new(Mount {
-            id: self.next_mount.fetch_add(1, Ordering::Relaxed),
+            id: self.next_id(),
             flags: AtomicU32::new(flags.bits()),
             root,
-            fs,
-            parent: Some((Arc::clone(&at.mount), Arc::clone(&at.dentry))),
+            sb: Superblock::new(fs),
+            parent: SpinLock::new(Some((Arc::clone(&at.mount), Arc::clone(&at.dentry)))),
             parker: Arc::clone(&self.parker),
             _charge: charge,
         });
-        let _ = mounts.insert(key, Arc::clone(&mount));
-        at.dentry.add_mount();
+        self.attach(core::slice::from_ref(&mount))?;
         Ok(mount)
     }
 
-    /// Give the mount whose root `at` is the flags `flags`: `MS_REMOUNT`.
-    /// The flags replace the old ones whole; which to keep is the caller's
-    /// to decide, as `mount(2)`'s rules say.
+    /// `mount(source, target, NULL, MS_BIND)`: a new mount on `target` of
+    /// the filesystem `source` is on, starting at `source` -- a directory, a
+    /// subdirectory, or a single file -- with the flags of `source`'s mount.
+    /// With `recursive` (`MS_REC`), every mount at or below `source` is
+    /// copied under the new one, each with its own flags; without it, none
+    /// is, and what they cover shows through.
+    ///
+    /// A directory binds onto a directory and anything else onto anything
+    /// but a directory, as Linux's `graft_tree` has it. Flags other than
+    /// the source mount's are a remount's to set, as on Linux.
     ///
     /// # Errors
     ///
-    /// `EINVAL` if `at` is not the root of a mount.
-    pub fn remount(&self, at: &Location, flags: MountFlags) -> Result<()> {
+    /// `ENOTDIR` for a directory onto a non-directory or the reverse;
+    /// `EINVAL` if either place is not in this namespace's tree (Linux's
+    /// `check_mnt`: a descriptor kept into a mount `MNT_DETACH` took out
+    /// binds nothing); `EBUSY` if something is mounted exactly on `target`;
+    /// `ENOMEM` past the job's memory limit, with nothing mounted.
+    pub fn bind(
+        &self,
+        source: &Location,
+        target: &Location,
+        recursive: bool,
+    ) -> Result<Arc<Mount>> {
+        let source_dir = source.inode()?.metadata().kind == FileType::Directory;
+        let target_dir = target.inode()?.metadata().kind == FileType::Directory;
+        if source_dir != target_dir {
+            return Err(Errno::ENOTDIR);
+        }
+        let _changing = self.change.lock();
+        if !self.owns(&source.mount) || !self.owns(&target.mount) {
+            return Err(Errno::EINVAL);
+        }
+        let mut originals = Vec::new();
+        originals.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+        originals.push(Arc::clone(&source.mount));
+        if recursive {
+            let below = self.descendants(&source.mount, Some(&source.dentry))?;
+            originals
+                .try_reserve(below.len())
+                .map_err(|_| Errno::ENOMEM)?;
+            originals.extend(below);
+        }
+        // Every copy charged and made before the table is locked, so a
+        // refusal leaves the tree as it was.
+        let mut made: Vec<Arc<Mount>> = Vec::new();
+        made.try_reserve(originals.len())
+            .map_err(|_| Errno::ENOMEM)?;
+        made.push(self.copy_of(
+            &source.mount,
+            Arc::clone(&source.dentry),
+            (Arc::clone(&target.mount), Arc::clone(&target.dentry)),
+        )?);
+        for original in originals.iter().skip(1) {
+            let (above, covered) = original.parent().ok_or(Errno::EINVAL)?;
+            let copied_above = originals
+                .iter()
+                .position(|candidate| Arc::ptr_eq(candidate, &above))
+                .and_then(|index| made.get(index))
+                .cloned()
+                .ok_or(Errno::EINVAL)?;
+            made.push(self.copy_of(
+                original,
+                Arc::clone(&original.root),
+                (copied_above, covered),
+            )?);
+        }
+        self.attach(&made)?;
+        made.into_iter().next().ok_or(Errno::EINVAL)
+    }
+
+    /// A new mount like `like` -- its filesystem and flags -- starting at
+    /// `root` and on `parent`, charged; not yet in the table.
+    fn copy_of(
+        &self,
+        like: &Mount,
+        root: Arc<Dentry>,
+        parent: (Arc<Mount>, Arc<Dentry>),
+    ) -> Result<Arc<Mount>> {
+        let charge = crate::charge(mount_footprint())?;
+        Ok(Arc::new(Mount {
+            id: self.next_id(),
+            flags: AtomicU32::new(like.flags().bits()),
+            sb: Arc::clone(&like.sb),
+            root,
+            parent: SpinLock::new(Some(parent)),
+            parker: Arc::clone(&self.parker),
+            _charge: charge,
+        }))
+    }
+
+    /// A mount id no mount of the kernel has had.
+    fn next_id(&self) -> u64 {
+        self.shared.next_mount.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Put `mounts` in the table, each on the place its parent pointer
+    /// names, the first on a place nothing is mounted on. The change lock
+    /// is held, and every mount was made already.
+    ///
+    /// # Errors
+    ///
+    /// `EBUSY` if something is mounted exactly where the first goes;
+    /// nothing is put in then.
+    fn attach(&self, mounts: &[Arc<Mount>]) -> Result<()> {
+        // Read before the table's lock, so nothing is allocated under it: no
+        // parent of a mount not yet in the table can change meanwhile.
+        let mut placed: Vec<Option<(Arc<Mount>, Arc<Dentry>)>> = Vec::new();
+        placed
+            .try_reserve_exact(mounts.len())
+            .map_err(|_| Errno::ENOMEM)?;
+        placed.extend(mounts.iter().map(|mount| mount.parent()));
+        let mut table = self.mounts.lock();
+        if let Some(Some((above, covered))) = placed.first()
+            && table.contains_key(&(above.id, covered.id()))
+        {
+            return Err(Errno::EBUSY);
+        }
+        for (mount, place) in mounts.iter().zip(placed) {
+            if let Some((above, covered)) = place {
+                let _ = table.insert((above.id, covered.id()), Arc::clone(mount));
+                covered.add_mount();
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether `mount` is in this namespace's tree: its root, or in its
+    /// table on the place its parent pointer names. A mount `MNT_DETACH`
+    /// took out, or a [`Location::detached`] one, is not.
+    #[must_use]
+    pub fn owns(&self, mount: &Arc<Mount>) -> bool {
+        if Arc::ptr_eq(mount, &self.root) {
+            return true;
+        }
+        let Some((above, covered)) = mount.parent() else {
+            return false;
+        };
+        self.mounts
+            .lock()
+            .get(&(above.id, covered.id()))
+            .is_some_and(|found| Arc::ptr_eq(found, mount))
+    }
+
+    /// Every mount of the table, copied out: the change lock is held, so
+    /// the table cannot grow between its size being read and the copy.
+    fn snapshot(&self) -> Result<Vec<Arc<Mount>>> {
+        let len = self.mounts.lock().len();
+        let mut all = Vec::new();
+        all.try_reserve_exact(len).map_err(|_| Errno::ENOMEM)?;
+        all.extend(self.mounts.lock().values().take(len).cloned());
+        Ok(all)
+    }
+
+    /// The mounts below `top`, each after its parent: those on `top` whose
+    /// mount point is at or below `within` (all of them without one), and
+    /// then everything on those, all the way down. The change lock is held.
+    fn descendants(
+        &self,
+        top: &Arc<Mount>,
+        within: Option<&Arc<Dentry>>,
+    ) -> Result<Vec<Arc<Mount>>> {
+        let all = self.snapshot()?;
+        let mut found: Vec<Arc<Mount>> = Vec::new();
+        found.try_reserve(all.len()).map_err(|_| Errno::ENOMEM)?;
+        for mount in &all {
+            if let Some((above, covered)) = mount.parent()
+                && Arc::ptr_eq(&above, top)
+                && within.is_none_or(|place| place.is_ancestor_of(&covered))
+            {
+                found.push(Arc::clone(mount));
+            }
+        }
+        let mut next = 0;
+        while let Some(parent) = found.get(next).cloned() {
+            next += 1;
+            for mount in &all {
+                if let Some((above, _)) = mount.parent()
+                    && Arc::ptr_eq(&above, &parent)
+                {
+                    found.push(Arc::clone(mount));
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// The mount whose root `at` is and every mount inside it, each after
+    /// its parent: what [`Namespace::unmount_with`] with `detach` takes out,
+    /// for a caller that must write their filesystems out first.
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` if `at` is not the root of a mount of this namespace's tree;
+    /// `ENOMEM` when there is no memory to list them.
+    pub fn subtree(&self, at: &Location) -> Result<Vec<Arc<Mount>>> {
         if !at.is_mount_root() {
+            return Err(Errno::EINVAL);
+        }
+        let _changing = self.change.lock();
+        if !self.owns(&at.mount) {
+            return Err(Errno::EINVAL);
+        }
+        let inside = self.descendants(&at.mount, None)?;
+        let mut all = Vec::new();
+        all.try_reserve_exact(inside.len() + 1)
+            .map_err(|_| Errno::ENOMEM)?;
+        all.push(Arc::clone(&at.mount));
+        all.extend(inside);
+        Ok(all)
+    }
+
+    /// Give the mount whose root `at` is the flags `flags`: `MS_REMOUNT |
+    /// MS_BIND`, which changes that one mount and no other mount of its
+    /// filesystem. The flags replace the old ones whole; which to keep is the
+    /// caller's to decide, as `mount(2)`'s rules say.
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` if `at` is not the root of a mount of this namespace's tree.
+    pub fn remount(&self, at: &Location, flags: MountFlags) -> Result<()> {
+        if !at.is_mount_root() || !self.owns(&at.mount) {
             return Err(Errno::EINVAL);
         }
         at.mount.flags.store(flags.bits(), Ordering::Release);
         Ok(())
     }
 
-    /// Unmount the filesystem whose root `at` is.
-    ///
-    /// Lazy, in the sense of `MNT_DETACH`: files already open on it keep
-    /// working, and it goes away when the last of them closes.
+    /// A plain `MS_REMOUNT`: as [`Namespace::remount`], and the filesystem
+    /// itself read-only or writable as `flags` says, so that every mount of
+    /// it -- each bind, each copy -- refuses writes or takes them again
+    /// (Linux's `do_remount`, which sets the superblock's `SB_RDONLY` and
+    /// the mount's own flags).
     ///
     /// # Errors
     ///
-    /// `EINVAL` if `at` is not the root of a mount, or is the namespace's
-    /// root; `EBUSY` if something is mounted inside it.
+    /// As [`Namespace::remount`].
+    pub fn remount_filesystem(&self, at: &Location, flags: MountFlags) -> Result<()> {
+        self.remount(at, flags)?;
+        at.mount
+            .sb
+            .read_only
+            .store(flags.contains(MountFlags::READ_ONLY), Ordering::Release);
+        Ok(())
+    }
+
+    /// Unmount the filesystem whose root `at` is: `umount2` without
+    /// `MNT_DETACH`.
+    ///
+    /// Lazy all the same, as every unmount here is: files already open on it
+    /// keep working, and it goes away when the last of them closes.
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` if `at` is not the root of a mount of this namespace's tree,
+    /// or is the namespace's root; `EBUSY` if something is mounted inside
+    /// it.
     pub fn unmount(&self, at: &Location) -> Result<()> {
-        if !Arc::ptr_eq(&at.dentry, &at.mount.root) {
+        self.unmount_with(at, false)
+    }
+
+    /// `umount2`, with `detach` for `MNT_DETACH`: then everything mounted
+    /// inside it leaves the table with it, at once, rather than being
+    /// `EBUSY`.
+    ///
+    /// Every mount that leaves loses its parent, as Linux's `umount_tree`
+    /// disconnects each: `..` from inside one stops at its root, and nothing
+    /// of it can be reached by a path from the tree it left. Each goes when
+    /// its last user does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Namespace::unmount`], less `EBUSY` with `detach`; `ENOMEM` when
+    /// there is no memory to list what is inside it.
+    pub fn unmount_with(&self, at: &Location, detach: bool) -> Result<()> {
+        if !at.is_mount_root() {
             return Err(Errno::EINVAL);
         }
-        let Some((parent, covered)) = &at.mount.parent else {
+        let _changing = self.change.lock();
+        if at.mount.parent().is_none() || !self.owns(&at.mount) {
             return Err(Errno::EINVAL);
-        };
+        }
+        let mut going = Vec::new();
+        going.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+        going.push(Arc::clone(&at.mount));
+        if detach {
+            let inside = self.descendants(&at.mount, None)?;
+            going.try_reserve(inside.len()).map_err(|_| Errno::ENOMEM)?;
+            going.extend(inside);
+        }
+        let mut old_parents = Vec::new();
+        old_parents
+            .try_reserve(going.len())
+            .map_err(|_| Errno::ENOMEM)?;
         {
-            let mut mounts = self.mounts.lock();
-            if mounts.keys().any(|&(on, _)| on == at.mount.id) {
+            let mut table = self.mounts.lock();
+            if !detach && table.keys().any(|&(on, _)| on == at.mount.id) {
                 return Err(Errno::EBUSY);
             }
-            let _ = mounts.remove(&(parent.id, covered.id()));
+            for mount in &going {
+                if let Some((above, covered)) = mount.parent() {
+                    let _ = table.remove(&(above.id, covered.id()));
+                    covered.remove_mount();
+                }
+                old_parents.push(mount.set_parent(None));
+            }
         }
-        covered.remove_mount();
-        // Outside the mount table's lock: the cache takes its own.
-        self.forget_tree(&at.mount.root);
+        // Outside the table's lock: a parent's last reference may go here,
+        // and the cache takes its own lock.
+        drop(old_parents);
+        for mount in &going {
+            self.forget_tree(&mount.root);
+        }
         Ok(())
     }
 
@@ -1247,7 +1607,7 @@ impl Namespace {
     /// released, since the last reference to one releases its parent chain.
     fn forget_tree(&self, root: &Arc<Dentry>) {
         let released: Vec<Arc<Dentry>> = {
-            let mut cache = self.cache.lock();
+            let mut cache = self.shared.cache.lock();
             let mut released = Vec::new();
             cache.retain(|cached| {
                 let gone = root.is_ancestor_of(cached);

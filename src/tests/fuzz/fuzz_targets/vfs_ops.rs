@@ -26,7 +26,12 @@
 //!   root by listings reaches no directory twice, every name reports
 //!   `path_of` as the path it was listed under, and every dentry's parents
 //!   end. A rename that moves a directory into its own subtree breaks the
-//!   first, and a dentry left with a stale parent breaks the second.
+//!   first, and a dentry left with a stale parent breaks the second. With
+//!   binds the same directory is reached through more than one mount, so a
+//!   directory counts as reached twice only through the same mount.
+//! * **Every mount's parents end** (`docs/NAMESPACES.md` §10): binds,
+//!   recursive binds, remounts and `MNT_DETACH` of a subtree never leave a
+//!   mount that is its own ancestor.
 //!
 //! Paths are built from a tiny alphabet — three names, `.`, `..`, and a link
 //! — so that operations collide with each other constantly rather than
@@ -41,7 +46,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use ferrix_vfs::dirent::{DirentWriter, records};
 use ferrix_vfs::tmpfs::{HeapStorage, Tmpfs};
 use ferrix_vfs::{
-    Clock, Context, FileSystem, FileType, Namespace, OpenFlags, RenameMode, Timespec, Whence,
+    Clock, Context, FileSystem, FileType, MountFlags, Namespace, OpenFlags, RenameMode,
+    Timespec, Whence,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -166,6 +172,18 @@ fn listing_agrees(ns: &Namespace, ctx: &Context, dir: &[u8]) {
     }
 }
 
+/// Every mount's parent chain ends: see the module documentation.
+fn parents_end(ns: &Namespace) {
+    for mount in ns.mounts() {
+        let mut parent = mount.parent();
+        for _ in 0..=1024 {
+            let Some((above, _)) = parent else { break };
+            parent = above.parent();
+        }
+        assert!(parent.is_none(), "a mount is its own ancestor");
+    }
+}
+
 /// The tree is a tree: see the module documentation.
 ///
 /// Walks down from the root by listing each directory and resolving each name
@@ -199,7 +217,7 @@ fn tree_is_a_tree(ns: &Namespace, ctx: &Context) {
             continue;
         }
         assert!(
-            seen.insert((stat.dev, stat.metadata.ino)),
+            seen.insert((at.mount.id(), stat.dev, stat.metadata.ino)),
             "a directory is inside itself: reached again at {}",
             String::from_utf8_lossy(&path)
         );
@@ -233,7 +251,7 @@ fuzz_target!(|data: &[u8]| {
         let Some(path) = input.path() else {
             break;
         };
-        match op % 12 {
+        match op % 15 {
             0 => {
                 let _ = ns.mkdir(&ctx, None, &path, 0o755);
             }
@@ -301,9 +319,37 @@ fuzz_target!(|data: &[u8]| {
                     let _ = ns.unmount(&at);
                 }
             }
+            12 => {
+                let Some(other) = input.path() else { break };
+                if let Ok(from) = ns.resolve(&ctx, None, &path, true)
+                    && let Ok(onto) = ns.resolve(&ctx, None, &other, true)
+                {
+                    let _ = ns.bind(&from, &onto, op & 0x10 != 0);
+                }
+            }
+            13 => {
+                if let Ok(at) = ns.resolve(&ctx, None, &path, true) {
+                    let _ = ns.unmount_with(&at, true);
+                }
+            }
+            14 => {
+                if let Ok(at) = ns.resolve(&ctx, None, &path, true) {
+                    let flags = if op & 0x10 == 0 {
+                        MountFlags::NONE
+                    } else {
+                        MountFlags::READ_ONLY
+                    };
+                    let _ = if op & 0x20 == 0 {
+                        ns.remount(&at, flags)
+                    } else {
+                        ns.remount_filesystem(&at, flags)
+                    };
+                }
+            }
             _ => listing_agrees(&ns, &ctx, &path),
         }
         tree_is_a_tree(&ns, &ctx);
+        parents_end(&ns);
     }
     listing_agrees(&ns, &ctx, b"/");
     listing_agrees(&ns, &ctx, b"/mnt");

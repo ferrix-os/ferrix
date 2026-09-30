@@ -65,9 +65,12 @@ impl Walked {
     }
 
     /// Whether the name is a mount point: what it resolved to is on another
-    /// mount than the directory holding it.
+    /// mount than the directory holding it, or it is covered by a mount the
+    /// walk did not cross because it came through another bind of the same
+    /// filesystem (Linux's `d_mountpoint`, which `vfs_rmdir`, `vfs_unlink`
+    /// and `vfs_rename` ask whatever mount the path went through).
     pub(crate) fn is_mountpoint(&self) -> bool {
-        !Arc::ptr_eq(&self.found.mount, &self.parent.mount)
+        !Arc::ptr_eq(&self.found.mount, &self.parent.mount) || self.found.dentry.is_mountpoint()
     }
 }
 
@@ -386,10 +389,7 @@ pub(crate) fn up(at: &Location, root: Option<&Location>) -> Location {
         if Arc::ptr_eq(&here.dentry, here.mount.root()) {
             match here.mount.parent() {
                 Some((mount, dentry)) => {
-                    here = Location {
-                        mount: Arc::clone(mount),
-                        dentry: Arc::clone(dentry),
-                    };
+                    here = Location { mount, dentry };
                     continue;
                 }
                 None => return here,

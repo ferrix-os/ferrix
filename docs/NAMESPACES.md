@@ -216,10 +216,14 @@ what stage 8 kept apart for this stage, and it makes the change small:
   read-only, nosuid, nodev, noexec, the atime mode, and the lock bits.
 * **A mount's parent can change** (`pivot_root`), so it moves from an
   immutable field to one read and written under its namespace's table lock.
-  One `SpinLock` per namespace guards the table and every parent pointer of
-  its mounts together, so a walk going `..` sees a `pivot_root` whole or not
-  at all, never a cycle half made. `up` and `path_of` take it only at a
-  mount's root.
+  Every parent pointer is written only under its namespace's table lock,
+  so the table and the parents change together; each pointer also has a
+  leaf lock of its own, which is all a walk going `..` (`up`, `path_of`)
+  takes. So a walk may see a change half made, and what keeps it safe is
+  an invariant every change holds at each step: **the graph of parents
+  stays acyclic**, so a walk upward always ends. N2's binds and detaches
+  hold it trivially; N3's `pivot_root` must order its pointer writes to
+  hold it too.
 * **A namespace's recorded root is a `Location`,** not only a root mount:
   the root switch (`fs/root_disk.rs`) re-roots pid 1 at `/sysroot`, and in
   the same step now records that place as the first namespace's root. It is
@@ -255,10 +259,12 @@ nothing cycles.
 * `remount(target, flags)` for `MS_REMOUNT|MS_BIND`: the target must be a
   mount's root; the per-mount flags become `flags`, refused `EPERM` if they
   clear a locked one. Plain `MS_REMOUNT` (Linux's remount of the
-  superblock) sets the same per-mount flags on that mount, since no
-  filesystem here keeps flags of its own apart from its mounts, and changes
-  no filesystem option; a remount to read-only writes the filesystem out
-  first, as `umount2` does, so a btrfs `/` or `/data` remounted read-only
+  superblock) sets the same per-mount flags on that mount and also sets or
+  clears read-only on the filesystem itself -- a superblock every bind and
+  copy of it shares, the one piece of mount state they share -- so every
+  bind of it refuses writes, or takes them again, as `SB_RDONLY` does on
+  Linux; no other filesystem option exists to change. A remount to
+  read-only writes the filesystem out first, as `umount2` does, so a btrfs `/` or `/data` remounted read-only
   at shutdown (`docs/INIT.md` §8.2, step 2, refused `EINVAL` until now) is
   committed and then refuses writes through that mount. Linux refuses a
   read-only remount while files are open for writing (`EBUSY`); nothing
@@ -266,7 +272,8 @@ nothing cycles.
   as they would through a read-only bind.
 * `unmount(target, detach)`: without `MNT_DETACH` as today (`EBUSY` with
   mounts inside); with it, the whole subtree leaves the table at once and
-  each mount goes when its last user does. The top of a detached subtree
+  each mount goes when its last user does. Every filesystem of the subtree
+  is written out first, once each, as the target's alone was before. The top of a detached subtree
   gets no parent, as Linux gives it, so `..` from inside it stops at its
   root. A locked mount cannot be the target (`EINVAL`); it goes only with
   its parent.
@@ -664,12 +671,15 @@ a sibling job must then make one, and both jobs must read zero after.
 |---|---|---|---|
 | namespace change lock | `SleepLock`, per mount namespace | every change to the tree: mount, bind, remount, unmount, `pivot_root`, copying (held on the source) | nothing; never two at once |
 | the shared rename lock | `SleepLock`, one | as today | the change lock |
-| namespace table | `SpinLock`, per mount namespace | the table and every parent pointer of its mounts | the change lock; a leaf |
+| namespace table | `SpinLock`, per mount namespace | the table, and the writing of every parent pointer of its mounts | the change lock |
+| a mount's parent | `SpinLock`, per mount | its parent pointer, read by walks going `..` | the table lock, or nothing; a leaf |
 | a process's fs context | `SpinLock` | `ns`, root, working directory | a leaf; copied out before a walk, as today |
 | a process's credentials | `SpinLock` | ids, `user_ns`, caps | a leaf, as today |
 | a map | `Once` | the extents; written under the namespace's write mutex, read with no lock | -- |
 
-Every allocation and charge happens before a spin lock is taken, so no
+Every allocation and charge a change makes happens before a spin lock is
+taken, but for the table's own insertions (a `BTreeMap` node, which
+predates N2 and allocates without sleeping), so no
 spin lock is held across anything that may sleep (`crate::sync::SpinLock`
 raises the preemption count; FX-0503 if a holder blocks). A copy allocates
 all its `Mount`s, charged, before it takes the new table's lock, and drops
@@ -815,7 +825,10 @@ were accepted, with their cost named (§4). No finding id was opened for
 the design. The customer's decisions are in §11. **N1 landed (2026-09-28)**:
 per-mount flags enforced, `MS_REMOUNT`, `mountinfo`, closing F-53; N2 is
 next, on branch `steam-userns`. Each landing's diff goes to the consultant
-before `land.sh take`.
+before `land.sh take`. **N2 landed (2026-09-30)**: binds, `MS_REC`,
+`MNT_DETACH` of a subtree, the propagation no-ops, the kernel-wide ids,
+cache and rename lock, and a superblock per filesystem so that a plain
+remount reaches every bind of it (the note below); N3 is next.
 
 **For N2 (interim reviewer, N1's review, 2026-09-29):** once binds exist,
 a plain `MS_REMOUNT` read-only must reach the whole filesystem -- every

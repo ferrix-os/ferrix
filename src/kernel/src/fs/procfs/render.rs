@@ -242,7 +242,7 @@ fn mounts_from(ns: &Namespace, root: &Location) -> Result<Vec<u8>> {
 /// when its filesystem takes no writes, as Linux's `show_vfsmnt` prints
 /// `ro` for either.
 fn shown_flags(mount: &ferrix_vfs::Mount) -> MountFlags {
-    if mount.filesystem().read_only() {
+    if mount.filesystem_read_only() {
         mount.flags().union(MountFlags::READ_ONLY)
     } else {
         mount.flags()
@@ -273,7 +273,7 @@ pub(super) fn mountinfo(process: &Process) -> Result<Vec<u8>> {
         let inside = Namespace::root_path(mount);
         let options = mount.flags().options();
         let name = mount.filesystem().name().as_bytes();
-        let super_options: &[u8] = if mount.filesystem().read_only() {
+        let super_options: &[u8] = if mount.filesystem_read_only() {
             b"ro"
         } else {
             b"rw"

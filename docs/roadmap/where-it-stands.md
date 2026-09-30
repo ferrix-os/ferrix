@@ -130,7 +130,10 @@ made it), and phase 1 is `authd`, passwords and a real hyprlock, 27 points.
 
 Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
-reclaim, freezing, `cpu.max`, `io`, namespaces and seccomp are left.
+reclaim, freezing, `cpu.max`, `io`, namespaces and seccomp are left. Of
+the namespaces, Steam's user and mount ones are being built
+(`docs/NAMESPACES.md`): per-mount flags (N1, 2026-09-28) and binds (N2,
+2026-09-30) are in, mount namespaces themselves (N3) are next.
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
 headless and in a window on the compositor, on x86-64, and both on ferrousli's

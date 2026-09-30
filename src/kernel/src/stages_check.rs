@@ -80,6 +80,9 @@ pub(super) fn check_programs() {
     // A mount's own flags, enforced and shown; under /tmp, after the root.
     check_mount_flags();
 
+    // Binds, detach and the two remounts, on a tmpfs under /tmp.
+    check_binds();
+
     // Stage 9's objects, driven through the native handlers between two
     // processes this check builds. After stage 7 because it shares the
     // dispatch path and the user copy layer, and here rather than under a
@@ -249,6 +252,24 @@ pub(super) fn check_mount_flags() {
          mount EROFS for every change, nodev EACCES, noexec EACCES and its mappings EPERM, \
          nosuid ignoring a set-user-id bit; remounts only at a mount's root and only by root; \
          mountinfo naming each as its descriptor link does",
+        checked.calls, checked.refusals,
+    );
+}
+
+/// Binds of a directory, a subtree, a file and a socket, `MS_REC`,
+/// `MNT_DETACH` of a subtree, the propagation no-ops, and a plain remount
+/// reaching every bind where `MS_REMOUNT | MS_BIND` reaches one
+/// (`docs/NAMESPACES.md`, N2).
+pub(super) fn check_binds() {
+    let checked = match fs::bind_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(catalog::STAGE8_BINDS, "bind self-check failed: {problem}"),
+    };
+    println!(
+        "  binds    {} calls answered as Linux answers them, {} of them refusals: a directory, \
+         a subtree, a file and a socket bound, MS_REC copying a submount, MNT_DETACH taking \
+         one; a bind remount reaching one mount and a plain remount every bind; mountinfo \
+         naming each as its descriptor link does",
         checked.calls, checked.refusals,
     );
 }
