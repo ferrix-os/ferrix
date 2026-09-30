@@ -59,9 +59,15 @@ pub enum Kind {
     MemoryCurrent,
     /// `memory.max`.
     MemoryMax,
+    /// `memory.high`: the mark above which a cgroup's pages are reclaimed.
+    MemoryHigh,
+    /// `memory.low`: the best-effort protection from reclaim.
+    MemoryLow,
+    /// `memory.min`: the hard protection from reclaim.
+    MemoryMin,
     /// `memory.events`.
     MemoryEvents,
-    /// `memory.stat`: what of `memory.current` is kernel heap.
+    /// `memory.stat`: the keys Ferrix has a source for.
     MemoryStat,
     /// `pids.current`.
     PidsCurrent,
@@ -91,6 +97,9 @@ pub const FILES: &[File] = &[
         Controller::Memory,
         false,
     ),
+    controlled("memory.min", Kind::MemoryMin, Controller::Memory, true),
+    controlled("memory.low", Kind::MemoryLow, Controller::Memory, true),
+    controlled("memory.high", Kind::MemoryHigh, Controller::Memory, true),
     controlled("memory.max", Kind::MemoryMax, Controller::Memory, true),
     controlled(
         "memory.events",
