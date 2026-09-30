@@ -85,6 +85,13 @@ pub(crate) fn count() -> usize {
     PAIRS.lock().len()
 }
 
+/// What the record of a pair and its place in the table are charged, to the
+/// job that made the pair; the two interfaces are the namespaces' tables' to
+/// pay for.
+pub(crate) fn record_cost() -> usize {
+    arc_footprint::<Pair>().saturating_add(3 * size_of::<(u64, Arc<Pair>)>())
+}
+
 /// The pair, if it is still there.
 fn pair(number: u64) -> Option<Arc<Pair>> {
     PAIRS.lock().get(&number).cloned()
@@ -154,9 +161,7 @@ pub(crate) fn create(
     two.roomy(if same { 2 } else { 1 })?;
     one.admit()?;
     two.admit()?;
-    let charge =
-        Charge::bytes(arc_footprint::<Pair>().saturating_add(3 * size_of::<(u64, Arc<Pair>)>()))
-            .map_err(|_| Errno::ENOMEM)?;
+    let charge = Charge::bytes(record_cost()).map_err(|_| Errno::ENOMEM)?;
     let number = NEXT_PAIR.fetch_add(1, Ordering::Relaxed);
     // A name asked for twice in one namespace is a name that exists.
     if same && one_name.is_some() && one_name == two_name {

@@ -73,6 +73,12 @@ pub(crate) struct Report {
     pub(crate) cgroup_namespaces: usize,
     /// Namespace files, each opened from a link of `/proc/<pid>/ns`.
     pub(crate) namespace_files: usize,
+    /// Network namespaces, each made as `unshare(CLONE_NEWNET)` makes one.
+    pub(crate) network_namespaces: usize,
+    /// Veth pairs, each between two namespaces made with it.
+    pub(crate) veth_pairs: usize,
+    /// Routes added to a network namespace by netlink.
+    pub(crate) routes: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -112,6 +118,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         report.ipc_namespaces = ipc_namespaces(&tree)?;
         report.cgroup_namespaces = cgroup_namespaces(&tree)?;
         report.namespace_files = namespace_files(&tree)?;
+        report.network_namespaces = network_namespaces(&tree)?;
+        report.veth_pairs = veth_pairs(&tree)?;
+        report.routes = routes(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -267,6 +276,86 @@ fn user_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
     let creator = crate::syscall::credentials::Credentials::root();
     kind(tree, "user namespaces", |_| {
         crate::syscall::userns::create(&creator)
+    })
+}
+
+/// Network namespaces, made as `unshare(CLONE_NEWNET)` makes them: each is
+/// charged to the job asking, for itself and not less than the structure it is,
+/// and refused `ENOMEM` at the limit (`docs/NETNS.md` section 5).
+fn network_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let owner = Arc::clone(crate::syscall::userns::first());
+    let made = kind(tree, "network namespaces", |_| {
+        crate::net::namespace::create(Arc::clone(&owner))
+    })?;
+    // Every namespace is at least the structure it is: a limit that held more
+    // than this many would not be charging for it.
+    let least = size_of::<crate::net::NetNamespace>() as u64;
+    if (made as u64).saturating_mul(least) > LIMIT {
+        return Err("kmem: a network namespace was not charged to its job for itself");
+    }
+    Ok(made)
+}
+
+/// Veth pairs, each between two namespaces of its own: the pair's record is
+/// charged to the job that makes it on top of the interfaces the tables pay
+/// for, and the fill ends at the job's limit.
+fn veth_pairs(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    use crate::net::{namespace, veth};
+    let owner = Arc::clone(crate::syscall::userns::first());
+    // One pair on its own: it costs its record and two interfaces, not less.
+    let job = tree
+        .new_child()
+        .map_err(|_| "kmem: a job refused a child")?;
+    let (one, two) = as_task_of(&job, || {
+        Ok::<_, Errno>((
+            namespace::create(Arc::clone(&owner))?,
+            namespace::create(Arc::clone(&owner))?,
+        ))
+    })
+    .map_err(|_| "kmem: a job could not make two network namespaces")?;
+    let before = used(&job, Resource::Kernel);
+    let _ = as_task_of(&job, || veth::create((&one, None), (&two, None)))
+        .map_err(|_| "kmem: a job could not make a veth pair")?;
+    let cost = used(&job, Resource::Kernel).saturating_sub(before);
+    let least = veth::record_cost() + 2 * size_of::<ferrix_net::Interface>();
+    drop((one, two));
+    if cost < least as u64 {
+        return Err("kmem: a veth pair was not charged to its job for its record and ends");
+    }
+    if used(&job, Resource::Kernel) != 0 || used(&job, Resource::Memory) != 0 {
+        return Err("kmem: a veth pair's namespaces are gone and their heap is still charged");
+    }
+    kind(tree, "veth pairs", |_| {
+        let one = namespace::create(Arc::clone(&owner))?;
+        let two = namespace::create(Arc::clone(&owner))?;
+        let _ = veth::create((&one, None), (&two, None))?;
+        Ok((one, two))
+    })
+}
+
+/// Routes added to a network namespace by netlink: what they add to the
+/// namespace's tables is charged to the job that made it, and the adding ends
+/// at the job's limit, not at the namespace's own ceiling.
+fn routes(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    use alloc::sync::Weak;
+    let owner = Arc::clone(crate::syscall::userns::first());
+    let mut homes: Vec<(u32, Weak<crate::net::NetNamespace>)> = Vec::new();
+    kind(tree, "routes in a network namespace", |n| {
+        let group = sched::running_group();
+        let home = match homes
+            .iter()
+            .find(|(each, _)| *each == group)
+            .and_then(|(_, weak)| weak.upgrade())
+        {
+            Some(home) => home,
+            None => {
+                let fresh = crate::net::namespace::create(Arc::clone(&owner))?;
+                homes.push((group, Arc::downgrade(&fresh)));
+                fresh
+            }
+        };
+        super::netns_check::route_for_fill(&home, n)?;
+        Ok(home)
     })
 }
 
