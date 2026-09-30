@@ -87,6 +87,16 @@ fuzz_target!(|data: &[u8]| {
         render::max(&mut out, limit);
         assert_eq!(write::parse_memory_max(&out), Ok(limit), "memory.max does not round-trip");
     }
+    if let Ok(max) = ferrix_cgroupfs::cpu::parse_max(text, ferrix_cgroupfs::cpu::PERIOD_DEFAULT_US) {
+        let mut out = Vec::new();
+        ferrix_cgroupfs::cpu::render_max(&mut out, max);
+        assert_eq!(
+            ferrix_cgroupfs::cpu::parse_max(&out, max.period),
+            Ok(max),
+            "cpu.max does not round-trip"
+        );
+    }
+    let _ = ferrix_cgroupfs::cpu::parse_nice(text);
     if let Ok(weight) = write::parse_weight(text) {
         assert!((1..=10_000).contains(&weight));
         let mut out = Vec::new();
