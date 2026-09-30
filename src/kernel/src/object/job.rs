@@ -57,7 +57,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 
@@ -174,6 +174,14 @@ pub(crate) struct Job {
     /// `memory.events`' `oom_kill`: how many processes in it or beneath it
     /// the scoped OOM kill ended.
     oom_kills: AtomicU64,
+    /// `cgroup.freeze`: whether it asks that its processes, and those of
+    /// every cgroup beneath it, stop where they can be stopped again by
+    /// nothing a program can send.
+    freeze: AtomicBool,
+    /// What `cgroup.events` last said of `frozen`: frozen is asked for and
+    /// every process beneath it has stopped. Kept here so that a change is
+    /// noticed once and its pollers woken once.
+    frozen_seen: AtomicBool,
     /// The owner, group and mode `chown` and `chmod` gave its cgroupfs
     /// directory and files, by each node's slot there. cgroupfs's, kept here
     /// because a directory there is a view made afresh at every lookup, and
@@ -415,6 +423,8 @@ impl Job {
             memory_events: fallible::try_arc(WaitQueue::new())?,
             ooms: AtomicU64::new(0),
             oom_kills: AtomicU64::new(0),
+            freeze: AtomicBool::new(false),
+            frozen_seen: AtomicBool::new(false),
             nodes: SpinLock::new(Vec::new()),
             quota,
             charge: Charge::none(Resource::Objects),
@@ -568,6 +578,54 @@ impl Job {
             job.memory_events.wake_all();
             at = job.parent.as_deref();
         }
+    }
+
+    /// Every job in this one's subtree, itself first.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] when the list cannot be made.
+    pub(crate) fn subtree(self: &Arc<Job>) -> Result<Vec<Arc<Job>>, AllocError> {
+        self.walk(|_| {})
+    }
+
+    /// Whether `cgroup.freeze` is set here: its own, not an ancestor's.
+    pub(crate) fn freeze_requested(&self) -> bool {
+        self.freeze.load(Ordering::Acquire)
+    }
+
+    /// Set `cgroup.freeze` here. The processes beneath it are to be told by
+    /// the caller ([`Process::sync_freeze`]), after this.
+    pub(crate) fn set_freeze(&self, on: bool) {
+        self.freeze.store(on, Ordering::SeqCst);
+    }
+
+    /// Whether it, or a job above it, asks for its processes to be frozen.
+    pub(crate) fn freezing(&self) -> bool {
+        let mut at = Some(self);
+        while let Some(job) = at {
+            if job.freeze.load(Ordering::SeqCst) {
+                return true;
+            }
+            at = job.parent.as_deref();
+        }
+        false
+    }
+
+    /// What `cgroup.events` last said of `frozen`.
+    pub(crate) fn frozen_seen(&self) -> bool {
+        self.frozen_seen.load(Ordering::Acquire)
+    }
+
+    /// Record that `frozen` is now `now`, and, if that changed what
+    /// `cgroup.events` says, wake whatever polls it. Whether it changed.
+    pub(crate) fn note_frozen(&self, now: bool) -> bool {
+        let changed = self.frozen_seen.swap(now, Ordering::AcqRel) != now;
+        if changed {
+            self.events.wake_all();
+            self.waiters.wake_all();
+        }
+        changed
     }
 
     /// Its `cpu.weight`: [`quota::DEFAULT_WEIGHT`] for the tree's root.
