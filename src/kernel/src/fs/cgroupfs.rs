@@ -1609,7 +1609,7 @@ fn check_the_limits(harness: &mut Harness) -> Checked<()> {
     for (file, data, errno, what) in [
         (
             &b"/check-b/cgroup.subtree_control"[..],
-            &b"+io\n"[..],
+            &b"+hugetlb\n"[..],
             Errno::EINVAL,
             "cgroup.subtree_control enabled a controller that is not built",
         ),
