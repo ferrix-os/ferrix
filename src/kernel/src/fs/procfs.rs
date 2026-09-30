@@ -150,8 +150,8 @@ pub(crate) enum Content<T: 'static> {
     IdMap(MapFile),
     /// `/proc/<pid>/fd`: a link per open descriptor.
     Descriptors,
-    /// `/proc/<pid>/ns`: a link per namespace the process is in, of which
-    /// there is one kind, `mnt` (`docs/NAMESPACES.md` §2.4).
+    /// `/proc/<pid>/ns`: a link per namespace the process is in: `mnt`,
+    /// `user`, `uts`, `ipc` and `cgroup` (`docs/NAMESPACES.md` §2.4).
     Namespaces,
     /// `/proc/<pid>/task`: a directory per thread, each holding
     /// [`PER_THREAD`].
@@ -185,13 +185,22 @@ enum NamespaceKind {
     Mount = 0,
     /// `user`.
     User = 1,
+    /// `uts`.
+    Uts = 2,
+    /// `ipc`.
+    Ipc = 3,
+    /// `cgroup`.
+    Cgroup = 4,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 2] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 5] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
+        (NamespaceKind::Uts, b"uts"),
+        (NamespaceKind::Ipc, b"ipc"),
+        (NamespaceKind::Cgroup, b"cgroup"),
     ];
 }
 
@@ -1251,6 +1260,9 @@ impl Inode for Node {
             Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
             Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Uts) => render::uts_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Ipc) => render::ipc_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Cgroup) => render::cgroup_namespace(&*alive(pid)?),
             _ => Err(Errno::EINVAL),
         }
     }

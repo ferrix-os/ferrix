@@ -235,8 +235,10 @@ pub(crate) struct UserNamespace {
 
 /// `/proc/<pid>/ns/user`'s number for the first namespace: Linux's own.
 const FIRST_ID: u64 = 0xEFFF_FFFD;
-/// And for the ones made after it.
-static NEXT_ID: AtomicU64 = AtomicU64::new(0xF000_0000);
+/// And for the ones made after it: a range of its own, so that no user
+/// namespace shares a number with a mount namespace (from 0xF0000000) or a
+/// UTS, IPC or cgroup one (from 0xF9000000).
+static NEXT_ID: AtomicU64 = AtomicU64::new(0xF800_0000);
 
 /// The process a boot check is acting as, when no task is running: the
 /// kernel's own self-checks drive system calls on behalf of a process of their

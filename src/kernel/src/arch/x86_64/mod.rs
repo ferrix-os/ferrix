@@ -474,7 +474,9 @@ pub(crate) const USER_FORK_PROGRAM: &[u8] = &[
 /// The two calls between them name every `CLONE_NEW*` flag `clone` can reach:
 /// the first `CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNS`, which is what an
 /// unprivileged sandbox asks for and what Chrome's zygote asks for; the
-/// second `CLONE_NEWCGROUP | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET`.
+/// second `CLONE_NEWCGROUP | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET`. Each is refused
+/// for the one flag in it that has no namespace yet, pid and network; the
+/// others are built (`fs/smallns_check.rs`).
 /// Each carries `SIGCHLD`, so nothing but the namespaces can be what is
 /// refused. A kernel that ignored the flags would answer the first with a
 /// child's pid, and both the parent and that child would exit 98.

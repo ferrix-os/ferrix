@@ -507,7 +507,9 @@ fn filesystem_named(
         b"tmpfs" => Ok(fs::new_tmpfs()?),
         b"proc" => Ok(Arc::new(Procfs::new())),
         b"devtmpfs" => Ok(Arc::new(Devfs::new())),
-        b"cgroup2" => Ok(Arc::new(fs::cgroupfs::Cgroupfs::new())),
+        b"cgroup2" => Ok(Arc::new(fs::cgroupfs::Cgroupfs::rooted_at(Arc::clone(
+            process.nsproxy().cgroup.root(),
+        )))),
         // Read-only as well as writable, as on Linux, where a container is
         // shown `/sys` read-only; nothing in it takes a write but `bind` and
         // `unbind`, which a read-only mount refuses.

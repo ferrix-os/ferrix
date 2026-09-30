@@ -1,4 +1,4 @@
-//! `unshare` and `setns`: mount and user namespaces, and nothing else yet.
+//! `unshare` and `setns`: mount, user, UTS, IPC and cgroup namespaces.
 //!
 //! A user namespace (`docs/NAMESPACES.md` §2.2) is made first when asked for
 //! with a mount namespace, and owns it. The caller ends up in it holding every
@@ -8,9 +8,9 @@
 //! root and working directory, and `unshare(CLONE_NEWNS)` or
 //! `clone(CLONE_NEWNS)` gives it a copy of the one it was in
 //! (`docs/NAMESPACES.md` §2.1): the same mounts, new ones, so that what it
-//! mounts or unmounts after is its own. Every other namespace a program can
-//! ask for is answered as a Linux kernel built without it answers, because
-//! that is what Ferrix is for those: one pid space, one of everything else. A
+//! mounts or unmounts after is its own. The UTS, IPC and cgroup namespaces
+//! are made with [`nsproxy::make`] and held in the process's proxy
+//! (`docs/NAMESPACES.md` §12). Pid and network namespaces do not exist: a
 //! program that asks for one is told no, and `EINVAL` is the no it already
 //! handles -- `CONFIG_*_NS` off is an ordinary configuration, and
 //! `unshare(1)` and container runtimes check for it.
@@ -30,6 +30,7 @@ use crate::fallible;
 use crate::fs;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
+use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS};
 use crate::syscall::process::Process;
 use crate::syscall::userns::{self, CAP_SYS_ADMIN};
 
@@ -60,7 +61,8 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// Every other flag names a namespace, or asks to leave a thread group or an
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
-    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER) != 0 {
+    const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
+    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER | SMALL) != 0 {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_FILES != 0 && Arc::strong_count(process.files()) > 1 {
@@ -72,8 +74,9 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
         return Err(Errno::EINVAL);
     }
     // A user namespace cannot be given to one thread of several (U5's kin:
-    // Linux implies `CLONE_THREAD`'s opposite).
-    if flags & CLONE_NEWUSER != 0 && process.tasks().len() > 1 {
+    // Linux implies `CLONE_THREAD`'s opposite), and the small ones are a
+    // process's, not a thread's, here (`docs/NAMESPACES.md` §12).
+    if flags & (CLONE_NEWUSER | SMALL) != 0 && process.tasks().len() > 1 {
         return Err(Errno::EINVAL);
     }
     let fresh = if flags & CLONE_NEWUSER != 0 {
@@ -81,13 +84,27 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     } else {
         None
     };
+    // The owner of everything made here: the new user namespace, if one was
+    // asked for, else the one the caller is in.
+    let owner = match &fresh {
+        Some(fresh) => Arc::clone(fresh),
+        None => process.with_credentials(|held| Arc::clone(&held.user_ns)),
+    };
     // `CLONE_NEWNS` needs `CAP_SYS_ADMIN` where the caller is: in the
     // namespace it is about to have, if it asked for one.
+    if flags & CLONE_NEWNS != 0
+        && fresh.is_none()
+        && !process.with_credentials(|held| held.holds(CAP_SYS_ADMIN))
+    {
+        return Err(Errno::EPERM);
+    }
+    // Made before anything is changed, so a refusal leaves nothing behind.
+    let proxy = nsproxy::make(process, flags, &owner, process.job())?;
     if flags & CLONE_NEWNS != 0 {
-        if fresh.is_none() && !process.with_credentials(|held| held.holds(CAP_SYS_ADMIN)) {
-            return Err(Errno::EPERM);
-        }
-        copy_namespace(process.fs_context())?;
+        copy_namespace(process.fs_context(), &owner)?;
+    }
+    if flags & SMALL != 0 {
+        process.set_nsproxy(proxy);
     }
     if let Some(fresh) = fresh {
         enter_user_namespace(process, fresh);
@@ -141,7 +158,10 @@ pub(crate) fn enter_user_namespace(process: &Process, namespace: Arc<userns::Use
 ///
 /// `ENOMEM` for memory or past the job's memory limit; the context is
 /// unchanged then.
-pub(crate) fn copy_namespace(context: &SpinLock<Context>) -> Result<(), Errno> {
+pub(crate) fn copy_namespace(
+    context: &SpinLock<Context>,
+    owner: &Arc<userns::UserNamespace>,
+) -> Result<(), Errno> {
     let (mut root, mut cwd, from) = {
         let context = context.lock();
         (
@@ -152,6 +172,8 @@ pub(crate) fn copy_namespace(context: &SpinLock<Context>) -> Result<(), Errno> {
     };
     let copy = from.copy(&mut [&mut root, &mut cwd])?;
     let copy = fallible::try_arc(copy).map_err(|_| Errno::ENOMEM)?;
+    let owner: Arc<dyn core::any::Any + Send + Sync> = owner.clone();
+    copy.set_owner(owner);
     let displaced = {
         let mut context = context.lock();
         (

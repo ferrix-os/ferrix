@@ -34,9 +34,10 @@ use crate::irq;
 use crate::mm;
 use crate::sched;
 use crate::smp;
+use crate::syscall::nsproxy;
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry::PID_MAX;
-use crate::syscall::system::{self, NAME_MAX, RELEASE, SYSNAME, VERSION};
+use crate::syscall::system::{NAME_MAX, RELEASE, SYSNAME, VERSION};
 use crate::syscall::time;
 use crate::syscall::userns::{self, Kind as IdKind, UserNamespace};
 use crate::user::space::Region;
@@ -577,12 +578,12 @@ pub(super) fn sys_version(_: &Kernel) -> Result<Vec<u8>> {
 
 /// `kernel/hostname`: `uname -n`.
 pub(super) fn hostname(_: &Kernel) -> Result<Vec<u8>> {
-    Ok(string(&system::hostname()))
+    Ok(string(&nsproxy::acting().uts.hostname()))
 }
 
 /// `kernel/domainname`: the domain name `uname` reports.
 pub(super) fn domainname(_: &Kernel) -> Result<Vec<u8>> {
-    Ok(string(&system::domainname()))
+    Ok(string(&nsproxy::acting().uts.domainname()))
 }
 
 /// A write to `kernel/hostname`: `proc_dostring`'s, so `echo name >` stores
@@ -590,13 +591,17 @@ pub(super) fn domainname(_: &Kernel) -> Result<Vec<u8>> {
 /// which is where the sysctl and `sethostname` differ on Linux too. The
 /// write is taken as from the start of the value, whatever the offset.
 pub(super) fn set_hostname(_: &Kernel, data: &[u8]) -> Result<usize> {
-    system::set_hostname(sysctl::stored(data, NAME_MAX))?;
+    nsproxy::acting()
+        .uts
+        .set_hostname(sysctl::stored(data, NAME_MAX))?;
     Ok(data.len())
 }
 
 /// A write to `kernel/domainname`, as [`set_hostname`].
 pub(super) fn set_domainname(_: &Kernel, data: &[u8]) -> Result<usize> {
-    system::set_domainname(sysctl::stored(data, NAME_MAX))?;
+    nsproxy::acting()
+        .uts
+        .set_domainname(sysctl::stored(data, NAME_MAX))?;
     Ok(data.len())
 }
 
@@ -700,9 +705,28 @@ pub(super) fn cmdline(process: &Process) -> Result<Vec<u8>> {
 
 /// `/proc/<pid>/comm`.
 /// `/proc/<pid>/cgroup`: the one line of the unified hierarchy, `0::/path`,
-/// naming the cgroup -- the job -- the process is in.
+/// naming the cgroup -- the job -- the process is in, as the reader's cgroup
+/// namespace sees it: relative to that namespace's root, and climbing out of
+/// it with `/..` for a cgroup that is not beneath it (`docs/NAMESPACES.md`
+/// §12).
 pub(super) fn cgroup(process: &Process) -> Result<Vec<u8>> {
-    fs::cgroupfs::proc_cgroup(&process.job())
+    let reader = nsproxy::acting().cgroup;
+    fs::cgroupfs::proc_cgroup(&process.job(), reader.root())
+}
+
+/// `/proc/<pid>/ns/uts`'s text, `uts:[N]`.
+pub(super) fn uts_namespace(process: &Process) -> Result<Vec<u8>> {
+    Ok(alloc::format!("uts:[{}]", process.nsproxy().uts.id()).into_bytes())
+}
+
+/// `/proc/<pid>/ns/ipc`'s text, `ipc:[N]`.
+pub(super) fn ipc_namespace(process: &Process) -> Result<Vec<u8>> {
+    Ok(alloc::format!("ipc:[{}]", process.nsproxy().ipc.id()).into_bytes())
+}
+
+/// `/proc/<pid>/ns/cgroup`'s text, `cgroup:[N]`.
+pub(super) fn cgroup_namespace(process: &Process) -> Result<Vec<u8>> {
+    Ok(alloc::format!("cgroup:[{}]", process.nsproxy().cgroup.id()).into_bytes())
 }
 
 /// `/proc/<pid>/comm`.

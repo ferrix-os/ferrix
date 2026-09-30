@@ -5526,14 +5526,15 @@ fn check_a_thread_shares_its_process_and_ends_alone() -> Result<Option<i32>, &'s
 /// were refused.
 const NAMESPACE_STATUS: i32 = 44;
 
-/// A program asking `clone` for a namespace is refused, whichever it asks for.
+/// A program asking `clone` for a namespace Ferrix does not have is refused.
 ///
-/// There are no namespaces here, and `unshare` has always said so. `clone` and
+/// Pid and network namespaces do not exist yet (the mount, user, UTS, IPC and
+/// cgroup ones do, and have their own boot line), and `unshare` says so. `clone` and
 /// `clone3` did not: they never looked at the `CLONE_NEW*` bits, so a program
 /// that asked for a sandbox got an ordinary child in the one namespace there
-/// is, and no way to tell. The two calls now answer alike, with the `EINVAL` a
-/// Linux built without `CONFIG_*_NS` answers. The program's two calls name
-/// every namespace flag `clone` can reach between them; see
+/// is, and no way to tell. The calls now answer alike, with the `EINVAL` a
+/// Linux built without `CONFIG_*_NS` answers. The program's two calls each name
+/// one of the two, pid in the first and network in the second, beside others that work; see
 /// [`arch::USER_NAMESPACE_PROGRAM`] for why `CLONE_NEWTIME` is not among them.
 fn check_clone_refuses_every_namespace() -> Result<(), &'static str> {
     if arch::USER_NAMESPACE_PROGRAM.is_empty() {
@@ -5554,10 +5555,8 @@ fn check_clone_refuses_every_namespace() -> Result<(), &'static str> {
     .map_err(|_| "a program that asks clone for namespaces could not be started")?;
     match status {
         NAMESPACE_STATUS => Ok(()),
-        98 => Err("clone with CLONE_NEWUSER, CLONE_NEWPID and CLONE_NEWNS was not refused"),
-        97 => Err(
-            "clone with CLONE_NEWCGROUP, CLONE_NEWUTS, CLONE_NEWIPC and CLONE_NEWNET was not refused",
-        ),
+        98 => Err("clone with CLONE_NEWPID, which does not exist, was not refused"),
+        97 => Err("clone with CLONE_NEWNET, which does not exist, was not refused"),
         _ => Err("a program that asks clone for namespaces did not exit as it should"),
     }
 }

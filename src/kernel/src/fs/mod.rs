@@ -176,6 +176,19 @@ pub(crate) fn is_in(ctx: &Context, ns: &Namespace) -> bool {
     }
 }
 
+/// The user namespace that owns mount namespace `ns`: the one that was
+/// current when it was copied, or the first for the kernel's own
+/// (`docs/NAMESPACES.md` §12).
+pub(crate) fn owner_of(ns: &Namespace) -> Arc<crate::syscall::userns::UserNamespace> {
+    ns.owner()
+        .and_then(|owner| {
+            owner
+                .downcast::<crate::syscall::userns::UserNamespace>()
+                .ok()
+        })
+        .unwrap_or_else(|| Arc::clone(crate::syscall::userns::first()))
+}
+
 /// The initramfs as the loader handed it over, kept for the root disk to
 /// install from.
 static ARCHIVE: Once<&'static [u8]> = Once::new();
