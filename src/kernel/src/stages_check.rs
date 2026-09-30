@@ -315,7 +315,7 @@ fn check_mount_permissions() {
         ),
     };
     println!(
-        "  mountperm {} calls answered as Linux answers them, {} of them refusals: no mounting          in a mount namespace a user namespace does not own, tmpfs alone and nosuid,nodev from          one that does, a copy's flags locked and its mounts locked to their parents, the host's          filesystem not its to remount, and no directory pinned by a mount of its own",
+        "  mountperm {} calls answered as Linux answers them, {} of them refusals: no mounting in a mount namespace a user namespace does not own, tmpfs alone and nosuid,nodev from one that does, a copy's flags locked and its mounts locked to their parents, the host's filesystem not its to remount, and no directory pinned by a mount of its own",
         checked.calls, checked.refusals,
     );
 }
