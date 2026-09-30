@@ -434,7 +434,7 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
 /// # Errors
 ///
 /// `ENOMEM`; the child is to be abandoned unstarted.
-fn retarget_vdso(parent: &Arc<Process>, child: &Arc<Process>) -> Result<(), Errno> {
+pub(crate) fn retarget_vdso(parent: &Arc<Process>, child: &Arc<Process>) -> Result<(), Errno> {
     if Arc::ptr_eq(parent.space(), child.space()) {
         return Ok(());
     }

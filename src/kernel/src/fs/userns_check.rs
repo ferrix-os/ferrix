@@ -81,14 +81,14 @@ fn call(process: &Process, call: Syscall, args: [u64; 6]) -> Result<usize, Errno
 
 /// `body` with the page's process as the one making the calls, which the
 /// boot check's own thread, with no process, cannot be.
-fn acting<R>(pid: u32, body: impl FnOnce() -> R) -> Result<R, &'static str> {
+pub(super) fn acting<R>(pid: u32, body: impl FnOnce() -> R) -> Result<R, &'static str> {
     let process = registry::find(pid).ok_or("the check's process was not registered")?;
     userns::acting_as(&process, body)
 }
 
 /// A file of `/proc` written once from its start: the result of the write,
 /// or why it would not open.
-fn write_to(
+pub(super) fn write_to(
     page: &mut Page<'_>,
     path: &[u8],
     data: &[u8],

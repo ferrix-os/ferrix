@@ -168,11 +168,6 @@ impl TimeNamespace {
         &self.owner
     }
 
-    /// Whether the offsets can no longer be written.
-    pub(crate) fn frozen(&self) -> bool {
-        self.offsets.lock().frozen
-    }
-
     /// The offset of `which`, in nanoseconds.
     pub(crate) fn offset(&self, which: Shift) -> i64 {
         let offsets = self.offsets.lock();

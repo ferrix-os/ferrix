@@ -65,6 +65,8 @@ pub(crate) struct Report {
     pub(crate) namespaces: usize,
     /// User namespaces, each a level-1 child of the first.
     pub(crate) user_namespaces: usize,
+    /// Time namespaces, each made as `unshare(CLONE_NEWTIME)` makes one.
+    pub(crate) time_namespaces: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -100,6 +102,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         })?;
         report.namespaces = namespaces(&tree)?;
         report.user_namespaces = user_namespaces(&tree)?;
+        report.time_namespaces = time_namespaces(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -255,6 +258,16 @@ fn user_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
     let creator = crate::syscall::credentials::Credentials::root();
     kind(tree, "user namespaces", |_| {
         crate::syscall::userns::create(&creator)
+    })
+}
+
+/// Time namespaces, made as `unshare(CLONE_NEWTIME)` makes them: each is
+/// charged to the job asking, refused `ENOMEM` at its limit, and gives its
+/// heap back when it ends (`docs/NAMESPACES.md` §12.1).
+fn time_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let creator = crate::syscall::credentials::Credentials::root();
+    kind(tree, "time namespaces", |_| {
+        crate::syscall::timens::create(&creator, None)
     })
 }
 
