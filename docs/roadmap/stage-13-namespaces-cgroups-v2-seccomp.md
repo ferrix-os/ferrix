@@ -185,6 +185,20 @@ at every site that reports one, `si_uid` among them. The `userns` boot line
 and the consultant's review are owed (`docs/NAMESPACES.md` §12 has what is
 and is not built). Next is NP, then N5.
 
+**Pid namespaces (2026-09-30, built on `stage13-pidns` over N4, not
+landed; `docs/PIDNS.md`):** `CLONE_NEWPID` through `clone`, `clone3` and
+`unshare`, so an unprivileged user namespace can run a process that is pid
+1 inside it -- the pid-1 part of the exit criterion. A task in a namespace
+below the first has a number in each level; the kernel number stays the key
+of the registry, the job tree, groups and sessions. Every call that names or
+reports a pid speaks the caller's namespace, orphans go to their own
+namespace's init, an init's end ends its namespace, and an init ignores
+what it has no handler for except `SIGKILL` and `SIGSTOP` from an ancestor.
+procfs, `cgroup.procs`, `si_pid`, `SO_PEERCRED` and the terminal's groups
+follow. The `pidns` boot line (FX-0891) and a pid-namespace fill in `kmem`
+prove it, each rule with a negative control; `PIDNS.md` §8 lists where it
+differs from Linux.
+
 **Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
 reclaiming inside the job before it OOM-kills (M2), then freezing,
 `cpu.max` and `io`. `docs/CGROUPS.md` §7.1 says where each
