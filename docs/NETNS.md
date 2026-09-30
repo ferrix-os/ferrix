@@ -6,8 +6,10 @@ built on the user namespaces of `docs/NAMESPACES.md` §2.2 (branch
 a namespace of its own interfaces, addresses, routes, neighbours, ports,
 sockets, `/proc/net` and netlink view, and `veth` pairs to join two of them.
 
-Status: **being built** (§11). This document is written from the code as it
-stands on `stage13-n4-userns` (813d24d4), before any of it is changed.
+Status: **built on `stage13-netns`, not landed** (§11). Sections 1 to 10 were
+written from the code as it stood on `stage13-n4-userns` (813d24d4) before
+any of it was changed, and amended where the building found them wrong; §11
+says what differs.
 
 ---
 
@@ -88,18 +90,21 @@ NetNamespace
   owner: Arc<UserNamespace>     the user namespace that was current when it was made
   core: NetCore                 the Stack, pending, progress, transmit_wakers: as today
   tables: Option<SpinLock<Charge>>   F-37; None for the first
-  veth_out: per-call, see §3.3
   _charge: Option<Charge>       F-37; None for the first
 ```
 
 `net::core()` remains, and answers **the first namespace's** `NetCore`, so the
 driver, the boot checks and every kernel-side caller keep their signature.
 `net::first()` is the `Arc<NetNamespace>` itself, made on first use. The first
-namespace has Linux's own number, `NET_NS_INIT_INO` (0xF0000098).
+namespace has the number a Linux host usually shows for its own
+(`net:[4026531992]`, 0xF0000098); the others count up from a counter of their
+own, so no two kinds of namespace share a number.
 
-A process holds its namespace: `Process::net_ns: SpinLock<Arc<NetNamespace>>`,
-a fork child copies it, and every process that nothing forked starts in the
-first. (Linux keeps it per task in `nsproxy`; `stage13-smallns` keeps the UTS,
+A process holds its namespace: `Process::net_ns: SpinLock<Option<Arc<NetNamespace>>>`,
+`None` standing for the first (which is not built until something asks, so
+making a process does not start the net core); a fork child copies it, a
+native child made by `process_create` takes its creator's, and every process
+that nothing forked starts in the first. (Linux keeps it per task in `nsproxy`; `stage13-smallns` keeps the UTS,
 IPC and cgroup namespaces in a per-process `NsProxy`, as Ferrix has no
 per-thread credentials either. When the integrator merges, this field moves
 into the `NsProxy`; the accessor `Process::net_ns()` is the seam.)
@@ -199,80 +204,91 @@ driver (§3.2). `Veth` names the pair and which of its two ends it is.
 ### 3.1 Library changes (`src/lib/network/net`, host-tested)
 
 * `Stack::new_namespace(config)`: a stack whose `lo` is down and has no
-  address. `Stack::new` stays as it is for the first namespace and for every
-  existing test.
-* `Stack::set_up(lo, true)` adds the loopback addresses and routes if absent;
-  `set_up(lo, false)` removes the addresses, routes and neighbours.
-  For any other interface `set_up` is unchanged, except that a `Veth` end is
-  not `IFF_RUNNING` until its peer is up too (the kernel sets the carrier
-  flags, §3.3).
+  address or route, and whose reassembler holds at most 32 KiB
+  (`reassembly::NAMESPACE_BYTES`). `Stack::new` stays as it is for the first
+  namespace and for every existing test.
+* `Stack::set_up(lo, true)` gives a loopback its addresses and their routes if
+  it has none; `set_up(lo, false)` takes the addresses, routes and neighbours
+  away. For any other interface `set_up` is unchanged, except that a `Veth`
+  end is not `IFF_RUNNING` until its peer is up too (the kernel sets the
+  carrier flags, §3.3).
 * `Stack::detach_interface(index) -> Option<Interface>` and
   `Stack::attach_interface(Interface) -> Result<u32, Error>` (the name must be
-  free there; a fresh index; addresses kept, routes and neighbours not): the
-  two halves of moving an interface.
-* `Stack::rename_interface`.
-* `Reassembler::with_limit`: a non-first namespace reassembles at most
-  `NAMESPACE_REASSEMBLY` (32 KiB) rather than 256 KiB, and the kernel charges
-  what is held (§5).
-* `Stack::interface_count`, route and address counts (for the budget of §5).
+  free there; a fresh index; routes and neighbours are not restored): the two
+  halves of moving an interface. `remove_interface` is `detach` and a drop.
+* `Stack::rename_interface`, `Stack::address_count`.
+* `Stack::footprint` and `Stack::shed`: the heap the tables hold (interfaces
+  and their addresses, routes, the neighbour cache with the packets it holds
+  back, fragments), which §5 charges, and what a namespace gives up when it
+  cannot pay (what was learned: neighbours and fragments; never what was
+  configured).
+* `Reassembler::with_limit`, `flush`; `Neighbors::footprint`, `shed`.
+
+Ten host tests (`tests/namespaces.rs`): a new namespace's loopback; a refused
+bind and send while it is down; datagrams once it is up; down taking the
+addresses away; two namespaces sharing no port; an interface moving with its
+addresses and leaving its routes; names; two stacks talking over a pair while a
+third hears nothing; the reassembly ceiling; the footprint and the shed.
 
 ### 3.2 Physical NICs and the driver
 
-The ring serves an interface by **device key**, not by index. A new
-`net/device.rs` holds `DEVICES: SpinLock<Vec<Device>>` with
-`Device { key, namespace: Weak<NetNamespace>, index, node }`, a leaf lock.
-`add_or_take_up` (which still adds to the first namespace) registers a key and
-puts `Backing::Device(key)` on the interface; `take_outgoing`, `receive`,
-`set_carrier`, `park_interface`, `forget_interface` and `wake_on_transmit`
-become `device::…(key, …)` and look the namespace and index up, then do what
-they did. **With the NIC in the first namespace the cost is one lookup in a
-vector of one or two elements per call.** `PLACED` is keyed by key.
+The ring serves a device by a **key**, not by the interface's index. A new
+`net/device.rs` holds a leaf-locked registry `Vec<Device { key, namespace:
+Weak<NetNamespace>, index }>`. `add_or_take_up` (which still adds to the first
+namespace) makes a key, puts `Backing::Device(key)` on the interface, and
+places it; `take_outgoing`, `receive`, `set_carrier`, `park`, `remove` and
+`wake_on_transmit` are `device::...(key, ...)`, which look the namespace and
+index up and do what `net::core()` did. The ring's `Serving` holds the key.
+**With the NIC in the first namespace the cost of a call is one look in a
+vector of one or two elements.** `PLACED` is keyed by key, and `node_of(index)`
+finds the key through the reader's namespace, so sysfs shows a moved NIC in the
+namespace it moved to.
 
-Moving a `Device` interface (`IFLA_NET_NS_*` on it, or the end of a namespace
-holding it) is `detach` from one stack, `attach` to the other, the
-`transmit_waker` moved with it, the registry updated; frames in flight for the
-old index are dropped. A parked interface (driver gone) moves like any other
-and keeps its key, so the next ring for that device takes it up wherever it
-is.
+Moving a `Device` interface (`IFLA_NET_NS_*` on it, or the end of the
+namespace holding it) is `detach` from one stack, `attach` to the other, the
+`transmit_waker` moved with it, the registry updated (`namespace::transfer`);
+frames in flight for the old index are dropped. A parked interface (driver
+gone) moves like any other and keeps its key, so the next ring for that device
+takes it up wherever it is. It comes down and loses its addresses on the way,
+as Linux's `dev_change_net_namespace` does.
 
 ### 3.3 veth
 
-A pair is a kernel record `VethPair { id, ends: SpinLock<[End; 2]> }` with
+A pair is a kernel record `Pair { ends: SpinLock<[End; 2]>, _charge }` with
 `End { namespace: Weak<NetNamespace>, index: u32 }`, kept in a leaf-locked
-table `VETHS: BTreeMap<u64, Arc<VethPair>>`. Both interfaces are Ethernet,
-MTU 1500, `IFF_BROADCAST | IFF_MULTICAST`, a random locally administered
-MAC (`02:…`), names `veth0`, `veth1`… (first free in the namespace it is made
-in; `IFLA_IFNAME` overrides).
+table `PAIRS: BTreeMap<u64, Arc<Pair>>` (`net/veth.rs`). Both interfaces are
+Ethernet, MTU 1500, `IFF_BROADCAST | IFF_MULTICAST`, a locally administered
+MAC (`02:fe:...`), named `IFLA_IFNAME` or else the first free `vethN` in the
+namespace.
 
 **Transmit.** `NetCore::take_frames` (called with the stack locked) already
-walks `poll_transmit`. A frame for an interface whose backing is `Veth` is
-pushed on a small `Vec<(pair, end, frame)>` instead of `pending`. `NetCore::with`
-returns it to the caller **after the lock is dropped**, and the caller runs
-`net::forward`:
+walks `poll_transmit`. A frame for an interface whose backing is `Veth` goes
+into a short list of `Frame { pair, end, bytes }` instead of `pending`.
+`NetCore::with` runs `veth::forward` on it **after the lock is dropped**:
 
 ```
-forward(work): while let Some((pair, end, frame)) = work.pop():
-    (target, index) = VETHS[pair].ends[1 - end]      // leaf locks, released
-    if target's interface is up:
-        work.extend( target.core.receive_collect(index, frame) )
+forward(frames): work = queue of frames
+  while frame = work.pop_front():
+    (target, index) = peer(frame.pair, frame.end)     // leaf locks, released
+    work.extend( target.core().receive_crossing(index, frame.bytes) )
 ```
 
-`receive_collect` is `receive` that returns, rather than forwards, the veth
-frames the reception produced (an ARP reply, a SYN-ACK). So the whole exchange
-is an **iterative loop over an explicit work list**: no recursion, no two
-stack locks ever held together, bounded by `MAX_FORWARD` (4096 frames per
-top-level call; the rest are dropped, as a network drops). The sender's task
-runs the receiver's stack, exactly as a loopback packet runs in the sender's
-task today.
+`receive_crossing` hands the frame to the stack if that end is up and returns,
+rather than carries, the frames the reception produced (an ARP reply, a
+SYN-ACK). So the whole exchange is an **iterative loop over a queue**: no
+recursion, no two stack locks ever held together, bounded by `MAX_FORWARD`
+(4096 frames per call; the rest are dropped, as a network drops). The sender's
+task runs the receiver's stack, as a loopback packet runs in the sender's task
+today.
 
-**Carrier.** After any change to an end's up flag the kernel calls
-`veth::refresh(pair)`: each end gets `IFF_RUNNING | IFF_LOWER_UP` iff both are
-up. A frame is delivered only to an end that is up.
+**Carrier.** After a changing request the namespace calls `refresh_carriers`,
+which for each pair with an end there sets `IFF_RUNNING | IFF_LOWER_UP` on both
+ends if both are up and clears them if not.
 
-**Moves and deletion.** `RTM_DELLINK` of an end deletes both (`EOPNOTSUPP`
-for `lo` and a NIC, as Linux). A move is `detach`/`attach` with the pair
-record's `End` updated between the two. A namespace ending destroys its ends
-(§2.5). The pair record is removed with the second end.
+**Moves and deletion.** `RTM_DELLINK` of an end deletes both (`EOPNOTSUPP` for
+`lo` and a NIC, as Linux). A move updates the pair record's `End` after the
+`attach` and refreshes the carrier. A namespace ending destroys its ends (§2.5).
+A link dump says `veth` in `IFLA_LINKINFO` for an end.
 
 ### 3.4 Interface indexes and names
 
@@ -285,28 +301,27 @@ recorded. Names must be unique in the target (`EEXIST`; Linux renames to
 
 ---
 
-## 4. The places that change
+## 4. The places that changed
 
 | Site | Change |
 |---|---|
-| `net/mod.rs` | `NetNamespace`, `first()`, `create()`, `acting()`; `core()` = first's; `NetCore` made per namespace; `take_frames`/`with` hand veth frames to `forward`; `run` ticks every namespace |
-| `net/namespace.rs` (new) | the object, its charge, `Drop`, the registry of live namespaces, `forward`, `veth`, budget |
-| `net/device.rs` (new) | device keys and the registry of §3.2 |
-| `net/socket.rs` | `ns: Arc<NetNamespace>` in `InetSocket`; `FILES` keyed `(ns id, SocketId)`; `open` takes the namespace; `accept`'s wrap uses the listener's |
-| `net/packet.rs`, `net/netlink/mod.rs` | `ns` field; `CAP_NET_ADMIN` test replaces `privileged()` |
-| `net/netlink/route.rs` | rename; `IFF_UP` of `lo` goes through `set_up`; budget hooks |
-| `net/netlink/link.rs` (new) | the requests that cannot run under the stack lock because they touch two stacks or allocate: link create (veth), `RTM_DELLINK`, `IFLA_NET_NS_*` |
-| `net/ifreq.rs` | the namespace of the calling process; `CAP_NET_ADMIN` over its owner |
-| `syscall/sockets.rs` | `socket()` opens in the process's namespace; raw/packet need `CAP_NET_RAW` over its owner |
+| `net/mod.rs` | `core()` = the first namespace's; `NetCore` made per namespace, `with` hands veth frames to `forward`; `run` ticks every live namespace |
+| `net/namespace.rs` (new) | `NetNamespace`, `first()`, `create()`, `acting()`, the list of live namespaces, `fit`/`admit` (the tables charge), `transfer` (a move), `Drop` (an end) |
+| `net/veth.rs` (new) | pairs: `create`, `destroy`, `peer`, `forward`, `refresh`, `moved` |
+| `net/device.rs` (new) | device keys and the registry of §3.2; `come_home` |
+| `net/netns_file.rs` (new) | a network namespace as a file, for `IFLA_NET_NS_FD`; the smallest `nsfs` (§11, merge) |
+| `net/socket.rs`, `net/packet.rs`, `net/netlink/mod.rs` | `ns: Arc<NetNamespace>`; `FILES` keyed `(ns id, SocketId)`; `open` takes the namespace; `CAP_NET_ADMIN` over the owner replaces `privileged()` |
+| `net/netlink/route.rs` | `answer` dispatches per message, asks the charge before an add, settles after a change, refuses past the ceilings; rename; `veth` in a dump |
+| `net/netlink/link.rs` (new) | what cannot run under one stack's lock: veth create, `RTM_DELLINK`, `IFLA_NET_NS_PID`/`_FD` |
+| `net/ifreq.rs` | the calling process's namespace; `CAP_NET_ADMIN` over its owner |
+| `syscall/sockets.rs` | `socket()` in the process's namespace; raw/packet need `CAP_NET_RAW` over its owner |
 | `syscall/userns.rs` | `HONOURED` += `CAP_NET_ADMIN`, `CAP_NET_RAW` |
-| `syscall/process.rs` | the `net_ns` field, copied in `forked_into` |
-| `syscall/family.rs`, `syscall/namespace.rs` | `CLONE_NEWNET` in `namespaces_asked`, `clone_with`, `sys_unshare` |
-| `fs/sockname.rs`, `fs/socket.rs` | abstract names keyed `(net ns id, name)` |
-| `fs/procfs.rs`, `fs/procfs/render.rs` | `/proc/<pid>/ns/net`; `/proc/net/*` from the reader's namespace |
-| `fs/sysfs.rs` | `/sys/class/net` from the reader's namespace |
-| `interfaces/net_ring/mod.rs` | device keys (§3.2) |
-| `fs/kmem_check.rs` | fills: network namespaces, veth pairs |
-| `net/netns_check.rs` (new), `stages_check.rs`, `panic/catalog.rs` | the `netns` line, FX-0893 |
+| `syscall/process.rs` | `net_ns`, copied in `forked_into`; `net_ns()`, `set_net_ns()` |
+| `syscall/family.rs`, `syscall/namespace.rs`, `syscall/launch.rs` | `CLONE_NEWNET` in `namespaces_asked`, `give_namespaces`, `sys_unshare`; a native child takes its creator's |
+| `fs/sockname.rs`, `fs/socket.rs` | abstract names keyed `(net ns id, name)`; a unix socket records its namespace's number |
+| `fs/procfs.rs`, `fs/procfs/render.rs` | `/proc/<pid>/ns/net` (link and file); `/proc/net/*` from the reader's namespace |
+| `fs/sysfs.rs`, `interfaces/net_ring/mod.rs` | `/sys/class/net` from the reader's namespace; device keys (§3.2) |
+| `fs/netns_check.rs` (new), `fs/kmem_check.rs`, `stages_check.rs`, `panic/catalog.rs` | the `netns` line, FX-0893; three fills |
 
 `/proc/<pid>/net` (the per-process view) is not built: `/proc/net` shows the
 reader's namespace (Linux's `/proc/net` is `self/net`), and a program that
@@ -318,20 +333,22 @@ wants another process's goes through `setns` and then reads it. **Not built.**
 
 | Kind | Made by | Charged |
 |---|---|---|
-| network namespace: itself, its `lo`, its routing and neighbour headroom | `CLONE_NEWNET` | at creation, `arc_footprint::<NetNamespace>() + NAMESPACE_BASE` |
-| interface, address, route | netlink, `ioctl` | the **tables charge**: after a change the namespace resizes a `Charge` (to the job that made the namespace, as `Charge::grow` charges the same job) to `ENTRY_COST × (interfaces + addresses + routes)` and to the reassembler's held bytes; a change that would pass the limit is refused `ENOMEM` *before* it is applied, the charge taken with headroom for the one entry the message adds |
-| veth pair: two interfaces, the pair record, its table node | `RTM_NEWLINK` | at creation, to the job of the caller, the pair holding its own `Charge` (both ends' worth), released when the second end goes |
-| neighbour cache | ARP | bounded at 256 entries by the library (`MAX_ENTRIES`), inside `NAMESPACE_BASE` |
+| network namespace: itself and the vectors of its loopback | `CLONE_NEWNET` | at creation, to the caller's job: `arc_footprint::<NetNamespace>()` and 512 bytes |
+| interfaces, addresses, routes, the neighbour cache and what it holds back, fragments | netlink, `ioctl`, ARP | the **tables charge**, a `Charge` to the job that made the namespace (`Charge::grow` charges the same job): `fit` makes it what `Stack::footprint` says. A request that adds first asks `admit`, which makes room for two more interfaces; the charge is then settled to what is held. A namespace that cannot pay gives up what it learned (`Stack::shed`) and tries again, and then refuses `ENOMEM`. Charged to the owner's job whoever asks, as the namespace is the owner's |
+| a veth pair's record and its place in the table | `RTM_NEWLINK` | at creation, to the job of the caller: `veth::record_cost()`. The interfaces are the tables' |
 | sockets, connections, queued datagrams | as today | as today (`socket_charge`, the stack's `owner`) |
-| netlink socket | `socket()` | as today |
+| a netlink socket | `socket()` | as today |
 
 An unprivileged user can now reach the netlink writers (by owning a network
 namespace), which before they could not; the tables charge is what makes that
 safe to allow, and the ceilings of §7 bound what a single namespace holds.
-`kmem_check` gains two fills (namespaces made by `unshare(CLONE_NEWNET)` in a
-job until `ENOMEM`; veth pairs made in one namespace until `ENOMEM`), each
-refused by the limit, a sibling job then making one, and both jobs reading
-zero after.
+`kmem_check` fills three kinds: network namespaces made until `ENOMEM` (and
+required to cost at least the structure each is), veth pairs (a pair alone
+must cost at least its record and two interfaces; then made between fresh
+namespaces until `ENOMEM`), and routes added to one namespace by netlink until
+`ENOMEM` (so that the job's limit, not the route ceiling, ends it). Each is
+refused by the limit, a sibling job then makes one, and both jobs read zero
+after. The first namespace is charged nothing, as before.
 
 ---
 

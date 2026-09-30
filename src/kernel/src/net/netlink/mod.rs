@@ -189,6 +189,11 @@ impl NetlinkSocket {
         fs::socket::open_on_sockfs(socket, ino, nonblock)
     }
 
+    /// The network namespace it was made in.
+    pub(crate) const fn namespace(&self) -> &Arc<NetNamespace> {
+        &self.ns
+    }
+
     /// Give it a port identifier and the groups it asked for.
     ///
     /// A `nl_pid` of zero asks the kernel to choose, which is what every
