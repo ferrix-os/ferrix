@@ -247,6 +247,8 @@
         "syscall/registry.rs",
         "syscall/sem.rs",
         "syscall/sem_check.rs",
+        "syscall/seccomp.rs",
+        "syscall/seccomp_check.rs",
         "syscall/signal.rs",
         "syscall/signalfd.rs",
         "syscall/sigpage.rs",
@@ -347,6 +349,7 @@
       "syscall::deliver",
       "syscall::launch",
       "syscall::linux",
+      "syscall::seccomp",
       "syscall::time"
     ]
   }

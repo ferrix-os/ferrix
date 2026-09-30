@@ -892,6 +892,23 @@ package FerrixItemRequirements {
                 serial log holds but the unlogged ones, and every program's output.";
             attribute :>> parent = "G.5";
         }
+        requirement <'H.TRAP.16'> aRegisteredFilterOnlyTakesAwayFromACall : ItemHighLevel {
+            attribute :>> statement = "A look a personality registers with the core at
+                its system call entries, before any answer of the entry's own, shall be
+                able to make a call do only less than it could: return a value without
+                running it, or end the program through the paths exit and a fatal
+                signal already take. It shall be asked about every call of every entry
+                once, first, with the entry's own architecture token and the
+                instruction after the call, and nothing registered shall change what
+                the core does.";
+            attribute :>> criterion = "Driven through each entry this architecture
+                has, every call the entry answers itself reaches a test-only filter
+                once, before that answer, and the filter's value is the one the program
+                gets; an int $0x80 call carries i386's token; a number with bits above
+                the 32nd set is judged as its low half and dispatched as no call; a
+                native-range call carries a token of its own (the `seccomp` line).";
+            attribute :>> parent = ("O.ISOLATE", "O.VALIDATE");
+        }
     }
 
     package Boot {
