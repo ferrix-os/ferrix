@@ -1290,6 +1290,11 @@ impl Inode for Node {
             }
             _ if self.descriptor_info_of().is_some() => {
                 let pid = self.descriptor_info_of().ok_or(Errno::ENOTDIR)?;
+                // A directory held for a process that has ended is empty: a
+                // root made of it (Chrome's zygote) must list as one.
+                if alive(pid).is_err() {
+                    return Ok(());
+                }
                 may_inspect(pid)?;
                 list_descriptors(pid, cursor, true, emit)
             }
@@ -1317,6 +1322,9 @@ impl Inode for Node {
             }
             _ => {
                 let pid = self.descriptors_of().ok_or(Errno::ENOTDIR)?;
+                if alive(pid).is_err() {
+                    return Ok(());
+                }
                 may_inspect(pid)?;
                 list_descriptors(pid, cursor, false, emit)
             }
