@@ -1449,3 +1449,15 @@ each stopping the boot with `smallns self-check failed: <message>`
 The namespace files' fill in `kmem_check` has no control: the detached mount
 the VFS charges bounds it, and the inode's few bytes do not change the count
 a job makes. That is a gap in the evidence, not in the code's charge.
+
+**Network namespaces built (2026-09-30, branch `stage13-netns`, on
+`stage13-n4-userns`), for the consultant's review before they land.**
+`docs/NETNS.md` is the design and its §11 says what was built and how it
+differs. What touches this document's rules: U8's honoured set gains
+`CAP_NET_ADMIN` and `CAP_NET_RAW`, which a child user namespace holds over the
+network namespaces it owns and over nothing else (`capable_over` is unchanged,
+so neither reaches the first namespace's, a file or a process), each with a
+boot check and a control in the `netns` line (FX-0893); `CLONE_NEWNET` is no
+longer `EINVAL` through `clone`, `clone3` and `unshare`; and a network namespace
+is created, configured and ended under the owner rule of §2.2, charged to the
+creating job as §5 asks (three more fills in `kmem_check`).

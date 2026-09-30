@@ -257,6 +257,20 @@ was judged in the writer's namespace, not the opener's (and not at all for
 controls (NAMESPACES §12). Later namespace landings extend `launch::load_native`'s
 proxy copy and its check.
 
+**Network namespaces (2026-09-30, built on `stage13-netns`, not landed):**
+`CLONE_NEWNET` through `clone`, `clone3` and `unshare` gives a namespace of its
+own interfaces, addresses, routes, neighbours, ports, sockets, `/proc/net` and
+netlink view, starting with a down loopback that `ip link set lo up` (netlink or
+`SIOCSIFFLAGS`) gives `127.0.0.1` and `::1`. A socket stays in the namespace it
+was made in. `CAP_NET_ADMIN` and `CAP_NET_RAW` over the owning user namespace
+judge changes and raw sockets. `veth` pairs made by `RTM_NEWLINK` join two
+namespaces and carry datagrams and streams, move by `IFLA_NET_NS_PID` or `_FD`
+and go with either end; a physical NIC moves with its ring and comes home when
+the namespace ends. Abstract unix names are per namespace. The `netns` boot line
+(FX-0893) and 30 negative controls prove it on x86_64 and the tables are
+charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
+controls and what is open.
+
 **Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
 reclaiming inside the job before it OOM-kills (M2), then freezing,
 `cpu.max` and `io`. `docs/CGROUPS.md` §7.1 says where each

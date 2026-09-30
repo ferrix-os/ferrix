@@ -358,11 +358,11 @@ after. The first namespace is charged nothing, as before.
 |---|---|---|---|
 | `NetCore::stack` | `SpinLock` | one namespace's `Stack` | after nothing; **never two at once** (the forward loop takes them one after the other) |
 | `NetCore::pending`, `transmit_wakers` | `SpinLock` | as today | after `stack`, as today |
-| `NAMESPACES` | `SpinLock` | the list of live namespaces | a leaf; cloned out before any tick |
-| `VETHS`, `VethPair::ends` | `SpinLock` | the pair table, each pair's two ends | leaves; never held with a stack lock; released before a stack is entered |
+| `LIVE` | `SpinLock` | the list of live namespaces | a leaf; cloned out before any tick |
+| `PAIRS`, `Pair::ends` | `SpinLock` | the pair table, each pair's two ends | leaves; never held with a stack lock; released before a stack is entered |
 | `DEVICES` | `SpinLock` | the device registry | a leaf, as above |
 | `Process::net_ns` | `SpinLock` | the pointer | a leaf; cloned out |
-| `tables` | `SpinLock` | the charge | a leaf; taken *after* a `look` of the counts has released the stack |
+| `tables` | `SpinLock` | the charge | a leaf; taken *after* a `look` of the counts has released the stack, and held across `Charge::resize`, which takes the quota account's locks as every charge does |
 | `FILES` | `SpinLock` | socket files by `(ns, id)` | never with a stack lock, as today |
 
 A change that touches two namespaces (a move) is: lock A, detach, unlock; lock
@@ -379,10 +379,9 @@ with the process, `InetSocket`'s with the file).
 
 ## 7. Limits
 
-* Interfaces per namespace: 64; addresses per namespace: 256; routes per
-  namespace: 1024 (`ENOSPC`). Each bounds what one namespace's tables can hold
-  before its charge is asked, and `ENTRY_COST × 1344` is the most a namespace's
-  tables charge can reach.
+* Interfaces per namespace: 64; addresses: 256; routes: 1024 (`ENOSPC`). They
+  apply to the first namespace as well, which nothing reaches. Each bounds
+  what one namespace's tables can hold before the charge is asked.
 * veth pairs are charged; there is no separate count.
 * Namespaces: no count of their own; the job's memory (§5), as for user
   namespaces.
@@ -401,8 +400,9 @@ Each rule has a boot check that attempts it and a negative control (`§9`).
 * **NN2. `lo` up brings 127.0.0.1 and `::1`.** UDP and TCP between two sockets
   of the namespace then work; `lo` down removes them again.
 * **NN3. Namespaces do not share ports or sockets.** The same port binds in
-  both; a listener in one is not reachable from the other over `127.0.0.1`;
-  `/proc/net/tcp` lists only the reader's.
+  both, with the loopback down (the wildcard) and up; a listener in one is not
+  reachable from the other over `127.0.0.1`; a datagram stays in the namespace
+  that sent it; netlink and `/proc/net/tcp` show only the reader's.
 * **NN4. A socket belongs to the namespace it was made in, for life.** One made
   before `unshare` still reaches its old namespace's listener after; one made
   after does not.
@@ -415,21 +415,22 @@ Each rule has a boot check that attempts it and a negative control (`§9`).
   namespace made. (`HONOURED`'s new bit has its control.)
 * **NN7. Raw and packet sockets need `CAP_NET_RAW` over the owner.**
 * **NN8. A veth pair joins two namespaces.** Created by `RTM_NEWLINK`
-  (`IFLA_LINKINFO` kind `veth`, peer in `IFLA_INFO_DATA`), one end moved by
-  `IFLA_NET_NS_PID`, addressed and routed, a UDP datagram and a TCP stream
-  cross it; a third namespace sees nothing (NN16).
+  (`IFLA_LINKINFO` kind `veth`, peer and its namespace in `IFLA_INFO_DATA`),
+  not running until both ends are up, a UDP datagram and a TCP stream cross it
+  with the peer resolved by ARP; moved by `IFLA_NET_NS_FD`, the peer follows;
+  `RTM_DELLINK` of one end deletes both.
 * **NN9. Moving needs `CAP_NET_ADMIN` over source and target.** An unprivileged
   user namespace cannot push an end into the first namespace or another
-  user's.
+  user's, nor make the peer of a pair there.
 * **NN10. A physical interface stays in the first namespace unless a
   privileged caller moves it, and returns when the namespace ends.**
 * **NN11. Abstract `AF_UNIX` names are per network namespace.**
-* **NN12. `/proc/<pid>/ns/net` names the namespace; `/proc/net` is the
-  reader's.**
+* **NN12. `/proc/<pid>/ns/net` names the namespace and opens as it;
+  `/proc/net/{dev,route,tcp}` and netlink are the reader's.**
 * **NN13. A namespace ends with its last user.** Its veth ends vanish, peer
   included; its physical interfaces go home.
-* **NN14. Charged (F-37):** namespaces and veth pairs, to the job, refused
-  `ENOMEM` at its limit.
+* **NN14. Charged (F-37):** namespaces, veth pairs and the routes of a
+  namespace, to the job, refused `ENOMEM` at its limit.
 * **NN15. Flags:** `CLONE_NEWNET` with `CLONE_THREAD` is `EINVAL`;
   `unshare` from a process with other threads is `EINVAL`.
 * **NN16. A frame leaves by one veth end and arrives at its peer only.**
@@ -446,17 +447,59 @@ namespace's business); `SO_PEERCRED` (the user namespace's).
 
 ## 9. Checks
 
-`net/netns_check.rs`, the `netns` line (FX-0893), registered beside
-`check_user_namespaces` in `stages_check.rs`. It makes a process that is uid
-1000, drives `clone`/`unshare`/`socket`/`sendmsg` through the syscall layer
-where a rule is about a call (NN5, NN6, NN7, NN9, NN15), and drives
-`InetSocket` in the two namespaces directly where it is about data (NN1 to
-NN4, NN8, NN16). One check per rule above, and one **negative control** per
-rule: a one-line sabotage, run, never committed, after which the boot stops
-with the check's own message. The controls and their messages are in the commit
-that lands the check. The fills of NN14 are in `fs/kmem_check.rs` and print on
-the `kmem` line. Host tests in `src/lib/network/net` cover the library half:
-`lo` down/up, detach/attach, two stacks joined by a veth, reassembly's limit.
+`fs/netns_check.rs`, the `netns` line (FX-0893), registered beside
+`check_user_namespaces` in `stages_check.rs` (1097 calls, 18 of them refusals
+on x86_64). It makes processes that are root and uid 1000, drives
+`unshare`, `socket`, `ioctl`, `openat` and the unix calls through the
+system-call layer where a rule is about a call (NN5, NN6, NN7, NN11, NN12,
+NN15), and netlink and the namespaces' own sockets where it is about what
+crosses them (NN1 to NN4, NN8 to NN10, NN13, NN16, NN17), a request at a time
+through `NetlinkSocket::send` with the acting process named. NN14's fills are
+in `fs/kmem_check.rs` and print on the `kmem` line. Host tests in
+`src/lib/network/net` cover the library half.
+
+**Negative controls**, each a one-line sabotage, run and never committed, after
+which the boot stopped with a message of the check's own. File, the change and
+the message (`FX-0893` unless it says otherwise):
+
+| Rule | Sabotage | Message |
+|---|---|---|
+| NN5 | `syscall/namespace.rs`: `held.holds(CAP_SYS_ADMIN).then(...)` becomes `true.then(...)` | an unprivileged process made a network namespace |
+| NN5 | `syscall/family.rs`: the `CLONE_NEWNET` test in `namespaces_asked` becomes `if false` | clone with CLONE_NEWNET was not refused EPERM to an unprivileged process |
+| NN15 | `syscall/family.rs`: `if false && flags & CLONE_NEWNET != 0 && flags & CLONE_THREAD != 0` | CLONE_NEWNET with CLONE_THREAD was not refused EINVAL |
+| NN1 | `iface.rs`: the new loopback's flags gain `IFF_UP \| IFF_RUNNING` | a new network namespace did not start with a loopback that is down |
+| NN2 | `stack.rs`: `if false && interface.addresses.is_empty()` | bringing a namespace's loopback up did not give it 127.0.0.1 and ::1 |
+| NN2 | `stack.rs`: `interface.addresses.clear()` removed from going down | taking a namespace's loopback down left its addresses |
+| NN3 | `net/socket.rs`: `open` ignores the namespace it is given and uses the first | the same port could not be bound in two namespaces |
+| NN4 | `syscall/sockets.rs`: `socket()` opens in the first namespace | a socket made before its maker moved did not stay in its namespace |
+| NN6 | `netlink/link.rs`: `net_admin` answers `true` | an unprivileged process changed the first network namespace |
+| NN6 | `netlink/link.rs`: `capable_over(held, &held.user_ns, ...)` (the caller's own namespace, not the owner) | fake root in a user namespace changed the first network namespace |
+| NN6 | `userns.rs`: `(1 << CAP_NET_ADMIN)` becomes `(0 << CAP_NET_ADMIN)` in `HONOURED` | a link could not be brought up by its owner |
+| NN7 | `userns.rs`: `(0 << CAP_NET_RAW)` in `HONOURED` | the owner of a network namespace could not open a raw socket there |
+| NN7 | `syscall/sockets.rs`: `if raw` becomes `if false` | FX-0701, stage 7's check, first: uid 1000 opened a raw socket |
+| NN8 | `veth.rs`: `forward`'s budget is 0 | a datagram did not cross a veth pair |
+| NN8 | `route.rs`: a veth end's `IFLA_LINKINFO` left out of a dump | a dump of links did not say a veth end is a veth |
+| NN16 | `veth.rs`: `pair()` answers the first pair for every number | a frame sent on one veth pair arrived at the peer of another |
+| NN9 | `link.rs`: the target's `net_admin` test becomes `false` | an unprivileged user namespace pushed a veth end into the first user namespace's |
+| NN10 | `device.rs`: `come_home` forgets the device instead of placing it | a device was nowhere after the namespace it was in ended |
+| NN10 | `namespace.rs`: a move does not place the device | the registry still named the old namespace after a device moved |
+| NN13 | `namespace.rs`: a namespace's end leaves its veth ends | FX-0906, `kmem`'s check, first: a veth pair's namespaces are gone and their heap is still charged |
+| NN11 | `fs/socket.rs`: every unix socket's namespace number is 0 | the same abstract name could not be bound in another network namespace |
+| NN12 | `render.rs`: `/proc/net/dev` reads the first namespace | /proc/net/dev showed another namespace's interfaces |
+| NN12 | `render.rs`: `/proc/net/tcp` reads the first namespace | /proc/net/tcp showed another namespace's sockets |
+| NN12 | `netlink/mod.rs`: requests are answered from the first namespace | FX-0906, `kmem`'s route fill, first: a fill was refused by something other than its limit |
+| NN17 | `route.rs`: the address ceiling becomes `if false` | a namespace took more addresses than its ceiling |
+| NN17 | `route.rs`: the route ceiling becomes `if false` | a namespace took more routes than its ceiling |
+| NN17 | `namespace.rs`: the interface ceiling is ten times higher | a namespace took more interfaces than its ceiling |
+| NN14 | `namespace.rs`: a namespace is charged 0 | FX-0906: kmem: a network namespace was not charged to its job for itself |
+| NN14 | `veth.rs`: a pair's record is charged 0 | FX-0906: kmem: a veth pair was not charged to its job for its record and ends |
+| NN14 | `namespace.rs`: `admit` answers `Ok(())` | FX-0906: kmem: a fill was refused by something other than its limit |
+
+Three controls are stopped by a check that runs before this one (a boot check
+stops at the first failure): the unprivileged raw socket by stage 7's, the end
+of a namespace leaving a pair by `kmem`'s, and a netlink request answered from
+the wrong namespace by `kmem`'s fill of routes. Each is still stopped with a
+message that names what is wrong.
 
 ---
 
