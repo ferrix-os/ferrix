@@ -345,6 +345,17 @@ fn a_controllers_files_are_there_only_where_it_is_enabled() {
         files::named(b"memory.current", false, all).map(files::File::mode),
         Some(0o444)
     );
+    for (name, kind) in [
+        ("memory.min", Kind::MemoryMin),
+        ("memory.low", Kind::MemoryLow),
+        ("memory.high", Kind::MemoryHigh),
+    ] {
+        assert_eq!(
+            files::named(name.as_bytes(), false, all).map(|file| (file.kind, file.mode())),
+            Some((kind, 0o644)),
+            "{name}"
+        );
+    }
     assert_eq!(files::named(b"cpu.weight", false, pids), None);
 }
 
@@ -411,11 +422,31 @@ fn the_controller_files_print_as_linux_prints_them() {
     assert_eq!(rendered(|out| render::number(out, 4096)), b"4096\n");
     assert_eq!(rendered(|out| render::pids_events(out, 3)), b"max 3\n");
     assert_eq!(
-        rendered(|out| render::memory_stat(out, 8192)),
-        b"kernel 8192\n"
+        rendered(|out| render::memory_stat(
+            out,
+            render::MemoryStat {
+                file: 4096,
+                kernel: 8192,
+                shmem: 12288,
+                pgscan: 5,
+                pgsteal: 4,
+                pgfault: 99,
+                pgmajfault: 7,
+            }
+        )),
+        b"file 4096\nkernel 8192\nshmem 12288\npgscan 5\npgsteal 4\npgfault 99\npgmajfault 7\n"
     );
     assert_eq!(
-        rendered(|out| render::memory_events(out, 2, 3, 1)),
-        b"low 0\nhigh 0\nmax 2\noom 3\noom_kill 1\noom_group_kill 0\n"
+        rendered(|out| render::memory_events(
+            out,
+            render::MemoryEvents {
+                low: 0,
+                high: 6,
+                max: 2,
+                oom: 3,
+                oom_kill: 1,
+            }
+        )),
+        b"low 0\nhigh 6\nmax 2\noom 3\noom_kill 1\noom_group_kill 0\n"
     );
 }

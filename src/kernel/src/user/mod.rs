@@ -6,6 +6,7 @@
 //! code it does not trust.
 
 pub(crate) mod alloc_check;
+pub(crate) mod cache;
 pub(crate) mod check;
 pub(crate) mod edge_check;
 pub(crate) mod madvise_check;
