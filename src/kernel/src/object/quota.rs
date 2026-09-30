@@ -105,6 +105,64 @@ impl Resource {
 /// How many resources a slot counts.
 const RESOURCES: usize = 4;
 
+/// What a slot counts that no limit governs: events, for `memory.events` and
+/// `memory.stat`. Each is counted in the job it happened in and in every job
+/// above it, as cgroup v2's hierarchical files report them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Counter {
+    /// Times its use went over `memory.high` and was reclaimed.
+    High,
+    /// Pages reclaim looked at (`pgscan`).
+    Scanned,
+    /// Pages reclaim gave back (`pgsteal`).
+    Stolen,
+    /// Page faults its programs took (`pgfault`).
+    Faults,
+    /// Faults that read a file from its disk (`pgmajfault`).
+    MajorFaults,
+}
+
+impl Counter {
+    /// Where the slot keeps it.
+    const fn at(self) -> usize {
+        match self {
+            Counter::High => 0,
+            Counter::Scanned => 1,
+            Counter::Stolen => 2,
+            Counter::Faults => 3,
+            Counter::MajorFaults => 4,
+        }
+    }
+}
+
+/// How many counters a slot has.
+const COUNTERS: usize = 5;
+
+/// The marks of `memory.high`, `memory.low` and `memory.min`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Mark {
+    /// `memory.high`: above it, the job's pages are reclaimed. [`UNLIMITED`]
+    /// for `max`.
+    High,
+    /// `memory.low`: a job using no more than this is spared by the reclaim
+    /// of a job above it while anything else can give ([`protected`]).
+    Low,
+    /// `memory.min`: a job using no more than this is spared by the reclaim
+    /// of a job above it, whatever else is asked of that reclaim.
+    Min,
+}
+
+impl Mark {
+    /// Where the slot keeps it.
+    const fn at(self) -> usize {
+        match self {
+            Mark::High => 0,
+            Mark::Low => 1,
+            Mark::Min => 2,
+        }
+    }
+}
+
 /// What a frame is charged as: a page of memory.
 const FRAME_BYTES: u64 = ferrix_bootinfo::PAGE_SIZE;
 
@@ -138,6 +196,10 @@ struct Slot {
     limit: [AtomicU64; RESOURCES],
     /// How many charges of each resource a limit here refused.
     refused: [AtomicU64; RESOURCES],
+    /// `memory.high`, `memory.low` and `memory.min`, in bytes.
+    marks: [AtomicU64; 3],
+    /// Its [`Counter`]s.
+    counters: [AtomicU64; COUNTERS],
     /// `cpu.weight`.
     weight: AtomicU32,
     /// The weight of its runnable tasks and busy children, in task units.
@@ -160,6 +222,12 @@ impl Slot {
             used: [const { AtomicU64::new(0) }; RESOURCES],
             limit: [const { AtomicU64::new(UNLIMITED) }; RESOURCES],
             refused: [const { AtomicU64::new(0) }; RESOURCES],
+            marks: [
+                AtomicU64::new(UNLIMITED),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+            ],
+            counters: [const { AtomicU64::new(0) }; COUNTERS],
             weight: AtomicU32::new(DEFAULT_WEIGHT),
             load: AtomicI64::new(0),
             contributed: AtomicI64::new(0),
@@ -246,6 +314,12 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
             limit.store(UNLIMITED, Ordering::Relaxed);
             refused.store(0, Ordering::Relaxed);
         }
+    }
+    for (mark, fresh) in taken.marks.iter().zip([UNLIMITED, 0, 0]) {
+        mark.store(fresh, Ordering::Relaxed);
+    }
+    for counter in &taken.counters {
+        counter.store(0, Ordering::Relaxed);
     }
     taken.weight.store(DEFAULT_WEIGHT, Ordering::Relaxed);
     taken.load.store(0, Ordering::Relaxed);
@@ -368,6 +442,80 @@ pub(crate) fn at_limit(index: u32, resource: Resource, amount: u64) -> Option<u3
         let then = used.load(Ordering::Acquire).checked_add(amount);
         if then.is_none_or(|then| then > limit.load(Ordering::Acquire)) {
             return Some(at);
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+    None
+}
+
+/// Whether slot `index` is `scope` or beneath it: whether what is charged to
+/// `index` is charged to `scope` too.
+pub(crate) fn within(index: u32, scope: u32) -> bool {
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        if at == scope {
+            return true;
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+    false
+}
+
+/// Whether a page charged to slot `owner` is spared when `scope` is
+/// reclaimed from: some job from `owner` up to, not including, `scope` uses
+/// no more than its `memory.min`, or, when `low` is set, its `memory.low`
+/// (Linux's `mem_cgroup_protection`, without its proportional share: a job
+/// is protected whole or not at all). A job's own reclaim, at its own limit,
+/// is never spared by its own marks.
+pub(crate) fn protected(owner: u32, scope: u32, low: bool) -> bool {
+    let mut at = owner;
+    while at != scope {
+        let Some(slot) = slot(at) else {
+            return false;
+        };
+        let used = slot
+            .used(Resource::Memory)
+            .map_or(u64::MAX, |used| used.load(Ordering::Acquire));
+        let mark = |which: Mark| {
+            slot.marks
+                .get(which.at())
+                .map_or(0, |held| held.load(Ordering::Relaxed))
+        };
+        if used <= mark(Mark::Min) || (low && used <= mark(Mark::Low)) {
+            return true;
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+    false
+}
+
+/// Count `amount` of `counter` in `index` and every slot above it.
+pub(crate) fn count(index: u32, counter: Counter, amount: u64) {
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        if let Some(held) = slot.counters.get(counter.at()) {
+            let _ = held.fetch_add(amount, Ordering::Relaxed);
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+}
+
+/// The nearest slot from `index` up whose use of memory is over its
+/// `memory.high`, and by how many bytes: where a program that just took a
+/// page is made to reclaim (`memory.high`'s throttle, Linux's
+/// `mem_cgroup_handle_over_high`). Atomics only; one load per level for a
+/// job with no mark set.
+pub(crate) fn over_high(index: u32) -> Option<(u32, u64)> {
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        let high = slot.marks.get(Mark::High.at())?.load(Ordering::Relaxed);
+        if high != UNLIMITED
+            && let Some(used) = slot.used(Resource::Memory)
+        {
+            let used = used.load(Ordering::Acquire);
+            if used > high {
+                return Some((at, used - high));
+            }
         }
         at = slot.parent.load(Ordering::Acquire);
     }
@@ -629,6 +777,28 @@ impl Quota {
             limit: read(slot.and_then(|slot| slot.limit(resource)), UNLIMITED),
             refused: read(slot.and_then(|slot| slot.refused(resource)), 0),
         }
+    }
+
+    /// Its `memory.high`, `memory.low` or `memory.min`: [`UNLIMITED`] for a
+    /// `max`.
+    pub(crate) fn mark(&self, mark: Mark) -> u64 {
+        slot(self.index)
+            .and_then(|slot| slot.marks.get(mark.at()))
+            .map_or(0, |held| held.load(Ordering::Acquire))
+    }
+
+    /// Set a mark.
+    pub(crate) fn set_mark(&self, mark: Mark, value: u64) {
+        if let Some(held) = slot(self.index).and_then(|slot| slot.marks.get(mark.at())) {
+            held.store(value, Ordering::Release);
+        }
+    }
+
+    /// How many of `counter` were counted in it and beneath it.
+    pub(crate) fn counted(&self, counter: Counter) -> u64 {
+        slot(self.index)
+            .and_then(|slot| slot.counters.get(counter.at()))
+            .map_or(0, |held| held.load(Ordering::Acquire))
     }
 
     /// Its `cpu.weight`.

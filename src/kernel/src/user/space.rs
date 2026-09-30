@@ -107,7 +107,7 @@ use crate::fallible;
 use crate::mm;
 use crate::smp::{self, CpuMask, TlbPages};
 use crate::user::memory_type::{self, MemoryType};
-use crate::user::vmo::{Kept, Own, Retired, ShadowCopies, Sharing, Vmo, VmoError};
+use crate::user::vmo::{Commit, Kept, Own, Retired, ShadowCopies, Sharing, Vmo, VmoError};
 
 /// The lowest address a program may map anything at: 64 KiB, the
 /// `vm.mmap_min_addr` Linux distributions ship.
@@ -146,6 +146,10 @@ pub(crate) enum SpaceError {
     /// A page of the device memory asked for is mapped, by this or another
     /// address space, with another memory type (`user::memory_type`).
     OtherMemoryType,
+    /// The page of a file on a disk that a fault was filling was reclaimed
+    /// before the fault could use it (`user::cache`): fill it again. Only
+    /// [`AddressSpace::fault`] sees this, and it never gives it to a caller.
+    Evicted,
 }
 
 impl fmt::Display for SpaceError {
@@ -164,6 +168,7 @@ impl fmt::Display for SpaceError {
             SpaceError::OtherMemoryType => {
                 f.write_str("the device memory is mapped with another memory type")
             }
+            SpaceError::Evicted => f.write_str("a page was reclaimed as it was filled"),
         }
     }
 }
@@ -496,6 +501,10 @@ fn this_logical_cpu() -> usize {
     }
 }
 
+/// How many times a fault fills a page that reclaim took again before it gives
+/// the program a `SIGBUS`: reclaim would have to take it every time.
+const REFILLS: usize = 64;
+
 /// The frame for page `index` of `vmo`, committed on first touch.
 ///
 /// A page of a file mapping (`file`) wholly past the end of its file is
@@ -504,9 +513,11 @@ fn this_logical_cpu() -> usize {
 /// before it takes that lock to take pages away.
 fn commit_page(vmo: &Vmo, index: u64, file: bool, address: u64) -> Result<Frame, SpaceError> {
     if file {
-        vmo.commit_within(index)
-            .map_err(SpaceError::Backing)?
-            .ok_or(SpaceError::PastEnd(address))
+        match vmo.commit_within(index).map_err(SpaceError::Backing)? {
+            Commit::Frame(frame) => Ok(frame),
+            Commit::PastEnd => Err(SpaceError::PastEnd(address)),
+            Commit::Unfilled => Err(SpaceError::Evicted),
+        }
     } else {
         vmo.commit(index).map_err(SpaceError::Backing)
     }
@@ -953,8 +964,16 @@ impl AddressSpace {
     /// permit the access, which is the other one.
     pub(crate) fn fault(&self, address: u64, access: Access) -> Result<(), SpaceError> {
         fault_requested();
-        self.fill_file_page(address)?;
-        self.resolve(address, access)
+        // A page of a file on a disk that reclaim takes between its fill and
+        // its use is filled again; it is never used as zeros (`user::cache`).
+        for _ in 0..REFILLS {
+            self.fill_file_page(address)?;
+            match self.resolve(address, access) {
+                Err(SpaceError::Evicted) => {}
+                done => return done,
+            }
+        }
+        Err(SpaceError::Unreadable(address))
     }
 
     /// [`AddressSpace::fault`] once a file's page is in its object: find the
@@ -1227,6 +1246,11 @@ impl AddressSpace {
             // show.
             match file.page(index) {
                 Some(original) => mm::copy_frame(frame, original),
+                None if file.sourced(index) => {
+                    // Filled before this lock and reclaimed since: not a hole.
+                    let _ = mm::release_frame(frame);
+                    return Err(SpaceError::Evicted);
+                }
                 None => mm::zero_frame(frame),
             }
             // The shadow lacked the page under this space's lock, and every
