@@ -185,13 +185,16 @@ enum NamespaceKind {
     Mount = 0,
     /// `user`.
     User = 1,
+    /// `net`.
+    Net = 2,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 2] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 3] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
+        (NamespaceKind::Net, b"net"),
     ];
 }
 
@@ -1251,6 +1254,7 @@ impl Inode for Node {
             Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
             Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Net) => render::net_namespace(&*alive(pid)?),
             _ => Err(Errno::EINVAL),
         }
     }
@@ -1267,6 +1271,15 @@ impl Inode for Node {
     fn link_location(&self) -> Option<Result<Location>> {
         if let Place::Descriptor(pid, fd) = self.place {
             return descriptor_location(pid, fd);
+        }
+        // Following `/proc/<pid>/ns/net` opens the namespace as a file.
+        if let Place::Namespace(pid, NamespaceKind::Net) = self.place {
+            return Some(alive(pid).and_then(|process| {
+                if !crate::net::netns_file::may_open(&process) {
+                    return Err(Errno::EACCES);
+                }
+                crate::net::netns_file::location(process.net_ns())
+            }));
         }
         let Place::Entry(pid, index) = self.place else {
             return None;

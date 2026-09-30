@@ -401,8 +401,19 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 /// refuses a namespace a shared fs context would leave; `EPERM` for
 /// `CLONE_NEWNS` without privilege.
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
-    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER)) != 0 {
+    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET)) != 0 {
         return Err(Errno::EINVAL);
+    }
+    // A thread cannot have a network namespace of its own: it is its
+    // process's (`docs/NETNS.md` section 2.2).
+    if flags & CLONE_NEWNET != 0 && flags & CLONE_THREAD != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if flags & CLONE_NEWNET != 0
+        && flags & CLONE_NEWUSER == 0
+        && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
+    {
+        return Err(Errno::EPERM);
     }
     // CVE-2013-1858 (U5): a root shared with a process outside, then `chroot`
     // inside. And a thread cannot have a user namespace of its own.
@@ -424,6 +435,26 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
         // Refused here, before anything is made, what `unshare` refuses the
         // same way; the namespace itself is made with the child.
         namespace::make_user_namespace(parent).map(drop)?;
+    }
+    Ok(())
+}
+
+/// Give `child` the namespaces `flags` asks for: a user namespace first, which
+/// owns the mount and network namespaces made with it, then a copy of the
+/// parent's mounts, then an empty network namespace.
+fn give_namespaces(parent: &Arc<Process>, child: &Arc<Process>, flags: u64) -> Result<(), Errno> {
+    if flags & CLONE_NEWUSER != 0 {
+        let fresh = namespace::make_user_namespace(parent)?;
+        namespace::enter_user_namespace(child, fresh);
+    }
+    if flags & CLONE_NEWNS != 0 {
+        namespace::copy_namespace(child.fs_context())?;
+    }
+    if flags & CLONE_NEWNET != 0 {
+        // Owned by the user namespace the child is in, the new one if it has
+        // one, and charged to the job of the parent, who is asking.
+        let owner = child.with_credentials(|held| Arc::clone(&held.user_ns));
+        child.set_net_ns(crate::net::namespace::create(owner)?);
     }
     Ok(())
 }
@@ -491,15 +522,9 @@ fn clone_with(
     if pid == 0 || child.over_quota() {
         return Err(Errno::EAGAIN);
     }
-    // Its own copy of the namespace, before anything can see it: a refusal
-    // goes with the child, unstarted.
-    if flags & CLONE_NEWUSER != 0 {
-        let fresh = namespace::make_user_namespace(parent)?;
-        namespace::enter_user_namespace(&child, fresh);
-    }
-    if flags & CLONE_NEWNS != 0 {
-        namespace::copy_namespace(child.fs_context())?;
-    }
+    // Its own copy of the namespaces asked for, before anything can see it: a
+    // refusal goes with the child, unstarted.
+    give_namespaces(parent, &child, flags)?;
     child.set_exit_signal((flags & CSIGNAL) as u32);
     // What glibc's `posix_spawn` asks for, so that its child need not reset
     // every handler itself before `execve`. Linux leaves the alternate stack

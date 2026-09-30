@@ -132,7 +132,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 
 /// A socket of a kind, as the inode behind the open file it comes as.
 fn socket(family: Family, kind: InetKind) -> Result<Arc<InetSocket>, &'static str> {
-    let file = InetSocket::open(family, kind, false, (0, 0))
+    let file = InetSocket::open(net::first(), family, kind, false, (0, 0))
         .map_err(|_| "a socket could not be opened")?;
     of(&file).ok_or("a socket's open file does not hold a socket")
 }

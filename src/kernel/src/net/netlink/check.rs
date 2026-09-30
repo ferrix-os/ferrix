@@ -323,7 +323,7 @@ struct Netlink {
 impl Netlink {
     /// Open a socket and bind it, as `rtnl_open` does.
     fn open() -> Result<Netlink, &'static str> {
-        let file = NetlinkSocket::open(SOCK_DGRAM, false, (0, 0))
+        let file = NetlinkSocket::open(crate::net::first(), SOCK_DGRAM, false, (0, 0))
             .map_err(|_| "a netlink socket could not be opened")?;
         let socket = of(&file).ok_or("a netlink socket's open file does not hold one")?;
         socket

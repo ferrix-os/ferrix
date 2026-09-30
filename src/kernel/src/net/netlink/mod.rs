@@ -33,6 +33,7 @@
 //! [`crate::net::NetCore::with`] states.
 
 pub(crate) mod check;
+pub(crate) mod link;
 mod route;
 
 use alloc::collections::VecDeque;
@@ -58,7 +59,7 @@ use ferrix_vfs::{Inode, Metadata, OpenFile, Readiness};
 
 use super::socket::Received;
 use crate::fs;
-use crate::net;
+use crate::net::NetNamespace;
 use crate::sync::SpinLock;
 
 /// The most one send answers with.
@@ -121,6 +122,9 @@ struct State {
 
 /// An `AF_NETLINK` socket.
 pub(crate) struct NetlinkSocket {
+    /// The network namespace it was made in, for life: the tables its
+    /// requests read and change.
+    ns: Arc<NetNamespace>,
     /// `SOCK_DGRAM` or `SOCK_RAW`, as `SO_TYPE` reports it. Netlink treats
     /// them the same and so does this.
     kind: u32,
@@ -149,6 +153,7 @@ impl NetlinkSocket {
     ///
     /// Whatever [`OpenFile::new`] refuses, which for a socket is nothing.
     pub(crate) fn open(
+        ns: &Arc<NetNamespace>,
         kind: u32,
         nonblock: bool,
         owner: (u32, u32),
@@ -162,6 +167,7 @@ impl NetlinkSocket {
         );
         let ino = fs::socket::next_ino();
         let socket = Arc::new(NetlinkSocket {
+            ns: Arc::clone(ns),
             kind,
             metadata: fs::socket::socket_metadata(ino, owner),
             state: SpinLock::new(State {
@@ -247,18 +253,25 @@ impl NetlinkSocket {
             }
         }
         let port = self.port();
-        // Changing addresses and routes takes `CAP_NET_ADMIN` on Linux, which
-        // is root here, as `ifreq`'s setters take it; the kernel's own checks
-        // send with no process and may.
-        let privileged = crate::syscall::process::current()
-            .is_none_or(|process| process.with_credentials(|held| held.privileged()));
+        // Changing addresses, routes and links takes `CAP_NET_ADMIN` over the
+        // user namespace that owns this socket's network namespace, as Linux's
+        // `rtnetlink_rcv_msg` asks; the kernel's own checks, which are no
+        // process, may.
+        let actor = crate::syscall::userns::acting();
+        let privileged = link::net_admin(actor.as_deref(), &self.ns);
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(MAX_REPLY)
             .map_err(|_| Errno::ENOMEM)?;
         buffer.resize(MAX_REPLY, 0);
-        let written =
-            net::core().with(|stack, _| route::answer(stack, port, data, &mut buffer, privileged));
+        let written = route::answer(
+            &self.ns,
+            actor.as_deref(),
+            port,
+            data,
+            &mut buffer,
+            privileged,
+        );
         buffer.truncate(written);
         self.queue(&buffer)?;
         // The queue is this socket's, not the stack's, so the wake the net
@@ -266,7 +279,7 @@ impl NetlinkSocket {
         // costs a walk of an empty queue in the common case and is the
         // difference between a blocked reader waking now and waking on the
         // driving task's next tick.
-        net::core().progress().wake_all();
+        self.ns.core().progress().wake_all();
         Ok(data.len())
     }
 
@@ -292,7 +305,7 @@ impl NetlinkSocket {
                 return Err(Errno::EAGAIN);
             }
             fs::socket::wait_on(
-                net::core().progress(),
+                self.ns.core().progress(),
                 || !self.state.lock().queue.is_empty(),
                 deadline,
             )?;
@@ -486,11 +499,11 @@ impl Inode for NetlinkSocket {
     /// The net core's progress queue, which every change a socket's
     /// readiness reads wakes.
     fn poll_changes(&self) -> Option<u64> {
-        Some(net::core().progress().wakes())
+        Some(self.ns.core().progress().wakes())
     }
 
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
-        visit(fs::wake::lent(net::core().progress()));
+        visit(self.ns.core().progress_source());
         true
     }
 
