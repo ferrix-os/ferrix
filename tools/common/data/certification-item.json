@@ -238,6 +238,7 @@
         "syscall/memory.rs",
         "syscall/namespace.rs",
         "syscall/path.rs",
+        "syscall/pidns.rs",
         "syscall/pipe.rs",
         "syscall/poll.rs",
         "syscall/process.rs",

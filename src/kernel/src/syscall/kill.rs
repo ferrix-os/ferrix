@@ -42,6 +42,7 @@ use ferrix_linux_abi::types::{NSIG, SIGALRM, SIGCHLD, SIGCONT};
 use crate::sched::{self, WaitQueue};
 use crate::syscall::credentials;
 use crate::syscall::deliver;
+use crate::syscall::pidns;
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
 use crate::syscall::signal::{Alarm, Origin, Posted};
@@ -98,6 +99,9 @@ pub(crate) fn send(target: &Process, signal: u32, origin: Origin) {
     if signal == SIGCONT {
         target.leave_stop();
     }
+    if pidns::discards(target, signal, origin) {
+        return;
+    }
     match target.post_signal(signal, origin) {
         Posted::Discarded => {}
         Posted::Fatal => process::kill(target, 128 + signal as i32),
@@ -115,6 +119,9 @@ pub(crate) fn send_to_thread(thread: &Thread, signal: u32, origin: Origin) {
     }
     if signal == SIGCONT {
         target.leave_stop();
+    }
+    if pidns::discards(target, signal, origin) {
+        return;
     }
     match target.post_signal_to(thread, signal, origin) {
         Posted::Discarded => {}
@@ -150,19 +157,24 @@ pub(crate) fn sys_kill(process: &Process, pid: i32, signal: u32) -> Result<usize
         return Err(Errno::EINVAL);
     }
     let caller = process.pid();
+    // Every number here is one in the caller's namespace, and a process it
+    // cannot see is not a target (`docs/PIDNS.md` §3).
     let targets: Vec<Arc<Process>> = if pid > 0 {
-        registry::find(pid.unsigned_abs()).into_iter().collect()
+        pidns::find_in(process, pid.unsigned_abs())
+            .into_iter()
+            .collect()
     } else {
         let group = if pid == 0 {
-            process.pgid()
+            Some(process.pgid())
         } else {
-            pid.unsigned_abs()
+            pidns::from_user(process, pid.unsigned_abs())
         };
-        registry::live()?
+        pidns::live_in(process)?
             .into_iter()
             .filter(|other| match pid {
-                -1 => other.pid() != caller && other.pid() != 1,
-                _ => other.pgid() == group,
+                // Not the caller, and not the init of its namespace.
+                -1 => other.pid() != caller && pidns::to_user(process, other) > 1,
+                _ => group == Some(other.pgid()),
             })
             .collect()
     };
@@ -218,7 +230,7 @@ pub(crate) fn sys_pidfd_send_signal(
         return Err(Errno::EINVAL);
     }
     let target = pidfd.process();
-    if target.is_reaped() {
+    if target.is_reaped() || pidns::to_user(process, target) == 0 {
         return Err(Errno::ESRCH);
     }
     if !may_signal(process, target, signal) {
@@ -252,7 +264,7 @@ pub(crate) fn sys_tkill(process: &Process, tid: i32, signal: u32) -> Result<usiz
     if tid <= 0 || signal > NSIG {
         return Err(Errno::EINVAL);
     }
-    let thread = find_thread(tid.unsigned_abs(), None)?;
+    let thread = find_thread(process, tid.unsigned_abs(), None)?;
     if !may_signal(process, thread.process(), signal) {
         return Err(Errno::EPERM);
     }
@@ -267,14 +279,15 @@ pub(crate) fn sys_tkill(process: &Process, tid: i32, signal: u32) -> Result<usiz
     Ok(0)
 }
 
-/// The live thread numbered `tid`, required to be one of process `tgid`'s
-/// when that is given.
-fn find_thread(tid: u32, tgid: Option<u32>) -> Result<Arc<Thread>, Errno> {
-    let target = registry::find(tid).ok_or(Errno::ESRCH)?;
-    if tgid.is_some_and(|tgid| target.pid() != tgid) {
+/// The live thread `viewer` calls `tid`, required to be one of the process
+/// it calls `tgid` when that is given.
+fn find_thread(viewer: &Process, tid: u32, tgid: Option<u32>) -> Result<Arc<Thread>, Errno> {
+    let kernel = pidns::from_user(viewer, tid).ok_or(Errno::ESRCH)?;
+    let target = registry::find(kernel).ok_or(Errno::ESRCH)?;
+    if tgid.is_some_and(|tgid| pidns::to_user(viewer, &target) != tgid) {
         return Err(Errno::ESRCH);
     }
-    target.thread_by_tid(tid).ok_or(Errno::ESRCH)
+    target.thread_by_tid(kernel).ok_or(Errno::ESRCH)
 }
 
 /// `tgkill`: signal thread `tid` of process `tgid`, which is what glibc's
@@ -293,7 +306,7 @@ pub(crate) fn sys_tgkill(
     if tgid <= 0 || tid <= 0 || signal > NSIG {
         return Err(Errno::EINVAL);
     }
-    let thread = find_thread(tid.unsigned_abs(), Some(tgid.unsigned_abs()))?;
+    let thread = find_thread(process, tid.unsigned_abs(), Some(tgid.unsigned_abs()))?;
     if !may_signal(process, thread.process(), signal) {
         return Err(Errno::EPERM);
     }

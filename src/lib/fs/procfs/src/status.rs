@@ -90,6 +90,16 @@ pub struct Status<'a> {
     /// `Pid` and `NSpid`: the thread's id, which is the process's for
     /// `/proc/<pid>/status` and for its main thread's `task/<pid>/status`.
     pub pid: u32,
+    /// `NStgid`'s numbers, from the reader's namespace down to the process's
+    /// own; empty for a process in the first namespace read from it, which
+    /// prints `tgid` alone, as Linux does.
+    pub nstgid: &'a [u32],
+    /// `NSpid`'s, as `nstgid` is, for the thread.
+    pub nspid: &'a [u32],
+    /// `NSpgid`'s; the line is printed only when this is not empty.
+    pub nspgid: &'a [u32],
+    /// `NSsid`'s; the line is printed only when this is not empty.
+    pub nssid: &'a [u32],
     /// `PPid`.
     pub ppid: u32,
     /// `Uid`: the real, effective, saved and filesystem user ids.
@@ -131,13 +141,21 @@ pub fn render(out: &mut Vec<u8>, status: &Status<'_>) {
             "\nUmask:\t{:04o}\nState:\t{}\nTgid:\t{tgid}\nNgid:\t0\nPid:\t{pid}\nPPid:\t{}\n\
              TracerPid:\t0\nUid:\t{ruid}\t{euid}\t{suid}\t{fsuid}\n\
              Gid:\t{rgid}\t{egid}\t{sgid}\t{fsgid}\n\
-             FDSize:\t{}\nGroups:\t \nNStgid:\t{tgid}\nNSpid:\t{pid}\n",
+             FDSize:\t{}\nGroups:\t \n",
             status.umask,
             status.state.description(),
             status.ppid,
             status.fd_size,
         ),
     );
+    numbers(out, "NStgid", status.nstgid, tgid);
+    numbers(out, "NSpid", status.nspid, pid);
+    if !status.nspgid.is_empty() {
+        numbers(out, "NSpgid", status.nspgid, 0);
+    }
+    if !status.nssid.is_empty() {
+        numbers(out, "NSsid", status.nssid, 0);
+    }
     for (label, kib) in [
         ("VmSize", status.vm_size),
         ("VmLck", status.vm_locked),
@@ -205,4 +223,17 @@ pub fn cpu_list(out: &mut Vec<u8>, cpus: u32) {
         0 | 1 => out.push(b'0'),
         _ => put(out, format_args!("0-{}", cpus - 1)),
     }
+}
+
+/// One of the `NS*` lines: the numbers tab-separated, or `alone` when there
+/// are none to list, which is a process in the first namespace.
+fn numbers(out: &mut Vec<u8>, label: &str, list: &[u32], alone: u32) {
+    put(out, format_args!("{label}:"));
+    if list.is_empty() {
+        put(out, format_args!("\t{alone}"));
+    }
+    for number in list {
+        put(out, format_args!("\t{number}"));
+    }
+    out.push(b'\n');
 }

@@ -505,7 +505,12 @@ fn filesystem_named(
     // the flag is the mount's, and the VFS refuses the writes.
     match name {
         b"tmpfs" => Ok(fs::new_tmpfs()?),
-        b"proc" => Ok(Arc::new(Procfs::new())),
+        // Of the pid namespace the mounter is in (`docs/PIDNS.md` §6).
+        b"proc" => Ok(Arc::new(Procfs::new_in(
+            process
+                .numbers()
+                .map(|numbers| Arc::clone(numbers.namespace())),
+        ))),
         b"devtmpfs" => Ok(Arc::new(Devfs::new())),
         b"cgroup2" => Ok(Arc::new(fs::cgroupfs::Cgroupfs::new())),
         // Read-only as well as writable, as on Linux, where a container is

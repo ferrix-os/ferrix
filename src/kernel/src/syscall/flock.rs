@@ -554,7 +554,11 @@ fn get_lock(
         whence: SEEK_SET as i16,
         start: i64::try_from(held_start).unwrap_or(i64::MAX),
         len: i64::try_from(len).unwrap_or(i64::MAX),
-        pid,
+        // The holder, as the asking process's namespace numbers it (-1 for a
+        // description lock stays -1).
+        pid: u32::try_from(pid).map_or(pid, |kernel| {
+            i32::try_from(crate::syscall::pidns::show_pid(kernel)).unwrap_or(0)
+        }),
     })
 }
 

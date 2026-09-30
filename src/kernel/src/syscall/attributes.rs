@@ -57,6 +57,7 @@ use ferrix_sched::weight_of_nice;
 
 use crate::sched::Task;
 use crate::syscall::credentials::{self, CAP_LAST_CAP};
+use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::syscall::registry;
 use crate::syscall::uaccess;
@@ -204,11 +205,17 @@ impl Deref for Subject<'_> {
 ///
 /// `ESRCH` for a pid nothing has, negative ones included.
 pub(crate) fn subject(process: &Process, pid: i32) -> Result<Subject<'_>, Errno> {
-    if pid == 0 || u32::try_from(pid).is_ok_and(|pid| pid == process.pid()) {
+    if pid == 0 {
         return Ok(Subject::Caller(process));
     }
-    let pid = u32::try_from(pid).map_err(|_| Errno::ESRCH)?;
-    registry::find(pid).map(Subject::Other).ok_or(Errno::ESRCH)
+    // A number in the caller's namespace (`docs/PIDNS.md` §3).
+    let number = u32::try_from(pid).map_err(|_| Errno::ESRCH)?;
+    if pidns::from_user(process, number) == Some(process.pid()) {
+        return Ok(Subject::Caller(process));
+    }
+    pidns::find_in(process, number)
+        .map(Subject::Other)
+        .ok_or(Errno::ESRCH)
 }
 
 /// A `pid_t` or `int` argument: 32 bits, signed, whatever the register width.
@@ -464,10 +471,11 @@ fn robust_list_subject(
     if pid == 0 {
         return crate::syscall::thread::current_of(process).ok_or(Errno::ESRCH);
     }
-    let tid = u32::try_from(pid).map_err(|_| Errno::ESRCH)?;
+    let number = u32::try_from(pid).map_err(|_| Errno::ESRCH)?;
+    let tid = pidns::from_user(process, number).ok_or(Errno::ESRCH)?;
     process
         .thread_by_tid(tid)
-        .or_else(|| registry::find(tid).and_then(|other| other.thread_by_tid(tid)))
+        .or_else(|| pidns::find_in(process, number).and_then(|other| other.thread_by_tid(tid)))
         .ok_or(Errno::ESRCH)
 }
 
@@ -517,13 +525,13 @@ fn named_by(process: &Process, which: i32, who: i32) -> Result<Vec<Subject<'_>>,
         PRIO_PROCESS => Ok(subject(process, who).into_iter().collect()),
         PRIO_PGRP => {
             let group = match u32::try_from(who) {
-                Ok(0) => process.pgid(),
-                Ok(group) => group,
+                Ok(0) => Some(process.pgid()),
+                Ok(group) => pidns::from_user(process, group),
                 Err(_) => return Ok(Vec::new()),
             };
-            Ok(registry::live()?
+            Ok(pidns::live_in(process)?
                 .into_iter()
-                .filter(|member| member.pgid() == group)
+                .filter(|member| group == Some(member.pgid()))
                 .map(Subject::Other)
                 .collect())
         }
@@ -540,7 +548,7 @@ fn named_by(process: &Process, which: i32, who: i32) -> Result<Vec<Subject<'_>>,
                 },
                 Err(_) => return Ok(Vec::new()),
             };
-            Ok(registry::live()?
+            Ok(pidns::live_in(process)?
                 .into_iter()
                 .filter(|member| member.with_credentials(|ids| ids.user.real) == uid)
                 .map(Subject::Other)

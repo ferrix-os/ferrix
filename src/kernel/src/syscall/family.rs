@@ -43,6 +43,7 @@ use ferrix_linux_abi::types::SIGCHLD;
 use crate::arch;
 use crate::fs::cgroupfs;
 use crate::object::job::{self, Job};
+use crate::syscall::pidns::{self, CLONE_NEWPID};
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
 use crate::syscall::{fd, namespace, registry, thread_area, uaccess, userns};
@@ -103,8 +104,6 @@ const CLONE_NEWUTS: u64 = 0x0400_0000;
 const CLONE_NEWIPC: u64 = 0x0800_0000;
 /// ... a user namespace, which is what an unprivileged sandbox asks for first.
 const CLONE_NEWUSER: u64 = 0x1000_0000;
-/// ... a pid namespace.
-const CLONE_NEWPID: u64 = 0x2000_0000;
 /// ... a network namespace.
 const CLONE_NEWNET: u64 = 0x4000_0000;
 /// Every namespace a child could be asked to be given. A mount and a user
@@ -399,14 +398,33 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 /// Whether the namespaces `flags` asks for can be given: `EINVAL` for one
 /// Ferrix does not have and for `CLONE_NEWNS` with `CLONE_FS`, as Linux
 /// refuses a namespace a shared fs context would leave; `EPERM` for
-/// `CLONE_NEWNS` without privilege.
+/// `CLONE_NEWNS` or `CLONE_NEWPID` without privilege; `ENOSPC` for a pid
+/// namespace past the depth limit.
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
-    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER)) != 0 {
+    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID)) != 0 {
         return Err(Errno::EINVAL);
     }
     // CVE-2013-1858 (U5): a root shared with a process outside, then `chroot`
     // inside. And a thread cannot have a user namespace of its own.
     if flags & CLONE_NEWUSER != 0 && flags & (CLONE_FS | CLONE_THREAD) != 0 {
+        return Err(Errno::EINVAL);
+    }
+    // A thread or a sibling in a pid namespace of its own would be a
+    // process with no parent there; and the init of a namespace may not make
+    // a sibling (`docs/PIDNS.md` §3).
+    if flags & CLONE_NEWPID != 0 && flags & (CLONE_THREAD | CLONE_PARENT) != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if flags & CLONE_PARENT != 0 && pidns::is_init(parent) {
+        return Err(Errno::EINVAL);
+    }
+    if flags & CLONE_THREAD != 0
+        && parent.children_namespace().is_some_and(|children| {
+            parent
+                .numbers()
+                .is_none_or(|own| !Arc::ptr_eq(own.namespace(), &children))
+        })
+    {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_NEWNS != 0 {
@@ -420,12 +438,67 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
             return Err(Errno::EPERM);
         }
     }
+    if flags & CLONE_NEWPID != 0 {
+        if flags & CLONE_NEWUSER == 0
+            && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
+        {
+            return Err(Errno::EPERM);
+        }
+        if pidns::level_of(parent.children_namespace().as_ref()) >= pidns::MAX_LEVEL {
+            return Err(Errno::ENOSPC);
+        }
+    }
     if flags & CLONE_NEWUSER != 0 {
         // Refused here, before anything is made, what `unshare` refuses the
         // same way; the namespace itself is made with the child.
         namespace::make_user_namespace(parent).map(drop)?;
     }
     Ok(())
+}
+
+/// What [`fresh_namespaces`] made: a user namespace and a pid namespace.
+type Fresh = (
+    Option<Arc<userns::UserNamespace>>,
+    Option<Arc<pidns::PidNamespace>>,
+);
+
+/// The namespaces `flags` has a child made in, before the child is: the user
+/// namespace first, as `unshare` makes it, and then a pid namespace below
+/// the one the parent's children go in.
+fn fresh_namespaces(parent: &Process, flags: u64) -> Result<Fresh, Errno> {
+    let user = if flags & CLONE_NEWUSER != 0 {
+        Some(namespace::make_user_namespace(parent)?)
+    } else {
+        None
+    };
+    let pids = if flags & CLONE_NEWPID != 0 {
+        Some(pidns::create(parent.children_namespace().as_ref())?)
+    } else {
+        None
+    };
+    Ok((user, pids))
+}
+
+/// Write a child's id where `CLONE_PARENT_SETTID` and `CLONE_CHILD_SETTID`
+/// ask, and answer the number the parent is told. A failure to write either
+/// is ignored, as Linux ignores it: the child exists by now, and the
+/// addresses were the program's to get right. The parent is told the child's
+/// number in the parent's namespace, the child its own.
+fn write_ids(
+    parent: &Process,
+    child: &Process,
+    flags: u64,
+    (parent_tid, child_tid): (u64, u64),
+) -> u32 {
+    let seen = pidns::to_user(parent, child);
+    let own = child.numbers().map_or(child.pid(), |numbers| numbers.own());
+    if flags & CLONE_PARENT_SETTID != 0 {
+        let _ = uaccess::copy_to_user(parent.space(), parent_tid, &seen.to_le_bytes());
+    }
+    if flags & CLONE_CHILD_SETTID != 0 {
+        let _ = uaccess::copy_to_user(child.space(), child_tid, &own.to_le_bytes());
+    }
+    seen
 }
 
 /// Make the process `request` asks for. See [`sys_clone`].
@@ -484,7 +557,8 @@ fn clone_with(
     // whole or not at all.
     // A child asked into a cgroup is counted there from the start, and never
     // in its parent's: its first instruction already runs in it.
-    let child = fork_into(parent, flags, into.as_ref())?;
+    let (fresh_user, fresh_pids) = fresh_namespaces(parent, flags)?;
+    let child = fork_into(parent, flags, into.as_ref(), fresh_pids)?;
     let pid = child.pid();
     // No pid left, or the job's task limit (`pids.max`) reached: Linux's
     // `EAGAIN` for both. The child charged nothing, and goes unstarted.
@@ -493,8 +567,7 @@ fn clone_with(
     }
     // Its own copy of the namespace, before anything can see it: a refusal
     // goes with the child, unstarted.
-    if flags & CLONE_NEWUSER != 0 {
-        let fresh = namespace::make_user_namespace(parent)?;
+    if let Some(fresh) = fresh_user {
         namespace::enter_user_namespace(&child, fresh);
     }
     if flags & CLONE_NEWNS != 0 {
@@ -537,16 +610,16 @@ fn clone_with(
         process::kill(&child, job::KILLED_STATUS);
         return Err(Errno::ENODEV);
     }
-
-    // A failure to write either id is ignored, as Linux ignores it: the child
-    // exists by now, and the addresses were the program's to get right.
-    let id = pid.to_le_bytes();
-    if flags & CLONE_PARENT_SETTID != 0 {
-        let _ = uaccess::copy_to_user(parent.space(), parent_tid, &id);
+    // And a pid namespace whose init went between the child's numbering and
+    // its being findable: `init_gone` could not see it, so it ends here.
+    if child
+        .numbers()
+        .is_some_and(|numbers| numbers.namespace().is_dying())
+    {
+        process::kill(&child, job::KILLED_STATUS);
+        return Err(Errno::ENOMEM);
     }
-    if flags & CLONE_CHILD_SETTID != 0 {
-        let _ = uaccess::copy_to_user(child.space(), child_tid, &id);
-    }
+    let seen = write_ids(parent, &child, flags, (parent_tid, child_tid));
 
     // The child starts with its parent's registers as they are right now, in
     // this system call: its thread pointer and floating-point state, and the
@@ -577,7 +650,7 @@ fn clone_with(
             caller.set_in_vfork(false);
         }
     }
-    Ok(pid as usize)
+    Ok(seen as usize)
 }
 
 /// Copy `parent` for a child in `into`, or in the parent's job: the copy is
@@ -590,6 +663,7 @@ fn fork_into(
     parent: &Arc<Process>,
     flags: u64,
     into: Option<&Arc<Job>>,
+    pid_ns: Option<Arc<pidns::PidNamespace>>,
 ) -> Result<Arc<Process>, Errno> {
     let own = crate::sched::running_group();
     if let Some(into) = into {
@@ -602,6 +676,7 @@ fn fork_into(
             flags & CLONE_FILES != 0,
             flags & CLONE_FS != 0,
             into.cloned(),
+            pid_ns,
         )
     });
     if into.is_some() {
@@ -648,8 +723,11 @@ fn clone_thread(
         return Err(Errno::ENOSYS);
     }
     let caller = thread::current_of(parent).ok_or(Errno::ESRCH)?;
-    let tid = registry::allocate_thread(parent).ok_or(Errno::EAGAIN)?;
-    let thread = Thread::sibling(parent, tid, &caller).map_err(|_| {
+    let (tid, numbers) = registry::allocate_thread_in(parent).ok_or(Errno::EAGAIN)?;
+    // Its number in the caller's namespace, which is its own: a thread is
+    // never made in another.
+    let seen = numbers.as_ref().map_or(tid, |numbers| numbers.own());
+    let thread = Thread::sibling_numbered(parent, tid, numbers, &caller).map_err(|_| {
         // Never a thread, so nothing gives its id back but this.
         registry::release_thread(tid, parent);
         Errno::ENOMEM
@@ -658,7 +736,7 @@ fn clone_thread(
     let thread = crate::fallible::try_arc(thread).map_err(|_| Errno::ENOMEM)?;
 
     // Ignored if they fail, as for a process; see `clone_with`.
-    let id = tid.to_le_bytes();
+    let id = seen.to_le_bytes();
     if flags & CLONE_PARENT_SETTID != 0 {
         let _ = uaccess::copy_to_user(parent.space(), parent_tid, &id);
     }
@@ -681,17 +759,24 @@ fn clone_thread(
     }
     thread.set_resume(thread_regs);
     let _task = process::start_thread(thread, state).map_err(|_| Errno::EAGAIN)?;
-    Ok(tid as usize)
+    Ok(seen as usize)
 }
 
-/// Which children a wait is for, decoded from `wait4`'s `pid`.
+/// Which children a wait is for, decoded from `wait4`'s `pid`, which is a
+/// number in the caller's namespace. One the caller's namespace has no
+/// process or group under selects nothing, and the wait is `ECHILD`.
 fn wait4_selector(process: &Process, pid: i32) -> impl Fn(&Process) -> bool {
     let own_group = process.pgid();
+    let named = match pid {
+        pid if pid > 0 => pidns::from_user(process, pid.unsigned_abs()),
+        pid if pid < -1 => pidns::from_user(process, pid.unsigned_abs()),
+        _ => None,
+    };
     move |child: &Process| match pid {
         -1 => true,
         0 => child.pgid() == own_group,
-        pid if pid > 0 => child.pid() == pid.unsigned_abs(),
-        pid => child.pgid() == pid.unsigned_abs(),
+        pid if pid > 0 => named == Some(child.pid()),
+        _ => named == Some(child.pgid()),
     }
 }
 
@@ -802,7 +887,7 @@ pub(crate) fn sys_wait4(
     if rusage != 0 {
         zero_rusage(process, rusage, super::signal::word_of(abi))?;
     }
-    Ok(child.pid() as usize)
+    Ok(pidns::to_user(process, child) as usize)
 }
 
 /// `pidfd_open`: a descriptor for process `pid`, close-on-exec as Linux
@@ -816,7 +901,7 @@ pub(crate) fn sys_pidfd_open(process: &Process, pid: i32, flags: u32) -> Result<
     if pid <= 0 || flags & !PIDFD_NONBLOCK != 0 {
         return Err(Errno::EINVAL);
     }
-    let target = registry::find(pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
+    let target = pidns::find_in(process, pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
     let file = crate::fs::pidfd::create(target, flags & PIDFD_NONBLOCK != 0)?;
     let fd = process.files().lock().insert(file, true)?;
     usize::try_from(fd).map_err(|_| Errno::EMFILE)
@@ -851,14 +936,16 @@ pub(crate) fn sys_waitid(
     let named = if idtype == P_PIDFD {
         let file = fd::file(process, fd::arg(u64::from(id)))?;
         let pidfd = crate::fs::pidfd::of(&file).ok_or(Errno::EBADF)?;
-        pidfd.process().pid()
+        Some(pidfd.process().pid())
     } else {
-        id
+        // A number in the caller's namespace; one it has nothing under
+        // selects no child.
+        pidns::from_user(process, id)
     };
     let select = move |child: &Process| match idtype {
         P_ALL => true,
-        P_PID | P_PIDFD => child.pid() == named,
-        P_PGID => child.pgid() == named,
+        P_PID | P_PIDFD => named == Some(child.pid()),
+        P_PGID => named == Some(child.pgid()),
         _ => false,
     };
     let found = wait_for_child(process, &select, options, options & WNOWAIT == 0)?;
@@ -879,7 +966,7 @@ pub(crate) fn sys_waitid(
             let union = if word == 8 { 16 } else { 12 };
             put_i32(&mut info, 0, SIGCHLD as i32)?;
             put_i32(&mut info, 8, code)?;
-            put_i32(&mut info, union, child.pid() as i32)?;
+            put_i32(&mut info, union, pidns::to_user(process, child) as i32)?;
             put_i32(&mut info, union + 8, status)?;
         }
         uaccess::copy_to_user(process.space(), infop, &info).map_err(|_| Errno::EFAULT)?;
@@ -921,58 +1008,69 @@ pub(crate) fn sys_setpgid(process: &Process, pid: i32, pgid: i32) -> Result<usiz
     if pgid < 0 {
         return Err(Errno::EINVAL);
     }
-    let target = if pid == 0 || pid.unsigned_abs() == process.pid() {
+    // Numbers in the caller's namespace, taken to kernel numbers.
+    let named = pidns::from_user(process, pid.unsigned_abs());
+    let target = if pid == 0 || named == Some(process.pid()) {
         None
-    } else if pid > 0 && process.has_child(pid.unsigned_abs()) {
-        Some(registry::find(pid.unsigned_abs()).ok_or(Errno::ESRCH)?)
+    } else if let Some(kernel) = named.filter(|&kernel| pid > 0 && process.has_child(kernel)) {
+        Some(registry::find(kernel).ok_or(Errno::ESRCH)?)
     } else {
         return Err(Errno::ESRCH);
     };
     let target_process: &Process = target.as_deref().unwrap_or(process);
     let group = if pgid == 0 {
-        target_process.pid()
+        Some(target_process.pid())
     } else {
-        pgid.unsigned_abs()
+        pidns::from_user(process, pgid.unsigned_abs())
     };
     if target_process.sid() == target_process.pid() {
         return Err(Errno::EPERM);
     }
-    if group != target_process.pid() {
-        let exists = registry::live()?
-            .iter()
-            .any(|other| other.pgid() == group && other.sid() == process.sid());
-        if !exists {
-            return Err(Errno::EPERM);
+    // The group joined, and the numbers it is told in a namespace by: the
+    // target's own if it leads it, else a member's.
+    let (group, record) = match group {
+        Some(group) if group == target_process.pid() => {
+            (group, target_process.numbers().map(Arc::clone))
         }
-    }
-    target_process.set_pgid(group);
+        Some(group) => {
+            let member = registry::live()?
+                .into_iter()
+                .find(|other| other.pgid() == group && other.sid() == process.sid())
+                .ok_or(Errno::EPERM)?;
+            (group, member.group_record())
+        }
+        None => return Err(Errno::EPERM),
+    };
+    target_process.set_pgid(group, record);
     Ok(0)
 }
 
-/// `getpgid`: the process group of `pid`, or of the caller for zero.
+/// `getpgid`: the process group of `pid`, or of the caller for zero, as the
+/// caller's namespace numbers it: zero for a group led from outside it.
 ///
 /// # Errors
 ///
 /// `ESRCH` for a pid no process has.
 pub(crate) fn sys_getpgid(process: &Process, pid: i32) -> Result<usize, Errno> {
     if pid == 0 {
-        return Ok(process.pgid() as usize);
+        return Ok(process.pgid_in(process) as usize);
     }
-    let other = registry::find(pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
-    Ok(other.pgid() as usize)
+    let other = pidns::find_in(process, pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
+    Ok(other.pgid_in(process) as usize)
 }
 
-/// `getsid`: the session of `pid`, or of the caller for zero.
+/// `getsid`: the session of `pid`, or of the caller for zero, as the
+/// caller's namespace numbers it.
 ///
 /// # Errors
 ///
 /// `ESRCH` for a pid no process has.
 pub(crate) fn sys_getsid(process: &Process, pid: i32) -> Result<usize, Errno> {
     if pid == 0 {
-        return Ok(process.sid() as usize);
+        return Ok(process.sid_in(process) as usize);
     }
-    let other = registry::find(pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
-    Ok(other.sid() as usize)
+    let other = pidns::find_in(process, pid.unsigned_abs()).ok_or(Errno::ESRCH)?;
+    Ok(other.sid_in(process) as usize)
 }
 
 /// `setsid`: lead a new session and process group.
@@ -989,5 +1087,5 @@ pub(crate) fn sys_setsid(process: &Process) -> Result<usize, Errno> {
         return Err(Errno::EPERM);
     }
     process.lead_new_session();
-    Ok(process.pid() as usize)
+    Ok(pidns::to_user(process, process) as usize)
 }

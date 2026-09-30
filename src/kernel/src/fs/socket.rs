@@ -482,7 +482,11 @@ pub(crate) fn sender_of(passed: Option<&Passed>) -> Ucred {
 /// ids, and a program is only ever told its own namespace's (rule U9).
 pub(crate) fn as_seen(credentials: Ucred) -> Ucred {
     Ucred {
-        pid: credentials.pid,
+        // Kernel numbers are what is stamped; the reader's namespace names it.
+        pid: i32::try_from(crate::syscall::pidns::show_pid(
+            u32::try_from(credentials.pid).unwrap_or(0),
+        ))
+        .unwrap_or(0),
         uid: crate::syscall::credentials::show_uid(credentials.uid),
         gid: crate::syscall::credentials::show_gid(credentials.gid),
     }

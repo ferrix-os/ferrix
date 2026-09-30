@@ -254,6 +254,10 @@ fn status_is_byte_for_byte_what_linux_printed() {
         state: State::Running,
         tgid: 457743,
         pid: 457743,
+        nstgid: &[],
+        nspid: &[],
+        nspgid: &[],
+        nssid: &[],
         ppid: 457739,
         uid: [1000; 4],
         gid: [1000; 4],
@@ -283,6 +287,10 @@ fn a_threads_status_names_its_process_and_itself() {
         state: State::Sleeping,
         tgid: 457743,
         pid: 457750,
+        nstgid: &[],
+        nspid: &[],
+        nspgid: &[],
+        nssid: &[],
         ppid: 457739,
         uid: [1000; 4],
         gid: [1000; 4],
@@ -306,6 +314,10 @@ fn a_status_name_escapes_newline_and_backslash_only() {
         state: State::Sleeping,
         tgid: 1,
         pid: 1,
+        nstgid: &[],
+        nspid: &[],
+        nspgid: &[],
+        nssid: &[],
         ppid: 0,
         uid: [0; 4],
         gid: [0; 4],
@@ -1045,4 +1057,38 @@ fn loadavg_folds_as_linux_does() {
     averages.advance(3 * 3600 * 1_000_000_000, 0);
     assert_eq!(averages.loads, [0; 3]);
     assert_eq!(loadavg::hundredths(FIXED_1 * 3 / 2), (1, 50));
+}
+
+#[test]
+fn a_status_in_a_pid_namespace_lists_every_number_from_the_readers_down() {
+    // The init of a namespace the reader made: 4242 to the machine, 1 to
+    // itself. Linux prints each `NS*` line as the numbers, tab-separated,
+    // from the reader's namespace down; `NSpgid` and `NSsid` with them.
+    let status = Status {
+        name: b"sh",
+        umask: 0o0022,
+        state: State::Sleeping,
+        tgid: 4242,
+        pid: 4242,
+        nstgid: &[4242, 1],
+        nspid: &[4242, 1],
+        nspgid: &[4242, 1],
+        nssid: &[4242, 1],
+        ppid: 100,
+        uid: [0; 4],
+        gid: [0; 4],
+        fd_size: 64,
+        vm_size: 0,
+        vm_locked: 0,
+        vm_data: 0,
+        vm_stack: 0,
+        threads: 1,
+        cpus: 1,
+    };
+    let out = rendered(|out| status::render(out, &status));
+    let text = core::str::from_utf8(&out).unwrap_or("");
+    assert!(
+        text.contains("Groups:\t \nNStgid:\t4242\t1\nNSpid:\t4242\t1\nNSpgid:\t4242\t1\nNSsid:\t4242\t1\nVmSize:"),
+        "{text}"
+    );
 }

@@ -30,6 +30,7 @@ use crate::fallible;
 use crate::fs;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
+use crate::syscall::pidns::{self, CLONE_NEWPID};
 use crate::syscall::process::Process;
 use crate::syscall::userns::{self, CAP_SYS_ADMIN};
 
@@ -60,7 +61,7 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// Every other flag names a namespace, or asks to leave a thread group or an
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
-    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER) != 0 {
+    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID) != 0 {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_FILES != 0 && Arc::strong_count(process.files()) > 1 {
@@ -81,16 +82,28 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     } else {
         None
     };
-    // `CLONE_NEWNS` needs `CAP_SYS_ADMIN` where the caller is: in the
-    // namespace it is about to have, if it asked for one.
+    // `CLONE_NEWNS` and `CLONE_NEWPID` need `CAP_SYS_ADMIN` where the caller
+    // is: in the namespace it is about to have, if it asked for one.
+    let privileged = fresh.is_some() || process.with_credentials(|held| held.holds(CAP_SYS_ADMIN));
+    if flags & (CLONE_NEWNS | CLONE_NEWPID) != 0 && !privileged {
+        return Err(Errno::EPERM);
+    }
+    // The pid namespace is made before anything is changed, and owned by the
+    // user namespace made with it, if any. It takes the caller's later
+    // children and not the caller (`docs/PIDNS.md` §1).
+    let fresh_pids = if flags & CLONE_NEWPID != 0 {
+        Some(pidns::create(process.children_namespace().as_ref())?)
+    } else {
+        None
+    };
     if flags & CLONE_NEWNS != 0 {
-        if fresh.is_none() && !process.with_credentials(|held| held.holds(CAP_SYS_ADMIN)) {
-            return Err(Errno::EPERM);
-        }
         copy_namespace(process.fs_context())?;
     }
     if let Some(fresh) = fresh {
         enter_user_namespace(process, fresh);
+    }
+    if let Some(pids) = fresh_pids {
+        process.set_children_namespace(pids);
     }
     Ok(0)
 }

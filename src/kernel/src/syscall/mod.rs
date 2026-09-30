@@ -73,6 +73,7 @@ pub(crate) mod namespace;
 pub(crate) mod native;
 pub(crate) mod native_check;
 pub(crate) mod path;
+pub(crate) mod pidns;
 pub(crate) mod pipe;
 pub(crate) mod poll;
 pub(crate) mod process;

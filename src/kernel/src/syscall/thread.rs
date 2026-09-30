@@ -34,6 +34,7 @@ use crate::fallible::AllocError;
 use crate::object::process::{self as pids, Host};
 use crate::sched::{self, Task, UserThread};
 use crate::sync::SpinLock;
+use crate::syscall::pidns::Numbers;
 use crate::syscall::process::Process;
 use crate::syscall::signal::{self, Inherited, Signals, ThreadSignals};
 
@@ -47,6 +48,10 @@ pub(crate) struct Thread {
     /// Set as it begins to end, after which a signal is never chosen for it
     /// and its process no longer lists it.
     gone: AtomicBool,
+    /// Its numbers in the pid namespaces below the first, when it is a thread
+    /// beside its process's first and its process is in one. The first
+    /// thread's are the process's ([`Thread::numbers`]).
+    numbers: SpinLock<Option<Arc<Numbers>>>,
     /// The program it runs. Holding it is what keeps the process alive while
     /// the thread is: a process does not own its threads, its threads own it.
     process: Arc<Process>,
@@ -90,6 +95,20 @@ impl Thread {
         Ok(Thread::with(process, ThreadSignals::new(inherited)?))
     }
 
+    /// [`Thread::sibling_numbered`] for a process in the first namespace,
+    /// which has no numbers to give it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Thread::leader`].
+    pub(crate) fn sibling(
+        process: &Arc<Process>,
+        tid: u32,
+        caller: &Thread,
+    ) -> Result<Thread, AllocError> {
+        Thread::sibling_numbered(process, tid, None, caller)
+    }
+
     /// A thread of `process` other than its first, numbered `tid`, made by
     /// `caller`: with the caller's blocked mask, no alternate stack and nothing
     /// pending, as Linux's `copy_process` makes a `CLONE_THREAD` child.
@@ -97,9 +116,10 @@ impl Thread {
     /// # Errors
     ///
     /// As [`Thread::leader`]. `tid` is then still the caller's to give back.
-    pub(crate) fn sibling(
+    pub(crate) fn sibling_numbered(
         process: &Arc<Process>,
         tid: u32,
+        numbers: Option<Arc<Numbers>>,
         caller: &Thread,
     ) -> Result<Thread, AllocError> {
         let inherited = caller
@@ -107,6 +127,7 @@ impl Thread {
             .without_alt_stack();
         let mut thread = Thread::with(process, ThreadSignals::new(inherited)?);
         *thread.tid.get_mut() = tid;
+        *thread.numbers.get_mut() = numbers;
         Ok(thread)
     }
 
@@ -115,6 +136,7 @@ impl Thread {
         Thread {
             tid: AtomicU32::new(process.pid()),
             gone: AtomicBool::new(false),
+            numbers: SpinLock::new(None),
             process: Arc::clone(process),
             clear_child_tid: AtomicU64::new(0),
             robust_list: AtomicU64::new(0),
@@ -143,7 +165,21 @@ impl Thread {
     /// program while not the first does, becoming the leader. Answers the id
     /// it had, which its process then gives back.
     pub(crate) fn take_pid(&self, pid: u32) -> u32 {
+        // Its own numbers go with the id it gives up; the process's are its
+        // now. Dropped with no lock held.
+        let given_up = self.numbers.lock().take();
+        drop(given_up);
         self.tid.swap(pid, Ordering::AcqRel)
+    }
+
+    /// Its numbers in the pid namespaces below the first it is in: its
+    /// process's for the first thread, its own for another; `None` in the
+    /// first namespace.
+    pub(crate) fn numbers(&self) -> Option<Arc<Numbers>> {
+        if self.tid() == self.process.pid() {
+            return self.process.numbers().cloned();
+        }
+        self.numbers.lock().clone()
     }
 
     /// Whether it has begun to end.

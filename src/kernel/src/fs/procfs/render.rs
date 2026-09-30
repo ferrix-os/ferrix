@@ -34,6 +34,7 @@ use crate::irq;
 use crate::mm;
 use crate::sched;
 use crate::smp;
+use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry::PID_MAX;
 use crate::syscall::system::{self, NAME_MAX, RELEASE, SYSNAME, VERSION};
@@ -68,9 +69,21 @@ fn put(out: &mut Vec<u8>, arguments: fmt::Arguments<'_>) {
 /// `/proc/self`: the caller's pid. `ENOENT` from a kernel thread, which has
 /// no process to name, as on Linux.
 pub(super) fn self_link(_: &Kernel) -> Result<Vec<u8>> {
+    self_link_in(None)
+}
+
+/// `/proc/self` as an instance mounted in pid namespace `ns` (`None` for the
+/// first) names the caller: by the number that namespace gives it, and
+/// `ENOENT` if it gives it none -- a program reading another namespace's
+/// procfs.
+pub(super) fn self_link_in(ns: Option<&Arc<PidNamespace>>) -> Result<Vec<u8>> {
     let process = process::current().ok_or(Errno::ENOENT)?;
+    let number = pidns::name_in(ns, &process);
+    if number == 0 {
+        return Err(Errno::ENOENT);
+    }
     let mut target = Vec::new();
-    put(&mut target, format_args!("{}", process.pid()));
+    put(&mut target, format_args!("{number}"));
     Ok(target)
 }
 
@@ -218,6 +231,20 @@ pub(super) fn mount_namespace(process: &Process) -> Result<Vec<u8>> {
 pub(super) fn user_namespace(process: &Process) -> Result<Vec<u8>> {
     let id = process.with_credentials(|held| held.user_ns.id());
     Ok(alloc::format!("user:[{id}]").into_bytes())
+}
+
+/// `/proc/<pid>/ns/pid` and `pid_for_children`, `pid:[N]`: the pid
+/// namespace the process is in, or the one its children are made in.
+pub(super) fn pid_namespace(process: &Process, for_children: bool) -> Result<Vec<u8>> {
+    let namespace = if for_children {
+        process.children_namespace()
+    } else {
+        process
+            .numbers()
+            .map(|numbers| Arc::clone(numbers.namespace()))
+    };
+    let id = pidns::id_of(namespace.as_ref());
+    Ok(alloc::format!("pid:[{id}]").into_bytes())
 }
 
 /// The user namespace the reading process is in: the first, for the kernel's
@@ -949,12 +976,77 @@ fn state_of(process: &Process, tid: u32) -> State {
     }
 }
 
-/// Its parent's pid, as `getppid` answers it: 0 for a process the kernel
-/// started, pid 1 among them, as Linux reports init's. This said 1 for every
-/// process long after processes had parents, so a zombie in `/proc` always
-/// looked like init's to reap, whoever its parent was.
-fn parent_of(process: &Process) -> u32 {
-    process.parent_pid()
+/// The pids `status` and `stat` tell, as the reading process's namespace
+/// numbers them (`docs/PIDNS.md` §6).
+struct Shown {
+    /// The process's own.
+    tgid: u32,
+    /// The thread's.
+    pid: u32,
+    /// Its parent's, or zero.
+    ppid: u32,
+    /// Its group's and its session's.
+    pgrp: u32,
+    /// See `pgrp`.
+    session: u32,
+    /// The `NS*` lines' numbers, empty for a process in the first namespace
+    /// read from it.
+    nstgid: Vec<u32>,
+    /// See `nstgid`.
+    nspid: Vec<u32>,
+    /// See `nstgid`.
+    nspgid: Vec<u32>,
+    /// See `nstgid`.
+    nssid: Vec<u32>,
+}
+
+/// What the reading process is told of thread `tid` of `process`.
+fn pids_shown(process: &Process, tid: u32) -> Shown {
+    let Some(reader) = userns::acting() else {
+        return Shown {
+            tgid: process.pid(),
+            pid: tid,
+            ppid: process.parent().map_or(0, |parent| parent.pid()),
+            pgrp: process.pgid(),
+            session: process.sid(),
+            nstgid: Vec::new(),
+            nspid: Vec::new(),
+            nspgid: Vec::new(),
+            nssid: Vec::new(),
+        };
+    };
+    let level = reader
+        .numbers()
+        .map_or(0, |numbers| numbers.namespace().level());
+    let nested = level > 0 || process.numbers().is_some();
+    let thread = process.thread_by_tid(tid);
+    let thread_numbers = thread.as_ref().and_then(|thread| thread.numbers());
+    let tgid = pidns::to_user(&reader, process);
+    let pid = if tid == process.pid() {
+        tgid
+    } else {
+        thread
+            .as_ref()
+            .map_or(0, |thread| pidns::tid_to_user(&reader, thread))
+    };
+    let chain = |numbers: Option<&Arc<pidns::Numbers>>| {
+        if nested {
+            pidns::status_chain(numbers, level)
+        } else {
+            Vec::new()
+        }
+    };
+    Shown {
+        tgid,
+        pid,
+        ppid: process.parent_pid_in(&reader),
+        pgrp: process.pgid_in(&reader),
+        session: process.sid_in(&reader),
+        nstgid: chain(process.numbers()),
+        nspid: chain(thread_numbers.as_ref().or(process.numbers())),
+        nspgid: chain(process.group_record().as_ref()),
+        nssid: chain(process.session_record().as_ref()),
+    }
 }
 
 /// Processors online, which every process may run on.
@@ -1009,6 +1101,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         )
     });
     let memory = Memory::of(process);
+    let seen = pids_shown(process, tid);
     let name = process.comm();
     // Slots in the table as Linux sizes one: a power of two, 64 at least.
     let highest = process.files().lock().iter().map(|(fd, _)| fd).last();
@@ -1019,9 +1112,13 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         name: &name,
         umask: process.umask(),
         state: state_of(process, tid),
-        tgid: process.pid(),
-        pid: tid,
-        ppid: parent_of(process),
+        tgid: seen.tgid,
+        pid: seen.pid,
+        nstgid: &seen.nstgid,
+        nspid: &seen.nspid,
+        nspgid: &seen.nspgid,
+        nssid: &seen.nssid,
+        ppid: seen.ppid,
         uid,
         gid,
         fd_size,
@@ -1121,15 +1218,22 @@ fn controlling_terminal(session: u32) -> (u32, i32) {
 fn stat_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     let memory = Memory::of(process);
     let comm = process.comm();
-    let session = process.sid();
-    let (tty_nr, tpgid) = controlling_terminal(session);
+    let seen = pids_shown(process, tid);
+    let (tty_nr, tpgid) = controlling_terminal(process.sid());
+    // The terminal keeps a kernel group number; the reader's namespace names it.
+    let tpgid = match (userns::acting(), u32::try_from(tpgid)) {
+        (Some(reader), Ok(group)) if group != 0 => {
+            i32::try_from(pidns::pgrp_to_user(&reader, group)).unwrap_or(-1)
+        }
+        _ => tpgid,
+    };
     let stat = Stat {
-        pid: tid,
+        pid: seen.pid,
         comm: &comm,
         state: state_of(process, tid),
-        ppid: parent_of(process),
-        pgrp: process.pgid(),
-        session,
+        ppid: seen.ppid,
+        pgrp: seen.pgrp,
+        session: seen.session,
         tty_nr,
         tpgid,
         // No `PF_*` flag applies: in particular `PF_RANDOMIZE` is clear,

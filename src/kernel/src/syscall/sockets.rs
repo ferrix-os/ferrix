@@ -70,6 +70,7 @@ use crate::net::socket::{self as inet, InetKind, InetSocket};
 use crate::syscall::attributes::int;
 use crate::syscall::credentials;
 use crate::syscall::fd;
+use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::trap::Abi;
@@ -1093,7 +1094,8 @@ fn named_credentials(process: &Process, data: &[u8]) -> Result<Ucred, Errno> {
     // The ids are as the sender's namespace names them; the stamp holds
     // kernel ids, and an id the namespace does not map is refused.
     let named = Ucred {
-        pid: field(0)?.cast_signed(),
+        // A number in the sender's namespace, stamped as the kernel's own.
+        pid: pidns::from_user(process, field(0)?).map_or(0, u32::cast_signed),
         uid: credentials::kernel_uid(process, field(4)?)?,
         gid: credentials::kernel_gid(process, field(8)?)?,
     };

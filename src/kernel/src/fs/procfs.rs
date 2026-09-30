@@ -110,6 +110,7 @@ use ferrix_vfs::{
 
 use crate::fs;
 use crate::panic::{catalog, fatal};
+use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::Process;
 use crate::syscall::registry;
 
@@ -185,13 +186,19 @@ enum NamespaceKind {
     Mount = 0,
     /// `user`.
     User = 1,
+    /// `pid`: the namespace the process is in.
+    Pid = 2,
+    /// `pid_for_children`: the one its children are made in.
+    PidForChildren = 3,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 2] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 4] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
+        (NamespaceKind::Pid, b"pid"),
+        (NamespaceKind::PidForChildren, b"pid_for_children"),
     ];
 }
 
@@ -635,15 +642,25 @@ struct Shared {
     device: u64,
     /// Every timestamp: when it was mounted.
     made: Timespec,
+    /// The pid namespace it was mounted in, whose numbers name its processes
+    /// (`docs/PIDNS.md` §6); `None` for the first.
+    pid_ns: Option<Arc<PidNamespace>>,
 }
 
 impl Procfs {
-    /// A procfs, stamped with the time it was made.
+    /// A procfs of the first pid namespace, stamped with the time it was made.
     pub(crate) fn new() -> Procfs {
+        Procfs::new_in(None)
+    }
+
+    /// A procfs of pid namespace `pid_ns` (`None` for the first): it lists
+    /// only the processes that namespace can see, under its numbers.
+    pub(crate) fn new_in(pid_ns: Option<Arc<PidNamespace>>) -> Procfs {
         Procfs {
             shared: Arc::new(Shared {
                 device: fs::anonymous_device(),
                 made: fs::clock().now(),
+                pid_ns,
             }),
         }
     }
@@ -1136,8 +1153,14 @@ impl Inode for Node {
                 if let Some(child) = named_in(Tree::ROOT, name) {
                     return Ok(self.at(Place::Top(child)));
                 }
-                let pid = number(name).ok_or(Errno::ENOENT)?;
-                let _ = alive(pid)?;
+                // A number in the namespace that mounted this; a process it
+                // cannot see is not there.
+                let ns = self.shared.pid_ns.as_ref();
+                let pid = pidns::kernel_in(ns, number(name).ok_or(Errno::ENOENT)?)
+                    .ok_or(Errno::ENOENT)?;
+                if pidns::name_in(ns, &*alive(pid)?) == 0 {
+                    return Err(Errno::ENOENT);
+                }
                 Ok(self.at(Place::Process(pid)))
             }
             Place::Top(tree) => {
@@ -1172,8 +1195,13 @@ impl Inode for Node {
             }
             _ if self.threads_of().is_some() => {
                 let pid = self.threads_of().ok_or(Errno::ENOTDIR)?;
-                let tid = number(name).ok_or(Errno::ENOENT)?;
-                let _ = thread_alive(pid, tid)?;
+                let ns = self.shared.pid_ns.as_ref();
+                let tid = pidns::kernel_in(ns, number(name).ok_or(Errno::ENOENT)?)
+                    .ok_or(Errno::ENOENT)?;
+                let of = thread_alive(pid, tid)?;
+                if pidns::thread_name_in(ns, &of.process, tid) == 0 {
+                    return Err(Errno::ENOENT);
+                }
                 Ok(self.at(Place::Thread(pid, tid)))
             }
             _ => {
@@ -1190,7 +1218,7 @@ impl Inode for Node {
 
     fn read_dir(&self, cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<()> {
         match self.place {
-            Place::Root => list_root(cursor, emit),
+            Place::Root => list_root(self.shared.pid_ns.as_ref(), cursor, emit),
             Place::Top(tree) => {
                 let entries = tree.entries().ok_or(Errno::ENOTDIR)?;
                 let ino = |index| tree.child(index).map_or(0, |child| Place::Top(child).ino());
@@ -1229,7 +1257,7 @@ impl Inode for Node {
             }
             _ if self.threads_of().is_some() => {
                 let pid = self.threads_of().ok_or(Errno::ENOTDIR)?;
-                list_threads(pid, cursor, emit)
+                list_threads(self.shared.pid_ns.as_ref(), pid, cursor, emit)
             }
             _ => {
                 let pid = self.descriptors_of().ok_or(Errno::ENOTDIR)?;
@@ -1240,6 +1268,11 @@ impl Inode for Node {
 
     fn read_link(&self) -> Result<Vec<u8>> {
         match self.place {
+            // `/proc/self` names the reader as this instance's namespace
+            // numbers it (`docs/PIDNS.md` §6).
+            Place::Top(tree) if tree.entry().is_some_and(|(entry, _)| entry.name == b"self") => {
+                render::self_link_in(self.shared.pid_ns.as_ref())
+            }
             Place::Top(tree) => match tree.entry().map(|(entry, _)| &entry.content) {
                 Some(Content::Link(target)) => target(&()),
                 _ => Err(Errno::EINVAL),
@@ -1251,6 +1284,12 @@ impl Inode for Node {
             Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
             Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Pid) => {
+                render::pid_namespace(&*alive(pid)?, false)
+            }
+            Place::Namespace(pid, NamespaceKind::PidForChildren) => {
+                render::pid_namespace(&*alive(pid)?, true)
+            }
             _ => Err(Errno::EINVAL),
         }
     }
@@ -1314,8 +1353,13 @@ fn list_table<T>(
     true
 }
 
-/// `/proc`: the table, then a directory per live process in pid order.
-fn list_root(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<()> {
+/// `/proc`: the table, then a directory per process the instance's namespace
+/// can see, in its numbering's order.
+fn list_root(
+    ns: Option<&Arc<PidNamespace>>,
+    cursor: u64,
+    emit: &mut dyn FnMut(DirEntry<'_>) -> bool,
+) -> Result<()> {
     let ino = |index| {
         Tree::ROOT
             .child(index)
@@ -1326,8 +1370,16 @@ fn list_root(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<
     }
     let from = cursor.saturating_sub(PID_CURSORS);
     let mut digits = [0_u8; 20];
-    for process in registry::live()? {
-        let pid = u64::from(process.pid());
+    // Each under the number this namespace gives it, which is the kernel's
+    // in the first namespace, where the registry's order is already right.
+    let mut visible: Vec<(u32, Arc<Process>)> = registry::live()?
+        .into_iter()
+        .map(|process| (pidns::name_in(ns, &process), process))
+        .filter(|(name, _)| *name != 0)
+        .collect();
+    visible.sort_by_key(|(name, _)| *name);
+    for (name, process) in visible {
+        let pid = u64::from(name);
         if pid < from {
             continue;
         }
@@ -1344,13 +1396,25 @@ fn list_root(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<
     Ok(())
 }
 
-/// `/proc/<pid>/task`: a directory per thread, in id order.
-fn list_threads(pid: u32, cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<()> {
+/// `/proc/<pid>/task`: a directory per thread, in the instance's numbering's
+/// order.
+fn list_threads(
+    ns: Option<&Arc<PidNamespace>>,
+    pid: u32,
+    cursor: u64,
+    emit: &mut dyn FnMut(DirEntry<'_>) -> bool,
+) -> Result<()> {
     let process = alive(pid)?;
     let from = cursor.saturating_sub(FIRST_CURSOR);
     let mut digits = [0_u8; 20];
-    for tid in thread_ids(&process) {
-        let at = u64::from(tid);
+    let mut named: Vec<(u32, u32)> = thread_ids(&process)
+        .into_iter()
+        .map(|tid| (pidns::thread_name_in(ns, &process, tid), tid))
+        .filter(|(name, _)| *name != 0)
+        .collect();
+    named.sort_unstable();
+    for (name, tid) in named {
+        let at = u64::from(name);
         if at < from {
             continue;
         }

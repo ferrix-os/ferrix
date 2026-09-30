@@ -24,6 +24,7 @@ use alloc::vec::Vec;
 use ferrix_linux_abi::errno::Errno;
 
 use crate::object::process::{self as table, Host};
+use crate::syscall::pidns::{self, Numbers};
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::Thread;
 
@@ -51,8 +52,10 @@ pub(crate) fn publish_forked(child: &Arc<Process>, thread: &Arc<Thread>) {
 /// Choose a thread id for a new thread of `process`, which is already shared
 /// and findable, and have it find `process` from the start: thread ids and
 /// pids are one space, as on Linux, so `kill` or `prlimit` given a thread's
-/// id reach its process. `None` if every number is in use.
-pub(crate) fn allocate_thread(process: &Arc<Process>) -> Option<u32> {
+/// id reach its process. Also its numbers in every pid namespace `process` is
+/// in below the first. `None` if every number is in use, or a namespace has
+/// no room or no memory.
+pub(crate) fn allocate_thread_in(process: &Arc<Process>) -> Option<(u32, Option<Arc<Numbers>>)> {
     // A thread is a task its job's `pids.max` counts, charged before its id
     // is chosen and given back with the id.
     process.charge_thread().ok()?;
@@ -60,9 +63,26 @@ pub(crate) fn allocate_thread(process: &Arc<Process>) -> Option<u32> {
         process.uncharge_thread();
         return None;
     };
+    let numbers = match process.numbers() {
+        None => None,
+        Some(own) => match pidns::assign(own.namespace(), tid) {
+            Ok(numbers) => Some(numbers),
+            Err(_) => {
+                release(tid);
+                process.uncharge_thread();
+                return None;
+            }
+        },
+    };
     // Reserved just above, so naming it adds no entry and cannot fail.
     let _ = table::name(tid, weak(process));
-    Some(tid)
+    Some((tid, numbers))
+}
+
+/// [`allocate_thread_in`] for a process in the first namespace, which has no
+/// numbers to keep: the boot checks'.
+pub(crate) fn allocate_thread(process: &Arc<Process>) -> Option<u32> {
+    allocate_thread_in(process).map(|(tid, _)| tid)
 }
 
 /// Give back thread id `tid` of `process`, if it still names that process.
@@ -86,6 +106,12 @@ pub(crate) fn numbers_naming(process: &Process) -> usize {
 /// the blocked mask a signal sent to it is judged against -- is listed first.
 pub(crate) fn publish(process: &Arc<Process>) {
     let pid = process.pid();
+    // The first process of a pid namespace is its init.
+    if let Some(numbers) = process.numbers()
+        && numbers.own() == 1
+    {
+        numbers.namespace().set_init(process);
+    }
     if pid != 0 {
         // Reserved by `allocate` when the process was made, so naming it adds
         // no entry and cannot fail.

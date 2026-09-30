@@ -58,6 +58,7 @@ use crate::fallible::{self, AllocError};
 use crate::signal_frame::StackRecord;
 use crate::syscall::credentials;
 use crate::syscall::deliver;
+use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::syscall::thread::Thread;
 use crate::syscall::time::{self, TimeWidth};
@@ -208,12 +209,12 @@ impl Origin {
         let code = match self {
             Origin::Kernel => SI_KERNEL,
             Origin::User { pid, uid } => {
-                put_int(&mut info, union, pid as i32);
+                put_int(&mut info, union, pidns::show_pid(pid) as i32);
                 put_int(&mut info, union + 4, credentials::show_uid(uid) as i32);
                 SI_USER
             }
             Origin::Thread { pid, uid } => {
-                put_int(&mut info, union, pid as i32);
+                put_int(&mut info, union, pidns::show_pid(pid) as i32);
                 put_int(&mut info, union + 4, credentials::show_uid(uid) as i32);
                 SI_TKILL
             }
@@ -223,7 +224,7 @@ impl Origin {
                 uid,
                 status,
             } => {
-                put_int(&mut info, union, pid as i32);
+                put_int(&mut info, union, pidns::show_pid(pid) as i32);
                 put_int(&mut info, union + 4, credentials::show_uid(uid) as i32);
                 put_int(&mut info, union + 8, status);
                 code
@@ -249,12 +250,12 @@ impl Origin {
         let code = match self {
             Origin::Kernel => SI_KERNEL,
             Origin::User { pid, uid } => {
-                put_int(&mut info, 12, pid as i32);
+                put_int(&mut info, 12, pidns::show_pid(pid) as i32);
                 put_int(&mut info, 16, credentials::show_uid(uid) as i32);
                 SI_USER
             }
             Origin::Thread { pid, uid } => {
-                put_int(&mut info, 12, pid as i32);
+                put_int(&mut info, 12, pidns::show_pid(pid) as i32);
                 put_int(&mut info, 16, credentials::show_uid(uid) as i32);
                 SI_TKILL
             }
@@ -264,7 +265,7 @@ impl Origin {
                 uid,
                 status,
             } => {
-                put_int(&mut info, 12, pid as i32);
+                put_int(&mut info, 12, pidns::show_pid(pid) as i32);
                 put_int(&mut info, 16, credentials::show_uid(uid) as i32);
                 put_int(&mut info, 40, status);
                 code
@@ -497,6 +498,15 @@ impl Signals {
             shared: Queue::new()?,
             alarm: Alarm::default(),
         })
+    }
+
+    /// Whether `signal` is at its default action: no handler and not
+    /// ignored. What a namespace's init does not take from inside
+    /// (`docs/PIDNS.md` §5).
+    pub(crate) fn is_default(&self, signal: u32) -> bool {
+        self.actions
+            .get((signal as usize).wrapping_sub(1))
+            .is_none_or(|action| action.handler == SIG_DFL)
     }
 
     /// Whether a child that ends is released without being waited for:

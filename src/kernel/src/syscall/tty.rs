@@ -50,6 +50,7 @@ use ferrix_linux_abi::types::{
 use ferrix_vfs::OpenFile;
 
 use crate::fs::terminal::{self, Terminal, Termios, Winsize};
+use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::syscall::{registry, uaccess};
 
@@ -163,10 +164,11 @@ fn job_control(process: &Process, request: u32, arg: u64) -> Result<usize, Errno
             }
             Ok(0)
         }),
-        TIOCGPGRP => terminal::with(|terminal| controlling(process, terminal, &live))
-            .and_then(|(_, foreground)| put_int(process, arg, foreground)),
+        TIOCGPGRP => terminal::with(|terminal| controlling(process, terminal, &live)).and_then(
+            |(_, foreground)| put_int(process, arg, pidns::pgrp_to_user(process, foreground)),
+        ),
         TIOCGSID => terminal::with(|terminal| controlling(process, terminal, &live))
-            .and_then(|(session, _)| put_int(process, arg, session)),
+            .and_then(|(session, _)| put_int(process, arg, pidns::sid_to_user(process, session))),
         TIOCSPGRP => set_foreground(process, &live, arg),
         _ => Err(Errno::ENOTTY),
     };
@@ -231,6 +233,8 @@ fn set_foreground(process: &Process, live: &[Arc<Process>], arg: u64) -> Result<
     let mut bytes = [0_u8; 4];
     get(process, arg, &mut bytes)?;
     let group = u32::try_from(i32::from_le_bytes(bytes)).map_err(|_| Errno::EINVAL)?;
+    // A number in the caller's namespace; a group it has no one in is no group.
+    let group = pidns::pgrp_from_user(process, group).ok_or(Errno::ESRCH)?;
     let members: Vec<u32> = live
         .iter()
         .filter(|other| other.pgid() == group)
@@ -455,20 +459,22 @@ fn pty_job_control(
             if pty.session() != process.sid() {
                 Err(Errno::ENOTTY)
             } else {
-                put_int(process, arg, pty.foreground())
+                put_int(process, arg, pidns::pgrp_to_user(process, pty.foreground()))
             }
         }
         TIOCGSID => {
             if pty.session() != process.sid() {
                 Err(Errno::ENOTTY)
             } else {
-                put_int(process, arg, pty.session())
+                put_int(process, arg, pidns::sid_to_user(process, pty.session()))
             }
         }
         TIOCSPGRP => {
             let mut bytes = [0_u8; 4];
             get(process, arg, &mut bytes)?;
-            let group = u32::from_le_bytes(bytes);
+            let number = u32::from_le_bytes(bytes);
+            // A number in the caller's namespace.
+            let group = pidns::pgrp_from_user(process, number).unwrap_or(0);
             if pty.session() != process.sid() {
                 return Err(Errno::ENOTTY);
             }

@@ -808,9 +808,21 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         Kind::Type => out.extend_from_slice(b"domain\n"),
         Kind::Procs => render::ids(&mut out, &members(job)),
         Kind::Threads => {
+            // As the reader's namespace numbers them.
+            let reader = crate::syscall::userns::acting();
+            let ns = reader
+                .as_ref()
+                .and_then(|reader| reader.numbers())
+                .map(|numbers| Arc::clone(numbers.namespace()));
             let mut tids: Vec<u32> = members_processes(job)
                 .iter()
-                .flat_map(|process| procfs::thread_ids(process))
+                .flat_map(|process| {
+                    procfs::thread_ids(process)
+                        .into_iter()
+                        .map(|tid| crate::syscall::pidns::thread_name_in(ns.as_ref(), process, tid))
+                        .collect::<Vec<u32>>()
+                })
+                .filter(|&tid| tid != 0)
                 .collect();
             tids.sort_unstable();
             render::ids(&mut out, &tids);
@@ -871,12 +883,21 @@ fn members_processes(job: &Arc<Job>) -> Vec<Arc<Process>> {
         .collect()
 }
 
-/// Their pids.
+/// Their pids, as the reading process's namespace numbers them: those it
+/// cannot see are left out, in the order its numbers give.
 fn members(job: &Arc<Job>) -> Vec<u32> {
-    members_processes(job)
+    let reader = crate::syscall::userns::acting();
+    let mut numbers: Vec<u32> = members_processes(job)
         .iter()
-        .map(|process| process.pid())
-        .collect()
+        .map(|process| {
+            reader.as_ref().map_or(process.pid(), |reader| {
+                crate::syscall::pidns::to_user(reader, process)
+            })
+        })
+        .filter(|&number| number != 0)
+        .collect();
+    numbers.sort_unstable();
+    numbers
 }
 
 /// What a job's `cgroup.controllers` lists: what its parent enables for
@@ -923,7 +944,12 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
             }
             let process = match target {
                 Target::Writer => process::current().ok_or(Errno::ESRCH)?,
-                Target::Pid(pid) => registry::find(pid).ok_or(Errno::ESRCH)?,
+                // A number in the writer's namespace, which must see it.
+                Target::Pid(pid) => match crate::syscall::userns::acting() {
+                    Some(writer) => crate::syscall::pidns::find_in(&writer, pid),
+                    None => registry::find(pid),
+                }
+                .ok_or(Errno::ESRCH)?,
             };
             attach_permissions(&opener.who, &process.job(), job, &opener.shared)?;
             job.adopt(&process).map_err(move_errno)?;

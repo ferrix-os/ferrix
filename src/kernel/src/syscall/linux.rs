@@ -37,6 +37,7 @@ use super::{
 use crate::arch;
 use crate::sched;
 use crate::syscall::memory::{MmapRequest, OffsetUnit};
+use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::trap::{Abi, Outcome, SyscallArgs};
 
@@ -210,12 +211,15 @@ pub(crate) fn handle(
         // thread of this process. A process's first thread is numbered by its
         // pid, which is what glibc's `raise` and a fork child's
         // `CLONE_CHILD_SETTID` expect to agree.
-        let pid = process.map(|process| process.pid()).filter(|&pid| pid != 0);
-        let tid = thread::current()
-            .filter(|thread| {
-                process.is_some_and(|process| core::ptr::eq(thread.process().as_ref(), process))
+        let pid = process
+            .map(|process| pidns::to_user(process, process))
+            .filter(|&pid| pid != 0);
+        let tid = process
+            .and_then(|process| {
+                thread::current()
+                    .filter(|thread| core::ptr::eq(thread.process().as_ref(), process))
+                    .map(|thread| pidns::tid_to_user(process, &thread))
             })
-            .map(|thread| thread.tid())
             .filter(|&tid| tid != 0);
         let id = match call {
             Syscall::Gettid => tid.or(pid),
@@ -224,7 +228,7 @@ pub(crate) fn handle(
         return Ok(id.map_or_else(current_id, |id| id as usize));
     }
     if let (Syscall::Getppid, Some(process)) = (call, process) {
-        return Ok(process.parent_pid() as usize);
+        return Ok(process.parent_pid_in(process) as usize);
     }
     if let Some(id) = process.and_then(|process| credentials::identity(call, process)) {
         return Ok(id as usize);
@@ -557,10 +561,13 @@ fn current_id() -> usize {
 /// is the calling thread's, when the caller is a thread of `process`; the
 /// self-checks call with none.
 fn set_tid_address(process: &Process, address: u64) -> usize {
-    let tid = thread::current_of(process).map_or(0, |thread| thread.set_clear_child_tid(address));
+    let tid = thread::current_of(process).map_or(0, |thread| {
+        let _ = thread.set_clear_child_tid(address);
+        pidns::tid_to_user(process, &thread)
+    });
     match (tid, process.pid()) {
         (0, 0) => current_id(),
-        (0, pid) => pid as usize,
+        (0, _) => pidns::to_user(process, process) as usize,
         (tid, _) => tid as usize,
     }
 }

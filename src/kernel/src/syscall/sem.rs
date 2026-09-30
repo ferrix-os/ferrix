@@ -1292,7 +1292,8 @@ fn read_one(caller: &Caller, id: i32, num: i32, cmd: i32) -> Result<usize, Errno
     };
     Ok(match cmd {
         GETVAL => sem.value as usize,
-        GETPID => sem.pid as usize,
+        // Kept as the kernel number; told as the asker's namespace numbers it.
+        GETPID => crate::syscall::pidns::show_pid(sem.pid) as usize,
         GETNCNT => counted(false),
         _ => counted(true),
     })
