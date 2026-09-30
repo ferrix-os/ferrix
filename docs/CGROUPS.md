@@ -351,7 +351,7 @@ follow, as `docs/BACKLOG.md` decided.
 | P1 | done, 2026-09-26, with the certification's F-35 | "Charge each job for its tasks, memory, objects and processor share"; "Show the job quotas as cgroup2's cpu, memory and pids controllers" |
 | M1 | charging, `memory.max`, `memory.current` and `memory.events` done, 2026-09-26; kernel memory in `memory.current` and `memory.stat`'s `kernel` line the same day, with the certification's F-37; the scoped OOM kill the same day; `memory.stat`'s other keys not | the same two; "Charge the kernel heap a job drives through the Linux personality (F-37)"; "Kill inside the cgroup whose memory.max a program's fault finds full" |
 | S1 | done differently, 2026-09-26: a weight per job applied to each task's, not a group entity | the same two |
-| M2, F1, S2, B1 | not started | |
+| M2, F1, S2, B1 | built, 2026-09-30: §10 to §13 | (landing pending) |
 
 What is left of the controllers is the rest of `memory.stat`, M2's
 reclaim, F1, S2 and B1. Init's L5 writes `TasksMax=` and `MemoryMax=`
@@ -556,3 +556,118 @@ carry today's sightings. The init's open decisions are `docs/INIT.md` §14,
 3. **Whether S1 and S2 (cpu) are in stage 13 at all.** Draft: yes, last. The
    stage names the `cpu` controller, but neither init nor the stage's exit
    needs it.
+
+## 10. Reclaim and `memory.high` (M2, 2026-09-30)
+
+What is reclaimable in a job is the clean page cache of files on a disk,
+charged to it, and nothing else: anonymous memory has no swap to go to, a
+memory filesystem's pages have nothing to be read back from, and the heap
+(`kernel` in `memory.stat`) has no shrinker. `src/kernel/src/user/cache.rs`
+keeps a weak list of every file's object (`Vmo::new_filled`) and gives back
+pages the way a truncation does (`Vmo::decommit_range`: out of the object,
+out of every mapping, a shootdown, then the frame and its charge).
+
+* **Whose.** The frame record names the job a page is charged to; a reclaim at
+  job `J` takes pages charged to `J` or beneath it, never a sibling's.
+  `memory.min` spares a child using no more than it from the reclaim of a job
+  above; `memory.low` does, unless nothing else gave enough (Linux's shares
+  are proportional, these are whole-or-nothing).
+* **What may be dropped.** A file's source says whether its pages can be read
+  again as they were (`PageSource::reclaimable`). A read-only btrfs mount
+  does. A writable one does not yet: its dirty pages are in its inodes and
+  not in the object, and a page taken between a write's copy and its dirty
+  mark would lose the write. An object a shared mapping may write through
+  does not either.
+* **When.** A fault that finds `memory.max` full reclaims in the job before it
+  asks for the kill of §6 (`object::oom`); a page-cache fill that finds it
+  full does, and with room for part of a run fills that part; with no limit
+  full but the machine out of frames, the fault reclaims anywhere. A program
+  that just took a page while its job, or one above it, is over `memory.high`
+  reclaims down to the mark (`oom::throttle`, after a fault and after a
+  read) and, if that gave back less than the excess, pauses a millisecond.
+  Linux's pause grows with the excess; this one does not.
+* **Reclaim makes an absent page a thing to fill.** Two places took an absent
+  page of a file for a hole: `Pages::read` read zeros, and a fault committed
+  a zero page or copied one into a private mapping. Both now ask the source
+  (`Filler::is_sourced`): a read fills again, and after eight tries reads the
+  source directly; a fault is retried (`SpaceError::Evicted`, which never
+  leaves `AddressSpace::fault`) and is `SIGBUS` after 64.
+* **Files.** `memory.high` (`max`), `memory.low` and `memory.min` (`0`) take
+  a byte count or `max`, rounded down to a page; there is no `memory.swap.*`.
+  `memory.events` counts `high` (the mark was hit and reclaimed from, in the
+  job whose mark it was and above). `memory.stat` prints `file`, `kernel`,
+  `shmem`, `pgscan`, `pgsteal`, `pgfault` and `pgmajfault`; `anon` is left
+  out, because page tables are charged as frames and cannot be told from
+  anonymous pages, and so are the forty keys with no source.
+* **Not built.** `memory.low` events, `memory.reclaim`, proportional
+  protection, the dentry and inode caches as reclaimable (M1's note that
+  dentries stay charged stands), `workingset_*`, and an audit record for the
+  three marks.
+
+## 11. `cgroup.freeze` (F1, 2026-09-30)
+
+A process is frozen when its job, or one above it, has `cgroup.freeze` set. It
+is a flag on the core process (`Process::is_frozen`), written under the
+membership lock a move holds, set when the process is made, moved, and when
+the file is written, and looked at again when the process becomes findable
+(`registry::publish`), so a freeze that scanned the table before a fork child
+was in it does not miss it. A frozen process's threads wait on their way back
+to user mode where a stopped one's do (`Process::must_park`), counted as
+parked; a thread in a blocking call is interrupted as a stop interrupts it, and
+the call restarts when the cgroup thaws. `SIGKILL` and `cgroup.kill` end a
+frozen process as they end a stopped one; `SIGCONT` does not thaw it, and no
+parent is told.
+
+`cgroup.events` says `frozen 1` when the cgroup is to be frozen and every live
+process beneath it has parked, and wakes its pollers when that changes
+(`cgroupfs::settle_frozen`: at a freeze, a thaw, a park, a move, a thread
+leaving). A cgroup beneath a frozen one says `frozen 1` with its own
+`cgroup.freeze` at `0`. A `clone3` into a frozen cgroup starts frozen, because
+`Process::new` reads the job it is counted in. **`cgroup.stat` does not print
+`nr_frozen_descendants`:** Linux 7.0 on the reference host prints
+`nr_descendants`, `nr_subsys_*` and the dying counts and no such line.
+
+## 12. `cpu.max` and `cpu.stat` (S2, 2026-09-30)
+
+`cpu.max` gives a job and everything beneath it a quota of processor time each
+period. `sched::CpuQueue::account_in` charges each slice to the running task's
+job and every job above it, and to the machine; a slice ended by a tick from
+user mode is user time, any other system time (tick accounting). A job whose
+use reaches its quota in a period is throttled: its tasks wait out the period
+on the way back to user mode (`sched::throttle_current`, beside
+`regroup_current`). A period starts with the first charge; the next is started
+by whoever looks first. A task alone on a processor gets no tick, so
+`arm_timer` also arms for the moment the quota would be used up.
+
+`cpu.max` is written and read as `cpu_max_write` has it (`src/lib/fs/cgroupfs`
+`cpu.rs`, with host tests and a fuzz round-trip). `cpu.weight.nice` maps to
+`cpu.weight` through Linux's table. `cpu.stat` prints `usage_usec`,
+`user_usec` and `system_usec` in every cgroup and the root (the machine's),
+and `nr_periods`, `nr_throttled` and `throttled_usec` where `cpu` is enabled;
+`nice_usec`, `core_sched.force_idle_usec` and the burst keys have no source.
+The limit is in the audit trail as a cgroup limit (`resource::CPU_MAX`).
+A throttled task sleeps to its period's end, so a raised quota lets it go at
+the end of that period. `cpu.idle` and `cpu.max.burst` are not built.
+
+## 13. The `io` controller (B1, 2026-09-30)
+
+`src/kernel/src/fs/blkio.rs`. The disk the block ring registers is wrapped, so
+a mount's fill, a write-back and a raw read of the node are charged, to the
+job of the task that submits them and each job above, and to the machine (the
+root's `io.stat`). A partition is not wrapped: its reads reach the disk it is
+on. `io.stat` prints the six counters per `MAJ:MIN`, and leaves out a disk the
+cgroup never used; `io.max` takes `rbps`, `wbps`, `riops` and `wiops` as
+`tg_set_limit` does (`ENODEV`, `EINVAL`, `ERANGE`), and the root has none.
+
+A request waits in its submitter for the latest instant the limits on the way
+up give it (`ferrix_block::Throttle`: one virtual clock per limit, no burst
+beyond a request, host-tested) and pays them all that start. A job's entries
+are one table keyed by its quota slot and dropped as the job goes
+(`quota::on_job_release`), each charged to the job as kernel heap (F-37). The
+block core's queue (`ferrix_block::Queue`) is not where this sits: a throttled
+request has not been queued, so no barrier can wait for it.
+
+`io.weight` and `io.latency` are not built: a weight needs a scheduler with
+more than one request in flight to divide, and both would accept a value and do
+nothing. With `io` built, `cgroup.controllers` at the root lists
+`cpu io memory pids`, and the no-internal-process rule reaches `io`.
