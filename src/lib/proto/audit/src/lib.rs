@@ -177,6 +177,9 @@ pub mod resource {
     pub const KERNEL: u64 = 4;
     /// The processor weight (`cpu.weight`).
     pub const CPU_WEIGHT: u64 = 5;
+    /// The processor quota per period (`cpu.max`), in microseconds; the
+    /// largest number for `max`.
+    pub const CPU_MAX: u64 = 6;
 }
 
 /// A 64-bit amount in a 32-bit detail word: itself, or `u32::MAX` when it
