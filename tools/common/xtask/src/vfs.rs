@@ -370,6 +370,37 @@ pub(crate) const APPLETS: &[Command] = &[
         status: 6,
         expect: Expect::Lines(&["killed by SIGKILL", "oom_kill 1", "removed"]),
     },
+    // `cgroup.freeze` (stage 13's F, `docs/CGROUPS.md` §11): a busy shell
+    // in a cgroup stops using the processor when the cgroup is frozen,
+    // `cgroup.events` says so, it runs again when thawed, and `cgroup.kill`
+    // ends it while frozen.
+    Command {
+        argv: &["sh", "-c", FREEZE_SCRIPT],
+        status: 5,
+        expect: Expect::Lines(&[
+            "running cgroup used the processor",
+            "cgroup.events frozen 1",
+            "frozen cgroup used no processor",
+            "thawed cgroup ran again",
+            "frozen cgroup killed",
+            "removed",
+        ]),
+    },
+    // `cpu.max` (stage 13's S2, `docs/CGROUPS.md` §12): a busy shell in a
+    // cgroup with a fifth of a processor is held to about that, `cpu.stat`
+    // counts the throttling, and with `max` it takes more than half again.
+    Command {
+        argv: &["sh", "-c", CPU_MAX_SCRIPT],
+        status: 6,
+        expect: Expect::Lines(&[
+            "max 100000",
+            "20000 100000",
+            "held to about a fifth of a processor",
+            "cpu.stat counted the throttling",
+            "free again",
+            "removed",
+        ]),
+    },
     // `mount -t proc` and `mount -t devtmpfs` go here once mount takes them.
 ];
 
@@ -599,6 +630,79 @@ while read key count; do [ "$key" = oom_kill ] && echo "oom_kill $count"; done <
 rmdir /tmp/co/o && echo removed
 echo "-memory" > /tmp/co/cgroup.subtree_control || exit 5
 umount /tmp/co
+exit 6
+"#;
+
+/// Root mounts cgroup2 and makes `z`. A shell moves itself into `z` and
+/// spins; `cpu.stat`'s `usage_usec`, the first line of it, is what tells
+/// whether the cgroup used the processor. Frozen, `cgroup.events` must say
+/// `frozen 1` and two looks two seconds apart must read the same usage;
+/// thawed, the usage must have moved; frozen again, `cgroup.kill` must end
+/// the shell and empty the cgroup. Only builtins read what is checked, as in
+/// [`QUOTA_SCRIPT`].
+const FREEZE_SCRIPT: &str = r#"mkdir -p /tmp/cz && mount -t cgroup2 none /tmp/cz || exit 1
+mkdir /tmp/cz/z || exit 2
+sh -c 'echo $$ > /tmp/cz/z/cgroup.procs || exit 1
+while :; do :; done' &
+sleep 1
+read key before < /tmp/cz/z/cpu.stat
+sleep 1
+read key after < /tmp/cz/z/cpu.stat
+[ $after -gt $before ] && echo "running cgroup used the processor"
+echo 1 > /tmp/cz/z/cgroup.freeze || exit 3
+sleep 2
+while read key value; do [ "$key" = frozen ] && echo "cgroup.events frozen $value"; done < /tmp/cz/z/cgroup.events
+read key before < /tmp/cz/z/cpu.stat
+sleep 2
+read key after < /tmp/cz/z/cpu.stat
+[ $after -eq $before ] && echo "frozen cgroup used no processor" || echo "used $((after - before)) while frozen"
+echo 0 > /tmp/cz/z/cgroup.freeze || exit 3
+sleep 2
+read key later < /tmp/cz/z/cpu.stat
+[ $later -gt $after ] && echo "thawed cgroup ran again"
+echo 1 > /tmp/cz/z/cgroup.freeze || exit 3
+sleep 2
+echo 1 > /tmp/cz/z/cgroup.kill || exit 4
+for i in 1 2 3 4 5 6 7 8 9 10; do read key populated < /tmp/cz/z/cgroup.events; [ "$populated" = 0 ] && echo "frozen cgroup killed" && break; sleep 1; done
+rmdir /tmp/cz/z && echo removed
+umount /tmp/cz
+exit 5
+"#;
+
+/// Root mounts cgroup2, enables `cpu` and makes `u` with `cpu.max` 20000
+/// 100000. A shell moves itself into `u` and spins; over three seconds its
+/// usage, from `cpu.stat`'s first line, must be between a tenth and two fifths
+/// of a processor, where the shell alone would take all of one, and
+/// `nr_throttled` must have counted. With `max` written back, two seconds must
+/// show more than six tenths. Only builtins read what is checked, as in
+/// [`QUOTA_SCRIPT`].
+const CPU_MAX_SCRIPT: &str = r#"mkdir -p /tmp/cu && mount -t cgroup2 none /tmp/cu || exit 1
+echo "+cpu" > /tmp/cu/cgroup.subtree_control || exit 2
+mkdir /tmp/cu/u || exit 3
+cat /tmp/cu/u/cpu.max
+echo "20000 100000" > /tmp/cu/u/cpu.max || exit 4
+cat /tmp/cu/u/cpu.max
+sh -c 'echo $$ > /tmp/cu/u/cgroup.procs || exit 1
+while :; do :; done' &
+sleep 1
+read key before < /tmp/cu/u/cpu.stat
+sleep 3
+read key after < /tmp/cu/u/cpu.stat
+used=$((after - before))
+[ $used -gt 300000 ] && [ $used -lt 1200000 ] && echo "held to about a fifth of a processor" || echo "used $used in 3 s"
+while read key count; do [ "$key" = nr_throttled ] && [ $count -ge 1 ] && echo "cpu.stat counted the throttling"; done < /tmp/cu/u/cpu.stat
+echo max > /tmp/cu/u/cpu.max || exit 5
+sleep 1
+read key before < /tmp/cu/u/cpu.stat
+sleep 2
+read key after < /tmp/cu/u/cpu.stat
+used=$((after - before))
+[ $used -gt 1200000 ] && echo "free again" || echo "used $used in 2 s"
+echo 1 > /tmp/cu/u/cgroup.kill
+for i in 1 2 3 4 5 6 7 8 9 10; do read key populated < /tmp/cu/u/cgroup.events; [ "$populated" = 0 ] && break; sleep 1; done
+rmdir /tmp/cu/u && echo removed
+echo "-cpu" > /tmp/cu/cgroup.subtree_control
+umount /tmp/cu
 exit 6
 "#;
 
