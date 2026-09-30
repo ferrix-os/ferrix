@@ -429,6 +429,23 @@ pub(crate) fn regroup_current() {
     drop(task);
 }
 
+/// Have the running task wait out the rest of its job's `cpu.max` period if
+/// its job, or one above it, has used the quota: called on the way back to
+/// user mode, where the task holds no lock, as [`regroup_current`] is. A
+/// machine with no `cpu.max` set pays one load.
+pub(crate) fn throttle_current() {
+    if !quota::bandwidth_in_use() {
+        return;
+    }
+    let group = running_group();
+    if group == quota::NONE {
+        return;
+    }
+    while let Some(until) = quota::throttled_until(group, crate::timer::now_nanos()) {
+        sleep_until(until);
+    }
+}
+
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.
 pub(crate) fn set_current_group(index: u32) {
@@ -1916,7 +1933,7 @@ fn choose_next(
     let queue = unsafe { lock.lock_manually() };
 
     let now = crate::timer::now_nanos();
-    queue.account(now);
+    queue.account_in(now, interrupted_user);
     queue.wake_sleepers(now);
 
     let previous = queue.current.clone();
