@@ -507,6 +507,8 @@ pub mod x86_64 {
     pub const FINIT_MODULE: usize = 313;
     /// Rename with flags, such as `RENAME_NOREPLACE`.
     pub const RENAMEAT2: usize = 316;
+    /// Restrict the system calls a thread may make: `seccomp(2)`.
+    pub const SECCOMP: usize = 317;
     /// Fill a buffer with random bytes.
     pub const GETRANDOM: usize = 318;
     /// Create an anonymous file living in memory.
@@ -969,6 +971,8 @@ pub mod aarch64 {
     pub const SETNS: usize = 268;
     /// Load a kernel module from a file descriptor.
     pub const FINIT_MODULE: usize = 273;
+    /// Restrict the system calls a thread may make: `seccomp(2)`.
+    pub const SECCOMP: usize = 277;
     /// Fill a buffer with random bytes.
     pub const GETRANDOM: usize = 278;
     /// Create an anonymous file living in memory.
@@ -1532,6 +1536,8 @@ pub mod arm {
     pub const FINIT_MODULE: usize = 379;
     /// Rename with flags, such as `RENAME_NOREPLACE`.
     pub const RENAMEAT2: usize = 382;
+    /// Restrict the system calls a thread may make: `seccomp(2)`.
+    pub const SECCOMP: usize = 383;
     /// Fill a buffer with random bytes.
     pub const GETRANDOM: usize = 384;
     /// Create an anonymous file living in memory.
@@ -2005,6 +2011,8 @@ pub mod i386 {
     pub const SETNS: usize = 346;
     /// Rename with flags, such as `RENAME_NOREPLACE`.
     pub const RENAMEAT2: usize = 353;
+    /// Restrict the system calls a thread may make: `seccomp(2)`.
+    pub const SECCOMP: usize = 354;
     /// Fill a buffer with random bytes.
     pub const GETRANDOM: usize = 355;
     /// Create an anonymous file living in memory.
@@ -2739,6 +2747,8 @@ pub enum Syscall {
     ArmCacheflush,
     /// Operate on per-process control settings, such as the thread name.
     Prctl,
+    /// Restrict the system calls a thread may make, or ask what seccomp offers.
+    Seccomp,
     /// Fill a buffer with random bytes.
     Getrandom,
     /// Create an anonymous file living in memory.
@@ -3063,6 +3073,7 @@ fn x86_64_at_family(nr: usize) -> Option<Syscall> {
         x86_64::PRLIMIT64 => Syscall::Prlimit64,
         x86_64::NAME_TO_HANDLE_AT => Syscall::NameToHandleAt,
         x86_64::RENAMEAT2 => Syscall::Renameat2,
+        x86_64::SECCOMP => Syscall::Seccomp,
         x86_64::GETRANDOM => Syscall::Getrandom,
         x86_64::MEMFD_CREATE => Syscall::MemfdCreate,
         x86_64::EXECVEAT => Syscall::Execveat,
@@ -3382,6 +3393,7 @@ fn aarch64_memory_and_process(nr: usize) -> Option<Syscall> {
         aarch64::WAIT4 => Syscall::Wait4,
         aarch64::PRLIMIT64 => Syscall::Prlimit64,
         aarch64::NAME_TO_HANDLE_AT => Syscall::NameToHandleAt,
+        aarch64::SECCOMP => Syscall::Seccomp,
         aarch64::GETRANDOM => Syscall::Getrandom,
         aarch64::MEMFD_CREATE => Syscall::MemfdCreate,
         aarch64::EXECVEAT => Syscall::Execveat,
@@ -3737,6 +3749,7 @@ fn arm_recent(nr: usize) -> Option<Syscall> {
         arm::PRLIMIT64 => Syscall::Prlimit64,
         arm::NAME_TO_HANDLE_AT => Syscall::NameToHandleAt,
         arm::RENAMEAT2 => Syscall::Renameat2,
+        arm::SECCOMP => Syscall::Seccomp,
         arm::GETRANDOM => Syscall::Getrandom,
         arm::MEMFD_CREATE => Syscall::MemfdCreate,
         arm::EXECVEAT => Syscall::Execveat,
@@ -4153,6 +4166,7 @@ fn i386_recent(nr: usize) -> Option<Syscall> {
         i386::SYNCFS => Syscall::Syncfs,
         i386::SETNS => Syscall::Setns,
         i386::RENAMEAT2 => Syscall::Renameat2,
+        i386::SECCOMP => Syscall::Seccomp,
         i386::GETRANDOM => Syscall::Getrandom,
         i386::MEMFD_CREATE => Syscall::MemfdCreate,
         i386::EXECVEAT => Syscall::Execveat,
