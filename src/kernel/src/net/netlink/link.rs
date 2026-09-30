@@ -157,14 +157,15 @@ fn create(
     }
     let one_ns = target(&outer, actor)?.unwrap_or_else(|| Arc::clone(ns));
     let one_name = outer.find(IFLA_IFNAME).map(|found| found.as_name());
-    let data = info.find(IFLA_INFO_DATA).ok_or(Errno::EINVAL)?;
-    let peer = Attributes::new(data.as_bytes())
-        .find(VETH_INFO_PEER)
-        .ok_or(Errno::EINVAL)?;
     // The peer block is an `ifinfomsg` and then attributes, as a message is.
-    let block = peer.as_bytes();
+    // A request that describes no peer gets one in the same namespace under a
+    // name of the kernel's choosing, as `ip link add type veth` with no `peer`.
+    let block = info
+        .find(IFLA_INFO_DATA)
+        .and_then(|data| Attributes::new(data.as_bytes()).find(VETH_INFO_PEER))
+        .map_or(&[][..], |peer| peer.as_bytes());
     let body_end = ferrix_linux_abi::netlink::nlmsg_align(IfInfoMsg::SIZE);
-    if block.len() < IfInfoMsg::SIZE {
+    if !block.is_empty() && block.len() < IfInfoMsg::SIZE {
         return Err(Errno::EINVAL);
     }
     let peer_attributes = Attributes::new(block.get(body_end..).unwrap_or_default());
