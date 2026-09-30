@@ -860,6 +860,8 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
             }
         }
         Kind::CpuStat => {
+            // Whoever runs without a tick has not been charged for it yet.
+            crate::sched::charge_running();
             let (user, system) = job.cpu_times();
             ferrix_cgroupfs::cpu::render_stat(
                 &mut out,

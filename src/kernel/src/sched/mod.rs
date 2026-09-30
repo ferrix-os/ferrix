@@ -2591,6 +2591,25 @@ fn for_each_queue_charged(mut visit: impl FnMut(usize, &mut CpuQueue)) {
     <arch::Irq as IrqControl>::restore(saved);
 }
 
+/// Charge every processor's running task for the time since it was last
+/// charged, to its job's `cpu.stat`. A processor running one task with
+/// nothing behind it gets no tick, and is charged only when something
+/// happens to it; a reader of `cpu.stat` asks for the rest to be counted. The
+/// time is counted as user time: a task that has been neither interrupted nor
+/// descheduled since it was last charged has been running its program, since
+/// any long stay in the kernel blocks or is cut by the timer.
+pub(crate) fn charge_running() {
+    let Some(queues) = QUEUES.get() else {
+        return;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    for lock in queues {
+        let mut queue = lock.lock();
+        queue.account_in(crate::timer::now_nanos(), true);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
 /// What every processor's scheduling has done.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Summary {
