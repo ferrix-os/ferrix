@@ -69,8 +69,8 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
     };
     let mut made = Vec::new();
     let outcome = creation(&mut tally, &mut made)
-        .and_then(|()| loopback(&mut tally, &mut made))
         .and_then(|()| isolation(&mut tally, &mut made))
+        .and_then(|()| loopback(&mut tally, &mut made))
         .and_then(|()| privileges(&mut tally, &mut made))
         .and_then(|()| pairs(&mut tally, &mut made))
         .and_then(|()| devices(&mut tally, &mut made))
@@ -958,6 +958,20 @@ fn first_pair(
     Ok((ia, ib))
 }
 
+/// What a namespace has taken in over all its interfaces and what its stack
+/// has delivered: unchanged while traffic it is no party to goes by.
+fn watched_frames(side: &Side) -> (u64, u64, u64) {
+    side.ns.core().look(|stack| {
+        let counters = stack.counters();
+        let received = stack
+            .interfaces()
+            .iter()
+            .map(|each| each.counters.received)
+            .sum();
+        (received, counters.delivered, counters.not_ours)
+    })
+}
+
 /// NN16: a second pair, between `a` and `c`, carries its own traffic; what
 /// crosses one never arrives at the other's peer, which is in `watched`.
 fn second_pair(
@@ -976,7 +990,7 @@ fn second_pair(
     let id = c.index(b"veth-d", "the second pair's peer is not in its namespace")?;
     a.configure(ic, [10, 8, 0, 1], tally)?;
     c.configure(id, [10, 8, 0, 2], tally)?;
-    let before = watched.ns.core().with(|stack, _| stack.counters());
+    let before = watched_frames(watched);
     let far = socket_in(&c.ns, InetKind::Datagram)?;
     far.bind(&addr4([10, 8, 0, 2], 5_000))
         .map_err(|_| "the second pair's far end would not take its address")?;
@@ -984,8 +998,8 @@ fn second_pair(
     let _ = client
         .send(BODY, 0, false, Some(&addr4([10, 8, 0, 2], 5_000)))
         .map_err(|_| "a datagram to the second pair was refused")?;
-    let after = watched.ns.core().with(|stack, _| stack.counters());
-    if after.delivered != before.delivered || after.not_ours != before.not_ours {
+    let after = watched_frames(watched);
+    if after != before {
         return Err("a frame sent on one veth pair arrived at the peer of another");
     }
     let mut out = [0_u8; 128];
