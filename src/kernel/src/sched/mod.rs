@@ -218,6 +218,23 @@ pub(crate) fn regroup_current() {
     drop(task);
 }
 
+/// Have the running task wait out the rest of its job's `cpu.max` period if
+/// its job, or one above it, has used the quota: called on the way back to
+/// user mode, where the task holds no lock, as [`regroup_current`] is. A
+/// machine with no `cpu.max` set pays one load.
+pub(crate) fn throttle_current() {
+    if !quota::bandwidth_in_use() {
+        return;
+    }
+    let group = running_group();
+    if group == quota::NONE {
+        return;
+    }
+    while let Some(until) = quota::throttled_until(group, crate::timer::now_nanos()) {
+        sleep_until(until);
+    }
+}
+
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.
 pub(crate) fn set_current_group(index: u32) {
@@ -1977,7 +1994,7 @@ fn choose_next(
     let queue = unsafe { lock.lock_manually() };
 
     let now = crate::timer::now_nanos();
-    queue.account(now);
+    queue.account_in(now, interrupted_user);
     queue.wake_sleepers(now);
 
     let previous = queue.current.clone();
@@ -2652,6 +2669,25 @@ fn for_each_queue_charged(mut visit: impl FnMut(usize, &mut CpuQueue)) {
         let mut queue = lock.lock();
         queue.account(crate::timer::now_nanos());
         visit(cpu, &mut queue);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// Charge every processor's running task for the time since it was last
+/// charged, to its job's `cpu.stat`. A processor running one task with
+/// nothing behind it gets no tick, and is charged only when something
+/// happens to it; a reader of `cpu.stat` asks for the rest to be counted. The
+/// time is counted as user time: a task that has been neither interrupted nor
+/// descheduled since it was last charged has been running its program, since
+/// any long stay in the kernel blocks or is cut by the timer.
+pub(crate) fn charge_running() {
+    let Some(queues) = QUEUES.get() else {
+        return;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    for lock in queues {
+        let mut queue = lock.lock();
+        queue.account_in(crate::timer::now_nanos(), true);
     }
     <arch::Irq as IrqControl>::restore(saved);
 }

@@ -53,8 +53,14 @@ pub enum Kind {
     Freeze,
     /// `cgroup.kill`, which is write-only on Linux: mode 0200.
     Kill,
+    /// `cpu.stat`.
+    CpuStat,
     /// `cpu.weight`.
     CpuWeight,
+    /// `cpu.weight.nice`.
+    CpuWeightNice,
+    /// `cpu.max`.
+    CpuMax,
     /// `memory.current`.
     MemoryCurrent,
     /// `memory.max`.
@@ -90,7 +96,15 @@ pub const FILES: &[File] = &[
     file("cgroup.stat", Kind::Stat, true, false),
     file("cgroup.freeze", Kind::Freeze, false, true),
     file("cgroup.kill", Kind::Kill, false, true),
+    file("cpu.stat", Kind::CpuStat, true, false),
     controlled("cpu.weight", Kind::CpuWeight, Controller::Cpu, true),
+    controlled(
+        "cpu.weight.nice",
+        Kind::CpuWeightNice,
+        Controller::Cpu,
+        true,
+    ),
+    controlled("cpu.max", Kind::CpuMax, Controller::Cpu, true),
     controlled(
         "memory.current",
         Kind::MemoryCurrent,
