@@ -88,15 +88,6 @@ impl Walked {
             _ => Err(err),
         }
     }
-
-    /// Whether the name is a mount point: what it resolved to is on another
-    /// mount than the directory holding it, or it is covered by a mount the
-    /// walk did not cross because it came through another bind of the same
-    /// filesystem (Linux's `d_mountpoint`, which `vfs_rmdir`, `vfs_unlink`
-    /// and `vfs_rename` ask whatever mount the path went through).
-    pub(crate) fn is_mountpoint(&self) -> bool {
-        !Arc::ptr_eq(&self.found.mount, &self.parent.mount) || self.found.dentry.is_mountpoint()
-    }
 }
 
 /// Where a walk in progress has got to.

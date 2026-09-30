@@ -498,7 +498,8 @@ fn clone_with(
         namespace::enter_user_namespace(&child, fresh);
     }
     if flags & CLONE_NEWNS != 0 {
-        namespace::copy_namespace(child.fs_context())?;
+        let owner = child.with_credentials(|held| Arc::clone(&held.user_ns));
+        namespace::copy_namespace(child.fs_context(), owner)?;
     }
     child.set_exit_signal((flags & CSIGNAL) as u32);
     // What glibc's `posix_spawn` asks for, so that its child need not reset

@@ -87,7 +87,12 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
         if fresh.is_none() && !process.with_credentials(|held| held.holds(CAP_SYS_ADMIN)) {
             return Err(Errno::EPERM);
         }
-        copy_namespace(process.fs_context())?;
+        // Owned by the namespace it is asked for in: the new user namespace
+        // if one is being made, the caller's own otherwise.
+        let owner = fresh
+            .clone()
+            .unwrap_or_else(|| process.with_credentials(|held| Arc::clone(&held.user_ns)));
+        copy_namespace(process.fs_context(), owner)?;
     }
     if let Some(fresh) = fresh {
         enter_user_namespace(process, fresh);
@@ -141,7 +146,10 @@ pub(crate) fn enter_user_namespace(process: &Process, namespace: Arc<userns::Use
 ///
 /// `ENOMEM` for memory or past the job's memory limit; the context is
 /// unchanged then.
-pub(crate) fn copy_namespace(context: &SpinLock<Context>) -> Result<(), Errno> {
+pub(crate) fn copy_namespace(
+    context: &SpinLock<Context>,
+    owner: Arc<userns::UserNamespace>,
+) -> Result<(), Errno> {
     let (mut root, mut cwd, from) = {
         let context = context.lock();
         (
@@ -150,7 +158,12 @@ pub(crate) fn copy_namespace(context: &SpinLock<Context>) -> Result<(), Errno> {
             fs::namespace_of(&context),
         )
     };
-    let copy = from.copy(&mut [&mut root, &mut cwd])?;
+    // A copy owned by a user namespace that does not own the one it is made
+    // from has every mount's flags locked and every mount locked to its
+    // parent (M3, M4): what the owner of the original did cannot be undone,
+    // or seen under.
+    let lock = !Arc::ptr_eq(&owner_of(&from), &owner);
+    let copy = from.copy_as(&mut [&mut root, &mut cwd], Some(owner), lock)?;
     let copy = fallible::try_arc(copy).map_err(|_| Errno::ENOMEM)?;
     let displaced = {
         let mut context = context.lock();
@@ -162,6 +175,32 @@ pub(crate) fn copy_namespace(context: &SpinLock<Context>) -> Result<(), Errno> {
     };
     drop((displaced, from));
     Ok(())
+}
+
+/// The user namespace that owns the mount namespace `namespace`: the one that
+/// was current when it was made, the first for the kernel's own.
+pub(crate) fn owner_of(namespace: &ferrix_vfs::Namespace) -> Arc<userns::UserNamespace> {
+    namespace
+        .owner()
+        .and_then(|held| held.downcast::<userns::UserNamespace>().ok())
+        .unwrap_or_else(|| Arc::clone(userns::first()))
+}
+
+/// Linux's `may_mount`: `CAP_SYS_ADMIN` over the user namespace that owns the
+/// caller's mount namespace. A process that shares the first namespace's
+/// mounts can never change them without being root (M1).
+///
+/// # Errors
+///
+/// `EPERM`.
+pub(crate) fn may_mount(process: &Process) -> Result<(), Errno> {
+    let namespace = fs::namespace_of(&process.fs_context().lock());
+    let owner = owner_of(&namespace);
+    if process.with_credentials(|held| userns::capable_over(held, &owner, CAP_SYS_ADMIN)) {
+        Ok(())
+    } else {
+        Err(Errno::EPERM)
+    }
 }
 
 /// `setns`.

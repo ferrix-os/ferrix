@@ -4,6 +4,7 @@ use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use core::any::Any;
 use core::fmt;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
@@ -139,6 +140,19 @@ impl MountFlags {
     }
 }
 
+/// Mount flags that cannot be cleared, and a mount that cannot be separated
+/// from its parent: Linux's `MNT_LOCK_*` and `MNT_LOCKED`, set on every mount
+/// a namespace copy brings into a namespace its creator's user namespace
+/// does not own (`docs/NAMESPACES.md` M3, M4). The low bits are
+/// [`MountFlags`]' own: a set lock bit keeps that flag set.
+const LOCK_FLAGS: u32 =
+    MountFlags::READ_ONLY.0 | MountFlags::NOSUID.0 | MountFlags::NODEV.0 | MountFlags::NOEXEC.0;
+/// The access-time mode cannot change.
+const LOCK_ATIME: u32 = 1 << 8;
+/// The mount cannot be unmounted, bound without `MS_REC`, or pivoted to on its own:
+/// what it covers stays hidden.
+const LOCK_PARENT: u32 = 1 << 9;
+
 /// A filesystem as every mount of it shares it: Linux's superblock, less
 /// everything a filesystem here keeps for itself.
 ///
@@ -171,6 +185,9 @@ pub struct Mount {
     /// that every check reads them without a lock and sees one remount
     /// whole.
     flags: AtomicU32,
+    /// Which of those cannot change, and whether it is locked to its parent
+    /// (`LOCK_*`): set when a copy into a less privileged namespace makes it.
+    locks: AtomicU32,
     sb: Arc<Superblock>,
     /// Where in its filesystem it starts: the filesystem's root for a mount
     /// made by `mount(2)`, any directory or file of it for a bind.
@@ -205,6 +222,14 @@ impl Mount {
     #[must_use]
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Whether it is locked to its parent: unmounting it alone, binding it
+    /// without `MS_REC` and pivoting to it would reveal what it covers
+    /// (`docs/NAMESPACES.md` M4).
+    #[must_use]
+    pub fn is_locked(&self) -> bool {
+        self.locks.load(Ordering::Acquire) & LOCK_PARENT != 0
     }
 
     /// The filesystem mounted here.
@@ -359,6 +384,7 @@ impl Location {
         let mount = Arc::new(Mount {
             id: DETACHED_MOUNT,
             flags: AtomicU32::new(0),
+            locks: AtomicU32::new(0),
             sb: Superblock::new(fs),
             root: Arc::clone(&dentry),
             parent: SpinLock::new(None),
@@ -477,6 +503,11 @@ struct Shared {
     /// `0xF000_0000` up, the numbers Linux's `proc_alloc_inum` hands out, so
     /// that a program comparing two never meets one another inode claims.
     next_namespace: AtomicU64,
+    /// Every namespace's table, so that removing a name that another
+    /// namespace has a mount on can take that mount off (Linux's
+    /// `detach_mounts`, since 3.18): otherwise a user with its own namespace
+    /// could pin any directory it can see against its owner.
+    trees: SpinLock<Vec<Weak<Tree>>>,
 }
 
 /// The number the first namespace is given, and the next ones count up from:
@@ -528,6 +559,10 @@ pub struct Namespace {
     parker: Arc<dyn Parker>,
     /// Its number, as `/proc/<pid>/ns/mnt` shows it.
     id: u64,
+    /// What owns it, as the kernel sets it: the user namespace that was
+    /// current when it was made, which decides who may change its mounts.
+    /// `None` is the kernel's first, owned by the first user namespace.
+    owner: SpinLock<Option<Arc<dyn Any + Send + Sync>>>,
     /// The kernel heap it holds, charged to the job of the process that
     /// asked for the copy; nothing for the first (F-37).
     _charge: Charge,
@@ -568,6 +603,7 @@ impl Namespace {
         let root = Arc::new(Mount {
             id: 1,
             flags: AtomicU32::new(MountFlags::READ_ONLY.bits()),
+            locks: AtomicU32::new(0),
             root: Dentry::uncharged_root(bottom.root()),
             sb: Superblock::new(bottom),
             parent: SpinLock::new(None),
@@ -578,6 +614,7 @@ impl Namespace {
         let top = Arc::new(Mount {
             id: 2,
             flags: AtomicU32::new(0),
+            locks: AtomicU32::new(0),
             root: Dentry::uncharged_root(fs.root()),
             sb: Superblock::new(fs),
             parent: SpinLock::new(Some((Arc::clone(&root), Arc::clone(&root.root)))),
@@ -593,6 +630,7 @@ impl Namespace {
             cache: SpinLock::new(VecDeque::new()),
             cache_limit,
             next_namespace: AtomicU64::new(FIRST_NAMESPACE + 1),
+            trees: SpinLock::new(Vec::from([Arc::downgrade(&tree)])),
         });
         Namespace {
             root,
@@ -601,6 +639,7 @@ impl Namespace {
             shared,
             parker,
             id: FIRST_NAMESPACE,
+            owner: SpinLock::new(None),
             _charge: Charge::none(),
         }
     }
@@ -610,6 +649,13 @@ impl Namespace {
     #[must_use]
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// What owns this namespace, as [`Namespace::copy_as`] was told; `None`
+    /// for the first.
+    #[must_use]
+    pub fn owner(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.owner.lock().clone()
     }
 
     /// Where this namespace's sleeping locks wait, and every mount's in it.
@@ -1191,13 +1237,87 @@ impl Namespace {
         if walked.must_be_dir {
             return Err(Errno::ENOTDIR);
         }
-        if walked.is_mountpoint() {
-            return Err(Errno::EBUSY);
-        }
+        self.busy_or_detach(&walked)?;
         walked.parent.inode()?.unlink(name)?;
         walked.parent.dentry.remove_name(name);
         self.forget(&walked.found.dentry);
         Ok(())
+    }
+
+    /// Whether removing or renaming the name `walked` found may go on: it is
+    /// `EBUSY` where a mount of this namespace's tree is on it -- crossed, or
+    /// reached through another bind of its filesystem -- and a mount that
+    /// only another namespace has there is taken off it, as Linux does since
+    /// 3.18 (`detach_mounts`). Otherwise a user mounting over a directory in
+    /// a namespace of their own could pin it against its owner, and the
+    /// `EBUSY` would tell the owner a mount was there.
+    fn busy_or_detach(&self, walked: &Walked) -> Result<()> {
+        if !Arc::ptr_eq(&walked.found.mount, &walked.parent.mount) {
+            return Err(Errno::EBUSY);
+        }
+        let dentry = &walked.found.dentry;
+        if !dentry.is_mountpoint() {
+            return Ok(());
+        }
+        let here = dentry.id();
+        if self
+            .tree
+            .mounts
+            .lock()
+            .keys()
+            .any(|&(_, covered)| covered == here)
+        {
+            return Err(Errno::EBUSY);
+        }
+        self.detach_elsewhere(dentry);
+        Ok(())
+    }
+
+    /// Take off every mount that another namespace has on `dentry`, and every
+    /// mount on those, each left without a parent as `MNT_DETACH` leaves one.
+    fn detach_elsewhere(&self, dentry: &Arc<Dentry>) {
+        let trees: Vec<Arc<Tree>> = {
+            let mut all = self.shared.trees.lock();
+            all.retain(|tree| tree.strong_count() > 0);
+            all.iter().filter_map(Weak::upgrade).collect()
+        };
+        let mut old_parents = Vec::new();
+        for tree in trees {
+            if Arc::ptr_eq(&tree, &self.tree) {
+                continue;
+            }
+            let mut table = tree.mounts.lock();
+            let mut going: Vec<Arc<Mount>> = table
+                .iter()
+                .filter(|&(&(_, covered), _)| covered == dentry.id())
+                .map(|(_, mount)| Arc::clone(mount))
+                .collect();
+            let mut next = 0;
+            while let Some(top) = going.get(next).cloned() {
+                next += 1;
+                going.extend(
+                    table
+                        .values()
+                        .filter(|mount| {
+                            mount
+                                .parent()
+                                .is_some_and(|(above, _)| Arc::ptr_eq(&above, &top))
+                        })
+                        .cloned(),
+                );
+            }
+            for mount in &going {
+                let Some((above, covered)) = mount.parent() else {
+                    continue;
+                };
+                if table.remove(&(above.id, covered.id())).is_some() {
+                    covered.remove_mount();
+                }
+                old_parents.push(mount.set_parent(None));
+            }
+        }
+        // Outside every table's lock: a parent's last reference may go here.
+        drop(old_parents);
     }
 
     /// `unlinkat` with `AT_REMOVEDIR`.
@@ -1221,9 +1341,7 @@ impl Namespace {
         if inode.metadata().kind != FileType::Directory {
             return Err(Errno::ENOTDIR);
         }
-        if walked.is_mountpoint() {
-            return Err(Errno::EBUSY);
-        }
+        self.busy_or_detach(&walked)?;
         walked.parent.inode()?.rmdir(name)?;
         walked.parent.dentry.remove_name(name);
         self.forget_with_children(&walked.found.dentry);
@@ -1261,9 +1379,8 @@ impl Namespace {
         let moving_meta = moving.metadata();
         let moving_dir = moving_meta.kind == FileType::Directory;
 
-        if source.is_mountpoint() || dest.is_mountpoint() {
-            return Err(Errno::EBUSY);
-        }
+        self.busy_or_detach(&source)?;
+        self.busy_or_detach(&dest)?;
         if (source.must_be_dir || dest.must_be_dir) && !moving_dir {
             return Err(Errno::ENOTDIR);
         }
@@ -1389,6 +1506,7 @@ impl Namespace {
         let mount = Arc::new(Mount {
             id: self.next_id(),
             flags: AtomicU32::new(flags.bits()),
+            locks: AtomicU32::new(0),
             root,
             sb: Superblock::new(fs),
             parent: SpinLock::new(Some((Arc::clone(&at.mount), Arc::clone(&at.dentry)))),
@@ -1433,6 +1551,16 @@ impl Namespace {
         if !self.owns(&source.mount) || !self.owns(&target.mount) {
             return Err(Errno::EINVAL);
         }
+        // A bind that leaves out the mounts under `source` would show what a
+        // locked one hides (Linux's `has_locked_children`).
+        if !recursive
+            && self
+                .descendants(&source.mount, Some(&source.dentry))?
+                .iter()
+                .any(|mount| mount.is_locked())
+        {
+            return Err(Errno::EINVAL);
+        }
         let mut originals = Vec::new();
         originals.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
         originals.push(Arc::clone(&source.mount));
@@ -1469,6 +1597,11 @@ impl Namespace {
                 &self.tree,
             )?);
         }
+        // The top is a mount point of its own now; what is under it stays
+        // locked to the mounts it was locked to.
+        if let Some(top) = made.first() {
+            let _ = top.locks.fetch_and(!LOCK_PARENT, Ordering::AcqRel);
+        }
         self.attach(&made)?;
         made.into_iter().next().ok_or(Errno::EINVAL)
     }
@@ -1487,6 +1620,10 @@ impl Namespace {
         Ok(Arc::new(Mount {
             id: self.next_id(),
             flags: AtomicU32::new(like.flags().bits()),
+            // A bind or a copy keeps which flags were locked and which mounts
+            // are locked to their parent (Linux's `clone_mnt`); the top of a
+            // bind is its own mount point, which `bind` unlocks.
+            locks: AtomicU32::new(like.locks.load(Ordering::Acquire)),
             sb: Arc::clone(&like.sb),
             root,
             parent: SpinLock::new(parent),
@@ -1557,6 +1694,24 @@ impl Namespace {
             .lock()
             .get(&(above.id, covered.id()))
             .is_some_and(|found| Arc::ptr_eq(found, mount))
+    }
+
+    /// Whether every mount of `mount`'s filesystem, in any namespace, is one
+    /// of this namespace's: the filesystem is this namespace's alone, made
+    /// here or copied from nowhere. A plain `MS_REMOUNT` changes the
+    /// filesystem for every mount of it, so a caller that does not own the
+    /// whole of it has no business doing that (`docs/NAMESPACES.md` N5).
+    #[must_use]
+    pub fn sole_filesystem(&self, mount: &Arc<Mount>) -> bool {
+        let here = self
+            .tree
+            .mounts
+            .lock()
+            .values()
+            .filter(|other| Arc::ptr_eq(&other.sb, &mount.sb))
+            .count();
+        // Each mount holds one reference; this call holds none of its own.
+        here > 0 && Arc::strong_count(&mount.sb) == here
     }
 
     /// Every mount of the table, copied out: the change lock is held, so
@@ -1639,6 +1794,18 @@ impl Namespace {
         if !at.is_mount_root() || !self.owns(&at.mount) {
             return Err(Errno::EINVAL);
         }
+        // A flag a copy locked stays set, and the access-time mode stays as
+        // it is (Linux's `do_reconfigure_mnt`): a remount in a user namespace
+        // cannot undo what an administrator's mount said (CVE-2014-5206, -5207).
+        let locks = at.mount.locks.load(Ordering::Acquire);
+        let old = at.mount.flags.load(Ordering::Acquire);
+        let held = old & locks & LOCK_FLAGS;
+        let atime = MountFlags::ATIME.bits();
+        if flags.bits() & held != held
+            || (locks & LOCK_ATIME != 0 && flags.bits() & atime != old & atime)
+        {
+            return Err(Errno::EPERM);
+        }
         at.mount.flags.store(flags.bits(), Ordering::Release);
         Ok(())
     }
@@ -1697,7 +1864,7 @@ impl Namespace {
         let Some((above, _)) = at.mount.parent() else {
             return Err(Errno::EINVAL);
         };
-        if !self.owns(&at.mount) {
+        if !self.owns(&at.mount) || at.mount.is_locked() {
             return Err(Errno::EINVAL);
         }
         // `/` stays: every process of the namespace that has not moved its
@@ -1790,6 +1957,25 @@ impl Namespace {
     ///
     /// `ENOMEM` for memory or past the job's memory limit.
     pub fn copy(&self, places: &mut [&mut Location]) -> Result<Namespace> {
+        self.copy_as(places, None, false)
+    }
+
+    /// As [`Namespace::copy`], owned by `owner` (whatever the kernel says
+    /// owns a namespace), and with `lock` -- when the owner is a user
+    /// namespace that does not own this one -- every copied mount's flags
+    /// locked and every mount locked to its parent, but the bottom, so that
+    /// the new namespace's owner cannot undo or reveal anything the old one's
+    /// administrator did (`docs/NAMESPACES.md` M3, M4).
+    ///
+    /// # Errors
+    ///
+    /// As [`Namespace::copy`].
+    pub fn copy_as(
+        &self,
+        places: &mut [&mut Location],
+        owner: Option<Arc<dyn Any + Send + Sync>>,
+        lock: bool,
+    ) -> Result<Namespace> {
         let charge = crate::charge(arc_footprint::<Namespace>() + arc_footprint::<Tree>())?;
         let _changing = self.change.lock();
         let below = self.descendants(&self.root, None)?;
@@ -1823,6 +2009,12 @@ impl Namespace {
                 }
             };
             let copy = self.copy_of(original, Arc::clone(&original.root), parent, &tree)?;
+            if lock && at > 0 {
+                let flags = original.flags().bits() & LOCK_FLAGS;
+                let _ = copy
+                    .locks
+                    .fetch_or(flags | LOCK_ATIME | LOCK_PARENT, Ordering::AcqRel);
+            }
             if let Some((above, covered)) = copy.parent() {
                 let _ = table.insert((above.id, covered.id()), Arc::clone(&copy));
             }
@@ -1847,6 +2039,7 @@ impl Namespace {
             }
         }
         *tree.mounts.lock() = table;
+        self.shared.trees.lock().push(Arc::downgrade(&tree));
         Ok(Namespace {
             root,
             tree,
@@ -1854,6 +2047,7 @@ impl Namespace {
             shared: Arc::clone(&self.shared),
             parker: Arc::clone(&self.parker),
             id: self.shared.next_namespace.fetch_add(1, Ordering::Relaxed),
+            owner: SpinLock::new(owner),
             _charge: charge,
         })
     }
@@ -1907,6 +2101,7 @@ impl Namespace {
         };
         if !root.is_mount_root()
             || !new_root.is_mount_root()
+            || new_root.mount.is_locked()
             || !reaches(put_old, new_root)
             || !reaches(new_root, root)
         {
@@ -1938,6 +2133,12 @@ impl Namespace {
                 Arc::clone(old_root),
             );
             put_old.dentry.add_mount();
+            // The old root's lock goes to the new one, so that what the old
+            // root covered stays hidden and the old root can be detached.
+            if old_root.is_locked() {
+                let _ = new_mount.locks.fetch_or(LOCK_PARENT, Ordering::AcqRel);
+                let _ = old_root.locks.fetch_and(!LOCK_PARENT, Ordering::AcqRel);
+            }
             (displaced_new, displaced_old)
         };
         // Outside the table's lock, as every parent is dropped.
@@ -1986,6 +2187,11 @@ impl Drop for Namespace {
             // Only mounts hold a superblock: one reference is this mount
             // alone, and nothing else of the filesystem is mounted anywhere.
             if Arc::strong_count(&mount.sb) == 1 {
+                // What it was given is written out before it is let go, as
+                // the last unmount of a filesystem does (F-53's class): a
+                // disk mounted in this namespace alone would otherwise lose
+                // what it wrote since its last commit.
+                let _ = mount.sb.fs.sync();
                 self.forget_tree(&mount.root);
             }
         }

@@ -632,6 +632,23 @@ pub(super) fn overflowuid(_: &Kernel) -> Result<Vec<u8>> {
     Ok(number(OVERFLOW_ID))
 }
 
+/// `kernel/cap_last_cap`: the highest capability number, which libcap reads
+/// to size its sets.
+pub(super) fn cap_last_cap(_: &Kernel) -> Result<Vec<u8>> {
+    Ok(number(u64::from(crate::syscall::credentials::CAP_LAST_CAP)))
+}
+
+/// `kernel/ngroups_max`: most supplementary groups a process may have.
+pub(super) fn ngroups_max(_: &Kernel) -> Result<Vec<u8>> {
+    Ok(number(65_536))
+}
+
+/// `user/max_user_namespaces`: most user namespaces alive at once, which
+/// [`userns::create`] holds to.
+pub(super) fn max_user_namespaces(_: &Kernel) -> Result<Vec<u8>> {
+    Ok(number(u64::from(userns::MAX_NAMESPACES)))
+}
+
 /// `kernel/overflowgid`: [`overflowuid`]'s group.
 pub(super) fn overflowgid(_: &Kernel) -> Result<Vec<u8>> {
     Ok(number(OVERFLOW_ID))

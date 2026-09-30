@@ -1332,8 +1332,6 @@ fn an_ended_namespace_gives_its_mount_points_back() {
     let m = copy.resolve(&inside, None, b"/m", true).unwrap();
     let mounted = copy.mount(tmpfs(2), &m).unwrap();
     write_file(&copy, &inside, "/m/x", b"x");
-    // The dentry is a mount point in the copy, so the first may not remove it.
-    assert_eq!(ns.rmdir(&ctx, None, b"/m").unwrap_err(), Errno::EBUSY);
     drop((copy, inside, m));
     // Held on, the mount is disconnected: nothing above it.
     assert!(mounted.parent().is_none());
@@ -4689,4 +4687,128 @@ mod charged {
         drop((table, copy));
         assert_eq!((job.used(), job.holds()), (0, 0));
     }
+}
+
+/// A copy owned by something else, its mounts locked: `/m` a tmpfs mounted
+/// `ro,nosuid` with `/m/deep` a second tmpfs under it.
+fn locked_copy() -> (Arc<Namespace>, Context) {
+    let (ns, ctx) = fresh();
+    ns.mkdir(&ctx, None, b"/m", 0o755).unwrap();
+    let m = ns.resolve(&ctx, None, b"/m", true).unwrap();
+    let flags = crate::MountFlags::READ_ONLY.union(crate::MountFlags::NOSUID);
+    let _ = ns.mount_with(tmpfs(2), &m, flags).unwrap();
+    let mut root = ctx.root.clone();
+    let mut cwd = ctx.cwd.clone();
+    let owner: Arc<dyn core::any::Any + Send + Sync> = Arc::new(7_u32);
+    let copy = Arc::new(
+        ns.copy_as(&mut [&mut root, &mut cwd], Some(owner), true)
+            .unwrap(),
+    );
+    let inside = Context {
+        root,
+        cwd,
+        who: ctx.who,
+        ns: Some(Arc::clone(&copy)),
+    };
+    (copy, inside)
+}
+
+#[test]
+fn a_copy_remembers_who_owns_it() {
+    let (copy, _) = locked_copy();
+    let owner = copy.owner().unwrap().downcast::<u32>().unwrap();
+    assert_eq!(*owner, 7);
+    assert!(fresh().0.owner().is_none(), "the first has none to name");
+}
+
+#[test]
+fn a_locked_flag_cannot_be_cleared_and_one_more_can_be_set() {
+    let (copy, inside) = locked_copy();
+    let m = copy.resolve(&inside, None, b"/m", true).unwrap();
+    // Clearing `ro`, or `nosuid`, is refused; keeping them and adding `nodev` is not.
+    assert_eq!(
+        copy.remount(&m, crate::MountFlags::NOSUID),
+        Err(Errno::EPERM)
+    );
+    assert_eq!(
+        copy.remount(&m, crate::MountFlags::READ_ONLY),
+        Err(Errno::EPERM)
+    );
+    assert_eq!(copy.remount(&m, crate::MountFlags::NONE), Err(Errno::EPERM));
+    let more = crate::MountFlags::READ_ONLY
+        .union(crate::MountFlags::NOSUID)
+        .union(crate::MountFlags::NODEV);
+    copy.remount(&m, more).unwrap();
+    // The access-time mode is frozen too.
+    assert_eq!(
+        copy.remount(&m, more.union(crate::MountFlags::NOATIME)),
+        Err(Errno::EPERM)
+    );
+}
+
+#[test]
+fn a_locked_mount_is_not_unmounted_alone_and_goes_with_its_parent() {
+    let (copy, inside) = locked_copy();
+    let m = copy.resolve(&inside, None, b"/m", true).unwrap();
+    assert_eq!(copy.unmount(&m), Err(Errno::EINVAL));
+    assert_eq!(copy.unmount_with(&m, true), Err(Errno::EINVAL));
+    // The first namespace's own mounts are not locked: the lock is the copy's.
+    let (ns, ctx) = fresh();
+    ns.mkdir(&ctx, None, b"/m", 0o755).unwrap();
+    let at = ns.resolve(&ctx, None, b"/m", true).unwrap();
+    let _ = ns.mount(tmpfs(2), &at).unwrap();
+    let mounted = ns.resolve(&ctx, None, b"/m", true).unwrap();
+    ns.unmount(&mounted).unwrap();
+}
+
+#[test]
+fn a_bind_keeps_the_locked_flags_and_a_partial_one_over_locked_children_is_refused() {
+    let (copy, inside) = locked_copy();
+    let root = copy.resolve(&inside, None, b"/", true).unwrap();
+    copy.mkdir(&inside, None, b"/b", 0o755).unwrap();
+    let target = copy.resolve(&inside, None, b"/b", true).unwrap();
+    // `/` has `/m`, locked, under it: a bind of it that leaves `/m` out
+    // would show what `/m` covers.
+    assert_eq!(
+        copy.bind(&root, &target, false).map(drop),
+        Err(Errno::EINVAL)
+    );
+    // With `MS_REC` the locked child comes along, with its flags locked.
+    let bound = copy.bind(&root, &target, true).unwrap();
+    let under = copy.resolve(&inside, None, b"/b/m", true).unwrap();
+    assert!(under.mount.flags().contains(crate::MountFlags::READ_ONLY));
+    assert_eq!(
+        copy.remount(&under, crate::MountFlags::NONE),
+        Err(Errno::EPERM)
+    );
+    // The top of the bind is a mount point of its own.
+    assert!(!bound.is_locked());
+}
+
+#[test]
+fn pivoting_to_a_locked_mount_is_refused() {
+    let (copy, inside) = locked_copy();
+    let m = copy.resolve(&inside, None, b"/m", true).unwrap();
+    let old = copy.resolve(&inside, None, b"/", true).unwrap();
+    assert_eq!(copy.pivot_root(&old, &m, &m), Err(Errno::EINVAL));
+}
+
+#[test]
+fn removing_a_name_takes_another_namespaces_mount_off_it() {
+    let (ns, ctx) = fresh();
+    ns.mkdir(&ctx, None, b"/m", 0o755).unwrap();
+    let (copy, inside) = copied(&ns, &ctx);
+    let m = copy.resolve(&inside, None, b"/m", true).unwrap();
+    let mounted = copy.mount(tmpfs(2), &m).unwrap();
+    // The first namespace has no mount on `/m`; the copy does. Removing the
+    // name is not `EBUSY` -- a user's private mount must not pin a directory
+    // against its owner -- and it takes the copy's mount with it.
+    ns.rmdir(&ctx, None, b"/m").unwrap();
+    assert!(mounted.parent().is_none());
+    assert!(copy.resolve(&inside, None, b"/m", true).is_err());
+    // A mount of the caller's own namespace still pins it.
+    ns.mkdir(&ctx, None, b"/n", 0o755).unwrap();
+    let n = ns.resolve(&ctx, None, b"/n", true).unwrap();
+    let _ = ns.mount(tmpfs(3), &n).unwrap();
+    assert_eq!(ns.rmdir(&ctx, None, b"/n"), Err(Errno::EBUSY));
 }
