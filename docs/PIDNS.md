@@ -6,7 +6,7 @@ user namespace runs a process whose pid is 1 inside it, under a memory limit
 ... with a seccomp filter" -- needs the pid-1 part from here; the memory
 controller and seccomp are other streams'.
 
-Status: **designed, being built** (§9). Linux's semantics throughout; §8
+Status: **built on `stage13-pidns`, not landed** (§9). Linux's semantics throughout; §8
 lists every place this differs.
 
 ---
@@ -50,7 +50,6 @@ space of *local numbers* that map to a `K`.
 PidNamespace
   parent: Option<Arc<PidNamespace>>    None for the first
   level: u32                           0 for the first, at most 32
-  owner: Arc<UserNamespace>            the creator's user namespace
   id: u64                              what /proc/<pid>/ns/pid names
   local: SpinLock<Local>               map local number -> K, cursor
   init: SpinLock<Weak<Process>>        pid 1 of this namespace
@@ -234,11 +233,13 @@ reader navigates by -- do follow the instance.
 namespace's `id` (the first's is Linux's `0xEFFFFFFC`). `/proc/sys/kernel/
 pid_max` stays `32768`.
 
-`mount("proc", ...)` needs `CAP_SYS_ADMIN` in the mounter's user namespace
-and, in a child user namespace, the mounter's pid namespace must be owned by
-that user namespace or one below it (Linux's `proc_init_fs_context`); the
-"fully visible" check against a host `/proc` is not made (§8). `umount` and
-a bind of `/proc` are as before.
+`mount("proc", ...)` makes an instance of the mounter's pid namespace. The
+call itself is as it was: `mount(2)` needs the first namespace's root, so a
+process in a child *user* namespace has a `/proc` of its pid namespace only
+by a bind of one, and lifting that is N5's (mount rules for child
+namespaces), where Linux's `proc_init_fs_context` owner check and the "fully
+visible `/proc`" rule belong (§8). `umount` and a bind of `/proc` are as
+before.
 
 ## 7. F-37 and limits
 
@@ -275,9 +276,15 @@ job's `pids.max` counts tasks as today, in whatever namespace.
 * Files in procfs tell numbers for the reader, not the instance (§6).
 * The "fully visible `/proc`" mount check is not made.
 * `setns` into a pid namespace is not built (`setns` answers `EINVAL`).
-* `CLONE_NEWPID` with `CLONE_THREAD` or `CLONE_PARENT` is `EINVAL`, and so
-  is `CLONE_NEWPID | CLONE_SIGHAND` (Linux's); `clone3`'s `set_tid` is
-  refused with `EINVAL` as the struct's `set_tid_size` already is.
+* `CLONE_NEWPID` with `CLONE_THREAD` or `CLONE_PARENT` is `EINVAL`, as is
+  `CLONE_PARENT` from a namespace's init, and `CLONE_THREAD` from a process
+  whose children are in another namespace than it is. `clone3`'s `set_tid`
+  stays `ENOSYS`, as before.
+* The console's and a pty's `TIOCGPGRP`, `TIOCGSID` and `TIOCSPGRP`, `F_GETLK`'s
+  `l_pid` and `semctl(GETPID)` are translated by the shared helpers
+  (`pgrp_to_user`, `show_pid`) and have no boot check of their own.
+* A terminal's foreground group is found for a reader by scanning for a
+  live member, so a group whose members are all gone reads 0 in a namespace.
 * `kill(-1)` does not reach a process the caller's namespace does not show.
 * A process group whose leader is gone keeps its local numbers for as long
   as a member holds them, not as Linux's `struct pid` counts (same thing,

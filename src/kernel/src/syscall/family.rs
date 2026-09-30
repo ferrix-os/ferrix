@@ -441,9 +441,9 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
         }
     }
     if flags & CLONE_NEWPID != 0 {
-        if flags & CLONE_NEWUSER == 0
-            && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
-        {
+        let asker_may = flags & CLONE_NEWUSER != 0
+            || parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN));
+        if !asker_may {
             return Err(Errno::EPERM);
         }
         if pidns::level_of(parent.children_namespace().as_ref()) >= pidns::MAX_LEVEL {
