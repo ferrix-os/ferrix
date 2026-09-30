@@ -212,6 +212,9 @@ pub(crate) struct Process {
     continue_report: AtomicBool,
     /// Woken when it continues, or ends, which is what a stopped task waits for.
     resumed: WaitQueue,
+    /// How many of its threads are parked by `cgroup.freeze`, waiting on
+    /// their way back to user mode (`docs/CGROUPS.md` §11).
+    parked: AtomicU32,
     /// Its user and group ids and supplementary groups. A lock of its own:
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
@@ -382,6 +385,7 @@ impl Process {
             stop_report: AtomicU32::new(0),
             continue_report: AtomicBool::new(false),
             resumed: WaitQueue::new(),
+            parked: AtomicU32::new(0),
             // A process the kernel starts is root's. A fork child takes its
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
@@ -903,6 +907,11 @@ impl Process {
                 live.checked_sub(1)
             });
         self.thread_left.wake_all();
+        // A thread that leaves a frozen cgroup's process may have been the
+        // last one the cgroup waited for.
+        if self.core().is_frozen() {
+            fs::cgroupfs::settle_frozen(&self.core().job());
+        }
         if before != Ok(1) {
             return;
         }
@@ -1398,6 +1407,51 @@ impl Process {
     /// Whether it is stopped.
     pub(crate) fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::Acquire) != 0
+    }
+
+    /// Whether its threads are to wait on their way back to user mode: it is
+    /// stopped, or its cgroup is frozen. A freeze is a stop that `SIGCONT`
+    /// does not undo, that no parent is told of, and that a `SIGKILL` ends
+    /// as it ends a stop.
+    pub(crate) fn must_park(&self) -> bool {
+        self.is_stopped() || self.core().is_frozen()
+    }
+
+    /// Look at its cgroup's freeze again: after it was made, moved, or its
+    /// cgroup's `cgroup.freeze` changed. A newly frozen process has its
+    /// threads interrupted as a stop has, so that they park; a thawed one
+    /// has them released.
+    pub(crate) fn freeze_sync(&self) {
+        let (frozen, changed) = self.core().sync_freeze();
+        if !changed {
+            return;
+        }
+        if frozen {
+            self.signalled.wake_all();
+            self.wake_other_tasks();
+        } else {
+            self.resumed.wake_all();
+        }
+    }
+
+    /// A thread of it is parked by a freeze.
+    pub(crate) fn thread_parked(&self) {
+        let _ = self.parked.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// A thread of it is no longer parked.
+    pub(crate) fn thread_unparked(&self) {
+        let _ = self
+            .parked
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |parked| {
+                parked.checked_sub(1)
+            });
+    }
+
+    /// Whether every thread of it that has started and not ended is parked
+    /// by a freeze: what a frozen cgroup's `frozen 1` waits for.
+    pub(crate) fn is_parked(&self) -> bool {
+        self.parked.load(Ordering::Acquire) >= self.live_threads.load(Ordering::Acquire)
     }
 
     /// The queue woken when it continues or ends.

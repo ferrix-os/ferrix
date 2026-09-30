@@ -73,6 +73,7 @@ mod controllers_check;
 mod creator_check;
 mod delegation_check;
 mod events_check;
+mod freeze_check;
 mod limits_check;
 mod native_check;
 mod oom_check;
@@ -840,12 +841,16 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         }
         Kind::Controllers => controllers::render(&mut out, offered(job)),
         Kind::SubtreeControl => controllers::render(&mut out, job.subtree_control()),
-        Kind::Events => render::events(&mut out, job.is_populated(), false),
+        Kind::Events => render::events(&mut out, job.is_populated(), job.frozen_seen()),
         Kind::MaxDescendants => render::limit(&mut out, job.limits().1),
         Kind::MaxDepth => render::limit(&mut out, job.limits().0),
         // With no memory to count them, as many as a count can say.
         Kind::Stat => render::stat(&mut out, job.descendants().unwrap_or(u32::MAX)),
-        Kind::Freeze => out.extend_from_slice(b"0\n"),
+        Kind::Freeze => out.extend_from_slice(if job.freeze_requested() {
+            b"1\n"
+        } else {
+            b"0\n"
+        }),
         Kind::Kill => {}
         Kind::CpuWeight => render::number(&mut out, u64::from(job.cpu_weight())),
         Kind::MemoryCurrent => render::number(&mut out, usage(job, Resource::Memory).used),
@@ -985,27 +990,37 @@ fn limit_set(job: &Job, resource: Resource, limit: u64) {
     );
 }
 
+/// A pid written to `job`'s `cgroup.procs`: move that process in.
+fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
+    let target = write::parse_procs(data).map_err(errno)?;
+    if job.is_removed() {
+        return Err(Errno::ENODEV);
+    }
+    let process = match target {
+        Target::Writer => process::current().ok_or(Errno::ESRCH)?,
+        Target::Pid(pid) => registry::find(pid).ok_or(Errno::ESRCH)?,
+    };
+    let left = process.job();
+    // Linux's `cgroup_procs_write_permission`: a writer in a cgroup
+    // namespace moves only between cgroups inside its own root, and
+    // is told `ENOENT`, as if the rest of the tree were not there.
+    if !visible_in(&opener.ns, &[&left, job]) {
+        return Err(Errno::ENOENT);
+    }
+    attach_permissions(&opener.who, &left, job, &opener.shared)?;
+    job.adopt(&process).map_err(move_errno)?;
+    // Frozen with the cgroup it went into, thawed from the one it left; and
+    // either may now be frozen, or no longer, as a whole.
+    process.freeze_sync();
+    settle_frozen(&left);
+    settle_frozen(job);
+    Ok(())
+}
+
 /// A write of `data` to a file of `job`, opened by `opener`.
 fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
     match kind {
-        Kind::Procs => {
-            let target = write::parse_procs(data).map_err(errno)?;
-            if job.is_removed() {
-                return Err(Errno::ENODEV);
-            }
-            let process = match target {
-                Target::Writer => process::current().ok_or(Errno::ESRCH)?,
-                Target::Pid(pid) => registry::find(pid).ok_or(Errno::ESRCH)?,
-            };
-            // Linux's `cgroup_procs_write_permission`: a writer in a cgroup
-            // namespace moves only between cgroups inside its own root, and
-            // is told `ENOENT`, as if the rest of the tree were not there.
-            if !visible_in(&opener.ns, &[&process.job(), job]) {
-                return Err(Errno::ENOENT);
-            }
-            attach_permissions(&opener.who, &process.job(), job, &opener.shared)?;
-            job.adopt(&process).map_err(move_errno)?;
-        }
+        Kind::Procs => move_process(job, data, opener)?,
         Kind::Kill => {
             write::parse_kill(data).map_err(errno)?;
             let ended = job.kill_members().map_err(|_| Errno::ENOMEM)?;
@@ -1031,7 +1046,14 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         Kind::MaxDepth => job.set_max_depth(write::parse_limit(data).map_err(errno)?),
         Kind::MaxDescendants => job.set_max_descendants(write::parse_limit(data).map_err(errno)?),
         Kind::Type => write::parse_type(data).map_err(errno)?,
-        Kind::Threads | Kind::Freeze => return Err(Errno::EOPNOTSUPP),
+        Kind::Threads => return Err(Errno::EOPNOTSUPP),
+        Kind::Freeze => {
+            let on = write::parse_freeze(data).map_err(errno)?;
+            if job.is_removed() {
+                return Err(Errno::ENODEV);
+            }
+            freeze(job, on)?;
+        }
         Kind::PidsMax => {
             let limit = write::parse_pids_max(data).map_err(errno)?;
             let limit = limit.unwrap_or(quota::UNLIMITED);
@@ -1086,6 +1108,55 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         | Kind::PidsEvents => return Err(Errno::EACCES),
     }
     Ok(data.len())
+}
+
+/// Whether `job` is frozen as `cgroup.events` says: its subtree is to be
+/// frozen, and every process in it, live, has parked (`docs/CGROUPS.md`
+/// §11). A cgroup with no process is frozen as soon as it is asked to be.
+fn is_frozen(job: &Arc<Job>, live: &[Arc<Process>]) -> bool {
+    job.freezing()
+        && live.iter().all(|process| {
+            process.is_terminated()
+                || !job.contains(&process.core().job())
+                || (process.core().is_frozen() && process.is_parked())
+        })
+}
+
+/// Look again at whether `job`, and every cgroup above it, is frozen, and
+/// wake whatever polls the `cgroup.events` of each that changed. Called when
+/// a thread parks, leaves, or a process moves.
+pub(crate) fn settle_frozen(job: &Arc<Job>) {
+    let Ok(live) = registry::live() else {
+        return;
+    };
+    let mut at = Some(Arc::clone(job));
+    while let Some(current) = at {
+        let _ = current.note_frozen(is_frozen(&current, &live));
+        at = current.parent().cloned();
+    }
+}
+
+/// `cgroup.freeze` written to `job`: freeze, or thaw, every process beneath
+/// it (those a cgroup beneath it freezes of its own stay frozen), and settle
+/// what `cgroup.events` says of each cgroup in the subtree and above it.
+fn freeze(job: &Arc<Job>, on: bool) -> Result<()> {
+    if job.freeze_requested() == on {
+        return Ok(());
+    }
+    let tree = job.subtree().map_err(|_| Errno::ENOMEM)?;
+    job.set_freeze(on);
+    let live = registry::live().map_err(|_| Errno::ENOMEM)?;
+    for process in &live {
+        if job.contains(&process.core().job()) {
+            process.freeze_sync();
+        }
+    }
+    // A thaw is seen at once; a freeze is seen when the last has parked.
+    for member in &tree {
+        let _ = member.note_frozen(is_frozen(member, &live));
+    }
+    settle_frozen(job);
+    Ok(())
 }
 
 /// `/proc/<pid>/cgroup` for a process in `job`.
@@ -1151,6 +1222,9 @@ pub(crate) struct Report {
     /// Pages of files' caches that reclaim gave back, inside the cgroup
     /// asking and no other, and that read back as the source has them.
     pub(crate) reclaimed: u64,
+    /// Checks of `cgroup.freeze` passed: a program frozen, held through
+    /// `SIGCONT`, thawed, killed frozen, and the nested and moved cases.
+    pub(crate) frozen: u32,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1307,6 +1381,7 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.created_as = creator_check::run(&mut harness)?;
     harness.report.limits_refused = limits_check::run(&mut harness)?;
     harness.report.reclaimed = reclaim_check::run(&mut harness)?;
+    harness.report.frozen = freeze_check::run(&mut harness)?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)
