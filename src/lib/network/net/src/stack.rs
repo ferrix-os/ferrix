@@ -296,10 +296,38 @@ impl Stack {
             .sum()
     }
 
-    /// Forget the fragments held: a namespace that cannot pay for them drops
-    /// them, as a host under memory pressure does.
-    pub fn flush_reassembly(&mut self) {
+    /// The heap the tables hold that a program's own calls did not each pay
+    /// for: interfaces and their addresses, routes, the neighbour cache with
+    /// the packets it holds back, and fragments waiting for their siblings.
+    /// Sockets are charged when they are made and are not counted here. What
+    /// a namespace's owner is charged for (`docs/NETNS.md` section 5).
+    #[must_use]
+    pub fn footprint(&self) -> usize {
+        let interfaces = self.interfaces.iter().fold(0_usize, |total, interface| {
+            total.saturating_add(size_of::<Interface>()).saturating_add(
+                interface
+                    .addresses
+                    .capacity()
+                    .saturating_mul(size_of::<Address>()),
+            )
+        });
+        let routes = self
+            .routes
+            .entries()
+            .len()
+            .saturating_mul(size_of::<Route>());
+        interfaces
+            .saturating_add(routes)
+            .saturating_add(self.neighbors.footprint())
+            .saturating_add(self.reassembly.held())
+    }
+
+    /// Give up what was learned rather than configured, and the fragments
+    /// held: a namespace that cannot pay for them drops them, as a host under
+    /// memory pressure does. Interfaces, addresses and routes stay.
+    pub fn shed(&mut self) {
         self.reassembly.flush();
+        self.neighbors.shed();
     }
 
     /// The interface with that name.
