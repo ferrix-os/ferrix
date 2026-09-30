@@ -491,6 +491,13 @@ pub(super) fn check_cgroupfs() {
          usage and its throttling, and free again at max",
         checked.throttled,
     );
+    println!(
+        "  io       {} requests to a disk charged to the cgroup that made them and every one above, \
+         io.stat counting them per disk in Linux's format, a sibling's untouched, and io.max \
+         spacing a cgroup's reads out to its rate, in it and beneath it; cpu io memory pids \
+         listed as the controllers built",
+        checked.disk_requests,
+    );
 }
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the

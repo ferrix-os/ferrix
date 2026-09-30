@@ -860,3 +860,127 @@ fn the_model_accepts_any_short_input() {
         assert_eq!(model::run(&data).map(|_| ()), Ok(()), "len {len}");
     }
 }
+
+// -- Per-cgroup bandwidth ---------------------------------------------------------
+
+mod throttling {
+    use super::vec;
+    use crate::{Limiter, Throttle};
+
+    const SECOND: u64 = 1_000_000_000;
+
+    #[test]
+    fn an_unlimited_clock_never_waits() {
+        let mut limiter = Limiter::UNLIMITED;
+        for now in [0, 5, 1_000_000] {
+            let start = limiter.earliest(now);
+            assert_eq!(start, now);
+            limiter.commit(start, u64::MAX);
+        }
+        assert_eq!(limiter.earliest(7), 7);
+    }
+
+    #[test]
+    fn a_rate_spaces_out_what_it_admits() {
+        let mut limiter = Limiter::UNLIMITED;
+        limiter.set_rate(Some(1000));
+        // A thousand bytes a second, in requests of a thousand: one a second.
+        let mut starts = vec![];
+        for _ in 0..4 {
+            let start = limiter.earliest(0);
+            limiter.commit(start, 1000);
+            starts.push(start);
+        }
+        assert_eq!(starts, [0, SECOND, 2 * SECOND, 3 * SECOND]);
+    }
+
+    #[test]
+    fn an_idle_clock_owes_nothing() {
+        let mut limiter = Limiter::UNLIMITED;
+        limiter.set_rate(Some(1000));
+        limiter.commit(0, 1000);
+        // A minute later the work admitted has long been paid for.
+        let start = limiter.earliest(60 * SECOND);
+        assert_eq!(start, 60 * SECOND);
+    }
+
+    #[test]
+    fn a_rate_holds_over_any_stretch() {
+        let mut limiter = Limiter::UNLIMITED;
+        limiter.set_rate(Some(4096));
+        let mut now = 0;
+        let mut admitted = 0_u64;
+        // Requests of odd sizes, each asked for at the instant the last
+        // started: what was started by `now` never exceeds the rate times
+        // `now`, plus the request that began it.
+        for size in (1..200).map(|n| n * 97 % 5000 + 1) {
+            let start = limiter.earliest(now);
+            limiter.commit(start, size);
+            now = start;
+            admitted += size;
+            let allowed = u128::from(now) * 4096 / u128::from(SECOND) + 5000;
+            assert!(u128::from(admitted) <= allowed, "{admitted} by {now}");
+        }
+    }
+
+    #[test]
+    fn setting_a_rate_forgives_what_came_before() {
+        let mut limiter = Limiter::UNLIMITED;
+        limiter.set_rate(Some(1));
+        limiter.commit(0, 1_000_000);
+        limiter.set_rate(Some(1000));
+        assert_eq!(limiter.earliest(3), 3);
+        limiter.set_rate(None);
+        assert_eq!(limiter.rate(), None);
+    }
+
+    #[test]
+    fn a_request_waits_for_the_tighter_of_bytes_and_operations() {
+        let mut throttle = Throttle::UNLIMITED;
+        assert!(!throttle.is_limited());
+        throttle.bytes.set_rate(Some(1_000_000));
+        throttle.ios.set_rate(Some(2));
+        assert!(throttle.is_limited());
+        // Small requests: two operations a second is the limit.
+        let mut starts = vec![];
+        for _ in 0..4 {
+            let start = throttle.earliest(0);
+            throttle.commit(start, 512);
+            starts.push(start);
+        }
+        assert_eq!(starts, [0, SECOND / 2, SECOND, 3 * SECOND / 2]);
+        // Large ones: a megabyte a second is.
+        let mut throttle = Throttle::UNLIMITED;
+        throttle.bytes.set_rate(Some(1_000_000));
+        throttle.ios.set_rate(Some(1000));
+        let first = throttle.earliest(0);
+        throttle.commit(first, 1_000_000);
+        assert_eq!(throttle.earliest(0), SECOND);
+    }
+
+    #[test]
+    fn a_parent_holds_however_its_children_share_it() {
+        // Two children under a parent limited to two operations a second: each
+        // asks for a start, the latest of the two levels, and pays both.
+        let mut parent = Throttle::UNLIMITED;
+        parent.ios.set_rate(Some(2));
+        let mut children = [Throttle::UNLIMITED; 2];
+        let mut starts = vec![];
+        for turn in 0..4 {
+            let child = &mut children[turn % 2];
+            let start = child.earliest(0).max(parent.earliest(0));
+            child.commit(start, 512);
+            parent.commit(start, 512);
+            starts.push(start);
+        }
+        assert_eq!(starts, [0, SECOND / 2, SECOND, 3 * SECOND / 2]);
+    }
+
+    #[test]
+    fn the_clock_saturates() {
+        let mut limiter = Limiter::UNLIMITED;
+        limiter.set_rate(Some(1));
+        limiter.commit(u64::MAX - 1, u64::MAX);
+        assert_eq!(limiter.earliest(0), u64::MAX);
+    }
+}
