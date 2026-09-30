@@ -152,6 +152,8 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
     // nothing has moved.
     if frame.came_from_user() {
         crate::sched::regroup_current();
+        // And waits out the rest of a `cpu.max` period its job has used up.
+        crate::sched::throttle_current();
     }
 
     // On the way back to a program, which is where a program killed from
@@ -364,6 +366,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
     // (`echo $$ > cgroup.procs`) runs in the new job from here.
     if regs.is_some() {
         crate::sched::regroup_current();
+        crate::sched::throttle_current();
         crate::sched::call_left();
     }
     outcome
