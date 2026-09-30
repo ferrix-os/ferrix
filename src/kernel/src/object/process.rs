@@ -99,6 +99,11 @@ pub(crate) struct Process {
     /// Its job's quota slot, read without the membership lock: what the
     /// scheduler files its threads under. Written only under `membership`.
     slot: AtomicU32,
+    /// Whether its job, or one above, is frozen (`cgroup.freeze`): its
+    /// threads stop on their way back to user mode, and nothing but the
+    /// process ending lets them go. Written under `membership`, so that a
+    /// move and a freeze cannot pass each other.
+    frozen: AtomicBool,
     /// Whether its job's task limit refused it as it was made. Such a
     /// process charged nothing and is never started: `fork` answers
     /// `EAGAIN`, as it does for a process that got no pid.
@@ -279,6 +284,7 @@ impl Process {
         // says so too, and a space another domain already claimed is out.
         let domain = job.domain();
         space.claim_domain(domain);
+        let frozen = job.freezing();
         Ok(Process {
             space,
             pid,
@@ -288,6 +294,7 @@ impl Process {
             counted: AtomicBool::new(true),
             tasks: AtomicU64::new(u64::from(!over_quota)),
             slot: AtomicU32::new(slot),
+            frozen: AtomicBool::new(frozen),
             over_quota,
             exit,
             bootstrap: SpinLock::new(Bootstrap::Open),
@@ -372,6 +379,21 @@ impl Process {
     /// that must not be started.
     pub(crate) fn over_quota(&self) -> bool {
         self.over_quota
+    }
+
+    /// Whether its job, or one above, is frozen: the answer is read on every
+    /// way back to user mode, and is a load.
+    pub(crate) fn is_frozen(&self) -> bool {
+        self.frozen.load(Ordering::Acquire)
+    }
+
+    /// Look at its job again, and answer whether it is to be frozen and
+    /// whether that changed. Under `membership`, which a move also holds.
+    pub(crate) fn sync_freeze(&self) -> (bool, bool) {
+        let membership = self.membership.lock();
+        let now = membership.freezing();
+        let before = self.frozen.swap(now, Ordering::SeqCst);
+        (now, before != now)
     }
 
     /// Its job's quota slot, read without a lock.
@@ -509,6 +531,9 @@ impl Process {
             }
             quota::uncharge(membership.quota_index(), Resource::Tasks, tasks);
             self.slot.store(to.quota_index(), Ordering::Release);
+            // Frozen with the cgroup it goes into, thawed with the one it
+            // leaves; the personality kicks its threads, having moved it.
+            self.frozen.store(to.freezing(), Ordering::SeqCst);
             core::mem::replace(&mut *membership, Arc::clone(to))
         };
         // Outside the lock: it may be the last reference to that job.
