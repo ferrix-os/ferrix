@@ -1102,12 +1102,12 @@
     "object/process.rs": {
       "ring": "core",
       "lines": [
-        181,
-        220,
-        838,
-        883,
+        186,
+        225,
+        863,
         908,
-        1050
+        933,
+        1075
       ]
     },
     "arch/arm_common/gicv2.rs": {
