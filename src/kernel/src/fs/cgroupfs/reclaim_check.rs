@@ -98,7 +98,7 @@ fn file(pages: u64) -> Checked<(Box<dyn Pages>, Arc<Pattern>)> {
 }
 
 /// A cgroup, and a process in it to stand for its programs.
-struct Group {
+pub(super) struct Group {
     /// Its name, beneath the mount.
     path: &'static [u8],
     /// The process, if it has one: a cgroup that enables memory for its
@@ -110,7 +110,7 @@ struct Group {
 
 impl Group {
     /// Make the cgroup `path`, with no process in it.
-    fn bare(harness: &mut Harness, path: &'static [u8]) -> Checked<Group> {
+    pub(super) fn bare(harness: &mut Harness, path: &'static [u8]) -> Checked<Group> {
         harness
             .mkdir(path)
             .map_err(|_| "reclaim check: mkdir of a cgroup failed")?;
@@ -123,7 +123,7 @@ impl Group {
     }
 
     /// Make the cgroup `path` and move a new process into it.
-    fn make(harness: &mut Harness, path: &'static [u8]) -> Checked<Group> {
+    pub(super) fn make(harness: &mut Harness, path: &'static [u8]) -> Checked<Group> {
         let mut group = Group::bare(harness, path)?;
         let process =
             process::new_for_check().map_err(|_| "reclaim check: no process for a cgroup")?;
@@ -139,14 +139,14 @@ impl Group {
     }
 
     /// The slot charges made as a task of this cgroup go to.
-    fn slot(&self) -> u32 {
+    pub(super) fn slot(&self) -> u32 {
         self.job
             .as_ref()
             .map_or(crate::object::quota::NONE, |job| job.quota_index())
     }
 
     /// `file` of this cgroup, as a path beneath the mount.
-    fn file(&self, name: &str) -> Vec<u8> {
+    pub(super) fn file(&self, name: &str) -> Vec<u8> {
         let mut path = Vec::from(self.path);
         path.push(b'/');
         path.extend_from_slice(name.as_bytes());
@@ -154,7 +154,7 @@ impl Group {
     }
 
     /// Set `name` to `value`.
-    fn set(&self, harness: &Harness, name: &str, value: &[u8]) -> Checked<()> {
+    pub(super) fn set(&self, harness: &Harness, name: &str, value: &[u8]) -> Checked<()> {
         harness
             .write(&self.file(name), value)
             .map(drop)
@@ -163,7 +163,7 @@ impl Group {
 
     /// The number after `key` in `name`, or `name` itself when `key` is
     /// empty.
-    fn number(&self, harness: &Harness, name: &str, key: &str) -> Checked<u64> {
+    pub(super) fn number(&self, harness: &Harness, name: &str, key: &str) -> Checked<u64> {
         let text = harness
             .read(&self.file(name))
             .map_err(|_| "reclaim check: a controller file did not read")?;
@@ -180,6 +180,15 @@ impl Group {
                 (name == key).then(|| value.parse().ok()).flatten()
             })
             .ok_or("reclaim check: a key is missing from a file")
+    }
+
+    /// Run `work` as a task of this cgroup, charged to it.
+    pub(super) fn as_task<T>(&self, work: impl FnOnce() -> T) -> T {
+        let own = sched::running_group();
+        sched::set_current_group(self.slot());
+        let done = work();
+        sched::set_current_group(own);
+        done
     }
 
     /// Read all of `store` as a task of this cgroup, and whether the bytes
@@ -203,7 +212,7 @@ impl Group {
     }
 
     /// Kill the process and leave the cgroup empty.
-    fn end(self, harness: &Harness) -> Checked<()> {
+    pub(super) fn end(self, harness: &Harness) -> Checked<()> {
         if let Some(process) = &self.process {
             process::kill(process, crate::object::job::KILLED_STATUS);
         }
