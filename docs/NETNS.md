@@ -520,4 +520,91 @@ message that names what is wrong.
 
 ## 11. Where it stands (2026-09-30)
 
-Written before the code. See below as it is built.
+**Built** on branch `stage13-netns`, which is `stage13-n4-userns` (813d24d4)
+and the commits after it; not landed, for the certification consultant's
+review (the design before code, the diff before it lands, as for N4).
+
+* `CLONE_NEWNET` through `clone`, `clone3` and `unshare`, alone or with
+  `CLONE_NEWUSER`; a namespace of its own stack (interfaces, addresses,
+  routes, neighbours, ports, sockets, reassembly), owned by a user namespace,
+  charged to the job that made it, ended with its last holder.
+* A new namespace has a down loopback and nothing else; `RTM_NEWLINK` or
+  `SIOCSIFFLAGS` with `IFF_UP` gives it `127.0.0.1/8` and `::1`; down takes
+  them away.
+* A process holds its namespace and a fork child, and a native child, takes
+  it; a socket holds the one it was made in (inet, packet, netlink, and the
+  unix socket's abstract names).
+* Changes judged by `CAP_NET_ADMIN`, raw and packet sockets by `CAP_NET_RAW`,
+  over the user namespace that owns the network namespace; `HONOURED` gains
+  the two bits.
+* veth pairs: `RTM_NEWLINK` with `IFLA_LINKINFO` kind `veth` and the peer in
+  `IFLA_INFO_DATA`, each end placed by `IFLA_NET_NS_PID`; moved by
+  `IFLA_NET_NS_PID` or `_FD`; `RTM_DELLINK`; a link dump says `veth`.
+* A ring-3 NIC is served by a device key, moves with its interface, and comes
+  home when its namespace ends; a namespace ending destroys its veth ends with
+  their peers.
+* `/proc/<pid>/ns/net` (link, and a file that `IFLA_NET_NS_FD` takes),
+  `/proc/net/*`, `/sys/class/net` and netlink show the reader's namespace.
+* The tables are charged (`Stack::footprint`, `shed`) and have ceilings.
+
+**Evidence.** Ten host tests of the stack's half (`src/lib/network/net`,
+`tests/namespaces.rs`; the crate's 82 pass). The `netns` boot line (FX-0893, `fs/netns_check.rs`): 1097 calls, 18
+refusals, on x86_64, and on aarch64 and armv7a at `--smp 2` (see the gates
+below). Three more fills on the `kmem` line. Thirty negative controls (§9),
+each run on x86_64, three of them stopped by an earlier check with a message
+of its own.
+
+**How it differs from the design above, where the building found it wrong:**
+
+* The process holds an `Option`, `None` for the first, so that a process made
+  during early boot does not make the net core before the clock.
+* The check is in `fs/` (it uses the mount check's helpers, which are
+  `pub(super)`) and not in `net/`.
+* `admit` makes room for two interfaces (`HEADROOM` = 1 KiB) before an add;
+  the rest of the charge is settled after a change, and `tables_cover` is what
+  `kmem_check` holds it to.
+* `/sys/class/net` and the native child are the reader's and the creator's
+  namespace: the design listed one and not the other.
+
+**Where it differs from Linux** (beside the two honoured capabilities, which
+Linux honours all of):
+
+* A network namespace is a process's, not a task's: `CLONE_NEWNET` with
+  `CLONE_THREAD` is `EINVAL`, and `unshare(CLONE_NEWNET)` from a process with
+  more than one thread is `EINVAL`. (Not checked at boot: the harness makes no
+  threads; the code is one line in `sys_unshare`.)
+* A moved interface keeps no index (it gets the next free one) and a name the
+  target has is `EEXIST`, where Linux renames it to `dev%d`; an interface that
+  comes home to the first namespace is renamed `devN` on a clash.
+* `ip link add type X` makes `veth` only; `dummy`, `bridge`, `macvlan` and the
+  rest are `EOPNOTSUPP`. A pair's MTU is 1500, and it has no queue
+  attributes, statistics or multicast groups (there are no notifications).
+* The stack is a host, not a router: a namespace with two veth ends does not
+  forward between them. **Container networking that wants NAT or a bridge is
+  not built**, and needs forwarding in `src/lib/network/net` first.
+* `setns(CLONE_NEWNET)`, `RTM_NEWNSID`/`RTM_GETNSID`, `IFLA_LINK_NETNSID`,
+  `IFLA_TARGET_NETNSID` and `/proc/<pid>/net` are not built. `IFLA_NET_NS_FD`
+  takes a descriptor of `/proc/<pid>/ns/net` (`net/netns_file.rs`, the smallest
+  `nsfs`); the branch that owns `setns` has the general one.
+* The ceilings (64 interfaces, 256 addresses, 1024 routes per namespace) also
+  apply to the first namespace.
+* A reassembler in a new namespace holds 32 KiB, not 256.
+
+**Open.**
+
+* **Merge.** Three places meet other branches: `Process::net_ns` becomes an
+  `NsProxy` member, `procfs.rs`'s `NamespaceKind` gains `Net` beside `Uts`,
+  `Ipc` and `Cgroup` (its values will need renumbering), and `netns_file.rs`
+  becomes `Handle::Net` in `nsfs.rs`. `family.rs`'s `namespaces_asked` and
+  `namespace.rs`'s `sys_unshare` are edited by both.
+* The raw and packet socket code is now reachable by an unprivileged user who
+  owns a namespace (VULNERABILITY-ANALYSIS); that is a larger attack surface
+  than before, in safe Rust, with no ring-buffer interface.
+* Not checked at boot: `unshare` from a multi-threaded process, a native child
+  inheriting the namespace, and `/sys/class/net`'s per-reader listing. A
+  namespace ended by the last `close` of a socket, rather than the last
+  process, is covered by the ownership rules and not by a check of its own.
+* `tables_cover` and the ceilings make the tables safe to give a user; the
+  neighbour cache (256 entries, each holding back three packets) is charged
+  as it fills and shed when it cannot be paid for, but the wait to learn is the
+  sender's. No check drives ARP past the limit.
