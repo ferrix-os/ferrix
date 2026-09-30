@@ -448,8 +448,8 @@ namespace's business); `SO_PEERCRED` (the user namespace's).
 ## 9. Checks
 
 `fs/netns_check.rs`, the `netns` line (FX-0893), registered beside
-`check_user_namespaces` in `stages_check.rs` (1097 calls, 18 of them refusals
-on x86_64). It makes processes that are root and uid 1000, drives
+`check_user_namespaces` in `stages_check.rs` (1099 calls, 18 of them refusals,
+the same on x86_64, aarch64 and armv7a). It makes processes that are root and uid 1000, drives
 `unshare`, `socket`, `ioctl`, `openat` and the unix calls through the
 system-call layer where a rule is about a call (NN5, NN6, NN7, NN11, NN12,
 NN15), and netlink and the namespaces' own sockets where it is about what
@@ -548,11 +548,24 @@ review (the design before code, the diff before it lands, as for N4).
 * The tables are charged (`Stack::footprint`, `shed`) and have ceilings.
 
 **Evidence.** Ten host tests of the stack's half (`src/lib/network/net`,
-`tests/namespaces.rs`; the crate's 82 pass). The `netns` boot line (FX-0893, `fs/netns_check.rs`): 1097 calls, 18
-refusals, on x86_64, and on aarch64 and armv7a at `--smp 2` (see the gates
-below). Three more fills on the `kmem` line. Thirty negative controls (§9),
+`tests/namespaces.rs`; the crate's 82 pass). The `netns` boot line (FX-0893, `fs/netns_check.rs`): 1099 calls, 18
+refusals, the same count on x86_64, aarch64 and armv7a at `--smp 2`. Three more fills on the `kmem` line. Thirty negative controls (§9),
 each run on x86_64, three of them stopped by an earlier check with a message
 of its own.
+
+**Gated**, on the code of e8de326e (the commits after it are documents): `cargo
+fmt` and `cargo clippy -p ferrix-kernel` on x86_64, aarch64 and armv7a; `cargo
+test` of `ferrix-net` (82), `ferrix-linux-abi` (146) and `ferrix-netlink` (48);
+`check-item-boundary.py`; on nazuna through the queue, `test-boot` on x86_64,
+aarch64 and armv7a at `--smp 2` (the `netns` line on each, with `kmem`, `net`,
+`netlink` and the ring check passing), `test-shell` and `test-vfs` on x86_64
+with the static busybox, and `test-net` on x86_64 (all 17 network programs,
+`wget`, `curl`, `nc`, `arp`, `/proc/net/dev`, TLS and `git`). The controls were
+run on x86_64 on a Windows host (`cargo xtask test-boot`, QEMU under TCG), one
+of them again on aarch64 through the queue (`link.rs`'s `net_admin` over the
+caller's own namespace: "fake root in a user namespace changed the first
+network namespace"). Not run: `cargo xtask check`, `test-init`, `carry-coverage`,
+`gen-coverage-justification`, which are the integrator's.
 
 **How it differs from the design above, where the building found it wrong:**
 
