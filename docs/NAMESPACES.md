@@ -1113,3 +1113,93 @@ How it differs from the design, and what is open:
   landing's final run, `test-shell`, `test-vfs` on both Arm targets and
   `test-init --arch all`. `carry-coverage` and `gen-coverage-justification
   --check` run on the final rebase.
+
+### 12.1 The time namespace (2026-09-30, branch `stage13-timens`)
+
+The eighth namespace, `CLONE_NEWTIME` (0x80), after `time_namespaces(7)`. It
+shifts two clocks, `CLOCK_MONOTONIC` and `CLOCK_BOOTTIME`, by an offset each,
+for the processes in it. Nothing else moves: `CLOCK_REALTIME`, `CLOCK_TAI` and
+the CPU-time clocks read as they do outside.
+
+**The object.** `syscall/timens.rs`: a `TimeNamespace` holds its owning user
+namespace (the creator's, for `CAP_SYS_TIME` over it), an id for
+`/proc/<pid>/ns/time` (Linux's `0xEFFFFFFA` for the first), two signed
+nanosecond offsets behind one spin lock, a `frozen` flag, and a `Charge` (F-37,
+§5). The first namespace has zero offsets, is frozen, and is never charged.
+Each `Process` holds two references, `time` (the namespace it is in) and
+`time_for_children`, under one lock of its own, taken alone. Both start as the
+first's; `fork` and `clone` give the child the parent's `time_for_children`
+for both, and freeze it (Linux's `timens_on_fork`); `exec` changes nothing.
+
+**Reaching it.** `CLONE_NEWTIME` lies inside `CSIGNAL`, so `clone` reads it as
+an exit signal and `clone3` refuses `CSIGNAL`, as Linux does: only `unshare`
+(and, when the small-namespaces plumbing lands, `setns`) can make or join one.
+`unshare(CLONE_NEWTIME)` needs `CAP_SYS_ADMIN` in the caller's user namespace
+(`EPERM`), creates a namespace owned by it, and sets `time_for_children` only:
+the caller stays where it was, `ns/time` unchanged and `ns/time_for_children`
+new. With `CLONE_NEWUSER` the user namespace is made and entered first, so the
+time namespace is owned by it and its creator holds the capability there.
+`setns` will do `TimeNamespace::join` (set `time_for_children`, after
+`capable_over(creds, ns.owner, CAP_SYS_ADMIN)` and over the caller's own user
+namespace); the machinery is the small-namespaces landing's.
+
+**The offsets file.** `/proc/<pid>/timens_offsets` reads and writes the
+namespace the process makes *children* in (`time_for_children`), as Linux's
+`proc_timens_set_offset` does, in Linux's order: parse
+(`monotonic|boottime <secs> <nsecs>`, at most two lines, `nsecs` below 10^9,
+`EINVAL`), `CAP_SYS_TIME` over the owner by the opener and by the writer
+(`EPERM`), range (`ERANGE`: seconds within +-9223372036 and the clock plus its
+offset within 0 to half that), then `EACCES` once frozen. The brief for this
+work says `EPERM` after the first process; Linux says `EACCES` and this follows
+Linux. The first namespace is frozen, so it is always `EACCES`.
+
+**Where each clock read applies them**, found by `grep now_nanos
+realtime_nanos Clock:: CLOCK_MONOTONIC CLOCK_BOOTTIME TIMER_ABSTIME` over
+`src/kernel/src`; every other `now_nanos` is the kernel's own deadline on the
+host clock and stays unshifted:
+
+| Site | Shift |
+|---|---|
+| `time::sys_clock_gettime` | add, for MONOTONIC, MONOTONIC_RAW, MONOTONIC_COARSE (monotonic offset) and BOOTTIME (boottime offset) |
+| `time::sys_clock_nanosleep`, `TIMER_ABSTIME` | subtract, same four (the two sleepable ones); relative sleeps are unshifted |
+| `syscall/timerfd.rs` `timerfd_settime`, `TFD_TIMER_ABSTIME` | subtract by the caller's offsets; the timer keeps host deadlines; `gettime` reports time left and is unshifted |
+| `futex` `FUTEX_WAIT_BITSET` without `FUTEX_CLOCK_REALTIME` | subtract the monotonic offset (Linux's `timens_ktime_to_host(CLOCK_MONOTONIC)`) |
+| `procfs::render::uptime`, `system::sys_sysinfo` | add the boottime offset |
+| `time::sys_times` | add the boottime offset (Linux does not; a program reading `times` beside `/proc/uptime` should agree) |
+| `/proc/stat` `btime`, `/proc/<pid>/stat` `starttime` | subtract / add the boottime offset, as Linux's `timens_sub_boottime` |
+| `clock_getres` | none (a resolution) |
+| `timer_create`, `mq_timedreceive` | not implemented here; nothing to shift |
+
+An offset is added by the caller's own namespace, read once per call (the
+process's `time`, not `time_for_children`). A result below zero reads zero.
+
+**The vDSO.** The fast path reads the kernel's time page, which is one page
+shared by all processes, so a process in a shifted namespace must not map it.
+Linux gives such a process its own vvar page. Here the simplest correct choice:
+a second object, built on first need, whose data page says `MODE_SYSCALL` (the
+mode the image already has for a counter the code cannot read) over the same
+image; every function in it makes its system call, where the shift applies.
+Only processes in a non-first time namespace pay for the system call; nothing
+in the image changes, so the certified code page is untouched. `exec` maps the
+variant when the process's namespace is not the first. A `fork` whose child's
+namespace differs from its parent's (the usual `unshare; fork` with no `exec`
+between) replaces the child's copy of the mapping at the same address before it
+can run (`AddressSpace::replace_shared_code`, which unmaps and maps again); a
+`CLONE_VFORK` child shares its parent's space, so it keeps the parent's view
+until its `exec`, which maps its own (refusing it would break every
+`posix_spawn`; Linux too leaves such sharers with whichever page faulted in
+first). On aarch64 and ARMv7-A
+the image holds only the signal trampoline and no clock function, so there is
+no fast path to bypass and no variant is built. An i386 program maps no vDSO
+(`docs/I386.md` §2) and always enters the kernel, where the shift is applied
+at the width of its call.
+
+**F-37.** One `Charge::arc::<TimeNamespace>()` at creation, to the job of the
+task asking, `ENOMEM` past the limit; the `kmem` line gains a fill.
+
+**Checks.** The `timens` boot line (FX-0910, `fs/timens_check.rs`), through
+the system-call layer: a shifted `clock_gettime` per clock, unshifted REALTIME,
+the file's every refusal, the frozen rule, a forked child in the namespace,
+the two `ns` links, absolute `clock_nanosleep` and `timerfd_settime`,
+`/proc/uptime` and `sysinfo`, and the vDSO variant's mode word. Each with a
+negative control, listed in the commit that adds it.
