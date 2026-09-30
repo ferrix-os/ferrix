@@ -152,6 +152,19 @@ impl Stack {
         stack
     }
 
+    /// The stack of a network namespace made after the first: its loopback is
+    /// there and down, with no address and no route, and it reassembles at
+    /// most [`crate::reassembly::NAMESPACE_BYTES`] (`docs/NETNS.md` 2.2).
+    #[must_use]
+    pub fn new_namespace(config: Config) -> Stack {
+        let mut stack = Stack::new(config);
+        stack.interfaces.clear();
+        stack.routes = Routes::new();
+        stack.interfaces.push(Interface::loopback_down(1));
+        stack.reassembly = Reassembler::with_limit(crate::reassembly::NAMESPACE_BYTES);
+        stack
+    }
+
     /// Seed the generator that chooses initial sequence numbers and ephemeral
     /// ports. A stack that is never seeded is deterministic and says so in
     /// [`crate::rand`].
@@ -216,15 +229,77 @@ impl Stack {
     /// is left alone: it keeps its name and stops receiving, which is what a
     /// program sees when a cable is pulled.
     pub fn remove_interface(&mut self, index: u32) -> bool {
-        let before = self.interfaces.len();
-        self.interfaces.retain(|interface| interface.index != index);
-        if self.interfaces.len() == before {
-            return false;
-        }
+        self.detach_interface(index).is_some()
+    }
+
+    /// Take an interface out of the stack and hand it back, with its routes
+    /// and what the neighbour cache learned over it gone: the first half of
+    /// moving it to another stack ([`Stack::attach_interface`]). Its addresses
+    /// stay on it.
+    pub fn detach_interface(&mut self, index: u32) -> Option<Interface> {
+        let at = self
+            .interfaces
+            .iter()
+            .position(|interface| interface.index == index)?;
+        let interface = self.interfaces.remove(at);
         self.routes.remove_interface(index);
         self.neighbors.remove_interface(index);
         self.egress.retain(|outgoing| outgoing.interface != index);
-        true
+        Some(interface)
+    }
+
+    /// Put an interface taken from a stack into this one, under the next free
+    /// index, and answer the index. Its name must be free here. Its routes
+    /// are not restored: a route named an index of the other stack, and what
+    /// an address implies is added.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AddressInUse`] when an interface of this stack has its name.
+    pub fn attach_interface(&mut self, interface: Interface) -> Result<u32, Error> {
+        if self.interface_by_name(interface.name.as_bytes()).is_some() {
+            return Err(Error::AddressInUse);
+        }
+        let up = interface.is_up();
+        let index = self.add_interface(interface);
+        if up {
+            self.add_local_routes(index);
+        }
+        Ok(index)
+    }
+
+    /// Give an interface another name.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoDevice`] for an index that is not here,
+    /// [`Error::AddressInUse`] for a name another interface has.
+    pub fn rename_interface(&mut self, index: u32, name: &[u8]) -> Result<(), Error> {
+        let name = crate::iface::Name::new(name);
+        if self
+            .interfaces
+            .iter()
+            .any(|each| each.index != index && each.name == name)
+        {
+            return Err(Error::AddressInUse);
+        }
+        self.interface_mut(index).ok_or(Error::NoDevice)?.name = name;
+        Ok(())
+    }
+
+    /// How many addresses the interfaces hold between them.
+    #[must_use]
+    pub fn address_count(&self) -> usize {
+        self.interfaces
+            .iter()
+            .map(|interface| interface.addresses.len())
+            .sum()
+    }
+
+    /// Forget the fragments held: a namespace that cannot pay for them drops
+    /// them, as a host under memory pressure does.
+    pub fn flush_reassembly(&mut self) {
+        self.reassembly.flush();
     }
 
     /// The interface with that name.
@@ -260,14 +335,37 @@ impl Stack {
 
     /// Bring an interface up or down. Taking one down drops its routes and
     /// everything the neighbour cache learned over it.
+    ///
+    /// A loopback owns its addresses only while it is up, as Linux's does:
+    /// bringing one up that has none gives it `127.0.0.1/8` and `::1`, and
+    /// taking it down takes them away. A virtual Ethernet end is not running
+    /// until its peer is up too, which the kernel, who can see both ends, says.
     pub fn set_up(&mut self, index: u32, up: bool) -> Result<(), Error> {
         let interface = self
             .interface_mut(index)
             .ok_or(Error::AddressNotAvailable)?;
+        let loopback = interface.medium == Medium::Loopback;
+        let running = if matches!(interface.backing, crate::iface::Backing::Veth { .. }) {
+            0
+        } else {
+            crate::iface::IFF_RUNNING
+        };
         if up {
-            interface.flags |= crate::iface::IFF_UP | crate::iface::IFF_RUNNING;
+            interface.flags |= crate::iface::IFF_UP | running;
+            if loopback {
+                interface.flags |= crate::iface::IFF_RUNNING | crate::iface::IFF_LOWER_UP;
+                if interface.addresses.is_empty() {
+                    interface
+                        .addresses
+                        .extend_from_slice(&Interface::loopback_addresses());
+                }
+            }
         } else {
             interface.flags &= !(crate::iface::IFF_UP | crate::iface::IFF_RUNNING);
+            if loopback {
+                interface.flags &= !crate::iface::IFF_LOWER_UP;
+                interface.addresses.clear();
+            }
         }
         if up {
             self.add_local_routes(index);
