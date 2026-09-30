@@ -26,6 +26,7 @@
 
 pub(crate) mod anon;
 pub(crate) mod bind_check;
+pub(crate) mod blkio;
 pub(crate) mod block;
 pub(crate) mod btrfs;
 pub(crate) mod btrfs_check;
