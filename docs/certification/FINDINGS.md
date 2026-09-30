@@ -1872,7 +1872,10 @@ the target is the flags asked for; a mount going read-only has its
 filesystem written out first, as `umount2` writes it, and afterwards every
 change through it is `EROFS` (`docs/NAMESPACES.md` §2.3). Init writes a
 probe file after each remount and says `/ is read-only` only when the write
-was refused with `EROFS`.
+was refused with `EROFS`. Since N2 (2026-09-30) a plain `MS_REMOUNT`, the
+one init makes, sets the filesystem's read-only state, which every bind of
+it shares, so a bind of `/` or `/data` is read-only too; the `binds` boot
+line (FX-0886) checks that scope against `MS_REMOUNT | MS_BIND`'s.
 
 *Checked by the build:* `cargo xtask test-init` requires `init     / is
 read-only` and `init     /data is read-only` between `going down:

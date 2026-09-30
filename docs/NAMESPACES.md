@@ -835,3 +835,28 @@ a plain `MS_REMOUNT` read-only must reach the whole filesystem -- every
 bind of it -- and only `MS_REMOUNT | MS_BIND` the one mount, as on Linux;
 or the difference is written down here. Either way a boot check covers
 it. M3's flag locking (CVE-2014-5206, -5207) stays N5's.
+
+**N2's review (certification consultant, 2026-09-30): OK.** The interim
+reviewer's note is met: a plain `MS_REMOUNT` read-only sets the
+filesystem's superblock and reaches every bind, `MS_REMOUNT | MS_BIND` one
+mount, and the `binds` line (FX-0886) checks both with a negative control.
+The item is touched only by data and a check: FX-0886's entry in
+`panic/catalog.rs` and `check_binds` in `stages_check.rs`; no `unsafe`
+added. `docs/certification/VULNERABILITY-ANALYSIS.md` gains the rows for
+the superblock, for detach and for the plain remount from a child
+namespace. For the landings after it:
+
+* **N3.** §6 says every allocation happens before a spin lock is taken;
+  `Namespace::attach` collects the parents into a `Vec` under the table's
+  lock, and a table insert may allocate there too. Copying a whole tree on
+  `clone` goes through the same place, so either hoist those allocations
+  or restate §6 as what holds (no allocation that can sleep). The shared
+  superblock crosses namespaces, as on Linux; §4's M7 says so when N3
+  lands.
+* **N5.** A plain `MS_REMOUNT` from a child namespace needs privilege over
+  the namespace that made the filesystem (Linux's `do_remount`, over
+  `s_user_ns`), not only over the caller's mount namespace: otherwise fake
+  root turns the host's `/` read-only, or back. And §8's line "N2 repeats
+  them on a bind" is met only for `ro` through `open`: N5's check, where a
+  bind is the boundary, shows a bind of a `nosuid`, `nodev`, `noexec` and
+  read-only mount inheriting and enforcing each.
