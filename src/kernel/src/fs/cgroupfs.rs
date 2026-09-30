@@ -75,6 +75,7 @@ mod creator_check;
 mod delegation_check;
 mod events_check;
 mod freeze_check;
+mod io_check;
 mod limits_check;
 mod native_check;
 mod oom_check;
@@ -87,10 +88,12 @@ type Result<T> = core::result::Result<T, Errno>;
 /// tells a cgroup v2 mount from a v1 one before trusting it.
 const CGROUP2_SUPER_MAGIC: u64 = 0x6367_7270;
 
-/// The controllers this kernel has built: `cpu`, `memory` and `pids`, over
-/// the job quotas. `io` is landing B1.
+/// The controllers this kernel has built: `cpu`, `io`, `memory` and `pids`.
+/// Three are over the job quotas; `io` is over what the disks' wrapper
+/// counts (`fs::blkio`).
 const BUILT: Set = Set::EMPTY
     .with(Controller::Cpu)
+    .with(Controller::Io)
     .with(Controller::Memory)
     .with(Controller::Pids);
 
@@ -880,6 +883,16 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
                 },
             );
         }
+        Kind::IoStat => {
+            for (device, stat) in super::blkio::stats(job.quota_index()) {
+                ferrix_cgroupfs::io::render_stat(&mut out, device, stat);
+            }
+        }
+        Kind::IoMax => {
+            for (device, limits) in super::blkio::limits(job.quota_index()) {
+                ferrix_cgroupfs::io::render_max(&mut out, device, limits);
+            }
+        }
         Kind::CpuStat => {
             // Whoever runs without a tick has not been charged for it yet.
             crate::sched::charge_running();
@@ -1075,6 +1088,53 @@ fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
     Ok(())
 }
 
+/// A write to `memory.high`, `memory.low` or `memory.min`.
+fn set_mark(job: &Job, kind: Kind, data: &[u8]) -> Result<()> {
+    let mark = match kind {
+        Kind::MemoryHigh => Mark::High,
+        Kind::MemoryLow => Mark::Low,
+        _ => Mark::Min,
+    };
+    let value = write::parse_memory_max(data)
+        .map_err(errno)?
+        .map_or(quota::UNLIMITED, |bytes| {
+            bytes - bytes % ferrix_bootinfo::PAGE_SIZE
+        });
+    // Not audited: the audit record names a limit that refuses charges, and
+    // a mark refuses nothing.
+    let _ = job.set_mark(mark, value);
+    Ok(())
+}
+
+/// A write to `io.max`: a disk, then the limits to change on it.
+fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
+    let slot = job.quota_index();
+    let ((major, minor), words) = ferrix_cgroupfs::io::parse_device(data).map_err(errno)?;
+    if super::devfs::block_device(ferrix_vfs::initramfs::makedev(major, minor)).is_none() {
+        return Err(Errno::ENODEV);
+    }
+    let held = super::blkio::limits_on(slot, (major, minor));
+    let limits = ferrix_cgroupfs::io::parse_limits(words, held).map_err(errno)?;
+    super::blkio::set_limits(slot, (major, minor), limits)
+}
+
+/// A write to `cpu.max`.
+fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
+    let (_, period) = job.bandwidth();
+    let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
+    let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
+    if job.set_bandwidth(runtime, max.period * 1000) {
+        audit::limit_set(
+            audit::CGROUP_LIMIT,
+            writer(),
+            job.id(),
+            ferrix_audit::resource::CPU_MAX,
+            max.quota.unwrap_or(u64::MAX),
+        );
+    }
+    Ok(())
+}
+
 /// Set `job`'s `cpu.weight`, from either file that does, and record it.
 fn set_weight(job: &Job, weight: u32) {
     if job.set_cpu_weight(weight) {
@@ -1142,39 +1202,13 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
                 limit_set(job, Resource::Memory, bytes);
             }
         }
-        Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => {
-            let mark = match kind {
-                Kind::MemoryHigh => Mark::High,
-                Kind::MemoryLow => Mark::Low,
-                _ => Mark::Min,
-            };
-            let value = write::parse_memory_max(data)
-                .map_err(errno)?
-                .map_or(quota::UNLIMITED, |bytes| {
-                    bytes - bytes % ferrix_bootinfo::PAGE_SIZE
-                });
-            // Not audited: the audit record names a limit that refuses
-            // charges, and a mark refuses nothing.
-            let _ = job.set_mark(mark, value);
-        }
+        Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => set_mark(job, kind, data)?,
         Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?),
         Kind::CpuWeightNice => {
-            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?)
+            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?);
         }
-        Kind::CpuMax => {
-            let (_, period) = job.bandwidth();
-            let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
-            let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
-            if job.set_bandwidth(runtime, max.period * 1000) {
-                audit::limit_set(
-                    audit::CGROUP_LIMIT,
-                    writer(),
-                    job.id(),
-                    ferrix_audit::resource::CPU_MAX,
-                    max.quota.unwrap_or(u64::MAX),
-                );
-            }
-        }
+        Kind::IoMax => set_io_max(job, data)?,
+        Kind::CpuMax => set_cpu_max(job, data)?,
         Kind::Controllers
         | Kind::Events
         | Kind::Stat
@@ -1182,6 +1216,7 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         | Kind::MemoryEvents
         | Kind::MemoryStat
         | Kind::CpuStat
+        | Kind::IoStat
         | Kind::PidsCurrent
         | Kind::PidsEvents => return Err(Errno::EACCES),
     }
@@ -1306,6 +1341,9 @@ pub(crate) struct Report {
     /// Periods of a `cpu.max` in which a program was throttled: held to a
     /// fifth of a processor, in its cgroup and beneath one.
     pub(crate) throttled: u64,
+    /// Requests the `io` controller charged to the right cgroups, and
+    /// the ones `io.max` spaced out.
+    pub(crate) disk_requests: u32,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1464,6 +1502,7 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.reclaimed = reclaim_check::run(&mut harness)?;
     harness.report.frozen = freeze_check::run(&mut harness)?;
     harness.report.throttled = cpu_check::run(&mut harness)?;
+    harness.report.disk_requests = io_check::run(&mut harness)?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)
