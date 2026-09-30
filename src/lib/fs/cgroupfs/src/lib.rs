@@ -24,6 +24,7 @@
 //! * [`write`](mod@write) -- the writes of a number: `cgroup.procs`, `cgroup.kill`,
 //!   `cgroup.max.depth`, `cgroup.max.descendants` and `cgroup.type`.
 //! * [`cpu`] -- `cpu.max`, `cpu.weight.nice` and `cpu.stat`.
+//! * [`io`] -- `io.max` and `io.stat`.
 //! * [`render`] -- `cgroup.procs`, `cgroup.events`, `cgroup.stat`, the limits,
 //!   and `/proc/<pid>/cgroup`.
 
@@ -35,6 +36,7 @@ extern crate alloc;
 pub mod controllers;
 pub mod cpu;
 pub mod files;
+pub mod io;
 pub mod name;
 pub mod render;
 pub mod write;
