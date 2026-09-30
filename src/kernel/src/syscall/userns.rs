@@ -299,6 +299,24 @@ pub(crate) fn acting_as<R>(
     Ok(answer)
 }
 
+/// Most user namespaces alive at once: `/proc/sys/user/max_user_namespaces`.
+/// Linux's default depends on the memory of the machine; this is a bound of
+/// its own, and a namespace past it is `ENOSPC`, as `inc_user_namespaces`
+/// answers.
+pub(crate) const MAX_NAMESPACES: u32 = 4096;
+
+/// How many are alive: the first, and every one [`create`] made and nothing
+/// has yet let go.
+static ALIVE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+impl Drop for UserNamespace {
+    fn drop(&mut self) {
+        if self.parent.is_some() {
+            let _ = ALIVE.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
 /// The first namespace, made on first use.
 pub(crate) fn first() -> &'static Arc<UserNamespace> {
     static FIRST: Once<Arc<UserNamespace>> = Once::new();
@@ -437,6 +455,10 @@ pub(crate) fn create(creator: &Credentials) -> Result<Arc<UserNamespace>, Errno>
         return Err(Errno::EPERM);
     }
     let charge = Charge::arc::<UserNamespace>().map_err(|_| Errno::ENOMEM)?;
+    if ALIVE.fetch_add(1, Ordering::AcqRel) >= MAX_NAMESPACES {
+        let _ = ALIVE.fetch_sub(1, Ordering::AcqRel);
+        return Err(Errno::ENOSPC);
+    }
     let namespace = UserNamespace {
         parent: Some(Arc::clone(parent)),
         level: parent.level + 1,

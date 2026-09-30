@@ -393,11 +393,15 @@ pub(crate) static TOP: [Entry<Kernel>; 15] = [
 
 /// `/proc/sys`: the sysctls this kernel has a source for, and no others. A
 /// value is added here when something in the kernel holds it, not before.
-static SYS: [Entry<Kernel>; 3] = [
+static SYS: [Entry<Kernel>; 4] = [
     sysctl_directory(b"fs", &SYS_FS),
     sysctl_directory(b"kernel", &SYS_KERNEL),
+    sysctl_directory(b"user", &SYS_USER),
     sysctl_directory(b"vm", &SYS_VM),
 ];
+
+/// `/proc/sys/user`: how many user namespaces may be alive.
+static SYS_USER: [Entry<Kernel>; 1] = [file(b"max_user_namespaces", render::max_user_namespaces)];
 
 /// `/proc/sys/vm`: the memory policy a program can ask about.
 static SYS_VM: [Entry<Kernel>; 1] = [file(b"overcommit_memory", render::overcommit_memory)];
@@ -411,9 +415,11 @@ static SYS_FS: [Entry<Kernel>; 3] = [
 
 /// `/proc/sys/kernel`: what `uname` reports, the pid limit, and the ids a
 /// namespace shows for one it has no mapping of.
-static SYS_KERNEL: [Entry<Kernel>; 8] = [
+static SYS_KERNEL: [Entry<Kernel>; 10] = [
+    file(b"cap_last_cap", render::cap_last_cap),
     sysctl_setting(b"domainname", render::domainname, render::set_domainname),
     sysctl_setting(b"hostname", render::hostname, render::set_hostname),
+    file(b"ngroups_max", render::ngroups_max),
     file(b"osrelease", render::osrelease),
     file(b"ostype", render::ostype),
     file(b"overflowgid", render::overflowgid),
