@@ -77,7 +77,7 @@ pub(super) fn self_link(_: &Kernel) -> Result<Vec<u8>> {
 /// `ENOENT` if it gives it none -- a program reading another namespace's
 /// procfs.
 pub(super) fn self_link_in(ns: Option<&Arc<PidNamespace>>) -> Result<Vec<u8>> {
-    let process = process::current().ok_or(Errno::ENOENT)?;
+    let process = userns::acting().ok_or(Errno::ENOENT)?;
     let number = pidns::name_in(ns, &process);
     if number == 0 {
         return Err(Errno::ENOENT);
