@@ -541,6 +541,13 @@ pub(super) fn check_cgroupfs() {
          while frozen, and frozen on a move in and a fork made in a frozen cgroup",
         checked.frozen,
     );
+    println!(
+        "  cpu      cpu.max read and written as Linux does, cpu.weight.nice turned into cpu.weight and \
+         back, and a program of two counting threads held to about a fifth of a processor by cpu.max \
+         20000 100000 in its cgroup and beneath one ({} periods throttled), cpu.stat counting its \
+         usage and its throttling, and free again at max",
+        checked.throttled,
+    );
 }
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the

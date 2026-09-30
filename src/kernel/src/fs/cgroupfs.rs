@@ -70,6 +70,7 @@ use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
 
 mod controllers_check;
+mod cpu_check;
 mod creator_check;
 mod delegation_check;
 mod events_check;
@@ -853,6 +854,37 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         }),
         Kind::Kill => {}
         Kind::CpuWeight => render::number(&mut out, u64::from(job.cpu_weight())),
+        Kind::CpuWeightNice => {
+            let nice = ferrix_cgroupfs::cpu::nice_from_weight(job.cpu_weight());
+            out.extend_from_slice(alloc::format!("{nice}\n").as_bytes());
+        }
+        Kind::CpuMax => {
+            let (quota, period) = job.bandwidth();
+            ferrix_cgroupfs::cpu::render_max(
+                &mut out,
+                ferrix_cgroupfs::cpu::Max {
+                    quota: (quota != quota::UNLIMITED).then_some(quota / 1000),
+                    period: period / 1000,
+                },
+            );
+        }
+        Kind::CpuStat => {
+            // Whoever runs without a tick has not been charged for it yet.
+            crate::sched::charge_running();
+            let (user, system) = job.cpu_times();
+            ferrix_cgroupfs::cpu::render_stat(
+                &mut out,
+                ferrix_cgroupfs::cpu::Stat {
+                    usage: (user / 1000).saturating_add(system / 1000),
+                    user: user / 1000,
+                    system: system / 1000,
+                    periods: job.counted(Counter::Periods),
+                    throttled: job.counted(Counter::Throttled),
+                    throttled_us: job.counted(Counter::ThrottledNs) / 1000,
+                },
+                offered(job).contains(Controller::Cpu),
+            );
+        }
         Kind::MemoryCurrent => render::number(&mut out, usage(job, Resource::Memory).used),
         Kind::MemoryMax => {
             let limit = usage(job, Resource::Memory).limit;
@@ -1017,6 +1049,19 @@ fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
     Ok(())
 }
 
+/// Set `job`'s `cpu.weight`, from either file that does, and record it.
+fn set_weight(job: &Job, weight: u32) {
+    if job.set_cpu_weight(weight) {
+        audit::limit_set(
+            audit::CGROUP_LIMIT,
+            writer(),
+            job.id(),
+            ferrix_audit::resource::CPU_WEIGHT,
+            u64::from(weight),
+        );
+    }
+}
+
 /// A write of `data` to a file of `job`, opened by `opener`.
 fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
     match kind {
@@ -1086,15 +1131,21 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
             // charges, and a mark refuses nothing.
             let _ = job.set_mark(mark, value);
         }
-        Kind::CpuWeight => {
-            let weight = write::parse_weight(data).map_err(errno)?;
-            if job.set_cpu_weight(weight) {
+        Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?),
+        Kind::CpuWeightNice => {
+            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?)
+        }
+        Kind::CpuMax => {
+            let (_, period) = job.bandwidth();
+            let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
+            let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
+            if job.set_bandwidth(runtime, max.period * 1000) {
                 audit::limit_set(
                     audit::CGROUP_LIMIT,
                     writer(),
                     job.id(),
-                    ferrix_audit::resource::CPU_WEIGHT,
-                    u64::from(weight),
+                    ferrix_audit::resource::CPU_MAX,
+                    max.quota.unwrap_or(u64::MAX),
                 );
             }
         }
@@ -1104,6 +1155,7 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         | Kind::MemoryCurrent
         | Kind::MemoryEvents
         | Kind::MemoryStat
+        | Kind::CpuStat
         | Kind::PidsCurrent
         | Kind::PidsEvents => return Err(Errno::EACCES),
     }
@@ -1225,6 +1277,9 @@ pub(crate) struct Report {
     /// Checks of `cgroup.freeze` passed: a program frozen, held through
     /// `SIGCONT`, thawed, killed frozen, and the nested and moved cases.
     pub(crate) frozen: u32,
+    /// Periods of a `cpu.max` in which a program was throttled: held to a
+    /// fifth of a processor, in its cgroup and beneath one.
+    pub(crate) throttled: u64,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1382,6 +1437,7 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.limits_refused = limits_check::run(&mut harness)?;
     harness.report.reclaimed = reclaim_check::run(&mut harness)?;
     harness.report.frozen = freeze_check::run(&mut harness)?;
+    harness.report.throttled = cpu_check::run(&mut harness)?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)
