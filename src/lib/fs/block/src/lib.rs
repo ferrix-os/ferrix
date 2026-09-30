@@ -143,6 +143,7 @@ mod limits;
 mod queue;
 mod request;
 mod schedule;
+mod throttle;
 mod unit;
 
 #[cfg(any(test, feature = "model"))]
@@ -154,3 +155,4 @@ mod tests;
 pub use limits::{Config, Limits, LimitsError, MAX_BLOCK_SIZE, MIN_BLOCK_SIZE};
 pub use queue::{Completion, Dispatch, Queue, SubmitError, Token, TokenError};
 pub use request::{Flags, Op, Part, Request, RequestId};
+pub use throttle::{Limiter, Throttle};
