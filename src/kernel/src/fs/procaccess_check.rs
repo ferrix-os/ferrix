@@ -157,6 +157,7 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
         )?;
     }
     robust_lists(&mut tally, &user, &dumpable, &other)?;
+    fdinfo(&mut tally)?;
     Ok(counts)
 }
 
@@ -255,5 +256,85 @@ fn robust_lists(
         return Err("get_robust_list was allowed a thread of another uid's process");
     }
     tally.report.refusals += 1;
+    Ok(())
+}
+
+/// `/proc/<pid>/fdinfo` (`docs/SECCOMP.md` R4): a file per open descriptor with
+/// Linux's first lines, and the jail Chrome's zygote makes of it -- `chroot`
+/// into a child's `fdinfo`, the child ends, and `/` must still be statted and
+/// listed, empty, not a fatal error.
+fn fdinfo(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let jailed =
+        process::new_for_check().map_err(|_| "could not make the fdinfo check's process")?;
+    let mut page = page_for(&jailed)?;
+    let child = process::new_for_check().map_err(|_| "could not make the fdinfo child")?;
+    // The file: a descriptor the process holds reads back its mode and inode.
+    let own = format!("/proc/{}/fdinfo", jailed.pid());
+    let fd = {
+        let path = staged(&mut page, b"/")?;
+        by_number(
+            &jailed,
+            Syscall::Openat,
+            [
+                AT_FDCWD as u64,
+                path,
+                u64::from(O_RDONLY | O_DIRECTORY),
+                0,
+                0,
+                0,
+            ],
+        )
+        .map_err(|_| "the fdinfo check could not open /")?
+    };
+    let text = crate::fs::namespace_check::read_file(&mut page, format!("{own}/{fd}").as_bytes())?
+        .map_err(|_| "a descriptor's fdinfo could not be read")?;
+    for key in [&b"pos:\t0"[..], b"flags:\t0", b"mnt_id:\t", b"ino:\t"] {
+        if !text.windows(key.len()).any(|window| window == key) {
+            return Err("fdinfo did not hold pos, flags, mnt_id and ino");
+        }
+    }
+    tally.report.calls += 1;
+
+    // The jail.
+    let path = format!("/proc/{}/fdinfo", child.pid());
+    let at = staged(&mut page, path.as_bytes())?;
+    tally.ok(
+        by_number(&jailed, Syscall::Chroot, [at, 0, 0, 0, 0, 0]),
+        "a process could not chroot into a child's fdinfo",
+    )?;
+    process::kill(&child, 137);
+    drop(child);
+    let root = staged(&mut page, b"/")?;
+    tally.ok(
+        by_number(
+            &jailed,
+            Syscall::Newfstatat,
+            [AT_FDCWD as u64, root, page.buffer(), 0, 0, 0],
+        ),
+        "/ could not be statted in a jail whose process ended",
+    )?;
+    let listing = by_number(
+        &jailed,
+        Syscall::Openat,
+        [
+            AT_FDCWD as u64,
+            root,
+            u64::from(O_RDONLY | O_DIRECTORY),
+            0,
+            0,
+            0,
+        ],
+    );
+    let listed = listing.and_then(|fd| {
+        by_number(
+            &jailed,
+            Syscall::Getdents64,
+            [fd as u64, page.buffer(), 512, 0, 0, 0],
+        )
+    });
+    // Empty: only `.` and `..`, or nothing; never an error.
+    if listed.is_err() {
+        return Err("/ could not be listed in a jail whose process ended");
+    }
     Ok(())
 }

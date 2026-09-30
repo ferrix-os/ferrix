@@ -748,6 +748,33 @@ pub(super) fn descriptor(process: &Process, fd: i32) -> Result<Vec<u8>> {
     Ok(located(file.location(), &root))
 }
 
+/// `/proc/<pid>/fdinfo/<fd>`: the open file's position, its access mode, the
+/// mount it is on and its inode, as Linux's first lines are.
+pub(super) fn fdinfo(process: &Process, fd: i32) -> Result<Vec<u8>> {
+    let file = process
+        .files()
+        .lock()
+        .get(fd)
+        .map(Arc::clone)
+        .map_err(|_| Errno::ENOENT)?;
+    let access = match (file.readable(), file.writable()) {
+        (true, true) => 2,
+        (false, true) => 1,
+        _ => 0,
+    };
+    let mount = file.location().mount.id();
+    let inode = file.inode().metadata().ino;
+    let mut out = Vec::new();
+    put(
+        &mut out,
+        format_args!(
+            "pos:\t{}\nflags:\t0{access:o}\nmnt_id:\t{mount}\nino:\t{inode}\n",
+            file.offset()
+        ),
+    );
+    Ok(out)
+}
+
 /// `/proc/<pid>/cwd`: the working directory, as `getcwd` would give it —
 /// with ` (deleted)` after a directory since removed, where `getcwd` answers
 /// `ENOENT` instead, as Linux's link and system call differ too.
