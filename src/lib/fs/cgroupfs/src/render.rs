@@ -98,22 +98,83 @@ pub fn pids_events(out: &mut Vec<u8>, max: u64) {
     let _ = writeln!(Out(out), "max {max}");
 }
 
-/// Append `memory.stat`: of the bytes `memory.current` counts, how many are
-/// kernel memory held for the cgroup's programs, under Linux's key. Linux
-/// prints some forty keys; this is the one Ferrix counts, and a reader
-/// looks a key up by its name.
-pub fn memory_stat(out: &mut Vec<u8>, kernel: u64) {
-    let _ = writeln!(Out(out), "kernel {kernel}");
+/// What `memory.stat` prints: only the keys Ferrix has a source for, in
+/// Linux's order, and a reader looks a key up by its name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MemoryStat {
+    /// Bytes of the cgroup's pages in the page cache of files on a disk.
+    pub file: u64,
+    /// Bytes of kernel memory held for the cgroup's programs: the heap part
+    /// of `memory.current`.
+    pub kernel: u64,
+    /// Bytes of the cgroup's pages in a memory filesystem's files (tmpfs,
+    /// `memfd`).
+    pub shmem: u64,
+    /// Pages reclaim looked at for the cgroup.
+    pub pgscan: u64,
+    /// Pages reclaim gave back from the cgroup.
+    pub pgsteal: u64,
+    /// Page faults the cgroup's programs took.
+    pub pgfault: u64,
+    /// Page faults that read a file from its disk.
+    pub pgmajfault: u64,
 }
 
-/// Append `memory.events`, in the order Linux prints it: how many charges
-/// `memory.max` refused under `max`, how many faults found it full under
-/// `oom`, and how many processes the scoped OOM kill ended under
-/// `oom_kill`; the rest, which Ferrix never counts (no `memory.low`, no
-/// `memory.high`, no `memory.oom.group`), as zeros.
-pub fn memory_events(out: &mut Vec<u8>, max: u64, oom: u64, oom_kill: u64) {
+/// Append `memory.stat`. Linux prints some sixty keys; a key with no source
+/// here is left out and not printed as zero.
+pub fn memory_stat(out: &mut Vec<u8>, stat: MemoryStat) {
     let _ = write!(
         Out(out),
-        "low 0\nhigh 0\nmax {max}\noom {oom}\noom_kill {oom_kill}\noom_group_kill 0\n"
+        "file {}
+kernel {}
+shmem {}
+pgscan {}
+pgsteal {}
+pgfault {}
+pgmajfault {}
+",
+        stat.file,
+        stat.kernel,
+        stat.shmem,
+        stat.pgscan,
+        stat.pgsteal,
+        stat.pgfault,
+        stat.pgmajfault
+    );
+}
+
+/// What `memory.events` counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MemoryEvents {
+    /// Times the cgroup was reclaimed from below `memory.low`: never, since
+    /// protection is reported and not enforced.
+    pub low: u64,
+    /// Times it went over `memory.high` and was reclaimed.
+    pub high: u64,
+    /// Charges `memory.max` refused.
+    pub max: u64,
+    /// Faults that found `memory.max` full and asked for a kill.
+    pub oom: u64,
+    /// Processes the scoped OOM kill ended.
+    pub oom_kill: u64,
+}
+
+/// Append `memory.events`, in the order Linux prints it; `oom_group_kill`,
+/// which Ferrix never counts (no `memory.oom.group`), as zero.
+pub fn memory_events(out: &mut Vec<u8>, events: MemoryEvents) {
+    let _ = write!(
+        Out(out),
+        "low {}
+high {}
+max {}
+oom {}
+oom_kill {}
+oom_group_kill 0
+",
+        events.low,
+        events.high,
+        events.max,
+        events.oom,
+        events.oom_kill
     );
 }
