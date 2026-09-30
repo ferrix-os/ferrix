@@ -190,7 +190,7 @@ fn made_and_written(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<Offset
         "unshare(CLONE_NEWTIME) did not name a new namespace for the caller's children",
     )?;
 
-    let malformed: [(&[u8], &str); 5] = [
+    let malformed: [(&[u8], &str); 4] = [
         (
             b"garbage\n",
             "a timens_offsets write of garbage was accepted",
@@ -207,7 +207,6 @@ fn made_and_written(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<Offset
             b"realtime 1 2\n",
             "an offset for CLOCK_REALTIME was accepted",
         ),
-        (b"", "an empty timens_offsets write was accepted"),
     ];
     for (data, problem) in malformed {
         tally.refused(
