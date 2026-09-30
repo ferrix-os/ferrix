@@ -58,6 +58,7 @@ use ferrix_linux_abi::types::{SA_RESTART, SA_RESTORER, SIG_DFL, SIG_IGN, SIGSEGV
 
 use crate::arch;
 use crate::console::println;
+use crate::object::process::Host;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::{
     self, DefaultAction, Origin, Posted, Restart, SIGSET_SIZE, Taken, UNBLOCKABLE,
@@ -123,7 +124,7 @@ pub(crate) fn needs_attention() -> bool {
     thread::current().is_some_and(|thread| {
         let process = thread.process();
         process.must_leave(&thread)
-            || process.is_stopped()
+            || process.must_park()
             || thread.with_signals(|shared, own| signal::needs_attention(shared, own))
     })
 }
@@ -174,11 +175,21 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
             if process.must_leave(&thread) {
                 break;
             }
-            if process.is_stopped() {
+            if process.must_park() {
+                // Stopped, or frozen: a freeze counts its parked threads,
+                // and says when the last has parked (`cgroup.events`).
+                let frozen = process.core().is_frozen();
+                if frozen {
+                    process.thread_parked();
+                    crate::fs::cgroupfs::settle_frozen(&process.core().job());
+                }
                 let _ = process.resumed().wait_until_deadline(
-                    || !process.is_stopped() || process.must_leave(&thread),
+                    || !process.must_park() || process.must_leave(&thread),
                     u64::MAX,
                 );
+                if frozen {
+                    process.thread_unparked();
+                }
                 continue;
             }
             let Some(taken) = thread.with_signals(signal::take_next) else {
