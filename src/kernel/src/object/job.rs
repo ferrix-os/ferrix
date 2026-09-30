@@ -580,6 +580,32 @@ impl Job {
         }
     }
 
+    /// Its `cpu.max`: the quota in nanoseconds, or [`quota::UNLIMITED`], and
+    /// the period in nanoseconds.
+    pub(crate) fn bandwidth(&self) -> (u64, u64) {
+        self.quota.as_ref().map_or(
+            (quota::UNLIMITED, quota::DEFAULT_PERIOD_NS),
+            Quota::bandwidth,
+        )
+    }
+
+    /// Set its `cpu.max`. Whether it could be: the tree's root takes none.
+    pub(crate) fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
+        self.quota
+            .as_ref()
+            .map(|slot| slot.set_bandwidth(quota, period))
+            .is_some()
+    }
+
+    /// Nanoseconds its tasks, and those of the jobs beneath it, have used
+    /// the processor in user mode and in kernel mode; the whole machine's for
+    /// the tree's root.
+    pub(crate) fn cpu_times(&self) -> (u64, u64) {
+        self.quota
+            .as_ref()
+            .map_or_else(quota::machine_cpu, Quota::cpu_times)
+    }
+
     /// Every job in this one's subtree, itself first.
     ///
     /// # Errors
