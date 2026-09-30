@@ -557,3 +557,98 @@ fn the_controller_files_print_as_linux_prints_them() {
         b"low 0\nhigh 6\nmax 2\noom 3\noom_kill 1\noom_group_kill 0\n"
     );
 }
+
+#[test]
+fn io_max_is_read_as_tg_set_limit_reads_it() {
+    use crate::io::{self, Limits};
+    let none = Limits::NONE;
+    let (device, rest) = io::parse_device(b"8:16 rbps=2097152 wiops=120\n").unwrap();
+    assert_eq!(device, (8, 16));
+    assert_eq!(
+        io::parse_limits(rest, none),
+        Ok(Limits {
+            rbps: Some(2_097_152),
+            wbps: None,
+            riops: None,
+            wiops: Some(120),
+        })
+    );
+    // A word not given keeps its value, and max lifts one.
+    let held = Limits {
+        rbps: Some(5000),
+        wbps: Some(6000),
+        riops: Some(70),
+        wiops: Some(80),
+    };
+    assert_eq!(
+        io::parse_limits(b"wbps=max riops=9\n", held),
+        Ok(Limits {
+            rbps: Some(5000),
+            wbps: None,
+            riops: Some(9),
+            wiops: Some(80),
+        })
+    );
+    // The digits a value starts with, as sscanf reads them; iops past
+    // UINT_MAX are UINT_MAX.
+    assert_eq!(
+        io::parse_limits(b"rbps=100x wiops=99999999999", none),
+        Ok(Limits {
+            rbps: Some(100),
+            wiops: Some(0xffff_ffff),
+            ..none
+        })
+    );
+    assert_eq!(io::parse_limits(b"", held), Ok(held));
+    // Refusals: no equals, no number, unknown key, a limit of 1 byte, zero.
+    assert_eq!(io::parse_limits(b"rbps", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=lots", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbytes=10", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=1", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=0", none), Err(Refusal::Range));
+    assert_eq!(io::parse_limits(b"bogus=0", none), Err(Refusal::Range));
+    // The device.
+    assert_eq!(io::parse_device(b"8:0").unwrap().0, (8, 0));
+    assert_eq!(io::parse_device(b"8 0"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b":0 rbps=9"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b"8:x"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b"8:0rbps=9"), Err(Refusal::Invalid));
+}
+
+#[test]
+fn io_files_print_as_linux_prints_them() {
+    use crate::io::{self, Limits, Stat};
+    assert_eq!(text(|out| io::render_max(out, (8, 0), Limits::NONE)), b"");
+    assert_eq!(
+        text(|out| io::render_max(
+            out,
+            (8, 0),
+            Limits {
+                rbps: None,
+                wbps: Some(200),
+                riops: None,
+                wiops: Some(7),
+            }
+        )),
+        b"8:0 rbps=max wbps=200 riops=max wiops=7\n"
+    );
+    assert_eq!(
+        text(|out| io::render_stat(out, (8, 0), Stat::default())),
+        b""
+    );
+    assert_eq!(
+        text(|out| io::render_stat(
+            out,
+            (7, 22),
+            Stat {
+                rbytes: 749_568,
+                wbytes: 0,
+                rios: 72,
+                wios: 0,
+                dbytes: 0,
+                dios: 0,
+            }
+        )),
+        b"7:22 rbytes=749568 wbytes=0 rios=72 wios=0 dbytes=0 dios=0\n"
+    );
+}

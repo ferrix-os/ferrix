@@ -705,7 +705,13 @@ fn take_up<'s>(
                 name.as_str().as_bytes(),
                 VIRTIO_BLK_MAJOR,
                 name.minor(),
-                Arc::clone(&disk) as Arc<dyn BlockDevice>,
+                // Its reads and writes are charged to the job that makes
+                // them (`fs::blkio`, the `io` controller).
+                crate::fs::blkio::account_disk(
+                    Arc::clone(&disk) as Arc<dyn BlockDevice>,
+                    VIRTIO_BLK_MAJOR,
+                    name.minor(),
+                ),
                 Origin {
                     node,
                     serial: accepted.serial,
