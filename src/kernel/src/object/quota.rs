@@ -120,6 +120,13 @@ pub(crate) enum Counter {
     Faults,
     /// Faults that read a file from its disk (`pgmajfault`).
     MajorFaults,
+    /// Periods that ran under its `cpu.max` (`nr_periods`). Its own, not
+    /// its descendants'.
+    Periods,
+    /// Periods in which its `cpu.max` ran out (`nr_throttled`). Its own.
+    Throttled,
+    /// Nanoseconds it spent throttled (`throttled_usec`). Its own.
+    ThrottledNs,
 }
 
 impl Counter {
@@ -131,12 +138,18 @@ impl Counter {
             Counter::Stolen => 2,
             Counter::Faults => 3,
             Counter::MajorFaults => 4,
+            Counter::Periods => 5,
+            Counter::Throttled => 6,
+            Counter::ThrottledNs => 7,
         }
     }
 }
 
 /// How many counters a slot has.
-const COUNTERS: usize = 5;
+const COUNTERS: usize = 8;
+
+/// `cpu.max`'s default period, 100 ms, in nanoseconds.
+pub(crate) const DEFAULT_PERIOD_NS: u64 = 100_000_000;
 
 /// The marks of `memory.high`, `memory.low` and `memory.min`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -200,6 +213,21 @@ struct Slot {
     marks: [AtomicU64; 3],
     /// Its [`Counter`]s.
     counters: [AtomicU64; COUNTERS],
+    /// Nanoseconds its tasks used the processor in user mode and in kernel
+    /// mode, its descendants' included (`cpu.stat`), as the ticks saw them.
+    cpu_time: [AtomicU64; 2],
+    /// `cpu.max`: the runtime its subtree may use each period, or
+    /// [`UNLIMITED`], in nanoseconds.
+    bw_quota: AtomicU64,
+    /// `cpu.max`'s period, in nanoseconds.
+    bw_period: AtomicU64,
+    /// What its subtree has used of this period's quota.
+    bw_used: AtomicU64,
+    /// When this period ends, by the counter's reckoning; zero before the
+    /// first charge under a quota.
+    bw_end: AtomicU64,
+    /// When it ran out of this period's quota, or zero if it has not.
+    bw_throttled_at: AtomicU64,
     /// `cpu.weight`.
     weight: AtomicU32,
     /// The weight of its runnable tasks and busy children, in task units.
@@ -228,6 +256,12 @@ impl Slot {
                 AtomicU64::new(0),
             ],
             counters: [const { AtomicU64::new(0) }; COUNTERS],
+            cpu_time: [const { AtomicU64::new(0) }; 2],
+            bw_quota: AtomicU64::new(UNLIMITED),
+            bw_period: AtomicU64::new(DEFAULT_PERIOD_NS),
+            bw_used: AtomicU64::new(0),
+            bw_end: AtomicU64::new(0),
+            bw_throttled_at: AtomicU64::new(0),
             weight: AtomicU32::new(DEFAULT_WEIGHT),
             load: AtomicI64::new(0),
             contributed: AtomicI64::new(0),
@@ -318,9 +352,14 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
     for (mark, fresh) in taken.marks.iter().zip([UNLIMITED, 0, 0]) {
         mark.store(fresh, Ordering::Relaxed);
     }
-    for counter in &taken.counters {
+    for counter in taken.counters.iter().chain(&taken.cpu_time) {
         counter.store(0, Ordering::Relaxed);
     }
+    taken.bw_quota.store(UNLIMITED, Ordering::Relaxed);
+    taken.bw_period.store(DEFAULT_PERIOD_NS, Ordering::Relaxed);
+    taken.bw_used.store(0, Ordering::Relaxed);
+    taken.bw_end.store(0, Ordering::Relaxed);
+    taken.bw_throttled_at.store(0, Ordering::Relaxed);
     taken.weight.store(DEFAULT_WEIGHT, Ordering::Relaxed);
     taken.load.store(0, Ordering::Relaxed);
     taken.job.store(0, Ordering::Relaxed);
@@ -459,6 +498,154 @@ pub(crate) fn within(index: u32, scope: u32) -> bool {
         at = slot.parent.load(Ordering::Acquire);
     }
     false
+}
+
+/// Slots holding a `cpu.max` quota: what the way back to user mode asks
+/// before it looks at any slot, so that a machine with none pays a load.
+static BANDWIDTHS: AtomicU32 = AtomicU32::new(0);
+
+/// Nanoseconds every task has used the processor in user and kernel mode,
+/// in any job: the root cgroup's `cpu.stat`, which has no slot of its own.
+static MACHINE_CPU: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
+/// Whether any `cpu.max` is set.
+pub(crate) fn bandwidth_in_use() -> bool {
+    BANDWIDTHS.load(Ordering::Relaxed) != 0
+}
+
+/// Nanoseconds all tasks have used the processor in user mode and in kernel
+/// mode, since boot.
+pub(crate) fn machine_cpu() -> (u64, u64) {
+    (
+        MACHINE_CPU[0].load(Ordering::Relaxed),
+        MACHINE_CPU[1].load(Ordering::Relaxed),
+    )
+}
+
+/// Start the next period of a slot's quota if the one it is in has ended at
+/// `now`: its use goes to zero, and the time it spent throttled is counted.
+/// Only one of any callers racing on the same end does it.
+fn refresh_period(slot: &Slot, now: u64) {
+    let period = slot.bw_period.load(Ordering::Relaxed).max(1);
+    let end = slot.bw_end.load(Ordering::Acquire);
+    if end == 0 {
+        // The first charge starts the first period.
+        if slot
+            .bw_end
+            .compare_exchange(
+                0,
+                now.saturating_add(period),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            bump(slot, Counter::Periods, 1);
+        }
+        return;
+    }
+    if now < end {
+        return;
+    }
+    // Every whole period that passed with nothing running is one the job was
+    // not busy in: the next starts now.
+    let next = now.saturating_add(period);
+    if slot
+        .bw_end
+        .compare_exchange(end, next, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    let _ = slot.bw_used.swap(0, Ordering::AcqRel);
+    let throttled_at = slot.bw_throttled_at.swap(0, Ordering::AcqRel);
+    // Counted as it starts, as Linux's period timer does, so that
+    // `nr_periods` is never behind `nr_throttled`.
+    bump(slot, Counter::Periods, 1);
+    if throttled_at != 0 {
+        bump(slot, Counter::ThrottledNs, end.saturating_sub(throttled_at));
+    }
+}
+
+/// Count `amount` of `counter` in `slot` alone.
+fn bump(slot: &Slot, counter: Counter, amount: u64) {
+    if let Some(held) = slot.counters.get(counter.at()) {
+        let _ = held.fetch_add(amount, Ordering::Relaxed);
+    }
+}
+
+/// Charge `delta` nanoseconds of processor time, used at `now` in user mode
+/// (`user`) or in kernel mode, to slot `index` and every slot above it, and
+/// to the machine. A slot under a quota whose use reaches it is throttled
+/// until its period ends. Atomics only: the scheduler calls this under a run
+/// queue's lock.
+pub(crate) fn charge_cpu(index: u32, now: u64, delta: u64, user: bool) {
+    let mode = usize::from(!user);
+    if let Some(total) = MACHINE_CPU.get(mode) {
+        let _ = total.fetch_add(delta, Ordering::Relaxed);
+    }
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        if let Some(time) = slot.cpu_time.get(mode) {
+            let _ = time.fetch_add(delta, Ordering::Relaxed);
+        }
+        let quota = slot.bw_quota.load(Ordering::Acquire);
+        if quota != UNLIMITED {
+            refresh_period(slot, now);
+            let used = slot
+                .bw_used
+                .fetch_add(delta, Ordering::AcqRel)
+                .saturating_add(delta);
+            if used >= quota
+                && slot
+                    .bw_throttled_at
+                    .compare_exchange(0, now.max(1), Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                bump(slot, Counter::Throttled, 1);
+            }
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+}
+
+/// How much longer a task of slot `index` may run at `now` before a
+/// `cpu.max` at its slot or above runs out: the least remaining quota on the
+/// way up. `None` when none of them has a quota. What arms the timer for a
+/// task alone on its processor, which would otherwise get no tick to be
+/// throttled at.
+pub(crate) fn runtime_left(index: u32, now: u64) -> Option<u64> {
+    let mut left: Option<u64> = None;
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        let quota = slot.bw_quota.load(Ordering::Acquire);
+        if quota != UNLIMITED {
+            refresh_period(slot, now);
+            let remaining = quota.saturating_sub(slot.bw_used.load(Ordering::Acquire));
+            left = Some(left.map_or(remaining, |least| least.min(remaining)));
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+    left
+}
+
+/// When the tasks of slot `index` may run again at `now`: the latest end of
+/// a period in which it, or a slot above it, has used its `cpu.max` quota.
+/// `None` if they may run.
+pub(crate) fn throttled_until(index: u32, now: u64) -> Option<u64> {
+    let mut until = None;
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        if slot.bw_quota.load(Ordering::Acquire) != UNLIMITED {
+            refresh_period(slot, now);
+            if slot.bw_used.load(Ordering::Acquire) >= slot.bw_quota.load(Ordering::Acquire) {
+                let end = slot.bw_end.load(Ordering::Acquire);
+                until = until.max(Some(end));
+            }
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+    until.filter(|&end| end > now)
 }
 
 /// Whether a page charged to slot `owner` is spared when `scope` is
@@ -801,6 +988,50 @@ impl Quota {
             .map_or(0, |held| held.load(Ordering::Acquire))
     }
 
+    /// Its `cpu.max`: the quota in nanoseconds, or [`UNLIMITED`], and the
+    /// period.
+    pub(crate) fn bandwidth(&self) -> (u64, u64) {
+        slot(self.index).map_or((UNLIMITED, DEFAULT_PERIOD_NS), |slot| {
+            (
+                slot.bw_quota.load(Ordering::Acquire),
+                slot.bw_period.load(Ordering::Acquire),
+            )
+        })
+    }
+
+    /// Set its `cpu.max`, starting a period of it from the next charge.
+    pub(crate) fn set_bandwidth(&self, quota: u64, period: u64) {
+        let Some(slot) = slot(self.index) else {
+            return;
+        };
+        let before = slot.bw_quota.swap(UNLIMITED, Ordering::AcqRel);
+        slot.bw_period.store(period, Ordering::Release);
+        slot.bw_used.store(0, Ordering::Release);
+        slot.bw_end.store(0, Ordering::Release);
+        slot.bw_throttled_at.store(0, Ordering::Release);
+        slot.bw_quota.store(quota, Ordering::Release);
+        match (before == UNLIMITED, quota == UNLIMITED) {
+            (true, false) => {
+                let _ = BANDWIDTHS.fetch_add(1, Ordering::AcqRel);
+            }
+            (false, true) => {
+                let _ = BANDWIDTHS.fetch_sub(1, Ordering::AcqRel);
+            }
+            _ => {}
+        }
+    }
+
+    /// Nanoseconds its tasks used the processor in user mode and in kernel
+    /// mode, its descendants' included.
+    pub(crate) fn cpu_times(&self) -> (u64, u64) {
+        slot(self.index).map_or((0, 0), |slot| {
+            (
+                slot.cpu_time[0].load(Ordering::Relaxed),
+                slot.cpu_time[1].load(Ordering::Relaxed),
+            )
+        })
+    }
+
     /// Its `cpu.weight`.
     pub(crate) fn weight(&self) -> u32 {
         slot(self.index).map_or(DEFAULT_WEIGHT, |slot| slot.weight.load(Ordering::Relaxed))
@@ -830,6 +1061,8 @@ impl Quota {
 
 impl Drop for Quota {
     fn drop(&mut self) {
+        // A quota set on a job that goes leaves no mark behind.
+        self.set_bandwidth(UNLIMITED, DEFAULT_PERIOD_NS);
         release(self.index);
     }
 }

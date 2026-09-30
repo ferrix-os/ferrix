@@ -50,9 +50,9 @@ const POLL_NANOS: u64 = 1_000_000;
 const STILL_NANOS: u64 = 50_000_000;
 
 /// A program loaded, moved into `/check-fz`, and started.
-struct Running {
+pub(super) struct Running {
     /// The process.
-    process: Arc<Process>,
+    pub(super) process: Arc<Process>,
     /// Its task, kept so that it is not reaped under the check.
     _task: Arc<crate::sched::Task>,
 }
@@ -67,7 +67,7 @@ fn class() -> Class {
 }
 
 /// Load the program, move it into the cgroup at `tail`, and start it.
-fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
+pub(super) fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
     let file = image::build_with(
         class(),
         arch::ARCH.elf_machine(),
@@ -95,12 +95,17 @@ fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
     })
 }
 
-/// A word of the program's page.
-fn word(process: &Process, offset: u64) -> Checked<u32> {
+/// A word of the program's page, if it has mapped it yet.
+fn try_word(process: &Process, offset: u64) -> Option<u32> {
     let mut bytes = [0_u8; 4];
     uaccess::copy_from_user(process.space(), PAGE + offset, &mut bytes)
-        .map_err(|_| "freeze check: the program's page could not be read")?;
-    Ok(u32::from_le_bytes(bytes))
+        .ok()
+        .map(|()| u32::from_le_bytes(bytes))
+}
+
+/// A word of the program's page, which it has mapped.
+fn word(process: &Process, offset: u64) -> Checked<u32> {
+    try_word(process, offset).ok_or("freeze check: the program's page could not be read")
 }
 
 /// `usage_usec` of `/check-fz`'s `cpu.stat`: what its tasks have used.
@@ -140,12 +145,26 @@ fn until(
     }
 }
 
+/// Wait until the program has both counts moving and its waiter waiting.
+pub(super) fn wait_running(process: &Process) -> Checked<()> {
+    until(
+        process,
+        &|| running(process),
+        "the program never had both counts moving and its waiter waiting",
+    )
+}
+
+/// The program's two counts.
+pub(super) fn counts(process: &Process) -> Checked<(u32, u32)> {
+    Ok((word(process, 0)?, word(process, 4)?))
+}
+
 /// Both counts moving and the waiter waiting.
 fn running(process: &Process) -> Checked<bool> {
-    Ok(word(process, 12)? == 1
+    Ok(try_word(process, 12) == Some(1)
         && futex::waiters_on(process, PAGE + 8) == 1
-        && word(process, 0)? != 0
-        && word(process, 4)? != 0)
+        && try_word(process, 0).is_some_and(|count| count != 0)
+        && try_word(process, 4).is_some_and(|count| count != 0))
 }
 
 /// Require `cgroup.events` of `tail` to read exactly `expected`.
@@ -176,6 +195,24 @@ fn events_become(
         },
         failure,
     )
+}
+
+/// Wait until the cgroup at `tail` is empty: a killed program's threads leave
+/// its job when they have gone, not when the kill was sent.
+pub(super) fn wait_empty(harness: &Harness, tail: &[u8]) -> Checked<()> {
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    loop {
+        let mut path = Vec::from(tail);
+        path.extend_from_slice(b"/cgroup.events");
+        let text = harness.read(&path).unwrap_or_default();
+        if text.starts_with(b"populated 0") {
+            return Ok(());
+        }
+        if crate::timer::now_nanos() >= deadline {
+            return Err("freeze check: a killed program's cgroup never emptied");
+        }
+        crate::sched::sleep_for(POLL_NANOS);
+    }
 }
 
 /// Wait until `cgroup.events` of `tail` reads `expected`, for a cgroup whose
@@ -216,10 +253,17 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
         let nested = nested_and_moved(harness)?;
         Ok(first + second + nested)
     });
+    let emptied = freeze_check_wait(harness);
     let removed = harness.rmdir(b"/check-fz");
     let passed = outcome?;
+    emptied?;
     removed.map_err(|_| "freeze check: the cgroup did not empty")?;
     Ok(passed)
+}
+
+/// The cgroup of the check is empty before it is removed.
+fn freeze_check_wait(harness: &Harness) -> Checked<()> {
+    wait_empty(harness, b"/check-fz")
 }
 
 /// Freeze, hold, `SIGCONT`, thaw, freeze, `cgroup.kill`.
