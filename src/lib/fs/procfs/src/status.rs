@@ -108,6 +108,12 @@ pub struct Status<'a> {
     pub vm_stack: u64,
     /// `Threads`.
     pub threads: u32,
+    /// `NoNewPrivs`.
+    pub no_new_privs: bool,
+    /// `Seccomp`: the thread's mode, 0 (none), 1 (strict) or 2 (filter).
+    pub seccomp: u32,
+    /// `Seccomp_filters`: how many filters the thread's chain holds.
+    pub seccomp_filters: u32,
     /// Processors, all of which the process may run on.
     pub cpus: u32,
 }
@@ -146,9 +152,18 @@ pub fn render(out: &mut Vec<u8>, status: &Status<'_>) {
     ] {
         put(out, format_args!("{label}:\t{kib:>8} kB\n"));
     }
+    // `NoNewPrivs`, `Seccomp` and `Seccomp_filters` come after the capability
+    // sets and before the speculation lines and `Cpus_allowed`
+    // (`fs/proc/array.c`), which is where the lines Ferrix has fall.
     put(
         out,
-        format_args!("Threads:\t{}\nCpus_allowed:\t", status.threads),
+        format_args!(
+            "Threads:\t{}\nNoNewPrivs:\t{}\nSeccomp:\t{}\nSeccomp_filters:\t{}\nCpus_allowed:\t",
+            status.threads,
+            u32::from(status.no_new_privs),
+            status.seccomp,
+            status.seccomp_filters,
+        ),
     );
     cpu_mask(out, status.cpus);
     out.extend_from_slice(b"\nCpus_allowed_list:\t");

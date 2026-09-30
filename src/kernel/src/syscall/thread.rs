@@ -35,6 +35,7 @@ use crate::object::process::{self as pids, Host};
 use crate::sched::{self, Task, UserThread};
 use crate::sync::SpinLock;
 use crate::syscall::process::Process;
+use crate::syscall::seccomp;
 use crate::syscall::signal::{self, Inherited, Signals, ThreadSignals};
 
 /// One line of execution through a process.
@@ -65,6 +66,16 @@ pub(crate) struct Thread {
     /// Registers its task resumes from instead of entering the program: a
     /// fork child's first thread, and every thread `clone` makes. Taken once.
     resume: SpinLock<Option<crate::arch::UserRegs>>,
+    /// Its seccomp mode and filter chain, which Linux keeps per thread
+    /// (`task_struct.seccomp`). A leaf lock: nothing is taken inside it, and
+    /// neither a filter nor the memory of a dropped chain is ever run or freed
+    /// under it (`docs/SECCOMP.md` §7).
+    seccomp: SpinLock<seccomp::State>,
+    /// Whether [`Thread::seccomp`] holds anything, for the system call entry's
+    /// fast path: written under that lock after the state it summarises, with
+    /// release, and read with acquire. A thread that has never been filtered
+    /// pays this load and nothing else.
+    filtered: AtomicBool,
 }
 
 impl Thread {
@@ -75,7 +86,14 @@ impl Thread {
     /// [`AllocError`] when there is no memory for its signal state; this and
     /// the two below are on paths that answer `ENOMEM` or `NO_MEMORY`.
     pub(crate) fn leader(process: &Arc<Process>) -> Result<Thread, AllocError> {
-        Ok(Thread::with(process, ThreadSignals::new(Inherited::NONE)?))
+        // A native child of a filtered creator starts with its creator's chain
+        // (`seccomp::inherit_native`); any other first thread starts with none.
+        let seccomp = process.take_first_seccomp().unwrap_or_default();
+        Ok(Thread::with(
+            process,
+            ThreadSignals::new(Inherited::NONE)?,
+            seccomp,
+        ))
     }
 
     /// The first thread of a fork child `process`, made by `parent`: it
@@ -87,7 +105,13 @@ impl Thread {
     /// As [`Thread::leader`].
     pub(crate) fn forked(process: &Arc<Process>, parent: &Thread) -> Result<Thread, AllocError> {
         let inherited = parent.with_own_signals(|signals| signals.inherited());
-        Ok(Thread::with(process, ThreadSignals::new(inherited)?))
+        // The parent's mode and chain, shared: a child never escapes a filter
+        // by being forked.
+        Ok(Thread::with(
+            process,
+            ThreadSignals::new(inherited)?,
+            parent.seccomp_copy(),
+        ))
     }
 
     /// A thread of `process` other than its first, numbered `tid`, made by
@@ -105,13 +129,19 @@ impl Thread {
         let inherited = caller
             .with_own_signals(|signals| signals.inherited())
             .without_alt_stack();
-        let mut thread = Thread::with(process, ThreadSignals::new(inherited)?);
+        let mut thread = Thread::with(
+            process,
+            ThreadSignals::new(inherited)?,
+            caller.seccomp_copy(),
+        );
         *thread.tid.get_mut() = tid;
         Ok(thread)
     }
 
-    /// The first thread of `process`, numbered by its pid, with `signals`.
-    fn with(process: &Arc<Process>, signals: ThreadSignals) -> Thread {
+    /// The first thread of `process`, numbered by its pid, with `signals` and
+    /// `seccomp`.
+    fn with(process: &Arc<Process>, signals: ThreadSignals, seccomp: seccomp::State) -> Thread {
+        let filtered = AtomicBool::new(seccomp.is_active());
         Thread {
             tid: AtomicU32::new(process.pid()),
             gone: AtomicBool::new(false),
@@ -121,7 +151,34 @@ impl Thread {
             in_vfork: AtomicBool::new(false),
             signals: SpinLock::new(signals),
             resume: SpinLock::new(None),
+            seccomp: SpinLock::new(seccomp),
+            filtered,
         }
+    }
+
+    /// Whether it is under seccomp at all: the load the system call entry
+    /// makes on every call.
+    pub(crate) fn is_filtered(&self) -> bool {
+        self.filtered.load(Ordering::Acquire)
+    }
+
+    /// Read or change its seccomp state, under its leaf lock, and publish
+    /// whether it holds anything afterwards.
+    ///
+    /// A closure for the reason [`Thread::with_own_signals`] is one. What it
+    /// returns is returned after the lock is released, so a chain it swapped
+    /// out is dropped by the caller and not under the lock.
+    pub(crate) fn with_seccomp<R>(&self, change: impl FnOnce(&mut seccomp::State) -> R) -> R {
+        let mut held = self.seccomp.lock();
+        let answer = change(&mut held);
+        self.filtered.store(held.is_active(), Ordering::Release);
+        answer
+    }
+
+    /// A copy of its seccomp state for a thread or process made of it: the
+    /// mode, and the chain shared, one reference more.
+    pub(crate) fn seccomp_copy(&self) -> seccomp::State {
+        self.seccomp.lock().clone()
     }
 
     /// Have its task resume from `regs` rather than enter the program.

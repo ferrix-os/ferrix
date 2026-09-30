@@ -1010,6 +1010,15 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     });
     let memory = Memory::of(process);
     let name = process.comm();
+    // The thread's own seccomp mode and filter count, as Linux keeps them per
+    // thread: the thread numbered `tid`, or the process's first live one when
+    // that has gone, or none for a process that has ended.
+    let seccomp = process
+        .thread_by_tid(tid)
+        .or_else(|| process.threads().into_iter().next())
+        .map_or((0, 0), |thread| {
+            thread.with_seccomp(|state| (state.mode().number(), state.filters()))
+        });
     // Slots in the table as Linux sizes one: a power of two, 64 at least.
     let highest = process.files().lock().iter().map(|(fd, _)| fd).last();
     let fd_size = highest
@@ -1030,6 +1039,9 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         vm_data: memory.data / 1024,
         vm_stack: memory.stack / 1024,
         threads: thread_count(process),
+        no_new_privs: crate::syscall::attributes::get(process).no_new_privs,
+        seccomp: seccomp.0,
+        seccomp_filters: seccomp.1,
         cpus: online_cpus(),
     };
     let mut out = Vec::new();
