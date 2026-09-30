@@ -89,7 +89,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 /// the kernel's, reports `NETLINK_KOBJECT_UEVENT`, and a receive that does
 /// not wait finds nothing, since no event is broadcast yet.
 fn uevents() -> Result<(), &'static str> {
-    let file = NetlinkSocket::open(SOCK_RAW, Protocol::Uevent, true, (0, 0))
+    let file = NetlinkSocket::open(crate::net::first(), SOCK_RAW, Protocol::Uevent, true, (0, 0))
         .map_err(|_| "a uevent socket could not be opened")?;
     let socket = of(&file).ok_or("a uevent socket's open file does not hold one")?;
     let group = NetlinkAddress { pid: 0, groups: 1 };
@@ -349,7 +349,13 @@ struct Netlink {
 impl Netlink {
     /// Open a socket and bind it, as `rtnl_open` does.
     fn open() -> Result<Netlink, &'static str> {
-        let file = NetlinkSocket::open(SOCK_DGRAM, Protocol::Route, false, (0, 0))
+        let file = NetlinkSocket::open(
+            crate::net::first(),
+            SOCK_DGRAM,
+            Protocol::Route,
+            false,
+            (0, 0),
+        )
             .map_err(|_| "a netlink socket could not be opened")?;
         let socket = of(&file).ok_or("a netlink socket's open file does not hold one")?;
         socket

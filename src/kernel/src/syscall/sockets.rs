@@ -393,7 +393,8 @@ enum Opened {
 }
 
 /// Whether `socket` may open what `socket_type` named: a raw socket needs
-/// `CAP_NET_RAW`, which here is being root, as for every capability.
+/// `CAP_NET_RAW` over the user namespace that owns the network namespace it
+/// is made in (`docs/NETNS.md` section 2.3).
 ///
 /// Asked after the type and protocol are known to exist, as `inet_create`
 /// asks it after its protocol lookup, so a raw socket at protocol zero is
@@ -403,8 +404,18 @@ fn permitted(process: &Process, opened: &Opened) -> Result<(), Errno> {
         opened,
         Opened::Inet(_, InetKind::Raw { .. }) | Opened::Packet(..)
     );
-    if raw && !process.with_credentials(|ids| ids.privileged()) {
-        return Err(Errno::EPERM);
+    if raw {
+        let owner = process.net_ns();
+        let held = process.with_credentials(|ids| {
+            crate::syscall::userns::capable_over(
+                ids,
+                owner.owner(),
+                crate::syscall::userns::CAP_NET_RAW,
+            )
+        });
+        if !held {
+            return Err(Errno::EPERM);
+        }
     }
     Ok(())
 }
@@ -525,11 +536,19 @@ pub(crate) fn sys_socket(
     let nonblock = kind & SOCK_NONBLOCK != 0;
     let file = match opened {
         Opened::Unix(socket_type) => fs::socket::new_socket(socket_type, nonblock, process)?,
-        Opened::Inet(family, kind) => InetSocket::open(family, kind, nonblock, owner)?,
-        Opened::Netlink(kind, protocol) => NetlinkSocket::open(kind, protocol, nonblock, owner)?,
-        Opened::Packet(kind, protocol) => {
-            PacketSocket::open(packet_kind(kind)?, protocol, nonblock, owner)?
+        Opened::Inet(family, kind) => {
+            InetSocket::open(&process.net_ns(), family, kind, nonblock, owner)?
         }
+        Opened::Netlink(kind, protocol) => {
+            NetlinkSocket::open(&process.net_ns(), kind, protocol, nonblock, owner)?
+        }
+        Opened::Packet(kind, protocol) => PacketSocket::open(
+            &process.net_ns(),
+            packet_kind(kind)?,
+            protocol,
+            nonblock,
+            owner,
+        )?,
     };
     let descriptor = process
         .files()

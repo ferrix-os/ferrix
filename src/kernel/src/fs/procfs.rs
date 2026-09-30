@@ -191,16 +191,19 @@ enum NamespaceKind {
     Ipc = 3,
     /// `cgroup`.
     Cgroup = 4,
+    /// `net`.
+    Net = 5,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 5] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 6] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
         (NamespaceKind::Uts, b"uts"),
         (NamespaceKind::Ipc, b"ipc"),
         (NamespaceKind::Cgroup, b"cgroup"),
+        (NamespaceKind::Net, b"net"),
     ];
 }
 
@@ -1017,6 +1020,8 @@ fn namespace_location(pid: u32, kind: NamespaceKind) -> Result<Location> {
         NamespaceKind::Uts => fs::nsfs::Kind::Uts,
         NamespaceKind::Ipc => fs::nsfs::Kind::Ipc,
         NamespaceKind::Cgroup => fs::nsfs::Kind::Cgroup,
+        // Followed before this is asked, through `net::netns_file`.
+        NamespaceKind::Net => return Err(Errno::EINVAL),
     };
     fs::nsfs::location(fs::nsfs::Handle::of(&process, kind))
 }
@@ -1282,6 +1287,7 @@ impl Inode for Node {
             Place::Namespace(pid, NamespaceKind::Uts) => render::uts_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::Ipc) => render::ipc_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::Cgroup) => render::cgroup_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Net) => render::net_namespace(&*alive(pid)?),
             _ => Err(Errno::EINVAL),
         }
     }
@@ -1298,6 +1304,15 @@ impl Inode for Node {
     fn link_location(&self) -> Option<Result<Location>> {
         if let Place::Descriptor(pid, fd) = self.place {
             return descriptor_location(pid, fd);
+        }
+        // Following `/proc/<pid>/ns/net` opens the namespace as a file.
+        if let Place::Namespace(pid, NamespaceKind::Net) = self.place {
+            return Some(alive(pid).and_then(|process| {
+                if !crate::net::netns_file::may_open(&process) {
+                    return Err(Errno::EACCES);
+                }
+                crate::net::netns_file::location(process.net_ns())
+            }));
         }
         if let Place::Namespace(pid, kind) = self.place {
             return Some(namespace_location(pid, kind));

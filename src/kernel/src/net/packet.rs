@@ -24,7 +24,7 @@ use ferrix_net::packet::{LinkAddress, PacketKind};
 use ferrix_vfs::{Inode, Metadata, OpenFile, Readiness};
 
 use crate::fs;
-use crate::net;
+use crate::net::NetNamespace;
 use crate::net::socket::Received;
 use crate::sync::SpinLock;
 
@@ -50,6 +50,8 @@ struct Options {
 
 /// An `AF_PACKET` socket.
 pub(crate) struct PacketSocket {
+    /// The network namespace it was made in, for life.
+    ns: Arc<NetNamespace>,
     /// Which socket in the stack.
     id: SocketId,
     /// Whole frames or payloads.
@@ -74,7 +76,7 @@ impl fmt::Debug for PacketSocket {
 
 impl Drop for PacketSocket {
     fn drop(&mut self) {
-        net::core().with(|stack, _| stack.close(self.id));
+        self.ns.core().with(|stack, _| stack.close(self.id));
     }
 }
 
@@ -86,14 +88,18 @@ impl PacketSocket {
     ///
     /// Whatever [`OpenFile::new`] refuses, which for a socket is nothing.
     pub(crate) fn open(
+        ns: &Arc<NetNamespace>,
         kind: PacketKind,
         protocol: u16,
         nonblock: bool,
         owner: (u32, u32),
     ) -> Result<Arc<OpenFile>, Errno> {
-        let id = net::core().with(|stack, _| stack.open_packet(kind, u16::from_be(protocol)));
+        let id = ns
+            .core()
+            .with(|stack, _| stack.open_packet(kind, u16::from_be(protocol)));
         let ino = fs::socket::next_ino();
         let socket = Arc::new(PacketSocket {
+            ns: Arc::clone(ns),
             id,
             kind,
             opened_protocol: protocol,
@@ -110,7 +116,7 @@ impl PacketSocket {
 
     /// What it can do right now.
     pub(crate) fn readiness(&self) -> Readiness {
-        let ready = net::core().look(|stack| stack.readiness(self.id));
+        let ready = self.ns.core().look(|stack| stack.readiness(self.id));
         Readiness {
             readable: ready.readable,
             writable: ready.writable,
@@ -130,7 +136,8 @@ impl PacketSocket {
         }
         let protocol = be16_at(raw, 2).ok_or(Errno::EINVAL)?;
         let interface = interface_at(raw).ok_or(Errno::ENODEV)?;
-        net::core()
+        self.ns
+            .core()
             .with(|stack, _| stack.bind_packet(self.id, u16::from_be(protocol), interface))
             .map_err(|error| match error {
                 ferrix_net::Error::NoDevice => Errno::ENODEV,
@@ -148,7 +155,8 @@ impl PacketSocket {
             None => None,
             Some(raw) => Some(self.link_address(raw)?),
         };
-        net::core()
+        self.ns
+            .core()
             .with(|stack, _| stack.send_packet(self.id, data, address))
             .map_err(errno)
     }
@@ -192,7 +200,10 @@ impl PacketSocket {
             fs::socket::deadline_after(self.options.lock().receive_timeout)
         };
         loop {
-            let taken = net::core().with(|stack, _| stack.recv_packet(self.id, out, peek));
+            let taken = self
+                .ns
+                .core()
+                .with(|stack, _| stack.recv_packet(self.id, out, peek));
             match taken {
                 Ok(frame) => {
                     let mut name = vec![0_u8; SOCKADDR_LL_SIZE];
@@ -217,7 +228,7 @@ impl PacketSocket {
                 Err(other) => return Err(errno(other)),
             }
             fs::socket::wait_on(
-                net::core().progress(),
+                self.ns.core().progress(),
                 || self.readiness().readable,
                 deadline,
             )?;
@@ -228,7 +239,7 @@ impl PacketSocket {
     /// bound interface, with that interface's hardware address when there is
     /// one, and as long as the address it holds.
     pub(crate) fn local_name(&self) -> Vec<u8> {
-        let (protocol, interface, hardware) = net::core().with(|stack, _| {
+        let (protocol, interface, hardware) = self.ns.core().with(|stack, _| {
             let Some(socket) = stack.packet_socket(self.id) else {
                 return (0, 0, None);
             };
@@ -339,7 +350,7 @@ impl PacketSocket {
         if request != ferrix_linux_abi::socket::SIOCINQ {
             return Err(Errno::ENOTTY);
         }
-        let waiting = net::core().with(|stack, _| {
+        let waiting = self.ns.core().with(|stack, _| {
             stack
                 .packet_socket(self.id)
                 .and_then(|socket| socket.peek())
@@ -374,11 +385,11 @@ impl Inode for PacketSocket {
     /// The net core's progress queue, which every change a socket's
     /// readiness reads wakes.
     fn poll_changes(&self) -> Option<u64> {
-        Some(net::core().progress().wakes())
+        Some(self.ns.core().progress().wakes())
     }
 
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
-        visit(fs::wake::lent(net::core().progress()));
+        visit(self.ns.core().progress_source());
         true
     }
 
@@ -406,7 +417,7 @@ const fn errno(error: ferrix_net::Error) -> Errno {
     match error {
         ferrix_net::Error::NoDevice => Errno::ENXIO,
         ferrix_net::Error::NetworkDown => Errno::ENETDOWN,
-        other => net::socket::errno(other),
+        other => crate::net::socket::errno(other),
     }
 }
 

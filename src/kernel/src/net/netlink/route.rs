@@ -29,6 +29,8 @@
 //! it would get from a kernel whose table holds one row. Filters belong with
 //! the first program that sends one.
 
+use alloc::sync::Arc;
+
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::netlink::{
     ARPHRD_ETHER, ARPHRD_LOOPBACK, IFA_ADDRESS, IFA_F_PERMANENT, IFA_LABEL, IFA_LOCAL, IFF_UP,
@@ -43,6 +45,11 @@ use ferrix_net::iface::{Address as IfaceAddress, Medium};
 use ferrix_net::route::{Origin, Route};
 use ferrix_net::{IpAddress, IpCidr, Ipv4, Ipv6, Stack};
 use ferrix_netlink::{Address, Attr, Attributes, Message, Messages, Value, Writer};
+
+use super::link;
+use crate::net::NetNamespace;
+use crate::net::namespace::{MAX_ADDRESSES, MAX_ROUTES};
+use crate::syscall::process::Process;
 
 /// The most attributes any reply here carries.
 const MAX_ATTRS: usize = 4;
@@ -83,21 +90,44 @@ impl<'a> Attrs<'a> {
 
 /// Answer every request in `request`, writing the replies into `out`.
 ///
-/// Called with the stack locked. Answers how many bytes of `out` were written.
-/// A request that changes something is refused `EPERM` unless `privileged`:
-/// the address and route tables are the machine's, not a program's, and
-/// grow with every address and route added.
+/// Each request is answered with its own namespace's stack locked, so nothing
+/// it does allocates, waits or touches a program's memory -- except the few
+/// that touch two namespaces or allocate, which [`link`] answers with no lock
+/// held. Answers how many bytes of `out` were written. A request that changes
+/// something is refused `EPERM` unless `privileged`: the tables are the
+/// namespace's owner's, and one that adds to them first asks the namespace's
+/// charge for room.
 pub(super) fn answer(
-    stack: &mut Stack,
+    ns: &Arc<NetNamespace>,
+    actor: Option<&Process>,
     port: u32,
     request: &[u8],
     out: &mut [u8],
     privileged: bool,
 ) -> usize {
     let mut writer = Writer::new(out);
+    let mut changed = false;
     for message in Messages::new(request) {
         match message {
-            Ok(message) => one(stack, port, &message, &mut writer, privileged),
+            Ok(message) => {
+                let header = message.header;
+                let asked = header.flags & NLM_F_REQUEST != 0;
+                if asked
+                    && privileged
+                    && adds(header.kind)
+                    && let Err(errno) = ns.admit()
+                {
+                    let _ = writer.error(header, i32::from(errno.0), port);
+                    continue;
+                }
+                if link::wants(&message) && asked {
+                    link::answer(ns, actor, port, &message, &mut writer, privileged);
+                } else {
+                    ns.core()
+                        .with(|stack, _| one(stack, port, &message, &mut writer, privileged));
+                }
+                changed |= asked && privileged && changes(header.kind);
+            }
             Err(_) => {
                 // A length that cannot be read leaves no header to echo, so
                 // the error names the request it answers as far as it can.
@@ -106,7 +136,18 @@ pub(super) fn answer(
             }
         }
     }
+    if changed {
+        // What the tables hold now, and the carrier of any pair an end of
+        // which came up or went down.
+        let _ = ns.fit(0);
+        ns.refresh_carriers();
+    }
     writer.len()
+}
+
+/// Whether a message of this type may add to the tables.
+const fn adds(kind: u16) -> bool {
+    matches!(kind, RTM_NEWLINK | RTM_NEWADDR | RTM_NEWROUTE)
 }
 
 /// `EINVAL` as an `NLMSG_ERROR` carries it.
@@ -382,6 +423,24 @@ fn set_link(stack: &mut Stack, message: &Message<'_>) -> Result<bool, Errno> {
         let interface = stack.interface_mut(index).ok_or(Errno::ENODEV)?;
         interface.mtu = mtu;
     }
+    // A name for an interface that is there: only while it is down, as
+    // `dev_change_name` has it (`EBUSY`), and never one another has.
+    if body.index > 0
+        && let Some(name) = attributes.find(IFLA_IFNAME).map(|found| found.as_name())
+    {
+        let current = stack.interface(index).ok_or(Errno::ENODEV)?;
+        if current.name.as_bytes() != name {
+            if current.is_up() {
+                return Err(Errno::EBUSY);
+            }
+            stack
+                .rename_interface(index, name)
+                .map_err(|error| match error {
+                    ferrix_net::Error::AddressInUse => Errno::EEXIST,
+                    _ => Errno::ENODEV,
+                })?;
+        }
+    }
     // `ifi_change` says which flags the message is about and `ifi_flags` what
     // they should become, so a request that leaves `change` empty changes
     // nothing however its flags are set. Only `IFF_UP` is ours to act on; the
@@ -434,6 +493,9 @@ fn change_address(stack: &mut Stack, message: &Message<'_>, add: bool) -> Result
         .map(|interface| interface.index)
         .ok_or(Errno::ENODEV)?;
     if add {
+        if stack.address_count() >= MAX_ADDRESSES {
+            return Err(Errno::ENOSPC);
+        }
         stack
             .add_address(
                 index,
@@ -496,6 +558,9 @@ fn change_route(stack: &mut Stack, message: &Message<'_>, add: bool) -> Result<b
         return Ok(false);
     }
     let interface = route_interface(stack, &attributes, gateway)?;
+    if stack.routes().entries().len() >= MAX_ROUTES {
+        return Err(Errno::ENOSPC);
+    }
     stack.routes_mut().add(Route {
         destination,
         gateway,

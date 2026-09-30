@@ -227,6 +227,7 @@ const PACKET_BODY: &[u8] = b"a frame a packet socket wrote";
 /// `udhcpc` binds one for IPv4.
 fn packet_socket(index: u32) -> Result<Arc<net::packet::PacketSocket>, &'static str> {
     let file = net::packet::PacketSocket::open(
+        net::first(),
         ferrix_net::packet::PacketKind::Datagram,
         ethertype::ARP.to_be(),
         false,

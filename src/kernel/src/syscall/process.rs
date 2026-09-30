@@ -220,6 +220,10 @@ pub(crate) struct Process {
     /// §12). A leaf lock: cloned out before anything is done with what it
     /// names.
     nsproxy: SpinLock<NsProxy>,
+    /// The network namespace it is in (`docs/NETNS.md` section 2.1): the
+    /// first unless `CLONE_NEWNET` made another, and a fork child's is its
+    /// parent's. A leaf lock; clone the `Arc` out.
+    net_ns: SpinLock<Arc<crate::net::NetNamespace>>,
 }
 
 /// Where a program starts: the two numbers `exec::load` computes and the task
@@ -386,6 +390,7 @@ impl Process {
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
             nsproxy: SpinLock::new(NsProxy::initial()),
+            net_ns: SpinLock::new(Arc::clone(crate::net::first())),
         })
     }
 
@@ -449,8 +454,21 @@ impl Process {
         child.oom_score_adj = AtomicI32::new(parent.oom_score_adj());
         child.credentials = SpinLock::new(parent.credentials.lock().clone());
         child.nsproxy = SpinLock::new(parent.nsproxy.lock().clone());
+        child.net_ns = SpinLock::new(parent.net_ns());
         child.identity = SpinLock::new(parent.identity.lock().clone());
         Ok(child)
+    }
+
+    /// The network namespace it is in.
+    pub(crate) fn net_ns(&self) -> Arc<crate::net::NetNamespace> {
+        Arc::clone(&self.net_ns.lock())
+    }
+
+    /// Put it in another network namespace. What it held is dropped after the
+    /// lock is released, since the namespace it named may end there.
+    pub(crate) fn set_net_ns(&self, namespace: Arc<crate::net::NetNamespace>) {
+        let displaced = core::mem::replace(&mut *self.net_ns.lock(), namespace);
+        drop(displaced);
     }
 
     /// Its descriptor table.

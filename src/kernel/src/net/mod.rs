@@ -3,6 +3,13 @@
 //! `src/lib/network/net` is the whole of the logic and holds no lock, no clock and no
 //! device. This module is the three things it lacks.
 //!
+//! # One core for each network namespace
+//!
+//! A [`NetCore`] is the kernel's half of one network namespace's stack
+//! (`docs/NETNS.md`). [`core`] is the first namespace's, which the drivers and
+//! the boot checks use; a socket or a call made by a process uses the
+//! namespace it holds.
+//!
 //! # One lock, and nothing sleeps inside it
 //!
 //! The stack is behind a [`SpinLock`], which disables preemption, so nothing
@@ -30,17 +37,22 @@
 //! The conversion is [`now`], and it is the only place the two meet.
 
 pub(crate) mod check;
+pub(crate) mod device;
 pub(crate) mod ifreq;
+pub(crate) mod namespace;
 pub(crate) mod netlink;
+pub(crate) mod netns_file;
 pub(crate) mod packet;
 pub(crate) mod socket;
+pub(crate) mod veth;
+
+pub(crate) use namespace::{NetNamespace, acting, first};
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use ferrix_net::stack::{Config, Millis, Outgoing};
+use ferrix_net::stack::{Millis, Outgoing};
 use ferrix_net::{Interface, Stack};
-use ferrix_sync::Once;
 
 use crate::object::port::Port;
 use crate::sched::WaitQueue;
@@ -83,7 +95,7 @@ pub(crate) struct NetCore {
     /// `take_frames` does: the stack, then this, then the wakers.
     pending: SpinLock<Pending>,
     /// Woken whenever anything in the stack moved.
-    progress: WaitQueue,
+    progress: Arc<WaitQueue>,
     /// The port each driven interface's ring sleeps on, which hears when
     /// frames are queued for that interface. Without it a frame waits until
     /// the ring wakes for its driver or its recheck, up to 20 ms, and every
@@ -95,17 +107,11 @@ pub(crate) struct NetCore {
     transmit_wakers: SpinLock<Vec<(u32, Arc<Port>)>>,
 }
 
-/// The one net core, made on first use.
-static CORE: Once<NetCore> = Once::new();
-
-/// The net core.
+/// The first network namespace's net core: the one the ring-3 drivers, the
+/// boot checks and every call made with no process attach to. A process's own
+/// is [`NetNamespace::core`] of the namespace it is in (`docs/NETNS.md`).
 pub(crate) fn core() -> &'static NetCore {
-    CORE.call_once(|| NetCore {
-        stack: SpinLock::new(new_stack()),
-        pending: SpinLock::new(Pending::default()),
-        progress: WaitQueue::new(),
-        transmit_wakers: SpinLock::new(Vec::new()),
-    })
+    first().core()
 }
 
 /// A stack with its loopback, seeded from the clock.
@@ -113,8 +119,7 @@ pub(crate) fn core() -> &'static NetCore {
 /// The seed is what makes an initial sequence number and an ephemeral port
 /// unguessable. A counter would be worse than nothing: it would look random in
 /// a log and be predictable to anyone who saw one connection.
-fn new_stack() -> Stack {
-    let mut stack = Stack::new(Config::default());
+fn seeded(mut stack: Stack) -> Stack {
     stack.seed(crate::timer::now_nanos().wrapping_mul(0x2545_F491_4F6C_DD1D));
     stack
 }
@@ -125,21 +130,45 @@ pub(crate) fn now() -> Millis {
 }
 
 impl NetCore {
+    /// A net core over `stack`.
+    fn new(stack: Stack, progress: Arc<WaitQueue>) -> NetCore {
+        NetCore {
+            stack: SpinLock::new(seeded(stack)),
+            pending: SpinLock::new(Pending::default()),
+            progress,
+            transmit_wakers: SpinLock::new(Vec::new()),
+        }
+    }
+
     /// Run `body` with the stack locked, then move what it produced and wake
     /// whoever was waiting.
     ///
     /// Nothing inside `body` may sleep: the lock disables preemption. Copy out
     /// of the stack and act on it afterwards.
     pub(crate) fn with<T>(&self, body: impl FnOnce(&mut Stack, Millis) -> T) -> T {
+        let (answer, crossing) = self.with_crossing(body);
+        veth::forward(crossing);
+        answer
+    }
+
+    /// [`NetCore::with`], handing back the frames for the other end of a
+    /// virtual pair instead of carrying them: the stack is unlocked when this
+    /// returns, and the caller gives them to [`veth::forward`], which takes
+    /// the other namespace's lock with none of this one's held.
+    pub(crate) fn with_crossing<T>(
+        &self,
+        body: impl FnOnce(&mut Stack, Millis) -> T,
+    ) -> (T, Vec<veth::Frame>) {
         let at = now();
-        let (answer, queued_for) = {
+        let (answer, queued_for, crossing) = {
             let mut stack = self.stack.lock();
             let answer = body(&mut stack, at);
-            (answer, self.take_frames(&mut stack, at))
+            let (queued_for, crossing) = self.take_frames(&mut stack, at);
+            (answer, queued_for, crossing)
         };
         self.progress.wake_all();
         self.wake_transmitters(&queued_for);
-        answer
+        (answer, crossing)
     }
 
     /// Run `body` with the stack locked and read only, waking nobody.
@@ -155,28 +184,42 @@ impl NetCore {
     /// Let the clock reach now, and move what that produced.
     fn tick(&self) {
         let at = now();
-        let queued_for = {
+        let (queued_for, crossing) = {
             let mut stack = self.stack.lock();
             stack.on_timer(at);
             self.take_frames(&mut stack, at)
         };
         self.progress.wake_all();
         self.wake_transmitters(&queued_for);
+        veth::forward(crossing);
     }
 
     /// Empty the stack's egress into the pending queue, and answer which
-    /// interfaces got frames.
+    /// interfaces got frames, and which frames are for the other end of a
+    /// virtual pair.
     ///
     /// Called with the stack locked, and it allocates nothing the stack has
-    /// not already allocated but that short list: the frames are moved, not
+    /// not already allocated but those short lists: the frames are moved, not
     /// copied. A frame for an interface no ring serves -- one parked after
     /// its driver died -- is dropped, as a link with no carrier drops it, so
     /// that it cannot fill the queue every other interface shares.
-    fn take_frames(&self, stack: &mut Stack, at: Millis) -> Vec<u32> {
+    fn take_frames(&self, stack: &mut Stack, at: Millis) -> (Vec<u32>, Vec<veth::Frame>) {
         let mut pending = self.pending.lock();
         let wakers = self.transmit_wakers.lock();
         let mut interfaces = Vec::new();
+        let mut crossing = Vec::new();
         while let Some(outgoing) = stack.poll_transmit(at) {
+            if let Some((pair, end)) = stack
+                .interface(outgoing.interface)
+                .and_then(|each| veth::end_of(each.backing))
+            {
+                crossing.push(veth::Frame {
+                    pair,
+                    end,
+                    bytes: outgoing.frame,
+                });
+                continue;
+            }
             let served = wakers.iter().any(|(index, _)| *index == outgoing.interface);
             if !served || pending.frames.len() >= MAX_PENDING {
                 pending.dropped += 1;
@@ -187,7 +230,7 @@ impl NetCore {
             }
             pending.frames.push(outgoing);
         }
-        interfaces
+        (interfaces, crossing)
     }
 
     /// Have `port` told when frames are queued for `interface`.
@@ -253,6 +296,18 @@ impl NetCore {
         self.with(|stack, at| stack.receive(interface, frame, at));
     }
 
+    /// Hand a frame that arrived over a virtual pair to the stack, if the end
+    /// it arrived on is up, and answer the frames that produced for the other
+    /// end of a pair ([`veth::forward`] carries them).
+    pub(crate) fn receive_crossing(&self, interface: u32, frame: &[u8]) -> Vec<veth::Frame> {
+        self.with_crossing(|stack, at| {
+            if stack.interface(interface).is_some_and(Interface::is_up) {
+                stack.receive(interface, frame, at);
+            }
+        })
+        .1
+    }
+
     /// Add an interface, and answer the index it was given.
     pub(crate) fn add_interface(&self, interface: Interface) -> u32 {
         self.with(|stack, _| stack.add_interface(interface))
@@ -268,6 +323,21 @@ impl NetCore {
             .retain(|(interface, _)| *interface != index);
         let mut pending = self.pending.lock();
         pending.frames.retain(|frame| frame.interface != index);
+    }
+
+    /// Take the port that hears of frames queued for an interface away, so
+    /// that it can be given to the interface's next stack.
+    pub(crate) fn take_waker(&self, index: u32) -> Option<Arc<Port>> {
+        let mut wakers = self.transmit_wakers.lock();
+        let at = wakers
+            .iter()
+            .position(|(interface, _)| *interface == index)?;
+        let (_, port) = wakers.remove(at);
+        self.pending
+            .lock()
+            .frames
+            .retain(|frame| frame.interface != index);
+        Some(port)
     }
 
     /// Take an interface away, and drop what was waiting for it.
@@ -296,8 +366,14 @@ impl NetCore {
     }
 
     /// Where a socket waits.
-    pub(crate) const fn progress(&self) -> &WaitQueue {
+    pub(crate) fn progress(&self) -> &WaitQueue {
         &self.progress
+    }
+
+    /// The same queue as a source a wait can hold, which keeps it alive for
+    /// as long as it waits: a namespace can end under a waiter.
+    pub(crate) fn progress_source(&self) -> ferrix_vfs::WakeSource {
+        crate::fs::wake::shared(&self.progress)
     }
 
     /// When the stack next has something to do, in milliseconds.
@@ -313,7 +389,7 @@ impl NetCore {
 /// to a host that cannot keep up.
 const MAX_PENDING: usize = 512;
 
-/// Start the task that drives the stack.
+/// Start the task that drives the stacks.
 ///
 /// # Errors
 ///
@@ -324,18 +400,28 @@ pub(crate) fn start() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// The driving task: let the clock reach now, move what that produced, and
-/// sleep until the stack's next deadline.
+/// The driving task: let the clock reach now in every namespace's stack, move
+/// what that produced, and sleep until the earliest deadline of any.
 fn run(_argument: usize) {
+    let mut live: Vec<Arc<NetNamespace>> = Vec::new();
     loop {
-        let core = core();
-        core.tick();
+        namespace::live(&mut live);
+        let mut soonest: Option<Millis> = None;
+        for each in &live {
+            let core = each.core();
+            core.tick();
+            soonest = match (soonest, core.poll_at()) {
+                (Some(one), Some(other)) => Some(one.min(other)),
+                (one, other) => one.or(other),
+            };
+        }
+        // Dropped here, where no lock is held: the last reference to a
+        // namespace may be this one.
+        live.clear();
         let at = now();
-        let next = core
-            .poll_at()
-            .map_or(at.saturating_add(RECHECK_MILLIS), |deadline| {
-                deadline.clamp(at, at.saturating_add(RECHECK_MILLIS))
-            });
+        let next = soonest.map_or(at.saturating_add(RECHECK_MILLIS), |deadline| {
+            deadline.clamp(at, at.saturating_add(RECHECK_MILLIS))
+        });
         // Never sleep until a moment that has already arrived. A deadline in
         // the past would otherwise turn this loop into a spin that starves
         // every other task on the processor, which is the worst way for a
