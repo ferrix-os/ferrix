@@ -301,6 +301,7 @@ pub(super) fn check_namespaces(disk: bool) {
         },
     );
     check_user_namespaces();
+    check_network_namespaces();
 }
 
 /// User namespaces: the rules of `docs/NAMESPACES.md` §4 attempted and
@@ -315,6 +316,22 @@ fn check_user_namespaces() {
     };
     println!(
         "  userns   {} calls answered as Linux answers them, {} of them refusals: a namespace named apart, ids 65534 until mapped, a gid_map refused before setgroups is denied, kernel root and a second id unmappable, a map written once, fake root refused what only root may do, a chrooted process refused, a set-id bit ignored, a read-only /proc/sys refusing a write",
+        checked.calls, checked.refusals,
+    );
+}
+
+/// Network namespaces: the rules of `docs/NETNS.md` section 8 attempted and
+/// refused or accepted (NN1 to NN17).
+fn check_network_namespaces() {
+    let checked = match fs::netns_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_NETWORK_NAMESPACES,
+            "network namespace self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  netns    {} calls answered as Linux answers them, {} of them refusals: a new namespace with a loopback that is down, brought up by netlink and by ioctl, ports and sockets private to each, a socket staying where it was made, changes and raw sockets judged over the owning user namespace, a veth pair carrying a datagram and a stream between two namespaces and nothing to a third, moved and deleted, a device served where it went and home when the namespace ended, abstract names per namespace, /proc/net the reader's, tables at their ceilings",
         checked.calls, checked.refusals,
     );
 }
@@ -946,7 +963,8 @@ pub(super) fn check_kernel_memory() {
     println!(
         "  kmem     at a {} KiB memory limit a job made {} files, {} pipes, {} socket pairs, \
          {} descriptors in flight, {} epoll registrations, {} eventfds, {} regions of one \
-         mapping, {} record locks, {} semaphore sets, {} mount namespaces of {} mounts and {} user namespaces, and \
+         mapping, {} record locks, {} semaphore sets, {} mount namespaces of {} mounts, {} user namespaces, \
+         {} network namespaces, {} veth pairs and {} routes in a network namespace, and \
          was refused one more of each -- \
          ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged \
          came back",
@@ -963,6 +981,9 @@ pub(super) fn check_kernel_memory() {
         report.namespaces,
         fs::kmem_check::TREE,
         report.user_namespaces,
+        report.network_namespaces,
+        report.veth_pairs,
+        report.routes,
     );
 }
 
