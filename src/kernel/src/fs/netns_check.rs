@@ -1653,8 +1653,11 @@ pub(crate) fn fill_socket(ns: &Arc<NetNamespace>) -> Result<Arc<NetlinkSocket>, 
 }
 
 /// Add the `n`th distinct /32 route by `socket`, for `kmem_check`'s fill: the
-/// request is made by the kernel, which is no process and may, and the answer
-/// is the acknowledgement's errno.
+/// request is made by the kernel, which is no process and may. It asks for no
+/// acknowledgement, as a program that adds routes in a loop does not, so a
+/// route that is added is answered with nothing and a refusal with an error
+/// message; that is how a route added and not paid for goes unnoticed by the
+/// one sending it.
 pub(crate) fn route_for_fill(socket: &NetlinkSocket, n: usize) -> Result<(), Errno> {
     let octets = [
         172,
@@ -1667,7 +1670,7 @@ pub(crate) fn route_for_fill(socket: &NetlinkSocket, n: usize) -> Result<(), Err
     let header = NlMsgHdr {
         len: 0,
         kind: RTM_NEWROUTE,
-        flags: NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE,
+        flags: NLM_F_REQUEST | NLM_F_CREATE,
         seq: 1,
         pid: 0,
     };
@@ -1684,7 +1687,11 @@ pub(crate) fn route_for_fill(socket: &NetlinkSocket, n: usize) -> Result<(), Err
     let request = writer.written().to_vec();
     let _ = socket.send(&request, None)?;
     let mut out = [0_u8; REPLY];
-    let (received, _) = socket.recv(&mut out, 0, true)?;
+    let (received, _) = match socket.recv(&mut out, 0, true) {
+        Ok(taken) => taken,
+        Err(Errno::EAGAIN) => return Ok(()),
+        Err(errno) => return Err(errno),
+    };
     let reply = out.get(..received.bytes).unwrap_or_default();
     let code = Messages::new(reply)
         .next()
