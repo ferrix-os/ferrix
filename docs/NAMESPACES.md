@@ -670,6 +670,7 @@ of the task whose call makes it, kept inside what it pays for:
 |---|---|---|
 | user namespace, with its two maps | `CLONE_NEWUSER` | at creation; the maps are inline, written once |
 | mount namespace | `CLONE_NEWNS` | at creation |
+| time namespace, with its two offsets | `CLONE_NEWTIME` | at creation; the offsets are inline (§12.1) |
 | a copied mount | `CLONE_NEWNS` copying the tree | each, as `mount` already charges one |
 | a bind mount, and each copy `MS_REC` makes | `mount(MS_BIND)` | each (the existing mount charge) |
 | a map file's opener record | `open` of `uid_map`/`gid_map` | with the open's rendered snapshot, already charged |
