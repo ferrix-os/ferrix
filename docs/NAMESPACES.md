@@ -1093,3 +1093,88 @@ How it differs from the design, and what is open:
   architectures and the x86_64 boot. Not yet: `cargo xtask check`, the
   aarch64 and armv7a boots (`--smp 2`), `test-shell`, `test-vfs`,
   `test-init --arch all`, `carry-coverage`.
+
+**The small namespaces, designed (2026-09-30, os-smallns).** UTS, IPC and
+cgroup namespaces, `setns(2)` by namespace descriptor, and the `unshare` and
+`clone` flags for all five that exist. Pid and network namespaces are other
+landings; their flags stay `EINVAL`. Stage 13's roadmap file has the rest.
+
+*The data.* A mount namespace stays in the fs context and a user namespace in
+the credentials. The other three are named together in a `NsProxy`
+(`syscall/nsproxy.rs`), one per process, behind a `SpinLock` in `Process`
+beside `credentials`:
+
+```
+NsProxy { uts: Arc<UtsNamespace>, ipc: Arc<IpcNamespace>, cgroup: Arc<CgroupNamespace> }
+UtsNamespace    { id, owner: Arc<UserNamespace>, names: SpinLock<(nodename, domainname)>, charge }
+IpcNamespace    { id, owner: Arc<UserNamespace>, table: SpinLock<sem::Table>, charge }
+CgroupNamespace { id, owner: Arc<UserNamespace>, root: Arc<Job>, charge }
+```
+
+The first of each kind is a static made on first use, with Linux's own
+inode numbers (`UTS_NS_INIT_INO` 0xEFFFFFFE, `IPC_NS_INIT_INO` 0xEFFFFFFF,
+`CGROUP_NS_INIT_INO` 0xEFFFFFFB) and the first user namespace as owner; the
+ones made after it count up from 0xF9000000, and user namespaces from
+0xF8000000, so that no two kinds share a number (the mount namespaces count
+from 0xF0000000). `fork` copies the proxy; `execve` keeps it. A mount
+namespace gains an `owner` the VFS does not interpret (an `Arc<dyn Any>` set
+once by the kernel after `Namespace::copy`), so that `setns` can ask
+`CAP_SYS_ADMIN` over it.
+
+*Where it differs from Linux.* Linux keeps the proxy per task; here it is
+per process, so a thread cannot leave its group's namespaces, and `clone`
+with `CLONE_THREAD` and any `CLONE_NEW*` is `EINVAL` (as `unshare` from a
+multithreaded process is for `CLONE_NEWUSER` already). `CLONE_NEWIPC` with
+`CLONE_SYSVSEM` is `EINVAL`, Linux's.
+
+*Making one.* `CLONE_NEWUTS`, `CLONE_NEWIPC`, `CLONE_NEWCGROUP` from `clone`,
+`clone3` and `unshare`: `CAP_SYS_ADMIN` in the user namespace the caller will
+be in (the new one if `CLONE_NEWUSER` is asked with them), `EPERM` without;
+the new namespace's owner is that user namespace. A UTS namespace starts with
+a copy of its creator's names. An IPC namespace starts empty. A cgroup
+namespace's root is the creator's own cgroup (the parent's, for `clone`,
+whatever `CLONE_INTO_CGROUP` says).
+
+*Who may set the names.* `sethostname`, `setdomainname` and the two sysctl
+files write the names of the caller's UTS namespace. The system calls need
+`CAP_SYS_ADMIN` over the namespace's owner (`capable_over`), not "kernel
+root": fake root may name the namespace it made and never the first's.
+
+*The descriptors.* `/proc/<pid>/ns/{mnt,user,uts,ipc,cgroup}` stay magic
+links whose text is `type:[N]`, and following one (`open`) now leads to an
+inode of a new filesystem, `nsfs` (`fs/nsfs.rs`), one inode per namespace and
+kind, numbered by the namespace's id: two opens are one `st_ino`. The inode
+holds the namespace strongly, so a descriptor keeps it alive; the open file is
+charged as every open file is, the namespace at its creation (F-37). The
+file's `ioctl`s are `NS_GET_USERNS` (0xb701), `NS_GET_PARENT` (0xb702, user
+namespaces only, `EPERM` for one the caller cannot see, `EINVAL` for another
+kind), `NS_GET_NSTYPE` (0xb703) and `NS_GET_OWNER_UID` (0xb704, user
+namespaces only); verified against `linux/nsfs.h` on the build host.
+
+*`setns(fd, nstype)`* in Linux's order: `EBADF`; `EINVAL` for a file that is
+not nsfs or a type that is neither 0 nor the file's; then by kind, `EPERM`
+unless `CAP_SYS_ADMIN` over the target's owner **and** in the caller's own user
+namespace (uts, ipc, cgroup); for a mount namespace also `CAP_SYS_CHROOT` in
+the caller's own, `EINVAL` for a shared fs context, and the caller's root
+and working directory become the target's root; for a user namespace `EINVAL`
+from a multithreaded process, with a shared fs context, or into the caller's
+own, `EPERM` without `CAP_SYS_ADMIN` in the target (which refuses every
+ancestor), then all capabilities there. No pidfd form: a pidfd is `EINVAL`.
+
+*Locks and order.* The proxy lock is a leaf, cloned out before use as the fs
+context is. A UTS namespace's name lock is a leaf. An IPC table's lock takes
+the place the one global table's took, before a set's state lock. Every
+namespace is allocated and charged before any spin lock is taken; a failed
+`clone` drops what it made with the child.
+
+*The sites:* `clone`/`clone3`/`unshare` flags (`family.rs`, `namespace.rs`);
+`sys_uname`, `sethostname`, `setdomainname`, the two sysctls (`system.rs`,
+`procfs/render.rs`); every `TABLE` use in `sem.rs` and the undo list, which
+now names its set's namespace; `/proc/<pid>/cgroup`, the `cgroup2` mount
+root and the `cgroup.procs` move rule (`cgroupfs.rs`, `fsctl.rs`); procfs's
+`ns` directory and `link_location`; `ioctl` (`fd.rs`); `setns`
+(`namespace.rs`).
+
+*Evidence planned:* the `smallns` boot line (FX-0892, `fs/smallns_check.rs`),
+a check and a negative control for every rule above, and `kmem_check` fills
+for the three new kinds.
