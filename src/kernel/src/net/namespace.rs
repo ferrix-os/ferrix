@@ -138,9 +138,15 @@ pub(crate) fn create(owner: Arc<UserNamespace>) -> Result<Arc<NetNamespace>, Err
 }
 
 /// Collect every live namespace, the first included, into `out`.
+///
+/// The driving task calls this over and over, and forgets the namespaces that
+/// have ended as it goes: a `Weak` keeps the allocation it points to, so a list
+/// that kept the dead would hold their memory, uncharged, for as long as it did.
 pub(crate) fn live(out: &mut Vec<Arc<NetNamespace>>) {
     out.push(Arc::clone(first()));
-    out.extend(LIVE.lock().iter().filter_map(Weak::upgrade));
+    let mut list = LIVE.lock();
+    list.retain(|each| each.strong_count() > 0);
+    out.extend(list.iter().filter_map(Weak::upgrade));
 }
 
 impl NetNamespace {

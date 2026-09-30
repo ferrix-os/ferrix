@@ -955,7 +955,39 @@ fn pairs(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), &'st
     let (ia, ib) = first_pair(&mut a, &mut b, tally)?;
     second_pair(&mut a, &mut c, &b, tally)?;
     authority(&a, tally, made)?;
-    moved_and_deleted(&mut a, &mut b, &c, (ia, ib), tally)
+    moved_and_deleted(&mut a, &mut b, &c, (ia, ib), tally)?;
+    default_peer(&mut a, tally)
+}
+
+/// A pair asked for with no description of its peer has both ends here, under
+/// names of the kernel's choosing, and goes with either.
+fn default_peer(a: &mut Side, tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let before = a.ns.core().look(|stack| stack.interfaces().len());
+    let kind = name_attr(IFLA_INFO_KIND, b"veth");
+    a.nl.must(
+        RTM_NEWLINK,
+        NLM_F_CREATE,
+        &link_body(0, 0, 0),
+        &[Attr::new(IFLA_LINKINFO, Value::Bytes(&kind))],
+        "a veth pair with no peer described could not be made",
+        tally,
+    )?;
+    if a.ns.core().look(|stack| stack.interfaces().len()) != before + 2 {
+        return Err("a veth pair with no peer described did not make two ends here");
+    }
+    let end = a.index(b"veth0", "a pair made with no name gave no veth0")?;
+    a.nl.must(
+        RTM_DELLINK,
+        0,
+        &link_body(end as i32, 0, 0),
+        &[],
+        "an end of a pair with no names could not be deleted",
+        tally,
+    )?;
+    if a.ns.core().look(|stack| stack.interfaces().len()) != before {
+        return Err("deleting one end of a pair left the other");
+    }
+    Ok(())
 }
 
 /// NN8: a pair made by netlink, not running until both ends are up, carries a
