@@ -1440,3 +1440,61 @@ S3, and S3 does not land without them.
   `chrome.rs`; out-of-range jumps are tested for `JEQ` alone of the
   conditional jumps. Notes, not conditions.
 
+**S2 built (2026-10-01, os-7c, `stage13-s2`).** The hook of §3.3, and
+nothing that filters yet. `trap::set_syscall_filter` and
+`trap::filter_system_call` are registered like `set_syscall_entry`;
+`SyscallArgs` gained `ip`, the instruction after the call (so the hook
+takes `&SyscallArgs` alone, where §3.3's sketch passed the pointer
+beside it); each of the four entries -- x86-64 `SYSCALL` and `int $0x80`,
+AArch64 `svc`, ARMv7-A `svc` -- fills `ip` from its saved program counter
+and asks the filter first, before its early answers and before the native
+range is split, applying an `Answer` as it applies the dispatcher's. The
+x86-64 `SYSCALL` entry was split (`answer_here`, `enter_program`) to stay
+under the complexity floor and nothing else about it changed.
+`arch::audit_arch` gives each entry's token, `arch::syscall_rollback_value`
+the value a trapped call's return register is given (S4 uses it; until
+then one check reads it). The registered body, `syscall::seccomp::check`,
+answers `Continue` for every call of every program; only a test probe,
+which the boot check arms for its own task and disarms, can make it
+answer otherwise. The native range carries the token `0xC000_0F1F`
+(`e_machine` 0x0F1F, 64-bit and little-endian flags), which Linux never
+uses. `seccomp_data`'s number is the low 32 bits of the register while the
+dispatcher still uses the whole one.
+
+Evidence: the `seccomp` boot line (FX-1302, `syscall/seccomp_check.rs`),
+which drives each entry of the architecture through
+`arch::drive_system_call` with frames of its own -- `linux::handle` would
+skip the hook -- and requires every call an entry answers itself
+(`arch_prctl`, `set_tls`, `sigreturn`, `rt_sigreturn`) to reach the filter
+once, before that answer, with its number, instruction pointer and first
+argument as the frame held them, and the filter's value to come back
+(SR3); the token to be the entry's, worked out from `e_machine` and not
+from the kernel's own table, so that an `int $0x80` call is i386's and a
+filter written for x86-64 alone does not judge it (SR1); a number with
+bits above the 32nd to be judged as its low half and dispatched as no call
+(SR2); and a native-range call to carry the native token, refused by a
+filter that refuses every foreign `arch` and let through by one that
+allows that token by name (Q2, both ways). A second line reads what the
+hook costs a thread with no filter, against a dispatcher call and the
+whole entry, in the guest.
+
+Gates run, and not run. Booted on `s2/work` (`a1632b0e`, the first S2
+commit): x86-64 (11 calls), AArch64 (6) and ARMv7-A at `--smp 2` (7), each
+`FERRIX-BOOT-OK stages 1-12`. **Not run:** the measurement commit and the
+later ones (docs, requirements, coverage anchors) were never booted;
+`cargo xtask check`; `test-threads --arch all`; the negative controls,
+which were queued and cancelled when the customer asked to stop; the
+hook's per-call cost (the line exists, nobody has read it yet). The
+negative controls, to run before landing and quote in the commit: the
+hook moved below the early answers (x86-64: `answer_here` before the
+filter call, expecting "arch_prctl was answered before the filter";
+AArch64 and ARMv7-A likewise, "rt_sigreturn was answered before the
+filter" and "set_tls was answered before the filter"); the token from the
+image (`audit_arch`'s i386 arm answering x86-64's, "an int 0x80 call was
+filtered as x86-64"); the number cut to 32 bits by the entry ("a number
+with bits above the 32nd set was dispatched as a call"); the native token
+not applied ("a native call was not filtered under the native token").
+`docs/SECCOMP.md` §9's S2 row is met but for these runs.
+
+**S3 is half written on `stage13-s3-wip`, which does not build**; see its
+commit message for what is there and what is not.

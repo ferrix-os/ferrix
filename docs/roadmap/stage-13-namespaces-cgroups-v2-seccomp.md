@@ -136,6 +136,19 @@ UTS and cgroup namespaces, `setns` and seccomp stay out of it.
 S1 to S6 (20 points); this stage's "a seccomp filter that blocks a
 syscall" is met at S3.
 
+**Done -- seccomp S1 and S2 (2026-10-01).** S1 is the verifier and
+interpreter, `src/lib/kernel/seccomp`. S2 is the hook: the core's four
+system call entries ask a registered filter about every call first, before
+their own early answers (`arch_prctl`, `set_tls`, the signal returns) and
+before the native range is split, with the entry's own `arch` token and the
+instruction after the call, and apply its answer as the dispatcher's. It
+answers `Continue` for every call until S3; the `seccomp` boot line drives
+each entry with frames of its own to prove the filter is asked once, first,
+and as the entry's own (`docs/SECCOMP.md` §12). Booted on all three
+architectures at the first S2 commit; the later S2 commits and the
+negative controls were not run. S3, the filters themselves -- which meet
+this stage's exit clause -- is half written and does not build.
+
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
 change through a read-only mount, `EACCES` for a device on a `nodev` one and

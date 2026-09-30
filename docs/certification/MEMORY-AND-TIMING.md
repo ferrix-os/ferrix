@@ -384,6 +384,26 @@ KVM, 5.1 s under `tcg` and 32 s under the plugin. The residual is a host that
 starves one virtual processor while it runs the waiter; that ends the wait
 early, which costs availability and never integrity.
 
+### 2.2b The filter a program supplies (seccomp, landing S2)
+
+Every system call of every program now passes a function the personality
+registers with the core (`trap::filter_system_call`), and from landing S3 that
+function may run a program the user wrote -- classic BPF, in ring 0, on the
+call's own path. Its bound is the verifier's and the chain's, as in Linux: a
+filter is at most 4,096 instructions, every jump goes forward (so it runs at
+most its length), and the filters one thread holds may total 32,768
+instructions with four more counted for each (`MAX_INSNS_PER_PATH`), so one
+call runs at most 32,768 interpreter steps. At a few nanoseconds a step that
+is tens of microseconds in the worst case; Chromium's filters run a few dozen.
+The hook allocates nothing, takes no sleeping lock and reads registers only;
+a thread with no filter pays one load of the registration, an indirect call
+and the running task's own flag, and the boot reads that cost in the guest
+(the second `seccomp` line). AoU-4 (a program a user supplies may take this
+long per call, and the kernel is preemptible around it: the hook opens
+interrupts while it runs) is the one assumption this adds. Until S3 the
+registered function answers `Continue` and the bound is that of the load and
+store of the flag.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
