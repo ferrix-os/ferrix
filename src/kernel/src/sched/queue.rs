@@ -262,14 +262,24 @@ impl CpuQueue {
     /// the scheduler asked for and the request it actually served, and it is
     /// what widens the fairness bound on a real machine.
     pub(crate) fn account(&mut self, now: u64) {
+        self.account_in(now, false);
+    }
+
+    /// [`CpuQueue::account`], with the time since the last charge counted
+    /// as used in user mode when `user`: the tick that cut it found the
+    /// processor there. Tick accounting, as `cpu.stat` has had it since
+    /// Linux was young.
+    pub(crate) fn account_in(&mut self, now: u64, user: bool) {
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
             return;
         }
-        if self.fair.current().is_some() {
+        if let Some(task) = self.fair.current() {
             self.stats.busy_ns += delta;
+            // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
+            crate::object::quota::charge_cpu(task.group(), now, delta, user);
         } else {
             self.stats.idle_ns += delta;
         }
@@ -552,7 +562,16 @@ impl CpuQueue {
             .decision_in_ns()
             .map(|left| now.saturating_add(left));
 
-        match [sleeper, slice].into_iter().flatten().min() {
+        // A task under a `cpu.max` is cut when its quota is used up, however
+        // alone it is: nothing else would interrupt it to throttle it.
+        let bandwidth = self
+            .current
+            .as_ref()
+            .filter(|_| crate::object::quota::bandwidth_in_use())
+            .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
+            .map(|left| now.saturating_add(left));
+
+        match [sleeper, slice, bandwidth].into_iter().flatten().min() {
             Some(at) => crate::timer::after(at.saturating_sub(now).max(MIN_ARM_NS)),
             None => crate::timer::stop(),
         }

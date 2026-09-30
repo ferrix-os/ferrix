@@ -41,6 +41,7 @@ fn the_root_lacks_what_linux_keeps_off_it() {
             "cgroup.max.descendants",
             "cgroup.max.depth",
             "cgroup.stat",
+            "cpu.stat",
         ]
     );
     assert_eq!(
@@ -400,6 +401,112 @@ fn memory_max_reads_sizes_as_memparse_does() {
         write::parse_memory_max(b"20E"),
         Ok(Some(u64::MAX)),
         "saturates"
+    );
+}
+
+#[test]
+fn cpu_max_is_read_as_cpu_max_write_reads_it() {
+    use crate::cpu::{self, Max};
+    let current = cpu::PERIOD_DEFAULT_US;
+    let max = |text: &[u8]| cpu::parse_max(text, current);
+    assert_eq!(max(b"max\n"), Ok(Max::DEFAULT));
+    assert_eq!(
+        max(b"50000 100000\n"),
+        Ok(Max {
+            quota: Some(50_000),
+            period: 100_000
+        })
+    );
+    // A period left out is kept, and so is one that is not a number.
+    assert_eq!(
+        cpu::parse_max(b"20000", 250_000),
+        Ok(Max {
+            quota: Some(20_000),
+            period: 250_000
+        })
+    );
+    assert_eq!(
+        cpu::parse_max(b"max abc", 250_000),
+        Ok(Max {
+            quota: None,
+            period: 250_000
+        })
+    );
+    // sscanf reads the digits a word starts with.
+    assert_eq!(
+        max(b"5000x 100000"),
+        Ok(Max {
+            quota: Some(5000),
+            period: 100_000
+        })
+    );
+    assert_eq!(max(b"1000 1000").map(|m| m.quota), Ok(Some(1000)));
+    // Under a millisecond, over a second, and not a number.
+    assert_eq!(max(b"999 100000"), Err(Refusal::Invalid));
+    assert_eq!(max(b"50000 999"), Err(Refusal::Invalid));
+    assert_eq!(max(b"50000 1000001"), Err(Refusal::Invalid));
+    assert_eq!(max(b"0"), Err(Refusal::Invalid));
+    assert_eq!(max(b"-1"), Err(Refusal::Invalid));
+    assert_eq!(max(b"lots"), Err(Refusal::Invalid));
+    assert_eq!(max(b""), Err(Refusal::Invalid));
+    assert_eq!(max(b"\n"), Err(Refusal::Invalid));
+    assert_eq!(
+        text(|out| cpu::render_max(out, Max::DEFAULT)),
+        b"max 100000\n"
+    );
+    assert_eq!(
+        text(|out| cpu::render_max(
+            out,
+            Max {
+                quota: Some(50_000),
+                period: 100_000
+            }
+        )),
+        b"50000 100000\n"
+    );
+}
+
+#[test]
+fn cpu_weight_nice_maps_as_the_scheduler_does() {
+    use crate::cpu;
+    // Linux prints these for these weights (`sched_prio_to_weight`).
+    assert_eq!(cpu::nice_from_weight(100), 0);
+    assert_eq!(cpu::nice_from_weight(1), 19);
+    assert_eq!(cpu::nice_from_weight(10_000), -20);
+    assert_eq!(cpu::nice_from_weight(50), 3);
+    assert_eq!(cpu::parse_nice(b"0\n"), Ok(100));
+    assert_eq!(cpu::parse_nice(b"-20"), Ok(8668));
+    assert_eq!(cpu::parse_nice(b"19"), Ok(1));
+    assert_eq!(cpu::parse_nice(b"5"), Ok(33));
+    assert_eq!(cpu::parse_nice(b"20"), Err(Refusal::Range));
+    assert_eq!(cpu::parse_nice(b"-21"), Err(Refusal::Range));
+    assert_eq!(cpu::parse_nice(b"x"), Err(Refusal::Invalid));
+    // A nice written reads back while cpu.weight's hundredths keep the
+    // weights apart: from -20 to 10. Below that two nices share a weight.
+    for nice in cpu::NICE_MIN..=10 {
+        let weight = cpu::parse_nice(alloc::format!("{nice}").as_bytes()).unwrap();
+        assert_eq!(cpu::nice_from_weight(weight), nice, "nice {nice}");
+    }
+}
+
+#[test]
+fn cpu_stat_prints_the_keys_it_has_a_source_for() {
+    use crate::cpu;
+    let stat = cpu::Stat {
+        usage: 3,
+        user: 2,
+        system: 1,
+        periods: 7,
+        throttled: 4,
+        throttled_us: 900,
+    };
+    assert_eq!(
+        text(|out| cpu::render_stat(out, stat, true)),
+        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\nnr_periods 7\nnr_throttled 4\nthrottled_usec 900\n"
+    );
+    assert_eq!(
+        text(|out| cpu::render_stat(out, stat, false)),
+        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\n"
     );
 }
 

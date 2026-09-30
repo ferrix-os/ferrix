@@ -50,9 +50,9 @@ const POLL_NANOS: u64 = 1_000_000;
 const STILL_NANOS: u64 = 50_000_000;
 
 /// A program loaded, moved into `/check-fz`, and started.
-struct Running {
+pub(super) struct Running {
     /// The process.
-    process: Arc<Process>,
+    pub(super) process: Arc<Process>,
     /// Its task, kept so that it is not reaped under the check.
     _task: Arc<crate::sched::Task>,
 }
@@ -67,7 +67,7 @@ fn class() -> Class {
 }
 
 /// Load the program, move it into the cgroup at `tail`, and start it.
-fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
+pub(super) fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
     let file = image::build_with(
         class(),
         arch::ARCH.elf_machine(),
@@ -95,12 +95,17 @@ fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
     })
 }
 
-/// A word of the program's page.
-fn word(process: &Process, offset: u64) -> Checked<u32> {
+/// A word of the program's page, if it has mapped it yet.
+fn try_word(process: &Process, offset: u64) -> Option<u32> {
     let mut bytes = [0_u8; 4];
     uaccess::copy_from_user(process.space(), PAGE + offset, &mut bytes)
-        .map_err(|_| "freeze check: the program's page could not be read")?;
-    Ok(u32::from_le_bytes(bytes))
+        .ok()
+        .map(|()| u32::from_le_bytes(bytes))
+}
+
+/// A word of the program's page, which it has mapped.
+fn word(process: &Process, offset: u64) -> Checked<u32> {
+    try_word(process, offset).ok_or("freeze check: the program's page could not be read")
 }
 
 /// Wait until `ready`, or fail with `failure`.
@@ -124,12 +129,26 @@ fn until(
     }
 }
 
+/// Wait until the program has both counts moving and its waiter waiting.
+pub(super) fn wait_running(process: &Process) -> Checked<()> {
+    until(
+        process,
+        &|| running(process),
+        "the program never had both counts moving and its waiter waiting",
+    )
+}
+
+/// The program's two counts.
+pub(super) fn counts(process: &Process) -> Checked<(u32, u32)> {
+    Ok((word(process, 0)?, word(process, 4)?))
+}
+
 /// Both counts moving and the waiter waiting.
 fn running(process: &Process) -> Checked<bool> {
-    Ok(word(process, 12)? == 1
+    Ok(try_word(process, 12) == Some(1)
         && futex::waiters_on(process, PAGE + 8) == 1
-        && word(process, 0)? != 0
-        && word(process, 4)? != 0)
+        && try_word(process, 0).is_some_and(|count| count != 0)
+        && try_word(process, 4).is_some_and(|count| count != 0))
 }
 
 /// Require `cgroup.events` of `tail` to read exactly `expected`.
