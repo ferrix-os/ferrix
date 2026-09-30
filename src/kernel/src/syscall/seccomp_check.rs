@@ -15,7 +15,7 @@ use ferrix_seccomp::SeccompData;
 
 use crate::arch;
 use crate::syscall::seccomp::{self, NATIVE_ARCH};
-use crate::trap::{Abi, Outcome, Verdict};
+use crate::trap::{Abi, Outcome, SyscallArgs, Verdict};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
@@ -29,6 +29,14 @@ pub(crate) struct Report {
     pub(crate) tokens: usize,
     /// Native-range calls judged under the token of their own.
     pub(crate) native: usize,
+    /// What the hook alone costs a thread with no filter, in tenths of a
+    /// nanosecond a call.
+    pub(crate) hook: u64,
+    /// What the dispatcher costs a call no table has, in tenths of a
+    /// nanosecond, for the hook's cost to be read against.
+    pub(crate) dispatch: u64,
+    /// What such a call costs through the whole entry, hook included.
+    pub(crate) entry: u64,
 }
 
 /// `AUDIT_ARCH_LE`.
@@ -215,7 +223,7 @@ const REFUSED: isize = -1;
 /// Drive every entry and every call an entry keeps for itself, and require the
 /// filter to have judged each first, once, with the entry's own token.
 ///
-/// Verifies: H.TRAP.16, L.trap.7, L.x86_64.124, L.x86_64.125, L.aarch64.51
+/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51
 ///
 /// # Errors
 ///
@@ -227,7 +235,45 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();
-    checked
+    let mut report = checked?;
+    measure(&mut report);
+    Ok(report)
+}
+
+/// Calls each measurement makes.
+const ROUNDS: u64 = 200_000;
+
+/// What the hook costs a call of a thread that has no filter -- every call of
+/// every program -- against what the dispatcher and the whole entry cost a
+/// call no table has. The probe is disarmed, so the hook is what a program
+/// pays: one `Once` load, an indirect call, the running task and its thread's
+/// flag. Measured in the guest, to be read and not judged: a virtual machine's
+/// clock is not a bound.
+fn measure(report: &mut Report) {
+    use core::hint::black_box;
+
+    let args = SyscallArgs {
+        abi: Abi::Native,
+        number: 0x7777,
+        args: [0; 6],
+        ip: IP,
+    };
+    let per_call = |each: &dyn Fn()| {
+        let start = crate::timer::now_nanos();
+        for _ in 0..ROUNDS {
+            each();
+        }
+        crate::timer::now_nanos().saturating_sub(start) * 10 / ROUNDS
+    };
+    report.hook = per_call(&|| {
+        let _ = black_box(crate::trap::filter_system_call(black_box(&args)));
+    });
+    report.dispatch = per_call(&|| {
+        let _ = black_box(crate::trap::system_call(black_box(&args), None));
+    });
+    report.entry = per_call(&|| {
+        let _ = black_box(arch::drive_system_call(Abi::Native, 0x7777, [0; 6], IP));
+    });
 }
 
 /// [`run`], with the probe armed.

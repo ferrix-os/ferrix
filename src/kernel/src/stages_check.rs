@@ -258,6 +258,16 @@ pub(super) fn check_seccomp() {
          let by one that allows it by name",
         checked.calls, checked.early, checked.tokens, checked.native,
     );
+    println!(
+        "  seccomp  a thread with no filter pays {}.{} ns a call for the hook; a call no table \
+         has costs {}.{} ns in the dispatcher and {}.{} ns through the whole entry",
+        checked.hook / 10,
+        checked.hook % 10,
+        checked.dispatch / 10,
+        checked.dispatch % 10,
+        checked.entry / 10,
+        checked.entry % 10,
+    );
 }
 
 /// A mount's own flags: `ro`, `nodev`, `noexec` and `nosuid` enforced,
