@@ -61,7 +61,7 @@ use crate::hooks::Full;
 use crate::object::Object;
 use crate::object::job::{self, Job, JobError, NodeAttributes};
 use crate::object::process::Host;
-use crate::object::quota::{self, Resource};
+use crate::object::quota::{self, Counter, Mark, Resource};
 use crate::sched::WaitQueue;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
@@ -76,6 +76,7 @@ mod events_check;
 mod limits_check;
 mod native_check;
 mod oom_check;
+mod reclaim_check;
 
 /// The result every operation here returns.
 type Result<T> = core::result::Result<T, Errno>;
@@ -864,16 +865,23 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
             let limit = usage(job, Resource::Memory).limit;
             render::max(&mut out, (limit != quota::UNLIMITED).then_some(limit));
         }
+        Kind::MemoryHigh => render_mark(&mut out, job.mark(Mark::High), true),
+        Kind::MemoryLow => render_mark(&mut out, job.mark(Mark::Low), false),
+        Kind::MemoryMin => render_mark(&mut out, job.mark(Mark::Min), false),
         Kind::MemoryEvents => {
             let (oom, oom_kill) = job.oom_counts();
             render::memory_events(
                 &mut out,
-                usage(job, Resource::Memory).refused,
-                oom,
-                oom_kill,
+                render::MemoryEvents {
+                    low: 0,
+                    high: job.counted(Counter::High),
+                    max: usage(job, Resource::Memory).refused,
+                    oom,
+                    oom_kill,
+                },
             );
         }
-        Kind::MemoryStat => render::memory_stat(&mut out, usage(job, Resource::Kernel).used),
+        Kind::MemoryStat => render::memory_stat(&mut out, memory_stat(job)),
         Kind::PidsCurrent => render::number(&mut out, usage(job, Resource::Tasks).used),
         Kind::PidsMax => {
             let limit = usage(job, Resource::Tasks).limit;
@@ -882,6 +890,38 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         Kind::PidsEvents => render::pids_events(&mut out, usage(job, Resource::Tasks).refused),
     }
     out
+}
+
+/// A mark as `memory.high`, `memory.low` and `memory.min` print it: `max`
+/// for none, else the number of bytes.
+fn render_mark(out: &mut Vec<u8>, value: u64, max_is_none: bool) {
+    if max_is_none {
+        render::max(out, (value != quota::UNLIMITED).then_some(value));
+    } else if value == quota::UNLIMITED {
+        render::max(out, None);
+    } else {
+        render::number(out, value);
+    }
+}
+
+/// What `memory.stat` says of `job`: the pages its programs hold in files'
+/// caches counted by walking them, the kernel heap and the events by the
+/// job's own counters.
+fn memory_stat(job: &Job) -> render::MemoryStat {
+    let (file, shmem) = match job.quota_index() {
+        quota::NONE => (0, 0),
+        slot => crate::user::cache::resident(slot),
+    };
+    let bytes = |pages: u64| pages.saturating_mul(ferrix_bootinfo::PAGE_SIZE);
+    render::MemoryStat {
+        file: bytes(file),
+        kernel: usage(job, Resource::Kernel).used,
+        shmem: bytes(shmem),
+        pgscan: job.counted(Counter::Scanned),
+        pgsteal: job.counted(Counter::Stolen),
+        pgfault: job.counted(Counter::Faults),
+        pgmajfault: job.counted(Counter::MajorFaults),
+    }
 }
 
 /// What `job` holds of `resource`: nothing, and no limit, for the root,
@@ -1035,6 +1075,21 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
                 limit_set(job, Resource::Memory, bytes);
             }
         }
+        Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => {
+            let mark = match kind {
+                Kind::MemoryHigh => Mark::High,
+                Kind::MemoryLow => Mark::Low,
+                _ => Mark::Min,
+            };
+            let value = write::parse_memory_max(data)
+                .map_err(errno)?
+                .map_or(quota::UNLIMITED, |bytes| {
+                    bytes - bytes % ferrix_bootinfo::PAGE_SIZE
+                });
+            // Not audited: the audit record names a limit that refuses
+            // charges, and a mark refuses nothing.
+            let _ = job.set_mark(mark, value);
+        }
         Kind::CpuWeight => {
             let weight = write::parse_weight(data).map_err(errno)?;
             if job.set_cpu_weight(weight) {
@@ -1119,6 +1174,9 @@ pub(crate) struct Report {
     /// A delegatee's attempts on its own cgroup's limits, natively and
     /// through the files, refused.
     pub(crate) limits_refused: u32,
+    /// Pages of files' caches that reclaim gave back, inside the cgroup
+    /// asking and no other, and that read back as the source has them.
+    pub(crate) reclaimed: u64,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1274,6 +1332,7 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.oom_killed = oom_check::run(&mut harness)?;
     harness.report.created_as = creator_check::run(&mut harness)?;
     harness.report.limits_refused = limits_check::run(&mut harness)?;
+    harness.report.reclaimed = reclaim_check::run(&mut harness)?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)

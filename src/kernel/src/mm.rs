@@ -540,6 +540,13 @@ pub(crate) fn disown_frame(frame: Frame) {
     }
 }
 
+/// The quota slot a frame is charged to, or `quota::NONE`: which job a page
+/// reclaim finds belongs to (`user::cache`).
+pub(crate) fn frame_owner(frame: Frame) -> u32 {
+    // NOALLOC: the frame allocator's per-frame record, looked up.
+    with_frames(|frames| frames.owner(frame)).unwrap_or(crate::object::quota::NONE)
+}
+
 /// How many references there are to a frame.
 ///
 /// For the fault handler's one real decision: a copy-on-write fault on a page

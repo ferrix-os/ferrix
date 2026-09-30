@@ -68,7 +68,7 @@ use ferrix_sync::Once;
 
 use super::port::{Observer, Observers, PortError, deliver, register, trigger};
 use super::process::{self, Process};
-use super::quota::{self, Charge, Quota, Resource, Usage};
+use super::quota::{self, Charge, Counter, Mark, Quota, Resource, Usage};
 use crate::fallible::{self, AllocError};
 use crate::sched::WaitQueue;
 
@@ -530,6 +530,44 @@ impl Job {
             .as_ref()
             .map(|quota| quota.set_limit(resource, limit))
             .is_some()
+    }
+
+    /// Its `memory.high`, `memory.low` or `memory.min` mark; a `max` high and
+    /// a zero low and min for the tree's root, which has none.
+    pub(crate) fn mark(&self, mark: Mark) -> u64 {
+        self.quota.as_ref().map_or(
+            if mark == Mark::High {
+                quota::UNLIMITED
+            } else {
+                0
+            },
+            |quota| quota.mark(mark),
+        )
+    }
+
+    /// Set a mark. Whether it could be: the tree's root takes none.
+    pub(crate) fn set_mark(&self, mark: Mark, value: u64) -> bool {
+        self.quota
+            .as_ref()
+            .map(|quota| quota.set_mark(mark, value))
+            .is_some()
+    }
+
+    /// How many of `counter` were counted in it and beneath it.
+    pub(crate) fn counted(&self, counter: Counter) -> u64 {
+        self.quota
+            .as_ref()
+            .map_or(0, |quota| quota.counted(counter))
+    }
+
+    /// Wake whatever polls its `memory.events` and every job above it: a
+    /// count in it changed (`memory.high`'s).
+    pub(crate) fn wake_memory_events(&self) {
+        let mut at = Some(self);
+        while let Some(job) = at {
+            job.memory_events.wake_all();
+            at = job.parent.as_deref();
+        }
     }
 
     /// Its `cpu.weight`: [`quota::DEFAULT_WEIGHT`] for the tree's root.

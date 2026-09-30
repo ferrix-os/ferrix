@@ -2667,7 +2667,8 @@ fn space_status(why: SpaceError) -> Errno {
         | SpaceError::NotMapped(_)
         | SpaceError::Backing(_)
         | SpaceError::PastEnd(_)
-        | SpaceError::Unreadable(_) => status::INVALID_ARGS,
+        | SpaceError::Unreadable(_)
+        | SpaceError::Evicted => status::INVALID_ARGS,
     }
 }
 
