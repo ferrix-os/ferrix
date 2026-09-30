@@ -5554,7 +5554,9 @@ fn check_clone_refuses_every_namespace() -> Result<(), &'static str> {
     .map_err(|_| "a program that asks clone for namespaces could not be started")?;
     match status {
         NAMESPACE_STATUS => Ok(()),
-        98 => Err("clone with CLONE_NEWUSER, CLONE_NEWPID and CLONE_NEWNS was not refused"),
+        98 => Err(
+            "clone with CLONE_NEWUSER, CLONE_NEWPID, CLONE_NEWNS and CLONE_NEWNET was not refused",
+        ),
         97 => Err(
             "clone with CLONE_NEWCGROUP, CLONE_NEWUTS, CLONE_NEWIPC and CLONE_NEWNET was not refused",
         ),

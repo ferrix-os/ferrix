@@ -472,22 +472,23 @@ pub(crate) const USER_FORK_PROGRAM: &[u8] = &[
 /// when the second was.
 ///
 /// The two calls between them name every `CLONE_NEW*` flag `clone` can reach:
-/// the first `CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNS`, which is what an
-/// unprivileged sandbox asks for and what Chrome's zygote asks for; the
+/// the first `CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET`, which an
+/// unprivileged sandbox with no network asks for (a user, pid and mount
+/// namespace exist, so it is `CLONE_NEWNET` that is refused); the
 /// second `CLONE_NEWCGROUP | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET`.
 /// Each carries `SIGCHLD`, so nothing but the namespaces can be what is
 /// refused. A kernel that ignored the flags would answer the first with a
 /// child's pid, and both the parent and that child would exit 98.
 ///
 /// ```text
-///   movl $56, %eax ; movl $0x30020011, %edi ; zeroed rsi, rdx, r10, r8 ; syscall
+///   movl $56, %eax ; movl $0x70020011, %edi ; zeroed rsi, rdx, r10, r8 ; syscall
 ///   movl $56, %eax ; movl $0x4e000011, %edi ; zeroed rsi, rdx, r10, r8 ; syscall
 ///   cmp/cmn against -22 ; exit_group(44), or 98 and 97 for a call allowed
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
 pub(crate) const USER_NAMESPACE_PROGRAM: &[u8] = &[
-    0xb8, 0x38, 0x00, 0x00, 0x00, 0xbf, 0x11, 0x00, 0x02, 0x30, 0x31, 0xf6, 0x31, 0xd2, 0x45, 0x31,
+    0xb8, 0x38, 0x00, 0x00, 0x00, 0xbf, 0x11, 0x00, 0x02, 0x70, 0x31, 0xf6, 0x31, 0xd2, 0x45, 0x31,
     0xd2, 0x45, 0x31, 0xc0, 0x0f, 0x05, 0x48, 0x83, 0xf8, 0xea, 0x75, 0x23, 0xb8, 0x38, 0x00, 0x00,
     0x00, 0xbf, 0x11, 0x00, 0x00, 0x4e, 0x31, 0xf6, 0x31, 0xd2, 0x45, 0x31, 0xd2, 0x45, 0x31, 0xc0,
     0x0f, 0x05, 0x48, 0x83, 0xf8, 0xea, 0x75, 0x0e, 0xbf, 0x2c, 0x00, 0x00, 0x00, 0xeb, 0x0c, 0xbf,

@@ -14,11 +14,13 @@
 //!
 //! # Namespaces
 //!
-//! There are none, and a `CLONE_NEW*` flag is `EINVAL` here, which is what a
-//! Linux built without the matching `CONFIG_*_NS` answers. `unshare` has
-//! always said so; `clone` used to ignore the flags and hand back an ordinary
-//! child in the one namespace there is, so a program that asked to be
-//! sandboxed was told it got what it asked for. The two calls now agree.
+//! A mount, a user and a pid namespace exist (`CLONE_NEWNS`, `CLONE_NEWUSER`,
+//! `CLONE_NEWPID`; `docs/NAMESPACES.md`, `docs/PIDNS.md`). The others do not,
+//! and their `CLONE_NEW*` flags are `EINVAL` here, which is what a Linux built
+//! without the matching `CONFIG_*_NS` answers. `unshare` has always said so;
+//! `clone` used to ignore the flags and hand back an ordinary child in the one
+//! namespace there is, so a program that asked to be sandboxed was told it got
+//! what it asked for. The two calls now agree.
 //!
 //! # `vfork` copies
 //!
