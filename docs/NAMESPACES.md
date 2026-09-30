@@ -1081,15 +1081,35 @@ How it differs from the design, and what is open:
 * **`CLONE_NEWNS` by a holder of `CAP_SYS_ADMIN` in a child namespace is
   allowed.** It copies; nothing in the copy can be unmounted or remounted
   before N5.
-* **Not built:** the audit record's check (§2.5: an audited call from
-  inside-root of a child namespace records kernel uid 1000, never 0); a
-  boot check of U5 (the harness has no process that shares its fs context,
-  so it stands on the code and the `clone` flag test); the
-  `max_user_namespaces` sysctl; F-37's fill in `kmem_check` (the namespace
-  is charged in `create`); ids at the sites nothing in Ferrix reports yet
-  (file leases and locks). `verify_root_map` needs file capabilities,
-  which Ferrix has none of; add it if it ever does.
-* **Gated so far:** `cargo check` of the kernel for all three
-  architectures and the x86_64 boot. Not yet: `cargo xtask check`, the
-  aarch64 and armv7a boots (`--smp 2`), `test-shell`, `test-vfs`,
-  `test-init --arch all`, `carry-coverage`.
+* **Built after the consultant's first review of the core (2026-09-30):**
+  U8's check (root inside a namespace refused a 0600 file, `chmod`,
+  `chown`, `mknod` and `kill` for an id it does not map); U5's flags on
+  `family::namespaces_asked`, which `clone` and `clone3` both ask first; F-37's
+  fill for user namespaces in `kmem_check` (128 made to the limit, then
+  `ENOMEM`); `si_uid`'s check for `kill` and `SIGCHLD`; the audit subject's
+  check; and `userns::acting_as`, which now refuses being nested. Negative
+  controls, each stopping the boot with its own message: `privileged()`
+  answering by `holds(CAP_SYS_ADMIN)` ("root inside a namespace made a device
+  node"), the `CLONE_FS` test dropped, the charge dropped ("a job made more
+  than its limit could hold"), `encode` not translating ("si_uid did not read
+  65534 ..."), and `Subject::of` recording uid 0 ("an audit record of root
+  inside a namespace recorded an id that is not the kernel's").
+* **The audit record's check is a check of the subject, not of a record.**
+  No personality supplies a uid to the audit trail yet: `Subject::of` always
+  answers `NO_UID`. The check requires that, or the kernel's uid, and that the
+  pid and job are the caller's; the day a personality supplies one, this is
+  where it would have to be the kernel id, and the check fails on uid 0.
+  There is no way to sabotage a supplier that does not exist, so its control
+  is `Subject::of` recording 0.
+* **Not built:** a boot check of `unshare(CLONE_NEWUSER)` with a shared fs
+  context (the harness has no process that shares its context; the code tests
+  the reference count, and the flags half is checked); a real `execve` of a
+  set-id file under a namespace (`Credentials::exec` is the decision point and
+  is checked); the `max_user_namespaces` sysctl (N5 adds it, with the
+  enforcement). `verify_root_map` needs file capabilities, which Ferrix has
+  none of; add it if it ever does.
+* **Gated:** `cargo xtask check`; the boot on x86_64, aarch64 and armv7a at
+  `--smp 2`; `test-shell`, `test-vfs` and `test-init` on x86_64; and, in the
+  landing's final run, `test-shell`, `test-vfs` on both Arm targets and
+  `test-init --arch all`. `carry-coverage` and `gen-coverage-justification
+  --check` run on the final rebase.
