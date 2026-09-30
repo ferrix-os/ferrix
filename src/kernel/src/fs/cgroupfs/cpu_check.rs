@@ -44,9 +44,11 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u64> {
         .map_err(|_| "cpu check: mkdir of a cgroup failed")?;
     harness.report.made += 1;
     let outcome = files(harness).and_then(|()| throttling(harness));
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
     let removed = harness.rmdir(b"/check-c");
     let disabled = harness.write(b"/cgroup.subtree_control", b"-cpu\n");
     let throttled = outcome?;
+    emptied?;
     removed.map_err(|_| "cpu check: the cgroup did not empty")?;
     let _ = disabled.map_err(|_| "the root refused to disable cpu after the cpu check")?;
     Ok(throttled)
@@ -251,8 +253,10 @@ fn beneath(harness: &mut Harness) -> Checked<u64> {
     let _ = program.process.wait_for_exit(deadline);
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c/k");
     let removed = harness.rmdir(b"/check-c/k");
     let throttled = outcome?;
+    emptied?;
     removed.map_err(|_| "cpu check: the nested cgroup did not go")?;
     Ok(throttled)
 }

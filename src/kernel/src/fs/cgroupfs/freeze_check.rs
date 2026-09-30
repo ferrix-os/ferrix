@@ -181,6 +181,24 @@ fn events_become(
     )
 }
 
+/// Wait until the cgroup at `tail` is empty: a killed program's threads leave
+/// its job when they have gone, not when the kill was sent.
+pub(super) fn wait_empty(harness: &Harness, tail: &[u8]) -> Checked<()> {
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    loop {
+        let mut path = Vec::from(tail);
+        path.extend_from_slice(b"/cgroup.events");
+        let text = harness.read(&path).unwrap_or_default();
+        if text.starts_with(b"populated 0") {
+            return Ok(());
+        }
+        if crate::timer::now_nanos() >= deadline {
+            return Err("freeze check: a killed program's cgroup never emptied");
+        }
+        crate::sched::sleep_for(POLL_NANOS);
+    }
+}
+
 /// Wait until `cgroup.events` of `tail` reads `expected`, for a cgroup whose
 /// program has ended.
 fn events_settle(
@@ -219,10 +237,17 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
         let nested = nested_and_moved(harness)?;
         Ok(first + second + nested)
     });
+    let emptied = freeze_check_wait(harness);
     let removed = harness.rmdir(b"/check-fz");
     let passed = outcome?;
+    emptied?;
     removed.map_err(|_| "freeze check: the cgroup did not empty")?;
     Ok(passed)
+}
+
+/// The cgroup of the check is empty before it is removed.
+fn freeze_check_wait(harness: &Harness) -> Checked<()> {
+    wait_empty(harness, b"/check-fz")
 }
 
 /// Freeze, hold, `SIGCONT`, thaw, freeze, `cgroup.kill`.
