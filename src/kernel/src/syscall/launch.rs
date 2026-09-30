@@ -97,7 +97,8 @@ fn process_give(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno>
 /// running as `creator` runs, or as root with none ([`native::LoadNative`]).
 ///
 /// "As `creator` runs" is its ids and its fs context: its mount namespace,
-/// its root and its working directory (`docs/NAMESPACES.md` §2.5). A child
+/// its root and its working directory (`docs/NAMESPACES.md` §2.5), and its
+/// network namespace. A child
 /// started in the first namespace's root instead would be an escape from a
 /// namespace, or a `chroot`, in one call. A process with no creator -- one
 /// the kernel starts, as `devmgr` is -- starts in the first namespace's
@@ -110,16 +111,26 @@ pub(crate) fn load_native(
     image: &[u8],
     name: &[u8],
 ) -> Result<Arc<dyn Host>, Errno> {
-    let (credentials, context) = match creator {
+    let (credentials, context, network) = match creator {
         Some(creator) => {
             let creator = process::of_host(creator).ok_or(status::BAD_STATE)?;
             let context = creator.fs_context().lock().clone();
-            (creator.with_credentials(|held| held.clone()), Some(context))
+            (
+                creator.with_credentials(|held| held.clone()),
+                Some(context),
+                Some(creator.net_ns()),
+            )
         }
-        None => (Credentials::root(), None),
+        None => (Credentials::root(), None, None),
     };
     let process: Arc<dyn Host> =
         exec::load_native(image, name, credentials, context).map_err(load_status)?;
+    // In its creator's network namespace too (`docs/NETNS.md` section 4).
+    if let Some(network) = network
+        && let Some(child) = process::of_host(&*process)
+    {
+        child.set_net_ns(network);
+    }
     Ok(process)
 }
 

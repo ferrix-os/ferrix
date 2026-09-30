@@ -125,14 +125,16 @@ static CLAIMS: Claims = Claims::new();
 /// (`docs/NETNS.md` section 3.2).
 static PLACED: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
 
-/// The device node the first namespace's interface with index `interface` is
-/// served from, by its index in `device::devices()`; `None` for one no ring
-/// added, the loopback interface among them.
+/// The device node the interface with index `interface` in the reader's
+/// network namespace is served from, by its index in `device::devices()`;
+/// `None` for one no ring added, the loopback interface among them.
 pub(crate) fn node_of(interface: u32) -> Option<usize> {
-    let key = net::core().look(|stack| match stack.interface(interface)?.backing {
-        ferrix_net::iface::Backing::Device(key) => Some(key),
-        _ => None,
-    })?;
+    let key = net::acting()
+        .core()
+        .look(|stack| match stack.interface(interface)?.backing {
+            ferrix_net::iface::Backing::Device(key) => Some(key),
+            _ => None,
+        })?;
     PLACED
         .lock()
         .iter()
