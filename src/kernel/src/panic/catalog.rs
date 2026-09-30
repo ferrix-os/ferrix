@@ -1257,6 +1257,39 @@ pub(crate) static STAGE13_CGROUPFS: Explanation = Explanation {
           docs/CGROUPS.md",
 };
 
+/// For `check_seccomp` in `stages_check.rs`, when `syscall::seccomp_check::run`
+/// fails.
+pub(crate) static STAGE13_SECCOMP: Explanation = Explanation {
+    code: "FX-1302",
+    title: "seccomp's filter was not asked first at every entry, or not as the entry's own",
+    meaning: "Stage 13's seccomp landing S2 (docs/SECCOMP.md §3.3): the core's system call \
+              entries ask a registered filter about every call before anything else answers \
+              it. `syscall::seccomp_check::run` drives each entry this architecture has -- \
+              SYSCALL and `int $0x80` on x86-64, `svc` on the Arm pair -- with frames of its \
+              own and a test-only rule in the filter's place. Every call an entry keeps for \
+              itself (`arch_prctl`, `set_tls`, `sigreturn`, `rt_sigreturn`) must reach the \
+              rule once and be answered with the rule's value, with the number, the \
+              instruction pointer and the first argument as the frame held them. A call must \
+              carry its entry's `arch` token: an `int $0x80` call is i386's and not x86-64's, \
+              whatever the image. A number with bits above the 32nd set must be judged as its \
+              low half and dispatched as no call. A call in the native range must carry a \
+              token of its own, so that a filter refusing every foreign `arch` refuses it and \
+              one allowing that token by name does not.",
+    causes: &[
+        "An entry in src/kernel/src/arch calls `trap::filter_system_call` after one of its \
+         early answers, or not at all, so a filter that denies `arch_prctl` or \
+         `rt_sigreturn` is not obeyed.",
+        "`arch::audit_arch` answers the image's token and not the entry's, or \
+         `syscall::seccomp::data` takes the token from the process.",
+        "`syscall::seccomp::data` cuts the number at another width than the filter's 32 \
+         bits, or judges the native range under a Linux token.",
+        "The entry builds `SyscallArgs::ip` from another register than the saved program \
+         counter.",
+    ],
+    see: "src/kernel/src/syscall/seccomp_check.rs; src/kernel/src/syscall/seccomp.rs; \
+          src/kernel/src/trap.rs filter_system_call; docs/SECCOMP.md §3.2, §3.3",
+};
+
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
 pub(crate) static SYSFS: Explanation = Explanation {
     code: "FX-0890",
@@ -2686,6 +2719,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE12_WRITE,
     &ROOT_PID1,
     &STAGE13_CGROUPFS,
+    &STAGE13_SECCOMP,
     &INIT_EXITED,
     &INIT_CALLS,
     &UNHANDLED_PAGE_FAULT,

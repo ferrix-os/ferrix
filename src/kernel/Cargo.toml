@@ -51,6 +51,7 @@ ferrix-sysfs.workspace = true
 ferrix-qr.workspace = true
 ferrix-crng.workspace = true
 ferrix-sched.workspace = true
+ferrix-seccomp.workspace = true
 ferrix-sync.workspace = true
 ferrix-ustack.workspace = true
 ferrix-vdso.workspace = true

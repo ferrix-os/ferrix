@@ -186,6 +186,11 @@ pub(crate) struct SyscallArgs {
     /// rest as whatever the program happened to have in them, which is why no
     /// handler may read past its own arity.
     pub(crate) args: [u64; 6],
+    /// The instruction after the one that made the call: what the entry's
+    /// saved program counter holds. Read by [`filter_system_call`] alone
+    /// (`seccomp_data.instruction_pointer`, and a `SIGSYS`'s `si_call_addr`);
+    /// zero from a kernel caller, which has no instruction.
+    pub(crate) ip: u64,
 }
 
 /// The ABI a system call was made in, or a program is entered in.
@@ -252,6 +257,57 @@ static SYSCALL_ENTRY: Once<SyscallEntry> = Once::new();
 /// stands; `main.rs` makes it before anything can enter user mode.
 pub(crate) fn set_syscall_entry(entry: SyscallEntry) {
     let _ = SYSCALL_ENTRY.call_once(|| entry);
+}
+
+/// What a registered filter decided about a call before anything answered it.
+///
+/// Deliberately so small that no variant can make a call do more than it
+/// could: [`Verdict::Answer`] carries the same [`Outcome`] the dispatcher
+/// returns, which is an errno, a value without running the call, or -- for a
+/// program that must not go on -- the paths `exit` and a fatal signal already
+/// take before anything returns. `docs/SECCOMP.md` §3.3, F-09's terms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Verdict {
+    /// Nothing to add: go on as a kernel with no filter would.
+    Continue,
+    /// The call is answered; the entry applies this exactly as it applies the
+    /// dispatcher's answer, and neither its own early answers nor the
+    /// dispatcher see the call.
+    Answer(Outcome),
+}
+
+/// A registered look at a call before anything answers it, given the call as
+/// the entry read it. Runs with interrupts masked, as the entry holds them,
+/// and may open them while it works provided it closes them again before it
+/// returns: a kill, which ends the thread through the paths `exit` uses, needs
+/// them open. Takes no sleeping lock and allocates nothing on the path every
+/// call of every program takes.
+pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;
+
+/// The registered filter, set once at bring-up, beside [`SYSCALL_ENTRY`] and
+/// for the same reason: which calls a program may make is the personality's
+/// policy and the core may not name it. A [`Once`], read with one acquiring
+/// load on every call.
+static SYSCALL_FILTER: Once<SyscallFilter> = Once::new();
+
+/// Judge every system call with `filter` from now on. The first registration
+/// stands; `main.rs` makes it before anything can enter user mode.
+pub(crate) fn set_syscall_filter(filter: SyscallFilter) {
+    let _ = SYSCALL_FILTER.call_once(|| filter);
+}
+
+/// Ask the registered filter about one call: what every architecture's entry
+/// calls first, with the registers it read, before its own early answers
+/// (`arch_prctl`, `set_tls`, the signal returns) and before
+/// [`system_call`], so that no call a program can make escapes the look.
+///
+/// With nothing registered every call is [`Verdict::Continue`], and the core
+/// alone behaves as it did before the registration existed.
+pub(crate) fn filter_system_call(args: &SyscallArgs) -> Verdict {
+    match SYSCALL_FILTER.get() {
+        Some(filter) => filter(args),
+        None => Verdict::Continue,
+    }
 }
 
 /// Answer one system call: what every architecture's system call path calls,

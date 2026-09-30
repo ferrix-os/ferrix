@@ -802,6 +802,7 @@ fn handed_only_to_devmgr(
         abi: crate::trap::Abi::Native,
         number: ferrix_native_abi::nr::PROCESS_START,
         args: [handle as u64, 0, 0, 0, 0, 0],
+        ip: 0,
     };
     if native::dispatch(&args, Some(caller)) != Err(status::BAD_STATE) {
         return Err("process_start on the handle to a started devmgr was not BAD_STATE");

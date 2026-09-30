@@ -608,6 +608,7 @@ fn call(caller: &Arc<Process>, number: usize, args: &[u64]) -> Result<usize, Err
         abi: crate::trap::Abi::Native,
         number,
         args: registers,
+        ip: 0,
     };
     native::dispatch(&args, Some(&**caller))
 }

@@ -54,6 +54,15 @@ pub(crate) enum StatLayout {
     Stat64,
 }
 
+// The core's own system call entry, run with a call the boot check chose
+// (`syscall::seccomp_check`).
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::drive_system_call;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::drive_system_call;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::drive_system_call;
+
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
@@ -66,8 +75,8 @@ pub(crate) use aarch64::{
     USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM,
     USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM,
     USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS, UserRegs, UserState,
-    advance_past_breakpoint, breakpoint, classify, console, console_receive_irq, counter_hz,
-    counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
+    advance_past_breakpoint, audit_arch, breakpoint, classify, console, console_receive_irq,
+    counter_hz, counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
     describe_cpus, disable_interrupts, drain_console, drop_identity_map, enable_console_receive,
     enable_interrupts, enter_user, flush_tlb, forbid_user_access, frame_pointer, halt, hardware_id,
     hardware_random, identity_map_live, identity_root, image_abi, init_console, init_interrupts,
@@ -75,9 +84,9 @@ pub(crate) use aarch64::{
     mask_interrupt, msi_allocate, msi_doorbell, permit_user_access, prepare_stack,
     prepare_user_root, read_console_byte, report_trap, reset, reset_user_state, restore_user_state,
     resume_user, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    set_thread_area, shutdown, switch_to, system_call, take_console_byte, thread_area, timer_arm,
-    timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt, user_hwcaps, user_platform,
-    wait_for_interrupt, wait_for_work,
+    set_thread_area, shutdown, switch_to, syscall_rollback_value, system_call, take_console_byte,
+    thread_area, timer_arm, timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_hwcaps, user_platform, wait_for_interrupt, wait_for_work,
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
@@ -86,8 +95,8 @@ pub(crate) use armv7a::{
     USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM,
     USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM,
     USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS, UserRegs, UserState,
-    advance_past_breakpoint, breakpoint, classify, console, console_receive_irq, counter_hz,
-    counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
+    advance_past_breakpoint, audit_arch, breakpoint, classify, console, console_receive_irq,
+    counter_hz, counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
     describe_cpus, disable_interrupts, drain_console, drop_identity_map, enable_console_receive,
     enable_interrupts, enter_user, flush_tlb, forbid_user_access, frame_pointer, halt, hardware_id,
     hardware_random, identity_map_live, identity_root, image_abi, init_console, init_interrupts,
@@ -95,9 +104,9 @@ pub(crate) use armv7a::{
     mask_interrupt, msi_allocate, msi_doorbell, permit_user_access, prepare_stack,
     prepare_user_root, read_console_byte, report_trap, reset, reset_user_state, restore_user_state,
     resume_user, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    set_thread_area, shutdown, switch_to, system_call, take_console_byte, thread_area, timer_arm,
-    timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt, user_hwcaps, user_platform,
-    wait_for_interrupt, wait_for_work,
+    set_thread_area, shutdown, switch_to, syscall_rollback_value, system_call, take_console_byte,
+    thread_area, timer_arm, timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_hwcaps, user_platform, wait_for_interrupt, wait_for_work,
 };
 // A signal return page, for an architecture without a vDSO its programs
 // could read: ARMv7-A's (`syscall::sigpage`, F-48).
@@ -220,8 +229,8 @@ pub(crate) use x86_64::{
     USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM,
     USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM,
     USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS, UserRegs, UserState,
-    advance_past_breakpoint, breakpoint, classify, console, console_receive_irq, counter_hz,
-    counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
+    advance_past_breakpoint, audit_arch, breakpoint, classify, console, console_receive_irq,
+    counter_hz, counter_now, cpu_local, cpu_local_register, decode_compat_syscall, decode_syscall,
     describe_cpus, disable_interrupts, drain_console, drop_identity_map, enable_console_receive,
     enable_interrupts, enter_user, flush_tlb, forbid_user_access, frame_pointer, halt, hardware_id,
     hardware_random, identity_map_live, identity_root, image_abi, init_console, init_interrupts,
@@ -229,9 +238,9 @@ pub(crate) use x86_64::{
     mask_interrupt, msi_allocate, msi_doorbell, permit_user_access, prepare_stack,
     prepare_user_root, read_console_byte, report_trap, reset, reset_user_state, restore_user_state,
     resume_user, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    set_thread_area, shutdown, switch_to, system_call, take_console_byte, thread_area, timer_arm,
-    timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt, user_hwcaps, user_platform,
-    wait_for_interrupt, wait_for_work,
+    set_thread_area, shutdown, switch_to, syscall_rollback_value, system_call, take_console_byte,
+    thread_area, timer_arm, timer_disarm, timer_irq, uninstall_user_root, unmask_interrupt,
+    user_hwcaps, user_platform, wait_for_interrupt, wait_for_work,
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{

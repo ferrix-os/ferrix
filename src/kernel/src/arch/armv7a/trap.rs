@@ -427,7 +427,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 /// A system call from SVC mode, which is a kernel bug, or an `execve` this path
 /// does not yet honour.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Outcome, SyscallArgs, system_call as dispatch};
+    use crate::trap::{Outcome, SyscallArgs, Verdict, system_call as dispatch};
     use ferrix_linux_abi::nr::Syscall;
 
     if !frame.came_from_user() {
@@ -445,41 +445,51 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             r4.into(),
             r5.into(),
         ],
+        // The saved `pc` already points past the `svc`, ARM or Thumb.
+        ip: frame.pc.into(),
     };
 
-    // `set_tls` writes a coprocessor register, which is a fact about this
-    // processor rather than about the process, so it is answered here for
-    // the same reason x86-64 answers `arch_prctl` in its own trap path.
-    // It cannot fail: any value is a valid thread pointer to hold, and
-    // Linux returns zero without looking at it.
-    if let Some(Syscall::ArmSetTls) = super::decode_syscall(args.number) {
-        cpu::write_tpidruro(r0);
-        if let Some(result) = frame.r.first_mut() {
-            *result = 0;
-        }
-        return Ok(());
-    }
+    // The registered filter looks at the call first, before `set_tls` and the
+    // signal returns are answered below (`docs/SECCOMP.md` §3.3).
+    let outcome = match crate::trap::filter_system_call(&args) {
+        Verdict::Answer(outcome) => outcome,
+        Verdict::Continue => {
+            // `set_tls` writes a coprocessor register, which is a fact about
+            // this processor rather than about the process, so it is answered
+            // here for the same reason x86-64 answers `arch_prctl` in its own
+            // trap path. It cannot fail: any value is a valid thread pointer
+            // to hold, and Linux returns zero without looking at it.
+            if let Some(Syscall::ArmSetTls) = super::decode_syscall(args.number) {
+                cpu::write_tpidruro(r0);
+                if let Some(result) = frame.r.first_mut() {
+                    *result = 0;
+                }
+                return Ok(());
+            }
 
-    // `rt_sigreturn` and `sigreturn` replace the whole frame, `r0` included,
-    // so they have no return value to write: answered here rather than
-    // through `dispatch`.
-    if let Some(call @ (Syscall::RtSigreturn | Syscall::Sigreturn)) =
-        super::decode_syscall(args.number)
-    {
-        let mut context = super::signal::UserContext::from_trap(frame);
-        super::enable_interrupts();
-        if let Some(path) = crate::trap::return_path() {
-            (path.sigreturn)(&mut context, call == Syscall::RtSigreturn);
-        }
-        super::disable_interrupts();
-        context.store_trap(frame);
-        return Ok(());
-    }
+            // `rt_sigreturn` and `sigreturn` replace the whole frame, `r0`
+            // included, so they have no return value to write: answered here
+            // rather than through `dispatch`.
+            if let Some(call @ (Syscall::RtSigreturn | Syscall::Sigreturn)) =
+                super::decode_syscall(args.number)
+            {
+                let mut context = super::signal::UserContext::from_trap(frame);
+                super::enable_interrupts();
+                if let Some(path) = crate::trap::return_path() {
+                    (path.sigreturn)(&mut context, call == Syscall::RtSigreturn);
+                }
+                super::disable_interrupts();
+                context.store_trap(frame);
+                return Ok(());
+            }
 
-    let regs = UserRegs(*frame);
-    super::enable_interrupts();
-    let outcome = dispatch(&args, Some(&regs));
-    super::disable_interrupts();
+            let regs = UserRegs(*frame);
+            super::enable_interrupts();
+            let outcome = dispatch(&args, Some(&regs));
+            super::disable_interrupts();
+            outcome
+        }
+    };
 
     match outcome {
         Outcome::Return(value) => {
