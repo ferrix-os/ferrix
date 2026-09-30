@@ -188,6 +188,17 @@ impl NetNamespace {
         tables.lock().resize(wanted).map_err(|_| Errno::ENOMEM)
     }
 
+    /// Whether what the tables are charged covers what they hold: always, for
+    /// the first namespace, which is charged nothing, and for the others unless
+    /// a change was applied that the charge refused. For `kmem_check`.
+    pub(crate) fn tables_cover(&self) -> bool {
+        let Some(tables) = &self.tables else {
+            return true;
+        };
+        let held = self.core.look(Stack::footprint);
+        tables.lock().charged() >= u64::try_from(held).unwrap_or(u64::MAX)
+    }
+
     /// Room for one change that adds to the tables, asked before it is
     /// applied. Follow it with `fit(0)` to settle on what is held.
     ///
