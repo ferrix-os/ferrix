@@ -345,12 +345,14 @@ fn routes(tree: &Arc<Job>) -> Result<usize, &'static str> {
                 socket
             }
         };
-        super::netns_check::route_for_fill(&socket, n)?;
-        // What the tables hold is what the job is charged for: a route that
-        // was added and not paid for is not the limit's doing.
+        let added = super::netns_check::route_for_fill(&socket, n);
+        // What the tables hold is what the job is charged for, also when the
+        // request was refused afterwards: a route that was added and not paid
+        // for is not the limit's doing.
         if !socket.namespace().tables_cover() {
             return Err(Errno::EFAULT);
         }
+        added?;
         Ok(socket)
     })
 }
