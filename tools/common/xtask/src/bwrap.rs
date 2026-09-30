@@ -1,5 +1,5 @@
-//! `test-bwrap`: Debian's bubblewrap on Ferrix, as root (`docs/NAMESPACES.md`
-//! §8, landing N3).
+//! `test-bwrap`: Debian's bubblewrap on Ferrix, as root and as uid 1000
+//! (`docs/NAMESPACES.md` §8, landings N3 and N5).
 //!
 //! bubblewrap is what Steam's container is made with: scout's requirements
 //! check runs it before every start, and pressure-vessel builds the container
@@ -33,8 +33,11 @@
 //! the empty bottom mount every namespace has, so that `pivot_root` can move
 //! it aside as it would a disk root (`docs/NAMESPACES.md` §2.1).
 //!
-//! As uid 1000 bubblewrap makes a user namespace too; that half is N4's and
-//! N5's, and this gate gains it then.
+//! As uid 1000 bubblewrap makes a user namespace too (`clone(CLONE_NEWUSER |
+//! CLONE_NEWNS)`, `uid_map`, `setgroups`, `gid_map`, `tmpfs` with `nosuid,nodev`,
+//! binds whose flags it remounts, two `pivot_root`s): the same lists run again
+//! under `su ferrix`, and the container must report uid 1000, the same
+//! mounts, and a write through its writable bind.
 
 use std::path::PathBuf;
 
@@ -68,27 +71,55 @@ fn place(name: &str) -> String {
 /// The busybox programs a sandbox runs, each a link to `/usr/bin/busybox`.
 const SANDBOXED: &[&str] = &["true", "sh", "cat", "id", "echo", "sed"];
 
-/// The requirements check's lists and the container, each followed by a
-/// line saying how it exited, then the writable bind read back outside.
-const SCRIPT: &str = r#"export PATH=/bin:/usr/bin
+/// Where the image carries the two bodies, and what each is told it is.
+const BODIES: [(&str, &str); 2] = [
+    ("usr/share/bwrap-gate-root.sh", ""),
+    ("usr/share/bwrap-gate-user.sh", " user"),
+];
+
+/// The requirements check's lists and the container, each followed by a line
+/// saying how it exited, then the writable bind read back outside. `label` is
+/// what marks the lines of a run: empty for root's, ` user` for uid 1000's.
+fn body(label: &str) -> String {
+    let binds = "--ro-bind /etc /etc --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib32 /lib32 --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin --ro-bind /usr /usr --ro-bind-try /gnu/store /gnu/store --ro-bind-try /nix/store /nix/store --bind /proc /proc --dev-bind /dev /dev true";
+    format!(
+        r#"export PATH=/bin:/usr/bin
 B=/usr/bin/bwrap
+$B {binds}
+echo "bwrap-gate{label}: plain exited $?"
+$B --not-a-security-boundary {binds}
+echo "bwrap-gate{label}: not-a-security-boundary exited $?"
+$B --level-prefix {binds}
+echo "bwrap-gate{label}: level-prefix exited $?"
+$B --perms 0700 --dir / {binds}
+echo "bwrap-gate{label}: perms exited $?"
+$B --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev-bind /dev /dev --tmpfs /tmp --dir /run/check --bind /tmp/bwrap-src /run/src --ro-bind /tmp/bwrap-file /run/file --ro-bind-data 3 /run/data --new-session /usr/bin/sh -c 'for f in /run/file /run/data /run/src/inside; do echo "bwrap-inside{label}: $(cat $f)"; done; echo written > /run/src/back; cat /tmp/bwrap-file 2>/dev/null && echo bwrap-inside{label}: the outer tmp shows; sed "s/^/bwrap-mountinfo{label}: /" /proc/self/mountinfo; echo "bwrap-inside{label}: $(id)"' 3< /tmp/bwrap-data
+echo "bwrap-gate{label}: container exited $?"
+echo "bwrap-gate{label}: written back: $(cat /tmp/bwrap-src/back)"
+"#
+    )
+}
+
+/// The script init runs: what the sandboxes bind, then [`body`] as root, then
+/// again as the image's user `ferrix`, uid 1000.
+fn script() -> String {
+    format!(
+        r#"export PATH=/bin:/usr/bin
 echo data-from-a-descriptor > /tmp/bwrap-data
 echo a-bound-file > /tmp/bwrap-file
 mkdir -p /tmp/bwrap-src
 echo in-a-bound-directory > /tmp/bwrap-src/inside
-$B --ro-bind /etc /etc --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib32 /lib32 --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin --ro-bind /usr /usr --ro-bind-try /gnu/store /gnu/store --ro-bind-try /nix/store /nix/store --bind /proc /proc --dev-bind /dev /dev true
-echo "bwrap-gate: plain exited $?"
-$B --not-a-security-boundary --ro-bind /etc /etc --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib32 /lib32 --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin --ro-bind /usr /usr --ro-bind-try /gnu/store /gnu/store --ro-bind-try /nix/store /nix/store --bind /proc /proc --dev-bind /dev /dev true
-echo "bwrap-gate: not-a-security-boundary exited $?"
-$B --level-prefix --ro-bind /etc /etc --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib32 /lib32 --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin --ro-bind /usr /usr --ro-bind-try /gnu/store /gnu/store --ro-bind-try /nix/store /nix/store --bind /proc /proc --dev-bind /dev /dev true
-echo "bwrap-gate: level-prefix exited $?"
-$B --perms 0700 --dir / --ro-bind /etc /etc --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib32 /lib32 --symlink usr/lib64 /lib64 --symlink usr/sbin /sbin --ro-bind /usr /usr --ro-bind-try /gnu/store /gnu/store --ro-bind-try /nix/store /nix/store --bind /proc /proc --dev-bind /dev /dev true
-echo "bwrap-gate: perms exited $?"
-$B --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev-bind /dev /dev --tmpfs /tmp --dir /run/check --bind /tmp/bwrap-src /run/src --ro-bind /tmp/bwrap-file /run/file --ro-bind-data 3 /run/data --new-session /usr/bin/sh -c 'for f in /run/file /run/data /run/src/inside; do echo "bwrap-inside: $(cat $f)"; done; echo written > /run/src/back; cat /tmp/bwrap-file 2>/dev/null && echo bwrap-inside: the outer tmp shows; sed "s/^/bwrap-mountinfo: /" /proc/self/mountinfo; echo "bwrap-inside: $(id)"' 3< /tmp/bwrap-data
-echo "bwrap-gate: container exited $?"
-echo "bwrap-gate: written back: $(cat /tmp/bwrap-src/back)"
+chmod 777 /tmp/bwrap-src
+chmod 644 /tmp/bwrap-data /tmp/bwrap-file /tmp/bwrap-src/inside
+sh /{root}
+rm -f /tmp/bwrap-src/back
+su ferrix -c 'sh /{user}'
 exit 21
-"#;
+"#,
+        root = BODIES[0].0,
+        user = BODIES[1].0,
+    )
+}
 
 /// What the script exits with when it ran to its end.
 const STATUS: &str = "21";
@@ -102,14 +133,15 @@ const LISTS: &[&str] = &[
     "container",
 ];
 
-/// What the container must print: each thing bound into it read back, and
-/// root's id.
+/// What the container must print: each thing bound into it read back.
 const INSIDE: &[&str] = &[
-    "bwrap-inside: a-bound-file",
-    "bwrap-inside: data-from-a-descriptor",
-    "bwrap-inside: in-a-bound-directory",
-    "bwrap-inside: uid=0",
+    "a-bound-file",
+    "data-from-a-descriptor",
+    "in-a-bound-directory",
 ];
+
+/// The runs, by the label of their lines, and the id the container reports.
+const RUNS: [(&str, &str); 2] = [("", "uid=0"), (" user", "uid=1000")];
 
 /// The mount points the container's `mountinfo` must list.
 const MOUNTED: &[&str] = &[
@@ -160,6 +192,13 @@ fn files(fetched: &std::path::Path, busybox: &[u8]) -> Result<Vec<File>> {
         mode: 0o755,
         content: Content::Bytes(busybox.to_vec()),
     });
+    for (path, label) in BODIES {
+        files.push(File {
+            path: path.to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(body(label).into_bytes()),
+        });
+    }
     files.extend(SANDBOXED.iter().map(|name| File {
         path: format!("usr/bin/{name}"),
         mode: 0o777,
@@ -186,9 +225,11 @@ pub(crate) fn test_bwrap(args: &Args) -> Result<()> {
     let fetched = fetched()?;
     let shell =
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
-    println!("  {arch}: building an image whose shell runs Debian's bubblewrap as root");
+    println!(
+        "  {arch}: building an image whose shell runs Debian's bubblewrap as root and as uid 1000"
+    );
     let loader = cargo::build_loader(arch, args.release)?;
-    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
+    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, &script())?;
     let natives = native::build(arch, args.release)?;
     let shell_bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
@@ -224,48 +265,59 @@ fn judge(arch: Arch, lines: &[String]) -> Result<()> {
             "{arch}: the bubblewrap script ended with {exited:?}, not at its end"
         )));
     }
-    for list in LISTS {
-        if !said(&format!("bwrap-gate: {list} exited 0")) {
+    let mut mounts = 0;
+    for (label, id) in RUNS {
+        for list in LISTS {
+            if !said(&format!("bwrap-gate{label}: {list} exited 0")) {
+                return Err(Error::new(format!(
+                    "{arch}: bubblewrap's{label} {list} list did not exit 0; its lines above say why"
+                )));
+            }
+        }
+        for line in INSIDE {
+            if !said(&format!("bwrap-inside{label}: {line}")) {
+                return Err(Error::new(format!(
+                    "{arch}: the{label} container did not print {line:?}"
+                )));
+            }
+        }
+        if !said(&format!("bwrap-inside{label}: {id}")) {
             return Err(Error::new(format!(
-                "{arch}: bubblewrap's {list} list did not exit 0; its lines above say why"
+                "{arch}: the{label} container did not report {id}"
             )));
         }
-    }
-    for line in INSIDE {
-        if !said(line) {
+        if said(&format!("bwrap-inside{label}: the outer tmp shows")) {
             return Err(Error::new(format!(
-                "{arch}: the container did not print {line:?}"
+                "{arch}:{label} the container saw the /tmp outside it through its own tmpfs"
             )));
         }
-    }
-    if said("bwrap-inside: the outer tmp shows") {
-        return Err(Error::new(format!(
-            "{arch}: the container saw the /tmp outside it through its own tmpfs"
-        )));
-    }
-    let mountinfo: Vec<&str> = after_boot
-        .iter()
-        .filter_map(|line| line.split_once("bwrap-mountinfo: ").map(|(_, rest)| rest))
-        .collect();
-    for point in MOUNTED {
-        let listed = mountinfo
+        let mountinfo: Vec<&str> = after_boot
             .iter()
-            .any(|line| line.split(' ').nth(4) == Some(point));
-        if !listed {
+            .filter_map(|line| {
+                line.split_once(&format!("bwrap-mountinfo{label}: "))
+                    .map(|(_, rest)| rest)
+            })
+            .collect();
+        for point in MOUNTED {
+            let listed = mountinfo
+                .iter()
+                .any(|line| line.split(' ').nth(4) == Some(point));
+            if !listed {
+                return Err(Error::new(format!(
+                    "{arch}:{label} the container's mountinfo did not list {point}"
+                )));
+            }
+        }
+        if !said(&format!("bwrap-gate{label}: written back: written")) {
             return Err(Error::new(format!(
-                "{arch}: the container's mountinfo did not list {point}"
+                "{arch}:{label} a write through the container's writable bind did not show outside it"
             )));
         }
-    }
-    if !said("bwrap-gate: written back: written") {
-        return Err(Error::new(format!(
-            "{arch}: a write through the container's writable bind did not show outside it"
-        )));
+        mounts = mountinfo.len();
     }
     println!(
         "  {arch}: bubblewrap ran the requirements check's four lists and a pressure-vessel-shaped \
-         container as root, {} mounts in it",
-        mountinfo.len()
+         container as root and as uid 1000, {mounts} mounts in the last"
     );
     Ok(())
 }
@@ -296,25 +348,33 @@ mod tests {
                         && matches!(&file.content, Content::Link(target) if target == "busybox"))
             );
         }
-        assert_eq!(files.len(), FETCHED.len() + 1 + SANDBOXED.len());
+        assert_eq!(
+            files.len(),
+            FETCHED.len() + 1 + BODIES.len() + SANDBOXED.len()
+        );
     }
 
     /// A line naming every list, and the script's own ending, judged.
     #[test]
     fn the_judge_wants_every_list_and_the_container() {
         let mut lines: Vec<String> = vec![qemu::SUCCESS_MARKER.to_owned()];
-        lines.extend(
-            LISTS
-                .iter()
-                .map(|list| format!("bwrap-gate: {list} exited 0")),
-        );
-        lines.extend(INSIDE.iter().map(|line| (*line).to_owned()));
-        lines.extend(
-            MOUNTED
-                .iter()
-                .map(|point| format!("bwrap-mountinfo: 1 1 0:1 / {point} rw - tmpfs tmpfs rw")),
-        );
-        lines.push("bwrap-gate: written back: written".to_owned());
+        for (label, id) in RUNS {
+            lines.extend(
+                LISTS
+                    .iter()
+                    .map(|list| format!("bwrap-gate{label}: {list} exited 0")),
+            );
+            lines.extend(
+                INSIDE
+                    .iter()
+                    .map(|line| format!("bwrap-inside{label}: {line}")),
+            );
+            lines.push(format!("bwrap-inside{label}: {id}(x) gid=1"));
+            lines.extend(MOUNTED.iter().map(|point| {
+                format!("bwrap-mountinfo{label}: 1 1 0:1 / {point} rw - tmpfs tmpfs rw")
+            }));
+            lines.push(format!("bwrap-gate{label}: written back: written"));
+        }
         lines.push(format!("{}{STATUS}", shell::EXITED));
         assert!(judge(Arch::X86_64, &lines).is_ok());
         lines.retain(|line| !line.contains("perms exited"));
