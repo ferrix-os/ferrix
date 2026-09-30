@@ -47,6 +47,7 @@ pub(crate) mod kmem_check;
 pub(crate) mod memfd_check;
 pub(crate) mod mmap_check;
 pub(crate) mod mount_check;
+pub(crate) mod mountperm_check;
 pub(crate) mod namespace_check;
 mod pages;
 pub(crate) mod partitions;
