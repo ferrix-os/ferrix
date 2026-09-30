@@ -82,8 +82,8 @@ const DETACH_FILE: &[u8] = b"ns-check-detach";
 /// `/mnt-rw`.
 const DISK_INDEX: u32 = 2;
 
-/// `CLONE_NEWPID`: a namespace Ferrix does not have.
-const CLONE_NEWPID: u64 = 0x2000_0000;
+/// `CLONE_NEWNET`: a namespace Ferrix does not have.
+const CLONE_NEWNET: u64 = 0x4000_0000;
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
@@ -531,7 +531,7 @@ fn private_both_ways(
     )?;
     drop(unprivileged);
     tally.refused(
-        unshare(inside.process, CLONE_NEWPID),
+        unshare(inside.process, CLONE_NEWNET),
         Errno::EINVAL,
         "unshare of a namespace Ferrix does not have was not refused EINVAL",
     )?;
