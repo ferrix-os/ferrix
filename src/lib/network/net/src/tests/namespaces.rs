@@ -294,3 +294,30 @@ fn a_namespace_reassembles_no_more_than_its_ceiling() {
     small.flush();
     assert_eq!(small.held(), 0);
 }
+
+#[test]
+fn a_namespaces_tables_have_a_footprint_that_grows_and_a_shed_that_keeps_the_configuration() {
+    let mut stack = with_loopback_up();
+    let before = stack.footprint();
+    assert!(
+        before > 0,
+        "a loopback with two addresses and two routes is heap"
+    );
+    let index = veth_end(&mut stack, b"veth0", 1, 3, 0, [10, 3, 0, 1]);
+    let after = stack.footprint();
+    assert!(
+        after > before,
+        "an interface, an address and a route are heap"
+    );
+    // Learn a neighbour by asking for it, then shed what was learned.
+    let client = stack.open_udp(Family::V4);
+    let _ = stack.send(client, b"x", Some(at(Ipv4::new([10, 3, 0, 9]), 9)), 0);
+    assert!(!stack.neighbors().entries().is_empty());
+    stack.shed();
+    assert!(stack.neighbors().entries().is_empty());
+    assert!(
+        stack
+            .interface(index)
+            .is_some_and(|each| each.addresses.len() == 1)
+    );
+}
