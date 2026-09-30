@@ -528,6 +528,12 @@ pub(super) fn check_cgroupfs() {
          refused, natively and through its files, and a job it made itself limited",
         checked.limits_refused,
     );
+    println!(
+        "  reclaim  {} pages of files' caches given back inside the cgroup over its memory.high \
+         or at its memory.max, none of a sibling's and none of a child held by memory.min, every \
+         one read again as its source has it, and no process killed where the cache was room",
+        checked.reclaimed,
+    );
 }
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
