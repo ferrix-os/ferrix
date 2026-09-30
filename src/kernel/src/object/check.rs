@@ -815,6 +815,7 @@ fn check_the_native_range_is_not_a_linux_one() -> Result<(), &'static str> {
         abi: crate::trap::Abi::Native,
         number: nr::CHANNEL_CREATE,
         args: [0; 6],
+        ip: 0,
     };
     if linux::dispatch(&args, None) != Outcome::Return(Errno::ESRCH.as_return_value()) {
         return Err("a native call with no process was not refused with ESRCH");
@@ -1212,6 +1213,7 @@ impl Side {
             abi: crate::trap::Abi::Native,
             number,
             args: registers,
+            ip: 0,
         };
         native::dispatch(&args, Some(&*self.process))
     }
@@ -1762,6 +1764,7 @@ fn write_after_a_delay(_: usize) {
             abi: crate::trap::Abi::Native,
             number: nr::CHANNEL_WRITE,
             args: [reg(end), 0, 0, 0, 0, 0],
+            ip: 0,
         };
         let _ = native::dispatch(&args, Some(&*process));
     }

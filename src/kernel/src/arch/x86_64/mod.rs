@@ -14,6 +14,7 @@ mod smp;
 pub(super) mod speculation;
 mod switch;
 mod syscall;
+pub(crate) use syscall::check::drive_system_call;
 mod trap;
 
 pub(crate) use cpu::hardware_random;
@@ -342,6 +343,32 @@ const ROOT_SLOTS: usize = 512;
 /// rather than through whatever lies past the table (Spectre variant 1).
 pub(crate) fn decode_syscall(number: usize) -> Option<Syscall> {
     nr::from_x86_64(super::nospec_index(number, nr::X86_64_END)?)
+}
+
+/// The `AUDIT_ARCH_*` token a system call made through `abi` carries in
+/// `seccomp_data.arch`: x86-64's for `SYSCALL`, i386's for `int $0x80`.
+/// Decided by the entry, as the table is, and never by the image the program
+/// runs (`docs/SECCOMP.md` §3.2, SR1).
+pub(crate) const fn audit_arch(abi: crate::trap::Abi) -> u32 {
+    match abi {
+        // `EM_X86_64` | `__AUDIT_ARCH_64BIT` | `__AUDIT_ARCH_LE`.
+        crate::trap::Abi::Native => 0xC000_003E,
+        // `EM_386` | `__AUDIT_ARCH_LE`.
+        crate::trap::Abi::Compat => 0x4000_0003,
+    }
+}
+
+/// The value to put in the return register of a call that is not run, so that
+/// the frame reads as it did when the program made the call: Linux's
+/// `syscall_rollback`. `RAX` held the number, and the handler of a trapped
+/// call finds it there (`docs/SECCOMP.md` §3.6).
+pub(crate) const fn syscall_rollback_value(
+    abi: crate::trap::Abi,
+    number: usize,
+    args: &[u64; 6],
+) -> isize {
+    let _ = (abi, args);
+    number as isize
 }
 
 /// ELF's `e_machine` for i386.
@@ -1209,7 +1236,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 ///
 /// A trap-vector system call that did not come from ring 3.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Abi, Outcome, SyscallArgs};
+    use crate::trap::{Abi, Outcome, SyscallArgs, Verdict};
 
     if !frame.came_from_user() {
         return Err("a system call through the trap vector from ring 0");
@@ -1226,32 +1253,44 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             word(frame.rdi),
             word(frame.rbp),
         ],
+        // `int $0x80` pushed the address of the next instruction.
+        ip: frame.rip,
     };
 
-    // `sigreturn` for a handler without `SA_SIGINFO`, `rt_sigreturn` for one
-    // with: an i386 program has both frames (`signal::compat`).
-    let returning = match decode_compat_syscall(args.number) {
-        Some(Syscall::RtSigreturn) => Some(true),
-        Some(Syscall::Sigreturn) => Some(false),
-        _ => None,
-    };
-    if let Some(rt) = returning {
-        let mut context = UserContext::from_trap(frame);
-        enable_interrupts();
-        if let Some(path) = crate::trap::return_path() {
-            (path.sigreturn)(&mut context, rt);
+    // The registered filter looks at the call first, before `sigreturn` and
+    // `rt_sigreturn` are answered below (`docs/SECCOMP.md` §3.3), with this
+    // entry's own architecture token: `AUDIT_ARCH_I386`, whatever the image
+    // the program runs.
+    let outcome = match crate::trap::filter_system_call(&args) {
+        Verdict::Answer(outcome) => outcome,
+        Verdict::Continue => {
+            // `sigreturn` for a handler without `SA_SIGINFO`, `rt_sigreturn`
+            // for one with: an i386 program has both frames (`signal::compat`).
+            let returning = match decode_compat_syscall(args.number) {
+                Some(Syscall::RtSigreturn) => Some(true),
+                Some(Syscall::Sigreturn) => Some(false),
+                _ => None,
+            };
+            if let Some(rt) = returning {
+                let mut context = UserContext::from_trap(frame);
+                enable_interrupts();
+                if let Some(path) = crate::trap::return_path() {
+                    (path.sigreturn)(&mut context, rt);
+                }
+                disable_interrupts();
+                context.store_trap(frame);
+                return Ok(());
+            }
+
+            // Open while the call is served, as `SYSCALL`'s path opens them: the
+            // gate closed them on entry.
+            let regs = UserRegs::Trap(*frame);
+            enable_interrupts();
+            let outcome = crate::trap::system_call(&args, Some(&regs));
+            disable_interrupts();
+            outcome
         }
-        disable_interrupts();
-        context.store_trap(frame);
-        return Ok(());
-    }
-
-    // Open while the call is served, as `SYSCALL`'s path opens them: the
-    // gate closed them on entry.
-    let regs = UserRegs::Trap(*frame);
-    enable_interrupts();
-    let outcome = crate::trap::system_call(&args, Some(&regs));
-    disable_interrupts();
+    };
 
     match outcome {
         // Sign-extended, as Linux stores a compat call's result: a 32-bit

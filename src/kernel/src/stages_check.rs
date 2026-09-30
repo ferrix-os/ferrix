@@ -77,6 +77,10 @@ pub(super) fn check_programs() {
     // the root, whose context the check's process is made in.
     check_semaphores();
 
+    // The filter the core's entries ask first about every call, driven through
+    // each entry with frames of the check's own.
+    check_seccomp();
+
     // A mount's own flags, enforced and shown; under /tmp, after the root.
     check_mount_flags();
 
@@ -233,6 +237,26 @@ pub(super) fn check_semaphores() {
          from another job once its maker had ended; a job refused ENOSPC at {} sets while a \
          sibling made one",
         checked.calls, checked.refusals, checked.waits, checked.per_job,
+    );
+}
+
+/// seccomp (`docs/SECCOMP.md`): the registered filter asked first at every
+/// entry, under the entry's own architecture token.
+pub(super) fn check_seccomp() {
+    let checked = match syscall::seccomp_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_SECCOMP,
+            "seccomp self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  seccomp  {} calls driven through the core's own entries, the filter asked first \
+         each time: {} calls an entry answers itself reached it before that answer, {} entries \
+         judged under the architecture token of their own, and {} native-range call judged \
+         under a token of its own, refused by a filter that refuses every foreign arch and \
+         let by one that allows it by name",
+        checked.calls, checked.early, checked.tokens, checked.native,
     );
 }
 

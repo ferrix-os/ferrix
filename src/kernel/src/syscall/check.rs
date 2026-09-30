@@ -305,6 +305,7 @@ impl Counter {
                 abi: crate::trap::Abi::Native,
                 number,
                 args,
+                ip: 0,
             },
             None,
         );
@@ -668,6 +669,7 @@ fn sweep_every_number() -> i32 {
                 abi: crate::trap::Abi::Native,
                 number,
                 args: poison,
+                ip: 0,
             },
             None,
         );
@@ -733,6 +735,7 @@ pub(crate) fn call_by_number(
             abi: crate::trap::Abi::Native,
             number,
             args,
+            ip: 0,
         },
         Some(process),
     )

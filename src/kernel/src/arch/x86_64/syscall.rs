@@ -483,14 +483,64 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
+    use crate::trap::Verdict;
+
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
         number: frame.rax as usize,
         args: [
             frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
         ],
+        // `SYSCALL` left the address of the next instruction in `RCX`.
+        ip: frame.rcx,
     };
 
+    // The registered filter looks at the call first, before the answers below
+    // that never reach the dispatcher, so that a filter that denies
+    // `arch_prctl` or `rt_sigreturn` is obeyed (`docs/SECCOMP.md` §3.3). An
+    // answer is applied as the dispatcher's is; nothing registered is
+    // `Continue`.
+    let outcome = match crate::trap::filter_system_call(&args) {
+        Verdict::Answer(outcome) => outcome,
+        Verdict::Continue => {
+            if answer_here(frame, &args) {
+                return;
+            }
+            // Open while the call is served: a call may block, and one that spins
+            // waiting for input must not keep the processor from switching away.
+            // `SFMASK` closed them on entry, and they are closed again before the
+            // frame is restored, because the way out swaps `GS` on a live stack.
+            super::enable_interrupts();
+            let regs = UserRegs::Syscall(*frame);
+            let outcome = crate::trap::system_call(&args, Some(&regs));
+            super::disable_interrupts();
+            outcome
+        }
+    };
+
+    match outcome {
+        Outcome::Return(value) => {
+            frame.rax = value as u64;
+        }
+        Outcome::Enter { entry, stack, abi } => enter_program(frame, entry, stack, abi),
+    }
+
+    // On the way back: a process ended from outside ends here, a stopped one
+    // waits, and a signal with a handler is delivered by pointing the frame at
+    // it. See `crate::syscall::deliver`.
+    if let Some(path) = crate::trap::return_path()
+        && (path.needs_attention)()
+    {
+        let mut context = super::signal::UserContext::from_syscall(frame);
+        (path.return_to_user)(&mut context);
+        context.store_syscall(frame);
+    }
+}
+
+/// The two calls this entry answers itself, before the dispatcher: `true` when
+/// the call was answered and the frame holds the result. `rt_sigreturn` does not
+/// come back.
+fn answer_here(frame: &mut SyscallFrame, args: &crate::trap::SyscallArgs) -> bool {
     // One call is answered before dispatch, because it is a fact about this
     // processor rather than about the process: `arch_prctl(ARCH_SET_FS)` writes
     // an MSR. It exists on no other architecture -- AArch64 writes `TPIDR_EL0`
@@ -500,7 +550,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     // rest of the program's user state.
     if let Some(ferrix_linux_abi::nr::Syscall::ArchPrctl) = super::decode_syscall(args.number) {
         frame.rax = arch_prctl(args.args[0], args.args[1]) as u64;
-        return;
+        return true;
     }
 
     // `rt_sigreturn` puts back every register a signal interrupted, `RCX` and
@@ -524,63 +574,40 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
         // the process ended and `return_to_user` did not come back.
         unsafe { super::signal::resume_context(&context) }
     }
+    false
+}
 
-    // Open while the call is served: a call may block, and one that spins
-    // waiting for input must not keep the processor from switching away.
-    // `SFMASK` closed them on entry, and they are closed again before the
-    // frame is restored, because the way out swaps `GS` on a live stack.
-    super::enable_interrupts();
-    let regs = UserRegs::Syscall(*frame);
-    let outcome = crate::trap::system_call(&args, Some(&regs));
-    super::disable_interrupts();
-
-    match outcome {
-        Outcome::Return(value) => {
-            frame.rax = value as u64;
-        }
-        Outcome::Enter { entry, stack, abi } => {
-            if abi == Abi::Compat {
-                enter_compat_after_execve(entry, stack);
-            }
-            // `execve` and a fresh `clone` child: the registers this frame
-            // holds belong to a program that no longer exists, so they are
-            // replaced rather than returned into. Everything else is cleared
-            // for the same reason `ferrix_enter_user` clears it -- a register
-            // carrying a kernel value into ring 3 is a leak nothing tests.
-            *frame = SyscallFrame {
-                r15: 0,
-                r14: 0,
-                r13: 0,
-                r12: 0,
-                rbp: 0,
-                rbx: 0,
-                r9: 0,
-                r8: 0,
-                r10: 0,
-                rdx: 0,
-                rsi: 0,
-                rdi: 0,
-                rax: 0,
-                // `SYSRET` takes the flags from R11 and the address from RCX,
-                // which is why an entry point can be delivered by returning.
-                // Interrupts open, as `ferrix_enter_user` leaves them.
-                r11: 0x202,
-                rcx: entry,
-                user_rsp: stack,
-            };
-        }
+/// Replace the frame with a program's first registers: `execve`, and the child
+/// side of a fresh `clone`.
+fn enter_program(frame: &mut SyscallFrame, entry: u64, stack: u64, abi: Abi) {
+    if abi == Abi::Compat {
+        enter_compat_after_execve(entry, stack);
     }
-
-    // On the way back: a process ended from outside ends here, a stopped one
-    // waits, and a signal with a handler is delivered by pointing the frame at
-    // it. See `crate::syscall::deliver`.
-    if let Some(path) = crate::trap::return_path()
-        && (path.needs_attention)()
-    {
-        let mut context = super::signal::UserContext::from_syscall(frame);
-        (path.return_to_user)(&mut context);
-        context.store_syscall(frame);
-    }
+    // The registers this frame holds belong to a program that no longer exists,
+    // so they are replaced rather than returned into. Everything else is
+    // cleared for the same reason `ferrix_enter_user` clears it -- a register
+    // carrying a kernel value into ring 3 is a leak nothing tests.
+    *frame = SyscallFrame {
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: 0,
+        rbp: 0,
+        rbx: 0,
+        r9: 0,
+        r8: 0,
+        r10: 0,
+        rdx: 0,
+        rsi: 0,
+        rdi: 0,
+        rax: 0,
+        // `SYSRET` takes the flags from R11 and the address from RCX, which is
+        // why an entry point can be delivered by returning. Interrupts open, as
+        // `ferrix_enter_user` leaves them.
+        r11: 0x202,
+        rcx: entry,
+        user_rsp: stack,
+    };
 }
 
 /// Leave an `execve` of a 32-bit image, made through `SYSCALL`, into the new
