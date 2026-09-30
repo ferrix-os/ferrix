@@ -864,7 +864,7 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
             ferrix_cgroupfs::cpu::render_stat(
                 &mut out,
                 ferrix_cgroupfs::cpu::Stat {
-                    usage: user.saturating_add(system) / 1000,
+                    usage: (user / 1000).saturating_add(system / 1000),
                     user: user / 1000,
                     system: system / 1000,
                     periods: job.counted(Counter::Periods),

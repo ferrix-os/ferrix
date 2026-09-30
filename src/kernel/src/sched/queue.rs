@@ -31,6 +31,14 @@ use ferrix_sched::{Config, CpuLoad, EntityState, Load, RunQueue, Timeline, slice
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 
+/// The most a task under a `cpu.max` runs before the quota is looked at
+/// again, however much is left: with `n` tasks of one job running at once on
+/// `n` processors the quota goes `n` times faster than one task's look at it
+/// would say. Linux hands each processor a slice of the quota at a time for
+/// the same reason. One millisecond bounds the overshoot to about a
+/// millisecond a processor a period.
+pub(crate) const BANDWIDTH_SLICE_NS: u64 = 1_000_000;
+
 /// How much CPU a task asks for at a time.
 ///
 /// Three milliseconds: long enough that a switch costs a fraction of a per
@@ -569,7 +577,7 @@ impl CpuQueue {
             .as_ref()
             .filter(|_| crate::object::quota::bandwidth_in_use())
             .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
-            .map(|left| now.saturating_add(left));
+            .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
 
         match [sleeper, slice, bandwidth].into_iter().flatten().min() {
             Some(at) => crate::timer::after(at.saturating_sub(now).max(MIN_ARM_NS)),
