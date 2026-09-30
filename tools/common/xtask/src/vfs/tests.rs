@@ -312,6 +312,28 @@ const APPLETS_ON_X86_64: &[(usize, &[&str])] = &[
         ],
     ),
     (22, &["killed by SIGKILL", "oom_kill 1", "removed"]),
+    (
+        23,
+        &[
+            "running cgroup used the processor",
+            "cgroup.events frozen 1",
+            "frozen cgroup used no processor",
+            "thawed cgroup ran again",
+            "frozen cgroup killed",
+            "removed",
+        ],
+    ),
+    (
+        24,
+        &[
+            "max 100000",
+            "20000 100000",
+            "held to about a fifth of a processor",
+            "cpu.stat counted the throttling",
+            "free again",
+            "removed",
+        ],
+    ),
 ];
 
 /// A log of the applets alone, numbered after the criterion's commands, each
