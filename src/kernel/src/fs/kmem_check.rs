@@ -65,6 +65,14 @@ pub(crate) struct Report {
     pub(crate) namespaces: usize,
     /// User namespaces, each a level-1 child of the first.
     pub(crate) user_namespaces: usize,
+    /// UTS namespaces, copies of the first's.
+    pub(crate) uts_namespaces: usize,
+    /// IPC namespaces, empty.
+    pub(crate) ipc_namespaces: usize,
+    /// Cgroup namespaces, rooted at the tree's root.
+    pub(crate) cgroup_namespaces: usize,
+    /// Namespace files, each opened from a link of `/proc/<pid>/ns`.
+    pub(crate) namespace_files: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -100,6 +108,10 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         })?;
         report.namespaces = namespaces(&tree)?;
         report.user_namespaces = user_namespaces(&tree)?;
+        report.uts_namespaces = uts_namespaces(&tree)?;
+        report.ipc_namespaces = ipc_namespaces(&tree)?;
+        report.cgroup_namespaces = cgroup_namespaces(&tree)?;
+        report.namespace_files = namespace_files(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -439,4 +451,43 @@ fn regions(tree: &Arc<Job>) -> Result<usize, &'static str> {
         return Err("kmem: spaces gone and their regions still charged");
     }
     Ok(usize::try_from(made).unwrap_or(0))
+}
+
+/// UTS namespaces, made as `unshare(CLONE_NEWUTS)` makes them: each a copy of
+/// the first's names, charged to the job asking (`docs/NAMESPACES.md` §12).
+fn uts_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let owner = Arc::clone(crate::syscall::userns::first());
+    kind(tree, "uts namespaces", |_| {
+        crate::syscall::system::initial_uts().copy(Arc::clone(&owner))
+    })
+}
+
+/// IPC namespaces, each empty, as `unshare(CLONE_NEWIPC)` makes them.
+fn ipc_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let owner = Arc::clone(crate::syscall::userns::first());
+    kind(tree, "ipc namespaces", |_| {
+        crate::syscall::sem::IpcNamespace::empty(Arc::clone(&owner))
+    })
+}
+
+/// Cgroup namespaces, each rooted at the tree's root, as
+/// `unshare(CLONE_NEWCGROUP)` makes them.
+fn cgroup_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let owner = Arc::clone(crate::syscall::userns::first());
+    kind(tree, "cgroup namespaces", |_| {
+        crate::syscall::nsproxy::CgroupNamespace::rooted_at(
+            Arc::clone(crate::object::job::root()),
+            Arc::clone(&owner),
+        )
+    })
+}
+
+/// Namespace files: a link of `/proc/<pid>/ns` followed makes an inode, a
+/// detached mount and their names, which the job that opens pays for while a
+/// descriptor keeps them.
+fn namespace_files(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let namespace = Arc::clone(crate::syscall::system::initial_uts());
+    kind(tree, "namespace files", |_| {
+        fs::nsfs::location(fs::nsfs::Handle::Uts(Arc::clone(&namespace)))
+    })
 }

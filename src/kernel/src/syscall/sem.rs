@@ -466,11 +466,6 @@ impl IpcNamespace {
         })
         .map_err(|_| Errno::ENOMEM)
     }
-
-    /// How many sets it holds.
-    pub(crate) fn sets(&self) -> usize {
-        self.table.lock().sets
-    }
 }
 
 /// What a blocked caller sleeps on. Nobody wakes it as a whole: a caller's

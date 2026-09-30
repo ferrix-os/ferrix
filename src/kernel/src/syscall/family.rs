@@ -437,7 +437,11 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
 /// parent's mount namespace, then the UTS, IPC and cgroup ones. A cgroup
 /// namespace is rooted where the parent is, not where `CLONE_INTO_CGROUP`
 /// puts the child, as Linux's `copy_cgroup_ns` reads the parent's css set.
-fn give_namespaces(parent: &Arc<Process>, child: &Arc<Process>, flags: u64) -> Result<(), Errno> {
+pub(crate) fn give_namespaces(
+    parent: &Arc<Process>,
+    child: &Arc<Process>,
+    flags: u64,
+) -> Result<(), Errno> {
     let owner = if flags & CLONE_NEWUSER != 0 {
         let fresh = namespace::make_user_namespace(parent)?;
         namespace::enter_user_namespace(child, Arc::clone(&fresh));
