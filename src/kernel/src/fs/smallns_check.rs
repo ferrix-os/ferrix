@@ -871,6 +871,21 @@ fn joining_user(tally: &mut Tally<'_>) -> Result<(), &'static str> {
     if theirs != ours {
         return Err("setns into a user namespace left the caller in another");
     }
+    // A mount namespace made inside it is owned by it, so another holder of
+    // its capabilities may join that one.
+    tally.ok(
+        unshare(&maker_of, CLONE_NEWNS),
+        "unshare(CLONE_NEWNS) was refused to a holder of CAP_SYS_ADMIN in a user namespace",
+    )?;
+    let mount = got(
+        tally,
+        ns_fd(&member, &mut mine, maker_of.pid(), "mnt"),
+        "a mount namespace made in a user namespace could not be opened",
+    )?;
+    tally.ok(
+        setns(&member, mount, CLONE_NEWNS),
+        "a mount namespace made in a user namespace could not be joined from inside it",
+    )?;
     // Root opens the link, then becomes someone else: not the owner.
     let opener = got(
         tally,
