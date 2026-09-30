@@ -299,7 +299,9 @@ pub(crate) fn sys_sysinfo_at_width(
     // Every field offset in `sysinfo_at` is a whole number of native words,
     // and the same number of words at any width: rescale it.
     let field = |native: usize| native / WORD * word;
-    let nanos = time::now_nanos();
+    let nanos = process
+        .time_namespace()
+        .shown(crate::syscall::timens::Shift::Boottime, time::now_nanos());
     let uptime = nanos / 1_000_000_000 + u64::from(!nanos.is_multiple_of(1_000_000_000));
     let total_pages = mm::managed_frames();
     let free_pages = mm::free_frames();

@@ -371,7 +371,9 @@ fn populate(
     // is a 64-bit image its libc could not read, and both musl and glibc
     // make those calls themselves without it (`docs/I386.md` §2).
     let vdso = match loaded.abi {
-        Abi::Native => super::vdso::map_into(space),
+        Abi::Native => {
+            super::vdso::map_into(space, super::vdso::is_shifted(&process.time_namespace()))
+        }
         Abi::Compat => None,
     };
     // ARMv7-A's signal return page, where a handler without `SA_RESTORER`

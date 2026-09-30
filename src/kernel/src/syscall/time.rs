@@ -24,6 +24,7 @@ use crate::syscall::credentials;
 use crate::syscall::process::Process;
 use crate::syscall::signal::RestartBlock;
 use crate::syscall::thread::Thread;
+use crate::syscall::timens::{self, Shift};
 use crate::syscall::uaccess::{self, WORD};
 use crate::trap::Abi;
 
@@ -231,7 +232,7 @@ pub(crate) fn sys_clock_gettime(
     let nanos = match clock {
         CLOCK_REALTIME | CLOCK_REALTIME_COARSE | CLOCK_TAI => realtime_nanos(),
         CLOCK_MONOTONIC | CLOCK_MONOTONIC_RAW | CLOCK_MONOTONIC_COARSE | CLOCK_BOOTTIME => {
-            now_nanos()
+            shown_to(process, clock, now_nanos())
         }
         CLOCK_THREAD_CPUTIME_ID => sched::current_runtime(),
         CLOCK_PROCESS_CPUTIME_ID => process_runtime(process),
@@ -239,6 +240,25 @@ pub(crate) fn sys_clock_gettime(
     };
     write_pair(process, at, nanos / NANOS, nanos % NANOS, width)?;
     Ok(0)
+}
+
+/// `host` nanoseconds on the counter as `process` reads `clock`: shifted by
+/// its time namespace's offset for the monotonic and boot-time clocks
+/// (`docs/NAMESPACES.md` §12.1), as they are for every other clock.
+pub(crate) fn shown_to(process: &Process, clock: u32, host: u64) -> u64 {
+    match timens::shift_of(clock) {
+        Some(which) => process.time_namespace().shown(which, host),
+        None => host,
+    }
+}
+
+/// An absolute time `process` gave on `clock`, as the counter reads it: the
+/// other way from [`shown_to`].
+pub(crate) fn host_from(process: &Process, clock: u32, given: u64) -> u64 {
+    match timens::shift_of(clock) {
+        Some(which) => process.time_namespace().host(which, given),
+        None => given,
+    }
 }
 
 /// `clock_getres` and `clock_getres_time64`: the resolution of a clock
@@ -554,7 +574,7 @@ pub(crate) fn sys_clock_nanosleep(
         let counter = i128::from(requested) - i128::from(realtime_offset());
         u64::try_from(counter.max(0)).unwrap_or(u64::MAX)
     } else {
-        requested
+        host_from(thread.process(), clock, requested)
     };
     sleep_until(thread, deadline, 0, width)
 }
@@ -575,7 +595,8 @@ pub(crate) fn sys_times(process: &Process, at: u64, word: usize) -> Result<usize
         let tms = zeros.get(..word * 4).ok_or(Errno::EFAULT)?;
         uaccess::copy_to_user(process.space(), at, tms).map_err(|_| Errno::EFAULT)?;
     }
-    Ok((now_nanos() / (NANOS / USER_HZ)) as usize)
+    let boot = process.time_namespace().shown(Shift::Boottime, now_nanos());
+    Ok((boot / (NANOS / USER_HZ)) as usize)
 }
 
 /// `getrusage`: zero usage, for a `who` Linux knows.

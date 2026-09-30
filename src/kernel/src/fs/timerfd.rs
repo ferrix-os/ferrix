@@ -223,6 +223,11 @@ pub(crate) fn create(clock: Clock, nonblock: bool) -> Result<Arc<OpenFile>, Errn
 }
 
 impl TimerFd {
+    /// The clock it counts on.
+    pub(crate) fn clock(&self) -> Clock {
+        self.clock
+    }
+
     /// Arm or disarm the timer, answering the setting it replaced, as
     /// `timerfd_settime` does.
     ///

@@ -58,6 +58,11 @@ pub(crate) const CAP_SETPCAP: u32 = 8;
 pub(crate) const CAP_SYS_CHROOT: u32 = 18;
 /// `CAP_SYS_ADMIN`.
 pub(crate) const CAP_SYS_ADMIN: u32 = 21;
+/// `CAP_SYS_TIME`: honoured in a child namespace for one thing only, writing
+/// the offsets of a time namespace that namespace owns
+/// (`docs/NAMESPACES.md` §12.1). Setting the clock needs `privileged()`,
+/// which a child namespace never is.
+pub(crate) const CAP_SYS_TIME: u32 = 25;
 
 /// Every capability Linux defines, as a set.
 pub(crate) const FULL: u64 = (1_u64 << (CAP_LAST_CAP + 1)) - 1;
@@ -69,7 +74,8 @@ pub(crate) const HONOURED: u64 = (1 << CAP_SETGID)
     | (1 << CAP_SETUID)
     | (1 << CAP_SETPCAP)
     | (1 << CAP_SYS_CHROOT)
-    | (1 << CAP_SYS_ADMIN);
+    | (1 << CAP_SYS_ADMIN)
+    | (1 << CAP_SYS_TIME);
 
 /// A process's four capability sets, as Linux's 64-bit masks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

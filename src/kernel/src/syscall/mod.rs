@@ -90,6 +90,7 @@ pub(crate) mod system;
 pub(crate) mod thread;
 pub(crate) mod thread_area;
 pub(crate) mod time;
+pub(crate) mod timens;
 pub(crate) mod timerfd;
 pub(crate) mod tty;
 pub(crate) mod uaccess;

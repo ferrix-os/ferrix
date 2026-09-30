@@ -70,7 +70,7 @@ use crate::syscall::fd;
 use crate::syscall::registry;
 use crate::syscall::signal::{Origin, Posted, Signals};
 use crate::syscall::thread::{self, Thread};
-use crate::syscall::{attributes, futex, kill, sem, uaccess};
+use crate::syscall::{attributes, futex, kill, sem, timens, uaccess};
 use crate::user::space::{AddressSpace, MMAP_MIN_ADDR, SpaceError};
 use ferrix_linux_abi::types::SIGCHLD;
 
@@ -215,6 +215,9 @@ pub(crate) struct Process {
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
     credentials: SpinLock<Credentials>,
+    /// The time namespace it is in and the one its children are made in
+    /// (`docs/NAMESPACES.md` §12.1). A lock of its own, taken alone.
+    time: SpinLock<timens::Held>,
 }
 
 /// Where a program starts: the two numbers `exec::load` computes and the task
@@ -380,6 +383,7 @@ impl Process {
             // A process the kernel starts is root's. A fork child takes its
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
+            time: SpinLock::new(timens::Held::initial()),
         })
     }
 
@@ -442,6 +446,7 @@ impl Process {
         child.umask = AtomicU32::new(parent.umask());
         child.oom_score_adj = AtomicI32::new(parent.oom_score_adj());
         child.credentials = SpinLock::new(parent.credentials.lock().clone());
+        child.time = SpinLock::new(parent.time.lock().for_fork());
         child.identity = SpinLock::new(parent.identity.lock().clone());
         Ok(child)
     }
@@ -711,6 +716,23 @@ impl Process {
     /// together. Nothing that waits may be done inside it.
     pub(crate) fn with_credentials<R>(&self, change: impl FnOnce(&mut Credentials) -> R) -> R {
         change(&mut self.credentials.lock())
+    }
+
+    /// The time namespace it is in, which its clock reads are shown in.
+    pub(crate) fn time_namespace(&self) -> Arc<timens::TimeNamespace> {
+        Arc::clone(&self.time.lock().own)
+    }
+
+    /// The time namespace its children are made in.
+    pub(crate) fn time_namespace_for_children(&self) -> Arc<timens::TimeNamespace> {
+        Arc::clone(&self.time.lock().children)
+    }
+
+    /// Make its children in `namespace`: what `unshare(CLONE_NEWTIME)` and
+    /// `setns` do. The caller's own clocks do not move.
+    pub(crate) fn set_time_namespace_for_children(&self, namespace: Arc<timens::TimeNamespace>) {
+        let displaced = core::mem::replace(&mut self.time.lock().children, namespace);
+        drop(displaced);
     }
 
     /// The semaphore sets it holds undo records in.

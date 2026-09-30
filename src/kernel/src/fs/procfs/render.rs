@@ -220,6 +220,34 @@ pub(super) fn user_namespace(process: &Process) -> Result<Vec<u8>> {
     Ok(alloc::format!("user:[{id}]").into_bytes())
 }
 
+/// `/proc/<pid>/ns/time` and `ns/time_for_children`.
+pub(super) fn time_namespace(process: &Process, children: bool) -> Result<Vec<u8>> {
+    let (id, name) = if children {
+        (
+            process.time_namespace_for_children().id(),
+            "time_for_children",
+        )
+    } else {
+        (process.time_namespace().id(), "time")
+    };
+    Ok(alloc::format!("{name}:[{id}]").into_bytes())
+}
+
+/// A write to `timens_offsets`: the namespace is the target's children's, who
+/// opened the file is `opener` and who writes is the running process, and
+/// [`timens::write_offsets`] judges both.
+pub(super) fn write_time_offsets(
+    namespace: &crate::syscall::timens::TimeNamespace,
+    opener: Option<&crate::syscall::credentials::Credentials>,
+    data: &[u8],
+) -> Result<usize> {
+    let opener = opener.ok_or(Errno::EPERM)?;
+    let writer = userns::acting()
+        .ok_or(Errno::EPERM)?
+        .with_credentials(|held| held.clone());
+    crate::syscall::timens::write_offsets(namespace, opener, &writer, data)
+}
+
 /// The user namespace the reading process is in: the first, for the kernel's
 /// own reads.
 fn reader_namespace() -> Arc<UserNamespace> {
@@ -366,7 +394,10 @@ pub(super) fn mountinfo(process: &Process) -> Result<Vec<u8>> {
 /// processors, which is what the `idle` field of the `cpuN` lines in
 /// `/proc/stat` adds up to.
 pub(super) fn uptime(_: &Kernel) -> Result<Vec<u8>> {
-    let nanos = time::now_nanos();
+    let nanos = crate::syscall::timens::shown_to_reader(
+        crate::syscall::timens::Shift::Boottime,
+        time::now_nanos(),
+    );
     let idle = online_times()?
         .iter()
         .fold(0_u64, |sum, (_, time)| sum.saturating_add(time.idle_ns));
@@ -431,7 +462,7 @@ fn online_times() -> Result<Vec<(u32, sched::CpuTime)>> {
 /// * **`ctxt`**: switches every run queue has made, idle task included.
 /// * **`btime`**: the wall clock less the counter, in whole seconds. That is
 ///   zero until something sets the clock, and moves when it is set, as
-///   Linux's does.
+///   Linux's does; less the reader's boot-time offset in a time namespace.
 /// * **`processes`**: tasks made since boot.
 /// * **`procs_running`**: tasks on the run queues, each running one included
 ///   and the idle tasks not.
@@ -466,7 +497,15 @@ pub(super) fn kstat(_: &Kernel) -> Result<Vec<u8>> {
         interrupts: irq::delivered().saturating_add(irq::unclaimed()),
         per_interrupt: &[],
         context_switches: switches,
-        boot_time: u64::try_from(time::realtime_offset()).unwrap_or(0) / NANOS,
+        // Less the reader's boot-time offset, as Linux's `timens_sub_boottime`.
+        boot_time: u64::try_from(
+            i128::from(time::realtime_offset())
+                - i128::from(crate::syscall::timens::reader_offset(
+                    crate::syscall::timens::Shift::Boottime,
+                )),
+        )
+        .unwrap_or(0)
+            / NANOS,
         processes: sched::tasks_made(),
         running,
         blocked: 0,
@@ -1143,7 +1182,10 @@ fn stat_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         priority: 20,
         nice: 0,
         threads: thread_count(process),
-        start_time: process.started() / (NANOS / CLOCK_TICKS),
+        start_time: crate::syscall::timens::shown_to_reader(
+            crate::syscall::timens::Shift::Boottime,
+            process.started(),
+        ) / (NANOS / CLOCK_TICKS),
         vsize: memory.size,
         // With no memory to count them in, none: `stat` is still answered.
         rss: process.space().resident_pages().unwrap_or(0),

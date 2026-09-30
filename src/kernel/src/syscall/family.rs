@@ -45,7 +45,7 @@ use crate::fs::cgroupfs;
 use crate::object::job::{self, Job};
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
-use crate::syscall::{fd, namespace, registry, thread_area, uaccess, userns};
+use crate::syscall::{fd, namespace, registry, thread_area, uaccess, userns, vdso};
 use crate::trap::Abi;
 
 /// The low byte of `clone`'s flags: the signal the parent is told with.
@@ -428,6 +428,23 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
     Ok(())
 }
 
+/// Give `child`, forked from `parent`, the vDSO view its time namespace
+/// needs, if that is not its parent's.
+///
+/// # Errors
+///
+/// `ENOMEM`; the child is to be abandoned unstarted.
+fn retarget_vdso(parent: &Arc<Process>, child: &Arc<Process>) -> Result<(), Errno> {
+    if Arc::ptr_eq(parent.space(), child.space()) {
+        return Ok(());
+    }
+    let shifted = vdso::is_shifted(&child.time_namespace());
+    if shifted == vdso::is_shifted(&parent.time_namespace()) {
+        return Ok(());
+    }
+    vdso::retarget(child.space(), shifted).map_err(|()| Errno::ENOMEM)
+}
+
 /// Make the process `request` asks for. See [`sys_clone`].
 fn clone_with(
     parent: &Arc<Process>,
@@ -491,6 +508,11 @@ fn clone_with(
     if pid == 0 || child.over_quota() {
         return Err(Errno::EAGAIN);
     }
+    // A child made in another time namespace than its parent is, with a copy
+    // of its parent's space, reads the clock through the parent's vDSO view:
+    // give it the other (`docs/NAMESPACES.md` §12.1). A `CLONE_VFORK` child
+    // shares the space and keeps the parent's until its `exec`.
+    retarget_vdso(parent, &child)?;
     // Its own copy of the namespace, before anything can see it: a refusal
     // goes with the child, unstarted.
     if flags & CLONE_NEWUSER != 0 {

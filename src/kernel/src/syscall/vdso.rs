@@ -21,6 +21,17 @@
 //! of one word is the whole update, so a program reading it concurrently sees
 //! the old offset or the new one, never half of each.
 //!
+//! # A second object for time namespaces
+//!
+//! The data page is one page for every process, so a process in a time
+//! namespace with offsets must not map it: it would read the clock unshifted
+//! (`docs/NAMESPACES.md` §12.1). Such a process is given a second object
+//! instead, the same image over a data page whose mode is
+//! [`ferrix_vdso::MODE_SYSCALL`], where every function makes the system call
+//! and the system call applies the offsets. Built the first time a process in
+//! such a namespace is started or forked, and kept; nothing in the image
+//! differs.
+//!
 //! # x86-64 only
 //!
 //! The one architecture with code for it (`crate::arch::vdso_spec`), and the
@@ -48,6 +59,10 @@ struct Vdso {
 /// Built by the first exec: `None` on an architecture without one, or if
 /// building failed, and then no process gets one.
 static VDSO: Once<Option<Vdso>> = Once::new();
+
+/// The variant for a process in a time namespace that shifts a clock: built
+/// on first need, like [`VDSO`].
+static SHIFTED: Once<Option<Vdso>> = Once::new();
 
 /// Taken to change the real-time offset and to write it into the data page,
 /// so that the two can only be changed together.
@@ -77,8 +92,9 @@ impl Vdso {
 }
 
 /// Build the object: two pages, held, the image in the second and the data
-/// page filled in. `None` on an architecture with no code for one.
-fn build() -> Option<Vdso> {
+/// page filled in. `None` on an architecture with no code for one. With
+/// `shifted` every function makes its system call.
+fn build(shifted: bool) -> Option<Vdso> {
     let spec = crate::arch::vdso_spec()?;
     let vmo = Vmo::new_anonymous(2).ok()?;
     let held = vmo.hold(0, 2).ok()?;
@@ -86,7 +102,7 @@ fn build() -> Option<Vdso> {
     ferrix_vdso::build(&spec, &mut image).ok()?;
     vmo.write_page(1, 0, &image).ok()?;
     let vdso = Vdso { vmo, held };
-    let mode = if crate::arch::vdso_can_read_counter() {
+    let mode = if crate::arch::vdso_can_read_counter() && !shifted {
         ferrix_vdso::MODE_TSC
     } else {
         ferrix_vdso::MODE_SYSCALL
@@ -99,7 +115,7 @@ fn build() -> Option<Vdso> {
 /// The object, built the first time it is asked for.
 fn vdso() -> Option<&'static Vdso> {
     let built = VDSO.get().is_some();
-    let vdso = VDSO.call_once(build).as_ref()?;
+    let vdso = VDSO.call_once(|| build(false)).as_ref()?;
     if !built {
         // Whatever the offset became while the page was being built.
         publish_realtime_offset(|| {});
@@ -107,12 +123,49 @@ fn vdso() -> Option<&'static Vdso> {
     Some(vdso)
 }
 
+/// The variant, built the first time it is asked for.
+fn shifted_vdso() -> Option<&'static Vdso> {
+    SHIFTED.call_once(|| build(true)).as_ref()
+}
+
 /// Map the vDSO into `space` and answer where its image is, for
 /// `AT_SYSINFO_EHDR`: `None` with no vDSO, or no room for one, and the
 /// program is started without, as it would be on an architecture without.
-pub(crate) fn map_into(space: &AddressSpace) -> Option<u64> {
-    let vdso = vdso()?;
+/// With `shifted`, for a process in a time namespace with offsets, the
+/// variant whose functions all make their system calls.
+pub(crate) fn map_into(space: &AddressSpace, shifted: bool) -> Option<u64> {
+    let vdso = if shifted { shifted_vdso()? } else { vdso()? };
     space.map_shared_code(Arc::clone(&vdso.vmo)).ok()
+}
+
+/// Whether a process in `namespace` is given the variant: it shifts a clock.
+pub(crate) fn is_shifted(namespace: &super::timens::TimeNamespace) -> bool {
+    !namespace.is_first()
+}
+
+/// Change the view of the vDSO `space` has to the one a process in a
+/// namespace that `shifted` says needs: what a fork does for a child whose
+/// time namespace is not its parent's. Nothing if the space maps neither, as
+/// a program that unmapped it or an architecture without one.
+///
+/// # Errors
+///
+/// The space could not be given the other view; it has none now.
+pub(crate) fn retarget(space: &AddressSpace, shifted: bool) -> Result<(), ()> {
+    let (from, to) = if shifted {
+        (VDSO.get().and_then(Option::as_ref), shifted_vdso())
+    } else {
+        (SHIFTED.get().and_then(Option::as_ref), vdso())
+    };
+    let (Some(from), Some(to)) = (from, to) else {
+        return Ok(());
+    };
+    let Some(at) = space.shared_code_at(&from.vmo) else {
+        return Ok(());
+    };
+    space
+        .replace_shared_code(at, Arc::clone(&to.vmo))
+        .map_err(drop)
 }
 
 /// The name of the return trampoline a signal handler without
@@ -131,8 +184,11 @@ pub(crate) fn sigreturn(space: &AddressSpace) -> Option<u64> {
         .functions
         .iter()
         .find(|function| function.name == SIGRETURN)?;
-    let vdso = VDSO.get()?.as_ref()?;
-    let data = space.shared_code_at(&vdso.vmo)?;
+    let data = [VDSO.get(), SHIFTED.get()]
+        .into_iter()
+        .flatten()
+        .filter_map(Option::as_ref)
+        .find_map(|vdso| space.shared_code_at(&vdso.vmo))?;
     let offset = u64::try_from(ferrix_vdso::CODE_AT + function.offset).ok()?;
     data.checked_add(ferrix_bootinfo::PAGE_SIZE)?
         .checked_add(offset)
@@ -158,6 +214,25 @@ pub(crate) fn image() -> Option<alloc::vec::Vec<u8>> {
     // the direct map; nothing writes it after `build`.
     let bytes = unsafe { core::slice::from_raw_parts(at, ferrix_vdso::IMAGE_BYTES) };
     Some(bytes.to_vec())
+}
+
+/// The variant's data page mode word, for the checks: builds it if need be.
+pub(crate) fn shifted_mode() -> Option<u64> {
+    let vdso = shifted_vdso()?;
+    Some(
+        vdso.word(ferrix_vdso::VVAR_MODE)?
+            .load(core::sync::atomic::Ordering::Acquire),
+    )
+}
+
+/// Where `space` maps the main object's data page and the variant's, for the
+/// checks: `None` for a view it does not have.
+pub(crate) fn mapped_views(space: &AddressSpace) -> [Option<u64>; 2] {
+    let at = |once: &Once<Option<Vdso>>| {
+        let vdso = once.get()?.as_ref()?;
+        space.shared_code_at(&vdso.vmo)
+    };
+    [at(&VDSO), at(&SHIFTED)]
 }
 
 /// The data page's words, for the checks: the mode, the frequency and the

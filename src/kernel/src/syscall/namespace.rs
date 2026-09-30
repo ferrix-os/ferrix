@@ -1,4 +1,4 @@
-//! `unshare` and `setns`: mount and user namespaces, and nothing else yet.
+//! `unshare` and `setns`: mount, user and time namespaces, and nothing else yet.
 //!
 //! A user namespace (`docs/NAMESPACES.md` §2.2) is made first when asked for
 //! with a mount namespace, and owns it. The caller ends up in it holding every
@@ -31,6 +31,7 @@ use crate::fs;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
 use crate::syscall::process::Process;
+use crate::syscall::timens::{self, CLONE_NEWTIME};
 use crate::syscall::userns::{self, CAP_SYS_ADMIN};
 
 /// Give the process a mount namespace of its own.
@@ -57,10 +58,13 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// share theirs -- and otherwise needs privilege (`EPERM`), and then copies
 /// the namespace into the context ([`copy_namespace`]).
 ///
+/// `CLONE_NEWTIME` needs `CAP_SYS_ADMIN` too, and moves only the caller's
+/// children ([`timens`]).
+///
 /// Every other flag names a namespace, or asks to leave a thread group or an
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
-    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER) != 0 {
+    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWTIME) != 0 {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_FILES != 0 && Arc::strong_count(process.files()) > 1 {
@@ -81,6 +85,14 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     } else {
         None
     };
+    // A time namespace is for the caller's children: its clocks stay as they
+    // are (`docs/NAMESPACES.md` §12.1). Owned by the user namespace made in
+    // the same call, if there is one; made here so a refusal changes nothing.
+    let time = if flags & CLONE_NEWTIME != 0 {
+        Some(process.with_credentials(|held| timens::create(held, fresh.as_ref()))?)
+    } else {
+        None
+    };
     // `CLONE_NEWNS` needs `CAP_SYS_ADMIN` where the caller is: in the
     // namespace it is about to have, if it asked for one.
     if flags & CLONE_NEWNS != 0 {
@@ -91,6 +103,9 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     }
     if let Some(fresh) = fresh {
         enter_user_namespace(process, fresh);
+    }
+    if let Some(time) = time {
+        process.set_time_namespace_for_children(time);
     }
     Ok(0)
 }

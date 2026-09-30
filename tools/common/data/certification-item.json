@@ -253,6 +253,7 @@
         "syscall/thread.rs",
         "syscall/thread_area.rs",
         "syscall/time.rs",
+        "syscall/timens.rs",
         "syscall/timerfd.rs",
         "syscall/tty.rs",
         "syscall/userns.rs",

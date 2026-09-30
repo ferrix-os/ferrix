@@ -148,6 +148,11 @@ pub(crate) enum Content<T: 'static> {
     /// `docs/NAMESPACES.md` §2.2 (U2 to U4), judged against who opened the
     /// file and who writes it.
     IdMap(MapFile),
+    /// `/proc/<pid>/timens_offsets`: the offsets of the time namespace the
+    /// process makes children in, written once before a process is made in
+    /// it, judged against who opened the file and who writes
+    /// (`docs/NAMESPACES.md` §12.1).
+    TimeOffsets,
     /// `/proc/<pid>/fd`: a link per open descriptor.
     Descriptors,
     /// `/proc/<pid>/ns`: a link per namespace the process is in, of which
@@ -185,13 +190,19 @@ enum NamespaceKind {
     Mount = 0,
     /// `user`.
     User = 1,
+    /// `time`: the time namespace the process is in.
+    Time = 2,
+    /// `time_for_children`: the one its children are made in.
+    TimeForChildren = 3,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 2] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 4] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
+        (NamespaceKind::Time, b"time"),
+        (NamespaceKind::TimeForChildren, b"time_for_children"),
     ];
 }
 
@@ -210,14 +221,14 @@ impl<T> Entry<T> {
     const fn takes_writes(&self) -> bool {
         matches!(
             self.content,
-            Content::File { write: Some(_), .. } | Content::IdMap(_)
+            Content::File { write: Some(_), .. } | Content::IdMap(_) | Content::TimeOffsets
         )
     }
 
     /// The kind of object this entry is.
     const fn kind(&self) -> FileType {
         match self.content {
-            Content::File { .. } | Content::IdMap(_) => FileType::Regular,
+            Content::File { .. } | Content::IdMap(_) | Content::TimeOffsets => FileType::Regular,
             Content::Link(_) => FileType::Symlink,
             Content::Descriptors
             | Content::Namespaces
@@ -389,7 +400,7 @@ static SYS_KERNEL: [Entry<Kernel>; 8] = [
 ];
 
 /// `/proc/<pid>`.
-pub(crate) static PER_PROCESS: [Entry<Process>; 18] = [
+pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
     Entry {
         name: b"fd",
         permissions: 0o500,
@@ -427,6 +438,11 @@ pub(crate) static PER_PROCESS: [Entry<Process>; 18] = [
         name: b"setgroups",
         permissions: 0o644,
         content: Content::IdMap(MapFile::Setgroups),
+    },
+    Entry {
+        name: b"timens_offsets",
+        permissions: 0o644,
+        content: Content::TimeOffsets,
     },
     Entry {
         name: b"oom_score_adj",
@@ -856,6 +872,20 @@ impl Node {
                     Snapshot::new(metadata, bytes, Some(writer), refusal, splices)
                         .map(|snapshot| Some(snapshot.only_at_start()))
                 }
+                Some(Content::TimeOffsets) => {
+                    let process = alive(pid)?;
+                    let namespace = process.time_namespace_for_children();
+                    let bytes = namespace.render_offsets();
+                    // Who opened it is judged at each write, beside who
+                    // writes, as a map file's are.
+                    let opener = crate::syscall::userns::acting()
+                        .map(|opener| opener.with_credentials(|held| held.clone()));
+                    let writer: Writer = Box::new(move |data| {
+                        render::write_time_offsets(&namespace, opener.as_ref(), data)
+                    });
+                    Snapshot::new(metadata, bytes, Some(writer), refusal, splices)
+                        .map(|snapshot| Some(snapshot.only_at_start()))
+                }
                 Some(Content::File { render, write }) => {
                     let process = alive(pid)?;
                     let bytes = render(&process)?;
@@ -1251,6 +1281,10 @@ impl Inode for Node {
             Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
             Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
+            Place::Namespace(
+                pid,
+                kind @ (NamespaceKind::Time | NamespaceKind::TimeForChildren),
+            ) => render::time_namespace(&*alive(pid)?, kind == NamespaceKind::TimeForChildren),
             _ => Err(Errno::EINVAL),
         }
     }
