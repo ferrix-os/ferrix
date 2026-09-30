@@ -75,6 +75,10 @@ pub enum Kind {
     MemoryEvents,
     /// `memory.stat`: the keys Ferrix has a source for.
     MemoryStat,
+    /// `io.stat`.
+    IoStat,
+    /// `io.max`.
+    IoMax,
     /// `pids.current`.
     PidsCurrent,
     /// `pids.max`.
@@ -122,6 +126,8 @@ pub const FILES: &[File] = &[
         false,
     ),
     controlled("memory.stat", Kind::MemoryStat, Controller::Memory, false),
+    on_root_too("io.stat", Kind::IoStat, Controller::Io, false),
+    controlled("io.max", Kind::IoMax, Controller::Io, true),
     controlled("pids.current", Kind::PidsCurrent, Controller::Pids, false),
     controlled("pids.max", Kind::PidsMax, Controller::Pids, true),
     controlled("pids.events", Kind::PidsEvents, Controller::Pids, false),
@@ -149,6 +155,23 @@ const fn controlled(
         name,
         kind,
         on_root: false,
+        writable,
+        controller: Some(controller),
+    }
+}
+
+/// A table entry of a controller's that the root has too: `io.stat`, which
+/// counts what the whole machine did.
+const fn on_root_too(
+    name: &'static str,
+    kind: Kind,
+    controller: Controller,
+    writable: bool,
+) -> File {
+    File {
+        name,
+        kind,
+        on_root: true,
         writable,
         controller: Some(controller),
     }

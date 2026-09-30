@@ -1053,8 +1053,26 @@ impl Quota {
     }
 }
 
+/// What a job's going tells whoever keeps state of its own per job slot
+/// (`fs::blkio`): the core cannot name it, so it is told through this.
+static RELEASE_HOOK: Once<fn(u32)> = Once::new();
+
+/// Have `hook` called with a job's slot as the job goes, before the slot
+/// lets go of its parent. Once; a second call is ignored.
+pub(crate) fn on_job_release(hook: fn(u32)) {
+    let _ = RELEASE_HOOK.call_once(|| hook);
+}
+
+/// The slot above `index`, or [`NONE`] at the top of a tree.
+pub(crate) fn parent_of(index: u32) -> u32 {
+    slot(index).map_or(NONE, |slot| slot.parent.load(Ordering::Acquire))
+}
+
 impl Drop for Quota {
     fn drop(&mut self) {
+        if let Some(hook) = RELEASE_HOOK.get() {
+            hook(self.index);
+        }
         // A quota set on a job that goes leaves no mark behind.
         self.set_bandwidth(UNLIMITED, DEFAULT_PERIOD_NS);
         release(self.index);
