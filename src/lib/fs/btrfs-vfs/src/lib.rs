@@ -475,6 +475,11 @@ impl<D: BlockHandle> PageSource for FileSource<D> {
         true
     }
 
+    /// A read-only mount's file is whatever the disk holds, and stays so.
+    fn reclaimable(&self) -> bool {
+        true
+    }
+
     /// One read for the whole run, which is how a compressed extent is read
     /// anyway. If that read fails — a sector's checksum, the disk — the run
     /// is read again a page at a time, and the pages before the first failure

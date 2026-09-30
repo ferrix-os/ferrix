@@ -76,7 +76,7 @@ fn protection(prot: u32) -> Result<VmaFlags, Errno> {
 fn refused(error: SpaceError) -> Errno {
     match error {
         SpaceError::OutOfMemory | SpaceError::Backing(_) => Errno::ENOMEM,
-        SpaceError::Unreadable(_) => Errno::EIO,
+        SpaceError::Unreadable(_) | SpaceError::Evicted => Errno::EIO,
         SpaceError::NotUserRange(_) | SpaceError::BadRange => Errno::EINVAL,
         // A copy into a file mapping past the file's end is EFAULT from a
         // system call, where the same touch from user mode is SIGBUS.
