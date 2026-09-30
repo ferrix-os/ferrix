@@ -207,25 +207,7 @@ pub(crate) fn handle(
     // The process's own number when there is a process, and the running
     // task's when there is not -- the boot self-checks call this with none.
     if matches!(call, Syscall::Getpid | Syscall::Gettid) {
-        // A thread answers `gettid` with its own number, when the caller is a
-        // thread of this process. A process's first thread is numbered by its
-        // pid, which is what glibc's `raise` and a fork child's
-        // `CLONE_CHILD_SETTID` expect to agree.
-        let pid = process
-            .map(|process| pidns::to_user(process, process))
-            .filter(|&pid| pid != 0);
-        let tid = process
-            .and_then(|process| {
-                thread::current()
-                    .filter(|thread| core::ptr::eq(thread.process().as_ref(), process))
-                    .map(|thread| pidns::tid_to_user(process, &thread))
-            })
-            .filter(|&tid| tid != 0);
-        let id = match call {
-            Syscall::Gettid => tid.or(pid),
-            _ => pid,
-        };
-        return Ok(id.map_or_else(current_id, |id| id as usize));
+        return Ok(own_number(call, process));
     }
     if let (Syscall::Getppid, Some(process)) = (call, process) {
         return Ok(process.parent_pid_in(process) as usize);
@@ -238,6 +220,31 @@ pub(crate) fn handle(
     }
     let process = process.ok_or(Errno::ESRCH)?;
     with_process(call, args, process)
+}
+
+/// What `getpid` and `gettid` answer: the caller's own number in its own
+/// namespace. A thread answers `gettid` with its own number, when the caller
+/// is a thread of this process. A process's first thread is numbered by its
+/// pid, which is what glibc's `raise` and a fork child's `CLONE_CHILD_SETTID`
+/// expect to agree. Apart, so that the dispatcher's frame, which every system
+/// call pays for on a kernel stack of four pages, does not grow with it.
+#[inline(never)]
+fn own_number(call: Syscall, process: Option<&Process>) -> usize {
+    let pid = process
+        .map(|process| pidns::to_user(process, process))
+        .filter(|&pid| pid != 0);
+    let tid = process
+        .and_then(|process| {
+            thread::current()
+                .filter(|thread| core::ptr::eq(thread.process().as_ref(), process))
+                .map(|thread| pidns::tid_to_user(process, &thread))
+        })
+        .filter(|&tid| tid != 0);
+    let id = match call {
+        Syscall::Gettid => tid.or(pid),
+        _ => pid,
+    };
+    id.map_or_else(current_id, |id| id as usize)
 }
 
 /// The calls that need no process: identity, and yielding.

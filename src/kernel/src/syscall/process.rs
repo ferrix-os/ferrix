@@ -438,6 +438,7 @@ impl Process {
     /// given: `clone3`'s `CLONE_INTO_CGROUP`, whose caller has checked that
     /// the parent may put a process there. The child is counted there from
     /// the start, so it is never in the parent's job at all.
+    #[inline(never)]
     pub(crate) fn forked_into(
         parent: &Arc<Process>,
         space: Arc<AddressSpace>,

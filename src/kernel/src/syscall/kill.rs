@@ -152,6 +152,7 @@ pub(crate) fn send_to_current(signal: u32) {
 ///
 /// `EINVAL` for a signal past 64; `ESRCH` when no process matches; `EPERM`
 /// when none that matched may be signalled.
+#[inline(never)]
 pub(crate) fn sys_kill(process: &Process, pid: i32, signal: u32) -> Result<usize, Errno> {
     if signal > NSIG {
         return Err(Errno::EINVAL);
@@ -281,6 +282,7 @@ pub(crate) fn sys_tkill(process: &Process, tid: i32, signal: u32) -> Result<usiz
 
 /// The live thread `viewer` calls `tid`, required to be one of the process
 /// it calls `tgid` when that is given.
+#[inline(never)]
 fn find_thread(viewer: &Process, tid: u32, tgid: Option<u32>) -> Result<Arc<Thread>, Errno> {
     let kernel = pidns::from_user(viewer, tid).ok_or(Errno::ESRCH)?;
     let target = registry::find(kernel).ok_or(Errno::ESRCH)?;

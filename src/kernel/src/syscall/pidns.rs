@@ -174,6 +174,7 @@ pub(crate) fn level_of(namespace: Option<&Arc<PidNamespace>>) -> u32 {
 ///
 /// `ENOSPC` past [`MAX_LEVEL`], Linux's answer; `ENOMEM` past the job's
 /// memory (F-37).
+#[inline(never)]
 pub(crate) fn create(parent: Option<&Arc<PidNamespace>>) -> Result<Arc<PidNamespace>, Errno> {
     let level = level_of(parent) + 1;
     if level > MAX_LEVEL {
@@ -274,6 +275,7 @@ impl Drop for Numbers {
 /// `ENOMEM` for a namespace that is ending, for the job's memory, and for the
 /// maps' nodes; `EAGAIN` when a namespace has no number left. Nothing is
 /// recorded on an error.
+#[inline(never)]
 pub(crate) fn assign(ns: &Arc<PidNamespace>, kernel: u32) -> Result<Arc<Numbers>, Errno> {
     if ns.is_dying() {
         return Err(Errno::ENOMEM);
@@ -366,6 +368,7 @@ pub(crate) fn find_in(viewer: &Process, number: u32) -> Option<Arc<Process>> {
 /// # Errors
 ///
 /// `ENOMEM` when there was no memory for the list.
+#[inline(never)]
 pub(crate) fn live_in(viewer: &Process) -> Result<Vec<Arc<Process>>, Errno> {
     let mut all = registry::live()?;
     if viewer.numbers().is_some() {
@@ -378,6 +381,7 @@ pub(crate) fn live_in(viewer: &Process) -> Result<Vec<Arc<Process>>, Errno> {
 /// `siginfo` or a socket's credentials tell, read by the process that reads
 /// them. The kernel number when nothing is reading, or the reader is in the
 /// first namespace; zero when it cannot be seen.
+#[inline(never)]
 pub(crate) fn show_pid(kernel: u32) -> u32 {
     let Some(reader) = userns::acting() else {
         return kernel;
@@ -409,6 +413,7 @@ pub(crate) fn is_init(process: &Process) -> bool {
 /// included -- except `SIGKILL` and `SIGSTOP` from an ancestor namespace
 /// (or the kernel's own kill), which are how a namespace is ended from
 /// outside.
+#[inline(never)]
 pub(crate) fn discards(target: &Process, signal: u32, origin: Origin) -> bool {
     if !is_init(target) || !target.with_signals(|signals| signals.is_default(signal)) {
         return false;
@@ -436,6 +441,7 @@ fn from_ancestor(target: &Process, origin: Origin) -> bool {
 
 /// A namespace's init is going: no task may join it, and every other task in
 /// it and below it is sent `SIGKILL` (Linux's `zap_pid_ns_processes`).
+#[inline(never)]
 pub(crate) fn init_gone(init: &Process) {
     let Some(numbers) = init.numbers() else {
         return;
@@ -514,6 +520,7 @@ pub(crate) fn kernel_in(ns: Option<&Arc<PidNamespace>>, number: u32) -> Option<u
 /// with `numbers`, read from the namespace at `level`: its number at that
 /// level and every one below. Empty when the task is in the first namespace
 /// and the reader is too, which Linux prints as the one number alone.
+#[inline(never)]
 pub(crate) fn status_chain(numbers: Option<&Arc<Numbers>>, level: u32) -> Vec<u32> {
     numbers
         .and_then(|numbers| numbers.chain().get(level as usize..))
@@ -528,6 +535,7 @@ pub(crate) fn status_chain(numbers: Option<&Arc<Numbers>>, level: u32) -> Vec<u3
 /// The number `viewer` calls process group `kernel`: zero when it has no
 /// member the viewer can see a number for. The terminal keeps kernel
 /// numbers; a program reads them through this.
+#[inline(never)]
 pub(crate) fn pgrp_to_user(viewer: &Process, kernel: u32) -> u32 {
     if viewer.numbers().is_none() {
         return kernel;
@@ -541,6 +549,7 @@ pub(crate) fn pgrp_to_user(viewer: &Process, kernel: u32) -> u32 {
 
 /// The kernel number of the process group `viewer` calls `number`, if a
 /// process in it is there to be found.
+#[inline(never)]
 pub(crate) fn pgrp_from_user(viewer: &Process, number: u32) -> Option<u32> {
     if viewer.numbers().is_none() {
         return Some(number);
@@ -553,6 +562,7 @@ pub(crate) fn pgrp_from_user(viewer: &Process, number: u32) -> Option<u32> {
 }
 
 /// [`pgrp_to_user`] for a session.
+#[inline(never)]
 pub(crate) fn sid_to_user(viewer: &Process, kernel: u32) -> u32 {
     if viewer.numbers().is_none() {
         return kernel;

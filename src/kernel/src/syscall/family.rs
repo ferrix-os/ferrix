@@ -467,6 +467,7 @@ type Fresh = (
 /// The namespaces `flags` has a child made in, before the child is: the user
 /// namespace first, as `unshare` makes it, and then a pid namespace below
 /// the one the parent's children go in.
+#[inline(never)]
 fn fresh_namespaces(parent: &Process, flags: u64) -> Result<Fresh, Errno> {
     let user = if flags & CLONE_NEWUSER != 0 {
         Some(namespace::make_user_namespace(parent)?)
@@ -486,6 +487,7 @@ fn fresh_namespaces(parent: &Process, flags: u64) -> Result<Fresh, Errno> {
 /// is ignored, as Linux ignores it: the child exists by now, and the
 /// addresses were the program's to get right. The parent is told the child's
 /// number in the parent's namespace, the child its own.
+#[inline(never)]
 fn write_ids(
     parent: &Process,
     child: &Process,
@@ -899,6 +901,7 @@ pub(crate) fn sys_wait4(
 ///
 /// `EINVAL` for a pid below one or a flag other than `PIDFD_NONBLOCK`;
 /// `ESRCH` for no such process; `EMFILE` for a full table.
+#[inline(never)]
 pub(crate) fn sys_pidfd_open(process: &Process, pid: i32, flags: u32) -> Result<usize, Errno> {
     if pid <= 0 || flags & !PIDFD_NONBLOCK != 0 {
         return Err(Errno::EINVAL);
@@ -1006,6 +1009,7 @@ fn zero_rusage(process: &Process, at: u64, word: usize) -> Result<(), Errno> {
 /// `ESRCH` if `pid` is neither the caller nor one of its children; `EINVAL`
 /// for a negative group; `EPERM` for a session leader, or a group that does not
 /// exist in the caller's session.
+#[inline(never)]
 pub(crate) fn sys_setpgid(process: &Process, pid: i32, pgid: i32) -> Result<usize, Errno> {
     if pgid < 0 {
         return Err(Errno::EINVAL);
@@ -1053,6 +1057,7 @@ pub(crate) fn sys_setpgid(process: &Process, pid: i32, pgid: i32) -> Result<usiz
 /// # Errors
 ///
 /// `ESRCH` for a pid no process has.
+#[inline(never)]
 pub(crate) fn sys_getpgid(process: &Process, pid: i32) -> Result<usize, Errno> {
     if pid == 0 {
         return Ok(process.pgid_in(process) as usize);
@@ -1067,6 +1072,7 @@ pub(crate) fn sys_getpgid(process: &Process, pid: i32) -> Result<usize, Errno> {
 /// # Errors
 ///
 /// `ESRCH` for a pid no process has.
+#[inline(never)]
 pub(crate) fn sys_getsid(process: &Process, pid: i32) -> Result<usize, Errno> {
     if pid == 0 {
         return Ok(process.sid_in(process) as usize);
@@ -1081,6 +1087,7 @@ pub(crate) fn sys_getsid(process: &Process, pid: i32) -> Result<usize, Errno> {
 ///
 /// `EPERM` if the caller already leads a process group, which is what stops a
 /// group leader from leaving its members in a session it no longer belongs to.
+#[inline(never)]
 pub(crate) fn sys_setsid(process: &Process) -> Result<usize, Errno> {
     let leads_a_group = registry::live()?
         .iter()

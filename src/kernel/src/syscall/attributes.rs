@@ -204,6 +204,7 @@ impl Deref for Subject<'_> {
 /// # Errors
 ///
 /// `ESRCH` for a pid nothing has, negative ones included.
+#[inline(never)]
 pub(crate) fn subject(process: &Process, pid: i32) -> Result<Subject<'_>, Errno> {
     if pid == 0 {
         return Ok(Subject::Caller(process));

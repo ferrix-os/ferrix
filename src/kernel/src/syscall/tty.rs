@@ -148,6 +148,7 @@ fn set(flush: bool, settings: impl FnOnce(Termios) -> Termios) {
 /// The live processes are listed before the terminal is locked and dropped
 /// after it is released: dropping the last reference to a process frees its
 /// memory, which is not something to do under a spin lock.
+#[inline(never)]
 fn job_control(process: &Process, request: u32, arg: u64) -> Result<usize, Errno> {
     let live = registry::live()?;
     let answer = match request {
@@ -228,6 +229,7 @@ fn take_controlling(
 /// A process in a background group changing the foreground would be sent
 /// `SIGTTOU` on Linux unless it ignores it -- which a shell's children do not
 /// yet, and nothing delivers a signal, so the change is simply allowed.
+#[inline(never)]
 fn set_foreground(process: &Process, live: &[Arc<Process>], arg: u64) -> Result<usize, Errno> {
     let (session, _) = terminal::with(|terminal| controlling(process, terminal, live))?;
     let mut bytes = [0_u8; 4];
@@ -426,6 +428,7 @@ fn pty_ioctl(
 /// for it gets it if nobody else holds it, a process may only ask about the
 /// terminal of its own session, and the foreground group must be a group in
 /// that session.
+#[inline(never)]
 fn pty_job_control(
     process: &Process,
     pty: &crate::fs::pty::Pty,
