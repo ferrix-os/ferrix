@@ -786,7 +786,8 @@ fn joining(tally: &mut Tally<'_>) -> Result<(), &'static str> {
     tally.ok(setns(&root, here, 0), "setns with type 0 was refused")?;
     joining_uts(tally)?;
     joining_user(tally)?;
-    joining_mount(tally)
+    joining_mount(tally)?;
+    joining_pidfd(tally)
 }
 
 /// A process joins the UTS namespace another process made and then tells its
@@ -963,6 +964,101 @@ fn joining_mount(tally: &mut Tally<'_>) -> Result<(), &'static str> {
         Errno::EPERM,
         "fake root joined the first mount namespace",
     )
+}
+
+/// A pidfd opened for `pid` by `process`.
+fn pidfd(process: &Process, pid: u32) -> Result<usize, Errno> {
+    call(process, Syscall::PidfdOpen, [u64::from(pid), 0, 0, 0, 0, 0])
+}
+
+/// `setns` on a pidfd: several namespaces of a process at once, all or none.
+fn joining_pidfd(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let (target, caller) = (maker()?, maker()?);
+    let (mut theirs, mut ours) = (page_for(&target)?, page_for(&caller)?);
+    tally.ok(
+        unshare(&target, CLONE_NEWUTS | CLONE_NEWIPC),
+        "unshare(CLONE_NEWUTS | CLONE_NEWIPC) was refused to root",
+    )?;
+    tally.ok(
+        set_name(&mut theirs, Syscall::Sethostname, b"viapidfd")?,
+        "root could not set a UTS namespace's host name",
+    )?;
+    let fd = tally.done(pidfd(&caller, target.pid()), "pidfd_open was refused")?;
+    tally.refused(
+        setns(&caller, fd, 0),
+        Errno::EINVAL,
+        "setns on a pidfd with no namespace flag was not EINVAL",
+    )?;
+    tally.refused(
+        setns(&caller, fd, CLONE_NEWPID),
+        Errno::EINVAL,
+        "setns on a pidfd with CLONE_NEWPID, which does not exist, was not EINVAL",
+    )?;
+    tally.ok(
+        setns(&caller, fd, CLONE_NEWUTS | CLONE_NEWIPC),
+        "setns on a pidfd was refused to root",
+    )?;
+    let (same_ipc, same_uts) = (
+        link(&mut ours, caller.pid(), "ipc")? == link(&mut theirs, target.pid(), "ipc")?,
+        link(&mut ours, caller.pid(), "uts")? == link(&mut theirs, target.pid(), "uts")?,
+    );
+    if !same_uts || names(&mut ours)?.0 != b"viapidfd" {
+        return Err("setns on a pidfd did not join the UTS namespace");
+    }
+    if !same_ipc {
+        return Err("setns on a pidfd did not join every namespace asked for");
+    }
+    joining_pidfd_user(tally)
+}
+
+/// An owner enters a user namespace and the UTS namespace it owns in one
+/// call, which neither half does alone; and a refused call changes nothing.
+fn joining_pidfd_user(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let (owner, joiner, same) = (person()?, person()?, maker()?);
+    let mut made = page_for(&owner)?;
+    let mut page = page_for(&joiner)?;
+    tally.ok(
+        unshare(&owner, CLONE_NEWUSER | CLONE_NEWUTS),
+        "unshare(CLONE_NEWUSER | CLONE_NEWUTS) was refused to uid 1000",
+    )?;
+    tally.ok(
+        set_name(&mut made, Syscall::Sethostname, b"entered")?,
+        "the owner could not name the UTS namespace it made",
+    )?;
+    let fd = tally.done(pidfd(&joiner, owner.pid()), "pidfd_open was refused")?;
+    tally.refused(
+        setns(&joiner, fd, CLONE_NEWUTS),
+        Errno::EPERM,
+        "a person with no capability joined a UTS namespace alone through a pidfd",
+    )?;
+    tally.ok(
+        setns(&joiner, fd, CLONE_NEWUSER | CLONE_NEWUTS),
+        "an owner could not join a user namespace and its UTS namespace together",
+    )?;
+    if names(&mut page)?.0 != b"entered"
+        || link(&mut page, joiner.pid(), "user")? != link(&mut page, owner.pid(), "user")?
+    {
+        return Err("setns on a pidfd left the caller outside what it joined");
+    }
+    // Joining one's own user namespace is refused, and the UTS namespace asked
+    // for with it is not joined either.
+    let mut alone = page_for(&same)?;
+    let peer = maker()?;
+    tally.ok(
+        unshare(&peer, CLONE_NEWUTS),
+        "unshare(CLONE_NEWUTS) was refused to root",
+    )?;
+    let before = link(&mut alone, same.pid(), "uts")?;
+    let fd = tally.done(pidfd(&same, peer.pid()), "pidfd_open was refused")?;
+    tally.refused(
+        setns(&same, fd, CLONE_NEWUSER | CLONE_NEWUTS),
+        Errno::EINVAL,
+        "setns on a pidfd into the caller's own user namespace was not EINVAL",
+    )?;
+    if link(&mut alone, same.pid(), "uts")? != before {
+        return Err("a refused setns on a pidfd joined part of what it asked for");
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

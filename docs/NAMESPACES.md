@@ -655,9 +655,32 @@ boot check that tries the attack and must be refused (§8).
   process outside it to walk out, and a same-uid process cannot reach into
   a non-dumpable one's descriptors.
 
-**What stays as it is:** `setns` (`EINVAL`), pid, network, IPC, UTS and
-cgroup namespaces (`EINVAL`), so the attack surface of joining someone
-else's namespace does not exist.
+**What stays as it is:** pid and network namespaces (`EINVAL`), and `setns`
+into either, which no descriptor can name. The UTS, IPC and cgroup
+namespaces and `setns` by descriptor are built (§12, "The small
+namespaces, built"), and the rules for joining are in the next list.
+
+**Joining and naming (S1 to S6, the small namespaces)**
+
+* **S1. Making a UTS, IPC or cgroup namespace needs `CAP_SYS_ADMIN` in the
+  user namespace the caller will be in**, and its owner is that user
+  namespace; a caller that asks for a user namespace with them holds it.
+* **S2. The names are the owner's.** `sethostname`, `setdomainname` ask
+  `CAP_SYS_ADMIN` over the UTS namespace's owner, not `privileged()`: fake
+  root names the namespace it made, nothing names the first's from a child.
+* **S3. `setns` needs `CAP_SYS_ADMIN` over the target's owner and in the
+  caller's own user namespace** (UTS, IPC, cgroup; a mount namespace also
+  `CAP_SYS_CHROOT` in the caller's own), so a process in a child user
+  namespace cannot step back into the namespaces of the one that made it.
+* **S4. A user namespace is joined only by a holder of `CAP_SYS_ADMIN` in
+  it**, never one's own or an ancestor, and never from a multithreaded
+  process or a shared fs context; it then holds every capability there.
+* **S5. A namespace file opens only for the same person or root** (Linux
+  asks `ptrace_may_access`), and `NS_GET_USERNS` and `NS_GET_PARENT` show a
+  caller only user namespaces it is inside of or above.
+* **S6. A cgroup namespace is a boundary for moves**: a writer of
+  `cgroup.procs` there names only cgroups under its root (`ENOENT`), and
+  reads every path from that root.
 
 ---
 
@@ -673,6 +696,8 @@ of the task whose call makes it, kept inside what it pays for:
 | a copied mount | `CLONE_NEWNS` copying the tree | each, as `mount` already charges one |
 | a bind mount, and each copy `MS_REC` makes | `mount(MS_BIND)` | each (the existing mount charge) |
 | a map file's opener record | `open` of `uid_map`/`gid_map` | with the open's rendered snapshot, already charged |
+| UTS, IPC and cgroup namespace | `CLONE_NEWUTS`, `CLONE_NEWIPC`, `CLONE_NEWCGROUP` | each at creation; an IPC namespace's sets as they are made, to the job that makes them |
+| a namespace file | `open` of a `/proc/<pid>/ns` link, `NS_GET_USERNS` | the inode, the detached mount and the open file, to the job that opens; the namespace it holds stays the maker's |
 
 A namespace held by a descriptor (`/proc/<pid>/ns/*` opened `O_PATH`) is
 the charged object kept alive by an open file that is itself charged. The

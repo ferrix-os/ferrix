@@ -189,10 +189,10 @@ pub(crate) fn copy_namespace(
 /// `setns`: join the namespace a descriptor names, as Linux's `setns` does
 /// for a namespace file (`docs/NAMESPACES.md` §12).
 ///
-/// In Linux's order: `EBADF` for a closed descriptor; `EINVAL` for a file
-/// that is not a namespace -- a pidfd, which Linux takes with several
-/// `nstype` bits, is not built -- and for a type that is neither 0 nor the
-/// file's own. Then the kind's rules, each `EPERM` unless every capability it
+/// In Linux's order: `EBADF` for a closed descriptor; a pidfd is [`setns_pidfd`]'s;
+/// `EINVAL` for any other file that is not a namespace, and for a type that
+/// is neither 0 nor the file's own. Then the kind's rules, each `EPERM`
+/// unless every capability it
 /// needs is held:
 ///
 /// * UTS, IPC and cgroup: `CAP_SYS_ADMIN` over the target's owner and in the
@@ -209,6 +209,11 @@ pub(crate) fn copy_namespace(
 /// either (`EINVAL`): the proxy is the process's, not the thread's.
 pub(crate) fn sys_setns(process: &Process, fd: i32, nstype: u32) -> Result<usize, Errno> {
     let file = fd::file(process, fd)?;
+    if let Some(pidfd) = fs::pidfd::of(&file) {
+        let target = Arc::clone(pidfd.process());
+        drop(file);
+        return setns_pidfd(process, &target, u64::from(nstype));
+    }
     let target = fs::nsfs::of(&file).ok_or(Errno::EINVAL)?;
     drop(file);
     if nstype != 0 && u64::from(nstype) != target.nstype() {
@@ -224,8 +229,23 @@ pub(crate) fn sys_setns(process: &Process, fd: i32, nstype: u32) -> Result<usize
 /// Whether the caller holds `CAP_SYS_ADMIN` over `owner` and, in the user
 /// namespace it is in, each of `own`.
 fn may_join(process: &Process, owner: &userns::UserNamespace, own: &[u32]) -> bool {
+    may_join_as(process, owner, own, false)
+}
+
+/// [`may_join`], judging the capabilities in the caller's own namespace as a
+/// caller who has just joined a user namespace holds them -- every one -- when
+/// `joining_user` is set: `setns` on a pidfd checks the rest after the user
+/// namespace, as Linux's `validate_nsset` does, so that an owner can enter a
+/// user namespace and its mount namespace in one call.
+fn may_join_as(
+    process: &Process,
+    owner: &userns::UserNamespace,
+    own: &[u32],
+    joining_user: bool,
+) -> bool {
     process.with_credentials(|held| {
-        userns::capable_over(held, owner, CAP_SYS_ADMIN) && own.iter().all(|&cap| held.holds(cap))
+        userns::capable_over(held, owner, CAP_SYS_ADMIN)
+            && (joining_user || own.iter().all(|&cap| held.holds(cap)))
     })
 }
 
@@ -239,14 +259,20 @@ fn join_small(process: &Process, target: fs::nsfs::Handle) -> Result<usize, Errn
         return Err(Errno::EINVAL);
     }
     let mut proxy = process.nsproxy();
+    put_in_proxy(&mut proxy, target)?;
+    process.set_nsproxy(proxy);
+    Ok(0)
+}
+
+/// Replace the member of `proxy` that `target` is one of.
+fn put_in_proxy(proxy: &mut nsproxy::NsProxy, target: fs::nsfs::Handle) -> Result<(), Errno> {
     match target {
         fs::nsfs::Handle::Uts(namespace) => proxy.uts = namespace,
         fs::nsfs::Handle::Ipc(namespace) => proxy.ipc = namespace,
         fs::nsfs::Handle::Cgroup(namespace) => proxy.cgroup = namespace,
         fs::nsfs::Handle::Mount(_) | fs::nsfs::Handle::User(_) => return Err(Errno::EINVAL),
     }
-    process.set_nsproxy(proxy);
-    Ok(0)
+    Ok(())
 }
 
 /// `setns` into a mount namespace: Linux's `mntns_install`.
@@ -258,6 +284,13 @@ fn join_mount(process: &Process, target: &Arc<Namespace>) -> Result<usize, Errno
     if Arc::strong_count(process.fs_context()) > 1 {
         return Err(Errno::EINVAL);
     }
+    install_mount(process, target);
+    Ok(0)
+}
+
+/// Put `process` in mount namespace `target`, its root and working directory
+/// at the namespace's root.
+fn install_mount(process: &Process, target: &Arc<Namespace>) {
     let top = target.root();
     let displaced = {
         let mut context = process.fs_context().lock();
@@ -269,22 +302,99 @@ fn join_mount(process: &Process, target: &Arc<Namespace>) -> Result<usize, Errno
     };
     // Dropped after the lock: the namespace it named may end here.
     drop(displaced);
-    Ok(0)
 }
 
 /// `setns` into a user namespace: Linux's `userns_install`.
 fn join_user(process: &Process, target: Arc<userns::UserNamespace>) -> Result<usize, Errno> {
-    if process.with_credentials(|held| held.user_ns.same(&target)) {
+    check_user(process, &target)?;
+    enter_user_namespace(process, target);
+    Ok(0)
+}
+
+/// What refuses `process` a user namespace: its own, a thread group or a
+/// shared fs context, or no `CAP_SYS_ADMIN` in it.
+fn check_user(process: &Process, target: &Arc<userns::UserNamespace>) -> Result<(), Errno> {
+    if process.with_credentials(|held| held.user_ns.same(target)) {
         return Err(Errno::EINVAL);
     }
     if process.tasks().len() > 1 || Arc::strong_count(process.fs_context()) > 1 {
         return Err(Errno::EINVAL);
     }
     let allowed =
-        process.with_credentials(|held| userns::capable_over(held, &target, CAP_SYS_ADMIN));
+        process.with_credentials(|held| userns::capable_over(held, target, CAP_SYS_ADMIN));
     if !allowed {
         return Err(Errno::EPERM);
     }
-    enter_user_namespace(process, target);
+    Ok(())
+}
+
+/// Every namespace `setns` on a pidfd can join.
+const PIDFD_FLAGS: u64 =
+    CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
+
+/// `setns` on a pidfd: the namespaces `flags` names, each the process
+/// `target`'s, joined together or not at all. `EINVAL` for no flag or a flag
+/// that is no namespace here. Each is judged as a descriptor for it would be;
+/// when `CLONE_NEWUSER` is among them the rest are judged after it, as Linux
+/// does, so an owner can enter a user namespace and its mount namespace in one
+/// call.
+fn setns_pidfd(process: &Process, target: &Process, flags: u64) -> Result<usize, Errno> {
+    use fs::nsfs::{Handle, Kind};
+    if flags == 0 || flags & !PIDFD_FLAGS != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let joining_user = flags & CLONE_NEWUSER != 0;
+    let user = match Handle::of(target, Kind::User) {
+        Handle::User(namespace) if joining_user => {
+            check_user(process, &namespace)?;
+            Some(namespace)
+        }
+        _ => None,
+    };
+    let mut proxy = process.nsproxy();
+    let mut small = false;
+    for (flag, kind) in [
+        (CLONE_NEWUTS, Kind::Uts),
+        (CLONE_NEWIPC, Kind::Ipc),
+        (CLONE_NEWCGROUP, Kind::Cgroup),
+    ] {
+        if flags & flag == 0 {
+            continue;
+        }
+        let namespace = Handle::of(target, kind);
+        let owner = namespace.owner().ok_or(Errno::EPERM)?;
+        if !may_join_as(process, &owner, &[CAP_SYS_ADMIN], joining_user) {
+            return Err(Errno::EPERM);
+        }
+        put_in_proxy(&mut proxy, namespace)?;
+        small = true;
+    }
+    if small && process.tasks().len() > 1 {
+        return Err(Errno::EINVAL);
+    }
+    let mount = match Handle::of(target, Kind::Mount) {
+        Handle::Mount(namespace) if flags & CLONE_NEWNS != 0 => {
+            let owner = fs::owner_of(&namespace);
+            let needs = [userns::CAP_SYS_CHROOT, CAP_SYS_ADMIN];
+            if !may_join_as(process, &owner, &needs, joining_user) {
+                return Err(Errno::EPERM);
+            }
+            if Arc::strong_count(process.fs_context()) > 1 {
+                return Err(Errno::EINVAL);
+            }
+            Some(namespace)
+        }
+        _ => None,
+    };
+    // Everything is judged; nothing below can be refused.
+    if let Some(namespace) = mount {
+        install_mount(process, &namespace);
+    }
+    if small {
+        process.set_nsproxy(proxy);
+    }
+    if let Some(namespace) = user {
+        enter_user_namespace(process, namespace);
+    }
     Ok(0)
 }
