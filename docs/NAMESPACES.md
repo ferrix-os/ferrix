@@ -622,7 +622,12 @@ boot check that tries the attack and must be refused (§8).
   never reach another namespace (no propagation exists). A process in the
   first namespace reaching a child's tree through `/proc/<pid>/root` sees
   files it could see anyway, at its own permissions; M2 means nothing in
-  that tree is a device node or set-id file the child made.
+  that tree is a device node or set-id file the child made. What the
+  namespaces do share is each filesystem's superblock, as on Linux: a
+  plain `MS_REMOUNT` read-only in one reaches the filesystem's mounts in
+  every other (N2's superblock). That is a change to the filesystem, not
+  to a tree, and from a child namespace it is refused unless the child
+  made the filesystem (N5, the vulnerability analysis's row).
 * **M8. `/proc/<pid>/root`, `cwd`, `exe` and `fd/*` cross namespaces only
   where Linux's `ptrace_may_access` allows** (landing NP, before N5). These
   links reach into another process's tree, so they are gated as Linux gates
@@ -836,7 +841,11 @@ bind of it -- and only `MS_REMOUNT | MS_BIND` the one mount, as on Linux;
 or the difference is written down here. Either way a boot check covers
 it. M3's flag locking (CVE-2014-5206, -5207) stays N5's.
 
-**N2's review (certification consultant, 2026-09-30): OK.** The interim
+**N2's review (certification consultant, 2026-09-30): OK**, and again on
+the amended commit after the code reviewer's two blockers were fixed: B1,
+a mount point removed or renamed through another bind of its filesystem
+(now `EBUSY`, in FX-0886), and B2, `MNT_DETACH` writing out only the
+target's filesystem (now every one inside). The interim
 reviewer's note is met: a plain `MS_REMOUNT` read-only sets the
 filesystem's superblock and reaches every bind, `MS_REMOUNT | MS_BIND` one
 mount, and the `binds` line (FX-0886) checks both with a negative control.
@@ -846,13 +855,15 @@ added. `docs/certification/VULNERABILITY-ANALYSIS.md` gains the rows for
 the superblock, for detach and for the plain remount from a child
 namespace. For the landings after it:
 
-* **N3.** §6 says every allocation happens before a spin lock is taken;
-  `Namespace::attach` collects the parents into a `Vec` under the table's
-  lock, and a table insert may allocate there too. Copying a whole tree on
-  `clone` goes through the same place, so either hoist those allocations
-  or restate §6 as what holds (no allocation that can sleep). The shared
-  superblock crosses namespaces, as on Linux; §4's M7 says so when N3
-  lands.
+* **N3.** Met before landing: `attach` allocates nothing under the table's
+  lock, and §6 names the table's own insertions; §4's M7 names the shared
+  superblock. What stays: no check sees `MNT_DETACH` of a subtree write out
+  a filesystem inside it other than the target's (the code reviewer's B2,
+  fixed in N2, of F-53's data-loss class; a tmpfs has nothing to write).
+  N3, whose `pivot_root` and detach of the old root put `/data`'s btrfs
+  inside a detached subtree, carries a check that data written inside the
+  subtree just before the detach is committed after it, or the argument
+  why none can be built.
 * **N5.** A plain `MS_REMOUNT` from a child namespace needs privilege over
   the namespace that made the filesystem (Linux's `do_remount`, over
   `s_user_ns`), not only over the caller's mount namespace: otherwise fake
