@@ -43,8 +43,9 @@ use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END};
 
 use super::job::{Job, KILLED_STATUS};
 use super::process::{self, Host};
-use super::quota::{self, Resource};
+use super::quota::{self, Counter, Resource};
 use crate::console::println;
+use crate::user::cache;
 use crate::user::space::{Access, AddressSpace, MMAP_MIN_ADDR, SpaceError};
 use crate::user::vmo::VmoError;
 
@@ -62,6 +63,10 @@ pub(crate) enum Answer {
 /// How long a fault waits before trying again while another OOM kill runs,
 /// or a victim of its job is still ending.
 const PAUSE_NANOS: u64 = 1_000_000;
+
+/// Pages one reclaim is asked for when a fault finds its job's limit full:
+/// a fill's worth, so that the next faults find room without asking again.
+const RECLAIM_PAGES: u64 = 32;
 
 /// Set while one fault chooses and kills, as Linux's `oom_lock` is held:
 /// two faults at one full limit kill one process, not two. A flag, not a
@@ -101,11 +106,16 @@ pub(crate) fn user_fault(
     address: u64,
     access: Access,
 ) -> Result<(), SpaceError> {
+    quota::count(crate::sched::running_group(), Counter::Faults, 1);
     match space.fault(address, access) {
         Err(error) if is_charge_refusal(&error) => match out_of_memory(space) {
             Answer::Refused => Err(error),
             Answer::Retry | Answer::Victim => Ok(()),
         },
+        Ok(()) => {
+            throttle();
+            Ok(())
+        }
         done => done,
     }
 }
@@ -120,6 +130,7 @@ pub(crate) fn user_fault(
 /// As [`AddressSpace::fault`], and the refusal itself when the running
 /// process was the victim or nothing could be killed.
 pub(crate) fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
+    quota::count(crate::sched::running_group(), Counter::Faults, 1);
     loop {
         match space.fault(address, access) {
             Err(error) if is_charge_refusal(&error) => {
@@ -127,8 +138,40 @@ pub(crate) fn fault(space: &AddressSpace, address: u64, access: Access) -> Resul
                     return Err(error);
                 }
             }
+            Ok(()) => {
+                throttle();
+                return Ok(());
+            }
             done => return done,
         }
+    }
+}
+
+/// A program that just took a page: if its job, or one above, is over its
+/// `memory.high`, reclaim from that job, and, if that gave back less than the
+/// excess, slow the program down for a moment. Linux's
+/// `mem_cgroup_handle_over_high`, at the same place -- before the program
+/// goes on -- and with a fixed pause where Linux's grows with the excess.
+///
+/// `memory.events`' `high` counts in the job whose mark it was and above, and
+/// wakes whatever polls their `memory.events`. Holds no lock, and must be
+/// called with none held, as every fault is.
+pub(crate) fn throttle() {
+    let Some((over, excess)) = quota::over_high(crate::sched::running_group()) else {
+        return;
+    };
+    quota::count(over, Counter::High, 1);
+    let pages = excess.div_ceil(PAGE_SIZE);
+    let done = cache::reclaim(over, pages);
+    if let Ok(live) = process::live()
+        && let Some(job) = live
+            .iter()
+            .find_map(|host| at_or_above(host.core().job(), over))
+    {
+        job.wake_memory_events();
+    }
+    if done.stolen < pages {
+        crate::sched::sleep_for(PAUSE_NANOS);
     }
 }
 
@@ -137,8 +180,18 @@ pub(crate) fn fault(space: &AddressSpace, address: u64, access: Access) -> Resul
 pub(crate) fn out_of_memory(space: &AddressSpace) -> Answer {
     let group = crate::sched::running_group();
     let Some(full) = quota::at_limit(group, Resource::Memory, PAGE_SIZE) else {
-        return Answer::Refused;
+        // No limit full: the machine out of frames. Its clean cache is room.
+        return if cache::reclaim(quota::NONE, RECLAIM_PAGES).stolen > 0 {
+            Answer::Retry
+        } else {
+            Answer::Refused
+        };
     };
+    // Reclaim inside the job before any kill: its own clean pages, and those
+    // of the jobs beneath it, never a sibling's (`user::cache`).
+    if cache::reclaim(full, RECLAIM_PAGES).stolen > 0 {
+        return Answer::Retry;
+    }
     if CHOOSING.swap(true, Ordering::AcqRel) {
         crate::sched::sleep_for(PAUSE_NANOS);
         return Answer::Retry;

@@ -200,6 +200,16 @@ pub trait PageSource: Send + Sync + fmt::Debug {
     fn reads_disk(&self) -> bool {
         false
     }
+
+    /// Whether the pages this source filled can be dropped from memory and
+    /// filled again, as they were: the source is the file's only copy and
+    /// nothing in memory is newer. A read-only mount says so; a source whose
+    /// file can be written, whose newer bytes live in the page cache until a
+    /// writeback, does not. `false` unless a source says so; reclaim takes
+    /// nothing from a file it cannot rely on (`docs/CGROUPS.md` §10).
+    fn reclaimable(&self) -> bool {
+        false
+    }
 }
 
 /// Where new files get their [`Pages`].
