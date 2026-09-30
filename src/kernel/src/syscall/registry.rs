@@ -122,6 +122,9 @@ pub(crate) fn publish(process: &Arc<Process>) {
         // no entry and cannot fail.
         let _ = table::name(pid, weak(process));
     }
+    // A process made in a frozen cgroup, or one a freeze looked for before
+    // it could be found, is frozen from here (`cgroup.freeze`).
+    process.freeze_sync();
 }
 
 /// The table's view of `process`: weak, and seen as the core sees it.

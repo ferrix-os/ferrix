@@ -275,7 +275,7 @@ impl Thread {
     /// `SIGCONT` as if it had never left.
     pub(crate) fn signal_pending(&self) -> bool {
         self.process.must_leave(self)
-            || self.process.is_stopped()
+            || self.process.must_park()
             || self.with_signals(|shared, own| signal::deliverable(shared, own) != 0)
     }
 }

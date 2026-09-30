@@ -550,6 +550,13 @@ pub(super) fn check_cgroupfs() {
          one read again as its source has it, and no process killed where the cache was room",
         checked.reclaimed,
     );
+    println!(
+        "  freeze   {} claims of cgroup.freeze held: a program of three threads parked with its \
+         counts still through SIGCONT, cgroup.events saying frozen 1 once the last had and waking \
+         POLLPRI, thawed with its futex wait restarted, killed by cgroup.kill and by SIGKILL \
+         while frozen, and frozen on a move in and a fork made in a frozen cgroup",
+        checked.frozen,
+    );
 }
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
