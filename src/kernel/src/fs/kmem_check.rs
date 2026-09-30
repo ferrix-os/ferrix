@@ -339,23 +339,26 @@ fn veth_pairs(tree: &Arc<Job>) -> Result<usize, &'static str> {
 fn routes(tree: &Arc<Job>) -> Result<usize, &'static str> {
     use alloc::sync::Weak;
     let owner = Arc::clone(crate::syscall::userns::first());
-    let mut homes: Vec<(u32, Weak<crate::net::NetNamespace>)> = Vec::new();
+    // One namespace and one socket for each job, held weakly here so that the
+    // fill's own list is what keeps them and they go with it.
+    let mut homes: Vec<(u32, Weak<crate::net::netlink::NetlinkSocket>)> = Vec::new();
     kind(tree, "routes in a network namespace", |n| {
         let group = sched::running_group();
-        let home = match homes
+        let socket = match homes
             .iter()
             .find(|(each, _)| *each == group)
             .and_then(|(_, weak)| weak.upgrade())
         {
-            Some(home) => home,
+            Some(socket) => socket,
             None => {
                 let fresh = crate::net::namespace::create(Arc::clone(&owner))?;
-                homes.push((group, Arc::downgrade(&fresh)));
-                fresh
+                let socket = super::netns_check::fill_socket(&fresh)?;
+                homes.push((group, Arc::downgrade(&socket)));
+                socket
             }
         };
-        super::netns_check::route_for_fill(&home, n)?;
-        Ok(home)
+        super::netns_check::route_for_fill(&socket, n)?;
+        Ok(socket)
     })
 }
 

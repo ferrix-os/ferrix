@@ -34,11 +34,12 @@ use alloc::sync::Arc;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::netlink::{
     ARPHRD_ETHER, ARPHRD_LOOPBACK, IFA_ADDRESS, IFA_F_PERMANENT, IFA_LABEL, IFA_LOCAL, IFF_UP,
-    IFLA_ADDRESS, IFLA_IFNAME, IFLA_MTU, IfAddrMsg, IfInfoMsg, NDA_DST, NDA_LLADDR, NLM_F_ACK,
-    NLM_F_MULTI, NLM_F_REQUEST, NLMSG_MIN_TYPE, NdMsg, NlMsgHdr, RT_SCOPE_HOST, RT_SCOPE_LINK,
-    RT_SCOPE_UNIVERSE, RT_TABLE_MAIN, RTA_DST, RTA_GATEWAY, RTA_OIF, RTA_PRIORITY, RTM_DELADDR,
-    RTM_DELLINK, RTM_DELNEIGH, RTM_DELROUTE, RTM_GETADDR, RTM_GETLINK, RTM_GETNEIGH, RTM_GETROUTE,
-    RTM_NEWADDR, RTM_NEWLINK, RTM_NEWNEIGH, RTM_NEWROUTE, RTM_SETLINK, RTN_UNICAST, RtMsg,
+    IFLA_ADDRESS, IFLA_IFNAME, IFLA_LINKINFO, IFLA_MTU, IfAddrMsg, IfInfoMsg, NDA_DST, NDA_LLADDR,
+    NLM_F_ACK, NLM_F_MULTI, NLM_F_REQUEST, NLMSG_MIN_TYPE, NdMsg, NlMsgHdr, RT_SCOPE_HOST,
+    RT_SCOPE_LINK, RT_SCOPE_UNIVERSE, RT_TABLE_MAIN, RTA_DST, RTA_GATEWAY, RTA_OIF, RTA_PRIORITY,
+    RTM_DELADDR, RTM_DELLINK, RTM_DELNEIGH, RTM_DELROUTE, RTM_GETADDR, RTM_GETLINK, RTM_GETNEIGH,
+    RTM_GETROUTE, RTM_NEWADDR, RTM_NEWLINK, RTM_NEWNEIGH, RTM_NEWROUTE, RTM_SETLINK, RTN_UNICAST,
+    RtMsg,
 };
 use ferrix_linux_abi::socket::{AF_INET, AF_INET6, AF_UNSPEC};
 use ferrix_net::iface::{Address as IfaceAddress, Medium};
@@ -50,6 +51,10 @@ use super::link;
 use crate::net::NetNamespace;
 use crate::net::namespace::{MAX_ADDRESSES, MAX_ROUTES};
 use crate::syscall::process::Process;
+
+/// `IFLA_INFO_KIND` inside `IFLA_LINKINFO` for a virtual pair: `veth`, nul
+/// terminated, padded as a nested attribute is.
+const VETH_KIND: [u8; 12] = [9, 0, 1, 0, b'v', b'e', b't', b'h', 0, 0, 0, 0];
 
 /// The most attributes any reply here carries.
 const MAX_ATTRS: usize = 4;
@@ -270,6 +275,10 @@ fn dump_links(
             Value::Bytes(interface.hardware.as_slice()),
         ));
         attributes.push(Attr::new(IFLA_MTU, Value::U32(interface.mtu)));
+        // A virtual pair says what it is, as `ip -d link` reads it.
+        if matches!(interface.backing, ferrix_net::iface::Backing::Veth { .. }) {
+            attributes.push(Attr::new(IFLA_LINKINFO, Value::Bytes(&VETH_KIND)));
+        }
         if writer
             .message(
                 part(RTM_NEWLINK, request, port),

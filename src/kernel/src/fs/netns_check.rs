@@ -35,7 +35,7 @@ use ferrix_linux_abi::socket::{
     AF_INET, AF_UNIX, IFNAMSIZ, SIOCGIFFLAGS, SIOCSIFFLAGS, SOCK_DGRAM, SOCK_RAW, SOCK_STREAM,
 };
 use ferrix_net::socket::Family;
-use ferrix_netlink::{Address, Attr, Messages, Value, Writer};
+use ferrix_netlink::{Address, Attr, Attributes, Messages, Value, Writer};
 use ferrix_vfs::Errno;
 
 use crate::fs::mount_check::{Page, Report as Counts, Tally, by_number, close, page_for};
@@ -69,8 +69,9 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
     };
     let mut made = Vec::new();
     let outcome = creation(&mut tally, &mut made)
-        .and_then(|()| isolation(&mut tally, &mut made))
+        .and_then(|()| ports(&mut tally, &mut made))
         .and_then(|()| loopback(&mut tally, &mut made))
+        .and_then(|()| reach(&mut tally, &mut made))
         .and_then(|()| privileges(&mut tally, &mut made))
         .and_then(|()| pairs(&mut tally, &mut made))
         .and_then(|()| devices(&mut tally, &mut made))
@@ -189,6 +190,9 @@ fn socket_at(
     inet_of(&file).ok_or(what)
 }
 
+/// A link of a dump: its name and the kind its `IFLA_LINKINFO` names.
+type Link = (Vec<u8>, Option<Vec<u8>>);
+
 /// A netlink socket in `ns`, spoken through by `who`.
 struct Nl {
     socket: Arc<NetlinkSocket>,
@@ -302,6 +306,11 @@ impl Nl {
 
     /// The names of the links a dump of the namespace lists.
     fn link_names(&mut self) -> Result<Vec<Vec<u8>>, &'static str> {
+        Ok(self.links()?.into_iter().map(|(name, _)| name).collect())
+    }
+
+    /// The links a dump lists, each with the kind its `IFLA_LINKINFO` names.
+    fn links(&mut self) -> Result<Vec<Link>, &'static str> {
         self.seq += 1;
         let mut buffer = [0_u8; 64];
         let mut writer = Writer::new(&mut buffer);
@@ -329,8 +338,13 @@ impl Nl {
             if message.header.kind == ferrix_linux_abi::netlink::NLMSG_DONE {
                 break;
             }
-            if let Some(name) = message.attributes(IfInfoMsg::SIZE).find(IFLA_IFNAME) {
-                names.push(name.as_name().to_vec());
+            let attributes = message.attributes(IfInfoMsg::SIZE);
+            if let Some(name) = attributes.find(IFLA_IFNAME) {
+                let kind = attributes
+                    .find(IFLA_LINKINFO)
+                    .and_then(|info| Attributes::new(info.as_bytes()).find(IFLA_INFO_KIND))
+                    .map(|kind| kind.as_name().to_vec());
+                names.push((name.as_name().to_vec(), kind));
             }
         }
         Ok(names)
@@ -674,9 +688,38 @@ fn stream_over(
     Ok(())
 }
 
-/// NN3 and NN4: two namespaces share no port and no socket, and a socket
-/// stays in the namespace it was made in when its maker moves.
-fn isolation(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), &'static str> {
+/// NN3: two namespaces share no port, whether or not their loopbacks are up.
+fn ports(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), &'static str> {
+    let (one, first) = in_own_namespace(tally, made)?;
+    let (_two, second) = in_own_namespace(tally, made)?;
+    // The wildcard needs no address, so this holds with the loopback down.
+    let held_first = socket_in(&first, InetKind::Datagram)?;
+    held_first
+        .bind(&addr4([0, 0, 0, 0], 7_100))
+        .map_err(|_| "a port could not be bound in a namespace")?;
+    let held_second = socket_in(&second, InetKind::Datagram)?;
+    held_second
+        .bind(&addr4([0, 0, 0, 0], 7_100))
+        .map_err(|_| "the same port could not be bound in two namespaces")?;
+    let again = socket_in(&first, InetKind::Datagram)?;
+    tally.refused(
+        again.bind(&addr4([0, 0, 0, 0], 7_100)).map(|()| 0),
+        Errno::EADDRINUSE,
+        "a port could be bound twice in one namespace",
+    )?;
+    // The netlink view is each namespace's own.
+    let mut dumper = Nl::open(&one, &first)?;
+    let names = dumper.link_names()?;
+    if names.as_slice() != [b"lo".to_vec()] {
+        return Err("a netlink dump in a new namespace showed another namespace's links");
+    }
+    Ok(())
+}
+
+/// NN3 and NN4 over the loopback: a listener in one namespace is not reached
+/// from another, a datagram stays in the namespace that sent it, and a socket
+/// made before its maker moves stays where it was made.
+fn reach(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), &'static str> {
     let (one, first) = in_own_namespace(tally, made)?;
     let (two, second) = in_own_namespace(tally, made)?;
     for (who, ns) in [(&one, &first), (&two, &second)] {
@@ -685,11 +728,11 @@ fn isolation(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), 
     let held_first = socket_in(&first, InetKind::Datagram)?;
     held_first
         .bind(&addr4([127, 0, 0, 1], 7_100))
-        .map_err(|_| "a port could not be bound in a namespace")?;
+        .map_err(|_| "a loopback port could not be bound in a namespace")?;
     let held_second = socket_in(&second, InetKind::Datagram)?;
     held_second
         .bind(&addr4([127, 0, 0, 1], 7_100))
-        .map_err(|_| "the same port could not be bound in two namespaces")?;
+        .map_err(|_| "the same loopback port could not be bound in two namespaces")?;
     // A listener in one is not reachable from the other over 127.0.0.1.
     let listener = socket_in(&first, InetKind::Stream)?;
     listener
@@ -718,14 +761,16 @@ fn isolation(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), 
     if held_first.recv(&mut out, 0, true).is_ok() {
         return Err("a datagram crossed from one namespace to another over the loopback");
     }
-    // The netlink view and the tables are each namespace's own.
-    let mut dumper = Nl::open(&one, &first)?;
-    let names = dumper.link_names()?;
-    if names.as_slice() != [b"lo".to_vec()] {
-        return Err("a netlink dump in a new namespace showed another namespace's links");
-    }
+    kept_where_made(tally, made)
+}
 
-    // NN4: a socket made before the maker moves stays where it was made.
+/// NN4: a socket made before its maker moves to another namespace stays in the
+/// one it was made in.
+fn kept_where_made(
+    tally: &mut Tally<'_>,
+    made: &mut Vec<Arc<Process>>,
+) -> Result<(), &'static str> {
+    let mut out = [0_u8; 8];
     // A socket made in one namespace by a process that then moves.
     let traveller = spawn(made)?;
     tally.ok(
@@ -935,6 +980,14 @@ fn first_pair(
         "the first end of a veth pair is not in its namespace",
     )?;
     let ib = b.index(b"veth-b", "the peer of a veth pair is not in its namespace")?;
+    // A dump says what it is.
+    let kinds = a.nl.links()?;
+    if !kinds
+        .iter()
+        .any(|(name, kind)| name == b"veth-a" && kind.as_deref() == Some(b"veth".as_slice()))
+    {
+        return Err("a dump of links did not say a veth end is a veth");
+    }
     a.configure(ia, [10, 9, 0, 1], tally)?;
     if a.has(ia, ferrix_net::iface::IFF_RUNNING) {
         return Err("a veth end ran before its peer was up");
@@ -1405,27 +1458,78 @@ fn proc_views(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(),
     if !opened.is_some_and(|found| found.same(&ns)) {
         return Err("/proc/<pid>/ns/net did not open as the namespace it names");
     }
-    // /proc/net is the reader's: a new namespace lists its loopback alone.
-    let devices = userns::acting_as(&one, || read_file(&mut page, b"/proc/net/dev"))??
-        .map_err(|_| "/proc/net/dev could not be read in a network namespace")?;
-    let rows = devices
+    readers_views(tally, (&one, &ns), &outside)
+}
+
+/// A file of `/proc` as `who` reads it.
+fn listing(who: &Arc<Process>, path: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let mut page = page_for(who)?;
+    userns::acting_as(who, || read_file(&mut page, path))??
+        .map_err(|_| "a /proc/net file could not be read")
+}
+
+/// Whether `text` holds `word`, in either case.
+fn mentions(text: &[u8], word: &[u8]) -> bool {
+    text.windows(word.len())
+        .any(|window| window.eq_ignore_ascii_case(word))
+}
+
+/// `/proc/net` is the reader's: a pair's end, an address on it, a route to it
+/// and a listener are in the files of a process of that namespace and in no
+/// other's.
+fn readers_views(
+    tally: &mut Tally<'_>,
+    (one, ns): (&Arc<Process>, &Arc<NetNamespace>),
+    outside: &Arc<Process>,
+) -> Result<(), &'static str> {
+    let other = namespace::create(Arc::clone(ns.owner()))
+        .map_err(|_| "no namespace for the far end of a pair")?;
+    let _ = veth::create((ns, Some(b"proc-a")), (&other, Some(b"proc-b")))
+        .map_err(|_| "a pair could not be made to be read about")?;
+    let index = index_of(ns, b"proc-a").ok_or("the pair's end is not in its namespace")?;
+    let mut nl = Nl::open(one, ns)?;
+    address_add(&mut nl, index, [10, 77, 0, 1], 24, tally)?;
+    link_up(&mut nl, index as i32, tally)?;
+    let listener = socket_in(ns, InetKind::Stream)?;
+    listener
+        .bind(&addr4([0, 0, 0, 0], 7_200))
+        .map_err(|_| "a listener could not bind to be read about")?;
+    listener
+        .listen(1)
+        .map_err(|_| "a listener could not listen to be read about")?;
+    for (path, word, what) in [
+        (
+            &b"/proc/net/dev"[..],
+            &b"proc-a:"[..],
+            "/proc/net/dev showed another namespace's interfaces",
+        ),
+        (
+            &b"/proc/net/route"[..],
+            &b"proc-a"[..],
+            "/proc/net/route showed another namespace's routes",
+        ),
+        (
+            &b"/proc/net/tcp"[..],
+            &b":1C20"[..],
+            "/proc/net/tcp showed another namespace's sockets",
+        ),
+    ] {
+        tally.report.calls += 2;
+        if !mentions(&listing(one, path)?, word) {
+            return Err(what);
+        }
+        if mentions(&listing(outside, path)?, word) {
+            return Err(what);
+        }
+    }
+    // A new namespace lists its loopback and the pair's end, and no more.
+    let rows = listing(one, b"/proc/net/dev")?
         .split(|&byte| byte == b'\n')
         .filter(|line| line.contains(&b':'))
         .count();
-    if rows != 1 || !devices.windows(3).any(|window| window == b"lo:") {
+    if rows != 2 {
         return Err("/proc/net/dev showed another namespace's interfaces");
     }
-    let routes = userns::acting_as(&one, || read_file(&mut page, b"/proc/net/route"))??
-        .map_err(|_| "/proc/net/route could not be read in a network namespace")?;
-    if routes
-        .split(|&byte| byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .count()
-        > 1
-    {
-        return Err("/proc/net/route showed another namespace's routes");
-    }
-    tally.report.calls += 3;
     Ok(())
 }
 
@@ -1540,13 +1644,18 @@ fn route_add(nl: &mut Nl, n: usize, tally: &mut Tally<'_>) -> Result<(), &'stati
     )
 }
 
-/// Add the `n`th distinct /32 route to `ns` by a netlink socket opened, used
-/// and closed here, for `kmem_check`'s fill: the request is made by the
-/// kernel, which is no process and may, and the answer is the acknowledgement's
-/// errno.
-pub(crate) fn route_for_fill(ns: &Arc<NetNamespace>, n: usize) -> Result<(), Errno> {
+/// A netlink socket in `ns`, for `kmem_check`'s fill of routes: opened once,
+/// so that what the fill runs out of is the namespace's tables and not the
+/// room for a socket to ask with.
+pub(crate) fn fill_socket(ns: &Arc<NetNamespace>) -> Result<Arc<NetlinkSocket>, Errno> {
     let file = NetlinkSocket::open(ns, SOCK_DGRAM, false, (0, 0))?;
-    let socket = net::netlink::of(&file).ok_or(Errno::EINVAL)?;
+    net::netlink::of(&file).ok_or(Errno::EINVAL)
+}
+
+/// Add the `n`th distinct /32 route by `socket`, for `kmem_check`'s fill: the
+/// request is made by the kernel, which is no process and may, and the answer
+/// is the acknowledgement's errno.
+pub(crate) fn route_for_fill(socket: &NetlinkSocket, n: usize) -> Result<(), Errno> {
     let octets = [
         172,
         16 + (n / 65_000) as u8,
