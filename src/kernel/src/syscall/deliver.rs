@@ -58,6 +58,12 @@ use ferrix_linux_abi::types::{SA_RESTART, SA_RESTORER, SIG_DFL, SIG_IGN, SIGSEGV
 
 use crate::arch;
 use crate::console::println;
+
+/// How long a parked thread trusts the wakes that end its park: an hour, which
+/// is a net under a missed one and no cost to a frozen cgroup.
+const PARKED_RECHECK_NANOS: u64 = 3_600_000_000_000;
+
+use crate::object::process::Host;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::{
     self, DefaultAction, Origin, Posted, Restart, SIGSET_SIZE, Taken, UNBLOCKABLE,
@@ -127,7 +133,7 @@ pub(crate) fn needs_attention() -> bool {
     thread::current().is_some_and(|thread| {
         let process = thread.process();
         process.must_leave(&thread)
-            || process.is_stopped()
+            || process.must_park()
             || thread.with_signals(|shared, own| signal::needs_attention(shared, own))
     })
 }
@@ -180,11 +186,28 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
                 capped = false;
                 break;
             }
-            if process.is_stopped() {
-                let _ = process.resumed().wait_until_deadline(
-                    || !process.is_stopped() || process.must_leave(&thread),
+            if process.must_park() {
+                // Stopped, or frozen: a freeze counts its parked threads,
+                // and says when the last has parked (`cgroup.events`).
+                let frozen = process.core().is_frozen();
+                if frozen {
+                    process.thread_parked();
+                    crate::fs::cgroupfs::settle_frozen(&process.core().job());
+                }
+                // Woken by everything that ends a park (a continue, a thaw, an
+                // end, an `execve`), so it looks again only now and then: a
+                // parked thread that woke every few milliseconds to find
+                // itself still parked was charged the time to do it, and a
+                // frozen cgroup is to use no processor.
+                let _ = crate::sched::WaitQueue::wait_on_any(
+                    &[process.resumed()],
+                    || !process.must_park() || process.must_leave(&thread),
                     u64::MAX,
+                    PARKED_RECHECK_NANOS,
                 );
+                if frozen {
+                    process.thread_unparked();
+                }
                 continue;
             }
             let Some(taken) = thread.with_signals(signal::take_next) else {
