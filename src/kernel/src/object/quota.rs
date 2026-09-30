@@ -530,12 +530,18 @@ fn refresh_period(slot: &Slot, now: u64) {
     let end = slot.bw_end.load(Ordering::Acquire);
     if end == 0 {
         // The first charge starts the first period.
-        let _ = slot.bw_end.compare_exchange(
-            0,
-            now.saturating_add(period),
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+        if slot
+            .bw_end
+            .compare_exchange(
+                0,
+                now.saturating_add(period),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            bump(slot, Counter::Periods, 1);
+        }
         return;
     }
     if now < end {
@@ -551,11 +557,11 @@ fn refresh_period(slot: &Slot, now: u64) {
     {
         return;
     }
-    let used = slot.bw_used.swap(0, Ordering::AcqRel);
+    let _ = slot.bw_used.swap(0, Ordering::AcqRel);
     let throttled_at = slot.bw_throttled_at.swap(0, Ordering::AcqRel);
-    if used != 0 || throttled_at != 0 {
-        bump(slot, Counter::Periods, 1);
-    }
+    // Counted as it starts, as Linux's period timer does, so that
+    // `nr_periods` is never behind `nr_throttled`.
+    bump(slot, Counter::Periods, 1);
     if throttled_at != 0 {
         bump(slot, Counter::ThrottledNs, end.saturating_sub(throttled_at));
     }
