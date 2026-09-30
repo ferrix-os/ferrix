@@ -354,11 +354,28 @@ the namespace ends. Abstract unix names are per namespace. The `netns` boot line
 charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
 controls and what is open.
 
-**Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
-reclaiming inside the job before it OOM-kills (M2), then freezing,
-`cpu.max` and `io`. `docs/CGROUPS.md` §7.1 says where each
-starts in the code, how landings are gated now, and what cost a gate on
-2026-09-23.
+**Done -- M2, F1, S2 and B1, the rest of the controllers (2026-09-30).** A
+charge past `memory.max` reclaims inside the job before it kills: the clean
+page cache of files on a read-only disk mount, charged to the job and never a
+sibling's, goes back the way a truncation's pages do and is read again from
+its source; a job over `memory.high` is brought down to it; `memory.min` and
+`memory.low` spare a child. `memory.stat` prints `file`, `kernel`, `shmem`,
+`pgscan`, `pgsteal`, `pgfault` and `pgmajfault`, and `memory.events` counts
+`high`. `cgroup.freeze` stops every process in a subtree where a stop would
+but no signal undoes, and `cgroup.events` says `frozen`. `cpu.max` throttles a
+subtree to a quota a period, `cpu.stat` and `cpu.weight.nice` exist, and the
+`io` controller counts a cgroup's reads and writes of each disk in `io.stat`
+and spaces them out to `io.max`. `cgroup.controllers` now lists
+`cpu io memory pids`. The `cgroups` boot line has a `reclaim`, a `freeze`, a
+`cpu` and an `io` line under it, each with negative controls, and
+`test-vfs` has a command for `cgroup.freeze` and one for `cpu.max`.
+`docs/CGROUPS.md` §10 to §13 say what each is and what it leaves out.
+
+**Still to do:** reclaim of a writable btrfs mount's clean pages, of the
+dentry and inode caches, and `memory.reclaim`; `io.weight` and `io.latency`;
+`cpu.idle` and `cpu.max.burst`; `anon` and `pagetables` in `memory.stat`.
+`docs/CGROUPS.md` §7.1 says how landings are gated now, and what cost a gate
+on 2026-09-23.
 
 ---
 
