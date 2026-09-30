@@ -1002,6 +1002,25 @@ fn descriptor_location(pid: u32, fd: i32) -> Option<Result<Location>> {
     Some(Ok(file.location().clone()))
 }
 
+/// Where following `/proc/<pid>/ns/<kind>` leads: the namespace as an nsfs
+/// file, so that `open` of the link is a descriptor `setns` takes. Refused
+/// `EACCES` to a caller who is neither the same person nor root, as Linux
+/// refuses it without `ptrace_may_access` (`fs/nsfs.rs`).
+fn namespace_location(pid: u32, kind: NamespaceKind) -> Result<Location> {
+    let process = alive(pid)?;
+    if !fs::nsfs::may_open(&process) {
+        return Err(Errno::EACCES);
+    }
+    let kind = match kind {
+        NamespaceKind::Mount => fs::nsfs::Kind::Mount,
+        NamespaceKind::User => fs::nsfs::Kind::User,
+        NamespaceKind::Uts => fs::nsfs::Kind::Uts,
+        NamespaceKind::Ipc => fs::nsfs::Kind::Ipc,
+        NamespaceKind::Cgroup => fs::nsfs::Kind::Cgroup,
+    };
+    fs::nsfs::location(fs::nsfs::Handle::of(&process, kind))
+}
+
 /// The ids of a process's threads that have not begun to end, in order; its
 /// own pid alone for a process the kernel made without listing a thread, as
 /// `render::thread_count` counts it.
@@ -1279,6 +1298,9 @@ impl Inode for Node {
     fn link_location(&self) -> Option<Result<Location>> {
         if let Place::Descriptor(pid, fd) = self.place {
             return descriptor_location(pid, fd);
+        }
+        if let Place::Namespace(pid, kind) = self.place {
+            return Some(namespace_location(pid, kind));
         }
         let Place::Entry(pid, index) = self.place else {
             return None;

@@ -322,6 +322,16 @@ impl UserNamespace {
         self.id
     }
 
+    /// The namespace it was made in; `None` for the first.
+    pub(crate) fn parent(&self) -> Option<&Arc<UserNamespace>> {
+        self.parent.as_ref()
+    }
+
+    /// Its creator's effective uid, as a kernel id: `NS_GET_OWNER_UID`.
+    pub(crate) fn owner_uid(&self) -> u32 {
+        self.owner_uid
+    }
+
     /// Whether `setgroups` is allowed.
     pub(crate) fn setgroups_allowed(&self) -> bool {
         self.maps.lock().setgroups
