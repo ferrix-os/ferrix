@@ -183,6 +183,32 @@ pub(crate) trait Filler: Send + Sync + fmt::Debug {
     ///
     /// As [`Filler::fill`].
     fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
+
+    /// Whether every page this object holds can be dropped and filled again
+    /// from the source, as it is: the file has no newer copy in memory. False
+    /// unless a source says so (`user::cache`).
+    fn reclaimable(&self) -> bool {
+        false
+    }
+
+    /// Whether page `index`, if the object lacks it, is the source's to
+    /// fill: it is not a hole the file was cut to, which reads as zeros.
+    fn is_sourced(&self, _index: u64) -> bool {
+        false
+    }
+}
+
+/// What [`Vmo::commit_within`] made of a page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Commit {
+    /// The page's frame.
+    Frame(Frame),
+    /// The page is wholly past the end of the file.
+    PastEnd,
+    /// The page is absent and the file's source is to fill it, which it did
+    /// before the fault took the lock and reclaim has undone: the caller
+    /// fills it again, and does not commit zeros in its place.
+    Unfilled,
 }
 
 /// A pageable memory object.
@@ -428,11 +454,63 @@ impl Vmo {
         pages: u64,
         filler: Option<Arc<dyn Filler>>,
     ) -> Result<Arc<Vmo>, AllocError> {
-        crate::fallible::try_arc(Vmo::unfilled(
+        let vmo = crate::fallible::try_arc(Vmo::unfilled(
             pages,
             filler,
             Charge::none(Resource::Objects),
-        ))
+        ))?;
+        crate::user::cache::register(&vmo)?;
+        Ok(vmo)
+    }
+
+    /// Whether this is the object of a file on a disk.
+    pub(crate) fn is_disk_file(&self) -> bool {
+        self.filler.is_some()
+    }
+
+    /// Whether reclaim may drop this object's pages: its source can read
+    /// them again and has no newer copy, and no shared mapping may write
+    /// them without a mark (`user::cache`).
+    pub(crate) fn reclaimable(&self) -> bool {
+        self.filler
+            .as_ref()
+            .is_some_and(|filler| filler.reclaimable())
+            && !self.writably_mapped()
+            && !self.mapped_written.load(Ordering::SeqCst)
+    }
+
+    /// Note, in `out`, the index of each committed page from `from` whose
+    /// frame `pick` accepts and that is not held, until `room` are noted or
+    /// [`CHUNK`]-many pages were looked at; `pick` sees each page looked at.
+    /// `out` has room for `room` already. The index to go on from, or
+    /// `None` at the end of the object.
+    pub(crate) fn pick_pages(
+        &self,
+        from: u64,
+        room: usize,
+        out: &mut Vec<u64>,
+        pick: &mut dyn FnMut(Frame) -> bool,
+    ) -> Option<u64> {
+        let state = self.pages.lock();
+        for (looked, (&index, &frame)) in state.frames.range(from..).enumerate() {
+            if out.len() >= room || looked >= CHUNK {
+                return Some(index);
+            }
+            if !state.held.contains_key(&index)
+                && pick(frame)
+                && crate::fallible::push_within(out, index).is_err()
+            {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    /// Call `visit` with the frame of each committed page.
+    pub(crate) fn for_each_page(&self, visit: &mut dyn FnMut(Frame)) {
+        for &frame in self.pages.lock().frames.values() {
+            visit(frame);
+        }
     }
 
     /// The object [`Vmo::new_filled`] allocates.
@@ -816,7 +894,7 @@ impl Vmo {
     /// # Errors
     ///
     /// As [`Vmo::commit`].
-    pub(crate) fn commit_within(&self, index: u64) -> Result<Option<Frame>, VmoError> {
+    pub(crate) fn commit_within(&self, index: u64) -> Result<Commit, VmoError> {
         let len = self.len_pages();
         if index >= len {
             return Err(VmoError::OutOfRange { index, pages: len });
@@ -824,17 +902,54 @@ impl Vmo {
 
         let mut pages = self.pages.lock();
         if index >= self.bound.load(Ordering::SeqCst) {
-            return Ok(None);
+            return Ok(Commit::PastEnd);
         }
         if let Some(&frame) = pages.frames.get(&index) {
-            return Ok(Some(frame));
+            return Ok(Commit::Frame(frame));
+        }
+        if self.sourced(index) {
+            return Ok(Commit::Unfilled);
         }
 
         let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
         let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
         mm::zero_frame(frame);
         let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
-        Ok(Some(frame))
+        Ok(Commit::Frame(frame))
+    }
+
+    /// Whether page `index`, if absent, is its file's source to fill.
+    pub(crate) fn sourced(&self, index: u64) -> bool {
+        self.filler
+            .as_ref()
+            .is_some_and(|filler| filler.is_sourced(index))
+    }
+
+    /// [`Vmo::read_page`], but `false`, reading nothing, for a page the
+    /// object lacks: the caller decides whether that is a hole or a page to
+    /// fill again.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::read_page`].
+    pub(crate) fn read_present(
+        &self,
+        index: u64,
+        offset: usize,
+        out: &mut [u8],
+    ) -> Result<bool, VmoError> {
+        self.check_span(index, offset, out.len())?;
+        let pages = self.pages.lock();
+        let Some(&frame) = pages.frames.get(&index) else {
+            return Ok(false);
+        };
+        let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
+        // SAFETY: (FRAME) as in `read_page`: the object holds a reference on
+        // `frame` while its lock is held, `check_span` kept the range inside
+        // the page, and the direct map covers all of RAM.
+        let source = unsafe { core::slice::from_raw_parts(at as *const u8, out.len()) };
+        out.copy_from_slice(source);
+        Ok(true)
     }
 
     /// Copy `out.len()` bytes out of page `index`, starting `offset` into it.

@@ -50,6 +50,7 @@ use ferrix_vfs::tmpfs::{PageSource, Pages, Storage};
 use ferrix_vfs::{Errno, Result};
 
 use crate::mm;
+use crate::object::quota::{self, Counter};
 use crate::sync::SpinLock;
 use crate::user::vmo::{Filler, Vmo, VmoError};
 
@@ -64,6 +65,10 @@ pub(crate) const MAX_FILE_SIZE: u64 = 1 << 40;
 /// `HeapPages` asks for, so that a read and a fault ask a filesystem the same
 /// way. A compressed btrfs extent is at most 128 KiB, which is 32 pages.
 pub(crate) const MAX_FILL_RUN: usize = 32;
+
+/// How many times a read fills a page that reclaim took again before it reads
+/// the page from the source directly.
+const REFILLS: usize = 8;
 
 /// [`PAGE_SIZE`] as a length.
 const PAGE_BYTES: usize = PAGE_SIZE as usize;
@@ -158,6 +163,19 @@ fn refused(error: VmoError) -> Errno {
     }
 }
 
+/// A frame for a page of the cache, reclaiming when there is none: first
+/// inside the job whose `memory.max` refused it, then anywhere if the machine
+/// itself is out (`user::cache`). Called with no lock held, as a fill is.
+fn allocate_reclaiming() -> Option<Frame> {
+    let group = crate::sched::running_group();
+    mm::allocate_user_frame().or_else(|| {
+        let scope =
+            quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE).unwrap_or(quota::NONE);
+        let _ = crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64);
+        mm::allocate_user_frame()
+    })
+}
+
 /// Give back frames no page kept.
 fn release_all(frames: impl IntoIterator<Item = Frame>) {
     for frame in frames {
@@ -175,6 +193,7 @@ impl VmoPages {
         let charge = Charge::bytes(
             boxed_footprint::<VmoPages>()
                 .saturating_add(arc_footprint::<Vmo>())
+                .saturating_add(crate::user::cache::ENTRY_HEAP)
                 .saturating_add(filled),
         )
         .map_err(|_| Errno::ENOMEM)?;
@@ -211,6 +230,14 @@ impl VmoPages {
 }
 
 impl Filler for Fill {
+    fn reclaimable(&self) -> bool {
+        self.source.reclaimable()
+    }
+
+    fn is_sourced(&self, index: u64) -> bool {
+        self.sourced(index)
+    }
+
     /// Read ahead as far as a read asks at most, [`MAX_FILL_RUN`] pages: a
     /// program's libraries are faulted in a page at a time, and a disk read
     /// per page is what would make that slow.
@@ -220,7 +247,12 @@ impl Filler for Fill {
             return Ok(());
         }
         let last = index.saturating_add(MAX_FILL_RUN as u64 - 1);
-        self.fill_run(vmo, index, self.run(vmo, index, last))
+        self.fill_run(vmo, index, self.run(vmo, index, last))?;
+        // A fault that had to read the disk: Linux's `pgmajfault`.
+        if self.source.reads_disk() {
+            quota::count(crate::sched::running_group(), Counter::MajorFaults, 1);
+        }
+        Ok(())
     }
 
     /// The one page, and no run after it.
@@ -276,15 +308,21 @@ impl Fill {
         let mut frames: Vec<Frame> = Vec::new();
         frames.try_reserve_exact(count).map_err(|_| Errno::ENOMEM)?;
         for _ in 0..count {
-            let Some(frame) = mm::allocate_user_frame() else {
-                release_all(frames);
-                return Err(Errno::ENOMEM);
+            let Some(frame) = allocate_reclaiming() else {
+                // Room for part of the run is a fill of part of it, which a
+                // source may always answer (`PageSource::fill_range`): a job
+                // limited below a run's size reads on in pieces.
+                if frames.is_empty() {
+                    return Err(Errno::ENOMEM);
+                }
+                break;
             };
             // Zeroed, so a source that writes less than a page hands no
             // earlier owner's bytes to whoever reads it.
             mm::zero_frame(frame);
             frames.push(frame);
         }
+        let count = frames.len();
 
         let filled = {
             let mut pages: Vec<&mut [u8]> = Vec::new();
@@ -340,26 +378,69 @@ impl Fill {
     }
 }
 
-impl Pages for VmoPages {
-    fn read(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
-        let len = buf.len();
-        let mut done = 0;
-        while done < len {
-            let (index, within, take) = piece(offset, done, len)?;
+impl VmoPages {
+    /// `out.len()` bytes of page `index` from `within`, filling the page
+    /// first if it is the source's to fill. `offset` and `len` are the whole
+    /// read's, which a fill reads ahead to the end of.
+    ///
+    /// Under the object's lock a page a truncation took away since the fill
+    /// reads as the zeros the file now has there. A page that reclaim took
+    /// since the fill (`user::cache`) is no hole but the source's, and is
+    /// filled again; after [`REFILLS`] of those it is read from the source
+    /// directly, which nothing can race.
+    fn read_piece(
+        &self,
+        index: u64,
+        within: usize,
+        out: &mut [u8],
+        offset: u64,
+        len: usize,
+    ) -> Result<()> {
+        for _ in 0..REFILLS {
             if self.wants_fill(index) {
                 let (last, _, _) = piece(offset, len - 1, len)?;
                 self.fill_from(index, last)?;
             } else {
                 super::seam::served(1);
             }
-            // Under the object's lock: a page a truncation took away since
-            // the fill reads as the zeros the file now has there.
+            if self
+                .vmo
+                .read_present(index, within, out)
+                .map_err(|_| Errno::EIO)?
+            {
+                return Ok(());
+            }
+            if !self.vmo.sourced(index) {
+                out.fill(0);
+                return Ok(());
+            }
+        }
+        let fill = self.fill.as_deref().ok_or(Errno::EIO)?;
+        let mut page = Vec::new();
+        page.try_reserve_exact(PAGE_BYTES)
+            .map_err(|_| Errno::ENOMEM)?;
+        page.resize(PAGE_BYTES, 0_u8);
+        fill.source.fill(index, &mut page)?;
+        let from = page.get(within..within + out.len()).ok_or(Errno::EIO)?;
+        out.copy_from_slice(from);
+        Ok(())
+    }
+}
+
+impl Pages for VmoPages {
+    fn read(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
+        let len = buf.len();
+        let mut done = 0;
+        while done < len {
+            let (index, within, take) = piece(offset, done, len)?;
             let out = buf.get_mut(done..done + take).ok_or(Errno::EIO)?;
-            self.vmo
-                .read_page(index, within, out)
-                .map_err(|_| Errno::EIO)?;
+            self.read_piece(index, within, out, offset, len)?;
             done += take;
         }
+        // The pages are in the object and copied out, so a job over its
+        // `memory.high` can give them back; not before, or a fill would be
+        // taken again as it was made.
+        crate::object::oom::throttle();
         Ok(())
     }
 
