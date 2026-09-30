@@ -125,7 +125,7 @@ fn mkdir(page: &mut Page<'_>, path: &[u8]) -> Result<Result<usize, Errno>, &'sta
 }
 
 /// `mount(source, target, type, flags, NULL)`.
-fn mount(
+pub(super) fn mount(
     page: &mut Page<'_>,
     source: &[u8],
     target: &[u8],
@@ -144,7 +144,7 @@ fn mount(
 }
 
 /// `umount2(target, flags)`.
-fn unmount(
+pub(super) fn unmount(
     page: &mut Page<'_>,
     target: &[u8],
     flags: u32,

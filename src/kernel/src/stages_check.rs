@@ -393,6 +393,23 @@ pub(super) fn check_namespaces(disk: bool) {
     check_pid_namespaces();
     check_network_namespaces();
     check_proc_access();
+    check_mount_permissions();
+}
+
+/// Who may change mounts: ownership, `tmpfs` alone from a user namespace,
+/// locked copies (`docs/NAMESPACES.md` M1 to M4, N5).
+fn check_mount_permissions() {
+    let checked = match fs::mountperm_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_MOUNT_PERMISSIONS,
+            "mount permission self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  mountperm {} calls answered as Linux answers them, {} of them refusals: no mounting          in a mount namespace a user namespace does not own, tmpfs alone and nosuid,nodev from          one that does, a copy's flags locked and its mounts locked to their parents, the host's          filesystem not its to remount, and no directory pinned by a mount of its own",
+        checked.calls, checked.refusals,
+    );
 }
 
 /// User namespaces: the rules of `docs/NAMESPACES.md` §4 attempted and
