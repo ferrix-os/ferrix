@@ -312,7 +312,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     drop(thread);
     match decision {
         Decision::Verdict(verdict) => verdict,
-        Decision::Leave(status) => process::exit_thread_current(status),
+        Decision::Leave(_) => process::leave_current(),
     }
 }
 
