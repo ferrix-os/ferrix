@@ -165,8 +165,17 @@ fork, clone and a native child and kept by `execve`, charged to the job
 that blocks a syscall".** The `seccomp` boot line (FX-1303) installs filters
 as a program does in a real thread of a check process and makes the calls
 through the core's own entry; thirteen negative controls each stopped the
-boot with the check's own message (`docs/SECCOMP.md` §12). `TRAP` (S4),
-`TSYNC` (S5) and the guest test (S6) follow.
+boot with the check's own message (`docs/SECCOMP.md` §12).
+
+**Done -- seccomp S4, `TRAP` (2026-10-01, 4 points).** A filter's `TRAP`
+forces `SIGSYS` with Linux's `_sigsys` information (field by field for i386),
+and the core rolls the call's registers back (`Verdict::Trap`, `L.trap.8`)
+so that a handler finds the call in its context and can answer it, as
+Chromium's renderers do. A trap cannot be blocked or ignored; a trapped
+native-range call kills its process. `PR_{GET,SET}_SPECULATION_CTRL` report
+both mitigations force-disabled and refuse to enable them. Six negative
+controls (`docs/SECCOMP.md` §12). `TSYNC` (S5) and the guest test (S6)
+follow.
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every

@@ -1695,4 +1695,73 @@ keeping the chain (no boot check runs an `execve`; S6's guest program does:
 bubblewrap's path), and `LOG`'s line (read by hand in the boot log). The
 several-thread `KILL_THREAD` is a check now, with started threads.
 
-S4 (`TRAP`) and S5 (`TSYNC`) follow.
+**S4 built (2026-10-01, os-7c, `stage13-s4`).** `TRAP`, after the
+consultant's design note (os-ad, 2026-10-01: "OK to build as described", with
+three conditions, each met below).
+* **The core.** `Verdict` gains `Trap`, which carries nothing. `trap::ask`
+  answers it with `arch::syscall_rollback_value` of the call as the entry read
+  it, the S2 function: the number for `RAX`/`EAX` on x86, the original first
+  argument for `x0`/`r0` on the Arm pair, where the number stays in `x8`/`r7`.
+  A filter chooses no value, and the value is one taken from the caller's own
+  registers, so nothing of the kernel's can reach a program's return register
+  this way. `L.trap.8` states it (reserved on `main` first), and the `seccomp`
+  line of FX-1302 checks it with a slot of its own for first arguments `0x1111`,
+  -512, -516 and -1. The core changes in `trap.rs` alone.
+* **The personality.** `syscall::seccomp::trap` forces `SIGSYS` on the
+  running thread through `deliver::force` (`signal::force`: unblocked, and
+  reset to the default if it was ignored or blocked, as Linux's
+  `force_sig_info_to_task` does, so a program that blocks `SIGSYS` dies of a
+  trap rather than handling it), as `Origin::Sys` with
+  `si_code` `SYS_SECCOMP`, `si_errno` the filter's data, `_call_addr` the
+  instruction after the call, `_syscall` the number and `_arch` the entry's
+  token. The signal is queued before `trap::ask` returns, so the return path of
+  this very call delivers it, from the rolled-back frame, before any other
+  instruction of the program runs. If the signal is fatal at once (no handler,
+  so the default action) or there is no thread, the process is killed through
+  `process::kill`, which a process already ending takes as a no-op: a thread
+  being killed gets no second, conflicting delivery.
+* **Native calls fail closed** (condition 2). A `TRAP` for a native-range call
+  (`arch` `NATIVE_ARCH`) is `KILL_PROCESS`: `SIGSYS` is a Linux signal the
+  native ABI cannot express. A native process with no Linux signal state never
+  reaches the filter at all, since the hook finds no personality thread.
+* **Restart codes** (condition 3). The rollback can put a value that reads as
+  `ERESTARTSYS` (-512) back in `x0`/`r0`, the program's own first argument.
+  It is written as the return value through `Outcome::Return` and never
+  passes the dispatcher, which alone marks a call for restart
+  (`mark_restart`); the filters check traps a call whose first argument is
+  -512 and requires no restart marked.
+* **i386.** `_sigsys` is a pointer and two `int`s, so the 32-bit layout is not
+  the 64-bit one shifted: `sigframe32::siginfo_from_64` converts this origin
+  field by field (`_call_addr` at 12, `_syscall` at 16, `_arch` at 20), with
+  a host test.
+* **`GET_ACTION_AVAIL`** answers 0 for `TRAP` now; `USER_NOTIF` stays
+  `EOPNOTSUPP`.
+* **Speculation** (§3.9, SR14). `PR_GET_SPECULATION_CTRL` answers
+  `PR_SPEC_PRCTL | PR_SPEC_FORCE_DISABLE` (9) for store bypass and indirect
+  branches and `ENODEV` for any other feature; `PR_SET_SPECULATION_CTRL`
+  accepts a request for more mitigation, refuses `PR_SPEC_ENABLE` with
+  `EPERM`, a value that is no control with `ERANGE`; `SPEC_ALLOW` turns
+  nothing off.
+
+Evidence: FX-1302's core case (above) and FX-1303's: a `TRAP` in a thread with
+a handler (unblocked, as Chromium installs it) traps the call and leaves
+`SIGSYS` pending and deliverable, with an `Origin::Sys` whose bytes are at
+Linux's offsets on this machine and, on x86-64, at i386's after the
+conversion; no restart is marked, for a first argument of -512 too; with
+`SIGSYS` blocked and ignored a trapped call ends the process by `SIGSYS`; a
+trapped native-range call ends the process though a handler is installed; and
+the speculation answers above. The frame a handler sees, its write into the
+context and `SA_NODEFER` are S6's guest program on four ABIs. Negative
+controls, each through `fleet/gate.sh control --expect` (the INDEX lines are
+in the landing's message):
+
+| Control (sabotage) | Message |
+|---|---|
+| a trapped call answered -38 instead of rolled back | `SIGSYS's context lost the syscall number` |
+| the i386 conversion off for a trap | `i386 si_syscall was not at offset 16` |
+| `SIGSYS` posted, not forced | `a blocked and ignored SIGSYS let a trapped call return` |
+| `PR_SPEC_ENABLE` accepted | `PR_SET_SPECULATION_CTRL enabled a mitigation` |
+| the trap's data left out of `si_errno` | `a trapped call's siginfo did not carry the call, its ip and its arch` |
+| a native-range trap raising `SIGSYS` | `a trapped native-range call returned` |
+
+S5 (`TSYNC`) follows.
