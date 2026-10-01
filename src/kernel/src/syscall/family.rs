@@ -14,13 +14,12 @@
 //!
 //! # Namespaces
 //!
-//! A mount, a user and a pid namespace exist (`CLONE_NEWNS`, `CLONE_NEWUSER`,
-//! `CLONE_NEWPID`; `docs/NAMESPACES.md`, `docs/PIDNS.md`). The others do not,
-//! and their `CLONE_NEW*` flags are `EINVAL` here, which is what a Linux built
-//! without the matching `CONFIG_*_NS` answers. `unshare` has always said so;
-//! `clone` used to ignore the flags and hand back an ordinary child in the one
-//! namespace there is, so a program that asked to be sandboxed was told it got
-//! what it asked for. The two calls now agree.
+//! Every namespace `clone` can ask for exists: mount, user, UTS, IPC, cgroup,
+//! pid and network (`docs/NAMESPACES.md`, `docs/PIDNS.md`, `docs/NETNS.md`).
+//! `clone` once ignored the flags and handed back an ordinary child in the one
+//! namespace there was, so a program that asked to be sandboxed was told it got
+//! what it asked for; now it gets the namespace, or an `EINVAL` for a
+//! combination Linux refuses.
 //!
 //! # `vfork` copies
 //!
@@ -103,17 +102,6 @@ const CLONE_NEWNS: u64 = 0x0002_0000;
 const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// ... a network namespace.
 const CLONE_NEWNET: u64 = 0x4000_0000;
-/// Every namespace a child could be asked to be given. Every one but pid and
-/// network exists. `CLONE_NEWTIME` is not among them because it is not reachable:
-/// its bit is inside `CSIGNAL`, so `clone` reads it as an exit signal, as
-/// Linux does, and [`clone3_request`] refuses `CSIGNAL` outright.
-const CLONE_NAMESPACES: u64 = CLONE_NEWNS
-    | CLONE_NEWCGROUP
-    | CLONE_NEWUTS
-    | CLONE_NEWIPC
-    | CLONE_NEWUSER
-    | CLONE_NEWPID
-    | CLONE_NEWNET;
 
 /// `wait4`: return at once if nothing has ended.
 const WNOHANG: u32 = 1;
@@ -392,8 +380,11 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
     }
 }
 
-/// Whether the namespaces `flags` asks for can be given: `EINVAL` for one
-/// Ferrix does not have (network), for `CLONE_NEWNS` with `CLONE_FS`, as Linux
+/// Whether the namespaces `flags` asks for can be given: every namespace a
+/// child can be asked for exists (`CLONE_NEWTIME` is not among them: its bit is
+/// inside `CSIGNAL`, so `clone` reads it as an exit signal, as Linux does, and
+/// `clone3` refuses `CSIGNAL` outright); `EINVAL` for `CLONE_NEWNS` with
+/// `CLONE_FS`, as Linux
 /// refuses a namespace a shared fs context would leave, for `CLONE_NEWIPC`
 /// with `CLONE_SYSVSEM`, for any of the UTS, IPC and cgroup namespaces with
 /// `CLONE_THREAD`, which here shares them with its process, for `CLONE_NEWPID`
@@ -403,12 +394,6 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 /// `ENOSPC` for a pid namespace past the depth limit.
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
     const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
-    if flags
-        & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET | SMALL))
-        != 0
-    {
-        return Err(Errno::EINVAL);
-    }
     if flags & SMALL != 0 && flags & CLONE_THREAD != 0 {
         return Err(Errno::EINVAL);
     }
