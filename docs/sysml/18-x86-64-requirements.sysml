@@ -1734,6 +1734,21 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.OBJ.12";
             attribute :>> unit = ("trap::system_call", "trap::dispatch");
         }
+        requirement <'L.trap.8'> aTrapAnswersOnlyTheCallsOwnRegister : ItemLowLevel {
+            attribute :>> statement = "A Trap verdict shall carry nothing, and ask
+                shall answer it with the architecture's syscall_rollback_value of
+                the call as the entry read it and no other value: a value taken from
+                the caller's own registers, so that nothing of the kernel's can be
+                put in a program's return register, and one that is never a restart
+                code the dispatcher marks.";
+            attribute :>> criterion = "A slot with a filter that answers Trap is
+                asked about a call with its first argument 0x1111, -512, -516 and
+                -1; each answer is the architecture's rollback value of that call,
+                the number on x86-64 and the first argument on the Arm pair (the
+                `seccomp` line).";
+            attribute :>> parent = "H.TRAP.16";
+            attribute :>> unit = "trap::ask";
+        }
         requirement <'L.trap.7'> theRegisteredFilterIsAskedFirst : ItemLowLevel {
             attribute :>> statement = "filter_system_call shall answer nothing with no
                 filter registered and ask the registered filter otherwise, the first

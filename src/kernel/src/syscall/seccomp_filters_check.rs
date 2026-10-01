@@ -198,14 +198,24 @@ impl Env {
     fn judges(&self, call: usize) -> Option<u32> {
         judge_thread(&self.thread, call)
     }
+
+    /// [`Env::judges`] with the call's arguments.
+    fn judges_with(&self, call: usize, args: [u64; 6]) -> Option<u32> {
+        judge_with(&self.thread, call, args)
+    }
 }
 
 /// What `thread`'s chain answers for the native call `call`.
 fn judge_thread(thread: &Thread, call: usize) -> Option<u32> {
+    judge_with(thread, call, [0; 6])
+}
+
+/// [`judge_thread`] with the call's arguments.
+fn judge_with(thread: &Thread, call: usize, args: [u64; 6]) -> Option<u32> {
     let args = SyscallArgs {
         abi: Abi::Native,
         number: call,
-        args: [0; 6],
+        args,
         ip: 0x1000,
     };
     match seccomp::judge(thread, &args) {
@@ -228,7 +238,6 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     ordering()?;
     heredity(&mut report)?;
     entry_task(&mut report)?;
-    rollback_through_the_core()?;
     speculation(&mut report)?;
     let (chain, many, released) = longest_chain()?;
     report.chain = chain;
@@ -552,6 +561,9 @@ enum Ending {
     Trap,
     /// `TRAP` with `SIGSYS` blocked and ignored: the process dies of it.
     TrapIgnored,
+    /// `TRAP` for a call in the native range, which `SIGSYS` cannot express:
+    /// the process is killed, though a handler is installed.
+    TrapNative,
 }
 
 /// Run a scenario task in a process of its own, and answer what it found and
@@ -710,6 +722,18 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             *FOUND.lock() = Some(Ok(seen));
             let _ = call(getsid, [0; 6]);
             return Err("a blocked and ignored SIGSYS let a trapped call return");
+        }
+        Some(Ending::TrapNative) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let gap = ferrix_native_abi::nr::LAST;
+            thread.with_signals(|shared, _| shared.install_action(SIGSYS_NUMBER, HANDLER, 0));
+            let at = env.put(&answering(&[(gap, TRAP | 1)]), None)?;
+            if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
+                return Err("a trapping filter was refused through the entry");
+            }
+            *FOUND.lock() = Some(Ok(seen));
+            let _ = call(gap, [0; 6]);
+            return Err("a trapped native-range call returned");
         }
         Some(Ending::Thread | Ending::Process) | None => {}
     }
@@ -873,6 +897,12 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
         return Err(
             "a blocked and ignored SIGSYS did not end the process that made a trapped call",
         );
+    }
+    report.traps += 1;
+    report.killed += 1;
+    let (_, status) = scenario(Ending::TrapNative, false)?;
+    if status != SIGSYS_STATUS {
+        return Err("a trapped native-range call did not end the process that made it");
     }
     report.traps += 1;
     report.killed += 1;
@@ -1067,6 +1097,35 @@ fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
     {
         return Err("a trapped call's siginfo did not carry the call, its ip and its arch");
     }
+    // A trap is never a restart: a call whose first argument reads as
+    // `ERESTARTSYS` (-512) is trapped like any, and the thread has no call
+    // marked for restart afterwards. Restarts are marked by the dispatcher, which
+    // a trap never reaches.
+    let thread_restart = env.thread.with_signals(|_, own| own.take_restart());
+    if thread_restart.is_some() {
+        return Err("a trapped call left a restart marked");
+    }
+    let minus_512 = (-512_i64) as u64;
+    if env.judges_with(getppid, [minus_512, 0, 0, 0, 0, 0]) != Some(TRAPPED) {
+        return Err("a trapped call whose first argument reads as ERESTARTSYS was not trapped");
+    }
+    if env
+        .thread
+        .with_signals(|_, own| own.take_restart())
+        .is_some()
+    {
+        return Err(
+            "a trapped call whose first argument reads as ERESTARTSYS was marked for restart",
+        );
+    }
+    // The signal it raised is the trap's, once: take it as the first did.
+    let again = env
+        .thread
+        .with_signals(|shared, own| signal::take_next(shared, own))
+        .ok_or("a trapped call raised no signal")?;
+    if again.signal != SIGSYS_NUMBER {
+        return Err("a trapped call raised a signal other than SIGSYS");
+    }
     // The bytes a handler of this machine reads.
     let info = taken.origin.encode(SIGSYS_NUMBER);
     let word = |at: usize| {
@@ -1108,40 +1167,6 @@ fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
 /// The `arch` token of this machine's own entry.
 fn arch_token() -> u32 {
     arch::audit_arch(Abi::Native)
-}
-
-/// The core gives a trapped call's registers back as the program made it: the
-/// value it answers is the architecture's rollback of the call, and nothing a
-/// filter chose (`docs/SECCOMP.md` §3.6).
-fn rollback_through_the_core() -> Result<(), &'static str> {
-    use ferrix_sync::Once;
-    fn trapping(_: &SyscallArgs) -> Verdict {
-        Verdict::Trap
-    }
-    let slot: Once<crate::trap::SyscallFilter> = Once::new();
-    crate::trap::register(&slot, trapping);
-    let args = SyscallArgs {
-        abi: Abi::Native,
-        number: 0x2222,
-        args: [0x1111, 2, 3, 4, 5, 6],
-        ip: 0x1000,
-    };
-    let expected = arch::syscall_rollback_value(Abi::Native, args.number, &args.args);
-    match crate::trap::ask(&slot, &args) {
-        Some(crate::trap::Outcome::Return(value)) if value == expected => {}
-        _ => return Err("SIGSYS's context lost the syscall number"),
-    }
-    // And that value is the number on x86, the first argument on the Arm pair:
-    // what a handler finds in the register that held it.
-    let wanted = if arch::ARCH.elf_machine() == 62 {
-        0x2222
-    } else {
-        0x1111
-    };
-    if expected != wanted {
-        return Err("SIGSYS's context lost the syscall number");
-    }
-    Ok(())
 }
 
 /// What a program learns of speculation and may do about it: both features

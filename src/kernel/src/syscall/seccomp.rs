@@ -501,6 +501,13 @@ fn trap(thread: &Thread, args: &SyscallArgs, errno: u32, log: bool) -> Decision 
         report(thread, args, "trap", TRAP);
     }
     let seen = data(args);
+    // A native-range call is not a Linux call, and `SIGSYS` is a Linux signal
+    // the native ABI cannot express: a filter that traps one gets the most
+    // restrictive answer, `KILL_PROCESS`, as it does for an action nobody
+    // defined (the consultant's S4 ruling).
+    if seen.arch == NATIVE_ARCH {
+        return kill_process(thread, args, TRAP);
+    }
     let origin = Origin::Sys {
         errno,
         call_addr: seen.instruction_pointer,
