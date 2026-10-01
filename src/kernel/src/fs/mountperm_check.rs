@@ -173,6 +173,14 @@ fn unprivileged(tally: &mut Tally<'_>, root_page: &mut Page<'_>) -> Result<(), &
         Errno::EPERM,
         "a user namespace remounted the host's filesystem as a whole",
     )?;
+    // And where no lock stands in the way: `/tmp` is the host's tmpfs, mounted
+    // read-write, so making the copy's mount read-only is the copy's to do,
+    // and a plain remount would turn the host's filesystem read-only too.
+    tally.refused(
+        mount(&mut page, b"none", b"/tmp", b"", MS_REMOUNT | MS_RDONLY)?,
+        Errno::EPERM,
+        "a user namespace remounted a filesystem the host has read-write as a whole",
+    )?;
     tally.ok(
         mount(&mut page, b"none", OWN, b"", MS_REMOUNT | MS_RDONLY)?,
         "a user namespace could not remount its own tmpfs",

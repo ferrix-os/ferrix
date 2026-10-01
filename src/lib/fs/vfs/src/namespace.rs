@@ -574,11 +574,11 @@ pub struct Namespace {
     /// The kernel heap it holds, charged to the job of the process that
     /// asked for the copy; nothing for the first (F-37).
     _charge: Charge,
-    /// What the kernel says owns it: the VFS does not look inside. Set once,
-    /// by the kernel, to the user namespace that was current when it was
+    /// What the kernel says owns it: the VFS does not look inside. Set by
+    /// [`Namespace::copy_as`] to the user namespace that was current when it was
     /// copied; empty for the first, whose owner is the first user namespace
     /// (`docs/NAMESPACES.md` §12).
-    owner: SpinLock<Option<Arc<dyn core::any::Any + Send + Sync>>>,
+    owner: SpinLock<Option<Arc<dyn Any + Send + Sync>>>,
 }
 
 impl fmt::Debug for Namespace {
@@ -664,19 +664,10 @@ impl Namespace {
         self.id
     }
 
-    /// Record what owns it. The kernel calls this once, on a copy it has just
-    /// made and nothing else names; a second call is ignored.
-    pub fn set_owner(&self, owner: Arc<dyn core::any::Any + Send + Sync>) {
-        let mut slot = self.owner.lock();
-        if slot.is_none() {
-            *slot = Some(owner);
-        }
-    }
-
-    /// What owns it, as [`Namespace::set_owner`] recorded it; `None` for the
+    /// What owns it, as [`Namespace::copy_as`] was told; `None` for the
     /// first namespace.
     #[must_use]
-    pub fn owner(&self) -> Option<Arc<dyn core::any::Any + Send + Sync>> {
+    pub fn owner(&self) -> Option<Arc<dyn Any + Send + Sync>> {
         self.owner.lock().clone()
     }
 
