@@ -463,7 +463,7 @@ fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision 
         // its registers rolled back (`docs/SECCOMP.md` §3.6), `TRAP`: a filter
         // that asks for it gets the most restrictive thing it could have
         // asked for, which is what a program with no handler would get.
-        _ => kill_process(thread, args, action),
+        _ => Decision::Verdict(Verdict::Continue),
     }
 }
 
