@@ -160,7 +160,10 @@ fn launchers(config: &str) -> Vec<File> {
         let Some(relative) = program.strip_prefix('/') else {
             continue;
         };
-        let Ok(bytes) = std::fs::read(program) else {
+        let Some(bytes) = std::fs::read(program)
+            .ok()
+            .or_else(|| std::fs::read(in_this_home(program)?).ok())
+        else {
             continue;
         };
         if !bytes.starts_with(b"#!/bin/sh\n") || out.iter().any(|file| file.path == relative) {
@@ -192,12 +195,27 @@ fn launchers(config: &str) -> Vec<File> {
     out
 }
 
+/// This machine's home: `HOME`, or on Windows, where PowerShell and `cmd`
+/// set none, `USERPROFILE`.
+pub(crate) fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// `/home/<user>/<rest>` as `<rest>` under this machine's home: where a
+/// config copied from a Linux machine finds, on Windows, the scripts it
+/// names by their Linux path.
+fn in_this_home(path: &str) -> Option<PathBuf> {
+    let (_user, rest) = path.strip_prefix("/home/")?.split_once('/')?;
+    Some(home()?.join(rest))
+}
+
 /// The font the user's lock screen names first -- `font_family` in
 /// `~/.config/hypr/hyprlock.conf`, `$variables` expanded -- which is the
 /// face the `caption` boot draws in. `None` without such a file.
 pub(crate) fn users_font() -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let path = Path::new(&home).join(".config/hypr/hyprlock.conf");
+    let path = home()?.join(".config/hypr/hyprlock.conf");
     let text = std::fs::read_to_string(path).ok()?;
     hyprlang_families(&text).into_iter().next()
 }
@@ -546,6 +564,16 @@ mod tests {
     }
 
     #[test]
+    fn a_linux_home_path_is_found_in_this_home() {
+        let home = home().unwrap();
+        assert_eq!(
+            in_this_home("/home/u/.local/bin/hypr-launcher"),
+            Some(home.join(".local/bin/hypr-launcher"))
+        );
+        assert_eq!(in_this_home("/usr/bin/fuzzel"), None);
+    }
+
+    #[test]
     fn a_family_name_is_compared_as_fontconfig_does() {
         assert!(same_family("DejaVu Sans", "dejavusans"));
         assert!(!same_family("Ubuntu", "Ubuntu Light"));
@@ -559,10 +587,10 @@ mod probe {
     #[test]
     #[ignore = "reads this machine's ~/.config and fontconfig"]
     fn this_machines_dotfiles() {
-        let Some(home) = std::env::var_os("HOME") else {
+        let Some(home) = super::home() else {
             return;
         };
-        let config = std::path::Path::new(&home).join(".config/hypr/hyprland.conf");
+        let config = home.join(".config/hypr/hyprland.conf");
         if !config.is_file() {
             return;
         }
@@ -575,8 +603,16 @@ mod probe {
         assert!(
             files
                 .iter()
-                .any(|file| file.path.starts_with("usr/share/fonts/host/"))
+                .any(|file| file.path.ends_with(".local/bin/hypr-launcher"))
         );
+        // A host with no fontconfig carries no fonts, and says so.
+        if super::run("fc-match", &["--version"]).is_some() {
+            assert!(
+                files
+                    .iter()
+                    .any(|file| file.path.starts_with("usr/share/fonts/host/"))
+            );
+        }
     }
 }
 

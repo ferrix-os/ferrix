@@ -17,11 +17,16 @@
 //! taken. Neither the EDID nor the registry is ever committed: both are
 //! read from the machine the image is built on.
 //!
-//! A machine without the monitor says so in one line and carries nothing:
-//! the screen then has no EDID, as it had before, and its description is
-//! only its connector's name, `Virtual-1`.
+//! A monitor found is also saved, with the registry, under
+//! `~/.local/share/ferrix/edid/`, and a machine without the monitor --
+//! it is asleep, and a DP port says `disconnected`, or it was never
+//! plugged in here -- takes it from there. That directory is the user's,
+//! outside the tree, and a copy of it is how a Windows machine gets it.
+//! With neither, it says so in one line and carries nothing: the screen then
+//! has no EDID, as it had before, and its description is only its
+//! connector's name, `Virtual-1`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ferrix_displayctl::edid;
 
@@ -72,29 +77,124 @@ pub(crate) fn for_run(asked: Option<&str>) -> Result<Option<Carried>> {
         Some(wanted) => wanted,
         None => DEFAULT_MONITOR,
     };
-    let registry = std::fs::read_to_string(REGISTRY).ok();
-    match find(Path::new(SYSFS_DRM), wanted, registry.as_deref())? {
-        Some(monitor) => {
+    let saved = saved_dir();
+    let registry = std::fs::read_to_string(REGISTRY)
+        .ok()
+        .or_else(|| std::fs::read_to_string(saved.as_ref()?.join(SAVED_REGISTRY)).ok());
+    let (monitor, from) =
+        if let Some(monitor) = find(Path::new(SYSFS_DRM), wanted, registry.as_deref())? {
+            if let Some(dir) = &saved {
+                save(dir, &monitor, registry.as_deref());
+            }
+            let from = format!("this machine's {}", monitor.connector);
+            (monitor, from)
+        } else if let Some(dir) = &saved
+            && let Some(monitor) = find_saved(dir, wanted, registry.as_deref())?
+        {
+            let from = format!("saved as {}", dir.join(&monitor.connector).display());
+            (monitor, from)
+        } else {
             println!(
-                "  edid: the screen is {} (this machine's {}), by drm.edid_firmware{}",
-                monitor.description,
-                monitor.connector,
-                if registry.is_some() {
-                    ""
-                } else {
-                    "; no /usr/share/hwdata/pnp.ids here, so the make is its three-letter code"
-                }
+                "  edid: no monitor of this machine describes itself as \"{wanted}\", and none was \
+             saved when one did; the screen has no EDID and is only Virtual-1 (--edid \
+             <description> names another)"
             );
-            Ok(Some(carry(&monitor, registry)))
+            return Ok(None);
+        };
+    println!(
+        "  edid: the screen is {} ({from}), by drm.edid_firmware{}",
+        monitor.description,
+        if registry.is_some() {
+            ""
+        } else {
+            "; no /usr/share/hwdata/pnp.ids here, so the make is its three-letter code"
         }
-        None => {
-            println!(
-                "  edid: no monitor of this machine describes itself as \"{wanted}\"; the screen \
-                 has no EDID and is only Virtual-1 (--edid <description> names another)"
-            );
-            Ok(None)
-        }
+    );
+    Ok(Some(carry(&monitor, registry)))
+}
+
+/// Where a monitor found on this machine is saved, for a boot when it is off
+/// or on another machine: `~/.local/share/ferrix/edid`. A DP monitor
+/// that is asleep is `disconnected`, EDID and all, and a copy of this
+/// directory is how a machine the monitor was never plugged into (Windows,
+/// whose `run-compositor` reads the same `hyprland.conf`) gives it anyway.
+fn saved_dir() -> Option<PathBuf> {
+    Some(
+        crate::dotfiles::home()?
+            .join(".local")
+            .join("share")
+            .join("ferrix")
+            .join("edid"),
+    )
+}
+
+/// The registry, saved beside the monitors: a host without
+/// `/usr/share/hwdata` still describes them as the host with it did.
+const SAVED_REGISTRY: &str = "pnp.ids";
+
+/// Save `monitor` into `dir`, named by its description, and the registry
+/// beside it. A failure is said and is no reason to stop the boot.
+fn save(dir: &Path, monitor: &Monitor, registry: Option<&str>) {
+    let name = format!("{}.bin", sanitized(&monitor.description));
+    let path = dir.join(&name);
+    if std::fs::read(&path).is_ok_and(|bytes| bytes == monitor.bytes) {
+        return;
     }
+    let saved = std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(&path, &monitor.bytes))
+        .and_then(|()| match registry {
+            Some(text) => std::fs::write(dir.join(SAVED_REGISTRY), text),
+            None => Ok(()),
+        });
+    match saved {
+        Ok(()) => println!(
+            "  edid: saved as {}, for a boot when it is off",
+            path.display()
+        ),
+        Err(error) => println!("  edid: not saved as {}: {error}", path.display()),
+    }
+}
+
+/// The first monitor saved in `dir` whose description starts with `wanted`,
+/// its file name as its connector.
+fn find_saved(dir: &Path, wanted: &str, registry: Option<&str>) -> Result<Option<Monitor>> {
+    let listing = match std::fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(Error::new(format!("{}: {error}", dir.display()))),
+    };
+    let mut names: Vec<String> = listing
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".bin"))
+        .collect();
+    names.sort();
+    Ok(names.into_iter().find_map(|name| {
+        let bytes = std::fs::read(dir.join(&name)).ok()?;
+        matching(name, bytes, wanted, registry)
+    }))
+}
+
+/// `bytes` read from `connector` as a monitor, if they are an EDID whose
+/// description, with `registry` or by its three-letter code, starts with
+/// `wanted`.
+fn matching(
+    connector: String,
+    mut bytes: Vec<u8>,
+    wanted: &str,
+    registry: Option<&str>,
+) -> Option<Monitor> {
+    let wanted = wanted.trim();
+    let checked = edid::check(&mut bytes).ok()?;
+    bytes.truncate(checked.len);
+    let named = describe(&bytes, registry)?;
+    let coded = describe(&bytes, None)?;
+    (!wanted.is_empty() && (named.starts_with(wanted) || coded.starts_with(wanted))).then_some(
+        Monitor {
+            connector,
+            bytes,
+            description: named,
+        },
+    )
 }
 
 /// The first monitor under `root` -- `/sys/class/drm` -- whose description
@@ -114,27 +214,10 @@ pub(crate) fn find(root: &Path, wanted: &str, registry: Option<&str>) -> Result<
     // In order, so which of two identical monitors is taken does not depend
     // on the order the directory lists them in.
     connectors.sort();
-    for connector in connectors {
-        let Ok(mut bytes) = std::fs::read(root.join(&connector).join("edid")) else {
-            continue;
-        };
-        let Ok(checked) = edid::check(&mut bytes) else {
-            continue;
-        };
-        bytes.truncate(checked.len);
-        let (Some(named), Some(coded)) = (describe(&bytes, registry), describe(&bytes, None))
-        else {
-            continue;
-        };
-        if !wanted.is_empty() && (named.starts_with(wanted) || coded.starts_with(wanted)) {
-            return Ok(Some(Monitor {
-                connector,
-                bytes,
-                description: named,
-            }));
-        }
-    }
-    Ok(None)
+    Ok(connectors.into_iter().find_map(|connector| {
+        let bytes = std::fs::read(root.join(&connector).join("edid")).ok()?;
+        matching(connector, bytes, wanted, registry)
+    }))
 }
 
 /// What a monitor's EDID says it is, as Hyprland's short description and
@@ -220,8 +303,12 @@ fn file_name(bytes: &[u8]) -> String {
             })
         })
         .unwrap_or_else(|| "monitor".to_owned());
-    let stem: String = stem
-        .chars()
+    format!("edid/{}.bin", sanitized(&stem))
+}
+
+/// `name` with anything but a letter, a digit, a dot or a dash made a dash.
+fn sanitized(name: &str) -> String {
+    name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
                 c
@@ -229,8 +316,7 @@ fn file_name(bytes: &[u8]) -> String {
                 '-'
             }
         })
-        .collect();
-    format!("edid/{stem}.bin")
+        .collect()
 }
 
 /// A monitor no machine has, for a gate on a machine without the one asked
@@ -330,6 +416,31 @@ mod tests {
         assert!(find(&root, "", None).unwrap().is_none());
         assert!(find(&root.join("absent"), "FRX", None).unwrap().is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_monitor_saved_once_is_found_when_it_is_off() {
+        let dir = std::env::temp_dir().join(format!("edid-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(find_saved(&dir, "FRX", None).unwrap().is_none());
+        let mut monitor = stand_in();
+        monitor.description = describe(&monitor.bytes, Some(REGISTRY_LINES)).unwrap();
+        save(&dir, &monitor, Some(REGISTRY_LINES));
+        std::fs::write(dir.join("broken.bin"), [1u8; 128]).unwrap();
+        // The registry saved beside it names the make, as on the host it
+        // was saved on.
+        let registry = std::fs::read_to_string(dir.join(SAVED_REGISTRY)).unwrap();
+        let found = find_saved(&dir, "Not really Ferrix", Some(&registry))
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.connector, "Not-really-Ferrix-Test-EDID0001.bin");
+        assert_eq!(found.bytes, monitor.bytes);
+        assert!(
+            find_saved(&dir, "Lenovo", Some(&registry))
+                .unwrap()
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
