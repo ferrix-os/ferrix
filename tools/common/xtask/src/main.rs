@@ -11,6 +11,7 @@
 //! cargo xtask test-threads --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-sem --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-shm --arch all [--i686] [--timeout SECONDS]
+//! cargo xtask test-container --arch all [--timeout SECONDS]
 //! cargo xtask test-procfs --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-uvm  [--arch x86_64] [--timeout SECONDS]
 //! cargo xtask test-nvrm [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
@@ -90,6 +91,7 @@ mod clipboard;
 use ferrix_vdagent as _;
 mod compositor;
 mod console;
+mod container;
 mod coverage;
 mod devloop;
 mod display;
@@ -289,6 +291,8 @@ COMMANDS:
     test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
                   attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
                   ipc(117) and 395-398)
+    test-container  Boot container-test as init and require stage 13's exit: an unprivileged user runs a pid 1 in eight new
+                  namespaces under a memory limit that ends it, with a seccomp filter that blocks a call
     test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
                   a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)
     test-uvm      Build NVIDIA's UVM against uvm-kpi and ferrousli from the tree tools/common/fetch/fetch-nvidia.sh fetches
@@ -698,7 +702,7 @@ fn run() -> Result<()> {
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
-        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" | "install-app" => pkg::run(command, &args),
