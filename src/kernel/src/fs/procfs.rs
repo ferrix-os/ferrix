@@ -334,8 +334,9 @@ const fn reporting_directory(
 /// `/proc/net`: what `route`, `netstat`, `arp` and `ifconfig` read.
 ///
 /// On Linux this is a symbolic link to `/proc/self/net`, because each network
-/// namespace has its own. Ferrix has one network namespace, so it is a
-/// directory; a program that follows the link finds the same files either way.
+/// namespace has its own. Ferrix gives each its own files too, but this is a
+/// directory whose files read the reader's namespace; a program that follows
+/// the link finds the same files either way.
 static NET: [Entry<Kernel>; 7] = [
     file(b"arp", render::net_arp),
     file(b"dev", render::net_dev),

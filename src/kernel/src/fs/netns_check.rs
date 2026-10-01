@@ -77,7 +77,8 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
         .and_then(|()| devices(&mut tally, &mut made))
         .and_then(|()| abstract_names(&mut tally, &mut made))
         .and_then(|()| proc_views(&mut tally, &mut made))
-        .and_then(|()| ceilings(&mut tally, &mut made));
+        .and_then(|()| ceilings(&mut tally, &mut made))
+        .and_then(|()| pid_scope(&mut tally, &mut made));
     for each in &made {
         process::kill(each, crate::object::job::KILLED_STATUS);
     }
@@ -1739,4 +1740,61 @@ pub(crate) fn route_for_fill(socket: &NetlinkSocket, n: usize) -> Result<(), Err
         0 => Ok(()),
         negative => Err(Errno(u16::try_from(-negative).unwrap_or(u16::MAX))),
     }
+}
+
+/// A process in a pid namespace names the network namespace of a peer by the
+/// number its own namespace gives: `IFLA_NET_NS_PID` is resolved as the
+/// caller's, so the pid `1` of its namespace is itself and a machine-wide pid
+/// it cannot see is `ESRCH`, whatever it names outside, which `EPERM` against
+/// `ESRCH` would otherwise tell.
+fn pid_scope(tally: &mut Tally<'_>, made: &mut Vec<Arc<Process>>) -> Result<(), &'static str> {
+    let maker = spawn(made)?;
+    tally.ok(
+        unshare(&maker, CLONE_NEWNET),
+        "root was refused a network namespace",
+    )?;
+    tally.ok(
+        unshare(&maker, ferrix_linux_abi::types::CLONE_NEWPID),
+        "root was refused a pid namespace",
+    )?;
+    let viewer = process::fork_for_check_in(&maker, None)
+        .map_err(|_| "no memory for a process in a pid namespace")?;
+    maker.adopt(Arc::clone(&viewer));
+    made.push(Arc::clone(&viewer));
+    let ns = viewer.net_ns();
+    if ns.same(net::first()) {
+        return Err("a process in a pid namespace was not in a network namespace of its own");
+    }
+    let mut here = Side {
+        nl: Nl::open(&viewer, &ns)?,
+        root: Arc::clone(&viewer),
+        ns,
+    };
+    // Its own number, 1, names itself: the far end stays in the namespace the
+    // pair is made in, not in the machine's first process's, which the
+    // machine-wide number 1 would name.
+    here.make_pair(
+        (b"pid-a", b"pid-b"),
+        1,
+        tally,
+        "a veth pair naming pid 1 of the caller's own pid namespace was refused",
+    )?;
+    if index_of(&here.ns, b"pid-b").is_none() || index_of(net::first(), b"pid-b").is_some() {
+        return Err("pid 1 in IFLA_NET_NS_PID named a machine-wide process, not the caller's own");
+    }
+    let near = here.index(
+        b"pid-a",
+        "the veth end made by a process in a pid namespace is lost",
+    )?;
+    // The machine-wide number of a process outside the pid namespace is no
+    // number of it: nothing there is called that.
+    here.nl.refused(
+        (RTM_SETLINK, 0),
+        &link_body(near as i32, 0, 0),
+        &[Attr::new(IFLA_NET_NS_PID, Value::U32(maker.pid()))],
+        Errno::ESRCH,
+        "a process in a pid namespace named a machine-wide pid in IFLA_NET_NS_PID",
+        tally,
+    )?;
+    Ok(())
 }

@@ -95,7 +95,15 @@ fn target(
         .find(IFLA_NET_NS_PID)
         .and_then(|attribute| attribute.as_u32())
     {
-        let process = crate::syscall::registry::find(pid).ok_or(Errno::ESRCH)?;
+        // The number is the caller's: in a pid namespace `pid` names what the
+        // caller calls it and nothing it cannot see, so that `ESRCH` against
+        // `EPERM` does not tell which machine-wide pids exist. The kernel's own
+        // checks, which are no process, speak kernel numbers.
+        let process = match actor {
+            Some(caller) => crate::syscall::pidns::find_in(caller, pid),
+            None => crate::syscall::registry::find(pid),
+        }
+        .ok_or(Errno::ESRCH)?;
         Some(process.net_ns())
     } else if let Some(descriptor) = attributes
         .find(IFLA_NET_NS_FD)

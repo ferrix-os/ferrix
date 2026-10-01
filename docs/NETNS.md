@@ -334,7 +334,7 @@ wants another process's goes through `setns` and then reads it. **Not built.**
 | Kind | Made by | Charged |
 |---|---|---|
 | network namespace: itself and the vectors of its loopback | `CLONE_NEWNET` | at creation, to the caller's job: `arc_footprint::<NetNamespace>()` and 512 bytes |
-| interfaces, addresses, routes, the neighbour cache and what it holds back, fragments | netlink, `ioctl`, ARP | the **tables charge**, a `Charge` to the job that made the namespace (`Charge::grow` charges the same job): `fit` makes it what `Stack::footprint` says. A request that adds first asks `admit`, which makes room for two more interfaces; the charge is then settled to what is held. A namespace that cannot pay gives up what it learned (`Stack::shed`) and tries again, and then refuses `ENOMEM`. Charged to the owner's job whoever asks, as the namespace is the owner's |
+| interfaces, addresses, routes, the neighbour cache and what it holds back, fragments | netlink, `ioctl`, ARP | the **tables charge**, a `Charge` to the job that made the namespace (`Charge::grow` charges the same job): `fit` makes it what `Stack::footprint` says. A request that adds first asks `admit`, which makes room for two more interfaces; the charge is then settled to what is held. A namespace that cannot pay gives up what it learned (`Stack::shed`) and tries again, and then refuses `ENOMEM`. Charged to the owner's job whoever asks, as the namespace is the owner's. **Two things grow on traffic and are not charged as they fill:** the neighbour cache (at most 256 entries, each holding up to 3 queued packets: about 1.1 MB per namespace) and the reassembler (32 KiB outside the first namespace); `fit` settles them to the job at the namespace's next change, and the namespace's own ceiling is what bounds them until then (consultant's review, 2026-10-01; BACKLOG) |
 | a veth pair's record and its place in the table | `RTM_NEWLINK` | at creation, to the job of the caller: `veth::record_cost()`. The interfaces are the tables' |
 | sockets, connections, queued datagrams | as today | as today (`socket_charge`, the stack's `owner`) |
 | a netlink socket | `socket()` | as today |
@@ -520,9 +520,9 @@ message that names what is wrong.
 
 ## 11. Where it stands (2026-09-30)
 
-**Built** on branch `stage13-netns`, which is `stage13-n4-userns` (813d24d4)
-and the commits after it; not landed, for the certification consultant's
-review (the design before code, the diff before it lands, as for N4).
+**Built** on branch `stage13-netns` (2026-09-30) and reviewed by the
+certification consultant (2026-10-01), whose conditions are met; the branch is
+one commit on top of `main` after the pid namespaces.
 
 * `CLONE_NEWNET` through `clone`, `clone3` and `unshare`, alone or with
   `CLONE_NEWUSER`; a namespace of its own stack (interfaces, addresses,
@@ -573,6 +573,13 @@ network namespace"). Not run: `cargo xtask check`, `test-init`, `carry-coverage`
   during early boot does not make the net core before the clock.
 * The check is in `fs/` (it uses the mount check's helpers, which are
   `pub(super)`) and not in `net/`.
+* The namespace is a member of the process's `NsProxy` (`syscall/nsproxy.rs`,
+  `net: Option<Arc<NetNamespace>>`, `None` for the first), not a field of
+  `Process`: a fork, a native child and the other kinds' joins carry it with
+  the UTS, IPC and cgroup ones.
+* `IFLA_NET_NS_PID` names a process by the number the caller's pid namespace
+  gives (`pidns::find_in`); the kernel's own checks speak kernel numbers
+  (`pid_scope` in the `netns` line, from the consultant's review).
 * `admit` makes room for two interfaces (`HEADROOM` = 1 KiB) before an add;
   the rest of the charge is settled after a change, and `tables_cover` is what
   `kmem_check` holds it to.
@@ -605,16 +612,19 @@ Linux honours all of):
 
 **Open.**
 
-* **Merge.** Three places meet other branches: `Process::net_ns` becomes an
-  `NsProxy` member, `procfs.rs`'s `NamespaceKind` gains `Net` beside `Uts`,
-  `Ipc` and `Cgroup` (its values will need renumbering), and `netns_file.rs`
-  becomes `Handle::Net` in `nsfs.rs`. `family.rs`'s `namespaces_asked` and
-  `namespace.rs`'s `sys_unshare` are edited by both.
+* **Merge, done.** `Process::net_ns` is an `NsProxy` member and `procfs.rs`'s
+  `NamespaceKind::Net` is 7, after the pid kinds. Still open: `netns_file.rs`
+  becomes `Handle::Net` in `nsfs.rs` when `setns(CLONE_NEWNET)` is built.
+* **No limit on how many network namespaces exist.** Each is charged to its
+  job, so a job's memory limit bounds them, but the net task ticks every one
+  that exists (consultant's F3). A `max_net_namespaces` limit like N5's other
+  sysctls would bound the ticking too; BACKLOG.
 * The raw and packet socket code is now reachable by an unprivileged user who
   owns a namespace (VULNERABILITY-ANALYSIS); that is a larger attack surface
   than before, in safe Rust, with no ring-buffer interface.
-* Not checked at boot: `unshare` from a multi-threaded process, a native child
-  inheriting the namespace, and `/sys/class/net`'s per-reader listing. A
+* Not checked at boot: `unshare` from a multi-threaded process and
+  `/sys/class/net`'s per-reader listing (a native child inheriting the
+  namespace is checked, in `namespace_check`). A
   namespace ended by the last `close` of a socket, rather than the last
   process, is covered by the ownership rules and not by a check of its own.
 * `tables_cover` and the ceilings make the tables safe to give a user; the
