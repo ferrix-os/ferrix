@@ -301,9 +301,13 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
     if !watched.poll().priority {
         return Err("cgroup.events did not poll POLLPRI when its cgroup froze");
     }
-    if !job.frozen_seen() || !process.every_task_blocked() {
-        return Err("a frozen cgroup's tasks are not all blocked");
-    }
+    // `frozen 1` is said when the last thread is counted parked, which is a
+    // moment before it is asleep: the tasks get a little while to be blocked.
+    until(
+        process,
+        &|| Ok(job.frozen_seen() && process.every_task_blocked()),
+        "a frozen cgroup's tasks are not all blocked",
+    )?;
     let still = (word(process, 0)?, word(process, 4)?);
     crate::sched::sleep_for(STILL_NANOS);
     if (word(process, 0)?, word(process, 4)?) != still {
