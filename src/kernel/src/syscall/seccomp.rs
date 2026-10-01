@@ -80,6 +80,12 @@ mod op {
 
 /// The filter flags `seccomp(SET_MODE_FILTER)` knows.
 pub(crate) mod flag {
+    /// `SECCOMP_FILTER_FLAG_TSYNC`: give every thread of the process the new
+    /// filter, or none (`docs/SECCOMP.md` §3.7).
+    pub(crate) const TSYNC: u64 = 1 << 0;
+    /// `SECCOMP_FILTER_FLAG_TSYNC_ESRCH`: with `TSYNC`, report a thread that
+    /// cannot be synchronised as `ESRCH` rather than as its thread id.
+    pub(crate) const TSYNC_ESRCH: u64 = 1 << 4;
     /// `SECCOMP_FILTER_FLAG_LOG`.
     pub(crate) const LOG: u64 = 1 << 1;
     /// `SECCOMP_FILTER_FLAG_SPEC_ALLOW`: accepted, and it turns nothing off,
@@ -91,7 +97,7 @@ pub(crate) mod flag {
     /// program that asked for every thread to be filtered and was told yes
     /// would be wrong. `NEW_LISTENER` and `WAIT_KILLABLE_RECV` (bits 3 and 5)
     /// are not built at all, and Linux's bits beyond the sixth are unknown.
-    pub(crate) const BUILT: u64 = LOG | SPEC_ALLOW;
+    pub(crate) const BUILT: u64 = LOG | SPEC_ALLOW | TSYNC | TSYNC_ESRCH;
 }
 
 /// `prctl`'s seccomp options, and the speculation controls a filter's installer
@@ -705,6 +711,13 @@ pub(crate) fn prepare(raw: &[Insn], log: bool) -> Result<Arc<Filter>, Errno> {
 /// `seccomp_may_assign_mode`), `ENOMEM` if the chain would pass
 /// `MAX_INSNS_PER_PATH` (Linux's `seccomp_attach_filter`).
 pub(crate) fn attach(thread: &Thread, mut filter: Arc<Filter>) -> Result<(), Errno> {
+    attach_to(thread, &mut filter)
+    // A refused filter is dropped with the argument, outside the lock.
+}
+
+/// [`attach`], leaving the caller holding the filter as well, so that it can be
+/// attached to other threads as the same chain (`TSYNC`).
+fn attach_to(thread: &Thread, filter: &mut Arc<Filter>) -> Result<(), Errno> {
     thread.with_seccomp(|state| {
         if matches!(state.mode, Mode::Strict | Mode::Dead) {
             return Err(Errno::EINVAL);
@@ -720,17 +733,16 @@ pub(crate) fn attach(thread: &Thread, mut filter: Arc<Filter>) -> Result<(), Err
         }
         // Nobody else holds the new filter, so this cannot fail; if it did,
         // the filter would simply not be attached.
-        let Some(mine) = Arc::get_mut(&mut filter) else {
+        let Some(mine) = Arc::get_mut(filter) else {
             return Err(Errno::ENOMEM);
         };
         mine.cost = u32::try_from(ferrix_seccomp::path_cost(earlier, program)).unwrap_or(u32::MAX);
         mine.depth = state.filter.as_ref().map_or(0, |newest| newest.depth) + 1;
         mine.previous = state.filter.take();
-        state.filter = Some(filter.clone());
+        state.filter = Some(Arc::clone(filter));
         state.mode = Mode::Filter;
         Ok(())
     })
-    // A refused filter is dropped with the local, outside the lock.
 }
 
 /// `seccomp(operation, flags, uargs)` for the calling thread of `process`.
@@ -866,6 +878,11 @@ fn set_filter(
     if flags & !flag::BUILT != 0 {
         return Err(Errno::EINVAL);
     }
+    // Linux: `TSYNC_ESRCH` is a way of reporting `TSYNC`'s failure, not a flag
+    // of its own.
+    if flags & flag::TSYNC_ESRCH != 0 && flags & flag::TSYNC == 0 {
+        return Err(Errno::EINVAL);
+    }
     let (length, pointer) = read_header(process, uargs, abi)?;
     if length == 0 || length > MAX_INSNS {
         return Err(Errno::EINVAL);
@@ -883,8 +900,126 @@ fn set_filter(
     let raw = read_program(process, pointer, length)?;
     let filter = prepare(&raw, flags & flag::LOG != 0)?;
     drop(raw);
+    if flags & flag::TSYNC != 0 {
+        return attach_sync(process, thread, filter, flags & flag::TSYNC_ESRCH != 0);
+    }
     attach(thread, filter)?;
     Ok(0)
+}
+
+/// Give every thread of the process the filter, or none: `Ok(0)` when every
+/// thread has it, `Ok(tid)` of the first thread that could not take it, or an
+/// errno.
+///
+/// # What it does (`docs/SECCOMP.md` §3.7)
+///
+/// With the filter made and charged but attached to nobody, it takes the
+/// process's thread-list lock, which is what `add_thread_from` holds to list a
+/// new thread and copy its creator's chain, and which `Process::threads`
+/// holds to list them. Under it:
+/// 1. an `execve` that has claimed the process answers `EAGAIN`;
+/// 2. every other live thread is checked under its leaf lock: one with no
+///    seccomp passes, and so does one whose chain is an ancestor of the
+///    caller's; a thread in strict mode or with a chain of its own fails the
+///    whole call, answering that thread's id (or `ESRCH` with `TSYNC_ESRCH`)
+///    with no thread changed;
+/// 3. the filter is attached to the caller as `attach` does, and then every
+///    other thread's chain becomes the caller's new one.
+///
+/// The old chains a thread gave up are dropped after the lock is released,
+/// and nothing is allocated under it: the list of threads and the room for
+/// those chains are made first.
+///
+/// # Errors
+///
+/// `ENOMEM` for the room, the filter's chain bound or the charge; `EAGAIN`
+/// for an `execve` in progress; `ESRCH` with `TSYNC_ESRCH`; `EINVAL` if the
+/// caller is in strict mode.
+pub(crate) fn attach_sync(
+    process: &Process,
+    caller: &Thread,
+    mut filter: Arc<Filter>,
+    esrch: bool,
+) -> Result<usize, Errno> {
+    let mut held: Vec<Arc<Thread>> = Vec::new();
+    let mut gave: Vec<Option<Arc<Filter>>> = Vec::new();
+    let mut room = 8_usize;
+    loop {
+        held.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
+        gave.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
+        let answer = process.with_live_threads(&mut held, |threads| {
+            synchronise(process, caller, threads, &mut filter, &mut gave, esrch)
+        });
+        match answer {
+            Ok(answer) => {
+                // The locks are released: the chains the threads gave up and
+                // the references to the threads go now, here.
+                drop(gave);
+                drop(held);
+                return answer;
+            }
+            Err(listed) => room = listed.saturating_add(4),
+        }
+    }
+}
+
+/// [`attach_sync`]'s part under the thread-list lock.
+fn synchronise(
+    process: &Process,
+    caller: &Thread,
+    threads: &[Arc<Thread>],
+    filter: &mut Arc<Filter>,
+    gave: &mut Vec<Option<Arc<Filter>>>,
+    esrch: bool,
+) -> Result<usize, Errno> {
+    if process.exec_claimed() {
+        return Err(Errno::EAGAIN);
+    }
+    let others = || {
+        threads
+            .iter()
+            .filter(|thread| !core::ptr::eq(Arc::as_ptr(thread), caller))
+    };
+    let mine = caller.with_seccomp(|state| state.filter.clone());
+    for thread in others() {
+        let fits = thread.with_seccomp(|state| match state.mode {
+            Mode::Disabled => true,
+            Mode::Filter => is_ancestor(state.filter.as_ref(), mine.as_ref()),
+            Mode::Strict | Mode::Dead => false,
+        });
+        if !fits {
+            return if esrch {
+                Err(Errno::ESRCH)
+            } else {
+                Ok(thread.tid() as usize)
+            };
+        }
+    }
+    attach_to(caller, filter)?;
+    for thread in others() {
+        thread.with_seccomp(|state| {
+            // Reserved by the caller: this cannot allocate.
+            gave.push(state.filter.replace(Arc::clone(filter)));
+            state.mode = Mode::Filter;
+        });
+    }
+    Ok(0)
+}
+
+/// Whether `candidate` is `walk` or a filter behind it: Linux's
+/// `is_ancestor`. A chain that is none is an ancestor of every chain.
+fn is_ancestor(candidate: Option<&Arc<Filter>>, walk: Option<&Arc<Filter>>) -> bool {
+    let Some(candidate) = candidate else {
+        return true;
+    };
+    let mut cursor = walk;
+    while let Some(filter) = cursor {
+        if Arc::ptr_eq(filter, candidate) {
+            return true;
+        }
+        cursor = filter.previous.as_ref();
+    }
+    false
 }
 
 /// The `struct sock_fprog` at `at`: a 16-bit length and a pointer to that many
