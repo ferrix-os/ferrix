@@ -553,7 +553,18 @@ refusals, the same count on x86_64, aarch64 and armv7a at `--smp 2`. Three more 
 each run on x86_64, three of them stopped by an earlier check with a message
 of its own.
 
-**Gated**, on the code of e8de326e (the commits after it are documents): `cargo
+**Gated again for the landing (2026-10-01), through `fleet/gate.sh` on nazuna**
+(the INDEX lines name the commit): on c14d6c69, `cargo xtask check`,
+`test-boot` on x86_64 (KVM), aarch64 and armv7a at `--smp 2`, `test-init --arch
+all`, and `test-shell`, `test-vfs` and `test-net --arch all` with ferrousli,
+all passed (tags `ae19-*`). The controls of §9 and `pid_scope`'s were run as
+`gate.sh control --expect` on 444344e4, whose kernel is c14d6c69's (the rebase
+between them touched only generated documents), tags `ae-nn-01` to `ae-nn-31`:
+each FIRED with its own message, except that NN3's open in the first namespace
+stops at the same section's earlier refusal, "a port could not be bound in a
+namespace" (`ae-nn-07b`), and NN5's `clone` control is `ae-nn-02b`.
+
+**Gated first**, on the code of e8de326e (the commits after it are documents): `cargo
 fmt` and `cargo clippy -p ferrix-kernel` on x86_64, aarch64 and armv7a; `cargo
 test` of `ferrix-net` (82), `ferrix-linux-abi` (146) and `ferrix-netlink` (48);
 `check-item-boundary.py`; on nazuna through the queue, `test-boot` on x86_64,
