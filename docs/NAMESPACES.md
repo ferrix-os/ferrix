@@ -1530,15 +1530,25 @@ now judged as Linux judges it.
 is Linux's: `CAP_SYS_ADMIN` over the user namespace that owns the caller's
 mount namespace (M1), asked by `mount`, `umount2` and `pivot_root` before any
 flag. From a child user namespace a new mount is `tmpfs` alone and always
-`nosuid,nodev` (M2); a plain remount is refused unless every mount of the
-filesystem is in the caller's namespace. A copy of a mount namespace into one
+`nosuid,nodev` (M2). A plain remount, which changes the filesystem under every
+mount of it, needs `CAP_SYS_ADMIN` over the user namespace that owns the
+filesystem (Linux's `s_user_ns`): the confined caller's for a `tmpfs` it
+mounted, the first for every other, recorded on the superblock at mount time,
+so a namespace's copy of a host filesystem stays the host's even after every
+host mount of it is gone. A copy of a mount namespace into one
 owned by a user namespace that did not own the original locks every mount's
-`ro`, `nosuid`, `nodev`, `noexec` and access-time mode, and locks every mount but
-the bottom to its parent (M3, M4): a remount clearing a locked flag is `EPERM`,
+`ro`, `nosuid`, `nodev`, `noexec` and access-time mode, the bottom's too, and
+locks every mount but the bottom to its parent (M3, M4): a remount clearing a locked flag is `EPERM`,
 an unmount or detach of a locked mount alone `EINVAL`, a bind without
 `MS_REC` over locked mounts `EINVAL`. Removing or renaming a name another
 namespace has a mount on takes that mount off, as Linux does since 3.18, so
 an unprivileged mount pins nothing against its owner.
+A namespace's end writes out each filesystem whose last mount it held; the
+write-out may sleep, so `Namespace`'s `Drop` asks the parker first, as a
+sleeping lock does (a debug kernel stops there under a spin lock). The last
+`Arc<Namespace>` goes where a fs context lets it go: `copy_namespace` and
+`setns` drop the displaced one after the context's lock is released, and a
+process's context goes in its release, which runs in task context.
 `/proc/sys/user/max_user_namespaces` reads the limit. The `mountperm` line
 (FX-0900) drives every rule as uid 1000 and as the owner of a user namespace,
 and the `mounts` line now also shows a bind of a `ro,nosuid,nodev,noexec`

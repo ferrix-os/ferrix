@@ -167,14 +167,27 @@ struct Superblock {
     fs: Arc<dyn FileSystem>,
     /// Set by a plain remount read-only, cleared by a plain remount without.
     read_only: AtomicBool,
+    /// What the kernel says owns the filesystem, Linux's `s_user_ns`: the
+    /// user namespace of a confined caller that mounted it, `None` for the
+    /// first. The VFS does not look inside.
+    owner: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl Superblock {
-    /// A new one for `fs`, writable.
+    /// A new one for `fs`, writable, owned by the first user namespace.
     fn new(fs: Arc<dyn FileSystem>) -> Arc<Superblock> {
+        Superblock::owned(fs, None)
+    }
+
+    /// A new one for `fs`, writable, owned by `owner`.
+    fn owned(
+        fs: Arc<dyn FileSystem>,
+        owner: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> Arc<Superblock> {
         Arc::new(Superblock {
             fs,
             read_only: AtomicBool::new(false),
+            owner,
         })
     }
 }
@@ -231,6 +244,14 @@ impl Mount {
     #[must_use]
     pub fn is_locked(&self) -> bool {
         self.locks.load(Ordering::Acquire) & LOCK_PARENT != 0
+    }
+
+    /// What owns its filesystem, as [`Namespace::mount_owned`] was told;
+    /// `None` for the first user namespace. Every mount of a filesystem, a
+    /// bind or a copy, answers the same.
+    #[must_use]
+    pub fn filesystem_owner(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.sb.owner.clone()
     }
 
     /// The filesystem mounted here.
@@ -1518,6 +1539,23 @@ impl Namespace {
         at: &Location,
         flags: MountFlags,
     ) -> Result<Arc<Mount>> {
+        self.mount_owned(fs, at, flags, None)
+    }
+
+    /// [`Namespace::mount_with`], the filesystem owned by `owner` (Linux's
+    /// `s_user_ns`; `None` is the first user namespace), which decides who
+    /// may remount it as a whole ([`Mount::filesystem_owner`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Namespace::mount`].
+    pub fn mount_owned(
+        &self,
+        fs: Arc<dyn FileSystem>,
+        at: &Location,
+        flags: MountFlags,
+        owner: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> Result<Arc<Mount>> {
         if at.inode()?.metadata().kind != FileType::Directory {
             return Err(Errno::ENOTDIR);
         }
@@ -1534,7 +1572,7 @@ impl Namespace {
             flags: AtomicU32::new(flags.bits()),
             locks: AtomicU32::new(0),
             root,
-            sb: Superblock::new(fs),
+            sb: Superblock::owned(fs, owner),
             parent: SpinLock::new(Some((Arc::clone(&at.mount), Arc::clone(&at.dentry)))),
             tree: Arc::downgrade(&self.tree),
             parker: Arc::clone(&self.parker),
@@ -2041,11 +2079,15 @@ impl Namespace {
                 }
             };
             let copy = self.copy_of(original, Arc::clone(&original.root), parent, &tree)?;
-            if lock && at > 0 {
+            if lock {
+                // Every copy's flags, the bottom's too, as Linux's
+                // `lock_mnt_tree` locks them; every mount but the bottom is
+                // locked to its parent.
                 let flags = original.flags().bits() & LOCK_FLAGS;
+                let parent_lock = if at > 0 { LOCK_PARENT } else { 0 };
                 let _ = copy
                     .locks
-                    .fetch_or(flags | LOCK_ATIME | LOCK_PARENT, Ordering::AcqRel);
+                    .fetch_or(flags | LOCK_ATIME | parent_lock, Ordering::AcqRel);
             }
             if let Some((above, covered)) = copy.parent() {
                 let _ = table.insert((above.id, covered.id()), Arc::clone(&copy));
@@ -2222,7 +2264,13 @@ impl Drop for Namespace {
                 // What it was given is written out before it is let go, as
                 // the last unmount of a filesystem does (F-53's class): a
                 // disk mounted in this namespace alone would otherwise lose
-                // what it wrote since its last commit.
+                // what it wrote since its last commit. A write-out may sleep,
+                // so the context is asked, as a sleeping lock asks it, before
+                // it starts: a namespace dropped under a spin lock stops here
+                // rather than sleeping there.
+                if let Some(parking) = self.parker.new_parking() {
+                    parking.may_park();
+                }
                 let _ = mount.sb.fs.sync();
                 self.forget_tree(&mount.root);
             }

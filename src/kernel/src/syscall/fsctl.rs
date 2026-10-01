@@ -596,10 +596,10 @@ pub(crate) fn sys_mount(
         }
     }
     if remount {
-        // A plain remount changes the filesystem for every mount of it: from
-        // a user namespace, only one the caller's namespace has alone (N5).
-        if confined && flags & MS_BIND == 0 && !mounts.sole_filesystem(&place.mount) {
-            return Err(Errno::EPERM);
+        // A plain remount changes the filesystem for every mount of it:
+        // only for a caller privileged over the filesystem's owner (N5).
+        if flags & MS_BIND == 0 {
+            namespace::may_remount_filesystem(process, &place.mount)?;
         }
         return remount_at(&mounts, &place, flags);
     }
@@ -632,7 +632,14 @@ pub(crate) fn sys_mount(
         wanted = wanted.union(MountFlags::NOSUID).union(MountFlags::NODEV);
     }
     let filesystem = filesystem_named(process, &kind, source, read_only)?;
-    let _ = mounts.mount_with(filesystem, &place, wanted)?;
+    // Owned by the caller's user namespace when it is not the first: the
+    // filesystem's owner is who may remount it as a whole.
+    let owner = confined.then(|| {
+        process.with_credentials(|held| {
+            Arc::clone(&held.user_ns) as Arc<dyn core::any::Any + Send + Sync>
+        })
+    });
+    let _ = mounts.mount_owned(filesystem, &place, wanted, owner)?;
     Ok(0)
 }
 

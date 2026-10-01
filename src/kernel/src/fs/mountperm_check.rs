@@ -43,6 +43,8 @@ const HOST: &[u8] = b"/tmp/.mp-check/host";
 const PIN: &[u8] = b"/tmp/.mp-check/pin";
 /// The child's own tmpfs.
 const OWN: &[u8] = b"/tmp/.mp-check/own";
+/// A host tmpfs, read-write, whose host mount goes while the child keeps its copy.
+const GONE: &[u8] = b"/tmp/.mp-check/gone";
 
 /// `mkdirat` with mode 0777, so the unprivileged process may make its own.
 fn make_directory(page: &mut Page<'_>, path: &[u8]) -> Result<Result<usize, Errno>, &'static str> {
@@ -87,7 +89,7 @@ fn set_up(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &'static str
         make_directory(page, BASE)?,
         "the mount check's directory could not be made",
     )?;
-    for path in [HOST, PIN, OWN] {
+    for path in [HOST, PIN, OWN, GONE] {
         tally.ok(
             make_directory(page, path)?,
             "a mount check's directory could not be made",
@@ -102,13 +104,18 @@ fn set_up(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &'static str
             MS_RDONLY | MS_NOSUID | MS_NODEV,
         )?,
         "the host's read-only tmpfs could not be mounted",
+    )?;
+    tally.ok(
+        mount(page, b"none", GONE, b"tmpfs", MS_NOSUID | MS_NODEV)?,
+        "the host's read-write tmpfs could not be mounted",
     )
 }
 
 /// Take down what the check made in the first namespace.
 fn clean_up(page: &mut Page<'_>) {
     let _ = unmount(page, HOST, MNT_DETACH);
-    for path in [OWN, HOST, PIN, BASE] {
+    let _ = unmount(page, GONE, MNT_DETACH);
+    for path in [OWN, HOST, GONE, PIN, BASE] {
         let _ = unmount(page, path, MNT_DETACH);
         page.reset();
         if let Ok(at) = page.put(path) {
@@ -180,6 +187,18 @@ fn unprivileged(tally: &mut Tally<'_>, root_page: &mut Page<'_>) -> Result<(), &
         mount(&mut page, b"none", b"/tmp", b"", MS_REMOUNT | MS_RDONLY)?,
         Errno::EPERM,
         "a user namespace remounted a filesystem the host has read-write as a whole",
+    )?;
+    // The host lets its own mount go; the copy is the filesystem's only mount
+    // left, and the filesystem is still the host's.
+    root_page.reset();
+    tally.ok(
+        unmount(root_page, GONE, MNT_DETACH)?,
+        "the host could not let its read-write tmpfs go",
+    )?;
+    tally.refused(
+        mount(&mut page, b"none", GONE, b"", MS_REMOUNT | MS_RDONLY)?,
+        Errno::EPERM,
+        "a user namespace remounted a host filesystem whose host mount had gone",
     )?;
     tally.ok(
         mount(&mut page, b"none", OWN, b"", MS_REMOUNT | MS_RDONLY)?,
