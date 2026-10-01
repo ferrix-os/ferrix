@@ -895,8 +895,10 @@ package FerrixItemRequirements {
         requirement <'H.TRAP.16'> aRegisteredFilterOnlyTakesAwayFromACall : ItemHighLevel {
             attribute :>> statement = "A look a personality registers with the core at
                 its system call entries, before any answer of the entry's own, shall be
-                able to make a call do only less than it could: let it go on, or fail it
-                with an errno the core bounds to 0 to 4095. It shall have no way to
+                able to make a call do only less than it could: let it go on, fail it
+                with an errno the core bounds to 0 to 4095, or have the core give its
+                registers back as the program made it, a value the core takes from the
+                caller's own registers. It shall have no way to
                 answer with anything else, so that it cannot start a program or choose
                 what a program's registers hold; a filter that must end the program does
                 so through the paths exit and a fatal signal already take. It shall be
