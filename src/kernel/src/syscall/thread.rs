@@ -150,13 +150,15 @@ impl Thread {
         let inherited = caller
             .with_own_signals(|signals| signals.inherited())
             .without_alt_stack();
-        // Its seccomp state is the creator's, copied by
-        // `Process::add_thread_from` under the lock that lists the thread, so
-        // that a `TSYNC` cannot pass it by.
+        // Its seccomp state is the creator's from the start, so that a path
+        // that lists it without `Process::add_thread_from` still makes a
+        // filtered thread (fail closed); `add_thread_from` copies it again
+        // under the lock that lists the thread, and that copy is the one a
+        // `TSYNC` cannot pass by.
         let mut thread = Thread::with(
             process,
             ThreadSignals::new(inherited)?,
-            seccomp::State::default(),
+            caller.seccomp_copy(),
         );
         *thread.tid.get_mut() = tid;
         *thread.numbers.get_mut() = numbers;
@@ -226,10 +228,13 @@ impl Thread {
 
     /// Take the seccomp mode and chain of `creator`, the thread that made this
     /// one: what `Process::add_thread_from` does while it holds the thread
-    /// list, the creator's leaf lock taken inside it.
-    pub(crate) fn copy_seccomp_from(&self, creator: &Thread) {
+    /// list, the creator's leaf lock taken inside it. Returns the state it
+    /// replaced, for the caller to drop once the list's lock is released: it
+    /// may hold the last reference to a long chain.
+    #[must_use = "the replaced state is dropped after the thread-list lock"]
+    pub(crate) fn copy_seccomp_from(&self, creator: &Thread) -> seccomp::State {
         let state = creator.seccomp_copy();
-        self.with_seccomp(|mine| *mine = state);
+        self.with_seccomp(|mine| core::mem::replace(mine, state))
     }
 
     /// A copy of its seccomp state for a thread or process made of it: the

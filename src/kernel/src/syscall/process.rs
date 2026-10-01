@@ -1517,7 +1517,12 @@ impl Process {
     /// one: never a thread listed with a chain read before the sync and so
     /// left unfiltered (`docs/SECCOMP.md` §3.7, SR10).
     pub(crate) fn add_thread_from(&self, thread: &Arc<Thread>, creator: &Thread) {
-        self.list_thread(thread, || thread.copy_seccomp_from(creator));
+        let mut replaced = None;
+        self.list_thread(thread, || {
+            replaced = Some(thread.copy_seccomp_from(creator))
+        });
+        // The state the thread was made with, dropped outside the lock.
+        drop(replaced);
     }
 
     /// Whether an `execve` has claimed the process: the thread that will
