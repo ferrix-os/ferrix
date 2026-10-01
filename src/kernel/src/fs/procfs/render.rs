@@ -507,6 +507,16 @@ pub(super) fn seam(_: &Kernel) -> Result<Vec<u8>> {
     Ok(fs::seam::render())
 }
 
+pub(super) fn dcache(_: &Kernel) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    for line in crate::fs::namespace().debug_cache() {
+        out.extend_from_slice(line.as_bytes());
+        out.push(b'
+');
+    }
+    Ok(out)
+}
+
 pub(super) fn version(_: &Kernel) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     put(

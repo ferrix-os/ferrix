@@ -657,6 +657,19 @@ impl Namespace {
         all
     }
 
+    /// DEBUG: the last cached dentries.
+    #[must_use]
+    pub fn debug_cache(&self) -> alloc::vec::Vec<alloc::string::String> {
+        let cache = self.shared.cache.lock();
+        let mut out = alloc::vec::Vec::new();
+        for cached in cache.iter() {
+            let parent = cached.parent().map(|p| alloc::string::String::from_utf8_lossy(&p.name()).into_owned()).unwrap_or_default();
+            let name = alloc::string::String::from_utf8_lossy(&cached.name()).into_owned();
+            out.push(alloc::format!("{parent}/{name} strong {} pos {} unhashed {}", Arc::strong_count(cached), cached.inode().is_some(), cached.is_unhashed()));
+        }
+        out
+    }
+
     /// How many unused dentries the cache is holding.
     #[must_use]
     pub fn cached(&self) -> usize {

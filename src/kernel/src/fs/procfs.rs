@@ -328,7 +328,7 @@ static NET: [Entry<Kernel>; 7] = [
 ];
 
 /// `/proc`, less the process directories that follow these in a listing.
-pub(crate) static TOP: [Entry<Kernel>; 15] = [
+pub(crate) static TOP: [Entry<Kernel>; 16] = [
     Entry {
         name: b"self",
         permissions: 0o777,
@@ -337,6 +337,7 @@ pub(crate) static TOP: [Entry<Kernel>; 15] = [
     file(b"cmdline", render::cmdline_file),
     file(b"cpuinfo", render::cpuinfo),
     file(b"ferrix-seam", render::seam),
+    file(b"ferrix-dcache", render::dcache),
     file(b"filesystems", render::filesystems),
     file(b"loadavg", render::loadavg),
     file(b"meminfo", render::meminfo),
