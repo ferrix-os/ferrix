@@ -50,7 +50,7 @@
 //! interrupt handlers.
 
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_sched::NICE_0_WEIGHT;
 use ferrix_sync::Once;
@@ -201,6 +201,10 @@ const MAX_EFFECTIVE: u64 = 1 << 24;
 struct Slot {
     /// How many things keep it: zero when it is free.
     holds: AtomicU64,
+    /// Whether the job it was the quota of has gone, though something (a task
+    /// asleep in the kernel in it) still holds it: whoever keeps state of its
+    /// own per slot must not start any for it (`blkio`'s entries).
+    ended: AtomicBool,
     /// Its parent's slot, or [`NONE`].
     parent: AtomicU32,
     /// Use of each resource, its own and every descendant's.
@@ -246,6 +250,7 @@ impl Slot {
     const fn new() -> Slot {
         Slot {
             holds: AtomicU64::new(0),
+            ended: AtomicBool::new(false),
             parent: AtomicU32::new(NONE),
             used: [const { AtomicU64::new(0) }; RESOURCES],
             limit: [const { AtomicU64::new(UNLIMITED) }; RESOURCES],
@@ -355,6 +360,7 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
     for counter in taken.counters.iter().chain(&taken.cpu_time) {
         counter.store(0, Ordering::Relaxed);
     }
+    taken.ended.store(false, Ordering::Relaxed);
     taken.bw_quota.store(UNLIMITED, Ordering::Relaxed);
     taken.bw_period.store(DEFAULT_PERIOD_NS, Ordering::Relaxed);
     taken.bw_used.store(0, Ordering::Relaxed);
@@ -1074,8 +1080,19 @@ pub(crate) fn parent_of(index: u32) -> u32 {
     slot(index).map_or(NONE, |slot| slot.parent.load(Ordering::Acquire))
 }
 
+/// Whether the job `index` was the quota of has gone. Read under the lock
+/// whoever keeps state per slot takes in its release hook, so that a task still
+/// holding the slot cannot start state the hook has already cleared.
+pub(crate) fn job_ended(index: u32) -> bool {
+    slot(index).is_some_and(|slot| slot.ended.load(Ordering::Acquire))
+}
+
 impl Drop for Quota {
     fn drop(&mut self) {
+        // Before the hook, which takes the lock `job_ended` is read under.
+        if let Some(slot) = slot(self.index) {
+            slot.ended.store(true, Ordering::Release);
+        }
         if let Some(hook) = RELEASE_HOOK.get() {
             hook(self.index);
         }
