@@ -1085,6 +1085,38 @@ Rules:
 * The leaf lock is never held while the signal locks are taken. `TRAP`
   forces its signal after evaluation, with no seccomp lock held.
 
+**Why the hook may open interrupts for the walk of a chain** (the consultant's
+S3 condition 2; `syscall::seccomp::check`). The core's contract is that the
+hook is entered and left with interrupts masked; a body that runs up to
+32,768 steps opens them for the walk and masks them again before it returns.
+That is safe at each entry because, at the point where the entry calls the
+hook, everything the entry set up is complete, lives on the calling task's own
+kernel stack or in its own thread object, and is exactly what the entry's
+dispatch, which the same entry runs with interrupts open a few instructions
+later and which may block, already relies on across a preemption:
+* **x86-64 `SYSCALL`.** `SFMASK` cleared `IF` on entry, the stub swapped `GS` and
+  switched to the task's kernel stack, and `ferrix_syscall_entry` was handed a
+  `SyscallFrame` on that stack, with the user registers saved in it. The hook
+  runs before `answer_here` and the dispatcher, which enable interrupts
+  themselves for the call. A preemption mid-walk saves and restores the task's
+  kernel context like any other; the frame is the task's own and no other task
+  names it. The way out disables interrupts again before `GS` is swapped on a
+  live stack, and so does the hook before it returns.
+* **x86-64 `int $0x80`.** An interrupt gate cleared `IF`, the hardware pushed
+  the frame onto the task's kernel stack and `system_call` received it as a
+  `TrapFrame`: the same argument.
+* **AArch64 `svc` and ARMv7-A `svc`.** The exception entry masked the
+  interrupts, saved the registers into the `TrapFrame` on the task's kernel
+  stack, and `system_call` received it; the dispatcher enables interrupts the
+  same way after the hook.
+What a preempted walk holds is the thread's `Arc` of the newest filter (a
+reference, so a `TSYNC` replacing the chain cannot free it) and nothing else:
+no lock, no per-processor value, no pointer into another task. It reads
+`seccomp_data`, built from the frame, which no other task can write: a frame is
+per thread (SR3). It can migrate to another processor between filters, which
+costs nothing it relied on, since it uses no per-processor data after
+`sched::current` (which disables interrupts for its own look and restores them).
+
 ---
 
 ## 8. Checks
@@ -1563,4 +1595,104 @@ check's own message:
 | an empty slot answers every call | x86-64 | `a call was answered with no filter registered` |
 | a registration into a slot of the check's own registers nothing | x86-64 | `a later registration replaced the first, or the first was not asked` |
 
-S3 follows on `stage13-s3`.
+**S3 built (2026-10-01, os-7c, `stage13-s3`).** Filters. `seccomp(2)` is in
+the four tables (317, 354, 277, 383, each read from the headers) and
+`prctl(PR_SET_SECCOMP)`, `PR_GET_SECCOMP`, `GET_ACTION_AVAIL` and
+`GET_NOTIF_SIZES` answer as Linux's `do_seccomp` does, in its order: the flags
+before the program is read (a NULL program is `EFAULT`, Chromium's probe), the
+length, the privilege rule (no-new-privs or privilege, else `EACCES`), the
+verifier, the mode, the chain's bound. A `Filter` is an `Arc` of a verified
+program that points at the one before it; a thread holds the newest in a
+`State` behind a leaf lock of its own, with a `filtered` flag and a
+machine-wide flag that no thread has ever held one, so that until one has,
+no call looks for its thread. A fork child takes its parent's chain, a thread
+its creator's, a native child its creator's through `launch::load_native`
+(`inherit_native`); `execve` keeps it, as it keeps the thread. The hook runs
+the chain newest first, with interrupts open and under no lock, allocating
+nothing, and the strictest answer wins, the newest filter's data on a tie.
+`ALLOW`, `ERRNO` (the core cuts it to 4095, so 512 is an errno and never a
+restart: SR7), `KILL_THREAD` (the process's last live thread: the process, by
+`SIGSYS`; any other: that thread alone, which leaves through `exit_thread_current`
+with status 128 + `SIGSYS`, so that a leader killed this way while another
+thread lives is what `wait` reports for the process when the last one leaves),
+`KILL_PROCESS`, `LOG` (one rate-limited line on the console, not
+the audit log, Q4), strict mode, `TRACE` and `USER_NOTIF` (`ENOSYS`: no
+tracer, no listener, SR13), and an action nobody defined (a kill) are built; a
+`TRAP` is a kill until S4. A thread in filter mode with no filter, which
+nothing can make, is a kill and not "allow" (the consultant's S1 condition 3);
+the chain's bound is the crate's `fits_path` with four more counted for each
+filter (condition 1, `ENOMEM` past 32,768). A filter is charged to the job that
+installed it before its program is copied (F-37, SR12) and released by a walk,
+never by recursion, when the last thread and child holding it goes (SR11).
+A native child's first state is *kept* on its process and cloned by each first
+thread made for it, not taken: a start that is refused (a bad argument handle,
+no memory for the thread) and made again makes a new first thread, which
+must start filtered too (the consultant's B1; taking it let a filtered
+process run an unfiltered child by `process_start` with a bad handle and then
+a good one). Installing needs no-new-privs or `CAP_SYS_ADMIN` in the caller's
+own user namespace (`holds`, as Linux's `ns_capable`). The flags a thread
+publishes are written when they change, not on every call, and reads of its
+state take the leaf lock and store nothing.
+`/proc/<pid>/status` has `NoNewPrivs`, `Seccomp` and `Seccomp_filters`.
+`TSYNC` is refused `EINVAL` until S5.
+
+Evidence: the `seccomp` boot line of FX-1303
+(`syscall/seccomp_filters_check.rs`, a load-ring file listed in
+`certification-item.json`). A task that is a real thread of a check process
+installs filters through `seccomp(2)` and `prctl` as a program does and makes
+the calls they judge through the core's own entry (`arch::drive_system_call`),
+which on the Arm pair then ends a thread whose process was ended, as the
+vector does and a driven call skips. It requires: Chromium's probes answered
+as Linux answers them; `EACCES` for uid 1000 without no-new-privs and success
+with it; `getppid` failed `EPERM`, `clone3` `ENOSYS`, `getpid` run; an older
+`ERRNO` under a newer `ALLOW` still `ERRNO`, the newest data on a tie;
+`ERRNO|512` coming back `-512` and `ERRNO|5000` `-4095`; `TRACE` and
+`USER_NOTIF` `ENOSYS`; `LOG` letting the call go on; a fork child, a thread
+and a native child each refused the call their creator's filter refuses, with
+`Seccomp: 2` and `Seccomp_filters: 2` in their `status`; a killed thread's
+process ending by `SIGSYS` (a `KILL_PROCESS` the same, a thread in strict mode
+by `SIGKILL`); a thread in filter mode with no filter ended; the longest chain
+Linux allows, 6,554 one-instruction filters, made and released outside the
+thread's lock; a native child whose start was refused and made again still
+filtered, with its creator's no-new-privs; one thread of a process killed by its
+filter, alone (the process lives and the others' calls run), and the first
+thread killed while another lives, the process ending by `SIGSYS` when the
+other leaves; and, in the `kmem` line, filters made until a job's memory limit refused one `ENOMEM`,
+a sibling job made one, and both read zero after. Each control below is a
+throwaway branch with one sabotage and a `NEGATIVE CONTROL` line, and stopped
+the boot with the check's own message:
+
+| Control (sabotage) | Message |
+|---|---|
+| the program is read before the flags are checked | `an unknown seccomp flag was answered EFAULT` |
+| the no-new-privs rule is not applied | `an unprivileged filter was installed without no-new-privs` |
+| the hook never learns a thread holds a filter | `a filtered getppid ran` |
+| the chain keeps the oldest filter's answer | `the newest filter's data did not stand on a tie` |
+| a fork child's thread starts with no filter | `a forked child of a filtered process was not filtered` |
+| a clone's thread starts with no filter | `a thread of a filtered process was not filtered` |
+| a native child is given no filter | `a native child of a filtered process was not filtered once its start was refused and made again` |
+| a killed last thread ends its process as exit 0 | `a killed thread's process exited otherwise than by SIGSYS` |
+| an ERRNO of 512 is answered 4 | `a filter's ERESTARTSYS restarted the call` |
+| strict mode allows every call | `strict mode let getpid run` |
+| the chain has no length bound | `a chain grew past what Linux allows` |
+| a filter is charged nothing to its job | `kmem: a job made more than its limit could hold` |
+| a thread in filter mode with no filter is let go on | `a thread in filter mode with no filter was let go on` |
+| a chain is released by the default recursive drop | `a chain's release was recursive, nested as deep as the chain is long` |
+| an ERRNO of 5000 is answered 7 | `a filter's errno was not cut to 4095` |
+| an action nobody defined lets the call go on | `an action nobody defined did not end the process` |
+| a native child's first state is taken, not kept | `a native child of a filtered process was not filtered once its start was refused and made again` |
+| a thread killed by its filter leaves with no status | `a killed leader's process did not end by SIGSYS` |
+| a killed thread always ends its whole process | `a thread killed by its filter took its whole process with it` |
+
+What a call costs the worst chains, read in the guest (`seccomp` line): the
+6,554-filter chain, 401 us a call; seven 4,096-instruction filters, the most
+steps there can be, 732 us; releasing the long chain, 8.1 ms, which in
+production can be the reaper's last drop with preemption off and is the one
+cost S3 adds there (a BACKLOG row). `MEMORY-AND-TIMING.md` §2.2b has them.
+
+What stands on the code and not on a check, each a BACKLOG row: `execve`
+keeping the chain (no boot check runs an `execve`; S6's guest program does:
+bubblewrap's path), and `LOG`'s line (read by hand in the boot log). The
+several-thread `KILL_THREAD` is a check now, with started threads.
+
+S4 (`TRAP`) and S5 (`TSYNC`) follow.
