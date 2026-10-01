@@ -152,8 +152,9 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
     // nothing has moved.
     if frame.came_from_user() {
         crate::sched::regroup_current();
-        // And waits out the rest of a `cpu.max` period its job has used up.
-        crate::sched::throttle_current();
+        // And waits out the rest of a `cpu.max` period its job has used up,
+        // unless there is a kill or a signal to deal with first.
+        crate::sched::throttle_current(must_attend);
     }
 
     // On the way back to a program, which is where a program killed from
@@ -350,7 +351,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
     // (`echo $$ > cgroup.procs`) runs in the new job from here.
     if regs.is_some() {
         crate::sched::regroup_current();
-        crate::sched::throttle_current();
+        crate::sched::throttle_current(must_attend);
     }
     outcome
 }
@@ -422,6 +423,12 @@ static RETURN_PATH: AtomicPtr<ReturnPath> = AtomicPtr::new(ptr::null_mut());
 /// is the property that makes the core independently analysable.
 pub(crate) fn set_return_path(path: &'static ReturnPath) {
     RETURN_PATH.store(ptr::from_ref(path).cast_mut(), Ordering::Release);
+}
+
+/// Whether the way back to user mode has anything to do for the running
+/// task: a kill, a signal, a stop. What a throttled task looks for.
+fn must_attend() -> bool {
+    return_path().is_some_and(|path| (path.needs_attention)())
 }
 
 /// The registered return path, if there is one.
