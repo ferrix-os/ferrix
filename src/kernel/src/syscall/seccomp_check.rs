@@ -238,6 +238,7 @@ const REFUSED: isize = -1;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    crate::println!("NEGATIVE CONTROL k1-flags-after-program applied: set_filter reads the program before it checks the flags");
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();

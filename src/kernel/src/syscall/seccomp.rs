@@ -768,10 +768,10 @@ fn set_filter(
     uargs: u64,
     abi: Abi,
 ) -> Result<usize, Errno> {
+    let (length, pointer) = read_header(process, uargs, abi)?;
     if flags & !flag::BUILT != 0 {
         return Err(Errno::EINVAL);
     }
-    let (length, pointer) = read_header(process, uargs, abi)?;
     if length == 0 || length > MAX_INSNS {
         return Err(Errno::EINVAL);
     }
