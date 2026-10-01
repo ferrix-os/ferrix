@@ -1124,6 +1124,9 @@ fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
     let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
     let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
     if job.set_bandwidth(runtime, max.period * 1000) {
+        // Tasks of the job already running alone on a processor are cut by
+        // a timer nothing has armed yet.
+        crate::sched::rearm_timers();
         audit::limit_set(
             audit::CGROUP_LIMIT,
             writer(),

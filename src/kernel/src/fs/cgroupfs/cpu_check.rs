@@ -212,8 +212,89 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
     let throttled = outcome?;
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let killed = killed_throttled(harness)?;
+    let late = quota_comes_late(harness)?;
     let beneath = beneath(harness)?;
-    Ok(throttled + killed + beneath)
+    Ok(throttled + killed + late + beneath)
+}
+
+/// A program already running alone on its processor is cut by a `cpu.max`
+/// that comes to bind it after it started: written under it, and the program
+/// moved beneath it. Nothing interrupts a lone task, so what arms the timer
+/// for the moment its quota would be used up is the write and the move
+/// themselves. (A shell that moved itself into a cgroup with a quota and then
+/// spun was held to a fifth only when something else happened to tick.)
+///
+/// Verifies: L.sched.4
+fn quota_comes_late(harness: &mut Harness) -> Checked<u64> {
+    if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
+        return Ok(0);
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"max 100000\n")
+        .map_err(|_| "cpu.max refused max")?;
+    let program = freeze_check::start(harness, b"/check-c")?;
+    let written = late_write(harness, &program);
+    kill::send(&program.process, SIGKILL, Origin::Kernel);
+    let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
+    let _ = program.process.wait_for_exit(deadline);
+    drop(program);
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
+    written?;
+    emptied?;
+
+    let program = freeze_check::start(harness, b"")?;
+    let moved = late_move(harness, &program);
+    kill::send(&program.process, SIGKILL, Origin::Kernel);
+    let _ = program.process.wait_for_exit(deadline);
+    drop(program);
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
+    moved?;
+    emptied?;
+    Ok(2)
+}
+
+/// The window's measure of what a program used of a processor, held to a
+/// fifth or not.
+fn held_to_a_fifth(harness: &Harness, what: &'static str) -> Checked<()> {
+    crate::sched::sleep_for(150_000_000);
+    let held = share(harness, b"/check-c/cpu.stat")?;
+    if !(80..=400).contains(&held) {
+        crate::console::println!("  cpu      {what}: held to {held} thousandths of the wall clock");
+        return Err(what);
+    }
+    Ok(())
+}
+
+/// The program runs free, then `cpu.max` is written under it.
+fn late_write(harness: &mut Harness, program: &Running) -> Checked<()> {
+    freeze_check::wait_running(&program.process)?;
+    crate::sched::sleep_for(100_000_000);
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"20000 100000\n")
+        .map_err(|_| "cpu.max refused 20000 100000")?;
+    held_to_a_fifth(
+        harness,
+        "a running program was not held to a fifth of a processor by a cpu.max written under it",
+    )
+}
+
+/// The program runs in the root cgroup, then is moved beneath a `cpu.max`.
+fn late_move(harness: &mut Harness, program: &Running) -> Checked<()> {
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"20000 100000\n")
+        .map_err(|_| "cpu.max refused 20000 100000")?;
+    freeze_check::wait_running(&program.process)?;
+    crate::sched::sleep_for(100_000_000);
+    let listed = alloc::format!("{}\n", program.process.pid());
+    let _ = harness
+        .write(b"/check-c/cgroup.procs", listed.as_bytes())
+        .map_err(|_| "a program could not be moved into the cgroup with a quota")?;
+    held_to_a_fifth(
+        harness,
+        "a running program moved beneath a cpu.max was not held to a fifth of a processor",
+    )
 }
 
 /// How long a program throttled for most of a second may take to end after
