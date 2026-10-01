@@ -942,7 +942,7 @@ fn ended_early(
             // Strict mode: `write` runs (to a descriptor that is not open, so
             // it answers EBADF and does not block), and any other call ends the
             // thread with SIGKILL.
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             if call(seccomp_call, [SET_MODE_STRICT, 0, 0, 0, 0, 0])? != 0 {
                 return Err("strict mode was refused");
             }
@@ -956,8 +956,8 @@ fn ended_early(
             Ok(Some(Err("strict mode let getpid run")))
         }
         Some(Ending::Member) => {
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            let _task = spawn_member(&process, &thread, killer)?;
+            let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let _task = spawn_member(process, thread, killer)?;
             let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
             while process.threads().len() > 1 {
                 if crate::timer::now_nanos() > patience {
@@ -981,9 +981,9 @@ fn ended_early(
             Ok(Some(Ok(seen)))
         }
         Some(Ending::Leader) => {
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let getsid = number(Syscall::Getsid)?;
-            let _task = spawn_member(&process, &thread, outlive_the_leader)?;
+            let _task = spawn_member(process, thread, outlive_the_leader)?;
             let at = env.put(&answering(&[(getsid, KILL_THREAD)]), None)?;
             if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
                 return Err("a filter that kills was refused through the entry");
