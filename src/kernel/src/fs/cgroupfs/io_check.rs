@@ -132,16 +132,25 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
     drop(registration);
     let counted = outcome?;
     let _ = disabled.map_err(|_| "the root refused to disable io after the io check")?;
-    // A program an earlier check killed may be reaped meanwhile, and give a
-    // slot back: more than were there before is what a leak is.
+    slots_back(
+        slots,
+        "the io check's cgroups are gone and their quota slots are not",
+    )?;
+    Ok(counted)
+}
+
+/// Wait for the quota slots to come down to `slots`. A program an earlier
+/// check killed may be reaped meanwhile, and give a slot back: more than were
+/// there before is what a leak is.
+fn slots_back(slots: u64, leak: &'static str) -> Checked<()> {
     let deadline = crate::timer::now_nanos().saturating_add(5_000_000_000);
     while crate::object::quota::live_slots() > slots {
         if crate::timer::now_nanos() >= deadline {
-            return Err("the io check's cgroups are gone and their quota slots are not");
+            return Err(leak);
         }
         crate::sched::sleep_for(1_000_000);
     }
-    Ok(counted)
+    Ok(())
 }
 
 /// Everything the check claims, in its cgroups.
@@ -159,7 +168,8 @@ fn requests(harness: &mut Harness) -> Checked<u32> {
         .and_then(|counted| Ok((counted, limits(harness, &job, &disk)?)));
     let rest = outcome.and_then(|(counted, spaced)| {
         let parent = hierarchy(harness, &disk)?;
-        Ok(counted + spaced + parent)
+        let gone = after_its_job_went(harness, &disk)?;
+        Ok(counted + spaced + parent + gone)
     });
     let _ = job.end(harness);
     let _ = sibling.end(harness);
@@ -298,4 +308,29 @@ fn hierarchy(harness: &mut Harness, disk: &Arc<dyn BlockDevice>) -> Checked<u32>
         return Err("a parent's io.stat does not count its child's I/O");
     }
     Ok(3)
+}
+
+/// A task that is still in the kernel when its job goes -- one asleep in the
+/// wait `io.max` makes it, say, whose process moved and whose cgroup was
+/// removed -- may charge the disk when it wakes, and that must not start
+/// state for a job that is gone: it would hold the job's quota slot, and every
+/// slot above it, for ever. Done as the task would: the check's own task
+/// holds the slot as a task of the job, the cgroup is removed, and then it
+/// reads.
+fn after_its_job_went(harness: &mut Harness, disk: &Arc<dyn BlockDevice>) -> Checked<u32> {
+    let before = crate::object::quota::live_slots();
+    let group = Group::make(harness, b"/check-iw")?;
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(group.slot());
+    let gone = group.end(harness);
+    let mut sector = [0_u8; 512];
+    let read = disk.read(0, &mut sector);
+    crate::sched::set_current_group(own);
+    gone?;
+    read.map_err(|_| "io check: a read of the disk failed")?;
+    slots_back(
+        before,
+        "a disk read by a task of a job that had gone kept the job's quota slot",
+    )?;
+    Ok(1)
 }

@@ -505,6 +505,22 @@ fn this_logical_cpu() -> usize {
 /// the program a `SIGBUS`: reclaim would have to take it every time.
 const REFILLS: usize = 64;
 
+/// Fill `frame` with page `index` of `file`: a copy of it, or zeros for a hole.
+/// A page of a file on a disk that was filled before the caller's lock and
+/// reclaimed since is not a hole: the frame is given back and the fault is to
+/// fill it again (`user::cache`).
+fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> {
+    match file.page(index) {
+        Some(original) => mm::copy_frame(frame, original),
+        None if file.sourced(index) => {
+            let _ = mm::release_frame(frame);
+            return Err(SpaceError::Evicted);
+        }
+        None => mm::zero_frame(frame),
+    }
+    Ok(())
+}
+
 /// The frame for page `index` of `vmo`, committed on first touch.
 ///
 /// A page of a file mapping (`file`) wholly past the end of its file is
@@ -1244,15 +1260,7 @@ impl AddressSpace {
             // a shared reference would make the file's next write copy on
             // write, and the file would stop being what its shared mappings
             // show.
-            match file.page(index) {
-                Some(original) => mm::copy_frame(frame, original),
-                None if file.sourced(index) => {
-                    // Filled before this lock and reclaimed since: not a hole.
-                    let _ = mm::release_frame(frame);
-                    return Err(SpaceError::Evicted);
-                }
-                None => mm::zero_frame(frame),
-            }
+            copy_or_zero(&file, index, frame)?;
             // The shadow lacked the page under this space's lock, and every
             // change to a shadow is made under it, so no page can have arrived
             // meanwhile: a frame that did not go in is one there was no memory
