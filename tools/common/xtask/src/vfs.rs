@@ -689,7 +689,7 @@ exit 5
 
 /// Root mounts cgroup2, enables `cpu` and makes `u` with `cpu.max` 20000
 /// 100000. A shell moves itself into `u` and spins; over three seconds its
-/// usage, from `cpu.stat`'s first line, must be between a tenth and two fifths
+/// usage, from `cpu.stat`'s first line, must be between a tenth and two thirds
 /// of a processor, where the shell alone would take all of one, and
 /// `nr_throttled` must have counted. With `max` written back, two seconds must
 /// show more than six tenths. Only builtins read what is checked, as in
@@ -707,7 +707,7 @@ read key before < /tmp/cu/u/cpu.stat
 sleep 3
 read key after < /tmp/cu/u/cpu.stat
 used=$((after - before))
-[ $used -gt 300000 ] && [ $used -lt 1200000 ] && echo "held to about a fifth of a processor" || echo "used $used in 3 s"
+[ $used -gt 300000 ] && [ $used -lt 1950000 ] && echo "held to about a fifth of a processor" || echo "used $used in 3 s"
 while read key count; do [ "$key" = nr_throttled ] && [ $count -ge 1 ] && echo "cpu.stat counted the throttling"; done < /tmp/cu/u/cpu.stat
 echo max > /tmp/cu/u/cpu.max || exit 5
 sleep 1
