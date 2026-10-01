@@ -299,6 +299,8 @@ fn the_files(harness: &mut Harness, group: &Group, other: &Group) -> Checked<()>
 }
 
 /// `/check-r` over its `memory.high`, `/check-rs` beside it.
+///
+/// Verifies: L.object.108, L.object.109, L.object.111, L.object.112, H.QUOTA.12
 fn high(
     harness: &mut Harness,
     group: &Group,

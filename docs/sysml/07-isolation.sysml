@@ -71,12 +71,13 @@ package FerrixIsolation {
              * separate mechanism: it is bandwidth and weight handed to the
              * scheduling classes. memory scopes reclaim and the OOM kill.
              *
-             * Built (docs/CGROUPS.md, 55 of its 85 points): every cgroup a
-             * Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a
-             * cgroup, delegation by chown; pids, memory's charging and its
-             * scoped OOM kill, and cpu.weight, over the certification's job
-             * quotas. Left: the rest of memory.stat, memory's reclaim,
-             * freezing, cpu.max and io. */
+             * Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted
+             * as cgroup2, cgroup.events, clone3 into a cgroup, delegation by
+             * chown; pids, memory's charging, its reclaim, memory.high and its
+             * scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io,
+             * over the certification's job quotas. Left: the rest of
+             * memory.stat, io.weight, io.latency, cpu.idle and
+             * cpu.max.burst. */
         part root : Cgroup;
     }
 

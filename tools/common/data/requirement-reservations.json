@@ -12,7 +12,7 @@
   ],
   "reservations": [
     {
-      "ids": ["L.object.106-112", "L.sched.3-4", "H.QUOTA.10-12"],
+      "ids": ["L.sched.4"],
       "owner": "os-7c",
       "branch": "stage13-cgctl",
       "date": "2026-10-01",
