@@ -277,6 +277,14 @@ pub(crate) enum Verdict {
     /// cannot return a value that is not an errno, nor one that is a restart
     /// code the dispatcher keeps for itself (`ERESTARTSYS` is 512).
     Errno(u32),
+    /// The call does not run, and the registers read as they did when the
+    /// program made it: the core gives the return register the value that
+    /// restores them (`arch::syscall_rollback_value`: the number on x86, the
+    /// first argument on the Arm pair), so that the `SIGSYS` the filter forced
+    /// on this thread is delivered with a context a handler can read the call
+    /// from. The filter chooses no value: the core computes it from the call
+    /// (`docs/SECCOMP.md` §3.6).
+    Trap,
 }
 
 /// The largest errno a call returns: Linux's `MAX_ERRNO`.
@@ -330,6 +338,11 @@ pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outc
     match filter(args) {
         Verdict::Continue => None,
         Verdict::Errno(errno) => Some(Outcome::Return(-(errno.min(MAX_ERRNO) as isize))),
+        Verdict::Trap => Some(Outcome::Return(arch::syscall_rollback_value(
+            args.abi,
+            args.number,
+            &args.args,
+        ))),
     }
 }
 
