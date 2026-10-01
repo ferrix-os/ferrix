@@ -753,11 +753,17 @@ fn i386_set_register(context: &mut libc::ucontext_t, index: usize, value: u32) {
     unsafe { base.add(index).write(value) }
 }
 
+/// General register `index` of an x86-64 context.
+#[cfg(target_arch = "x86_64")]
+fn general(context: &libc::ucontext_t, index: usize) -> u64 {
+    context.uc_mcontext.gregs.get(index).copied().unwrap_or(0) as u64
+}
+
 /// The context's instruction pointer.
 fn context_pc(context: &libc::ucontext_t) -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
-        context.uc_mcontext.gregs[libc::REG_RIP as usize] as u64
+        general(context, libc::REG_RIP as usize)
     }
     #[cfg(target_arch = "x86")]
     {
@@ -777,7 +783,7 @@ fn context_pc(context: &libc::ucontext_t) -> u64 {
 fn context_number(context: &libc::ucontext_t) -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
-        context.uc_mcontext.gregs[libc::REG_RAX as usize] as u64
+        general(context, libc::REG_RAX as usize)
     }
     #[cfg(target_arch = "x86")]
     {
@@ -797,7 +803,7 @@ fn context_number(context: &libc::ucontext_t) -> u64 {
 fn context_argument(context: &libc::ucontext_t) -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
-        context.uc_mcontext.gregs[libc::REG_RDI as usize] as u64
+        general(context, libc::REG_RDI as usize)
     }
     #[cfg(target_arch = "x86")]
     {
@@ -817,7 +823,9 @@ fn context_argument(context: &libc::ucontext_t) -> u64 {
 fn context_set_result(context: &mut libc::ucontext_t, value: c_long) {
     #[cfg(target_arch = "x86_64")]
     {
-        context.uc_mcontext.gregs[libc::REG_RAX as usize] = value as _;
+        if let Some(slot) = context.uc_mcontext.gregs.get_mut(libc::REG_RAX as usize) {
+            *slot = value as _;
+        }
     }
     #[cfg(target_arch = "x86")]
     {
@@ -889,7 +897,7 @@ extern "C" fn on_sigsys(signal: c_int, info: *mut libc::siginfo_t, context: *mut
         // A trap inside the handler traps again, since `SA_NODEFER` leaves
         // `SIGSYS` unblocked.
         let (answer, _) = call3(GETPPID, 0, 0, 0);
-        NESTED_ANSWER.store(answer as i32, Ordering::Release);
+        NESTED_ANSWER.store(i32::try_from(answer).unwrap_or(0), Ordering::Release);
     }
     if first != 0x1111 && first != 0 {
         // The call is made with `0x1111` as its first argument when the step
@@ -908,7 +916,7 @@ extern "C" fn on_sigsys(signal: c_int, info: *mut libc::siginfo_t, context: *mut
 fn install_handler() -> Step {
     // SAFETY: a zeroed `sigaction` with the fields set is a valid argument.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-    action.sa_sigaction = on_sigsys as usize;
+    action.sa_sigaction = on_sigsys as *const () as usize;
     action.sa_flags = libc::SA_SIGINFO | libc::SA_NODEFER;
     // SAFETY: `action` is alive for the call.
     let answer = unsafe { libc::sigaction(libc::SIGSYS, &action, std::ptr::null_mut()) };
@@ -986,7 +994,7 @@ fn emulate() -> Step {
         if HANDLED.load(Ordering::Acquire) != 4 || answer != EMULATED {
             return 9;
         }
-        if NESTED_ANSWER.load(Ordering::Acquire) != EMULATED as i32 {
+        if i64::from(NESTED_ANSWER.load(Ordering::Acquire)) != i64::from(EMULATED) {
             return 9;
         }
         0
@@ -1204,10 +1212,11 @@ extern "C" fn watcher(argument: *mut c_void) -> *mut c_void {
     let me = argument as usize;
     while !STOP.load(Ordering::Acquire) {
         let (answer, error) = call0(GETPPID);
-        if answer == -1 && error == libc::EPERM {
-            if let Some(flag) = REFUSED.get(me) {
-                flag.store(true, Ordering::Release);
-            }
+        if answer == -1
+            && error == libc::EPERM
+            && let Some(flag) = REFUSED.get(me)
+        {
+            flag.store(true, Ordering::Release);
         }
         // SAFETY: yields the processor.
         let _ = unsafe { libc::sched_yield() };
@@ -1242,7 +1251,7 @@ extern "C" fn maker(_argument: *mut c_void) -> *mut c_void {
 extern "C" fn foreign(_argument: *mut c_void) -> *mut c_void {
     if install(&answering(&[(GETSID, RET_ERRNO | libc::EBADF as u32)]), 0).0 == 0 {
         let (tid, _) = call0(GETTID);
-        FOREIGN_TID.store(tid as i32, Ordering::Release);
+        FOREIGN_TID.store(i32::try_from(tid).unwrap_or(0), Ordering::Release);
         FOREIGN_READY.store(true, Ordering::Release);
     } else {
         FOREIGN_READY.store(true, Ordering::Release);
