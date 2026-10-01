@@ -116,7 +116,7 @@ impl Thread {
         Ok(Thread::with(
             process,
             ThreadSignals::new(inherited)?,
-            parent.seccomp_copy(),
+            seccomp::State::default(),
         ))
     }
 
