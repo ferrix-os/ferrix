@@ -68,6 +68,23 @@ fn number(harness: &Harness, path: &[u8], key: &str) -> Checked<u64> {
         .ok_or("cpu check: a key is missing from cpu.stat")
 }
 
+/// `usage_usec`, `user_usec` and `system_usec` from one read of `path`.
+fn usage_split(harness: &Harness, path: &[u8]) -> Checked<(u64, u64, u64)> {
+    let text = harness
+        .read(path)
+        .map_err(|_| "cpu check: a file did not read")?;
+    let text = core::str::from_utf8(&text).map_err(|_| "cpu check: a file is not text")?;
+    let key = |wanted: &str| {
+        text.lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(' ')?;
+                (name == wanted).then(|| value.parse().ok()).flatten()
+            })
+            .ok_or("cpu check: a key is missing from cpu.stat")
+    };
+    Ok((key("usage_usec")?, key("user_usec")?, key("system_usec")?))
+}
+
 /// How many lines the file at `path` has.
 fn lines(harness: &Harness, path: &[u8]) -> Checked<usize> {
     let text = harness
@@ -270,9 +287,10 @@ fn measured(harness: &Harness, program: &Running) -> Checked<u64> {
     if number(harness, b"/check-c/cpu.stat", "throttled_usec")? == 0 {
         return Err("cpu.stat did not count the time its cgroup spent throttled");
     }
-    let user = number(harness, b"/check-c/cpu.stat", "user_usec")?;
-    let system = number(harness, b"/check-c/cpu.stat", "system_usec")?;
-    if user == 0 || user + system != usage(harness, b"/check-c/cpu.stat")? {
+    // From one read of the file: the program is still running, so three
+    // reads would each be of a later instant.
+    let (usage, user, system) = usage_split(harness, b"/check-c/cpu.stat")?;
+    if user == 0 || user + system != usage {
         return Err("cpu.stat's user and system time are not the usage it reports");
     }
 
