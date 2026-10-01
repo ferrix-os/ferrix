@@ -524,11 +524,26 @@ the figures are read and not judged; they say the worst case is below two
 milliseconds on the slowest machine measured. Chromium's filters run a few dozen
 steps for a call.
 
+**What S3's chains cost, measured.** The boot reads, in the guest and in the
+dev profile, the two worst chains the limits allow: 6,554 filters of one
+instruction (most runs of the interpreter, each with its loop and `Arc`
+deref) walked in 401 us a call, and seven filters of 4,096 instructions
+(most steps) in 732 us a call, both on x86-64 where a step is 25 ns; and the
+release of the 6,554-filter chain, which is a walk of `Drop`s and runs under
+no lock but where the last reference goes, 8.1 ms. A process's chain is
+released by its last thread or child, and in production the last drop can fall
+to the reaper with preemption off: **that is up to 8 ms of masked-preemption
+time in the reaper for the worst chain a program can build**, and is stated
+here rather than argued small. Every other release (a chain of a few filters,
+which is every program in practice) is microseconds. S3 does not bound it
+further; a deferred release by the reaper's own work queue would, and is a
+BACKLOG row.
+
 **AoU-4.** A program a user supplies may therefore take up to 32,768 steps on
 every call it makes, and the hook is written for it: it allocates nothing, takes
 no sleeping lock and reads registers only; a thread with no filter pays one
-load of the registration, an indirect call and (until S3) one load of the boot
-check's probe word. The hook is entered and left with interrupts masked, as the
+load of the registration, an indirect call and one load of the boot check's probe
+word (and, once any thread has held a filter, one look for the running thread). The hook is entered and left with interrupts masked, as the
 core's entry holds them (S2's registered body is a load and a store of a flag,
 and runs masked). S3's body, which runs a chain, opens interrupts for exactly
 the walk of the chain and closes them before it returns, as the dispatcher does
