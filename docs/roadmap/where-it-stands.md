@@ -205,8 +205,9 @@ architectures (2026-09-27). Its last slice, hyprlock over `authd` (P1.5), is
 parked on branch `hyprlock`.
 
 Stage 13 is under way, cgroups first because init needs them: cgroup2 with
-`pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
-reclaim, freezing, `cpu.max`, `io`, namespaces and seccomp are left. Of
+`pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26),
+and reclaim, freezing, `cpu.max` and `io` (2026-10-01); namespaces and seccomp
+are left. Of
 the namespaces, Steam's user and mount ones are being built
 (`docs/NAMESPACES.md`): per-mount flags (N1, 2026-09-28), binds (N2) and
 mount namespaces with `pivot_root` (N3, both 2026-09-30) are in, and

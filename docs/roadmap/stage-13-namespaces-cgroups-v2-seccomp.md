@@ -249,7 +249,6 @@ Linux):
 | `stage13-netns` | network namespaces, veth pairs, per-namespace stacks | boots on three architectures, `test-shell`, `test-vfs`, `test-net`, 30 controls; `check` not run |
 | `stage13-timens` | time namespace | agent had not reported |
 | `stage13-pidns` | pid namespaces | boots pass; **`test-vfs` fails on x86_64**: a kernel stack overflow on the `ioctl` path, cause not found (`Process` grew by about 48 bytes) |
-| `stage13-cgctl` | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max` with `cpu.stat`, the `io` controller (`io.stat`, `io.max`) | reclaim, freeze and cpu booted; the io check stopped at its last line (a quota-slot count, a fix written, not booted); no full boot, no `test-shell`/`test-vfs`, no negative control run |
 | `stage13-s3` | seccomp S3 to S5 | S3 built and booting, not gated; S4 and S5 not started |
 | `stage13-container` | `cargo xtask test-container`, the exit criterion as a program | written, never run |
 
