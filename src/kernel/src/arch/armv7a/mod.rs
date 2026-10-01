@@ -31,6 +31,7 @@ mod trap;
 pub(crate) use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
 
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+pub(crate) use trap::check::drive_system_call;
 
 use ferrix_bootinfo::{Arch, BootView};
 use ferrix_fdt::{GicVersion, PsciConduit};
@@ -229,6 +230,26 @@ pub(crate) fn decode_syscall(number: usize) -> Option<Syscall> {
         None => super::nospec_index(number, nr::ARM_END)?,
     };
     nr::from_arm(number)
+}
+
+/// The `AUDIT_ARCH_*` token a system call carries in `seccomp_data.arch`:
+/// `EM_ARM` | `__AUDIT_ARCH_LE`. One ABI here.
+pub(crate) const fn audit_arch(abi: crate::trap::Abi) -> u32 {
+    let _ = abi;
+    0x4000_0028
+}
+
+/// The value to put in the return register of a call that is not run, so that
+/// the frame reads as it did when the program made the call: Linux's
+/// `syscall_rollback`. `r7` still holds the number, and `r0` held the first
+/// argument (`docs/SECCOMP.md` §3.6).
+pub(crate) const fn syscall_rollback_value(
+    abi: crate::trap::Abi,
+    number: usize,
+    args: &[u64; 6],
+) -> isize {
+    let _ = (abi, number);
+    args[0] as isize
 }
 
 /// The ABI a program image runs in, or `None` for one this machine cannot

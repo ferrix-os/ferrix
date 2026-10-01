@@ -429,25 +429,38 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
         abi: crate::trap::Abi::Native,
         number: x8 as usize,
         args: [x0, x1, x2, x3, x4, x5],
+        // `ELR_EL1` already points past the `svc`.
+        ip: frame.elr,
     };
 
-    // `rt_sigreturn` replaces the whole frame, `x0` included, so it has no
-    // return value to write: answered here rather than through `dispatch`.
-    if let Some(ferrix_linux_abi::nr::Syscall::RtSigreturn) = super::decode_syscall(args.number) {
-        let mut context = super::signal::UserContext::from_trap(frame);
-        super::enable_interrupts();
-        if let Some(path) = crate::trap::return_path() {
-            (path.sigreturn)(&mut context, true);
-        }
-        super::disable_interrupts();
-        context.store_trap(frame);
-        return Ok(());
-    }
+    // The registered filter looks at the call first, before `rt_sigreturn`
+    // is answered below (`docs/SECCOMP.md` §3.3).
+    let outcome = match crate::trap::filter_system_call(&args) {
+        Some(outcome) => outcome,
+        None => {
+            // `rt_sigreturn` replaces the whole frame, `x0` included, so it has
+            // no return value to write: answered here rather than through
+            // `dispatch`.
+            if let Some(ferrix_linux_abi::nr::Syscall::RtSigreturn) =
+                super::decode_syscall(args.number)
+            {
+                let mut context = super::signal::UserContext::from_trap(frame);
+                super::enable_interrupts();
+                if let Some(path) = crate::trap::return_path() {
+                    (path.sigreturn)(&mut context, true);
+                }
+                super::disable_interrupts();
+                context.store_trap(frame);
+                return Ok(());
+            }
 
-    let regs = UserRegs(*frame);
-    super::enable_interrupts();
-    let outcome = dispatch(&args, Some(&regs));
-    super::disable_interrupts();
+            let regs = UserRegs(*frame);
+            super::enable_interrupts();
+            let outcome = dispatch(&args, Some(&regs));
+            super::disable_interrupts();
+            outcome
+        }
+    };
 
     match outcome {
         Outcome::Return(value) => {

@@ -861,5 +861,19 @@ package FerrixAarch64Requirements {
                 "arch::aarch64::mmio::read16", "arch::aarch64::mmio::write16",
                 "arch::aarch64::mmio::read32", "arch::aarch64::mmio::write32");
         }
+        requirement <'L.aarch64.51'> theFilterIsAskedFirstAtTheSvc : ItemLowLevel {
+            attribute :>> statement = "system_call shall ask the registered filter
+                about a call before rt_sigreturn is answered and before the
+                dispatcher is, with x8's low 32 bits, ELR as the instruction after the
+                svc and AArch64's token, apply the filter's errno as the dispatcher's answer,
+                and syscall_rollback_value shall give x0 the call's first argument so
+                that a call that did not run reads as it did at the call.";
+            attribute :>> criterion = "A test-only filter is shown rt_sigreturn once,
+                before its answer, and its value comes back in x0 (the `seccomp`
+                line).";
+            attribute :>> parent = "H.TRAP.16";
+            attribute :>> unit = ("arch::aarch64::audit_arch",
+                "arch::aarch64::syscall_rollback_value");
+        }
     }
 }

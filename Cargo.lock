@@ -308,6 +308,7 @@ dependencies = [
  "ferrix-qr",
  "ferrix-renderctl",
  "ferrix-sched",
+ "ferrix-seccomp",
  "ferrix-sndctl",
  "ferrix-sync",
  "ferrix-sysfs",

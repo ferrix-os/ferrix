@@ -150,6 +150,11 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // a Linux call does is the personality's, composed with the dispatcher
     // here, at compile time, so that it costs no second indirect call.
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
+    // And the look every call gets first, at all four entries, before the
+    // early answers the entries keep and before the native range is split off:
+    // a program's own filter is the personality's policy, so the core holds a
+    // pointer to it and nothing more (`docs/SECCOMP.md` §3.3).
+    trap::set_syscall_filter(syscall::seccomp::check);
     println!("  traps    vectors installed");
 
     let stats = bring_up_memory(view);

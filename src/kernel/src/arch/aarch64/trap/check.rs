@@ -145,3 +145,44 @@ fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     crate::syscall::exec::run(&file, &[name], &[], [0x7e; ferrix_ustack::RANDOM_BYTES])
         .map_err(|_| "a program that faults on purpose could not be started")
 }
+
+/// Take the entry a system call arrives through, with a frame built from these
+/// registers as an `svc` from EL0 leaves them, and answer what the entry left
+/// in `x0`.
+///
+/// For the seccomp check (`syscall::seccomp_check`), which needs the core's own
+/// entry run with a call it chose -- the registered filter is asked first, and
+/// the early answers (`rt_sigreturn`) follow -- without a program to make it.
+/// Interrupts are as the caller had them: a real entry starts with them masked
+/// and leaves them so, this wrapper does both for a task that runs with them
+/// open. `None` for a mode of entry this architecture does not have.
+pub(crate) fn drive_system_call(
+    abi: crate::trap::Abi,
+    number: usize,
+    args: [u64; 6],
+    ip: u64,
+) -> Option<isize> {
+    use ferrix_sync::IrqControl;
+
+    if abi != crate::trap::Abi::Native {
+        return None;
+    }
+    let mut frame = super::TrapFrame {
+        x: [0; 31],
+        sp: 0x7fff_e000,
+        elr: ip,
+        spsr: super::USER_SPSR,
+        // An `svc` from AArch64, class 0b010101, from a lower exception level.
+        esr: 0b01_0101 << 26,
+        far: 0,
+        kind: 8,
+        reserved: 0,
+    };
+    frame.x[..6].copy_from_slice(&args);
+    frame.x[8] = number as u64;
+    let saved = <super::super::Irq as IrqControl>::disable();
+    let done = super::system_call(&mut frame);
+    <super::super::Irq as IrqControl>::restore(saved);
+    done.ok()?;
+    Some(frame.x[0] as i64 as isize)
+}

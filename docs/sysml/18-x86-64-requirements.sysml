@@ -953,7 +953,8 @@ package FerrixX8664Requirements {
             attribute :>> criterion = "A program's execve of the user test program
                 ends with that program's status, 42 (the `execve` line).";
             attribute :>> parent = "H.TRAP.10";
-            attribute :>> unit = "arch::x86_64::syscall::ferrix_syscall_entry";
+            attribute :>> unit = ("arch::x86_64::syscall::ferrix_syscall_entry",
+                "arch::x86_64::syscall::enter_program");
         }
         requirement <'L.x86_64.70'> freshEntryClearsRegisters : ItemLowLevel {
             attribute :>> statement = "A program entered fresh, by enter_user or by
@@ -973,6 +974,31 @@ package FerrixX8664Requirements {
                 program, which exits 42.";
             attribute :>> parent = "H.TRAP.8";
             attribute :>> unit = "arch::x86_64::syscall::enter_compat_after_execve";
+        }
+        requirement <'L.x86_64.124'> theFilterIsAskedBeforeAnyAnswerOfTheEntrys : ItemLowLevel {
+            attribute :>> statement = "ferrix_syscall_entry and system_call shall ask
+                the registered filter about a call before arch_prctl, sigreturn and
+                rt_sigreturn are answered and before the dispatcher is, with the
+                number's low 32 bits, the instruction after the call, and the token
+                of the entry: x86-64's for SYSCALL and i386's for int $0x80, whatever
+                the image; and shall apply the filter's errno as the dispatcher's answer.";
+            attribute :>> criterion = "A test-only filter is shown arch_prctl and
+                rt_sigreturn through SYSCALL and sigreturn and rt_sigreturn through
+                int $0x80 once each, before their answers, and its value comes back; a
+                filter about x86-64 alone does not judge an int $0x80 call.";
+            attribute :>> parent = "H.TRAP.16";
+            attribute :>> unit = ("arch::x86_64::audit_arch",
+                "arch::x86_64::syscall::answer_here");
+        }
+        requirement <'L.x86_64.125'> aRolledBackFrameReadsAsAtTheCall : ItemLowLevel {
+            attribute :>> statement = "syscall_rollback_value shall give the value
+                for RAX that makes the frame of a call that did not run read as it did
+                at the call: the number.";
+            attribute :>> criterion = "The value for number 0x2222 is 0x2222 (the
+                `seccomp` line's rollback check); the handler of a trapped call reads
+                it from a real frame in a later landing.";
+            attribute :>> parent = "H.TRAP.16";
+            attribute :>> unit = "arch::x86_64::syscall_rollback_value";
         }
     }
 
@@ -1707,6 +1733,21 @@ package FerrixX8664Requirements {
                 cgroup's cgroup.procs, its next charges land in that job.";
             attribute :>> parent = "H.OBJ.12";
             attribute :>> unit = ("trap::system_call", "trap::dispatch");
+        }
+        requirement <'L.trap.7'> theRegisteredFilterIsAskedFirst : ItemLowLevel {
+            attribute :>> statement = "filter_system_call shall answer nothing with no
+                filter registered and ask the registered filter otherwise, the first
+                registration shall stand, and an errno the filter answers shall be cut
+                to 4095 before it is written as the call's result.";
+            attribute :>> criterion = "Every entry of the running architecture, driven
+                with frames of the check's own, asks the registered filter exactly
+                once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and
+                4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095;
+                a slot with nothing registered answers nothing, and one registered
+                twice asks the first (the `seccomp` line).";
+            attribute :>> parent = "H.TRAP.16";
+            attribute :>> unit = ("trap::filter_system_call", "trap::set_syscall_filter",
+                "trap::register", "trap::ask");
         }
     }
 }
