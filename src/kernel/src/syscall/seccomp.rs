@@ -47,10 +47,10 @@ use ferrix_seccomp::{
 use crate::arch;
 use crate::console::println;
 use crate::sched;
+use crate::sync::SpinLock;
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
 use crate::syscall::{attributes, credentials, uaccess};
-use crate::sync::SpinLock;
 use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// The `arch` a call in the native range carries.
