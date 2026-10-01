@@ -238,6 +238,7 @@ const REFUSED: isize = -1;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    crate::println!("NEGATIVE CONTROL k4-chain-order applied: the chain keeps the last filter's answer, the oldest's");
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();

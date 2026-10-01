@@ -409,7 +409,7 @@ fn run_chain(head: &Arc<Filter>, data: &SeccompData) -> (u32, bool) {
     let mut cursor = Some(head);
     while let Some(filter) = cursor {
         let result = ferrix_seccomp::run(&filter.program, data);
-        if ferrix_seccomp::more_restrictive(result, best) {
+        if true {
             best = result;
             log = filter.log;
         }
