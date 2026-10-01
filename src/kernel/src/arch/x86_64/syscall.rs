@@ -483,8 +483,6 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
-    use crate::trap::Verdict;
-
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
         number: frame.rax as usize,
@@ -501,8 +499,8 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     // answer is applied as the dispatcher's is; nothing registered is
     // `Continue`.
     let outcome = match crate::trap::filter_system_call(&args) {
-        Verdict::Answer(outcome) => outcome,
-        Verdict::Continue => {
+        Some(outcome) => outcome,
+        None => {
             if answer_here(frame, &args) {
                 return;
             }

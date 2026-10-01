@@ -1236,7 +1236,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 ///
 /// A trap-vector system call that did not come from ring 3.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Abi, Outcome, SyscallArgs, Verdict};
+    use crate::trap::{Abi, Outcome, SyscallArgs};
 
     if !frame.came_from_user() {
         return Err("a system call through the trap vector from ring 0");
@@ -1262,8 +1262,8 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     // entry's own architecture token: `AUDIT_ARCH_I386`, whatever the image
     // the program runs.
     let outcome = match crate::trap::filter_system_call(&args) {
-        Verdict::Answer(outcome) => outcome,
-        Verdict::Continue => {
+        Some(outcome) => outcome,
+        None => {
             // `sigreturn` for a handler without `SA_SIGINFO`, `rt_sigreturn`
             // for one with: an i386 program has both frames (`signal::compat`).
             let returning = match decode_compat_syscall(args.number) {

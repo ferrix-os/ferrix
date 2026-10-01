@@ -419,7 +419,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 /// A system call from EL1, which is a kernel bug, or an `execve` this path does
 /// not yet know how to honour.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Outcome, SyscallArgs, Verdict, system_call as dispatch};
+    use crate::trap::{Outcome, SyscallArgs, system_call as dispatch};
 
     if !frame.came_from_user() {
         return Err("a system call from EL1");
@@ -436,8 +436,8 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     // The registered filter looks at the call first, before `rt_sigreturn`
     // is answered below (`docs/SECCOMP.md` §3.3).
     let outcome = match crate::trap::filter_system_call(&args) {
-        Verdict::Answer(outcome) => outcome,
-        Verdict::Continue => {
+        Some(outcome) => outcome,
+        None => {
             // `rt_sigreturn` replaces the whole frame, `x0` included, so it has
             // no return value to write: answered here rather than through
             // `dispatch`.

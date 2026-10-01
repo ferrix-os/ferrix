@@ -15,7 +15,7 @@ use ferrix_seccomp::SeccompData;
 
 use crate::arch;
 use crate::syscall::seccomp::{self, NATIVE_ARCH};
-use crate::trap::{Abi, Outcome, SyscallArgs, Verdict};
+use crate::trap::{Abi, MAX_ERRNO, SyscallArgs, SyscallFilter, Verdict};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
@@ -37,6 +37,9 @@ pub(crate) struct Report {
     pub(crate) dispatch: u64,
     /// What such a call costs through the whole entry, hook included.
     pub(crate) entry: u64,
+    /// Errno ranges the core was shown a filter answer, each bounded as it
+    /// should be.
+    pub(crate) clamped: usize,
     /// What one interpreted instruction of a filter costs, in tenths of a
     /// nanosecond, from the longest program the verifier admits: the figure
     /// the bound of a call's filtering (32,768 steps) is read with.
@@ -80,7 +83,7 @@ fn rule(data: &SeccompData) -> Verdict {
     let matches = about == 0 || (data.arch == about) != EXCEPT.load(Ordering::Relaxed);
     let answer = ANSWER.load(Ordering::Relaxed);
     if matches && answer != CONTINUE {
-        return Verdict::Answer(Outcome::Return(answer as isize));
+        return Verdict::Errno(answer as u32);
     }
     Verdict::Continue
 }
@@ -105,8 +108,8 @@ struct Shot {
 /// The rule's terms for one call.
 #[derive(Debug, Clone, Copy)]
 struct Terms {
-    /// What the rule answers with, or `None` to let the call go on.
-    answer: Option<isize>,
+    /// The errno the rule fails the call with, or `None` to let it go on.
+    answer: Option<u32>,
     /// The token the rule is about, or zero.
     about: u32,
     /// Whether it is about every other token.
@@ -115,9 +118,9 @@ struct Terms {
 
 impl Terms {
     /// Answer `value` to every call.
-    const fn always(value: isize) -> Terms {
+    const fn always(errno: u32) -> Terms {
         Terms {
-            answer: Some(value),
+            answer: Some(errno),
             about: 0,
             except: false,
         }
@@ -136,10 +139,7 @@ impl Terms {
 /// Drive one call through its entry, judged by `terms`. `None` when this
 /// architecture has no such entry.
 fn shoot(abi: Abi, number: usize, args: [u64; 6], ip: u64, terms: Terms) -> Option<Shot> {
-    ANSWER.store(
-        terms.answer.map_or(CONTINUE, |v| v as i64),
-        Ordering::Relaxed,
-    );
+    ANSWER.store(terms.answer.map_or(CONTINUE, i64::from), Ordering::Relaxed);
     ABOUT.store(terms.about, Ordering::Relaxed);
     EXCEPT.store(terms.except, Ordering::Relaxed);
     JUDGED.store(0, Ordering::Relaxed);
@@ -220,14 +220,17 @@ const EARLY: [(Abi, Syscall, &str); 6] = [
 /// must show unchanged.
 const IP: u64 = 0x0040_1234;
 
-/// The value the rule answers when it answers: `-EPERM`, no value a real call
-/// of these returns.
+/// The errno the rule fails a call with when it answers: `EPERM`, which is
+/// not what any call these checks drive returns.
+const REFUSED_ERRNO: u32 = 1;
+/// What a call the rule refused returns.
 const REFUSED: isize = -1;
 
 /// Drive every entry and every call an entry keeps for itself, and require the
 /// filter to have judged each first, once, with the entry's own token.
 ///
-/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51
+/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51, `L.armv7a.1`,
+/// `L.armv7a.2`
 ///
 /// # Errors
 ///
@@ -326,8 +329,69 @@ fn all() -> Result<Report, &'static str> {
     tokens(&mut report)?;
     numbers(&mut report)?;
     native_range(&mut report)?;
+    errnos(&mut report)?;
+    registration()?;
     rollback()?;
     Ok(report)
+}
+
+/// The core, not the filter, bounds what a filter can make a call return: an
+/// errno up to Linux's 4095 comes back as it is, one above it is cut to 4095
+/// (`ERRNO | 5000` answers `-4095`, as Linux's does), and 512, which the
+/// dispatcher keeps for restarting a call, is an ordinary errno here.
+fn errnos(report: &mut Report) -> Result<(), &'static str> {
+    // A number no table has, so that nothing but the filter answers it.
+    let unknown = 0x7777;
+    for (errno, expected) in [
+        (0, 0),
+        (13, -13),
+        (512, -512),
+        (MAX_ERRNO, -(MAX_ERRNO as isize)),
+        (MAX_ERRNO + 1, -(MAX_ERRNO as isize)),
+        (5000, -(MAX_ERRNO as isize)),
+        (u32::MAX, -(MAX_ERRNO as isize)),
+    ] {
+        let Some(shot) = shoot(Abi::Native, unknown, [0; 6], IP, Terms::always(errno)) else {
+            return Ok(());
+        };
+        report.calls += 1;
+        if shot.result != expected {
+            return Err("the core let a filter's errno out of 0 to 4095 through");
+        }
+    }
+    report.clamped += 1;
+    Ok(())
+}
+
+/// A filter slot with nothing registered lets every call go on, and a second
+/// registration does not replace the first (`trap::ask`, `trap::register`):
+/// checked on a slot of the check's own, because the core's is registered
+/// before anything can run.
+fn registration() -> Result<(), &'static str> {
+    use ferrix_sync::Once;
+
+    fn first(_: &SyscallArgs) -> Verdict {
+        Verdict::Errno(11)
+    }
+    fn second(_: &SyscallArgs) -> Verdict {
+        Verdict::Errno(22)
+    }
+    let args = SyscallArgs {
+        abi: Abi::Native,
+        number: 0x7777,
+        args: [0; 6],
+        ip: IP,
+    };
+    let slot: Once<SyscallFilter> = Once::new();
+    if crate::trap::ask(&slot, &args).is_some() {
+        return Err("a call was answered with no filter registered");
+    }
+    crate::trap::register(&slot, first);
+    crate::trap::register(&slot, second);
+    match crate::trap::ask(&slot, &args) {
+        Some(crate::trap::Outcome::Return(-11)) => Ok(()),
+        _ => Err("a later registration replaced the first, or the first was not asked"),
+    }
 }
 
 /// The value a trapped call's return register is given so that the frame reads
@@ -363,7 +427,7 @@ fn early_answers(report: &mut Report) -> Result<(), &'static str> {
         // The arguments are ones the early answer would act on, were it reached:
         // `arch_prctl(ARCH_SET_FS, 0x7777)`, and a thread pointer for `set_tls`.
         let args = [0x1002, 0x7777, 0, 0, 0, 0];
-        let Some(shot) = shoot(abi, number, args, IP, Terms::always(REFUSED)) else {
+        let Some(shot) = shoot(abi, number, args, IP, Terms::always(REFUSED_ERRNO)) else {
             continue;
         };
         report.calls += 1;
@@ -410,13 +474,13 @@ fn tokens(report: &mut Report) -> Result<(), &'static str> {
     // number, answered only when the token is x86-64's.
     let x86_64 = u32::from(arch::ARCH.elf_machine()) | LITTLE_ENDIAN | WIDE;
     let for_x86_64 = Terms {
-        answer: Some(-7777),
+        answer: Some(77),
         about: x86_64,
         except: false,
     };
     if let Some(shot) = shoot(Abi::Compat, unknown, [0; 6], IP, for_x86_64) {
         report.calls += 1;
-        if shot.result == -7777 {
+        if shot.result == -77 {
             return Err("an int 0x80 call was filtered as x86-64");
         }
     }
@@ -464,7 +528,7 @@ fn native_range(report: &mut Report) -> Result<(), &'static str> {
 
     // A filter that refuses every `arch` but Linux's own, as Chromium's does.
     let linux_only = Terms {
-        answer: Some(REFUSED),
+        answer: Some(REFUSED_ERRNO),
         about: linux,
         except: true,
     };
@@ -485,7 +549,7 @@ fn native_range(report: &mut Report) -> Result<(), &'static str> {
     // One that refuses every `arch` but the native one: the native call goes on
     // to its dispatcher, and a Linux call is refused.
     let native_only = Terms {
-        answer: Some(REFUSED),
+        answer: Some(REFUSED_ERRNO),
         about: NATIVE_ARCH,
         except: true,
     };

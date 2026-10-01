@@ -981,7 +981,7 @@ package FerrixX8664Requirements {
                 rt_sigreturn are answered and before the dispatcher is, with the
                 number's low 32 bits, the instruction after the call, and the token
                 of the entry: x86-64's for SYSCALL and i386's for int $0x80, whatever
-                the image; and shall apply the filter's value as the dispatcher's.";
+                the image; and shall apply the filter's errno as the dispatcher's answer.";
             attribute :>> criterion = "A test-only filter is shown arch_prctl and
                 rt_sigreturn through SYSCALL and sigreturn and rt_sigreturn through
                 int $0x80 once each, before their answers, and its value comes back; a
@@ -1735,15 +1735,19 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("trap::system_call", "trap::dispatch");
         }
         requirement <'L.trap.7'> theRegisteredFilterIsAskedFirst : ItemLowLevel {
-            attribute :>> statement = "filter_system_call shall answer Continue with
-                no filter registered and ask the registered filter otherwise, and the
-                first registration shall stand.";
+            attribute :>> statement = "filter_system_call shall answer nothing with no
+                filter registered and ask the registered filter otherwise, the first
+                registration shall stand, and an errno the filter answers shall be cut
+                to 4095 before it is written as the call's result.";
             attribute :>> criterion = "Every entry of the running architecture, driven
                 with frames of the check's own, asks the registered filter exactly
-                once per call (the `seccomp` line); with none armed, a call goes to the
-                dispatcher as before.";
+                once per call, and the errnos 0, 13, 512, 4095, 4096, 5000 and
+                4294967295 come back as 0, -13, -512, -4095, -4095, -4095 and -4095;
+                a slot with nothing registered answers nothing, and one registered
+                twice asks the first (the `seccomp` line).";
             attribute :>> parent = "H.TRAP.16";
-            attribute :>> unit = ("trap::filter_system_call", "trap::set_syscall_filter");
+            attribute :>> unit = ("trap::filter_system_call", "trap::set_syscall_filter",
+                "trap::register", "trap::ask");
         }
     }
 }

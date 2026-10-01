@@ -865,7 +865,7 @@ package FerrixAarch64Requirements {
             attribute :>> statement = "system_call shall ask the registered filter
                 about a call before rt_sigreturn is answered and before the
                 dispatcher is, with x8's low 32 bits, ELR as the instruction after the
-                svc and AArch64's token, apply the filter's value as the dispatcher's,
+                svc and AArch64's token, apply the filter's errno as the dispatcher's answer,
                 and syscall_rollback_value shall give x0 the call's first argument so
                 that a call that did not run reads as it did at the call.";
             attribute :>> criterion = "A test-only filter is shown rt_sigreturn once,

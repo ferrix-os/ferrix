@@ -255,12 +255,15 @@ pub(super) fn check_seccomp() {
          each time: {} calls an entry answers itself reached it before that answer, {} entries \
          judged under the architecture token of their own, and {} native-range call judged \
          under a token of its own, refused by a filter that refuses every foreign arch and \
-         let by one that allows it by name",
-        checked.calls, checked.early, checked.tokens, checked.native,
+         let by one that allows it by name; and the core cut every errno a filter could \
+         answer to 0 to 4095 ({} range)",
+        checked.calls, checked.early, checked.tokens, checked.native, checked.clamped,
     );
     println!(
         "  seccomp  a thread with no filter pays {}.{} ns a call for the hook; a call no table \
-         has costs {}.{} ns in the dispatcher and {}.{} ns through the whole entry; one          interpreted filter instruction costs {}.{} ns, so the longest chain (32,768 steps) costs          at most {} us a call",
+         has costs {}.{} ns in the dispatcher and {}.{} ns through the whole entry; one \
+         interpreted filter instruction costs {}.{} ns, so the longest chain (32,768 steps) \
+         costs at most {} us a call",
         checked.hook / 10,
         checked.hook % 10,
         checked.dispatch / 10,

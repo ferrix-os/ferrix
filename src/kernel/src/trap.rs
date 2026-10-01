@@ -262,26 +262,33 @@ pub(crate) fn set_syscall_entry(entry: SyscallEntry) {
 /// What a registered filter decided about a call before anything answered it.
 ///
 /// Deliberately so small that no variant can make a call do more than it
-/// could: [`Verdict::Answer`] carries the same [`Outcome`] the dispatcher
-/// returns, which is an errno, a value without running the call, or -- for a
-/// program that must not go on -- the paths `exit` and a fatal signal already
-/// take before anything returns. `docs/SECCOMP.md` §3.3, F-09's terms.
+/// could: the call goes on, or it fails with an errno. There is no variant that
+/// carries an [`Outcome`], so a filter cannot start a program, choose the
+/// registers one starts with or return anything the dispatcher could not. A
+/// filter that must end the thread or the process does so itself, through the
+/// paths `exit` and a fatal signal take, and answers [`Verdict::Errno`] for the
+/// call it is in the middle of. `docs/SECCOMP.md` §3.3, F-09's terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Verdict {
     /// Nothing to add: go on as a kernel with no filter would.
     Continue,
-    /// The call is answered; the entry applies this exactly as it applies the
-    /// dispatcher's answer, and neither its own early answers nor the
-    /// dispatcher see the call.
-    Answer(Outcome),
+    /// The call does not run, and fails with this errno. The core clamps it to
+    /// [`MAX_ERRNO`] and writes `-errno` into the return register: a filter
+    /// cannot return a value that is not an errno, nor one that is a restart
+    /// code the dispatcher keeps for itself (`ERESTARTSYS` is 512).
+    Errno(u32),
 }
+
+/// The largest errno a call returns: Linux's `MAX_ERRNO`.
+pub(crate) const MAX_ERRNO: u32 = 4095;
 
 /// A registered look at a call before anything answers it, given the call as
 /// the entry read it. Runs with interrupts masked, as the entry holds them,
-/// and may open them while it works provided it closes them again before it
-/// returns: a kill, which ends the thread through the paths `exit` uses, needs
-/// them open. Takes no sleeping lock and allocates nothing on the path every
-/// call of every program takes.
+/// and returns with them masked. Takes no sleeping lock and allocates nothing
+/// on the path every call of every program takes. A body that needs more than a
+/// bounded, short time -- a filter's program is up to 32,768 steps -- opens
+/// them itself for exactly that stretch and closes them again before it
+/// returns, as the dispatcher does around the call it serves.
 pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;
 
 /// The registered filter, set once at bring-up, beside [`SYSCALL_ENTRY`] and
@@ -293,20 +300,36 @@ static SYSCALL_FILTER: Once<SyscallFilter> = Once::new();
 /// Judge every system call with `filter` from now on. The first registration
 /// stands; `main.rs` makes it before anything can enter user mode.
 pub(crate) fn set_syscall_filter(filter: SyscallFilter) {
-    let _ = SYSCALL_FILTER.call_once(|| filter);
+    register(&SYSCALL_FILTER, filter);
 }
 
 /// Ask the registered filter about one call: what every architecture's entry
 /// calls first, with the registers it read, before its own early answers
 /// (`arch_prctl`, `set_tls`, the signal returns) and before
 /// [`system_call`], so that no call a program can make escapes the look.
+/// `None` is "go on"; `Some` is the answer, which is always a failure with an
+/// errno.
 ///
-/// With nothing registered every call is [`Verdict::Continue`], and the core
-/// alone behaves as it did before the registration existed.
-pub(crate) fn filter_system_call(args: &SyscallArgs) -> Verdict {
-    match SYSCALL_FILTER.get() {
-        Some(filter) => filter(args),
-        None => Verdict::Continue,
+/// With nothing registered every call goes on, and the core alone behaves as
+/// it did before the registration existed.
+pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome> {
+    ask(&SYSCALL_FILTER, args)
+}
+
+/// [`set_syscall_filter`] for any slot: the first registration stands.
+pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
+    let _ = slot.call_once(|| filter);
+}
+
+/// [`filter_system_call`] for any slot: what the core makes of the filter's
+/// verdict, and the only place it is made. An errno is clamped here, in the
+/// core, so that no filter can write a value outside `-1..=-4095` or a positive
+/// one into a program's return register.
+pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
+    let filter = slot.get()?;
+    match filter(args) {
+        Verdict::Continue => None,
+        Verdict::Errno(errno) => Some(Outcome::Return(-(errno.min(MAX_ERRNO) as isize))),
     }
 }
 

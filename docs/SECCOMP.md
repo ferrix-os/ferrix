@@ -571,17 +571,24 @@ registration of the same kind:
 
 ```
 // trap.rs (core)
-pub(crate) type SyscallFilter = fn(&SyscallArgs, ip: u64) -> Verdict;
-pub(crate) enum Verdict { Continue, Answer(Outcome) }
+pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;   // ip is a field of SyscallArgs
+pub(crate) enum Verdict { Continue, Errno(u32) }                // built: S2 (S4 adds Trap)
 static SYSCALL_FILTER: Once<SyscallFilter>;
-pub(crate) fn filter_system_call(args: &SyscallArgs, ip: u64) -> Verdict
+pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome>
 ```
+
+The sketch of the first review had `Answer(Outcome)`, which would have let
+one bug in the load turn a `getpid` into `Outcome::Enter`, an `execve`'s
+jump. The consultant refused it (S2's review, §12), and the built type has
+no variant that carries an `Outcome`: the core builds the answer itself,
+from an errno it clamps to 4095.
 
 **Each architecture's entry calls `trap::filter_system_call` first.** It
 does so with the `SyscallArgs` it built and the instruction pointer from
 its frame, *before* its own early answers and before `trap::system_call`.
-On `Answer(outcome)` it applies the outcome exactly as it applies the
-dispatcher's. On `Continue` it goes on as today.
+On `Some(outcome)`, which is always `Return` of `-errno`, it applies the
+outcome exactly as it applies the dispatcher's. On `None` it goes on as
+today.
 
 **What that touches.** It is four call sites in `arch/` (x86-64 `SYSCALL`,
 x86-64 `int $0x80`, AArch64 `svc`, ARMv7-A `svc`), all core, plus the
@@ -599,11 +606,11 @@ filtered thread also runs its chain. §1.1's filter executes around 20 to
 change is plumbing: one more registered function, called at the top of
 four paths it already owns. What a filter decides is the personality's.
 Every `Verdict` it can return makes a call do *less* than it would have:
-* return an errno;
-* return a value without running the call (`TRAP`'s rolled-back
-  registers);
+* fail it with an errno, which the core clamps to 4095 (`Verdict::Errno`);
+* from S4, `TRAP`'s rolled-back registers (`Verdict::Trap`, whose value the
+  core computes itself from the call, so the filter chooses nothing);
 * end the thread or the process through the paths `exit` and a fatal
-  signal already use.
+  signal already use, which the filter's own body takes before it answers.
 
 A `Verdict` can never make the core or the item do something a call
 could not already make it do. That is the argument os-9f is asked to
@@ -782,8 +789,8 @@ already use:
 
 The thread is marked dead first (Linux's `SECCOMP_MODE_DEAD`), so no
 further call of its own is served should anything return to it. **The
-hook answers `Answer(...)` and never lets the thread reach user mode
-again.**
+hook ends it, or marks it dead and answers `Errno` for the call it is in,
+and never lets the thread reach user mode again.**
 
 **Strict mode** allows `read`, `write`, `exit` and `sigreturn`, in the
 entry's own numbers (i386's `sigreturn` 119, x86-64's `rt_sigreturn` 15,
@@ -802,7 +809,8 @@ per ABI.
    The facade gains one function, `arch::syscall_rollback_value(abi,
    number, args) -> isize`: the value to put in the return register so
    that the frame reads as it did at the call. The hook answers
-   `Answer(Outcome::Return(that value))`, with no new outcome.
+   `Verdict::Trap` (S4), and the core writes that value itself: no filter
+   chooses a register value.
 
    | Entry | Rollback | So the handler finds |
    |---|---|---|

@@ -427,7 +427,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 /// A system call from SVC mode, which is a kernel bug, or an `execve` this path
 /// does not yet honour.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Outcome, SyscallArgs, Verdict, system_call as dispatch};
+    use crate::trap::{Outcome, SyscallArgs, system_call as dispatch};
     use ferrix_linux_abi::nr::Syscall;
 
     if !frame.came_from_user() {
@@ -452,8 +452,8 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     // The registered filter looks at the call first, before `set_tls` and the
     // signal returns are answered below (`docs/SECCOMP.md` §3.3).
     let outcome = match crate::trap::filter_system_call(&args) {
-        Verdict::Answer(outcome) => outcome,
-        Verdict::Continue => {
+        Some(outcome) => outcome,
+        None => {
             // `set_tls` writes a coprocessor register, which is a fact about
             // this processor rather than about the process, so it is answered
             // here for the same reason x86-64 answers `arch_prctl` in its own
