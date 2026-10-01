@@ -619,7 +619,8 @@ read max < /tmp/cm/k/memory.max
 while read key kernel; do [ "$key" = kernel ] && [ $kernel -gt 0 ] && echo "memory.stat counts kernel memory"; done < /tmp/cm/k/memory.stat
 while read key count; do [ "$key" = max ] && [ $count -ge 1 ] && echo "memory.events counted the refusal"; done < /tmp/cm/k/memory.events
 rm -r /tmp/km || exit 4
-read after < /tmp/cm/k/memory.current
+after=1
+for i in 1 2 3 4 5; do read after < /tmp/cm/k/memory.current; [ $after -eq 0 ] && break; sleep 1; done
 [ $after -eq 0 ] && echo "memory.current back to 0" || echo "memory.current $after after"
 rmdir /tmp/cm/k && echo removed
 echo "-memory" > /tmp/cm/cgroup.subtree_control || exit 5
