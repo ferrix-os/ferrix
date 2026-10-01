@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "fe3886b69a604d43a66c84b3271384ea4c9fdfb80111078e963aa6f788af1161",
+  "digest": "c3ab4dc4648caed7d79be8c134f02f48118b8b4ca7de379848e0d19921513d35",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -24774,7 +24774,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::cpuBandwidthIsBounded",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"A program in a job limited to 20000 of 100000 microseconds is held to between a twelfth and two fifths of a processor with the throttling counted in cpu.stat, and one in a job limited to 1000 of 1000000 ends within a quarter of a second of its SIGKILL (the `cgroups` line, cpu).\"",
+                              "value": "\"A program in a job limited to 20000 of 100000 microseconds is held to between a twelfth and two thirds of a processor with the throttling counted in cpu.stat, and one in a job limited to 1000 of 1000000 ends within a quarter of a second of its SIGKILL (the `cgroups` line, cpu).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1204
@@ -32621,7 +32621,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A program of two counting threads in a job with cpu.max 20000 100000 is held to between a twelfth and two fifths of a processor, its cpu.stat counts at least 3 throttled periods and its user and system time add to its usage, and with cpu.max max it takes more than six tenths.\"",
+                  "value": "\"A program of two counting threads in a job with cpu.max 20000 100000 is held to between a twelfth and two thirds of a processor, its cpu.stat counts at least 3 throttled periods and its user and system time add to its usage, and with cpu.max max it takes more than six tenths.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1389
@@ -34345,7 +34345,7 @@
                   "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A program already running alone on its processor is held to between a twelfth and two fifths of a processor by a cpu.max 20000 100000 written under it, and by being moved beneath one.\"",
+                  "value": "\"A program already running alone on its processor is held to between a twelfth and two thirds of a processor by a cpu.max 20000 100000 written under it, and by being moved beneath one.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 65
