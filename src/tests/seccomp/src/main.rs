@@ -258,6 +258,15 @@ fn no_new_privs() -> Step {
     }
 }
 
+/// A system call's result as an `i32`: a `long` is one on a 32-bit ABI already.
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "c_long is i32 on the 32-bit ABIs and i64 on the 64-bit ones"
+)]
+fn to_i32(value: c_long) -> i32 {
+    value as i32
+}
+
 /// A raw system call with no arguments: the result and the errno.
 fn call0(number: c_long) -> (c_long, c_int) {
     // SAFETY: the calls made here take no arguments or ignore them.
@@ -897,7 +906,7 @@ extern "C" fn on_sigsys(signal: c_int, info: *mut libc::siginfo_t, context: *mut
         // A trap inside the handler traps again, since `SA_NODEFER` leaves
         // `SIGSYS` unblocked.
         let (answer, _) = call3(GETPPID, 0, 0, 0);
-        NESTED_ANSWER.store(i32::try_from(answer).unwrap_or(0), Ordering::Release);
+        NESTED_ANSWER.store(to_i32(answer), Ordering::Release);
     }
     if first != 0x1111 && first != 0 {
         // The call is made with `0x1111` as its first argument when the step
@@ -994,7 +1003,7 @@ fn emulate() -> Step {
         if HANDLED.load(Ordering::Acquire) != 4 || answer != EMULATED {
             return 9;
         }
-        if i64::from(NESTED_ANSWER.load(Ordering::Acquire)) != i64::from(EMULATED) {
+        if NESTED_ANSWER.load(Ordering::Acquire) != to_i32(EMULATED) {
             return 9;
         }
         0
@@ -1251,7 +1260,7 @@ extern "C" fn maker(_argument: *mut c_void) -> *mut c_void {
 extern "C" fn foreign(_argument: *mut c_void) -> *mut c_void {
     if install(&answering(&[(GETSID, RET_ERRNO | libc::EBADF as u32)]), 0).0 == 0 {
         let (tid, _) = call0(GETTID);
-        FOREIGN_TID.store(i32::try_from(tid).unwrap_or(0), Ordering::Release);
+        FOREIGN_TID.store(to_i32(tid), Ordering::Release);
         FOREIGN_READY.store(true, Ordering::Release);
     } else {
         FOREIGN_READY.store(true, Ordering::Release);
