@@ -288,6 +288,59 @@ fn rule_7_no_scratch_word_is_read_before_a_store_on_every_path() {
 }
 
 #[test]
+fn rule_7_a_scratch_read_after_a_return_is_judged_by_what_ran_into_it() {
+    // Linux's `check_load_and_stores` keeps one running set and never resets
+    // it at a `RET`: the instruction after a return takes what ran into the
+    // return, narrowed by the jumps that reach it. The first program is the
+    // certification consultant's; Linux's own answers are in
+    // `tests/data/scratch-<n>.answer`, from `oracle.c --accept`, and
+    // `tests/scratch.rs` holds `verify` to them.
+    let jeq = |jt, jf| Insn::new(JEQ_K, jt, jf, 0);
+    // The jump to the read stored, the fall through the `RET` did not.
+    let through_a_return = [
+        jeq(2, 0),
+        ins(ST, 0),
+        ins(JA, 1),
+        ret(ALLOW),
+        ins(LD_MEM, 0),
+        ins(RET_A, 0),
+    ];
+    assert_eq!(verify(&through_a_return), Err(Invalid::Uninitialised(4)));
+    // Code only a `RET` leads to, with nothing stored before it.
+    assert_eq!(
+        verify(&[ret(ALLOW), ins(LD_MEM, 0), ins(RET_A, 0)]),
+        Err(Invalid::Uninitialised(1))
+    );
+    // A store before the `RET` is still there after it.
+    assert!(verify(&[ins(ST, 0), ret(ALLOW), ins(LD_MEM, 0), ins(RET_A, 0)]).is_ok());
+}
+
+#[test]
+fn a_chain_is_bounded_as_linux_bounds_it() {
+    // One filter of 4096 counts 4100; seven of them 28700, and an eighth
+    // would total 28700 + 4096 = 32796, over 32768.
+    let mut cost = 0;
+    let mut chain = 0;
+    while fits_path(cost, MAX_INSNS) {
+        cost = path_cost(cost, MAX_INSNS);
+        chain += 1;
+    }
+    assert_eq!((chain, cost), (7, 7 * 4100));
+    // One-instruction filters count 5 each: the test is the new filter's one
+    // plus 5 for each before it, so 6554 are allowed and the 6555th is not.
+    let (mut cost, mut chain) = (0, 0);
+    while fits_path(cost, 1) {
+        cost = path_cost(cost, 1);
+        chain += 1;
+    }
+    assert_eq!(chain, 6554);
+    // Exactly at the limit is allowed, one over is not.
+    assert!(fits_path(MAX_INSNS_PER_PATH - 10, 10));
+    assert!(!fits_path(MAX_INSNS_PER_PATH - 10, 11));
+    assert_eq!(MAX_INSNS_PER_PATH, 32768);
+}
+
+#[test]
 fn a_verified_program_is_kept_whole() {
     let program = [ins(LD_IMM, 5), ins(RET_A, 0)];
     let kept = verify(&program).unwrap();
@@ -480,7 +533,8 @@ fn the_most_restrictive_action_wins_and_a_tie_keeps_the_newest() {
     let filters = [&allow, &eperm, &eacces];
     assert_eq!(run_all(filters, &data), ERRNO | 1);
     assert_eq!(run_all(filters.into_iter().rev(), &data), ERRNO | 13);
-    assert_eq!(run_all([], &data), ALLOW);
+    // No filter at all is never a license: Linux kills the process.
+    assert_eq!(run_all([], &data), KILL_PROCESS);
     // An action nobody defined is still ordered: among its neighbours.
     let odd = verified(&[ret(0x0001_0000)]);
     assert_eq!(run_all([&allow, &odd], &data), 0x0001_0000);

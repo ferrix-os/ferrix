@@ -297,41 +297,48 @@ fn check_insn(insn: &Insn, index: usize, after: usize) -> Result<(), Invalid> {
     }
 }
 
-/// Rule 7: a forward pass with a 16-bit mask of the scratch words every path
-/// to an instruction has stored, joined by intersection where paths meet.
+/// Rule 7, as Linux's `check_load_and_stores` does it, line for line.
+///
+/// One running set of the scratch words stored (`valid`), and a mask of what
+/// every jump to an instruction carried (`masks`, all ones until a jump
+/// narrows it). At each instruction the running set is narrowed by that
+/// instruction's mask; a store adds its word; a conditional jump narrows the
+/// masks of both its targets by the running set; an unconditional jump narrows
+/// its target's and then makes the running set everything, because nothing
+/// falls through it. A `RET` changes nothing: the instruction after it takes
+/// what ran into the `RET`, and a read there is judged by that. So
+/// `0 JEQ jt=2; 1 ST M[0]; 2 JA 1; 3 RET; 4 LD M[0]; 5 RET A` is refused: the
+/// `LD` is reached by the jump, which stored, and by the fall through the
+/// `RET`, which did not.
 fn check_scratch(raw: &[Insn]) -> Result<(), Invalid> {
-    let mut stored: Vec<u16> = Vec::new();
-    stored
+    let mut masks: Vec<u16> = Vec::new();
+    masks
         .try_reserve_exact(raw.len())
         .map_err(|_| Invalid::NoMemory)?;
-    // A point nothing reaches keeps every word "stored": it can read none.
-    stored.resize(raw.len(), u16::MAX);
-    if let Some(entry) = stored.first_mut() {
-        *entry = 0;
-    }
+    masks.resize(raw.len(), u16::MAX);
+    let mut valid = 0_u16;
     for (index, insn) in raw.iter().enumerate() {
-        let here = stored.get(index).copied().unwrap_or(0);
+        valid &= masks.get(index).copied().unwrap_or(u16::MAX);
         let word = 1_u16 << (insn.k % MEMWORDS as u32);
-        let after = match decode(insn.code) {
-            Op::LoadMem | Op::LoadXMem if here & word == 0 => {
-                return Err(Invalid::Uninitialised(index));
-            }
-            Op::Store | Op::StoreX => here | word,
-            _ => here,
-        };
-        let mut meet = |to: usize| {
-            if let Some(slot) = stored.get_mut(to) {
-                *slot &= after;
+        let mut narrow = |to: usize, by: u16| {
+            if let Some(mask) = masks.get_mut(to) {
+                *mask &= by;
             }
         };
         match decode(insn.code) {
-            Op::ReturnK | Op::ReturnA => {}
-            Op::Jump => meet(index + 1 + insn.k as usize),
-            Op::Branch(..) => {
-                meet(index + 1 + usize::from(insn.jt));
-                meet(index + 1 + usize::from(insn.jf));
+            Op::Store | Op::StoreX => valid |= word,
+            Op::LoadMem | Op::LoadXMem if valid & word == 0 => {
+                return Err(Invalid::Uninitialised(index));
             }
-            _ => meet(index + 1),
+            Op::Jump => {
+                narrow(index + 1 + insn.k as usize, valid);
+                valid = u16::MAX;
+            }
+            Op::Branch(..) => {
+                narrow(index + 1 + usize::from(insn.jt), valid);
+                narrow(index + 1 + usize::from(insn.jf), valid);
+            }
+            _ => {}
         }
     }
     Ok(())

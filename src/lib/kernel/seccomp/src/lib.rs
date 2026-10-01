@@ -39,9 +39,35 @@ pub use verify::{Invalid, Program, verify};
 /// Most instructions in one filter: Linux's `BPF_MAXINSNS`.
 pub const MAX_INSNS: usize = 4096;
 
-/// Most instructions across all the filters of one process: Linux's
-/// `MAX_INSNS_PER_PATH`.
-pub const MAX_INSNS_PER_PATH: usize = 1 << 18;
+/// Most instructions across all the filters of one thread, each filter counted
+/// with four more: Linux's `MAX_INSNS_PER_PATH`, which is `1 << 18` *bytes* of
+/// `struct sock_filter`, 32768 of them. (S1 had it as `1 << 18` instructions,
+/// eight times too many; the certification consultant found it.)
+pub const MAX_INSNS_PER_PATH: usize = (1 << 18) / INSN_BYTES;
+
+/// What each filter of a chain counts for beyond its own instructions, against
+/// [`MAX_INSNS_PER_PATH`]: Linux's `+ 4` in `seccomp_attach_filter`.
+pub const FILTER_OVERHEAD: usize = 4;
+
+/// What a chain counts against [`MAX_INSNS_PER_PATH`] once a filter of
+/// `new_len` instructions joins one that already counts `earlier`: the new
+/// filter's length and its four. Linux refuses the new filter, `ENOMEM`, when
+/// its own length plus every earlier filter's length and four is more than the
+/// limit ([`fits_path`]).
+#[must_use]
+pub const fn path_cost(earlier: usize, new_len: usize) -> usize {
+    earlier
+        .saturating_add(new_len)
+        .saturating_add(FILTER_OVERHEAD)
+}
+
+/// Whether a filter of `new_len` instructions may join a chain that counts
+/// `earlier`: the refusal `total_insns > MAX_INSNS_PER_PATH`, the other way
+/// round. The new filter's own four are not part of the test, as in Linux.
+#[must_use]
+pub const fn fits_path(earlier: usize, new_len: usize) -> bool {
+    earlier.saturating_add(new_len) <= MAX_INSNS_PER_PATH
+}
 
 /// Words of scratch memory: `BPF_MEMWORDS`.
 pub const MEMWORDS: usize = 16;

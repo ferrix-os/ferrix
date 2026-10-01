@@ -2,7 +2,9 @@
 //! that only moves forward.
 
 use crate::verify::{Op, Program, decode};
-use crate::{ALLOW, DATA_BYTES, KILL_THREAD, MEMWORDS, SeccompData, more_restrictive};
+use crate::{
+    ALLOW, DATA_BYTES, KILL_PROCESS, KILL_THREAD, MEMWORDS, SeccompData, more_restrictive,
+};
 
 /// Run a verified `program` against `data`, and answer what it returned.
 ///
@@ -74,9 +76,15 @@ pub fn run_counted(program: &Program, data: &SeccompData) -> (u32, usize) {
 
 /// Run every filter, newest first, and answer the most restrictive result. On
 /// a tie the newer one's data stands, as Linux's loop keeps the first it
-/// found. No filters at all is [`ALLOW`].
+/// found. No filters at all is [`KILL_PROCESS`]: a thread in filter mode has at
+/// least one, so an empty chain is a defect of the caller's and not a license,
+/// as Linux's `seccomp_run_filters` answers it (`WARN_ON(f == NULL)`).
 #[must_use]
 pub fn run_all<'a>(filters: impl IntoIterator<Item = &'a Program>, data: &SeccompData) -> u32 {
+    let mut filters = filters.into_iter().peekable();
+    if filters.peek().is_none() {
+        return KILL_PROCESS;
+    }
     let mut answer = ALLOW;
     for program in filters {
         let result = run(program, data);

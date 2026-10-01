@@ -1,7 +1,7 @@
 //! A second checker for seccomp filters, written from the rules by a different
 //! method than `verify`: the opcodes spelled out as a list where the verifier
-//! decodes them, and a fixpoint over the scratch words where the verifier
-//! makes one forward pass (`docs/SECCOMP.md` §3.1). The crate's agreement test
+//! decodes them, and the scratch words as the edges into each instruction where
+//! the verifier carries one running set (`docs/SECCOMP.md` §3.1). The crate's agreement test
 //! and the fuzz target `seccomp_verify_run` both hold `verify` to it.
 
 #![allow(
@@ -31,17 +31,6 @@ pub(crate) fn allowed(code: u16) -> bool {
     }
 }
 
-/// Narrow the set stored at `at` to `out`; whether that changed it.
-fn narrow(stored: &mut [u16], at: usize, out: u16) -> bool {
-    let Some(slot) = stored.get_mut(at) else {
-        return false;
-    };
-    let narrowed = *slot & out;
-    let changed = narrowed != *slot;
-    *slot = narrowed;
-    changed
-}
-
 /// The rules, checked by a second method.
 pub(crate) fn naive(raw: &[Insn]) -> bool {
     if raw.is_empty() || raw.len() > MAX_INSNS {
@@ -69,37 +58,36 @@ pub(crate) fn naive(raw: &[Insn]) -> bool {
     if !matches!(raw.last().map(|insn| insn.code), Some(0x06 | 0x16)) {
         return false;
     }
-    // Scratch words definitely stored on every path: iterate to a fixpoint.
-    let mut stored = vec![u16::MAX; len];
-    stored[0] = 0;
-    loop {
-        let mut changed = false;
-        for (i, insn) in raw.iter().enumerate() {
-            let here = stored[i];
-            let out = if matches!(insn.code, 0x02 | 0x03) {
-                here | (1 << (insn.k % 16))
-            } else {
-                here
-            };
-            let successors: Vec<usize> = match insn.code {
-                0x06 | 0x16 => vec![],
-                0x05 => vec![i + 1 + insn.k as usize],
-                c if matches!(c & 0xf7, 0x15 | 0x25 | 0x35 | 0x45) => {
-                    vec![i + 1 + usize::from(insn.jt), i + 1 + usize::from(insn.jf)]
-                }
-                _ => vec![i + 1],
-            };
-            for next in successors {
-                changed |= narrow(&mut stored, next, out);
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
+    // Linux's rule for scratch words, written as the edges into each
+    // instruction: what reaches instruction `i` is the set stored before the
+    // instruction ahead of it, plus its own store -- or everything, if that was
+    // an unconditional jump, which nothing falls through -- and, for each jump
+    // to `i`, the set stored before that jump. A `RET` is not special: the
+    // instruction after it takes what ran into it. Jumps only go forward, so
+    // one pass fills `jumped_in` before it is read.
+    let mut jumped_in: Vec<Vec<u16>> = vec![vec![]; len];
+    let mut before = vec![0_u16; len];
     for (i, insn) in raw.iter().enumerate() {
-        if matches!(insn.code, 0x60 | 0x61) && stored[i] & (1 << insn.k) == 0 {
+        let falling = if i == 0 {
+            0
+        } else if raw[i - 1].code == 0x05 {
+            u16::MAX
+        } else if matches!(raw[i - 1].code, 0x02 | 0x03) {
+            before[i - 1] | (1 << (raw[i - 1].k % 16))
+        } else {
+            before[i - 1]
+        };
+        before[i] = jumped_in[i].iter().fold(falling, |all, jump| all & jump);
+        if matches!(insn.code, 0x60 | 0x61) && before[i] & (1 << insn.k) == 0 {
             return false;
+        }
+        match insn.code {
+            0x05 => jumped_in[i + 1 + insn.k as usize].push(before[i]),
+            c if matches!(c & 0xf7, 0x15 | 0x25 | 0x35 | 0x45) => {
+                jumped_in[i + 1 + usize::from(insn.jt)].push(before[i]);
+                jumped_in[i + 1 + usize::from(insn.jf)].push(before[i]);
+            }
+            _ => {}
         }
     }
     true

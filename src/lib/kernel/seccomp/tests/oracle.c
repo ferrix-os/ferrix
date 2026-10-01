@@ -3,6 +3,10 @@
  *
  *     cc -O2 -o oracle oracle.c
  *     ./oracle data/chrome-1.bpf > data/chrome-1.verdicts
+ *     ./oracle --accept data/scratch-1.bpf > data/scratch-1.answer
+ *
+ * With --accept it does one thing: installs the filter and prints "accepted",
+ * or "refused" and the errno, which is what the kernel's verifier said of it.
  *
  * For each call number 0 to 449 a child installs the filter (after
  * PR_SET_NO_NEW_PRIVS) and makes the call with six zero arguments. Its fate is
@@ -114,13 +118,24 @@ static void run(long nr, int filtered, char *out, size_t size, int *status)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2)
+    int accept = argc == 3 && strcmp(argv[1], "--accept") == 0;
+    if (argc != 2 && !accept)
         return 1;
-    FILE *file = fopen(argv[1], "rb");
+    FILE *file = fopen(argv[accept ? 2 : 1], "rb");
     if (!file)
         return 1;
     length = (int)fread(program, sizeof program[0], MAX_INSNS, file);
     fclose(file);
+    if (accept) {
+        struct sock_fprog fprog = {.len = (unsigned short)length, .filter = program};
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+            return 3;
+        if (syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0, &fprog) == 0)
+            printf("accepted\n");
+        else
+            printf("refused %d\n", errno);
+        return 0;
+    }
     for (long nr = 0; nr <= LAST_CALL; nr++) {
         char with[64], without[64];
         int with_status = 0, without_status = 0;

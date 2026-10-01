@@ -677,8 +677,8 @@ being made".
 | exit | the thread's `Arc` dropped | -- |
 
 **Release is iterative.** Dropping the last reference to a filter drops
-its predecessor, and so on down the chain. A chain can be 32768 / 5 =
-6,553 filters long (§6), so a recursive `Drop` would run the kernel stack
+its predecessor, and so on down the chain. A chain can be 32768 / 5 ≈
+6,554 filters long (§6), so a recursive `Drop` would run the kernel stack
 out. `Filter`'s `Drop` takes `previous` and walks the chain in a loop,
 stopping at the first filter someone else still holds (`Arc::into_inner`).
 This is Linux's `__put_seccomp_filter`. A check makes the longest chain
@@ -1035,7 +1035,7 @@ names the landing that brings it. The vulnerability analysis's entry
 | **SR8** the verifier is Linux's, and runs are bounded | unbounded or out-of-range programs; reads of uninitialised scratch (CVE-2010-4158) | the crate's host tests, Miri, the fuzzer's properties (S1) |
 | **SR9** `TRAP` cannot be blocked or ignored, and the program runs no instruction past the call | a sandbox whose traps can be switched off by `sigprocmask` | `SIGSYS` blocked and ignored, then a trapped call: the handler runs, or the process dies of `SIGSYS`; never the next instruction (S4) |
 | **SR10** `TSYNC` is all or nothing, and no thread is left behind or made during it without the filter | Linux's `TSYNC` races with `clone` and `exec` | the `seccomp` line: eight threads, one of them `clone`ing in a loop during the sync, then every thread refused; a thread with a foreign filter makes `TSYNC` fail with its tid and changes no thread; negative control: the creator's filter read outside the thread-list lock, shown to leave a thread unfiltered with a delay inserted there (S5) |
-| **SR11** a chain is released without recursion | kernel stack overflow on a long chain's `Drop` | the longest allowed chain (6,553 one-instruction filters) made in a child that then exits (S3) |
+| **SR11** a chain is released without recursion | kernel stack overflow on a long chain's `Drop` | the longest allowed chain (6,554 one-instruction filters) made in a child that then exits (S3) |
 | **SR12** a filter's memory is charged | F-37's class: kernel heap a program keeps without bound | the `kmem` line: filters installed in a loop until `ENOMEM` at the job's limit, a sibling installs one, both read zero after (S3) |
 | **SR13** unbuilt actions fail closed | `TRACE` or `USER_NOTIF` read as "allow" by a kernel without a tracer or listener | each returns `ENOSYS`, and the call does not run (S4) |
 | **SR14** no filter or flag lowers a speculation mitigation | `SPEC_ALLOW` read as "turn SSBD off" | `SPEC_ALLOW` accepted; `PR_SET_SPECULATION_CTRL` to enable refused `EPERM` (S4) |
@@ -1439,4 +1439,25 @@ S3, and S3 does not land without them.
 * Miri runs the crate's unit tests only (`--lib`), not `agree.rs` or
   `chrome.rs`; out-of-range jumps are tested for `JEQ` alone of the
   conditional jumps. Notes, not conditions.
+
+**S1's conditions, the crate's part (os-7c, `stage13-s1b`, 2026-10-01).**
+Built ahead of S3, since none of it needs the kernel:
+* `MAX_INSNS_PER_PATH` is `(1 << 18) / 8`, 32768, and the crate states the
+  rule S3 enforces: `fits_path(earlier, new_len)` is Linux's refusal
+  (`total_insns > MAX_INSNS_PER_PATH`, the new filter's length against every
+  earlier filter's length and four) and `path_cost` what the chain then counts.
+  A host test pins it: seven 4096-instruction filters fit and an eighth does
+  not; 6,554 one-instruction filters fit and a 6,555th does not; exactly at the
+  limit passes, one over does not.
+* `check_scratch` is `check_load_and_stores` line for line: one running set of
+  the stored words, never reset at a `RET`, narrowed by the jumps that reach an
+  instruction, made everything after an unconditional jump. The naive checker
+  states the same rule as the edges into each instruction. Six small programs
+  in `tests/data/scratch-<n>.bpf` carry the answer of the real kernel (Linux
+  7.0 on nazuna, `oracle.c --accept`): programs 1, 2 and 6 are refused with
+  `EINVAL`, 3, 4 and 5 are accepted, and `tests/scratch.rs` holds `verify` and
+  the naive checker to each. S1 accepted 1 and 6.
+* `run_all` of no filters answers `KILL_PROCESS`, as Linux's
+  `seccomp_run_filters` does for `WARN_ON(f == NULL)`; the hook's own body
+  still never runs an empty chain, which S3 checks.
 
