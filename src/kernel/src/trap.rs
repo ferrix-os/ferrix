@@ -318,7 +318,7 @@ pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome> {
 
 /// [`set_syscall_filter`] for any slot: the first registration stands.
 pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
-    let _ = slot.call_once(|| filter);
+    if core::ptr::eq(slot, &SYSCALL_FILTER) { let _ = slot.call_once(|| filter); }
 }
 
 /// [`filter_system_call`] for any slot: what the core makes of the filter's
