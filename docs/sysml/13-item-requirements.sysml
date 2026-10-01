@@ -1084,6 +1084,44 @@ package FerrixItemRequirements {
                 all closed.";
             attribute :>> parent = "O.QUOTA";
         }
+        // Stage 13's controllers (cpu.max, cgroup.freeze, reclaim), 2026-10-01.
+        requirement <'H.QUOTA.10'> cpuBandwidthIsBounded : ItemHighLevel {
+            attribute :>> statement = "A job's tasks, with those of every job
+                beneath it, shall use no more processor time in a period than the
+                job's cpu.max allows, and a task kept waiting for the period to
+                end shall leave the wait at once for a kill or a signal.";
+            attribute :>> criterion = "A program in a job limited to 20000 of
+                100000 microseconds is held to between a twelfth and two fifths of
+                a processor with the throttling counted in cpu.stat, and one in a
+                job limited to 1000 of 1000000 ends within a quarter of a second
+                of its SIGKILL (the `cgroups` line, cpu).";
+            attribute :>> parent = "O.QUOTA";
+        }
+        requirement <'H.QUOTA.11'> aFrozenJobStops : ItemHighLevel {
+            attribute :>> statement = "A process in a job, or beneath one, whose
+                cgroup.freeze is set shall run no user code until the job is
+                thawed or the process is killed; SIGCONT shall not thaw it, and
+                cgroup.events shall say frozen only once every live process
+                beneath has stopped.";
+            attribute :>> criterion = "A program of three threads in a frozen
+                cgroup stops counting, cgroup.events says frozen 1 and wakes its
+                poller, SIGCONT changes neither, and thawing restarts its futex
+                wait (the `cgroups` line, freeze).";
+            attribute :>> parent = "O.QUOTA";
+        }
+        requirement <'H.QUOTA.12'> reclaimComesBeforeTheKill : ItemHighLevel {
+            attribute :>> statement = "A charge refused by a job's memory limit,
+                and a program over its memory.high, shall first take back clean
+                file cache charged to that job or beneath it, never a sibling's
+                and never a child's at or under its memory.min, and read back as
+                its source has it, before anything is killed.";
+            attribute :>> criterion = "A cgroup reading a file twice its
+                memory.high is brought back to it, its sibling's cache untouched,
+                every page read back as the source has it, and a read at
+                memory.max kills nothing where its clean cache was room (the
+                `cgroups` line, reclaim).";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
     }
 
     package Audit {
