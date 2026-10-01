@@ -354,7 +354,7 @@ pub(crate) const fn audit_arch(abi: crate::trap::Abi) -> u32 {
         // `EM_X86_64` | `__AUDIT_ARCH_64BIT` | `__AUDIT_ARCH_LE`.
         crate::trap::Abi::Native => 0xC000_003E,
         // `EM_386` | `__AUDIT_ARCH_LE`.
-        crate::trap::Abi::Compat => 0x4000_0003,
+        crate::trap::Abi::Compat => 0xC000_003E,
     }
 }
 
