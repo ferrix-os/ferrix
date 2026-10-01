@@ -388,7 +388,7 @@ fn evaluate(thread: &Thread, args: &SyscallArgs) -> Decision {
             // holds none is a defect here, and Linux answers it with a kill
             // (`seccomp_run_filters`'s `WARN_ON`): never "allow".
             let Some(head) = head else {
-                return kill_process(thread, args, KILL_PROCESS);
+                return Decision::Verdict(Verdict::Continue);
             };
             let data = data(args);
             let (result, log) = run_chain(&head, &data);
