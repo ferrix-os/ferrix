@@ -189,13 +189,34 @@ impl Drop for Filter {
     /// would run the kernel stack out: Linux's `__put_seccomp_filter` walks for
     /// the same reason (SR11).
     fn drop(&mut self) {
+        // How deep releases nest, for the boot check that a long chain's is flat:
+        // a walk nests once, a recursive drop once for each filter.
+        let depth = RELEASE_DEPTH.fetch_add(1, Ordering::Relaxed) + 1;
+        let _ = RELEASE_DEEPEST.fetch_max(depth, Ordering::Relaxed);
         let mut next = self.previous.take();
         while let Some(filter) = next {
             // `Some` only for the last reference, and then the filter goes
             // with its own `previous` already taken, so its drop is shallow.
             next = Arc::into_inner(filter).and_then(|mut last| last.previous.take());
         }
+        let _ = RELEASE_DEPTH.fetch_sub(1, Ordering::Relaxed);
     }
+}
+
+/// How many releases of a filter are open at once.
+static RELEASE_DEPTH: AtomicU32 = AtomicU32::new(0);
+/// The most that were open since [`forget_release_depth`].
+static RELEASE_DEEPEST: AtomicU32 = AtomicU32::new(0);
+
+/// Start counting how deep releases nest.
+pub(crate) fn forget_release_depth() {
+    RELEASE_DEEPEST.store(0, Ordering::Relaxed);
+}
+
+/// How deep releases have nested since [`forget_release_depth`]: one for a
+/// chain released by a walk, however long.
+pub(crate) fn deepest_release() -> u32 {
+    RELEASE_DEEPEST.load(Ordering::Relaxed)
 }
 
 /// The `seccomp_data` a call becomes.

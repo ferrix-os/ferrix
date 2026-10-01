@@ -1670,14 +1670,14 @@ the boot with the check's own message:
 | the chain keeps the oldest filter's answer | `the newest filter's data did not stand on a tie` |
 | a fork child's thread starts with no filter | `a forked child of a filtered process was not filtered` |
 | a clone's thread starts with no filter | `a thread of a filtered process was not filtered` |
-| a native child is given no filter | `a native child of a filtered process was not filtered` |
+| a native child is given no filter | `a native child of a filtered process was not filtered once its start was refused and made again` |
 | a killed last thread ends its process as exit 0 | `a killed thread's process exited otherwise than by SIGSYS` |
 | an ERRNO of 512 is answered 4 | `a filter's ERESTARTSYS restarted the call` |
 | strict mode allows every call | `strict mode let getpid run` |
 | the chain has no length bound | `a chain grew past what Linux allows` |
 | a filter is charged nothing to its job | `kmem: a job made more than its limit could hold` |
 | a thread in filter mode with no filter is let go on | `a thread in filter mode with no filter was let go on` |
-| a chain is released by the default recursive drop | `K11` |
+| a chain is released by the default recursive drop | `a chain's release was recursive, nested as deep as the chain is long` |
 | an ERRNO of 5000 is answered 7 | `a filter's errno was not cut to 4095` |
 | an action nobody defined lets the call go on | `an action nobody defined did not end the process` |
 | a native child's first state is taken, not kept | `a native child of a filtered process was not filtered once its start was refused and made again` |
