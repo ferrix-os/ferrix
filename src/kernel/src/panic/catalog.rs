@@ -1393,6 +1393,41 @@ pub(crate) static STAGE13_SECCOMP: Explanation = Explanation {
           src/kernel/src/trap.rs filter_system_call; docs/SECCOMP.md §3.2, §3.3",
 };
 
+/// For `check_seccomp_filters` in `stages_check.rs`, when
+/// `syscall::seccomp_filters_check::run` fails.
+pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
+    code: "FX-1303",
+    title: "a seccomp filter was not installed, judged, inherited, ordered or released as specified",
+    meaning: "Stage 13's seccomp landing S3 (docs/SECCOMP.md §3.4, §3.5, §3.5a, §8.1): \
+              `syscall::seccomp_filters_check::run` installs filters through `seccomp(2)` and \
+              `prctl` as a program does, in a task that is a real thread of a check process, \
+              and makes the calls they judge through the core's own entry. `seccomp(2)` must \
+              answer Chromium's probes as Linux answers them (a NULL program is EFAULT, a flag \
+              not built or not known is EINVAL before the program is read), an unprivileged \
+              process may install a filter only with no-new-privs, a filter that fails a call \
+              must fail it with its errno and leave the calls it does not name alone, the \
+              strictest answer of a chain must win and on a tie the newest filter's data, a \
+              forked child, a thread and a native child of a filtered thread must hold its \
+              chain and show it in /proc/<pid>/status, an ERRNO of 512 must reach the program \
+              as -512 and one past 4095 as -4095, a thread killed by its filter must end its \
+              process by SIGSYS and one in strict mode by SIGKILL, and the longest chain Linux \
+              allows must be made and released without running the kernel stack out.",
+    causes: &[
+        "`syscall::seccomp::set_filter` reads the program before the flags, or skips the \
+         privilege rule, or does not bound the chain as Linux does.",
+        "`syscall::seccomp::check` is not asked, or its flag that a thread holds a filter is \
+         not set, so a filtered thread's calls run.",
+        "`syscall::seccomp::run_chain` keeps another filter's answer than the strictest, or \
+         the oldest filter's data on a tie.",
+        "`Thread::forked`, `Thread::sibling` or `launch::load_native` does not give the \
+         creator's chain to the child.",
+        "A filter's errno passes through the dispatcher's restart handling, or the chain's \
+         release is recursive.",
+    ],
+    see: "src/kernel/src/syscall/seccomp_filters_check.rs; src/kernel/src/syscall/seccomp.rs; \
+         src/kernel/src/syscall/thread.rs; docs/SECCOMP.md §3.4 to §3.5a",
+};
+
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
 pub(crate) static SYSFS: Explanation = Explanation {
     code: "FX-0890",
@@ -3057,6 +3092,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ROOT_PID1,
     &STAGE13_CGROUPFS,
     &STAGE13_SECCOMP,
+    &STAGE13_SECCOMP_FILTERS,
     &INIT_EXITED,
     &INIT_CALLS,
     &UNHANDLED_PAGE_FAULT,
