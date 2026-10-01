@@ -79,7 +79,7 @@ pub(crate) mod check;
 /// `/proc/<pid>/status` of `process`, as a reader of it would read it: for the
 /// boot checks of what a thread holds (`seccomp`), which cannot name a process
 /// that is not one a program made.
-pub(crate) fn status_text(process: &crate::syscall::process::Process) -> Option<Vec<u8>> {
+pub(crate) fn status_text(process: &Process) -> Option<Vec<u8>> {
     render::status(process).ok()
 }
 

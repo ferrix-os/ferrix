@@ -41,7 +41,7 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_seccomp::{
     ACTION_FULL, ALLOW, DATA, ERRNO, Insn, KILL_PROCESS, KILL_THREAD, LOG, MAX_INSNS,
-    MAX_INSNS_PER_PATH, Program, SeccompData, TRACE, TRAP, USER_NOTIF,
+    MAX_INSNS_PER_PATH, Program, SeccompData, TRACE, USER_NOTIF,
 };
 
 use crate::arch;
