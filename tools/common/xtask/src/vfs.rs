@@ -616,8 +616,7 @@ for made in /tmp/km/f*; do n=$((n+1)); done
 read current < /tmp/cm/k/memory.current
 read max < /tmp/cm/k/memory.max
 [ $current -le $max ] && echo "memory.current within memory.max" || echo "$current above $max"
-read key kernel < /tmp/cm/k/memory.stat
-[ "$key" = kernel ] && [ $kernel -gt 0 ] && echo "memory.stat counts kernel memory"
+while read key kernel; do [ "$key" = kernel ] && [ $kernel -gt 0 ] && echo "memory.stat counts kernel memory"; done < /tmp/cm/k/memory.stat
 while read key count; do [ "$key" = max ] && [ $count -ge 1 ] && echo "memory.events counted the refusal"; done < /tmp/cm/k/memory.events
 rm -r /tmp/km || exit 4
 read after < /tmp/cm/k/memory.current
