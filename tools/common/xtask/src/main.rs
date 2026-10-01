@@ -119,6 +119,7 @@ mod restart;
 mod rustc;
 mod seam;
 mod seat;
+mod seccomp;
 mod selfhost;
 mod sem;
 mod serial;
@@ -235,6 +236,9 @@ COMMANDS:
                   image runs a 32-bit x86 build of it)
     test-sem      Boot sem-test as init and require System V semaphores across forks: a SEM_UNDO mutex, undo at a kill,
                   EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)
+    test-seccomp  Boot seccomp-test as init and require seccomp-bpf as Chromium, bubblewrap and Flatpak use it: probes, errnos and chain
+                  order, a trapped call emulated from its SIGSYS context, kills, strict mode, execve, TSYNC among threads being made
+                  (--arch all runs the four ABIs: x86-64 and 32-bit x86 on the x86-64 kernel, AArch64, ARMv7-A; --i686: 32-bit x86 alone)
     test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
                   a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits (--i686: 32-bit x86)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
@@ -557,7 +561,7 @@ fn run() -> Result<()> {
         "bench-seam" => seam::bench_seam(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "test-install" => installer::test_install(&args),
-        "test-threads" | "test-sem" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-seccomp" => sem::run(command, &args),
         "test-procfs" => procfs::test_procfs(&args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" => pkg::test_pkg(&args),
