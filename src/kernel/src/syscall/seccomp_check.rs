@@ -238,6 +238,7 @@ const REFUSED: isize = -1;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    crate::println!("NEGATIVE CONTROL k19-member-kills-all applied: a killed thread always ends its whole process");
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();
