@@ -369,7 +369,9 @@ fn ordering() -> Result<(), &'static str> {
     // An older ALLOW under a newer ERRNO: the ERRNO, for a call only it names.
     env.install(&answering(&[(getuid, ERRNO | 13)]), 0)?;
     if env.judges(getuid) != Some(13) || env.judges(getpid) != Some(0) {
-        return Err("a newer ERRNO did not hold over an older ALLOW, or judged a call it does not name");
+        return Err(
+            "a newer ERRNO did not hold over an older ALLOW, or judged a call it does not name",
+        );
     }
     // TRACE and USER_NOTIF have no tracer or listener: `ENOSYS`, and never a
     // call that runs.
@@ -441,8 +443,12 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
     report.inherited += 1;
 
     // A second thread of the same process: the caller's chain too.
-    let sibling = Thread::sibling(&env.process, env.process.pid().saturating_add(1), &env.thread)
-        .map_err(|_| "no thread for a seccomp sibling")?;
+    let sibling = Thread::sibling(
+        &env.process,
+        env.process.pid().saturating_add(1),
+        &env.thread,
+    )
+    .map_err(|_| "no thread for a seccomp sibling")?;
     if judge_thread(&sibling, getppid) != Some(EPERM) {
         return Err("a thread of a filtered process was not filtered");
     }
@@ -530,9 +536,8 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     NATIVE.store(native, core::sync::atomic::Ordering::Release);
     *FOUND.lock() = None;
     *ENDING.lock() = Some(ending);
-    let thread = Arc::new(
-        Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?,
-    );
+    let thread =
+        Arc::new(Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?);
     let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -645,7 +650,10 @@ fn in_the_process(ending: Option<Ending>) -> Found {
     seen.calls += 3;
     // An ERRNO of 512, which the dispatcher keeps for restarting calls, comes
     // back as it is, once; one past 4095 is cut to 4095 (SR7).
-    let at = env.put(&answering(&[(getuid, ERRNO | 512), (getgid, ERRNO | 5000)]), None)?;
+    let at = env.put(
+        &answering(&[(getuid, ERRNO | 512), (getgid, ERRNO | 5000)]),
+        None,
+    )?;
     if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
         return Err("a second filter was refused through the entry");
     }
@@ -687,9 +695,8 @@ fn native_child(creator: &Arc<Process>, getppid: usize) -> Result<usize, &'stati
         .ok()
         .and_then(downcast::<Process>)
         .ok_or("a native child could not be made for the seccomp check")?;
-    let thread = Arc::new(
-        Thread::leader(&child).map_err(|_| "no thread for a native seccomp child")?,
-    );
+    let thread =
+        Arc::new(Thread::leader(&child).map_err(|_| "no thread for a native seccomp child")?);
     child.add_thread(&thread);
     let answer = judge_thread(&thread, getppid);
     let shown = status_shows(&child, 2, 2);
@@ -745,7 +752,9 @@ fn longest_chain() -> Result<usize, &'static str> {
         match seccomp::attach(&env.thread, filter) {
             Ok(()) => made += 1,
             Err(Errno::ENOMEM) => break,
-            Err(_) => return Err("a filter was refused for another reason than the chain's length"),
+            Err(_) => {
+                return Err("a filter was refused for another reason than the chain's length");
+            }
         }
         if made > MAX_INSNS_PER_PATH {
             return Err("a chain grew past what Linux allows");
