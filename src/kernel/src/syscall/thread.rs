@@ -130,10 +130,13 @@ impl Thread {
         let inherited = caller
             .with_own_signals(|signals| signals.inherited())
             .without_alt_stack();
+        // Its seccomp state is the creator's, copied by
+        // `Process::add_thread_from` under the lock that lists the thread, so
+        // that a `TSYNC` cannot pass it by.
         let mut thread = Thread::with(
             process,
             ThreadSignals::new(inherited)?,
-            caller.seccomp_copy(),
+            seccomp::State::default(),
         );
         *thread.tid.get_mut() = tid;
         Ok(thread)
@@ -188,6 +191,14 @@ impl Thread {
     /// storing nothing: what every call of a filtered thread does.
     pub(crate) fn read_seccomp<R>(&self, read: impl FnOnce(&seccomp::State) -> R) -> R {
         read(&self.seccomp.lock())
+    }
+
+    /// Take the seccomp mode and chain of `creator`, the thread that made this
+    /// one: what `Process::add_thread_from` does while it holds the thread
+    /// list, the creator's leaf lock taken inside it.
+    pub(crate) fn copy_seccomp_from(&self, creator: &Thread) {
+        let state = creator.seccomp_copy();
+        self.with_seccomp(|mine| *mine = state);
     }
 
     /// A copy of its seccomp state for a thread or process made of it: the
