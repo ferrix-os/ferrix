@@ -251,6 +251,8 @@ fn freeze_check_wait(harness: &Harness) -> Checked<()> {
 }
 
 /// Freeze, hold, `SIGCONT`, thaw, freeze, `cgroup.kill`.
+///
+/// Verifies: L.object.107, H.QUOTA.11
 fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
     let program = start(harness, b"/check-fz")?;
     let process = &program.process;
