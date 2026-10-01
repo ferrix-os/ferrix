@@ -726,6 +726,33 @@ static NEST: AtomicBool = AtomicBool::new(false);
 /// What the nested call returned, once the handler has made it.
 static NESTED_ANSWER: AtomicI32 = AtomicI32::new(0);
 
+/// musl's i386 `mcontext_t` is `gregs[19]`: `gs fs es ds edi esi ebp esp ebx edx
+/// ecx eax trapno err eip cs efl uesp ss`, which the `libc` crate leaves opaque.
+#[cfg(target_arch = "x86")]
+const I386_EBX: usize = 8;
+/// See [`I386_EBX`].
+#[cfg(target_arch = "x86")]
+const I386_EAX: usize = 11;
+/// See [`I386_EBX`].
+#[cfg(target_arch = "x86")]
+const I386_EIP: usize = 14;
+
+/// Register `index` of an i386 context.
+#[cfg(target_arch = "x86")]
+fn i386_register(context: &libc::ucontext_t, index: usize) -> u32 {
+    let base = std::ptr::from_ref(&context.uc_mcontext).cast::<u32>();
+    // SAFETY: `gregs` is nineteen words and `index` is below that.
+    unsafe { base.add(index).read() }
+}
+
+/// Write register `index` of an i386 context.
+#[cfg(target_arch = "x86")]
+fn i386_set_register(context: &mut libc::ucontext_t, index: usize, value: u32) {
+    let base = std::ptr::from_mut(&mut context.uc_mcontext).cast::<u32>();
+    // SAFETY: as above.
+    unsafe { base.add(index).write(value) }
+}
+
 /// The context's instruction pointer.
 fn context_pc(context: &libc::ucontext_t) -> u64 {
     #[cfg(target_arch = "x86_64")]
@@ -734,7 +761,7 @@ fn context_pc(context: &libc::ucontext_t) -> u64 {
     }
     #[cfg(target_arch = "x86")]
     {
-        context.uc_mcontext.gregs[libc::REG_EIP as usize] as u32 as u64
+        u64::from(i386_register(context, I386_EIP))
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -754,7 +781,7 @@ fn context_number(context: &libc::ucontext_t) -> u64 {
     }
     #[cfg(target_arch = "x86")]
     {
-        context.uc_mcontext.gregs[libc::REG_EAX as usize] as u32 as u64
+        u64::from(i386_register(context, I386_EAX))
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -774,7 +801,7 @@ fn context_argument(context: &libc::ucontext_t) -> u64 {
     }
     #[cfg(target_arch = "x86")]
     {
-        context.uc_mcontext.gregs[libc::REG_EBX as usize] as u32 as u64
+        u64::from(i386_register(context, I386_EBX))
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -794,7 +821,7 @@ fn context_set_result(context: &mut libc::ucontext_t, value: c_long) {
     }
     #[cfg(target_arch = "x86")]
     {
-        context.uc_mcontext.gregs[libc::REG_EAX as usize] = value as _;
+        i386_set_register(context, I386_EAX, value as u32);
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -820,7 +847,7 @@ extern "C" fn on_sigsys(signal: c_int, info: *mut libc::siginfo_t, context: *mut
     // SAFETY: the kernel passes a `siginfo_t` and a `ucontext_t` that are alive
     // for the handler.
     let (info, context) = unsafe { (&*info, &mut *context.cast::<libc::ucontext_t>()) };
-    let word = std::mem::size_of::<usize>();
+    let word = size_of::<usize>();
     // `siginfo_t`: three `int`s, then the union at the first pointer-aligned
     // offset; `_sigsys` is a pointer and two `int`s.
     let union = 12_usize.div_ceil(word) * word;
@@ -1035,7 +1062,7 @@ fn kill() -> Step {
         if no_new_privs().is_err() {
             return 2;
         }
-        let mut thread: libc::pthread_t = 0;
+        let mut thread: libc::pthread_t = std::ptr::null_mut();
         // SAFETY: the entry function is `extern "C"` and takes nothing.
         let created = unsafe {
             libc::pthread_create(
@@ -1191,7 +1218,7 @@ extern "C" fn watcher(argument: *mut c_void) -> *mut c_void {
 /// The ninth thread: makes [`MORE`] more watchers, one after another.
 extern "C" fn maker(_argument: *mut c_void) -> *mut c_void {
     for n in 0..MORE {
-        let mut thread: libc::pthread_t = 0;
+        let mut thread: libc::pthread_t = std::ptr::null_mut();
         // SAFETY: the entry function is `extern "C"`; the argument is a number.
         let made = unsafe {
             libc::pthread_create(
@@ -1235,7 +1262,7 @@ fn tsync() -> Step {
         }
         let mut threads: Vec<libc::pthread_t> = Vec::new();
         for n in 0..THREADS {
-            let mut thread: libc::pthread_t = 0;
+            let mut thread: libc::pthread_t = std::ptr::null_mut();
             // SAFETY: the entry function is `extern "C"`; the argument is a number.
             let made = unsafe {
                 libc::pthread_create(&mut thread, std::ptr::null(), watcher, n as *mut c_void)
@@ -1245,7 +1272,7 @@ fn tsync() -> Step {
             }
             threads.push(thread);
         }
-        let mut ninth: libc::pthread_t = 0;
+        let mut ninth: libc::pthread_t = std::ptr::null_mut();
         // SAFETY: as above.
         if unsafe {
             libc::pthread_create(&mut ninth, std::ptr::null(), maker, std::ptr::null_mut())
@@ -1313,7 +1340,7 @@ fn tsync() -> Step {
         if no_new_privs().is_err() {
             return 2;
         }
-        let mut thread: libc::pthread_t = 0;
+        let mut thread: libc::pthread_t = std::ptr::null_mut();
         // SAFETY: the entry function is `extern "C"` and takes nothing.
         if unsafe {
             libc::pthread_create(&mut thread, std::ptr::null(), foreign, std::ptr::null_mut())
