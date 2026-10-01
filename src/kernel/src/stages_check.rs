@@ -83,6 +83,7 @@ pub(super) fn check_programs() {
     // The filter the core's entries ask first about every call, driven through
     // each entry with frames of the check's own.
     check_seccomp();
+    check_seccomp_filters();
 
     // A mount's own flags, enforced and shown; under /tmp, after the root.
     check_mount_flags();
@@ -295,6 +296,31 @@ pub(super) fn check_seccomp() {
         checked.step / 10,
         checked.step % 10,
         checked.step * 32_768 / 10_000,
+    );
+}
+
+/// seccomp's filters (`docs/SECCOMP.md` §8.1, S3): installed as a program does,
+/// judged through the core's own entry, ordered, inherited and released.
+pub(super) fn check_seccomp_filters() {
+    let checked = match syscall::seccomp_filters_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_SECCOMP_FILTERS,
+            "seccomp filters self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  seccomp  {} probes answered as Linux answers them, {} calls a filtered thread made \
+         through the entry and judged, {} children and threads that held their creator's chain, \
+         {} processes a filter ended, and a chain of {} filters made and released",
+        checked.probes, checked.calls, checked.inherited, checked.killed, checked.chain,
+    );
+    println!(
+        "  seccomp  a call costs {} us for the 6,554-filter chain, {} us for seven filters of \
+         4,096 instructions, the most steps there can be, and releasing the long chain costs {} us",
+        checked.walk_many / 1000,
+        checked.walk_long / 1000,
+        checked.release / 1000,
     );
 }
 
@@ -1082,7 +1108,7 @@ pub(super) fn check_kernel_memory() {
         "  kmem     at a {} KiB memory limit a job made {} files, {} pipes, {} socket pairs, \
          {} descriptors in flight, {} epoll registrations, {} eventfds, {} regions of one \
          mapping, {} record locks, {} semaphore sets, {} shared memory segments, {} mount namespaces of {} mounts, {} user, {} UTS, {} IPC, {} cgroup and {} pid namespaces, {} pid numbers and {} namespace files, \
-         {} network namespaces, {} veth pairs and {} routes in a network namespace, and \
+         {} network namespaces, {} veth pairs and {} routes in a network namespace, {} seccomp filters, and \
          was refused one more of each -- \
          ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged \
          came back",
@@ -1109,6 +1135,7 @@ pub(super) fn check_kernel_memory() {
         report.network_namespaces,
         report.veth_pairs,
         report.routes,
+        report.filters,
     );
 }
 

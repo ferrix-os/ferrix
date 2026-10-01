@@ -3300,7 +3300,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 244] = [
+const I386_NUMBERS: [(usize, usize, usize); 245] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3474,6 +3474,7 @@ const I386_NUMBERS: [(usize, usize, usize); 244] = [
     (i386::SETNS, 346, arm::SETNS),
     (i386::RENAMEAT2, 353, arm::RENAMEAT2),
     (i386::GETRANDOM, 355, arm::GETRANDOM),
+    (i386::SECCOMP, 354, arm::SECCOMP),
     (i386::MEMFD_CREATE, 356, arm::MEMFD_CREATE),
     (i386::EXECVEAT, 358, arm::EXECVEAT),
     (i386::MEMBARRIER, 375, arm::MEMBARRIER),
@@ -3892,4 +3893,27 @@ fn block_requests_match_linux_fs_h() {
         assert_eq!(types::BLKBSZGET, 0x8004_1270);
         assert_eq!(types::BLKGETSIZE64, 0x8004_1272);
     }
+}
+
+#[test]
+fn seccomp_is_where_the_headers_put_it() {
+    // `__NR_seccomp` in asm-x86/unistd_64.h, unistd_32.h, asm-generic/unistd.h
+    // and asm-arm/unistd-common.h: the generic table AArch64 uses is 277, and
+    // x86-64's 317, i386's 354 and EABI's 383 are each their own.
+    for (number, from, call) in [
+        (317, from_x86_64 as fn(usize) -> Option<Syscall>, "x86-64"),
+        (277, from_aarch64, "AArch64"),
+        (383, from_arm, "ARMv7-A"),
+        (354, from_i386, "i386"),
+    ] {
+        assert_eq!(
+            from(number),
+            Some(Syscall::Seccomp),
+            "{call}: seccomp is {number}"
+        );
+    }
+    assert_eq!(x86_64::SECCOMP, 317);
+    assert_eq!(aarch64::SECCOMP, 277);
+    assert_eq!(arm::SECCOMP, 383);
+    assert_eq!(i386::SECCOMP, 354);
 }

@@ -31,8 +31,8 @@ use ferrix_linux_abi::types::{AT_FDCWD, O_CREAT, O_TRUNC, O_WRONLY};
 
 use super::{
     Personality, attributes, compat, credentials, epoll, eventfd, exec, family, fd, file, flock,
-    fsctl, futex, kill, limits, memfd, memory, namespace, path, poll, process, sem, shm, signal,
-    signalfd, sockets, system, thread, thread_area, time, timerfd, tty, unanswered,
+    fsctl, futex, kill, limits, memfd, memory, namespace, path, poll, process, seccomp, sem, shm,
+    signal, signalfd, sockets, system, thread, thread_area, time, timerfd, tty, unanswered,
 };
 use crate::arch;
 use crate::sched;
@@ -292,7 +292,10 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
     if let Some(answer) = at_width(call, &a, process, signal::word_of(args.abi)) {
         return answer;
     }
-    let answer = attributes::dispatch(call, &a, process)
+    // `seccomp` and `prctl`'s seccomp options first: `attributes` answers every
+    // other `prctl` option, and knows nothing of these.
+    let answer = seccomp::dispatch(call, &a, process, args.abi)
+        .or_else(|| attributes::dispatch(call, &a, process))
         .or_else(|| limits::dispatch(call, &a, process))
         .or_else(|| credentials::dispatch(call, &a, process))
         .or_else(|| sockets::dispatch(call, &a, process, args.abi))
