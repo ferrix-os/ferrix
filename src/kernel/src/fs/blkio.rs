@@ -98,6 +98,12 @@ fn entry_of(
 ) -> Option<&mut Entry> {
     let key = (slot, device.0, device.1);
     if !table.contains_key(&key) {
+        // A task asleep in the kernel in a job that has gone: the release hook
+        // has cleared its entries and will not run again, so one made now
+        // would hold the slot, and every slot above it, for ever.
+        if quota::job_ended(slot) {
+            return None;
+        }
         let charge = Charge::to(slot, ENTRY_HEAP).ok()?;
         let fresh = Entry {
             stat: Stat::default(),
