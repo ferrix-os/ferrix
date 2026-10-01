@@ -40,8 +40,8 @@ use ferrix_kmem::{Charge, arc_footprint, buffer_footprint};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_seccomp::{
-    ACTION_FULL, ALLOW, DATA, ERRNO, Insn, KILL_PROCESS, KILL_THREAD, LOG, MAX_INSNS,
-    MAX_INSNS_PER_PATH, Program, SeccompData, TRACE, USER_NOTIF,
+    ACTION_FULL, ALLOW, DATA, ERRNO, Insn, KILL_PROCESS, KILL_THREAD, LOG, MAX_INSNS, Program,
+    SeccompData, TRACE, USER_NOTIF,
 };
 
 use crate::arch;
@@ -581,13 +581,12 @@ pub(crate) fn attach(thread: &Thread, mut filter: Arc<Filter>) -> Result<(), Err
             return Err(Errno::EINVAL);
         }
         // The instructions of the new filter, and of every one before it with
-        // four more each: Linux's bound on what one call may run.
+        // four more each: Linux's bound on what one call may run, which the
+        // crate states (`fits_path`).
         let before = state.filter.as_ref().map_or(0, |newest| newest.cost);
         let program = filter.program.len();
-        let total = usize::try_from(before)
-            .unwrap_or(usize::MAX)
-            .saturating_add(program);
-        if total > MAX_INSNS_PER_PATH {
+        let earlier = usize::try_from(before).unwrap_or(usize::MAX);
+        if !ferrix_seccomp::fits_path(earlier, program) {
             return Err(Errno::ENOMEM);
         }
         // Nobody else holds the new filter, so this cannot fail; if it did,
@@ -595,7 +594,7 @@ pub(crate) fn attach(thread: &Thread, mut filter: Arc<Filter>) -> Result<(), Err
         let Some(mine) = Arc::get_mut(&mut filter) else {
             return Err(Errno::ENOMEM);
         };
-        mine.cost = before.saturating_add(mine.cost);
+        mine.cost = u32::try_from(ferrix_seccomp::path_cost(earlier, program)).unwrap_or(u32::MAX);
         mine.depth = state.filter.as_ref().map_or(0, |newest| newest.depth) + 1;
         mine.previous = state.filter.take();
         state.filter = Some(filter.clone());
