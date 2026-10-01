@@ -133,6 +133,7 @@ mod restart;
 mod rustc;
 mod seam;
 mod seat;
+mod seccomp;
 mod selfhost;
 mod sem;
 mod serial;
@@ -265,6 +266,9 @@ COMMANDS:
     test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
                   attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
                   ipc(117) and 395-398)
+    test-seccomp  Boot seccomp-test as init and require seccomp-bpf as Chromium, bubblewrap and Flatpak use it: probes, errnos and chain
+                  order, a trapped call emulated from its SIGSYS context, kills, strict mode, execve, TSYNC among threads being made
+                  (--arch all runs the four ABIs: x86-64 and 32-bit x86 on the x86-64 kernel, AArch64, ARMv7-A; --i686: 32-bit x86 alone)
     test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
                   a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)
     test-uvm      Build NVIDIA's UVM against uvm-kpi and ferrousli from the tree tools/common/fetch/fetch-nvidia.sh fetches
@@ -661,7 +665,7 @@ fn run() -> Result<()> {
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" => installer::live(&args),
         "test-install" => installer::test_install(&args),
-        "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-shm" | "test-seccomp" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" => pkg::test_pkg(&args),
