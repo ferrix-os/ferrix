@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["L.sched.4"],
-      "owner": "os-7c",
-      "branch": "stage13-cgctl",
-      "date": "2026-10-01",
-      "purpose": "Stage 13 cgroup control: the cgctl landing chain (allocated by os-ad via os-79)"
-    },
-    {
       "ids": ["L.trap.8"],
       "owner": "os-7c",
       "branch": "stage13-s4",
