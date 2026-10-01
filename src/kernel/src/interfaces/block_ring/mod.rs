@@ -649,6 +649,37 @@ fn attach<'s>(start: &Start, accepted: Accepted, storage: &'s mut [Slot]) -> Opt
     }
 }
 
+/// Publish `disk` as `name` in `/dev`, with the device node the ring was made
+/// for, which sysfs shows the disk in. Its reads and writes are charged to the
+/// job that makes them (`fs::blkio`, the `io` controller).
+fn publish_disk(
+    start: &Start,
+    name: &DiskName,
+    serial: [u8; 20],
+    disk: &Arc<RingDisk>,
+) -> Result<BlockRegistration, Refusal> {
+    let node = CLAIMS
+        .lock()
+        .iter()
+        .find(|claim| claim.id == start.id)
+        .map(|claim| claim.device.index());
+    register_block_from(
+        name.as_str().as_bytes(),
+        VIRTIO_BLK_MAJOR,
+        name.minor(),
+        crate::fs::blkio::account_disk(
+            Arc::clone(disk) as Arc<dyn BlockDevice>,
+            VIRTIO_BLK_MAJOR,
+            name.minor(),
+        ),
+        Origin { node, serial },
+    )
+    .map_err(|refused| match refused {
+        BlockRefused::InvalidName => Refusal::Name,
+        BlockRefused::NameInUse | BlockRefused::NumberInUse => Refusal::NameInUse,
+    })
+}
+
 /// [`attach`]'s body: every step that can refuse, then READY.
 fn take_up<'s>(
     start: &Start,
@@ -694,33 +725,7 @@ fn take_up<'s>(
         }
         None => {
             let disk = Arc::new(RingDisk::new(device, limits, Arc::clone(&kernel_port)));
-            // The device node the ring was made for, which sysfs shows the
-            // disk in.
-            let node = CLAIMS
-                .lock()
-                .iter()
-                .find(|claim| claim.id == start.id)
-                .map(|claim| claim.device.index());
-            let registration = register_block_from(
-                name.as_str().as_bytes(),
-                VIRTIO_BLK_MAJOR,
-                name.minor(),
-                // Its reads and writes are charged to the job that makes
-                // them (`fs::blkio`, the `io` controller).
-                crate::fs::blkio::account_disk(
-                    Arc::clone(&disk) as Arc<dyn BlockDevice>,
-                    VIRTIO_BLK_MAJOR,
-                    name.minor(),
-                ),
-                Origin {
-                    node,
-                    serial: accepted.serial,
-                },
-            )
-            .map_err(|refused| match refused {
-                BlockRefused::InvalidName => Refusal::Name,
-                BlockRefused::NameInUse | BlockRefused::NumberInUse => Refusal::NameInUse,
-            })?;
+            let registration = publish_disk(start, &name, accepted.serial, &disk)?;
             (disk, registration)
         }
     };
