@@ -1552,6 +1552,9 @@ sleeping lock does (a debug kernel stops there under a spin lock). The last
 `Arc<Namespace>` goes where a fs context lets it go: `copy_namespace` and
 `setns` drop the displaced one after the context's lock is released, and a
 process's context goes in its release, which runs in task context.
+A new `tmpfs` is `1777` and owned by the mounter's filesystem ids, as Linux's
+is (landing `stage13-bwrap-user`), which is what lets bubblewrap make its new
+root as uid 1000; `mode=`, `uid=` and `gid=` are not read.
 `/proc/sys/user/max_user_namespaces` reads the limit, 4096 alive at once,
 and the next is `ENOSPC`. The `mountperm` line
 (FX-0900) drives every rule as uid 1000 and as the owner of a user namespace,
