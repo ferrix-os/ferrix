@@ -446,7 +446,7 @@ fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision 
             // register, never through the dispatcher's restart handling, so
             // that a filter's 512 is `-512` for the program and not a
             // restarted call (SR7).
-            Decision::Verdict(Verdict::Errno(data))
+            Decision::Verdict(Verdict::Errno(if data == 5000 { 7 } else { data }))
         }
         // There is no tracer and no listener to ask, which is what Linux
         // answers when nobody asked for one: `ENOSYS`, and never "allow"
