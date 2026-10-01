@@ -132,7 +132,10 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
     drop(registration);
     let counted = outcome?;
     let _ = disabled.map_err(|_| "the root refused to disable io after the io check")?;
-    slots_back(slots, "the io check's cgroups are gone and their quota slots are not")?;
+    slots_back(
+        slots,
+        "the io check's cgroups are gone and their quota slots are not",
+    )?;
     Ok(counted)
 }
 

@@ -231,8 +231,13 @@ fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
         return Err("a program under cpu.max 1000 1000000 was not throttled by its first second");
     }
     if took > KILL_NANOS {
-        crate::console::println!("  cpu      a SIGKILL took {} ms to end a throttled program", took / 1_000_000);
-        return Err("a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL");
+        crate::console::println!(
+            "  cpu      a SIGKILL took {} ms to end a throttled program",
+            took / 1_000_000
+        );
+        return Err(
+            "a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL",
+        );
     }
     emptied?;
     Ok(1)
