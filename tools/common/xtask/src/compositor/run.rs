@@ -6,8 +6,6 @@
 //! keyboard layout, the network and `--everything`'s additions appended to
 //! it; `desktop` builds what the image carries beside it.
 
-use std::path::Path;
-
 use super::boot::{build_desktop_image, build_parts};
 use super::browser::chrome_libc;
 use super::desktop::{
@@ -99,10 +97,10 @@ pub(super) fn everything_config(args: &mut Args) -> Result<Option<String>> {
     if args.config.is_some() || !args.everything || args.no_dotfiles {
         return Ok(None);
     }
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = crate::dotfiles::home() else {
         return Ok(None);
     };
-    let path = Path::new(&home).join(".config/hypr/hyprland.conf");
+    let path = home.join(".config/hypr/hyprland.conf");
     if !path.exists() {
         return Ok(None);
     }

@@ -50,7 +50,8 @@ use crate::{Error, Result};
 const REMOTE_REF: &str = "refs/ferrix-desktop/head";
 
 /// Where the remote boot leaves its process id, so a teardown can find it if
-/// closing the connection did not take it with it.
+/// closing the connection did not take it with it. The third line is the run
+/// that started it, from [`run_token`].
 const PID_FILE: &str = ".remote-desktop.pid";
 
 /// Config files this looks for when `--config` did not say, best first. The
@@ -218,7 +219,7 @@ pub(crate) fn remote_desktop(args: &Args) -> Result<()> {
     // a thing you can ask for, rather than only a thing that usually happens.
     if args.stop && !args.print_command {
         println!("stopping any boot of ours on {}:{directory}", config.host);
-        teardown(&config.host, &directory);
+        teardown(&config.host, &directory, None);
         return Ok(());
     }
 
@@ -239,6 +240,7 @@ pub(crate) fn remote_desktop(args: &Args) -> Result<()> {
             &config,
             &directory,
             &sha,
+            "<run>",
             &forwarded(args, &config.viewer, host_layout()),
         );
         let remote = format!("{}:{directory}", config.host);
@@ -267,10 +269,12 @@ pub(crate) fn remote_desktop(args: &Args) -> Result<()> {
     // a twenty-minute build on the other machine.
     let viewer = viewer_argv(&config.viewer, port)?;
     let (sha, described) = snapshot(config.send, &root)?;
+    let run = run_token();
     let script = boot_script(
         &config,
         &directory,
         &sha,
+        &run,
         &forwarded(args, &config.viewer, host_layout()),
     );
 
@@ -292,9 +296,11 @@ pub(crate) fn remote_desktop(args: &Args) -> Result<()> {
     let mut boot = spawn_boot(&config, port, ssh, &script)?;
     let outcome = watch(&config, &mut boot, port, viewer.as_deref());
 
-    // Whatever happened, nothing of ours should still be running over there.
+    // Whatever happened, nothing of ours should still be running over there
+    // -- and only ours: when a newer run stopped this boot to take the
+    // machine, the pid file already names that run's boot.
     stop_child(&mut boot);
-    teardown(&config.host, &directory);
+    teardown(&config.host, &directory, Some(&run));
     outcome
 }
 
@@ -1015,8 +1021,9 @@ fn forwarded(args: &Args, viewer: &Viewer, host: Option<(String, Option<String>)
 /// by the guest a line at a time. The caller closes stdin as well.
 ///
 /// `extra` is [`forwarded`]: the flags meant for the boot, and then whatever
-/// came after `--`.
-fn boot_script(config: &Config, directory: &str, sha: &str, extra: &[String]) -> String {
+/// came after `--`. `run` goes into the pid file, so this run's teardown can
+/// tell its own boot from a newer run's.
+fn boot_script(config: &Config, directory: &str, sha: &str, run: &str, extra: &[String]) -> String {
     let mut argv = vec![
         config.cargo.clone(),
         "xtask".to_owned(),
@@ -1058,7 +1065,7 @@ fn boot_script(config: &Config, directory: &str, sha: &str, extra: &[String]) ->
     // pid file below loses the only record of the old boot, so `--stop`
     // cannot find it again. So it goes first, before the checkout changes the
     // files under it.
-    steps.push(stop_recorded(PID_FILE));
+    steps.push(stop_recorded(PID_FILE, None));
     // This checkout is the cache owned by remote-desktop. A previous boot or
     // an interrupted/manual edit may have left tracked files dirty; those
     // files must not prevent the next requested snapshot from starting.
@@ -1070,7 +1077,8 @@ fn boot_script(config: &Config, directory: &str, sha: &str, extra: &[String]) ->
     // For a teardown that has to reach past a connection which did not take
     // the boot with it when it closed.
     steps.push(format!(
-        "printf \"%s\\n%s\\n\" \"$$\" \"$(ps -o pgid= -p $$ | tr -d ' ')\" > {PID_FILE}"
+        "printf \"%s\\n%s\\n%s\\n\" \"$$\" \"$(ps -o pgid= -p $$ | tr -d ' ')\" {} > {PID_FILE}",
+        quoted(run)
     ));
     steps.push(format!("exec {line}"));
     steps.join("; ")
@@ -1080,10 +1088,17 @@ fn boot_script(config: &Config, directory: &str, sha: &str, extra: &[String]) ->
 /// is one: its process group, then the process itself, then a wait of up to
 /// ten seconds for both to be gone, so a boot started next finds the VNC port
 /// free. Safe under `set -e`, and it never ends the script it is part of.
-fn stop_recorded(pid_path: &str) -> String {
+///
+/// With `run`, only a boot that run started: a run cleaning up after itself
+/// must not stop the boot of a newer run that has since taken the machine.
+fn stop_recorded(pid_path: &str, run: Option<&str>) -> String {
     let path = quoted(pid_path);
+    let ours = run.map_or_else(
+        || "true".to_owned(),
+        |run| format!("test \"$(sed -n 3p {path})\" = {}", quoted(run)),
+    );
     [
-        format!("if test -f {path}; then pid=$(sed -n 1p {path})"),
+        format!("if test -f {path} && {ours}; then pid=$(sed -n 1p {path})"),
         format!("pgid=$(sed -n 2p {path})"),
         "if test -n \"$pgid\"; then kill -TERM -\"$pgid\" 2>/dev/null || true; fi".to_owned(),
         "if test -n \"$pid\"; then kill -TERM \"$pid\" 2>/dev/null || true; fi".to_owned(),
@@ -1104,8 +1119,10 @@ fn stop_recorded(pid_path: &str) -> String {
 /// Closing the connection sends the boot a `SIGHUP` and that is usually the
 /// end of it. Usually is not always, and a QEMU nobody is watching holds a
 /// machine's memory and its VNC port against the next run, so this asks.
-fn teardown(host: &str, directory: &str) {
-    let script = stop_recorded(&format!("{directory}/{PID_FILE}"));
+///
+/// `run` is [`stop_recorded`]'s: `None` stops whatever boot is recorded.
+fn teardown(host: &str, directory: &str, run: Option<&str>) {
+    let script = stop_recorded(&format!("{directory}/{PID_FILE}"), run);
     let mut command = ssh(host);
     let _ = command
         .arg(script)
@@ -1113,6 +1130,15 @@ fn teardown(host: &str, directory: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     drop(command.status());
+}
+
+/// What names this run in the pid file over there: this process and the
+/// moment it asked, which two runs on one machine do not share.
+fn run_token() -> String {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}-{}", std::process::id(), since.as_nanos())
 }
 
 // --------------------------------------------------------------------------
@@ -1606,7 +1632,7 @@ send = "head"
     fn a_desktop_boot_starts_sshdt_unless_told_not_to() {
         let config = parse_config("[remote]\nhost = \"nowhere\"\n", "test.toml").unwrap();
         assert_eq!(config.ssh_port, 22022, "SSH is on by default, on 22022");
-        let script = boot_script(&config, "desktop", "abc123", &[]);
+        let script = boot_script(&config, "desktop", "abc123", "run1", &[]);
         assert!(
             script.contains("'--ssh' '22022'"),
             "run-compositor is asked for sshdt: {script}"
@@ -1617,7 +1643,7 @@ send = "head"
             "test.toml",
         )
         .unwrap();
-        assert!(!boot_script(&off, "desktop", "abc123", &[]).contains("--ssh"));
+        assert!(!boot_script(&off, "desktop", "abc123", "run1", &[]).contains("--ssh"));
         assert_eq!(
             pick_ssh_port(&off, 5900).unwrap(),
             None,
@@ -1630,7 +1656,7 @@ send = "head"
         )
         .unwrap();
         assert!(
-            !boot_script(&run, "desktop", "abc123", &[]).contains("--ssh"),
+            !boot_script(&run, "desktop", "abc123", "run1", &[]).contains("--ssh"),
             "`run` has nothing to start sshdt from"
         );
 
@@ -1651,6 +1677,7 @@ send = "head"
             &config,
             "desktop",
             "abc123",
+            "run1",
             &["--smp".to_owned(), "8".to_owned()],
         );
         assert!(script.contains("cd 'desktop'"));
@@ -1673,6 +1700,24 @@ send = "head"
         assert!(
             script.ends_with("'8'"),
             "the boot is exec'd last, so the connection is the machine"
+        );
+    }
+
+    #[test]
+    fn a_run_cleans_up_only_its_own_boot() {
+        let script = boot_script(&example(), "desktop", "abc123", "run1", &[]);
+        assert!(
+            script.contains(&format!("'run1' > {PID_FILE}")),
+            "the boot records the run that started it: {script}"
+        );
+        assert!(
+            stop_recorded(PID_FILE, Some("run1"))
+                .contains("test \"$(sed -n 3p '.remote-desktop.pid')\" = 'run1'"),
+            "a run's teardown stops a boot only when the record names that run"
+        );
+        assert!(
+            !stop_recorded(PID_FILE, None).contains("sed -n 3p"),
+            "a new boot, and --stop, stop whatever is recorded"
         );
     }
 
