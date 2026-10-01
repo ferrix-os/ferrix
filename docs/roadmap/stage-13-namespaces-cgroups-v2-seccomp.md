@@ -182,7 +182,16 @@ of its own or in strict mode makes the call answer its id (`ESRCH` with
 `TSYNC_ESRCH`), and a thread made while the sync runs copies its creator's
 chain under the lock the sync holds, so it cannot be left out. The `seccomp`
 line checks it with 49 threads, forty of them made during the sync; four
-negative controls. The guest test (S6) follows.
+negative controls.
+
+**Done -- seccomp S6, the guest test (2026-10-01, 2 points).** `cargo xtask
+test-seccomp` boots `src/tests/seccomp` as init on x86-64, i386, AArch64 and
+ARMv7-A: Chromium's probes and its `SIGSYS` emulation, Flatpak's filter for two
+architectures, bubblewrap's `prctl` then `execve`, the kill actions with a
+thread killed among several, strict mode, and `TSYNC` while threads are being
+made; two negative controls as features of the program
+(`docs/SECCOMP.md` §12). Linux's own `seccomp_bpf` selftest is the part of S6
+still to do (BACKLOG).
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
@@ -277,12 +286,11 @@ Linux):
 | `stage13-netns` | network namespaces, veth pairs, per-namespace stacks | boots on three architectures, `test-shell`, `test-vfs`, `test-net`, 30 controls; `check` not run |
 | `stage13-timens` | time namespace | agent had not reported |
 | `stage13-cgctl` | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max` with `cpu.stat`, the `io` controller (`io.stat`, `io.max`) | reclaim, freeze and cpu booted; the io check stopped at its last line (a quota-slot count, a fix written, not booted); no full boot, no `test-shell`/`test-vfs`, no negative control run |
-| `stage13-s3` | seccomp S3 to S5 | S3 built and booting, not gated; S4 and S5 not started |
 | `stage13-container` | `cargo xtask test-container`, the exit criterion as a program | written, never run |
 
 These branches were written against an earlier N4 and conflict with each other
 in the namespace, procfs, catalog and kmem files; they go in one at a time,
-each rebased with `git rebase --onto` the landed N4. Not started: seccomp S6,
+each rebased with `git rebase --onto` the landed N4. Not started: Linux's seccomp selftest (S6's second part),
 and N6 and N7 (Steam as uid 1000, pressure-vessel).
 
 **Landed -- the small namespaces and `setns` (built 2026-09-30, landed
