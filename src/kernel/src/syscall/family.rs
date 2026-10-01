@@ -781,7 +781,7 @@ fn clone_thread(
         thread_regs.set_stack(&mut state, stack);
     }
     thread.set_resume(thread_regs);
-    let _task = process::start_thread(thread, state).map_err(|_| Errno::EAGAIN)?;
+    let _task = process::start_thread(thread, &caller, state).map_err(|_| Errno::EAGAIN)?;
     Ok(seen as usize)
 }
 

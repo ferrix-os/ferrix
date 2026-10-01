@@ -56,6 +56,11 @@ pub(crate) struct Report {
     /// Traps delivered as a signal with the call's information, read back, and
     /// a blocked and ignored one that ended its process.
     pub(crate) traps: usize,
+    /// Threads that held the chain `TSYNC` gave, forty of them made while it
+    /// ran.
+    pub(crate) synced: usize,
+    /// Cases of `TSYNC`'s all-or-nothing rule checked.
+    pub(crate) refusals: usize,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -69,8 +74,7 @@ const SET_MODE_FILTER: u64 = 1;
 const GET_ACTION_AVAIL: u64 = 2;
 /// See [`SET_MODE_STRICT`].
 const GET_NOTIF_SIZES: u64 = 3;
-/// `SECCOMP_FILTER_FLAG_TSYNC`: not built until the landing that synchronises
-/// threads.
+/// `SECCOMP_FILTER_FLAG_TSYNC`.
 const TSYNC: u64 = 1 << 0;
 /// `SECCOMP_FILTER_FLAG_LOG`.
 const FLAG_LOG: u64 = 1 << 1;
@@ -239,6 +243,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     heredity(&mut report)?;
     entry_task(&mut report)?;
     speculation(&mut report)?;
+    tsync_rules(&mut report)?;
     let (chain, many, released) = longest_chain()?;
     report.chain = chain;
     report.walk_many = many;
@@ -253,7 +258,7 @@ fn probes(report: &mut Report) -> Result<(), &'static str> {
     let env = Env::new()?;
     // A NULL program is `EFAULT` for every flag the kernel builds: Chromium's
     // probe for "seccomp-bpf exists", and for the flags it asks after.
-    for flags in [0, FLAG_LOG, SPEC_ALLOW] {
+    for flags in [0, FLAG_LOG, SPEC_ALLOW, TSYNC, TSYNC | TSYNC_ESRCH] {
         if env.seccomp(SET_MODE_FILTER, flags, 0) != Err(Errno::EFAULT) {
             return Err("an unknown seccomp flag was answered EFAULT");
         }
@@ -262,7 +267,6 @@ fn probes(report: &mut Report) -> Result<(), &'static str> {
     // A flag that is not built, or that Linux does not know, is refused before
     // the program is read: `EINVAL`, and never `EFAULT`.
     for flags in [
-        TSYNC,
         NEW_LISTENER,
         TSYNC_ESRCH,
         WAIT_KILLABLE_RECV,
@@ -469,12 +473,15 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
     report.inherited += 1;
 
     // A second thread of the same process: the caller's chain too.
-    let sibling = Thread::sibling(
-        &env.process,
-        env.process.pid().saturating_add(1),
-        &env.thread,
-    )
-    .map_err(|_| "no thread for a seccomp sibling")?;
+    let sibling = Arc::new(
+        Thread::sibling(
+            &env.process,
+            env.process.pid().saturating_add(1),
+            &env.thread,
+        )
+        .map_err(|_| "no thread for a seccomp sibling")?,
+    );
+    env.process.add_thread_from(&sibling, &env.thread);
     if judge_thread(&sibling, getppid) != Some(EPERM) {
         return Err("a thread of a filtered process was not filtered");
     }
@@ -528,6 +535,9 @@ struct Seen {
     inherited: usize,
     /// Traps whose signal and information were read back.
     trapped: usize,
+    /// Threads that held the chain `TSYNC` gave, the ones made while it ran
+    /// among them.
+    threads: usize,
 }
 
 /// How the task ends its process when it was not killed: it must have been.
@@ -564,6 +574,8 @@ enum Ending {
     /// `TRAP` for a call in the native range, which `SIGSYS` cannot express:
     /// the process is killed, though a handler is installed.
     TrapNative,
+    /// `TSYNC` among threads that are made while it runs.
+    Sync,
 }
 
 /// Run a scenario task in a process of its own, and answer what it found and
@@ -819,6 +831,12 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
     }
     report.traps += 1;
     report.killed += 1;
+    // `TSYNC` while threads are being made: every thread has the chain.
+    let (seen, status) = scenario(Ending::Sync, false)?;
+    if status != SURVIVED {
+        return Err("the synchronised threads' process did not end as the check ended it");
+    }
+    report.synced = seen.threads;
     Ok(())
 }
 
@@ -832,7 +850,7 @@ fn spawn_member(
     let tid = crate::syscall::registry::allocate_thread(process).ok_or("no thread id")?;
     let thread = Thread::sibling(process, tid, creator).map_err(|_| "no memory for a thread")?;
     let thread = Arc::new(thread);
-    process.add_thread(&thread);
+    process.add_thread_from(&thread, creator);
     let task = sched::spawn_user("seccomp-member", entry, thread, None, None)
         .map_err(|_| "no task for a thread of the check")?;
     Ok(task)
@@ -967,7 +985,8 @@ fn judge_cost(thread: &Thread, call: usize) -> u64 {
 
 /// The endings that leave before the steps every other run shares: strict
 /// mode, a member killed by its filter, a leader killed while a member lives
-/// on, and the traps. `None` for the rest; an error is the check's.
+/// on, the traps, and `TSYNC` among threads being made. `None` for the rest;
+/// an error is the check's.
 fn ended_early(
     ending: Option<Ending>,
     env: &Env,
@@ -1069,6 +1088,11 @@ fn ended_early(
             *FOUND.lock() = Some(Ok(seen));
             let _ = call(gap, [0; 6]);
             Ok(Some(Err("a trapped native-range call returned")))
+        }
+        Some(Ending::Sync) => {
+            let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            seen.threads = synchronised(env)?;
+            Ok(Some(Ok(seen)))
         }
         Some(Ending::Thread | Ending::Process) | None => Ok(None),
     }
@@ -1236,4 +1260,186 @@ fn speculation(report: &mut Report) -> Result<(), &'static str> {
     report.probes += 6;
     process::kill(&env.process, 137);
     Ok(())
+}
+
+/// `TSYNC`'s rules on threads that are only objects: the new chain reaches
+/// every thread, a thread with a chain of its own makes the whole call fail
+/// with its id (or `ESRCH`) and changes nothing, and a thread in strict mode
+/// does the same (`docs/SECCOMP.md` §3.7, SR10).
+fn tsync_rules(report: &mut Report) -> Result<(), &'static str> {
+    let getppid = number(Syscall::Getppid)?;
+    let getuid = number(Syscall::Getuid)?;
+    let env = Env::new()?;
+    if attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]) != Ok(0) {
+        return Err("PR_SET_NO_NEW_PRIVS was refused");
+    }
+    // One sibling made before any filter, one after the first.
+    let early = member_thread(&env, &env.thread)?;
+    env.install(&answering(&[(getppid, ERRNO | EPERM)]), 0)?;
+    let late = member_thread(&env, &env.thread)?;
+    if early.with_seccomp(|state| state.filters()) != 0
+        || late.with_seccomp(|state| state.filters()) != 1
+    {
+        return Err("a thread was made with another chain than its creator's");
+    }
+    // Everyone gets the second filter, the thread that had none included.
+    let second = env.put(&answering(&[(getuid, ERRNO | 13)]), None)?;
+    if env.seccomp(SET_MODE_FILTER, TSYNC, second) != Ok(0) {
+        return Err("TSYNC among threads that can all take the filter was refused");
+    }
+    for thread in [&env.thread, &early, &late] {
+        if judge_thread(thread, getuid) != Some(13) {
+            return Err("a thread was left without the chain TSYNC gave");
+        }
+    }
+    if early.with_seccomp(|state| state.filters()) != 2 {
+        return Err("a thread that had no filter did not get the whole chain");
+    }
+    report.refusals += 1;
+
+    // A thread with a chain of its own: the whole call fails with its id, and
+    // nothing changes -- not the caller, not the threads that could have taken
+    // the filter.
+    let foreign = member_thread(&env, &env.thread)?;
+    foreign.with_seccomp(|state| *state = State::default());
+    let own = Env {
+        process: Arc::clone(&env.process),
+        thread: Arc::clone(&foreign),
+        page: env.page,
+    };
+    own.install(&answering(&[(getppid, ERRNO | 5)]), 0)?;
+    let chains = |threads: [&Arc<Thread>; 4]| -> Vec<u32> {
+        threads
+            .iter()
+            .map(|thread| thread.with_seccomp(|state| state.filters()))
+            .collect()
+    };
+    let before = chains([&env.thread, &early, &late, &foreign]);
+    let third = env.put(&answering(&[(getppid, ERRNO | ENOSYS)]), None)?;
+    if env.seccomp(SET_MODE_FILTER, TSYNC, third) != Ok(foreign.tid() as usize) {
+        return Err("a TSYNC blocked by a thread with a chain of its own did not answer its id");
+    }
+    if env.seccomp(SET_MODE_FILTER, TSYNC | TSYNC_ESRCH, third) != Err(Errno::ESRCH) {
+        return Err("a blocked TSYNC with TSYNC_ESRCH did not answer ESRCH");
+    }
+    if env.seccomp(SET_MODE_FILTER, TSYNC_ESRCH, third) != Err(Errno::EINVAL) {
+        return Err("TSYNC_ESRCH without TSYNC was not refused");
+    }
+    if before != chains([&env.thread, &early, &late, &foreign]) {
+        return Err("a TSYNC that failed changed a thread's chain");
+    }
+    report.refusals += 3;
+    process::kill(&env.process, 137);
+    Ok(())
+}
+
+/// A thread object of the check's process, made by `creator` and listed as a
+/// `clone(CLONE_THREAD)` lists one, which never runs.
+fn member_thread(env: &Env, creator: &Thread) -> Result<Arc<Thread>, &'static str> {
+    let tid = crate::syscall::registry::allocate_thread(&env.process)
+        .ok_or("no thread id for a seccomp check")?;
+    let thread = Thread::sibling(&env.process, tid, creator)
+        .map_err(|_| "no memory for a seccomp check's thread")?;
+    let thread = Arc::new(thread);
+    env.process.add_thread_from(&thread, creator);
+    Ok(thread)
+}
+
+/// How many threads the cloner has made, and 1,000 more once it has made all.
+static CLONED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The process's threads stop when this is set.
+static LEAVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// How many threads the cloner makes.
+const CLONES: u32 = 40;
+/// How many it has made when the sync starts.
+const CLONES_BEFORE_SYNC: u32 = 6;
+
+/// A member's task: runs until told to leave, then ends its thread.
+fn member(_argument: usize) {
+    while !LEAVE.load(core::sync::atomic::Ordering::Acquire) {
+        sched::yield_now();
+    }
+    process::leave_current();
+}
+
+/// The cloning thread's task: makes [`CLONES`] more threads, each by the path
+/// `clone(CLONE_THREAD)` takes (a thread made of its creator's state and
+/// listed under the lock), with the sync running in the middle.
+fn cloner(_argument: usize) {
+    if let Some(me) = crate::syscall::thread::current() {
+        let process = Arc::clone(me.process());
+        for _ in 0..CLONES {
+            if spawn_member(&process, &me, member).is_err() {
+                break;
+            }
+            let _ = CLONED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+            sched::yield_now();
+        }
+        // Done: the count says so, and this thread stays until told to leave.
+        let _ = CLONED.fetch_add(1_000, core::sync::atomic::Ordering::AcqRel);
+    }
+    member(0);
+}
+
+/// `TSYNC` among threads of a process that are being made while it runs: eight
+/// threads and a ninth that makes [`CLONES`] more, one of them in the middle of
+/// the sync. Every thread, those too, must hold the chain after (SR10).
+fn synchronised(env: &Env) -> Result<usize, &'static str> {
+    use core::sync::atomic::Ordering;
+    let getppid = number(Syscall::Getppid)?;
+    CLONED.store(0, Ordering::Release);
+    LEAVE.store(false, Ordering::Release);
+    let leader = Arc::clone(&env.thread);
+    let mut tasks = Vec::new();
+    for _ in 0..7 {
+        tasks.push(spawn_member(&env.process, &leader, member)?);
+    }
+    let cloning = crate::syscall::registry::allocate_thread(&env.process).ok_or("no thread id")?;
+    let cloning_thread = Arc::new(
+        Thread::sibling(&env.process, cloning, &leader).map_err(|_| "no memory for a thread")?,
+    );
+    env.process.add_thread_from(&cloning_thread, &leader);
+    tasks.push(
+        sched::spawn_user("seccomp-cloner", cloner, cloning_thread, None, None)
+            .map_err(|_| "no task for the cloning thread")?,
+    );
+    // Let it run until it has made a few, then synchronise in the middle of
+    // the rest.
+    let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while CLONED.load(Ordering::Acquire) < CLONES_BEFORE_SYNC {
+        if crate::timer::now_nanos() > patience {
+            LEAVE.store(true, Ordering::Release);
+            return Err("the cloning thread made no threads");
+        }
+        sched::yield_now();
+    }
+    let at = env.put(&answering(&[(getppid, ERRNO | EPERM)]), None)?;
+    let synced = env.seccomp(SET_MODE_FILTER, TSYNC, at);
+    // Wait for the rest to be made.
+    while CLONED.load(Ordering::Acquire) < 1_000 {
+        if crate::timer::now_nanos() > patience {
+            LEAVE.store(true, Ordering::Release);
+            return Err("the cloning thread never finished");
+        }
+        sched::yield_now();
+    }
+    let listed = env.process.threads();
+    let unfiltered = listed
+        .iter()
+        .filter(|thread| judge_thread(thread, getppid) != Some(EPERM))
+        .count();
+    let count = listed.len();
+    LEAVE.store(true, Ordering::Release);
+    drop(listed);
+    drop(tasks);
+    if synced != Ok(0) {
+        return Err("TSYNC among running threads was refused");
+    }
+    if unfiltered != 0 {
+        return Err("a thread made during TSYNC was not filtered");
+    }
+    if count < 9 + CLONES as usize {
+        return Err("the threads of the TSYNC check were not all there");
+    }
+    Ok(count)
 }
