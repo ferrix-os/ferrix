@@ -511,8 +511,7 @@ pub(super) fn dcache(_: &Kernel) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     for line in crate::fs::namespace().debug_cache() {
         out.extend_from_slice(line.as_bytes());
-        out.push(b'
-');
+        out.push(0x0a);
     }
     Ok(out)
 }
