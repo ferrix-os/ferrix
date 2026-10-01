@@ -708,11 +708,17 @@ fn native_child(creator: &Arc<Process>, getppid: usize) -> Result<usize, &'stati
     child.add_thread(&thread);
     let answer = judge_thread(&thread, getppid);
     let shown = status_shows(&child, 2, 2);
+    // It starts with its creator's no-new-privs too: a filter under no-new-privs
+    // is only safe if every child keeps it.
+    let privileges = attributes::sys_prctl(&child, 39, [0; 4]);
     process::kill(&child, 137);
     if answer != Some(EPERM) {
         return Err("a native child of a filtered process was not filtered");
     }
     shown?;
+    if privileges != Ok(1) {
+        return Err("a native child of a no-new-privs process could gain privileges");
+    }
     Ok(1)
 }
 

@@ -421,8 +421,8 @@ steps for a call.
 **AoU-4.** A program a user supplies may therefore take up to 32,768 steps on
 every call it makes, and the hook is written for it: it allocates nothing, takes
 no sleeping lock and reads registers only; a thread with no filter pays one
-load of the registration, an indirect call and (until S3) one load of the boot
-check's probe word. The hook is entered and left with interrupts masked, as the
+load of the registration, an indirect call and one load of the boot check's probe
+word (and, once any thread has held a filter, one look for the running thread). The hook is entered and left with interrupts masked, as the
 core's entry holds them (S2's registered body is a load and a store of a flag,
 and runs masked). S3's body, which runs a chain, opens interrupts for exactly
 the walk of the chain and closes them before it returns, as the dispatcher does
