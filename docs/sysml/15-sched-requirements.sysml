@@ -54,5 +54,18 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("sched::throttle_current", "trap::must_attend");
         }
+        requirement <'L.sched.4'> aQuotaThatComesLateBinds : ItemLowLevel {
+            attribute :>> statement = "A cpu.max written for a job, or a task moved
+                beneath one, shall arm the timer of every processor running a
+                task of the job, so that a task alone on its processor, which
+                gets no tick, is cut when its quota is used up.";
+            attribute :>> criterion = "A program already running alone on its
+                processor is held to between a twelfth and two fifths of a
+                processor by a cpu.max 20000 100000 written under it, and by being
+                moved beneath one.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
+                "sched::set_task_group");
+        }
     }
 }

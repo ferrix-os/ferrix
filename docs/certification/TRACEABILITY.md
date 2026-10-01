@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 115 | 63 | 52 |
-| Low (`L.*`) | 619 | 352 | 267 |
+| Low (`L.*`) | 620 | 353 | 267 |
 
-1224 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1227 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1224 |
+| Named by a low-level requirement | 1227 |
 | Accessors, covered by the requirement they serve | 600 |
 | Check code in a product file | 55 |
-| Named by none | 600 |
+| Named by none | 599 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -506,6 +506,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.1` | While any task waits on a processor's queue, CpuQueue::arm_timer shall arm the next decision no more than one configured slice away, however long a request the running task holds. | With an entity queued that is not eligible and the running one having yielded 600 times, so that its remaining request exceeds 100 slices, the queue's next decision is at most one slice away; with nothing queued there is none. | H.SCHED.2 | `sched::queue::CpuQueue::arm_timer` | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host test | host test | host test |
 | `L.sched.2` | A yield by the only task on a processor's queue shall leave its request unchanged. | After 600 yields with nothing else queued, the running entity's remaining slice is what it was before the first. | H.SCHED.2 | `sched::yield_now` | `src/lib/kernel/sched/src/tests.rs::yielding_alone_leaves_the_request_as_it_was` | host test | host test | host test |
 | `L.sched.3` | throttle_current shall hold a task whose job or one above it has used its cpu.max quota until the period ends, looking every millisecond whether the way back to user mode has a kill, a signal or a stop to deal with, and leaving the wait if so. | A program in a job with cpu.max 1000 1000000 that has used its millisecond ends within a quarter of a second of its SIGKILL, where waiting out the period takes nine tenths of a second. | H.QUOTA.10 | `sched::throttle_current`, `trap::must_attend` | `src/kernel/src/fs/cgroupfs/cpu_check.rs::killed_throttled` | not built | not built | not built |
+| `L.sched.4` | A cpu.max written for a job, or a task moved beneath one, shall arm the timer of every processor running a task of the job, so that a task alone on its processor, which gets no tick, is cut when its quota is used up. | A program already running alone on its processor is held to between a twelfth and two fifths of a processor by a cpu.max 20000 100000 written under it, and by being moved beneath one. | H.QUOTA.10 | `sched::rearm_timers`, `sched::rearm_here`, `sched::set_task_group` | `src/kernel/src/fs/cgroupfs/cpu_check.rs::quota_comes_late` | not built | not built | not built |
 
 ### Discovery
 
@@ -1269,6 +1270,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/device/check.rs::check_node` | kernel | L.device.1, L.device.2, L.device.3, L.device.4 |
 | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | kernel | L.object.52, L.object.61 |
 | `src/kernel/src/fs/cgroupfs/cpu_check.rs::killed_throttled` | kernel | L.sched.3, H.QUOTA.10 |
+| `src/kernel/src/fs/cgroupfs/cpu_check.rs::quota_comes_late` | kernel | L.sched.4 |
 | `src/kernel/src/fs/cgroupfs/cpu_check.rs::throttling` | kernel | L.object.106 |
 | `src/kernel/src/fs/cgroupfs/delegation_check.rs::check_a_removed_cgroup` | kernel | L.object.69 |
 | `src/kernel/src/fs/cgroupfs/freeze_check.rs::freeze_a_program` | kernel | L.object.107, H.QUOTA.11 |
