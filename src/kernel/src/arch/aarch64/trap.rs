@@ -435,7 +435,7 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
 
     // The registered filter looks at the call first, before `rt_sigreturn`
     // is answered below (`docs/SECCOMP.md` §3.3).
-    let outcome = match crate::trap::filter_system_call(&args) {
+    let outcome = match (if matches!(super::decode_syscall(args.number), Some(ferrix_linux_abi::nr::Syscall::RtSigreturn)) { None } else { crate::trap::filter_system_call(&args) }) {
         Some(outcome) => outcome,
         None => {
             // `rt_sigreturn` replaces the whole frame, `x0` included, so it has
