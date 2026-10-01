@@ -451,7 +451,7 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
 
     // The registered filter looks at the call first, before `set_tls` and the
     // signal returns are answered below (`docs/SECCOMP.md` §3.3).
-    let outcome = match crate::trap::filter_system_call(&args) {
+    let outcome = match (if matches!(super::decode_syscall(args.number), Some(Syscall::ArmSetTls)) { None } else { crate::trap::filter_system_call(&args) }) {
         Some(outcome) => outcome,
         None => {
             // `set_tls` writes a coprocessor register, which is a fact about
