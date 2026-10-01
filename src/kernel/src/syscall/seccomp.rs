@@ -486,7 +486,7 @@ fn kill_thread(thread: &Thread, args: &SyscallArgs, signal: u32, logged: bool) -
     thread.with_seccomp(|state| state.mode = Mode::Dead);
     let process = thread.process();
     if process.live_thread_count() <= 1 {
-        process::kill(process, 128 + signal as i32);
+        process::kill(process, 0);
         return Decision::Verdict(Verdict::Errno(ENOSYS));
     }
     Decision::Leave(128 + signal as i32)
