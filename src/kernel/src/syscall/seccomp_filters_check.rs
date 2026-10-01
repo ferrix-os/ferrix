@@ -925,13 +925,13 @@ fn longest_chain() -> Result<(usize, u64, u64), &'static str> {
     // and the chain goes after the lock does. In production the last drop can
     // fall to the reaper with preemption off, which is what this measures.
     let old = env.thread.with_seccomp(core::mem::take);
-    seccomp::forget_release_depth();
+    seccomp::measure_releases();
     let start = crate::timer::now_nanos();
     drop(old);
     let released = crate::timer::now_nanos().saturating_sub(start);
-    // A walk nests once; a recursive release nests once for each filter, and
-    // other processors' releases cannot add up to this many.
-    if seccomp::deepest_release() > 64 {
+    // A walk spreads over a few hundred bytes of this task's stack, a
+    // recursive release over a frame for each of the 6,554 filters.
+    if seccomp::release_stack_span() > 4096 {
         return Err("a chain's release was recursive, nested as deep as the chain is long");
     }
     process::kill(&env.process, 137);
