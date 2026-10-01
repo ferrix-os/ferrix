@@ -1807,4 +1807,59 @@ claims an exec), a BACKLOG row. The walk of each other thread's chain for
 `is_ancestor` runs under the thread-list lock and is bounded by the chain's
 length (6,554), a cost recorded in BACKLOG.
 
-S6 (`test-seccomp`) follows.
+**S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
+test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
+`libc` crate, built for x86-64, i386 (run on x86-64 through `int $0x80`),
+AArch64 and ARMv7-A musl and booted as init. It writes its filters as raw
+`sock_filter` arrays and installs them through raw `seccomp(2)` and `prctl(2)`
+calls, as Chromium, bubblewrap and Flatpak do, and prints a line per step:
+
+* **probes**: Chromium's detection (`EFAULT` for a null program through both
+  calls, `EINVAL` for an unknown flag), `GET_ACTION_AVAIL`, the speculation
+  controls;
+* **errno**, **order**: one call failed with its errno and `clone3` with
+  `ENOSYS`; 512 back as 512 and one past 4095 as 4095; the strictest answer of
+  a chain wins, the newest filter's data on a tie, `TRACE` and `USER_NOTIF`
+  are `ENOSYS`;
+* **unprivileged**: a child that is not root and has no no-new-privs is
+  refused `EACCES`;
+* **status**: `NoNewPrivs`, `Seccomp` and `Seccomp_filters` in
+  `/proc/self/status`;
+* **twoarch** (§8.2 case 1): one filter for x86-64 and i386, as Flatpak's,
+  refusing System V IPC in each one's own numbers;
+* **emulate** (case 2): Chromium's shape (an `arch` check, the x32 bit, a
+  `TRAP` with data) and a `SIGSYS` handler that checks Chromium's five sanity
+  conditions and writes the result into the context, which the program gets
+  back from the trapped call; with `SIGSYS` blocked, and a trap inside the
+  handler under `SA_NODEFER`;
+* **ignored**: with `SIGSYS` blocked and ignored, a trapped call ends the
+  process by `SIGSYS`, as Linux's `force_sig_info_to_task` resets it;
+* **kill**: `KILL_PROCESS` and `KILL_THREAD` end a single-threaded process by
+  `SIGSYS`; a thread killed by its own filter among several leaves the others
+  running and the process alive;
+* **strict**: `write` runs, `getpid` ends the thread with `SIGKILL`;
+* **bwrap** (case 3): no-new-privs, `prctl(PR_SET_SECCOMP, 2, &prog)`, then
+  `execve` of a second copy of the program (carried in the image at
+  `/bin/seccomp-test`, since init itself is built into the kernel), which
+  finds `Seccomp: 2` and `NoNewPrivs: 1` and its `getppid` refused;
+* **tsync**: eight threads and a ninth making more while `TSYNC` runs, then
+  every thread refused; a thread with a filter of its own makes `TSYNC` answer
+  its id, or `ESRCH` with `TSYNC_ESRCH`, and changes nothing.
+
+Evidence: `test-seccomp --arch all` prints every step and exits 0 on the four
+ABIs. Two negative controls, as Cargo features of the same program, run by the
+gate on each architecture's own ABI: the handler leaving its result out must
+fail on **emulate** (`a trapped call did not return the result its handler
+wrote`), and no-new-privs set before the unprivileged install must fail on
+**unprivileged** (`an unprivileged install without no-new-privs was not refused
+EACCES`); each must fail there and exit 1. Two points of the guest program
+behaved otherwise than first written, and the program follows Linux: musl's
+`pthread_join` waits for a thread to say it exited, which a thread killed by
+its filter never does, so the **kill** step polls `tgkill` for `ESRCH`
+instead of joining; and a blocked `SIGSYS` with a handler is reset to the
+default by the trap, so it is fatal, not handled.
+
+Not in this part, and a BACKLOG row: Linux's own `seccomp_bpf` selftest with
+its expected-failure list (§8.2, §10 risk 5), which needs the C cross build
+and a list the consultant reviews; and R6's reading of libseccomp's and
+Firefox's start-up probes.
