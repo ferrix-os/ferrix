@@ -65,7 +65,7 @@ package FerrixSchedRequirements {
                 moved beneath one.";
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
-                "sched::set_task_group");
+                "sched::set_task_group", "sched::note_moved");
         }
     }
 }

@@ -389,9 +389,16 @@ pub(crate) fn running_group() -> u32 {
 static MOVES: AtomicU64 = AtomicU64::new(0);
 
 /// A process moved to another job: every running task looks again.
+///
+/// A task of it running in user mode, alone on its processor, is not
+/// interrupted by anything and so would go on running and being charged in the
+/// job it left; every processor is kicked, so that each running task comes
+/// through the way back to user mode, where it looks, and arms its timer for
+/// the job it is in now.
 pub(crate) fn note_moved() {
     let _ = MOVES.fetch_add(1, Ordering::AcqRel);
     regroup_current();
+    rearm_timers();
 }
 
 /// Have the running task run, and charge, in its process's job, if a move
