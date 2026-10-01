@@ -238,6 +238,7 @@ const REFUSED: isize = -1;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    crate::println!("NEGATIVE CONTROL c1-archprctl applied: x86-64 SYSCALL entry skips the filter for arch_prctl");
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();

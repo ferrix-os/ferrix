@@ -498,7 +498,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     // `arch_prctl` or `rt_sigreturn` is obeyed (`docs/SECCOMP.md` §3.3). An
     // answer is applied as the dispatcher's is; nothing registered is
     // `Continue`.
-    let outcome = match crate::trap::filter_system_call(&args) {
+    let outcome = match (if matches!(super::decode_syscall(args.number), Some(ferrix_linux_abi::nr::Syscall::ArchPrctl)) { None } else { crate::trap::filter_system_call(&args) }) {
         Some(outcome) => outcome,
         None => {
             if answer_here(frame, &args) {
