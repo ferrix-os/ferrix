@@ -289,7 +289,7 @@ impl CpuQueue {
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
             crate::object::quota::charge_cpu(task.group(), now, delta, user);
             if task.group() == super::DBG_SLOT.load(core::sync::atomic::Ordering::Relaxed) && task.group() != 0 {
-                crate::console::println!("DBG charge slot {} delta {} user {} cpu {:?} task {:?}", task.group(), delta, user, super::this_cpu(), task.id());
+                crate::console::println!("DBG charge slot {} delta {} user {} cpu {:?} task {:?}", task.group(), delta, user, super::this_cpu(), task.id);
             }
         } else {
             self.stats.idle_ns += delta;
