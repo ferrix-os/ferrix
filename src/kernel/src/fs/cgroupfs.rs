@@ -829,32 +829,53 @@ impl Inode for EventsFile {
     }
 }
 
+/// The thread ids in `cgroup.threads`, as the reader's namespace numbers them.
+fn thread_names(job: &Arc<Job>) -> Vec<u32> {
+    let reader = crate::syscall::userns::acting();
+    let ns = reader
+        .as_ref()
+        .and_then(|reader| reader.numbers())
+        .map(|numbers| Arc::clone(numbers.namespace()));
+    let mut tids: Vec<u32> = members_processes(job)
+        .iter()
+        .flat_map(|process| {
+            procfs::thread_ids(process)
+                .into_iter()
+                .map(|tid| crate::syscall::pidns::thread_name_in(ns.as_ref(), process, tid))
+                .collect::<Vec<u32>>()
+        })
+        .filter(|&tid| tid != 0)
+        .collect();
+    tids.sort_unstable();
+    tids
+}
+
+/// `cpu.stat` of `job`.
+fn render_cpu_stat(out: &mut Vec<u8>, job: &Arc<Job>) {
+    // Whoever runs without a tick has not been charged for it yet.
+    crate::sched::charge_running();
+    let (user, system) = job.cpu_times();
+    ferrix_cgroupfs::cpu::render_stat(
+        out,
+        ferrix_cgroupfs::cpu::Stat {
+            usage: (user / 1000).saturating_add(system / 1000),
+            user: user / 1000,
+            system: system / 1000,
+            periods: job.counted(Counter::Periods),
+            throttled: job.counted(Counter::Throttled),
+            throttled_us: job.counted(Counter::ThrottledNs) / 1000,
+        },
+        offered(job).contains(Controller::Cpu),
+    );
+}
+
 /// What a file of `job` says now.
 fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
     let mut out = Vec::new();
     match kind {
         Kind::Type => out.extend_from_slice(b"domain\n"),
         Kind::Procs => render::ids(&mut out, &members(job)),
-        Kind::Threads => {
-            // As the reader's namespace numbers them.
-            let reader = crate::syscall::userns::acting();
-            let ns = reader
-                .as_ref()
-                .and_then(|reader| reader.numbers())
-                .map(|numbers| Arc::clone(numbers.namespace()));
-            let mut tids: Vec<u32> = members_processes(job)
-                .iter()
-                .flat_map(|process| {
-                    procfs::thread_ids(process)
-                        .into_iter()
-                        .map(|tid| crate::syscall::pidns::thread_name_in(ns.as_ref(), process, tid))
-                        .collect::<Vec<u32>>()
-                })
-                .filter(|&tid| tid != 0)
-                .collect();
-            tids.sort_unstable();
-            render::ids(&mut out, &tids);
-        }
+        Kind::Threads => render::ids(&mut out, &thread_names(job)),
         Kind::Controllers => controllers::render(&mut out, offered(job)),
         Kind::SubtreeControl => controllers::render(&mut out, job.subtree_control()),
         Kind::Events => render::events(&mut out, job.is_populated(), job.frozen_seen()),
@@ -893,23 +914,7 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
                 ferrix_cgroupfs::io::render_max(&mut out, device, limits);
             }
         }
-        Kind::CpuStat => {
-            // Whoever runs without a tick has not been charged for it yet.
-            crate::sched::charge_running();
-            let (user, system) = job.cpu_times();
-            ferrix_cgroupfs::cpu::render_stat(
-                &mut out,
-                ferrix_cgroupfs::cpu::Stat {
-                    usage: (user / 1000).saturating_add(system / 1000),
-                    user: user / 1000,
-                    system: system / 1000,
-                    periods: job.counted(Counter::Periods),
-                    throttled: job.counted(Counter::Throttled),
-                    throttled_us: job.counted(Counter::ThrottledNs) / 1000,
-                },
-                offered(job).contains(Controller::Cpu),
-            );
-        }
+        Kind::CpuStat => render_cpu_stat(&mut out, job),
         Kind::MemoryCurrent => render::number(&mut out, usage(job, Resource::Memory).used),
         Kind::MemoryMax => {
             let limit = usage(job, Resource::Memory).limit;
