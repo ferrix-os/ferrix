@@ -446,7 +446,7 @@ fn from_ancestor(target: &Process, origin: Origin) -> bool {
     let sender = match origin {
         Origin::Kernel => return true,
         Origin::User { pid, .. } | Origin::Thread { pid, .. } | Origin::Child { pid, .. } => pid,
-        Origin::Fault { .. } => return false,
+        Origin::Fault { .. } | Origin::Sys { .. } => return false,
     };
     let Some(ns) = target.numbers().map(|numbers| &numbers.ns) else {
         return true;

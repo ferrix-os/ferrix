@@ -229,7 +229,7 @@ const REFUSED: isize = -1;
 /// Drive every entry and every call an entry keeps for itself, and require the
 /// filter to have judged each first, once, with the entry's own token.
 ///
-/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51, `L.armv7a.1`, `L.armv7a.2`
+/// Verifies: H.TRAP.16, L.trap.7, `L.trap.8`, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51, `L.armv7a.1`, `L.armv7a.2`
 ///
 /// # Errors
 ///
@@ -331,6 +331,7 @@ fn all() -> Result<Report, &'static str> {
     errnos(&mut report)?;
     registration()?;
     rollback()?;
+    trap_verdict()?;
     Ok(report)
 }
 
@@ -411,6 +412,48 @@ fn rollback() -> Result<(), &'static str> {
         };
         if value != expected {
             return Err("a rolled-back frame would not read as it did at the call");
+        }
+    }
+    Ok(())
+}
+
+/// `Verdict::Trap` carries nothing, and the core answers it with the
+/// architecture's rollback of the call as the entry read it and no other value
+/// (`docs/SECCOMP.md` §3.6): the number on x86, the first argument on the Arm
+/// pair, whatever that argument is. One that reads as a restart code
+/// (`-512`, `ERESTARTSYS`) is such an argument like any other: the answer is
+/// written as the return value and never passes the dispatcher, which is the
+/// only thing that marks a call for restart, so it cannot be taken for one.
+fn trap_verdict() -> Result<(), &'static str> {
+    use ferrix_sync::Once;
+    fn trapping(_: &SyscallArgs) -> Verdict {
+        Verdict::Trap
+    }
+    let slot: Once<SyscallFilter> = Once::new();
+    crate::trap::register(&slot, trapping);
+    let wide = |value: i64| value as u64;
+    for first in [0x1111, wide(-512), wide(-516), wide(-1)] {
+        let args = SyscallArgs {
+            abi: Abi::Native,
+            number: 0x2222,
+            args: [first, 2, 3, 4, 5, 6],
+            ip: IP,
+        };
+        // The architecture's own rollback, and what it must be: the number on
+        // x86 (a filter chose none of it), the first argument as the program
+        // made the call on the Arm pair.
+        let expected = arch::syscall_rollback_value(Abi::Native, args.number, &args.args);
+        let wanted = if arch::ARCH.elf_machine() == 62 {
+            0x2222
+        } else {
+            first as isize
+        };
+        if expected != wanted {
+            return Err("SIGSYS's context lost the syscall number");
+        }
+        match crate::trap::ask(&slot, &args) {
+            Some(crate::trap::Outcome::Return(value)) if value == expected => {}
+            _ => return Err("SIGSYS's context lost the syscall number"),
         }
     }
     Ok(())
