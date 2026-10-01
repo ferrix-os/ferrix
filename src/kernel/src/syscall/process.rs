@@ -224,7 +224,7 @@ pub(crate) struct Process {
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
     credentials: SpinLock<Credentials>,
-    /// Its UTS, IPC and cgroup namespaces, named together (`docs/NAMESPACES.md`
+    /// Its UTS, IPC, cgroup and network namespaces, named together (`docs/NAMESPACES.md`
     /// §12). A leaf lock: cloned out before anything is done with what it
     /// names.
     nsproxy: SpinLock<NsProxy>,
@@ -538,6 +538,19 @@ impl Process {
         fs: Arc<SpinLock<Context>>,
     ) -> Result<Arc<Process>, AllocError> {
         fallible::try_arc(Process::with_context(space, pid, job, files, fs)?)
+    }
+
+    /// The network namespace it is in.
+    pub(crate) fn net_ns(&self) -> Arc<crate::net::NetNamespace> {
+        let held = self.nsproxy.lock().net.clone();
+        held.unwrap_or_else(|| Arc::clone(crate::net::first()))
+    }
+
+    /// Put it in another network namespace. What it held is dropped after the
+    /// lock is released, since the namespace it named may end there.
+    pub(crate) fn set_net_ns(&self, namespace: Arc<crate::net::NetNamespace>) {
+        let displaced = self.nsproxy.lock().net.replace(namespace);
+        drop(displaced);
     }
 
     /// Its descriptor table.

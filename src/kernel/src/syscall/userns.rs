@@ -54,6 +54,10 @@ pub(crate) const CAP_SETGID: u32 = 6;
 pub(crate) const CAP_SETUID: u32 = 7;
 /// `CAP_SETPCAP`.
 pub(crate) const CAP_SETPCAP: u32 = 8;
+/// `CAP_NET_ADMIN`.
+pub(crate) const CAP_NET_ADMIN: u32 = 12;
+/// `CAP_NET_RAW`.
+pub(crate) const CAP_NET_RAW: u32 = 13;
 /// `CAP_SYS_CHROOT`.
 pub(crate) const CAP_SYS_CHROOT: u32 = 18;
 /// `CAP_SYS_ADMIN`.
@@ -64,12 +68,17 @@ pub(crate) const FULL: u64 = (1_u64 << (CAP_LAST_CAP + 1)) - 1;
 
 /// What a capability in a child namespace allows. Nothing else is honoured
 /// there (`docs/NAMESPACES.md` §2.2): not `CAP_DAC_OVERRIDE`, `CAP_FOWNER`,
-/// `CAP_CHOWN`, `CAP_KILL` or `CAP_MKNOD`.
+/// `CAP_CHOWN`, `CAP_KILL` or `CAP_MKNOD`. `CAP_NET_ADMIN` and `CAP_NET_RAW`
+/// are honoured for the network namespaces the user namespace owns and for
+/// nothing else (`docs/NETNS.md` section 2.3): neither reaches a file, a
+/// process or a network namespace the first user namespace owns.
 pub(crate) const HONOURED: u64 = (1 << CAP_SETGID)
     | (1 << CAP_SETUID)
     | (1 << CAP_SETPCAP)
     | (1 << CAP_SYS_CHROOT)
-    | (1 << CAP_SYS_ADMIN);
+    | (1 << CAP_SYS_ADMIN)
+    | (1 << CAP_NET_ADMIN)
+    | (1 << CAP_NET_RAW);
 
 /// A process's four capability sets, as Linux's 64-bit masks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

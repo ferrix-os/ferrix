@@ -365,6 +365,7 @@ pub(super) fn check_namespaces(disk: bool) {
     check_user_namespaces();
     check_small_namespaces();
     check_pid_namespaces();
+    check_network_namespaces();
 }
 
 /// User namespaces: the rules of `docs/NAMESPACES.md` §4 attempted and
@@ -410,6 +411,22 @@ fn check_pid_namespaces() {
     };
     println!(
         "  pidns    {} calls answered as Linux answers them, {} of them refusals: pid 1 and 2 in a namespace and other numbers outside, kill, wait4, getppid, groups and sessions in the caller's numbers, an orphan given to its namespace's init, the init's end ending the namespace, an init ignoring what it does not catch from inside, si_pid and SO_PEERCRED told to the reader, a procfs and cgroup.procs of a namespace by its numbers, CLONE_NEWPID's privilege, flags and depth, a native child numbered in its creator's namespace, and a namespace closed by a failed first fork",
+        checked.calls, checked.refusals,
+    );
+}
+
+/// Network namespaces: the rules of `docs/NETNS.md` section 8 attempted and
+/// refused or accepted (NN1 to NN17).
+fn check_network_namespaces() {
+    let checked = match fs::netns_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_NETWORK_NAMESPACES,
+            "network namespace self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  netns    {} calls answered as Linux answers them, {} of them refusals: a new namespace with a loopback that is down, brought up by netlink and by ioctl, ports and sockets private to each, a socket staying where it was made, changes and raw sockets judged over the owning user namespace, a veth pair carrying a datagram and a stream between two namespaces and nothing to a third, moved and deleted, a device served where it went and home when the namespace ended, abstract names per namespace, /proc/net the reader's, tables at their ceilings",
         checked.calls, checked.refusals,
     );
 }
@@ -1047,7 +1064,8 @@ pub(super) fn check_kernel_memory() {
     println!(
         "  kmem     at a {} KiB memory limit a job made {} files, {} pipes, {} socket pairs, \
          {} descriptors in flight, {} epoll registrations, {} eventfds, {} regions of one \
-         mapping, {} record locks, {} semaphore sets, {} shared memory segments, {} mount namespaces of {} mounts, {} user, {} UTS, {} IPC, {} cgroup and {} pid namespaces, {} pid numbers and {} namespace files, and \
+         mapping, {} record locks, {} semaphore sets, {} shared memory segments, {} mount namespaces of {} mounts, {} user, {} UTS, {} IPC, {} cgroup and {} pid namespaces, {} pid numbers and {} namespace files, \
+         {} network namespaces, {} veth pairs and {} routes in a network namespace, and \
          was refused one more of each -- \
          ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged \
          came back",
@@ -1071,6 +1089,9 @@ pub(super) fn check_kernel_memory() {
         report.pid_namespaces,
         report.pid_numbers,
         report.namespace_files,
+        report.network_namespaces,
+        report.veth_pairs,
+        report.routes,
     );
 }
 

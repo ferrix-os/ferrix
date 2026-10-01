@@ -45,7 +45,9 @@ use ferrix_net::addr::{IpAddress, IpCidr, Ipv4};
 use ferrix_net::iface::{Address, IFF_MULTICAST, IFF_NOARP, IFF_POINTOPOINT, IFF_UP, Medium};
 use ferrix_vfs::Errno;
 
-use crate::net;
+use crate::net::NetNamespace;
+use crate::net::namespace;
+use crate::net::netlink::link;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 
@@ -72,10 +74,13 @@ const SETTABLE: u32 = IFF_UP | IFF_NOARP | IFF_PROMISC | IFF_ALLMULTI | IFF_MULT
 /// `ENOTTY` for a request this module does not know, so that the caller can
 /// go on to its own; and otherwise what the call refuses with.
 pub(crate) fn ioctl(process: &Process, request: u32, arg: u64) -> Result<usize, Errno> {
+    // The interfaces a program sees are its network namespace's.
+    let namespace = process.net_ns();
+    let ns = &namespace;
     match request {
-        SIOCGIFCONF => return config(process, arg),
+        SIOCGIFCONF => return config(ns, process, arg),
         SIOCGIFCOUNT => {
-            let count = net::core().with(|stack, _| stack.interfaces().len());
+            let count = ns.core().with(|stack, _| stack.interfaces().len());
             uaccess::put_u32(
                 process.space(),
                 arg,
@@ -83,30 +88,32 @@ pub(crate) fn ioctl(process: &Process, request: u32, arg: u64) -> Result<usize, 
             )?;
             return Ok(0);
         }
-        SIOCGIFNAME => return name_of_index(process, arg),
+        SIOCGIFNAME => return name_of_index(ns, process, arg),
         _ => {}
     }
-    if is_setter(request) && !process.with_credentials(|held| held.privileged()) {
+    // Changing one takes `CAP_NET_ADMIN` over the owner of the namespace.
+    if is_setter(request) && !link::net_admin(Some(process), ns) {
         return Err(Errno::EPERM);
     }
     let name = read_name(process, arg)?;
-    let index = net::core()
+    let index = ns
+        .core()
         .with(|stack, _| stack.interface_by_name(&name).map(|found| found.index))
         .ok_or(Errno::ENODEV)?;
     match request {
         SIOCGIFINDEX => uaccess::put_u32(process.space(), union_at(arg), index).map(|()| 0),
         SIOCGIFFLAGS => {
-            let flags = with_interface(index, |interface| interface.flags)?;
+            let flags = with_interface(ns, index, |interface| interface.flags)?;
             // `ifr_flags` is a `short`: sixteen bits, and the rest of the
             // union is the program's to have left as it was.
             put_u16(process, union_at(arg), flags as u16).map(|()| 0)
         }
-        SIOCSIFFLAGS => set_flags(process, index, arg),
+        SIOCSIFFLAGS => set_flags(ns, process, index, arg),
         SIOCGIFMTU => {
-            let mtu = with_interface(index, |interface| interface.mtu)?;
+            let mtu = with_interface(ns, index, |interface| interface.mtu)?;
             uaccess::put_u32(process.space(), union_at(arg), mtu).map(|()| 0)
         }
-        SIOCSIFMTU => set_mtu(process, index, arg),
+        SIOCSIFMTU => set_mtu(ns, process, index, arg),
         SIOCGIFTXQLEN => uaccess::put_u32(process.space(), union_at(arg), TXQLEN).map(|()| 0),
         // Linux takes a queue length and does nothing a stack with no queue
         // could show; refusing would fail `ifconfig eth0 txqueuelen 1000`.
@@ -115,14 +122,14 @@ pub(crate) fn ioctl(process: &Process, request: u32, arg: u64) -> Result<usize, 
         // set, as it refuses.
         SIOCGIFMETRIC => uaccess::put_u32(process.space(), union_at(arg), 0).map(|()| 0),
         SIOCSIFMETRIC => Err(Errno::EOPNOTSUPP),
-        SIOCGIFHWADDR => hardware(process, index, arg),
+        SIOCGIFHWADDR => hardware(ns, process, index, arg),
         SIOCGIFADDR | SIOCGIFDSTADDR | SIOCGIFBRDADDR | SIOCGIFNETMASK => {
-            get_address(process, index, request, arg)
+            get_address(ns, process, index, request, arg)
         }
         SIOCSIFADDR | SIOCSIFDSTADDR | SIOCSIFBRDADDR | SIOCSIFNETMASK => {
-            set_address(process, index, request, arg)
+            set_address(ns, process, index, request, arg)
         }
-        SIOCDIFADDR => delete_address(process, index, arg),
+        SIOCDIFADDR => delete_address(ns, process, index, arg),
         _ => Err(Errno::ENOTTY),
     }
 }
@@ -189,18 +196,20 @@ fn get_u16(process: &Process, at: u64) -> Result<u16, Errno> {
 /// Read something out of an interface, or `ENODEV` if it went away between
 /// the lookup and here.
 fn with_interface<T>(
+    ns: &NetNamespace,
     index: u32,
     read: impl FnOnce(&ferrix_net::iface::Interface) -> T,
 ) -> Result<T, Errno> {
-    net::core()
+    ns.core()
         .with(|stack, _| stack.interface(index).map(read))
         .ok_or(Errno::ENODEV)
 }
 
 /// `SIOCGIFNAME`: the index is in the union and the name comes back.
-fn name_of_index(process: &Process, arg: u64) -> Result<usize, Errno> {
+fn name_of_index(ns: &NetNamespace, process: &Process, arg: u64) -> Result<usize, Errno> {
     let index = uaccess::get_u32(process.space(), union_at(arg))?;
-    let name = net::core()
+    let name = ns
+        .core()
         .with(|stack, _| stack.interface(index).map(|found| found.name))
         .ok_or(Errno::ENODEV)?;
     write_name(process, arg, name.as_bytes())?;
@@ -208,30 +217,32 @@ fn name_of_index(process: &Process, arg: u64) -> Result<usize, Errno> {
 }
 
 /// `SIOCSIFFLAGS`.
-fn set_flags(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
+fn set_flags(ns: &NetNamespace, process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
     let wanted = u32::from(get_u16(process, union_at(arg))?);
     let up = wanted & IFF_UP != 0;
-    net::core()
-        .with(|stack, _| {
-            stack.set_up(index, up).map_err(|_| Errno::ENODEV)?;
-            let interface = stack.interface_mut(index).ok_or(Errno::ENODEV)?;
-            // Everything else the program may set, and nothing it may not:
-            // the driver's own bits -- `IFF_BROADCAST`, `IFF_LOOPBACK`,
-            // `IFF_RUNNING`, `IFF_LOWER_UP` -- are facts, not requests.
-            let settable = SETTABLE & !IFF_UP;
-            interface.flags = (interface.flags & !settable) | (wanted & settable);
-            Ok(())
-        })
-        .map(|()| 0)
+    let changed: Result<(), Errno> = ns.core().with(|stack, _| {
+        stack.set_up(index, up).map_err(|_| Errno::ENODEV)?;
+        let interface = stack.interface_mut(index).ok_or(Errno::ENODEV)?;
+        // Everything else the program may set, and nothing it may not:
+        // the driver's own bits -- `IFF_BROADCAST`, `IFF_LOOPBACK`,
+        // `IFF_RUNNING`, `IFF_LOWER_UP` -- are facts, not requests.
+        let settable = SETTABLE & !IFF_UP;
+        interface.flags = (interface.flags & !settable) | (wanted & settable);
+        Ok(())
+    });
+    // A virtual pair runs when both its ends are up.
+    ns.refresh_carriers();
+    let _ = ns.fit(0);
+    changed.map(|()| 0)
 }
 
 /// `SIOCSIFMTU`.
-fn set_mtu(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
+fn set_mtu(ns: &NetNamespace, process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
     let mtu = uaccess::get_u32(process.space(), union_at(arg))?;
     if !(MIN_MTU..=MAX_MTU).contains(&mtu) {
         return Err(Errno::EINVAL);
     }
-    net::core().with(|stack, _| {
+    ns.core().with(|stack, _| {
         let interface = stack.interface_mut(index).ok_or(Errno::ENODEV)?;
         interface.mtu = mtu;
         Ok(0)
@@ -240,8 +251,8 @@ fn set_mtu(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
 
 /// `SIOCGIFHWADDR`: a `sockaddr` whose family is the `ARPHRD_` kind and whose
 /// data is the address.
-fn hardware(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
-    let (kind, mac) = with_interface(index, |interface| {
+fn hardware(ns: &NetNamespace, process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
+    let (kind, mac) = with_interface(ns, index, |interface| {
         let kind = match interface.medium {
             Medium::Ethernet => ARPHRD_ETHER,
             Medium::Loopback => ARPHRD_LOOPBACK,
@@ -258,8 +269,8 @@ fn hardware(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
 }
 
 /// The IPv4 address an interface is configured with, for the getters.
-fn first_v4(index: u32) -> Result<Address, Errno> {
-    let found = with_interface(index, |interface| {
+fn first_v4(ns: &NetNamespace, index: u32) -> Result<Address, Errno> {
+    let found = with_interface(ns, index, |interface| {
         interface
             .addresses
             .iter()
@@ -289,8 +300,14 @@ fn prefix_of(mask: Ipv4) -> u8 {
 }
 
 /// `SIOCGIFADDR`, `SIOCGIFDSTADDR`, `SIOCGIFBRDADDR` and `SIOCGIFNETMASK`.
-fn get_address(process: &Process, index: u32, request: u32, arg: u64) -> Result<usize, Errno> {
-    let address = first_v4(index)?;
+fn get_address(
+    ns: &NetNamespace,
+    process: &Process,
+    index: u32,
+    request: u32,
+    arg: u64,
+) -> Result<usize, Errno> {
+    let address = first_v4(ns, index)?;
     let IpAddress::V4(four) = address.cidr.address() else {
         return Err(Errno::EADDRNOTAVAIL);
     };
@@ -347,9 +364,15 @@ fn read_v4(process: &Process, at: u64) -> Result<Ipv4, Errno> {
 /// of them rewrites that one: setting the address keeps the mask the
 /// interface had, and setting the mask keeps the address. That is what
 /// `ifconfig eth0 10.0.2.15 netmask 255.255.255.0` means, two calls in a row.
-fn set_address(process: &Process, index: u32, request: u32, arg: u64) -> Result<usize, Errno> {
+fn set_address(
+    ns: &NetNamespace,
+    process: &Process,
+    index: u32,
+    request: u32,
+    arg: u64,
+) -> Result<usize, Errno> {
     let given = read_v4(process, union_at(arg))?;
-    let held = first_v4(index).ok();
+    let held = first_v4(ns, index).ok();
     let (address, prefix_len, peer) = match request {
         SIOCSIFADDR => {
             let prefix = held.map_or_else(|| classful(given), |had| had.cidr.prefix_len());
@@ -376,7 +399,11 @@ fn set_address(process: &Process, index: u32, request: u32, arg: u64) -> Result<
         SIOCSIFBRDADDR => return Ok(0),
         _ => return Err(Errno::ENOTTY),
     };
-    net::core().with(|stack, _| {
+    ns.admit()?;
+    let done = ns.core().with(|stack, _| {
+        if held.is_none() && stack.address_count() >= namespace::MAX_ADDRESSES {
+            return Err(Errno::ENOSPC);
+        }
         if let Some(had) = held {
             let _ = stack.remove_address(index, had.cidr.address());
         }
@@ -395,14 +422,21 @@ fn set_address(process: &Process, index: u32, request: u32, arg: u64) -> Result<
             interface.flags |= IFF_POINTOPOINT;
         }
         Ok(())
-    })?;
+    });
+    let _ = ns.fit(0);
+    done?;
     Ok(0)
 }
 
 /// `SIOCDIFADDR`.
-fn delete_address(process: &Process, index: u32, arg: u64) -> Result<usize, Errno> {
+fn delete_address(
+    ns: &NetNamespace,
+    process: &Process,
+    index: u32,
+    arg: u64,
+) -> Result<usize, Errno> {
     let address = read_v4(process, union_at(arg))?;
-    net::core().with(|stack, _| {
+    ns.core().with(|stack, _| {
         stack
             .remove_address(index, IpAddress::V4(address))
             .map_err(|_| Errno::EADDRNOTAVAIL)
@@ -427,12 +461,12 @@ fn classful(address: Ipv4) -> u8 {
 /// one four and four. A length with a null pointer, or a length of zero, asks
 /// how many bytes the answer needs; anything else is filled to the length and
 /// the length is written back with what was used.
-fn config(process: &Process, arg: u64) -> Result<usize, Errno> {
+fn config(ns: &NetNamespace, process: &Process, arg: u64) -> Result<usize, Errno> {
     let word = size_of::<usize>() as u64;
     let length = uaccess::get_u32(process.space(), arg)? as usize;
     let buffer = uaccess::get_word(process.space(), arg.wrapping_add(word))?;
 
-    let entries: Vec<(ferrix_net::iface::Name, Ipv4)> = net::core().with(|stack, _| {
+    let entries: Vec<(ferrix_net::iface::Name, Ipv4)> = ns.core().with(|stack, _| {
         stack
             .interfaces()
             .iter()

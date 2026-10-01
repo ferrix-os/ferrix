@@ -603,6 +603,22 @@ pub const IFLA_AF_SPEC: u16 = 26;
 pub const IFLA_GROUP: u16 = 27;
 /// Link attribute: whether the carrier is up, one byte.
 pub const IFLA_CARRIER: u16 = 33;
+/// Link attribute: nested, what kind of link this is and its settings.
+pub const IFLA_LINKINFO: u16 = 18;
+/// Link attribute: the process whose network namespace the link goes to, a
+/// `u32`.
+pub const IFLA_NET_NS_PID: u16 = 19;
+/// Link attribute: the descriptor of the network namespace the link goes to, a
+/// `u32`.
+pub const IFLA_NET_NS_FD: u16 = 28;
+
+/// Inside `IFLA_LINKINFO`: the kind's name, `veth` for a virtual pair.
+pub const IFLA_INFO_KIND: u16 = 1;
+/// Inside `IFLA_LINKINFO`: the kind's own attributes, nested.
+pub const IFLA_INFO_DATA: u16 = 2;
+/// Inside a `veth`'s `IFLA_INFO_DATA`: the other end, as an `ifinfomsg` and
+/// the attributes of a link.
+pub const VETH_INFO_PEER: u16 = 1;
 
 /// Address attribute: none.
 pub const IFA_UNSPEC: u16 = 0;

@@ -403,7 +403,10 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 /// `ENOSPC` for a pid namespace past the depth limit.
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
     const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
-    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID | SMALL)) != 0 {
+    if flags
+        & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET | SMALL))
+        != 0
+    {
         return Err(Errno::EINVAL);
     }
     if flags & SMALL != 0 && flags & CLONE_THREAD != 0 {
@@ -411,6 +414,17 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
     }
     if flags & CLONE_NEWIPC != 0 && flags & CLONE_SYSVSEM != 0 {
         return Err(Errno::EINVAL);
+    }
+    // A thread cannot have a network namespace of its own: it is its
+    // process's (`docs/NETNS.md` section 2.2).
+    if flags & CLONE_NEWNET != 0 && flags & CLONE_THREAD != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if flags & CLONE_NEWNET != 0
+        && flags & CLONE_NEWUSER == 0
+        && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
+    {
+        return Err(Errno::EPERM);
     }
     // CVE-2013-1858 (U5): a root shared with a process outside, then `chroot`
     // inside. And a thread cannot have a user namespace of its own.
@@ -485,6 +499,11 @@ pub(crate) fn give_namespaces(
     }
     if flags & (CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP) != 0 {
         child.set_nsproxy(nsproxy::make(parent, flags, &owner, parent.job())?);
+    }
+    if flags & CLONE_NEWNET != 0 {
+        // Owned by the user namespace the child is in, the new one if it has
+        // one, and charged to the job of the parent, who is asking.
+        child.set_net_ns(crate::net::namespace::create(owner)?);
     }
     Ok(())
 }

@@ -242,6 +242,23 @@ impl Neighbors {
         });
     }
 
+    /// The heap the cache holds: its entries and the packets they hold back.
+    #[must_use]
+    pub fn footprint(&self) -> usize {
+        self.entries.iter().fold(0_usize, |total, entry| {
+            let queued: usize = entry.queued.iter().map(Vec::capacity).sum();
+            total
+                .saturating_add(size_of::<Entry>())
+                .saturating_add(queued)
+        })
+    }
+
+    /// Forget everything learned, keeping only what was configured by hand:
+    /// what a namespace does when it cannot pay for the cache.
+    pub fn shed(&mut self) {
+        self.entries.retain(|entry| entry.state == State::Permanent);
+    }
+
     /// Forget an address. Answers whether there was one.
     pub fn remove(&mut self, interface: u32, address: IpAddress) -> bool {
         let before = self.entries.len();

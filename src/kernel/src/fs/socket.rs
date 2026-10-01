@@ -403,6 +403,9 @@ pub(crate) struct Socket {
     /// call, as Linux takes them (`docs/AUTH.md` §8.3, E-01). A socket with
     /// no peer has none, and answers the overflow ids.
     peer_credentials: SpinLock<Option<Ucred>>,
+    /// The network namespace it was made in, by its number: where an
+    /// abstract name it binds or connects to is looked for.
+    net_ns: u64,
     /// The name `bind` gave it. Set once: Linux's `unix_bind` refuses a
     /// second one.
     bound: SpinLock<Option<Name>>,
@@ -551,6 +554,7 @@ impl Socket {
         credentials: Ucred,
         peer_credentials: Option<Ucred>,
         (uid, gid): (u32, u32),
+        net_ns: u64,
     ) -> Result<Arc<Socket>, Errno> {
         let names = footprint(SOCKADDR_UN_SIZE, 1).saturating_mul(4);
         let charge = Charge::bytes(
@@ -574,6 +578,7 @@ impl Socket {
                 shut_write: false,
             }),
             credentials,
+            net_ns,
             listen_credentials: SpinLock::new(None),
             peer_credentials: SpinLock::new(peer_credentials),
             bound: SpinLock::new(None),
@@ -648,14 +653,14 @@ impl Socket {
         let name = match *address {
             UnixAddress::Unnamed => return Err(Errno::EINVAL),
             UnixAddress::Path(path) => sockname::bind_path(self, ctx, None, path)?,
-            UnixAddress::Abstract(name) => sockname::bind_abstract(self, name)?,
+            UnixAddress::Abstract(name) => sockname::bind_abstract(self, self.net_ns, name)?,
         };
         let mut bound = self.bound.lock();
         if bound.is_some() {
             // Two binds at once, and this one lost. Undo it rather than leave
             // a name pointing at a socket that answers by another.
             drop(bound);
-            sockname::forget(&name);
+            sockname::forget(&name, self.net_ns);
             return Err(Errno::EINVAL);
         }
         *bound = Some(name);
@@ -740,7 +745,7 @@ impl Socket {
         let target = match *address {
             UnixAddress::Unnamed => return Err(Errno::EINVAL),
             UnixAddress::Path(path) => sockname::socket_at(ctx, None, path)?,
-            UnixAddress::Abstract(name) => sockname::socket_named(name)?,
+            UnixAddress::Abstract(name) => sockname::socket_named(self.net_ns, name)?,
         };
         // A stream may not connect to a datagram socket bound to the same
         // name, which is what Linux answers `EPROTOTYPE` to.
@@ -811,6 +816,7 @@ impl Socket {
                 target.credentials,
                 Some(caller),
                 (target.metadata.uid, target.metadata.gid),
+                target.net_ns,
             )?;
             let queued = {
                 let mut listener = target.listener.lock();
@@ -1551,7 +1557,7 @@ impl Drop for Socket {
         // The name goes first, so that a `connect` racing this drop finds
         // nothing rather than a socket whose channels are already closing.
         if let Some(name) = self.bound.lock().take() {
-            sockname::forget(&name);
+            sockname::forget(&name, self.net_ns);
         }
         // Nobody reads this direction again: what is queued goes, and a writer
         // sees a broken socket. Taken out under the lock, dropped after it.
@@ -1770,7 +1776,15 @@ pub(crate) fn new_socket(
     let credentials = credentials_of(creator);
     let owner = crate::syscall::path::creator_ids(creator);
     open(
-        Socket::new(kind, None, Channel::new(kind)?, credentials, None, owner)?,
+        Socket::new(
+            kind,
+            None,
+            Channel::new(kind)?,
+            credentials,
+            None,
+            owner,
+            creator.net_ns().id(),
+        )?,
         nonblock,
     )
 }
@@ -1798,8 +1812,17 @@ pub(crate) fn new_pair(
         mine,
         credentials,
         owner,
+        creator.net_ns().id(),
     )?;
-    let other = Socket::new(kind, Some(first), second, mine, credentials, owner)?;
+    let other = Socket::new(
+        kind,
+        Some(first),
+        second,
+        mine,
+        credentials,
+        owner,
+        creator.net_ns().id(),
+    )?;
     Ok((open(one, nonblock)?, open(other, nonblock)?))
 }
 

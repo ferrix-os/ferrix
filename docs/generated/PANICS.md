@@ -82,6 +82,7 @@ Causes are listed most likely first.
 | [FX-0890](#fx-0890) | sysfs did not show the machine's devices as Linux shows them |
 | [FX-0891](#fx-0891) | A pid namespace failed its self-check |
 | [FX-0892](#fx-0892) | A UTS, IPC or cgroup namespace, or setns, failed its self-check |
+| [FX-0893](#fx-0893) | A network namespace failed its self-check |
 | [FX-0901](#fx-0901) | the native ABI's objects failed their self-check |
 | [FX-0902](#fx-0902) | an allocation failure was not survived |
 | [FX-0903](#fx-0903) | a native call accepted what the ABI says it refuses |
@@ -1930,6 +1931,42 @@ See: src/kernel/src/fs/smallns_check.rs; src/kernel/src/syscall/nsproxy.rs;
 src/kernel/src/fs/nsfs.rs; src/kernel/src/syscall/namespace.rs;
 src/kernel/src/syscall/system.rs; src/kernel/src/syscall/sem.rs;
 src/kernel/src/fs/cgroupfs.rs.
+
+<a id="fx-0893"></a>
+
+## FX-0893 — A network namespace failed its self-check
+
+`fs::netns_check::run` makes network namespaces as root and as uid 1000. An
+unprivileged process must be refused CLONE_NEWNET until it makes a user
+namespace with it, which then owns it; a new namespace must hold a loopback that
+is down with no address and no route, and bring 127.0.0.1 and ::1 up by
+RTM_NEWLINK and by SIOCSIFFLAGS; two namespaces must share no port, no socket
+and no view of /proc/net or netlink, and a socket must stay in the namespace it
+was made in when its maker moves. Changes need CAP_NET_ADMIN and raw sockets
+CAP_NET_RAW over the user namespace that owns the network namespace: an
+unprivileged process and fake root are refused the first namespace, the owner is
+allowed its own. A veth pair made by netlink must carry a datagram and a stream
+between two namespaces and nothing to a third, come up only when both ends do,
+be moved only by a caller with authority over both owners, follow an end that
+moves by descriptor, and go with either end. A physical device must move with
+its ring and come home when the namespace it went to ends; abstract unix names
+must be per namespace; /proc/<pid>/ns/net and /proc/net must show the reader's;
+and the ceilings on interfaces, addresses and routes must hold (docs/NETNS.md
+section 8, NN1 to NN17).
+
+1. `NetNamespace::create` shares a stack or starts the loopback up, or
+   `Stack::set_up` no longer gives a loopback its addresses.
+2. `link::net_admin` or `userns::capable_over` answers for a capability over the
+   wrong user namespace, or `HONOURED` lost `CAP_NET_ADMIN` or `CAP_NET_RAW`.
+3. `veth::forward` or `veth::peer` delivers to the wrong end, or `Drop for
+   NetNamespace` leaves a veth end or a device behind.
+4. `namespace::transfer` does not update the device registry or the pair record.
+5. `sockname` keys abstract names without the network namespace, or `/proc/net`
+   reads the first namespace.
+
+See: src/kernel/src/fs/netns_check.rs; src/kernel/src/net/namespace.rs;
+src/kernel/src/net/veth.rs; src/kernel/src/net/device.rs;
+src/kernel/src/net/netlink/link.rs; docs/NETNS.md.
 
 <a id="fx-0901"></a>
 
