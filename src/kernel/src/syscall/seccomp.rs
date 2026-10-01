@@ -137,6 +137,15 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// A thread in filter mode that holds no filter: a state nothing can make,
+    /// for the boot check that a thread found in it is ended, not let go on.
+    pub(crate) fn filter_mode_with_no_filter() -> State {
+        State {
+            mode: Mode::Filter,
+            filter: None,
+        }
+    }
+
     /// Whether the thread is under seccomp at all.
     pub(crate) fn is_active(&self) -> bool {
         self.mode != Mode::Disabled

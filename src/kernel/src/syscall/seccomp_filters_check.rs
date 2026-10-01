@@ -385,6 +385,18 @@ fn ordering() -> Result<(), &'static str> {
     if logged.judges(getppid) != Some(0) {
         return Err("a LOG result stopped the call");
     }
+    // A thread in filter mode with no filter -- which nothing can make -- is
+    // ended, never let go on: Linux answers it with a kill.
+    let hollow = Env::new()?;
+    hollow
+        .thread
+        .with_seccomp(|state| *state = State::filter_mode_with_no_filter());
+    let hollow_answer = hollow.judges(getppid);
+    let hollow_ended = hollow.process.is_terminated();
+    process::kill(&hollow.process, 137);
+    if hollow_answer == Some(0) || !hollow_ended {
+        return Err("a thread in filter mode with no filter was let go on");
+    }
     // A filter that is not ours to read, an action nobody defined, is the
     // strictest there is: it ends the process.
     let odd = Env::new()?;
