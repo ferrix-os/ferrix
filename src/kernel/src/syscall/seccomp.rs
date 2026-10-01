@@ -41,7 +41,7 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_seccomp::{
     ACTION_FULL, ALLOW, DATA, ERRNO, Insn, KILL_PROCESS, KILL_THREAD, LOG, MAX_INSNS, Program,
-    SeccompData, TRACE, USER_NOTIF,
+    SeccompData, TRACE, TRAP, USER_NOTIF,
 };
 
 use crate::arch;
@@ -49,8 +49,9 @@ use crate::console::println;
 use crate::sched;
 use crate::sync::SpinLock;
 use crate::syscall::process::{self, Process};
+use crate::syscall::signal::{Origin, Posted};
 use crate::syscall::thread::{self, Thread};
-use crate::syscall::{attributes, uaccess, userns};
+use crate::syscall::{attributes, deliver, uaccess, userns};
 use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// The `arch` a call in the native range carries.
@@ -93,12 +94,69 @@ pub(crate) mod flag {
     pub(crate) const BUILT: u64 = LOG | SPEC_ALLOW;
 }
 
-/// `prctl`'s seccomp options.
+/// `prctl`'s seccomp options, and the speculation controls a filter's installer
+/// asks about (`docs/SECCOMP.md` §3.9).
 pub(crate) mod option {
     /// `PR_GET_SECCOMP`.
     pub(crate) const PR_GET_SECCOMP: i32 = 21;
     /// `PR_SET_SECCOMP`.
     pub(crate) const PR_SET_SECCOMP: i32 = 22;
+    /// `PR_GET_SPECULATION_CTRL`.
+    pub(crate) const PR_GET_SPECULATION_CTRL: i32 = 52;
+    /// `PR_SET_SPECULATION_CTRL`.
+    pub(crate) const PR_SET_SPECULATION_CTRL: i32 = 53;
+}
+
+/// `PR_SPEC_STORE_BYPASS` and `PR_SPEC_INDIRECT_BRANCH`: the two features
+/// `PR_{GET,SET}_SPECULATION_CTRL` name that this kernel mitigates.
+const PR_SPEC_STORE_BYPASS: u64 = 0;
+/// See [`PR_SPEC_STORE_BYPASS`].
+const PR_SPEC_INDIRECT_BRANCH: u64 = 1;
+/// `PR_SPEC_PRCTL`: controllable by `prctl`.
+const PR_SPEC_PRCTL: usize = 1 << 0;
+/// `PR_SPEC_ENABLE`: the speculation is on.
+const PR_SPEC_ENABLE: u64 = 1 << 1;
+/// `PR_SPEC_DISABLE`: the speculation is off.
+const PR_SPEC_DISABLE: u64 = 1 << 2;
+/// `PR_SPEC_FORCE_DISABLE`: off, and not to be turned on again.
+const PR_SPEC_FORCE_DISABLE: u64 = 1 << 3;
+
+/// `prctl(PR_GET_SPECULATION_CTRL, which)`: what a program is told about the
+/// mitigations of store bypass and indirect branches. On Ferrix they are on for
+/// every program and no program may turn them off (`docs/certification/
+/// SPECULATION.md`), so both answer "force-disabled", the state Linux reports
+/// for a task whose mitigation was forced on: Chromium's `DisableIBSpec` reads
+/// it and has nothing to do. Any other feature is `ENODEV`, as Linux answers a
+/// feature it has no control for.
+fn speculation_get(which: u64, rest: [u64; 3]) -> Result<usize, Errno> {
+    if rest != [0; 3] {
+        return Err(Errno::EINVAL);
+    }
+    match which {
+        PR_SPEC_STORE_BYPASS | PR_SPEC_INDIRECT_BRANCH => {
+            Ok(PR_SPEC_PRCTL | PR_SPEC_FORCE_DISABLE as usize)
+        }
+        _ => Err(Errno::ENODEV),
+    }
+}
+
+/// `prctl(PR_SET_SPECULATION_CTRL, which, control)`: a request for more
+/// mitigation is already true and is accepted; one for less, `PR_SPEC_ENABLE`,
+/// is `EPERM`, as Linux refuses it for a feature that was forced off (SR14: no
+/// filter and no flag lowers a mitigation). A value that is no control is
+/// `ERANGE`, and a non-zero argument beyond is `EINVAL`.
+fn speculation_set(which: u64, control: u64, rest: [u64; 2]) -> Result<usize, Errno> {
+    if rest != [0; 2] {
+        return Err(Errno::EINVAL);
+    }
+    if !matches!(which, PR_SPEC_STORE_BYPASS | PR_SPEC_INDIRECT_BRANCH) {
+        return Err(Errno::ENODEV);
+    }
+    match control {
+        PR_SPEC_DISABLE | PR_SPEC_FORCE_DISABLE => Ok(0),
+        PR_SPEC_ENABLE => Err(Errno::EPERM),
+        _ => Err(Errno::ERANGE),
+    }
 }
 
 /// `SECCOMP_MODE_*`, as `PR_GET_SECCOMP` and `/proc/<pid>/status` report it.
@@ -421,13 +479,41 @@ fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision 
             }
             Decision::Verdict(Verdict::Errno(ENOSYS))
         }
+        TRAP => trap(thread, args, data, log),
         KILL_THREAD => kill_thread(thread, args, SIGSYS, true),
-        // `KILL_PROCESS`, an action nobody defined -- Linux counts it as
-        // `KILL_PROCESS` -- and, until the landing that delivers `SIGSYS` with
-        // its registers rolled back (`docs/SECCOMP.md` §3.6), `TRAP`: a filter
-        // that asks for it gets the most restrictive thing it could have
-        // asked for, which is what a program with no handler would get.
+        // `KILL_PROCESS`, and an action nobody defined, which Linux counts as
+        // `KILL_PROCESS` too.
         _ => kill_process(thread, args, action),
+    }
+}
+
+/// `SECCOMP_RET_TRAP`: the call does not run, `SIGSYS` is forced on the calling
+/// thread -- unblocked, and reset to its default if it was ignored or blocked,
+/// as Linux's `force_sig_seccomp` does -- and the core gives the registers
+/// back as the program made the call (`Verdict::Trap`), so that the signal is
+/// delivered on the way out of this very call, before any other instruction of
+/// the program runs, with a context in which a handler finds the call. A
+/// program that blocks or ignores `SIGSYS` cannot escape a trap: it dies of it
+/// (SR9). `si_errno` is the filter's data, `si_call_addr` the instruction
+/// after the call, `si_syscall` the number and `si_arch` the entry's token.
+fn trap(thread: &Thread, args: &SyscallArgs, errno: u32, log: bool) -> Decision {
+    if log {
+        report(thread, args, "trap", TRAP);
+    }
+    let seen = data(args);
+    let origin = Origin::Sys {
+        errno,
+        call_addr: seen.instruction_pointer,
+        syscall: seen.nr,
+        arch: seen.arch,
+    };
+    // The running thread's own: the hook runs on the thread that made the call.
+    match deliver::force(SIGSYS, origin) {
+        // Nothing to raise it against, or the process is ended already (the
+        // signal's default action, with no handler, is fatal): not a program
+        // that may go on.
+        None | Some(Posted::Fatal) => kill_process(thread, args, TRAP),
+        Some(_) => Decision::Verdict(Verdict::Trap),
     }
 }
 
@@ -698,6 +784,8 @@ pub(crate) fn dispatch(
             abi,
         )),
         Syscall::Prctl => match a[0] as u32 as i32 {
+            option::PR_GET_SPECULATION_CTRL => Some(speculation_get(a[1], [a[2], a[3], a[4]])),
+            option::PR_SET_SPECULATION_CTRL => Some(speculation_set(a[1], a[2], [a[3], a[4]])),
             option::PR_GET_SECCOMP => Some(prctl_get(process)),
             option::PR_SET_SECCOMP => Some(
                 thread::current_of(process)
@@ -805,9 +893,8 @@ fn read_program(process: &Process, at: u64, length: usize) -> Result<Vec<Insn>, 
 fn action_available(process: &Process, at: u64) -> Result<usize, Errno> {
     let action = uaccess::get_u32(process.space(), at).map_err(|_| Errno::EFAULT)?;
     match action {
-        KILL_PROCESS | KILL_THREAD | ERRNO | TRACE | LOG | ALLOW => Ok(0),
-        // Built when `SIGSYS` is delivered (§3.6); a filter that returns it
-        // until then is killed, which is stricter and never "allowed".
+        KILL_PROCESS | KILL_THREAD | TRAP | ERRNO | TRACE | LOG | ALLOW => Ok(0),
+        // `USER_NOTIF` needs a listener, which is not built.
         _ => Err(Errno::EOPNOTSUPP),
     }
 }

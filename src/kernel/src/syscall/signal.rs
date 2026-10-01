@@ -175,6 +175,20 @@ pub(crate) enum Origin {
         /// Its exit code, or the signal that ended, stopped or continued it.
         status: i32,
     },
+    /// A system call a seccomp filter trapped: `SIGSYS` with `si_code`
+    /// `SYS_SECCOMP`, the filter's data as `si_errno`, and the call, as
+    /// `_sigsys` (`_call_addr`, `_syscall`, `_arch`).
+    Sys {
+        /// `SECCOMP_RET_DATA`: the 16 bits the filter returned with `TRAP`.
+        errno: u32,
+        /// The instruction after the call: where the program's context says it
+        /// is, so that a handler can check the signal is the kernel's.
+        call_addr: u64,
+        /// The call's number.
+        syscall: i32,
+        /// The `AUDIT_ARCH_*` token of the entry the call was made through.
+        arch: u32,
+    },
     /// A fault in the program's own instruction.
     Fault {
         /// `SEGV_MAPERR`, `SEGV_ACCERR`, `ILL_ILLOPC` and their like.
@@ -190,6 +204,8 @@ const SI_KERNEL: i32 = 0x80;
 const SI_USER: i32 = 0;
 /// `si_code` for `tkill` and `tgkill`.
 const SI_TKILL: i32 = -6;
+/// `si_code` for a system call a seccomp filter trapped.
+pub(crate) const SYS_SECCOMP: i32 = 1;
 
 /// Bytes in `siginfo_t` on every architecture.
 pub(crate) use crate::signal_frame::SIGINFO_BYTES;
@@ -227,6 +243,22 @@ impl Origin {
                 put_int(&mut info, union + 4, credentials::show_uid(uid) as i32);
                 put_int(&mut info, union + 8, status);
                 code
+            }
+            Origin::Sys {
+                errno,
+                call_addr,
+                syscall,
+                arch,
+            } => {
+                // `siginfo_t._sigsys`: a pointer, then two `int`s, laid out
+                // for this machine's word. A 32-bit program on a 64-bit
+                // kernel gets its own layout from
+                // `sigframe32::siginfo_from_64`, which knows this origin.
+                put_int(&mut info, 4, errno as i32);
+                let _ = put_word(&mut info, union, call_addr, WORD);
+                put_int(&mut info, union + WORD, syscall);
+                put_int(&mut info, union + WORD + 4, arch as i32);
+                SYS_SECCOMP
             }
             Origin::Fault { code, address } => {
                 let _ = put_word(&mut info, union, address, WORD);
@@ -268,6 +300,10 @@ impl Origin {
                 put_int(&mut info, 16, credentials::show_uid(uid) as i32);
                 put_int(&mut info, 40, status);
                 code
+            }
+            Origin::Sys { errno, .. } => {
+                put_int(&mut info, 4, errno as i32);
+                SYS_SECCOMP
             }
             Origin::Fault { code, address } => {
                 if let Some(slot) = info.get_mut(72..80) {
