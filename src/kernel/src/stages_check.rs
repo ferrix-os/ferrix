@@ -80,6 +80,7 @@ pub(super) fn check_programs() {
     // The filter the core's entries ask first about every call, driven through
     // each entry with frames of the check's own.
     check_seccomp();
+    check_seccomp_filters();
 
     // A mount's own flags, enforced and shown; under /tmp, after the root.
     check_mount_flags();
@@ -273,6 +274,24 @@ pub(super) fn check_seccomp() {
         checked.step / 10,
         checked.step % 10,
         checked.step * 32_768 / 10_000,
+    );
+}
+
+/// seccomp's filters (`docs/SECCOMP.md` §8.1, S3): installed as a program does,
+/// judged through the core's own entry, ordered, inherited and released.
+pub(super) fn check_seccomp_filters() {
+    let checked = match syscall::seccomp_filters_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_SECCOMP_FILTERS,
+            "seccomp filters self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  seccomp  {} probes answered as Linux answers them, {} calls a filtered thread made \
+         through the entry and judged, {} children and threads that held their creator's chain, \
+         {} processes a filter ended, and a chain of {} filters made and released",
+        checked.probes, checked.calls, checked.inherited, checked.killed, checked.chain,
     );
 }
 
@@ -992,7 +1011,7 @@ pub(super) fn check_kernel_memory() {
     println!(
         "  kmem     at a {} KiB memory limit a job made {} files, {} pipes, {} socket pairs, \
          {} descriptors in flight, {} epoll registrations, {} eventfds, {} regions of one \
-         mapping, {} record locks, {} semaphore sets, {} mount namespaces of {} mounts and {} user namespaces, and \
+         mapping, {} record locks, {} semaphore sets, {} mount namespaces of {} mounts, {} user namespaces and {} seccomp filters, and \
          was refused one more of each -- \
          ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged \
          came back",
@@ -1009,6 +1028,7 @@ pub(super) fn check_kernel_memory() {
         report.namespaces,
         fs::kmem_check::TREE,
         report.user_namespaces,
+        report.filters,
     );
 }
 

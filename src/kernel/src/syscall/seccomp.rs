@@ -652,14 +652,14 @@ pub(crate) fn do_seccomp(
 /// flags.
 pub(crate) fn prctl_set(
     process: &Process,
+    thread: &Thread,
     mode: u64,
     filter: u64,
     abi: Abi,
 ) -> Result<usize, Errno> {
-    let thread = thread::current_of(process).ok_or(Errno::ESRCH)?;
     match mode {
-        1 => set_strict(&thread),
-        2 => set_filter(process, &thread, 0, filter, abi),
+        1 => set_strict(thread),
+        2 => set_filter(process, thread, 0, filter, abi),
         _ => Err(Errno::EINVAL),
     }
 }
@@ -691,7 +691,11 @@ pub(crate) fn dispatch(
         )),
         Syscall::Prctl => match a[0] as u32 as i32 {
             option::PR_GET_SECCOMP => Some(prctl_get(process)),
-            option::PR_SET_SECCOMP => Some(prctl_set(process, a[1], a[2], abi)),
+            option::PR_SET_SECCOMP => Some(
+                thread::current_of(process)
+                    .ok_or(Errno::ESRCH)
+                    .and_then(|thread| prctl_set(process, &thread, a[1], a[2], abi)),
+            ),
             _ => None,
         },
         _ => None,

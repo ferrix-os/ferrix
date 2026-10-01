@@ -81,6 +81,7 @@ pub(crate) mod program_check;
 pub(crate) mod registry;
 pub(crate) mod seccomp;
 pub(crate) mod seccomp_check;
+pub(crate) mod seccomp_filters_check;
 pub(crate) mod sem;
 pub(crate) mod sem_check;
 pub(crate) mod signal;
