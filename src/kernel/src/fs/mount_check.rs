@@ -23,6 +23,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::{offset_of, size_of};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
@@ -42,6 +43,10 @@ use crate::syscall::uaccess;
 
 /// Where the check mounts its tmpfs.
 const MOUNT_POINT: &[u8] = b"/tmp/.mount-check";
+/// Where the check binds the mount, to show the bind keeps what it was given.
+const BIND_POINT: &[u8] = b"/tmp/.mount-check-bind";
+/// Whether [`under`] names the bind and not the mount.
+static THROUGH_THE_BIND: AtomicBool = AtomicBool::new(false);
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
@@ -198,9 +203,14 @@ pub(super) fn close(process: &Process, fd: usize) {
     let _ = by_number(process, Syscall::Close, [fd as u64, 0, 0, 0, 0, 0]);
 }
 
-/// A path under [`MOUNT_POINT`].
+/// A path under [`MOUNT_POINT`], or under [`BIND_POINT`] while the bind is checked.
 fn under(name: &[u8]) -> Vec<u8> {
-    let mut path = MOUNT_POINT.to_vec();
+    let mut path = if THROUGH_THE_BIND.load(Ordering::Relaxed) {
+        BIND_POINT
+    } else {
+        MOUNT_POINT
+    }
+    .to_vec();
     path.push(b'/');
     path.extend_from_slice(name);
     path
@@ -270,6 +280,7 @@ fn check(page: &mut Page<'_>, report: &mut Report) -> Result<(), &'static str> {
     changes_are_erofs(page, &mut tally)?;
     attributes_are_erofs(page, &mut tally)?;
     no_devices_no_programs(page, &mut tally)?;
+    through_a_bind(page, &mut tally)?;
     page.reset();
     let junk = page.put(b"abc")?;
     let got = by_number(process, Syscall::Write, [early as u64, junk, 3, 0, 0, 0]);
@@ -285,6 +296,66 @@ fn check(page: &mut Page<'_>, report: &mut Report) -> Result<(), &'static str> {
 
     one_flag_at_a_time(page, &mut tally)?;
     read_write_again(page, &mut tally)
+}
+
+/// A bind of the `ro,nosuid,nodev,noexec` mount is `ro,nosuid,nodev,noexec`
+/// (`docs/NAMESPACES.md` §8): it shows them, and refuses what each refuses --
+/// a write, a device, a program -- since the bind is the boundary a container
+/// is given (N5).
+fn through_a_bind(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let process = page.process;
+    page.reset();
+    let point = page.put(BIND_POINT)?;
+    tally.ok(
+        by_number(
+            process,
+            Syscall::Mkdirat,
+            [AT_FDCWD as u64, point, 0o755, 0, 0, 0],
+        ),
+        "the bind's mount point could not be made",
+    )?;
+    let source = page.put(MOUNT_POINT)?;
+    let result = by_number(
+        process,
+        Syscall::Mount,
+        [source, point, 0, u64::from(MS_BIND), 0, 0],
+    );
+    tally.ok(result, "a bind of the check's mount was refused")?;
+    THROUGH_THE_BIND.store(true, Ordering::Relaxed);
+    let checked = binds_keep_the_flags(page, tally);
+    THROUGH_THE_BIND.store(false, Ordering::Relaxed);
+    page.reset();
+    let point = page.put(BIND_POINT)?;
+    let _ = by_number(process, Syscall::Umount2, [point, 0, 0, 0, 0, 0]);
+    let _ = by_number(
+        process,
+        Syscall::Unlinkat,
+        [AT_FDCWD as u64, point, u64::from(AT_REMOVEDIR), 0, 0, 0],
+    );
+    checked
+}
+
+/// What [`through_a_bind`] requires of the bind, with it bound.
+fn binds_keep_the_flags(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let info = read_whole(
+        page,
+        tally,
+        alloc::format!("/proc/{}/mountinfo", page.process.pid()).as_bytes(),
+    )?;
+    let options = info.split(|&byte| byte == b'
+').find_map(|line| {
+        let fields: Vec<&[u8]> = line.split(|&byte| byte == b' ').collect();
+        (fields.get(4).copied() == Some(BIND_POINT)).then(|| fields.get(5).copied())
+    });
+    let Some(Some(options)) = options else {
+        return Err("mountinfo has no line for the check's bind");
+    };
+    if !options.starts_with(b"ro,nosuid,nodev,noexec") {
+        return Err("a bind of a ro,nosuid,nodev,noexec mount did not show those flags");
+    }
+    changes_are_erofs(page, tally)?;
+    attributes_are_erofs(page, tally)?;
+    no_devices_no_programs(page, tally)
 }
 
 /// Mount the check's tmpfs, `noatime` from the start, and fill it; answer
