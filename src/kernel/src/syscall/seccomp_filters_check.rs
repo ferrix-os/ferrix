@@ -626,8 +626,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
     if attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]) != Ok(0) {
         return Err("PR_SET_NO_NEW_PRIVS was refused");
     }
-    let before = call(getppid, [0; 6])?;
-    if before <= 0 {
+    // A process of the check's own has no parent that a program would name, so
+    // getppid answers whatever it answers (zero or init's pid), never an error.
+    if call(getppid, [0; 6])? < 0 {
         return Err("getppid failed before any filter was installed");
     }
     let at = env.put(
