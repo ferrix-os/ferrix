@@ -137,6 +137,10 @@ pub(crate) fn load_native(
         // Its UTS, IPC and cgroup namespaces too: a child left in the first
         // ones would be out of a container in one call (`docs/NAMESPACES.md` §12).
         child.set_nsproxy(creator.nsproxy());
+        // And its seccomp mode and filter chain, for the thread that starts it:
+        // a native process can make Linux calls, so a child that did not keep
+        // its creator's filter would be one call out of the sandbox.
+        crate::syscall::seccomp::inherit_native(creator, &child);
     }
     let process: Arc<dyn Host> = child;
     Ok(process)

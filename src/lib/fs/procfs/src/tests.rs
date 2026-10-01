@@ -267,13 +267,16 @@ fn status_is_byte_for_byte_what_linux_printed() {
         vm_data: 6724,
         vm_stack: 136,
         threads: 1,
+        no_new_privs: false,
+        seccomp: 0,
+        seccomp_filters: 0,
         cpus: 24,
     };
     let out = rendered(|out| status::render(out, &status));
     // Groups is copied from pid 1, which runs as root with no supplementary
     // groups — and still ends the line with the space `array.c` apologises
     // for.
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -300,10 +303,13 @@ fn a_threads_status_names_its_process_and_itself() {
         vm_data: 6724,
         vm_stack: 136,
         threads: 2,
+        no_new_privs: true,
+        seccomp: 2,
+        seccomp_filters: 3,
         cpus: 24,
     };
     let out = rendered(|out| status::render(out, &status));
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t3\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -327,6 +333,9 @@ fn a_status_name_escapes_newline_and_backslash_only() {
         vm_data: 0,
         vm_stack: 0,
         threads: 1,
+        no_new_privs: false,
+        seccomp: 0,
+        seccomp_filters: 0,
         cpus: 1,
     };
     let out = rendered(|out| status::render(out, &status));

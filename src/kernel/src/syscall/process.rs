@@ -151,6 +151,11 @@ pub(crate) struct Process {
     /// Woken whenever one of its threads has gone, for an `execve` waiting for
     /// the others to leave.
     thread_left: WaitQueue,
+    /// The seccomp state its first thread is to start with, for a native child
+    /// of a filtered creator: the creator's mode and chain, set between the
+    /// child's load and its start, and taken by [`Thread::leader`]
+    /// (`docs/SECCOMP.md` §3.3). A leaf lock, taken once.
+    first_seccomp: SpinLock<Option<crate::syscall::seccomp::State>>,
     /// The id of the thread a signal sent to it was last given to -- chosen by
     /// [`Process::notify_signal`], or handed on by
     /// [`Process::hand_on_newly_blocked`] -- or zero: for the checks that such
@@ -394,6 +399,7 @@ impl Process {
             live_threads: AtomicU32::new(0),
             exec_thread: AtomicU32::new(0),
             thread_left: WaitQueue::new(),
+            first_seccomp: SpinLock::new(None),
             handed_to: AtomicU32::new(0),
             released: AtomicBool::new(false),
             release_finished: AtomicBool::new(false),
@@ -1407,6 +1413,21 @@ impl Process {
                 sched::work::notify(task, sched::work::SIGNAL);
             }
         }
+    }
+
+    /// Have its first thread start under `state`, which a native creator's
+    /// thread was under.
+    pub(crate) fn set_first_seccomp(&self, state: crate::syscall::seccomp::State) {
+        *self.first_seccomp.lock() = Some(state);
+    }
+
+    /// The state its first thread is to start under; `None` for a process
+    /// nothing filtered made. Kept and not taken: a start that is refused and
+    /// made again -- a bad argument handle, no memory for the thread -- makes a
+    /// new first thread, which must start under it too, or the child would run
+    /// the second time without its creator's filter (the consultant's B1).
+    pub(crate) fn first_seccomp(&self) -> Option<crate::syscall::seccomp::State> {
+        self.first_seccomp.lock().clone()
     }
 
     /// Its threads that have not begun to end.

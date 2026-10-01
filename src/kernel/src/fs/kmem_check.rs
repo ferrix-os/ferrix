@@ -80,6 +80,9 @@ pub(crate) struct Report {
     /// Tasks numbered in a pid namespace, each with its record and its entry
     /// in the namespace's map.
     pub(crate) pid_numbers: usize,
+    /// seccomp filters of two instructions, each charged to the job that
+    /// installed it (`docs/SECCOMP.md` §6, SR12).
+    pub(crate) filters: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -126,6 +129,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             crate::syscall::pidns::create(None)
         })?;
         report.pid_numbers = pid_numbers(&tree)?;
+        report.filters = filters(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -515,5 +519,21 @@ fn namespace_files(tree: &Arc<Job>) -> Result<usize, &'static str> {
     let namespace = Arc::clone(crate::syscall::system::initial_uts());
     kind(tree, "namespace files", |_| {
         fs::nsfs::location(fs::nsfs::Handle::Uts(Arc::clone(&namespace)))
+    })
+}
+
+/// seccomp filters, each made as `seccomp(SET_MODE_FILTER)` makes one: charged
+/// to the job asking before anything is attached, and refused `ENOMEM` at its
+/// limit, with the charge given back when the last reference goes. They are
+/// held unattached, as a chain's older filters are held by the threads that
+/// still point at them.
+fn filters(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    use ferrix_seccomp::Insn;
+    let program = [
+        Insn::new(0x20, 0, 0, 0),
+        Insn::new(0x06, 0, 0, ferrix_seccomp::ALLOW),
+    ];
+    kind(tree, "seccomp filters", |_| {
+        crate::syscall::seccomp::prepare(&program, false)
     })
 }
