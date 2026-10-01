@@ -113,10 +113,11 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixX8664Requirements` | `18-x86-64-requirements.sysml` | What each unit of src/kernel/src/arch/x86_64/, src/kernel/src/trap.rs and src/kernel/src/syscall/mod.rs's dispatcher does, as `ItemLowLevel` requirements (part 13 defines the format): the descriptor tables and which selectors ring 3 may hold, the context switch and the user state it carries, starting processors, the paranoid entries, the speculation defences, the counter and timer, both ABIs' signal frames, SYSCALL and int $0x80, the exception gates and what a fault becomes, and which calls reach which answer. |
 | `FerrixAarch64Requirements` | `19-aarch64-requirements.sysml` | What each unit of src/kernel/src/arch/aarch64/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the trap path and the signal frames it builds, the context switch, the interrupt controllers and the generic timer, the boot console, the system registers, translation and the TLB, starting the other processors, the speculation defences, and what firmware is asked for -- power, reset, entropy. The PL011 and the GICv2 are arch/arm_common's, shared with ARMv7-A, and are not here. |
 | `FerrixDeviceRequirements` | `20-device-requirements.sysml` | What each unit of src/kernel/src/claim.rs and src/kernel/src/device.rs does, and the quiesce in src/kernel/src/syscall/native.rs, as `ItemLowLevel` requirements (part 13 defines the format): a device claimed through its core's control channels, the number its node is published under, the apertures and vectors a node hands out and nothing past them, the MSI-X vectors it mints, the bus mastering a quiesce turns off, and the quiesce itself, which waits out every core that serves the device before the next driver is given it. The objects a driver holds for a device -- its mapping, its interrupt, its pins -- are object/'s (part 14); the domain under them is iommu's (part 16). |
+| `FerrixArmv7aRequirements` | `21-armv7a-requirements.sysml` | ARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own beyond these: what the system call path does for the filter the core asks about every call (seccomp, `docs/SECCOMP.md` §3.3). The rest of the architecture waits in the baseline with the other architectures' unwritten rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of part 19 hold. |
 | `FerrixSmpRequirements` | `22-smp-requirements.sysml` | What each unit of src/kernel/src/smp.rs does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): finding the processors and giving each a record it finds itself by, starting the secondaries, the inter-processor interrupt, the TLB shootdown -- whole and scoped, and the bound on how long it waits -- grace periods, stopping the other processors for a panic, and the scheduler's kick. The start sequences themselves, the per-processor register and the interrupt controller are each architecture's (src/kernel/src/arch/\<isa>/smp.rs), and belong to the arch slices; this is the architecture-independent half above them. |
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
 
-23 files, 103 packages, 5291 elements, 212 relations. Model digest `eef84feb1b271812`.
+24 files, 105 packages, 5327 elements, 213 relations. Model digest `2cb7a8444a332504`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4225,6 +4226,8 @@ flowchart LR
 | `L.x86_64.69` | `nativeExecveEntry` | — | — | — |
 | `L.x86_64.70` | `freshEntryClearsRegisters` | — | — | — |
 | `L.x86_64.71` | `compatExecveFromSyscall` | — | — | — |
+| `L.x86_64.124` | `theFilterIsAskedBeforeAnyAnswerOfTheEntrys` | — | — | — |
+| `L.x86_64.125` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.x86_64.72` | `int80IsAnI386Call` | — | — | — |
 | `L.x86_64.73` | `i386SignalsDeliveredOnTheWayBack` | — | — | — |
 | `L.x86_64.74` | `aForeignImageIsRefused` | — | — | — |
@@ -4286,6 +4289,7 @@ flowchart LR
 | `L.syscall.3` | `enosysIsReportedWithinItsBound` | — | — | — |
 | `L.trap.5` | `noEntryMeansEnosys` | — | — | — |
 | `L.trap.6` | `aMovedProcessRunsInItsNewJob` | — | — | — |
+| `L.trap.7` | `theRegisteredFilterIsAskedFirst` | — | — | — |
 | `L.aarch64.1` | `syndromesAreDecoded` | — | — | — |
 | `L.aarch64.2` | `faultsGetLinuxsSignal` | — | — | — |
 | `L.aarch64.3` | `programsFaultToTheirSignal` | — | — | — |
@@ -4336,6 +4340,7 @@ flowchart LR
 | `L.aarch64.47` | `theMachineStops` | — | — | — |
 | `L.aarch64.48` | `watchdogsAreFed` | — | — | — |
 | `L.aarch64.50` | `registerAccessesAreEmulable` | — | — | — |
+| `L.aarch64.51` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.claim.1` | `aNodeIsClaimedOnce` | — | — | — |
 | `L.claim.2` | `aSharedNodeUpToItsLimit` | — | — | — |
 | `L.claim.3` | `refusedUnderAnyLiveDriver` | — | — | — |
@@ -4372,6 +4377,8 @@ flowchart LR
 | `L.quiesce.3` | `itWaitsOutADeadDriver` | — | — | — |
 | `L.quiesce.4` | `aRestartedManagerQuiesces` | — | — | — |
 | `L.quiesce.5` | `theWaitHasAnEnd` | — | — | — |
+| `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
+| `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.smp.1` | `impossibleListsAreRefused` | — | — | — |
 | `L.smp.2` | `theBootProcessorIsZero` | — | — | — |
 | `L.smp.3` | `eachProcessorFindsItsOwnRecord` | — | — | — |

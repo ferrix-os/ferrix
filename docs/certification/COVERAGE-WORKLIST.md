@@ -11,7 +11,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | Module | x86_64 | aarch64 | armv7a | Files |
 |---|---:|---:|---:|---:|
 | [`discovery`](#discovery) | 53 | 111 | 131 | 2 |
-| [`arch/x86_64`](#archx86_64) | 35 | - | - | 5 |
+| [`arch/x86_64`](#archx86_64) | 34 | - | - | 5 |
 | [`object`](#object) | 9 | 17 | 17 | 7 |
 | [`syscall`](#syscall) | 15 | 10 | 10 | 2 |
 | [`init`](#init) | 3 | 14 | 14 | 1 |
@@ -31,7 +31,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **134** | **176** | **210** | 38 |
+| **Total** | **133** | **176** | **210** | 38 |
 
 ---
 
@@ -39,7 +39,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 395, 561, 589, 596, 746, 839, 843-844, 862, 867, 1078 |
+| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 395, 561, 589, 596, 746, 840, 844-845, 863, 868, 1079 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 31 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495-496, 498-499, 504, 512, 527, 548, 556, 558, 567, 615, 620, 625, 653, 679, 684, 697, 704, 795 |
 
 ---
@@ -49,9 +49,9 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/trap.rs` | `core` | 22 | - | - | 22 | 51, 54-67, 70, 72, 77-81 |
-| `arch/x86_64/syscall.rs` | `core` | 7 | - | - | 7 | 412, 543, 590, 593-594, 596, 603 |
+| `arch/x86_64/syscall.rs` | `core` | 6 | - | - | 6 | 412, 615, 618-619, 621, 628 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 202, 482, 491 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1264-1265 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1303-1304 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 336 |
 
 ---
@@ -102,7 +102,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 291, 652, 1151 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 296, 657, 1156 |
 
 ---
 
@@ -151,7 +151,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1297 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1318 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

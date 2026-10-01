@@ -384,6 +384,52 @@ KVM, 5.1 s under `tcg` and 32 s under the plugin. The residual is a host that
 starves one virtual processor while it runs the waiter; that ends the wait
 early, which costs availability and never integrity.
 
+### 2.2b The filter a program supplies (seccomp, landing S2)
+
+Every system call of every program now passes a function the personality
+registers with the core (`trap::filter_system_call`), and from landing S3 that
+function may run a program the user wrote -- classic BPF, in ring 0, on the
+call's own path. What a filter can do to a call is bounded by the core: the
+call goes on, or it fails with an errno the core cuts to 4,095. It cannot
+return another value, start a program or choose registers.
+
+**The bound on time.** Linux's, and the verifier's and the chain's enforce it:
+a filter is at most 4,096 instructions, every jump goes forward (so it runs at
+most its length), and the filters one thread holds may total 32,768
+instructions, each counted with four more (`MAX_INSNS_PER_PATH`,
+`ferrix_seccomp::fits_path`). So **one call runs at most 32,768 interpreter
+steps**. The crate's constant was `1 << 18` in S1, eight times too large; it is
+32,768 from the crate's own correction, the one S3 enforces at install, which
+refuses a filter that would pass it with `ENOMEM`.
+
+**What a step costs, measured.** The boot reads it (the second `seccomp` line):
+the longest program the verifier admits, 4,095 loads of `seccomp_data` and a
+return, run 500 times against a call's data, in the dev profile in QEMU on the
+development host.
+
+| Architecture (accelerator) | one hook, no filter | one interpreted instruction | 32,768 steps |
+|---|---:|---:|---:|
+| x86-64 | 17.1 ns | 27.2 ns | 891 us |
+| AArch64 (TCG) | 15.0 ns | 25.8 ns | 845 us |
+| ARMv7-A (TCG, two processors) | 37.9 ns | 60.2 ns | 1,972 us |
+
+A virtual machine's clock is not a bound, and these are emulated processors, so
+the figures are read and not judged; they say the worst case is below two
+milliseconds on the slowest machine measured. Chromium's filters run a few dozen
+steps for a call.
+
+**AoU-4.** A program a user supplies may therefore take up to 32,768 steps on
+every call it makes, and the hook is written for it: it allocates nothing, takes
+no sleeping lock and reads registers only; a thread with no filter pays one
+load of the registration, an indirect call and (until S3) one load of the boot
+check's probe word. The hook is entered and left with interrupts masked, as the
+core's entry holds them (S2's registered body is a load and a store of a flag,
+and runs masked). S3's body, which runs a chain, opens interrupts for exactly
+the walk of the chain and closes them before it returns, as the dispatcher does
+around the call it serves, so the up to two milliseconds above are preemptible
+and are never added to the item's masked time. If a later body ran a chain
+masked, that time would be added to AoU-4's budget.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
