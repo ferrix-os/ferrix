@@ -249,6 +249,7 @@
         "syscall/sem_check.rs",
         "syscall/seccomp.rs",
         "syscall/seccomp_check.rs",
+        "syscall/seccomp_filters_check.rs",
         "syscall/signal.rs",
         "syscall/signalfd.rs",
         "syscall/sigpage.rs",

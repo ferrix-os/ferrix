@@ -596,8 +596,15 @@ fn in_the_process(ending: Option<Ending>) -> Found {
     let seccomp_call = number(Syscall::Seccomp)?;
     let mut seen = Seen::default();
     let call = |nr: usize, args: [u64; 6]| -> Result<isize, &'static str> {
-        arch::drive_system_call(Abi::Native, nr, args, 0x1000)
-            .ok_or("this architecture has no entry to drive")
+        let answer = arch::drive_system_call(Abi::Native, nr, args, 0x1000)
+            .ok_or("this architecture has no entry to drive")?;
+        // The x86-64 entry ends a thread whose process was ended on its way out.
+        // On the Arm pair that step is the vector's, after `system_call`
+        // returns, which a driven call skips: do what it does.
+        if process.is_terminated() {
+            process::leave_current();
+        }
+        Ok(answer)
     };
 
     match ending {
