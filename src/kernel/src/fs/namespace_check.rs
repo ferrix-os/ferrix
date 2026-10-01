@@ -806,7 +806,7 @@ fn native_child_stays(
     );
     // The creator first leaves the first UTS, IPC and cgroup namespaces, so that
     // a child left in them would show (`docs/NAMESPACES.md` §12).
-    let kinds: [&[u8]; 3] = [b"uts", b"ipc", b"cgroup"];
+    let kinds: [&[u8]; 4] = [b"uts", b"ipc", b"cgroup", b"net"];
     let mut before = Vec::new();
     for kind in kinds {
         before.push(ns_link(page, creator.pid(), kind)?);
@@ -820,6 +820,9 @@ fn native_child_stays(
     )
     .map_err(|_| "the creator of a native child could not leave the first small namespaces")?;
     creator.set_nsproxy(proxy);
+    creator.set_net_ns(crate::net::namespace::create(Arc::clone(&owner)).map_err(
+        |_| "the creator of a native child could not leave the first network namespace",
+    )?);
     for (kind, old) in kinds.into_iter().zip(&before) {
         if &ns_link(page, creator.pid(), kind)? == old {
             return Err("a creator's new small namespace was not named apart");
@@ -847,7 +850,7 @@ fn native_child_stays(
         return Err("a native child's /proc/<pid>/ns/mnt was not its creator's");
     }
     if !same_small {
-        return Err("a native child's UTS, IPC or cgroup namespace was not its creator's");
+        return Err("a native child's UTS, IPC, cgroup or network namespace was not its creator's");
     }
     Ok(())
 }

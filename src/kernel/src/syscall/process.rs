@@ -216,15 +216,10 @@ pub(crate) struct Process {
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
     credentials: SpinLock<Credentials>,
-    /// Its UTS, IPC and cgroup namespaces, named together (`docs/NAMESPACES.md`
+    /// Its UTS, IPC, cgroup and network namespaces, named together (`docs/NAMESPACES.md`
     /// §12). A leaf lock: cloned out before anything is done with what it
     /// names.
     nsproxy: SpinLock<NsProxy>,
-    /// The network namespace it is in (`docs/NETNS.md` section 2.1): `None`
-    /// for the first, which is most processes and which is not made until
-    /// something asks, unless `CLONE_NEWNET` made another; a fork child's is
-    /// its parent's. A leaf lock; clone the `Arc` out.
-    net_ns: SpinLock<Option<Arc<crate::net::NetNamespace>>>,
 }
 
 /// Where a program starts: the two numbers `exec::load` computes and the task
@@ -391,7 +386,6 @@ impl Process {
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
             nsproxy: SpinLock::new(NsProxy::initial()),
-            net_ns: SpinLock::new(None),
         })
     }
 
@@ -455,21 +449,20 @@ impl Process {
         child.oom_score_adj = AtomicI32::new(parent.oom_score_adj());
         child.credentials = SpinLock::new(parent.credentials.lock().clone());
         child.nsproxy = SpinLock::new(parent.nsproxy.lock().clone());
-        child.net_ns = SpinLock::new(parent.net_ns.lock().clone());
         child.identity = SpinLock::new(parent.identity.lock().clone());
         Ok(child)
     }
 
     /// The network namespace it is in.
     pub(crate) fn net_ns(&self) -> Arc<crate::net::NetNamespace> {
-        let held = self.net_ns.lock().clone();
+        let held = self.nsproxy.lock().net.clone();
         held.unwrap_or_else(|| Arc::clone(crate::net::first()))
     }
 
     /// Put it in another network namespace. What it held is dropped after the
     /// lock is released, since the namespace it named may end there.
     pub(crate) fn set_net_ns(&self, namespace: Arc<crate::net::NetNamespace>) {
-        let displaced = self.net_ns.lock().replace(namespace);
+        let displaced = self.nsproxy.lock().net.replace(namespace);
         drop(displaced);
     }
 

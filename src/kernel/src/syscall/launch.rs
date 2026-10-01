@@ -133,11 +133,10 @@ pub(crate) fn load_native(
     // pruned as a pid nothing finds, and before anything can start it.
     if let Some(creator) = creator {
         attributes::inherit(creator, &child);
-        // Its UTS, IPC and cgroup namespaces too: a child left in the first
-        // ones would be out of a container in one call (`docs/NAMESPACES.md` §12).
+        // Its UTS, IPC, cgroup and network namespaces too: a child left in the
+        // first ones would be out of a container in one call
+        // (`docs/NAMESPACES.md` §12, `docs/NETNS.md` section 4).
         child.set_nsproxy(creator.nsproxy());
-        // And its network namespace (`docs/NETNS.md` section 4).
-        child.set_net_ns(creator.net_ns());
     }
     let process: Arc<dyn Host> = child;
     Ok(process)
