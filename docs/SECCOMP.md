@@ -571,17 +571,24 @@ registration of the same kind:
 
 ```
 // trap.rs (core)
-pub(crate) type SyscallFilter = fn(&SyscallArgs, ip: u64) -> Verdict;
-pub(crate) enum Verdict { Continue, Answer(Outcome) }
+pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;   // ip is a field of SyscallArgs
+pub(crate) enum Verdict { Continue, Errno(u32) }                // built: S2 (S4 adds Trap)
 static SYSCALL_FILTER: Once<SyscallFilter>;
-pub(crate) fn filter_system_call(args: &SyscallArgs, ip: u64) -> Verdict
+pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome>
 ```
+
+The sketch of the first review had `Answer(Outcome)`, which would have let
+one bug in the load turn a `getpid` into `Outcome::Enter`, an `execve`'s
+jump. The consultant refused it (S2's review, §12), and the built type has
+no variant that carries an `Outcome`: the core builds the answer itself,
+from an errno it clamps to 4095.
 
 **Each architecture's entry calls `trap::filter_system_call` first.** It
 does so with the `SyscallArgs` it built and the instruction pointer from
 its frame, *before* its own early answers and before `trap::system_call`.
-On `Answer(outcome)` it applies the outcome exactly as it applies the
-dispatcher's. On `Continue` it goes on as today.
+On `Some(outcome)`, which is always `Return` of `-errno`, it applies the
+outcome exactly as it applies the dispatcher's. On `None` it goes on as
+today.
 
 **What that touches.** It is four call sites in `arch/` (x86-64 `SYSCALL`,
 x86-64 `int $0x80`, AArch64 `svc`, ARMv7-A `svc`), all core, plus the
@@ -599,11 +606,11 @@ filtered thread also runs its chain. §1.1's filter executes around 20 to
 change is plumbing: one more registered function, called at the top of
 four paths it already owns. What a filter decides is the personality's.
 Every `Verdict` it can return makes a call do *less* than it would have:
-* return an errno;
-* return a value without running the call (`TRAP`'s rolled-back
-  registers);
+* fail it with an errno, which the core clamps to 4095 (`Verdict::Errno`);
+* from S4, `TRAP`'s rolled-back registers (`Verdict::Trap`, whose value the
+  core computes itself from the call, so the filter chooses nothing);
 * end the thread or the process through the paths `exit` and a fatal
-  signal already use.
+  signal already use, which the filter's own body takes before it answers.
 
 A `Verdict` can never make the core or the item do something a call
 could not already make it do. That is the argument os-9f is asked to
@@ -782,8 +789,8 @@ already use:
 
 The thread is marked dead first (Linux's `SECCOMP_MODE_DEAD`), so no
 further call of its own is served should anything return to it. **The
-hook answers `Answer(...)` and never lets the thread reach user mode
-again.**
+hook ends it, or marks it dead and answers `Errno` for the call it is in,
+and never lets the thread reach user mode again.**
 
 **Strict mode** allows `read`, `write`, `exit` and `sigreturn`, in the
 entry's own numbers (i386's `sigreturn` 119, x86-64's `rt_sigreturn` 15,
@@ -802,7 +809,8 @@ per ABI.
    The facade gains one function, `arch::syscall_rollback_value(abi,
    number, args) -> isize`: the value to put in the return register so
    that the frame reads as it did at the call. The hook answers
-   `Answer(Outcome::Return(that value))`, with no new outcome.
+   `Verdict::Trap` (S4), and the core writes that value itself: no filter
+   chooses a register value.
 
    | Entry | Rollback | So the handler finds |
    |---|---|---|
@@ -1461,3 +1469,89 @@ Built ahead of S3, since none of it needs the kernel:
   `seccomp_run_filters` does for `WARN_ON(f == NULL)`; the hook's own body
   still never runs an empty chain, which S3 checks.
 
+
+**S2 built (2026-10-01, os-7c, `stage13-s2`).** The hook of §3.3, and
+nothing that filters yet. `trap::set_syscall_filter` and
+`trap::filter_system_call` are registered like `set_syscall_entry`;
+`SyscallArgs` gained `ip`, the instruction after the call (so the hook
+takes `&SyscallArgs` alone, where §3.3's first sketch passed the pointer
+beside it); each of the four entries -- x86-64 `SYSCALL` and `int $0x80`,
+AArch64 `svc`, ARMv7-A `svc` -- fills `ip` from its saved program
+counter and asks the filter first, before its early answers and before the
+native range is split, applying the answer as the dispatcher's. The x86-64
+`SYSCALL` entry was split (`answer_here`, `enter_program`) to stay under
+the complexity floor and nothing else about it changed.
+
+**The consultant's review (2026-10-01) and what it changed.** The hook and
+its placement were accepted. The first form of the verdict, `Answer(Outcome)`,
+was refused: `Outcome::Enter` would have let one bug in the load turn a
+`getpid` into an `execve`'s jump (and on x86-64 into compat mode), and
+`Return(isize)` was unclamped. The built `Verdict` is `Continue` or
+`Errno(u32)` and has no variant that carries an `Outcome`; the core builds
+the answer in `trap::ask`, clamping the errno to 4095. The hook is
+entered and left with interrupts masked; a body that runs a chain opens them
+for the walk and closes them again (`MEMORY-AND-TIMING.md` §2.2b has the
+bound, 32,768 steps, and what a step costs measured in the guest: 27.2 ns
+on x86-64, 25.8 ns on AArch64, 60.2 ns on ARMv7-A, so at most 0.9, 0.8 and
+2.0 ms a call). ARMv7-A, which had no requirements, has
+`L.armv7a.1` and `L.armv7a.2` (`docs/sysml/21-armv7a-requirements.sysml`),
+and `L.trap.7`'s two claims that nothing exercised -- nothing registered is
+`Continue`, the first registration stands -- are checked on a slot of the
+check's own. The coverage anchor carried across the hook and dropped as
+unmeasured is `enter_compat_after_execve(entry, stack)` in
+`arch/x86_64/syscall.rs`, line 543 before this landing, which is now inside
+`enter_program`; the next `cargo xtask coverage` measures it.
+
+**Deviations from the design, accepted by the consultant and recorded.**
+* The hook is `fn(&SyscallArgs) -> Verdict` with `ip` a field of
+  `SyscallArgs`, not a second parameter, and `filter_system_call` answers
+  `Option<Outcome>`.
+* The boot check's probe, a test seam that shows what a filter was shown and
+  which a filter program cannot say, stays after S3, so a thread with no
+  filter pays the registration's load and the probe word's, where §3.3 prices
+  the first alone.
+* `NATIVE_ARCH` (`0xC000_0F1F`) carries the 64-bit flag on ARMv7-A too, where
+  no native register is 64 bits wide.
+* SR2 is stricter than Linux: a number with bits above the 32nd is dispatched
+  as no call, where Linux masks it and runs the low half. `docs/BACKLOG.md`
+  has the row.
+* `FX-1302` sits in `catalog::ALL` in code order, not in numeric order beside
+  `FX-1301`; the generated page sorts.
+
+Evidence: the `seccomp` boot line (FX-1302, `syscall/seccomp_check.rs`),
+which drives each entry of the architecture through
+`arch::drive_system_call` with frames of its own -- `linux::handle` would
+skip the hook -- and requires every call an entry answers itself
+(`arch_prctl`, `set_tls`, `sigreturn`, `rt_sigreturn`) to reach the filter
+once, before that answer, with its number, instruction pointer and first
+argument as the frame held them, and the filter's value to come back
+(SR3); the token to be the entry's, worked out from `e_machine` and not
+from the kernel's own table, so that an `int $0x80` call is i386's and a
+filter written for x86-64 alone does not judge it (SR1); a number with
+bits above the 32nd to be judged as its low half and dispatched as no call
+(SR2); a native-range call to carry the native token, refused by a
+filter that refuses every foreign `arch` and let through by one that
+allows that token by name (Q2, both ways); and the core to cut an errno
+to 4095 and to keep 512 an errno. A second line reads what the hook costs.
+
+**Gates run on the final tree** (`stage13-s2`, side ref `os7s/s2`, nazuna):
+`cargo xtask check` exit 0; `test-boot` on x86-64, AArch64 and ARMv7-A at
+`--smp 2` each `FERRIX-BOOT-OK stages 1-12`; `test-threads --arch all` and
+`test-init --arch all` the same; `test-shell --arch all` as the landing
+message says. Negative controls, each a throwaway branch with one sabotage and
+a `NEGATIVE CONTROL` line in the boot log, each stopping the boot with the
+check's own message:
+
+| Control (sabotage) | Boot | Message |
+|---|---|---|
+| the SYSCALL entry skips the filter for `arch_prctl` | x86-64 | `arch_prctl was answered before the filter` |
+| the svc entry skips the filter for `rt_sigreturn` | AArch64 | `rt_sigreturn was answered before the filter` |
+| the svc entry skips the filter for `set_tls` | ARMv7-A | `set_tls was answered before the filter` |
+| `int $0x80` carries x86-64's token | x86-64 | `an int 0x80 call was filtered as x86-64` |
+| the SYSCALL entry cuts the number to 32 bits | x86-64 | `a number with bits above the 32nd set was dispatched as a call` |
+| native-range calls get no native token | x86-64 | `a native call was not filtered under the native token` |
+| the core does not clamp an errno | x86-64 | `the core let a filter's errno out of 0 to 4095 through` |
+| an empty slot answers every call | x86-64 | `a call was answered with no filter registered` |
+| a registration into a slot of the check's own registers nothing | x86-64 | `a later registration replaced the first, or the first was not asked` |
+
+S3 follows on `stage13-s3`.
