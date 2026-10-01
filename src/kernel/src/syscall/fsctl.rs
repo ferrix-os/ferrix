@@ -118,7 +118,7 @@ use ferrix_linux_abi::types::{
 };
 use ferrix_vfs::access::{MAY_EXEC, MAY_WRITE};
 use ferrix_vfs::statfs::StatfsLayout;
-use ferrix_vfs::{FileSystem, FileType, Location, MountFlags, Namespace};
+use ferrix_vfs::{FileSystem, FileType, Inode, Location, MountFlags, Namespace, SetAttributes};
 
 use crate::fs;
 use crate::fs::devfs::Devfs;
@@ -632,6 +632,19 @@ pub(crate) fn sys_mount(
         wanted = wanted.union(MountFlags::NOSUID).union(MountFlags::NODEV);
     }
     let filesystem = filesystem_named(process, &kind, source, read_only)?;
+    if kind == b"tmpfs" {
+        // Linux's tmpfs root is `1777` and the mounter's: a user's own tmpfs
+        // is one it can make a directory in, which bubblewrap does for its
+        // new root. `mode=`, `uid=` and `gid=` are not read.
+        let (uid, gid) =
+            process.with_credentials(|held| (held.user.filesystem, held.group.filesystem));
+        filesystem.root().set_attributes(&SetAttributes {
+            permissions: Some(0o1777),
+            uid: Some(uid),
+            gid: Some(gid),
+            ..SetAttributes::default()
+        })?;
+    }
     // Owned by the caller's user namespace when it is not the first: the
     // filesystem's owner is who may remount it as a whole.
     let owner = confined.then(|| {
