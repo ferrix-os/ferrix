@@ -116,7 +116,7 @@ pub(super) fn cpuinfo(_: &Kernel) -> Result<Vec<u8>> {
             Arch::AArch64 => out.extend_from_slice(b"CPU architecture: 8\n"),
             Arch::Armv7a => out.extend_from_slice(b"CPU architecture: 7\n"),
         }
-        out.push(b'\n');
+        out.push(0x0a);
     }
     Ok(out)
 }
