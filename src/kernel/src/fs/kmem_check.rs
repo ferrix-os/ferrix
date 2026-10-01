@@ -241,8 +241,12 @@ fn files(tree: &Arc<Job>) -> Result<usize, &'static str> {
         },
         |count| {
             for at in 0..count {
-                let _ = ns.unlink(&ctx, None, path(at).as_bytes());
+                let r = ns.unlink(&ctx, None, path(at).as_bytes());
+                if at + 3 >= count {
+                    crate::console::println!("  kmem     DBG unlink {at} of {count}: {r:?} cached {}", ns.cached());
+                }
             }
+            crate::console::println!("  kmem     DBG after unlinks cached {}", ns.cached());
         },
     )?;
     Ok(made)
