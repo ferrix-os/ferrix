@@ -37,6 +37,10 @@ pub(crate) struct Report {
     pub(crate) dispatch: u64,
     /// What such a call costs through the whole entry, hook included.
     pub(crate) entry: u64,
+    /// What one interpreted instruction of a filter costs, in tenths of a
+    /// nanosecond, from the longest program the verifier admits: the figure
+    /// the bound of a call's filtering (32,768 steps) is read with.
+    pub(crate) step: u64,
 }
 
 /// `AUDIT_ARCH_LE`.
@@ -274,6 +278,45 @@ fn measure(report: &mut Report) {
     report.entry = per_call(&|| {
         let _ = black_box(arch::drive_system_call(Abi::Native, 0x7777, [0; 6], IP));
     });
+    report.step = step_cost();
+}
+
+/// What one interpreted instruction costs: the longest program the verifier
+/// admits, 4,095 loads of `seccomp_data`'s first word and an `ALLOW`, run
+/// against a call's data. Measured in the guest, to be read and not judged.
+fn step_cost() -> u64 {
+    use core::hint::black_box;
+
+    /// `BPF_LD | BPF_W | BPF_ABS`.
+    const LOAD: u16 = 0x20;
+    /// `BPF_RET | BPF_K`.
+    const RETURN: u16 = 0x06;
+    /// Programs run.
+    const RUNS: u64 = 500;
+
+    let mut insns =
+        alloc::vec![ferrix_seccomp::Insn::new(LOAD, 0, 0, 0); ferrix_seccomp::MAX_INSNS - 1];
+    insns.push(ferrix_seccomp::Insn::new(
+        RETURN,
+        0,
+        0,
+        ferrix_seccomp::ALLOW,
+    ));
+    let Ok(program) = ferrix_seccomp::verify(&insns) else {
+        return 0;
+    };
+    let data = SeccompData {
+        nr: 1,
+        arch: 0,
+        instruction_pointer: 0,
+        args: [0; 6],
+    };
+    let steps = program.len() as u64 * RUNS;
+    let start = crate::timer::now_nanos();
+    for _ in 0..RUNS {
+        let _ = black_box(ferrix_seccomp::run(black_box(&program), black_box(&data)));
+    }
+    crate::timer::now_nanos().saturating_sub(start) * 10 / steps
 }
 
 /// [`run`], with the probe armed.

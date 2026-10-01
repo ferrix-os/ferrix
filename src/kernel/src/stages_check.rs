@@ -260,13 +260,16 @@ pub(super) fn check_seccomp() {
     );
     println!(
         "  seccomp  a thread with no filter pays {}.{} ns a call for the hook; a call no table \
-         has costs {}.{} ns in the dispatcher and {}.{} ns through the whole entry",
+         has costs {}.{} ns in the dispatcher and {}.{} ns through the whole entry; one          interpreted filter instruction costs {}.{} ns, so the longest chain (32,768 steps) costs          at most {} us a call",
         checked.hook / 10,
         checked.hook % 10,
         checked.dispatch / 10,
         checked.dispatch % 10,
         checked.entry / 10,
         checked.entry % 10,
+        checked.step / 10,
+        checked.step % 10,
+        checked.step * 32_768 / 10_000,
     );
 }
 
