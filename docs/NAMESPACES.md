@@ -1525,3 +1525,22 @@ a caller whose filesystem id is the target's, which it refuses; c08
 read, since either one alone refuses. The small-namespace check's processes set `PR_SET_DUMPABLE` after
 they drop their ids, since the owner's opening of their namespace links is
 now judged as Linux judges it.
+
+**N5 (2026-10-01, os-7c).** Unprivileged mounting. `namespace::may_mount`
+is Linux's: `CAP_SYS_ADMIN` over the user namespace that owns the caller's
+mount namespace (M1), asked by `mount`, `umount2` and `pivot_root` before any
+flag. From a child user namespace a new mount is `tmpfs` alone and always
+`nosuid,nodev` (M2); a plain remount is refused unless every mount of the
+filesystem is in the caller's namespace. A copy of a mount namespace into one
+owned by a user namespace that did not own the original locks every mount's
+`ro`, `nosuid`, `nodev`, `noexec` and access-time mode, and locks every mount but
+the bottom to its parent (M3, M4): a remount clearing a locked flag is `EPERM`,
+an unmount or detach of a locked mount alone `EINVAL`, a bind without
+`MS_REC` over locked mounts `EINVAL`. Removing or renaming a name another
+namespace has a mount on takes that mount off, as Linux does since 3.18, so
+an unprivileged mount pins nothing against its owner.
+`/proc/sys/user/max_user_namespaces` reads the limit. The `mountperm` line
+(FX-0900) drives every rule as uid 1000 and as the owner of a user namespace,
+and the `mounts` line now also shows a bind of a `ro,nosuid,nodev,noexec`
+mount keeping and enforcing each flag (§8's "N2 repeats them on a bind").
+`max_user_namespaces` is read-only; writing it is not supported.
