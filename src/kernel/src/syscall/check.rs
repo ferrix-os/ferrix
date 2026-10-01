@@ -2937,7 +2937,7 @@ fn map_shared_rw(process: &Process, len: u64) -> Result<u64, &'static str> {
 }
 
 /// Map `len` bytes of read/write anonymous memory, wherever it fits.
-fn map_rw(process: &Process, len: u64) -> Result<u64, &'static str> {
+pub(crate) fn map_rw(process: &Process, len: u64) -> Result<u64, &'static str> {
     let at = memory::sys_mmap(
         process,
         &MmapRequest {
@@ -10877,4 +10877,15 @@ pub(crate) fn run_handles() -> Result<(), &'static str> {
     }
     let _ = memory::sys_munmap(&process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
     Ok(())
+}
+
+/// The image of a program a native `process_create` loads, for the checks that
+/// make a native child they never start.
+pub(crate) fn native_child_image() -> Vec<u8> {
+    image::build_with(
+        class_of_this_build(),
+        arch::ARCH.elf_machine(),
+        image::Shape::Good,
+        arch::USER_ARGUMENT_PROGRAM,
+    )
 }
