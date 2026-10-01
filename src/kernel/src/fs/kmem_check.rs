@@ -120,6 +120,8 @@ fn used(job: &Job, resource: Resource) -> u64 {
     job.usage(resource).map_or(0, |usage| usage.used)
 }
 
+static DBG: crate::sync::SpinLock<Option<Arc<Job>>> = crate::sync::SpinLock::new(None);
+
 /// Run `work` charged to `job`, as a task of it would be.
 fn as_task_of<T>(job: &Job, work: impl FnOnce() -> T) -> T {
     let own = sched::running_group();
@@ -158,6 +160,7 @@ fn fill_and_empty<T>(
         .map_err(|_| "kmem: a job refused a child")?;
     let _ = job.set_limit(Resource::Memory, LIMIT);
     let _ = sibling.set_limit(Resource::Memory, LIMIT);
+    *DBG.lock() = Some(Arc::clone(&job));
     let (held, refused) = as_task_of(&job, || fill(&mut make));
     let made = held.len();
     let outcome = judge(&job, refused, made);
@@ -240,15 +243,19 @@ fn files(tree: &Arc<Job>) -> Result<usize, &'static str> {
                 .map(drop)
         },
         |count| {
+            let used_now = || DBG.lock().as_ref().map_or(0, |job| used(job, Resource::Kernel));
             for at in 0..count {
-                // The attempt that hit the limit may have left its name's
-                // dentry behind, charged to the job; making the name and
-                // removing it settles that (a sibling opening it did, before
-                // the sibling had a name of its own).
-                let _ = ns
-                    .open(&ctx, None, path(at).as_bytes(), &flags, 0o644)
-                    .map(drop);
-                let _ = ns.unlink(&ctx, None, path(at).as_bytes());
+                let r = ns.unlink(&ctx, None, path(at).as_bytes());
+                if at + 3 >= count {
+                    crate::console::println!("  kmem     DBG unlink {at}/{count}: {r:?} used {} cached {}", used_now(), ns.cached());
+                }
+            }
+            crate::console::println!("  kmem     DBG after unlinks used {}", used_now());
+            for at in (count.saturating_sub(4))..count {
+                let o = ns.open(&ctx, None, path(at).as_bytes(), &flags, 0o644).map(drop);
+                crate::console::println!("  kmem     DBG open {at}: {o:?} used {}", used_now());
+                let r = ns.unlink(&ctx, None, path(at).as_bytes());
+                crate::console::println!("  kmem     DBG unlink {at}: {r:?} used {}", used_now());
             }
         },
     )?;
