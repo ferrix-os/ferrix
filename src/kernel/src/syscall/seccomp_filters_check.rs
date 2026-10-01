@@ -746,7 +746,8 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
 /// recursive release would run the kernel stack out (SR11).
 fn longest_chain() -> Result<usize, &'static str> {
     let env = Env::new()?;
-    let one = answering(&[]);
+    // The shortest filter there is: one instruction, `ret ALLOW`.
+    let one = [Insn::new(0x06, 0, 0, ALLOW)];
     let mut made = 0;
     loop {
         let filter = seccomp::prepare(&one, false).map_err(|_| "a filter could not be made")?;
