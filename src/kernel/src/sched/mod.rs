@@ -433,7 +433,12 @@ pub(crate) fn regroup_current() {
 /// its job, or one above it, has used the quota: called on the way back to
 /// user mode, where the task holds no lock, as [`regroup_current`] is. A
 /// machine with no `cpu.max` set pays one load.
-pub(crate) fn throttle_current() {
+///
+/// The wait is cut where `leave` says the task has something to deal with
+/// first -- a `SIGKILL`, a kill by its cgroup or the OOM killer, any signal:
+/// it is asked every [`THROTTLE_LOOK_NS`], so that a task a kill is for does
+/// not wait out the rest of a period (up to a second) to hear of it.
+pub(crate) fn throttle_current(leave: fn() -> bool) {
     if !quota::bandwidth_in_use() {
         return;
     }
@@ -441,10 +446,21 @@ pub(crate) fn throttle_current() {
     if group == quota::NONE {
         return;
     }
-    while let Some(until) = quota::throttled_until(group, crate::timer::now_nanos()) {
-        sleep_until(until);
+    loop {
+        let now = crate::timer::now_nanos();
+        let Some(until) = quota::throttled_until(group, now) else {
+            return;
+        };
+        if leave() {
+            return;
+        }
+        sleep_until(until.min(now.saturating_add(THROTTLE_LOOK_NS)));
     }
 }
+
+/// How long a throttled task sleeps before it looks again for a reason to
+/// leave: a millisecond, the tick.
+const THROTTLE_LOOK_NS: u64 = 1_000_000;
 
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.

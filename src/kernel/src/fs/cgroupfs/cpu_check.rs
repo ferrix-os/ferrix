@@ -192,8 +192,50 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
     let _ = program.process.wait_for_exit(deadline);
     let throttled = outcome?;
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let killed = killed_throttled(harness)?;
     let beneath = beneath(harness)?;
-    Ok(throttled + beneath)
+    Ok(throttled + killed + beneath)
+}
+
+/// How long a program throttled for most of a second may take to end after
+/// a `SIGKILL`: a few ticks, where waiting out its period is nine tenths of a
+/// second.
+const KILL_NANOS: u64 = 250_000_000;
+
+/// A program whose job has used its quota is throttled until its period's end,
+/// and a `SIGKILL` for it ends it at once, not then (a kill by the cgroup or
+/// the OOM killer reaches it the same way). The quota is a millisecond in a
+/// second, so the wait a kill that was not heard would cost is long.
+fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
+    if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
+        return Ok(0);
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"1000 1000000\n")
+        .map_err(|_| "cpu.max refused 1000 1000000")?;
+    let program = freeze_check::start(harness, b"/check-c")?;
+    let ready = freeze_check::wait_running(&program.process);
+    // It has used its millisecond and is asleep until the period's end.
+    crate::sched::sleep_for(100_000_000);
+    let throttled = number(harness, b"/check-c/cpu.stat", "nr_throttled");
+    let asked = crate::timer::now_nanos();
+    kill::send(&program.process, SIGKILL, Origin::Kernel);
+    let deadline = asked.saturating_add(10_000_000_000);
+    let _ = program.process.wait_for_exit(deadline);
+    let took = crate::timer::now_nanos().saturating_sub(asked);
+    drop(program);
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
+    ready?;
+    if throttled? == 0 {
+        return Err("a program under cpu.max 1000 1000000 was not throttled by its first second");
+    }
+    if took > KILL_NANOS {
+        crate::console::println!("  cpu      a SIGKILL took {} ms to end a throttled program", took / 1_000_000);
+        return Err("a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL");
+    }
+    emptied?;
+    Ok(1)
 }
 
 /// The measurements of [`throttling`]: held to a fifth, counted, and free.
