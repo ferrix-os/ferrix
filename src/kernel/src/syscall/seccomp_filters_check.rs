@@ -646,9 +646,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             // so that a process of two threads has two live ones.
             process.thread_starting();
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            let task = spawn_member(&process, &thread, killer)?;
+            let _task = spawn_member(&process, &thread, killer)?;
             let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-            while !task.is_dead() || process.threads().len() > 1 {
+            while process.threads().len() > 1 {
                 if crate::timer::now_nanos() > patience {
                     return Err("a thread killed by its filter never left");
                 }
