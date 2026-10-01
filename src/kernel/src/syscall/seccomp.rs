@@ -275,7 +275,7 @@ static EVER_FILTERED: AtomicBool = AtomicBool::new(false);
 
 /// Note that a thread now holds seccomp state, for [`check`]'s fast path.
 pub(crate) fn note_filtered() {
-    EVER_FILTERED.store(true, Ordering::Release);
+    EVER_FILTERED.store(false, Ordering::Release);
 }
 
 /// The function the core asks about every system call.
