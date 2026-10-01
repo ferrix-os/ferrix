@@ -153,8 +153,20 @@ filter instruction, so at most 0.8 to 2.0 ms for the longest chain
 `cargo xtask check`, the three boots, `test-threads`, `test-init` and
 `test-shell` on all three architectures, and nine negative controls that each
 stopped the boot with the check's own message (`docs/SECCOMP.md` §12).
-ARMv7-A has its first requirements (`L.armv7a.1`, `L.armv7a.2`). S3, the
-filters themselves -- which meet this stage's exit clause -- follows.
+ARMv7-A has its first requirements (`L.armv7a.1`, `L.armv7a.2`).
+
+**Done -- seccomp S3, filters (2026-10-01, 6 points).** `seccomp(2)` and
+`prctl(PR_SET_SECCOMP)` install classic-BPF filters per thread: `ALLOW`,
+`ERRNO`, `KILL_THREAD`, `KILL_PROCESS`, `LOG`, strict mode, `TRACE` and
+`USER_NOTIF` as `ENOSYS`, the strictest answer of a chain winning, inherited by
+fork, clone and a native child and kept by `execve`, charged to the job
+(F-37), bounded at 32,768 instructions, released by a walk, shown in
+`/proc/<pid>/status`. **This meets the stage's exit clause "a seccomp filter
+that blocks a syscall".** The `seccomp` boot line (FX-1303) installs filters
+as a program does in a real thread of a check process and makes the calls
+through the core's own entry; thirteen negative controls each stopped the
+boot with the check's own message (`docs/SECCOMP.md` §12). `TRAP` (S4),
+`TSYNC` (S5) and the guest test (S6) follow.
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
