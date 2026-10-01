@@ -241,6 +241,11 @@ fn files(tree: &Arc<Job>) -> Result<usize, &'static str> {
         },
         |count| {
             for at in 0..count {
+                // The attempt that hit the limit may have left its name's
+                // dentry behind, charged to the job; making the name and
+                // removing it settles that (a sibling opening it did, before
+                // the sibling had a name of its own).
+                let _ = ns.open(&ctx, None, path(at).as_bytes(), &flags, 0o644).map(drop);
                 let _ = ns.unlink(&ctx, None, path(at).as_bytes());
             }
         },
