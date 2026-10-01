@@ -153,7 +153,7 @@ impl Thread {
         let mut thread = Thread::with(
             process,
             ThreadSignals::new(inherited)?,
-            caller.seccomp_copy(),
+            seccomp::State::default(),
         );
         *thread.tid.get_mut() = tid;
         *thread.numbers.get_mut() = numbers;
