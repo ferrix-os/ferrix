@@ -200,7 +200,7 @@ impl Drop for Filter {
             let _ = RELEASE_LOWEST.fetch_min(here, Ordering::Relaxed);
             let _ = RELEASE_HIGHEST.fetch_max(here, Ordering::Relaxed);
         }
-        let mut next = self.previous.take();
+        let mut next: Option<Arc<Filter>> = None;
         while let Some(filter) = next {
             // `Some` only for the last reference, and then the filter goes
             // with its own `previous` already taken, so its drop is shallow.
