@@ -117,7 +117,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixSmpRequirements` | `22-smp-requirements.sysml` | What each unit of src/kernel/src/smp.rs does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): finding the processors and giving each a record it finds itself by, starting the secondaries, the inter-processor interrupt, the TLB shootdown -- whole and scoped, and the bound on how long it waits -- grace periods, stopping the other processors for a panic, and the scheduler's kick. The start sequences themselves, the per-processor register and the interrupt controller are each architecture's (src/kernel/src/arch/\<isa>/smp.rs), and belong to the arch slices; this is the architecture-independent half above them. |
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
 
-24 files, 105 packages, 5327 elements, 213 relations. Model digest `2cb7a8444a332504`.
+24 files, 105 packages, 5384 elements, 213 relations. Model digest `14103566ce6f7155`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -2213,7 +2213,7 @@ Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026
 
 One unified hierarchy (v2), exposed as cgroupfs. cpu is not a separate mechanism: it is bandwidth and weight handed to the scheduling classes. memory scopes reclaim and the OOM kill.
 
-Built (docs/CGROUPS.md, 55 of its 85 points): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging and its scoped OOM kill, and cpu.weight, over the certification's job quotas. Left: the rest of memory.stat, memory's reclaim, freezing, cpu.max and io.
+Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging, its reclaim, memory.high and its scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io, over the certification's job quotas. Left: the rest of memory.stat, io.weight, io.latency, cpu.idle and cpu.max.burst.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -3940,8 +3940,17 @@ flowchart LR
 | `L.object.101` | `theLargestIsChosen` | — | — | — |
 | `L.object.102` | `noLimitFullNoKill` | — | — | — |
 | `L.object.103` | `anEndedVictimIsEmptied` | — | — | — |
+| `L.object.106` | `cpuIsChargedUp` | — | — | — |
+| `L.object.107` | `aFrozenProcessParks` | — | — | — |
+| `L.object.108` | `memoryHighReclaims` | — | — | — |
+| `L.object.109` | `reclaimIsScoped` | — | — | — |
+| `L.object.110` | `aGoneJobStaysGone` | — | — | — |
+| `L.object.111` | `theCacheIsCounted` | — | — | — |
+| `L.object.112` | `anEvictedPageIsNoHole` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
+| `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
+| `L.sched.4` | `aQuotaThatComesLateBinds` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
