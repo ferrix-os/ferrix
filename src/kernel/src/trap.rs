@@ -329,7 +329,7 @@ pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outc
     let filter = slot.get()?;
     match filter(args) {
         Verdict::Continue => None,
-        Verdict::Errno(errno) => Some(Outcome::Return(-(errno.min(MAX_ERRNO) as isize))),
+        Verdict::Errno(errno) => Some(Outcome::Return(-(errno as isize))),
     }
 }
 
