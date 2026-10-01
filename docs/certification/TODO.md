@@ -84,6 +84,7 @@ describe a tree without them.
 | `sched/trip.rs` | core | 448 | 5cc5ed38 |
 | the lines S2's hook added to `trap.rs` and the four system-call entries | core | the hook and `trap::ask` | 6f47bbd2f |
 | the lines the speculation domain added to `arch/*/speculation.rs`, `user/space.rs`, `object/{process,job}.rs` | core | the switch rule, the marking and leaving | bf9efba95 |
+| `user/cache.rs` | core | 192, and the lines the reclaim added to `user/vmo.rs`, `user/space.rs`, `object/quota.rs`, `object/job.rs`, `object/oom.rs` and `sched/` | the cgroup controllers landing (M2, F1, S2) |
 
 COVERAGE-RESIDUAL.md's unreached counts fell at 65639967 (x86-64 720 to
 683, AArch64 724 to 706, ARMv7-A 1,109 to 1,089) because moved lines left
