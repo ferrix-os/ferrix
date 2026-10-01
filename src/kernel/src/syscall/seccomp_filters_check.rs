@@ -175,9 +175,10 @@ impl Env {
     }
 
     /// Install `program` with `flags`, directly.
-    fn install(&self, program: &[Insn], flags: u64) -> Result<usize, &'static str> {
+    fn install(&self, program: &[Insn], flags: u64) -> Result<(), &'static str> {
         let at = self.put(program, None)?;
         self.seccomp(SET_MODE_FILTER, flags, at)
+            .map(drop)
             .map_err(|_| "a good filter was refused")
     }
 
