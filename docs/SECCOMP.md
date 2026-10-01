@@ -1611,8 +1611,11 @@ its creator's, a native child its creator's through `launch::load_native`
 the chain newest first, with interrupts open and under no lock, allocating
 nothing, and the strictest answer wins, the newest filter's data on a tie.
 `ALLOW`, `ERRNO` (the core cuts it to 4095, so 512 is an errno and never a
-restart: SR7), `KILL_THREAD` (the process's last thread: the process, by
-`SIGSYS`), `KILL_PROCESS`, `LOG` (one rate-limited line on the console, not
+restart: SR7), `KILL_THREAD` (the process's last live thread: the process, by
+`SIGSYS`; any other: that thread alone, which leaves through `exit_thread_current`
+with status 128 + `SIGSYS`, so that a leader killed this way while another
+thread lives is what `wait` reports for the process when the last one leaves),
+`KILL_PROCESS`, `LOG` (one rate-limited line on the console, not
 the audit log, Q4), strict mode, `TRACE` and `USER_NOTIF` (`ENOSYS`: no
 tracer, no listener, SR13), and an action nobody defined (a kill) are built; a
 `TRAP` is a kill until S4. A thread in filter mode with no filter, which
@@ -1621,6 +1624,15 @@ the chain's bound is the crate's `fits_path` with four more counted for each
 filter (condition 1, `ENOMEM` past 32,768). A filter is charged to the job that
 installed it before its program is copied (F-37, SR12) and released by a walk,
 never by recursion, when the last thread and child holding it goes (SR11).
+A native child's first state is *kept* on its process and cloned by each first
+thread made for it, not taken: a start that is refused (a bad argument handle,
+no memory for the thread) and made again makes a new first thread, which
+must start filtered too (the consultant's B1; taking it let a filtered
+process run an unfiltered child by `process_start` with a bad handle and then
+a good one). Installing needs no-new-privs or `CAP_SYS_ADMIN` in the caller's
+own user namespace (`holds`, as Linux's `ns_capable`). The flags a thread
+publishes are written when they change, not on every call, and reads of its
+state take the leaf lock and store nothing.
 `/proc/<pid>/status` has `NoNewPrivs`, `Seccomp` and `Seccomp_filters`.
 `TSYNC` is refused `EINVAL` until S5.
 
@@ -1640,8 +1652,12 @@ and a native child each refused the call their creator's filter refuses, with
 `Seccomp: 2` and `Seccomp_filters: 2` in their `status`; a killed thread's
 process ending by `SIGSYS` (a `KILL_PROCESS` the same, a thread in strict mode
 by `SIGKILL`); a thread in filter mode with no filter ended; the longest chain
-Linux allows, 6,554 one-instruction filters, made and released; and, in the
-`kmem` line, filters made until a job's memory limit refused one `ENOMEM`,
+Linux allows, 6,554 one-instruction filters, made and released outside the
+thread's lock; a native child whose start was refused and made again still
+filtered, with its creator's no-new-privs; one thread of a process killed by its
+filter, alone (the process lives and the others' calls run), and the first
+thread killed while another lives, the process ending by `SIGSYS` when the
+other leaves; and, in the `kmem` line, filters made until a job's memory limit refused one `ENOMEM`,
 a sibling job made one, and both read zero after. Each control below is a
 throwaway branch with one sabotage and a `NEGATIVE CONTROL` line, and stopped
 the boot with the check's own message:
@@ -1662,11 +1678,21 @@ the boot with the check's own message:
 | a filter is charged nothing to its job | `kmem: a job made more than its limit could hold` |
 | a thread in filter mode with no filter is let go on | `a thread in filter mode with no filter was let go on` |
 | a chain is released by the default recursive drop | `K11` |
+| an ERRNO of 5000 is answered 7 | `a filter's errno was not cut to 4095` |
+| an action nobody defined lets the call go on | `an action nobody defined did not end the process` |
+| a native child's first state is taken, not kept | `a native child of a filtered process was not filtered once its start was refused and made again` |
+| a thread killed by its filter leaves with no status | `a killed leader's process did not end by SIGSYS` |
+| a killed thread always ends its whole process | `a thread killed by its filter took its whole process with it` |
+
+What a call costs the worst chains, read in the guest (`seccomp` line): the
+6,554-filter chain, 401 us a call; seven 4,096-instruction filters, the most
+steps there can be, 732 us; releasing the long chain, 8.1 ms, which in
+production can be the reaper's last drop with preemption off and is the one
+cost S3 adds there (a BACKLOG row). `MEMORY-AND-TIMING.md` §2.2b has them.
 
 What stands on the code and not on a check, each a BACKLOG row: `execve`
 keeping the chain (no boot check runs an `execve`; S6's guest program does:
-bubblewrap's path), `KILL_THREAD` of one thread among several (the test
-processes have one thread that has started; S6's guest program kills one
-among several), and `LOG`'s line (read by hand in the boot log).
+bubblewrap's path), and `LOG`'s line (read by hand in the boot log). The
+several-thread `KILL_THREAD` is a check now, with started threads.
 
 S4 (`TRAP`) and S5 (`TSYNC`) follow.
