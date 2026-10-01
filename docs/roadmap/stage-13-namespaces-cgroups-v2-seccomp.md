@@ -246,7 +246,6 @@ Linux):
 | `stage13-np`, `stage13-fdinfo` | `/proc`'s private links by `ptrace_may_access`, dumpable cleared by id changes, `/proc/<pid>/fdinfo` | boot check written; last run failed on a real bug now fixed, not re-run. Overlaps `main`'s own `credentials_changed` |
 | `stage13-n5` | unprivileged mounting: `may_mount` by owner, `tmpfs` alone, locked copies, detach-don't-pin, sysctls | `mountperm` line booted on x86_64, four controls fired; other gates not run |
 | `stage13-bwrap-user` | `test-bwrap` as uid 1000 | its one run exited 1 near the `threads` line; cause not read |
-| `stage13-netns` | network namespaces, veth pairs, per-namespace stacks | boots on three architectures, `test-shell`, `test-vfs`, `test-net`, 30 controls; `check` not run |
 | `stage13-timens` | time namespace | agent had not reported |
 | `stage13-cgctl` | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max` with `cpu.stat`, the `io` controller (`io.stat`, `io.max`) | reclaim, freeze and cpu booted; the io check stopped at its last line (a quota-slot count, a fix written, not booted); no full boot, no `test-shell`/`test-vfs`, no negative control run |
 | `stage13-s3` | seccomp S3 to S5 | S3 built and booting, not gated; S4 and S5 not started |
@@ -288,6 +287,20 @@ procfs, `cgroup.procs`, `si_pid`, `SO_PEERCRED` and the terminal's groups
 follow. The `pidns` boot line (FX-0891) and a pid-namespace fill in `kmem`
 prove it, each rule with a negative control; `PIDNS.md` §8 lists where it
 differs from Linux.
+
+**Done -- network namespaces (built 2026-09-30, landed 2026-10-01):**
+`CLONE_NEWNET` through `clone`, `clone3` and `unshare` gives a namespace of its
+own interfaces, addresses, routes, neighbours, ports, sockets, `/proc/net` and
+netlink view, starting with a down loopback that `ip link set lo up` (netlink or
+`SIOCSIFFLAGS`) gives `127.0.0.1` and `::1`. A socket stays in the namespace it
+was made in. `CAP_NET_ADMIN` and `CAP_NET_RAW` over the owning user namespace
+judge changes and raw sockets. `veth` pairs made by `RTM_NEWLINK` join two
+namespaces and carry datagrams and streams, move by `IFLA_NET_NS_PID` or `_FD`
+and go with either end; a physical NIC moves with its ring and comes home when
+the namespace ends. Abstract unix names are per namespace. The `netns` boot line
+(FX-0893) and 30 negative controls prove it on x86_64 and the tables are
+charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
+controls and what is open.
 
 **Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
 reclaiming inside the job before it OOM-kills (M2), then freezing,

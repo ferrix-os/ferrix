@@ -711,7 +711,8 @@ struct Interface {
 /// Every interface, copied out: nothing may sleep inside the net core's
 /// lock, and rendering allocates.
 fn interfaces() -> Vec<Interface> {
-    net::core().look(|stack| {
+    // The reader's network namespace's (`docs/NETNS.md` section 4).
+    net::acting().core().look(|stack| {
         stack
             .interfaces()
             .iter()

@@ -228,6 +228,11 @@ pub(super) fn mount_namespace(process: &Process) -> Result<Vec<u8>> {
     Ok(alloc::format!("mnt:[{id}]").into_bytes())
 }
 
+/// `/proc/<pid>/ns/net`'s text, `net:[N]`.
+pub(super) fn net_namespace(process: &Process) -> Result<Vec<u8>> {
+    Ok(alloc::format!("net:[{}]", process.net_ns().id()).into_bytes())
+}
+
 /// `/proc/<pid>/ns/user`.
 pub(super) fn user_namespace(process: &Process) -> Result<Vec<u8>> {
     let id = process.with_credentials(|held| held.user_ns.id());
@@ -1313,7 +1318,7 @@ fn stat_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
 /// `/proc/net/dev`.
 pub(super) fn net_dev(_: &Kernel) -> Result<Vec<u8>> {
     let devices: Vec<(Vec<u8>, procfs_net::DeviceCounters)> =
-        crate::net::core().with(|stack, _| {
+        crate::net::acting().core().with(|stack, _| {
             stack
                 .interfaces()
                 .iter()
@@ -1350,38 +1355,39 @@ pub(super) fn net_dev(_: &Kernel) -> Result<Vec<u8>> {
 
 /// `/proc/net/route`, which is IPv4 only, as it is on Linux.
 pub(super) fn net_route(_: &Kernel) -> Result<Vec<u8>> {
-    let rows: Vec<(Vec<u8>, procfs_net::Route<'static>)> = crate::net::core().with(|stack, _| {
-        stack
-            .routes()
-            .entries()
-            .iter()
-            .filter_map(|route| {
-                let IpAddress::V4(destination) = route.destination.address() else {
-                    return None;
-                };
-                let interface = stack.interface(route.interface)?;
-                let gateway = match route.gateway {
-                    Some(IpAddress::V4(address)) => address.octets(),
-                    _ => [0; 4],
-                };
-                // RTF_UP is 1 and RTF_GATEWAY 2, which is what `route` prints
-                // as `U` and `UG`.
-                let flags = 1 | u16::from(route.gateway.is_some()) << 1;
-                Some((
-                    interface.name.as_bytes().to_vec(),
-                    procfs_net::Route {
-                        interface: b"",
-                        destination: destination.octets(),
-                        gateway,
-                        flags,
-                        metric: route.metric,
-                        mask: mask_of(route.destination.prefix_len()),
-                        mtu: interface.mtu,
-                    },
-                ))
-            })
-            .collect()
-    });
+    let rows: Vec<(Vec<u8>, procfs_net::Route<'static>)> =
+        crate::net::acting().core().with(|stack, _| {
+            stack
+                .routes()
+                .entries()
+                .iter()
+                .filter_map(|route| {
+                    let IpAddress::V4(destination) = route.destination.address() else {
+                        return None;
+                    };
+                    let interface = stack.interface(route.interface)?;
+                    let gateway = match route.gateway {
+                        Some(IpAddress::V4(address)) => address.octets(),
+                        _ => [0; 4],
+                    };
+                    // RTF_UP is 1 and RTF_GATEWAY 2, which is what `route` prints
+                    // as `U` and `UG`.
+                    let flags = 1 | u16::from(route.gateway.is_some()) << 1;
+                    Some((
+                        interface.name.as_bytes().to_vec(),
+                        procfs_net::Route {
+                            interface: b"",
+                            destination: destination.octets(),
+                            gateway,
+                            flags,
+                            metric: route.metric,
+                            mask: mask_of(route.destination.prefix_len()),
+                            mtu: interface.mtu,
+                        },
+                    ))
+                })
+                .collect()
+        });
     let rows: Vec<procfs_net::Route<'_>> = rows
         .iter()
         .map(|(name, route)| procfs_net::Route {
@@ -1438,8 +1444,9 @@ pub(super) fn net_udp6(_: &Kernel) -> Result<Vec<u8>> {
 /// A row names the socket's file, as `/proc/<pid>/fd` does, and the user that
 /// owns it; both are looked up after the net core is let go.
 fn inet_sockets(stream: bool, six: bool) -> Vec<procfs_net::Socket> {
+    let reader = crate::net::acting();
     let mut rows: Vec<(ferrix_net::SocketId, procfs_net::Socket)> =
-        crate::net::core().with(|stack, _| {
+        reader.core().with(|stack, _| {
             stack
                 .sockets()
                 .filter(|(_, socket)| {
@@ -1458,7 +1465,7 @@ fn inet_sockets(stream: bool, six: bool) -> Vec<procfs_net::Socket> {
                 .collect()
         });
     for (id, row) in &mut rows {
-        if let Some(file) = crate::net::socket::file_of(*id) {
+        if let Some(file) = crate::net::socket::file_of(reader.id(), *id) {
             row.inode = file.ino;
             row.uid = file.uid;
         }
@@ -1511,7 +1518,7 @@ fn endpoint_row(endpoint: ferrix_net::Endpoint) -> procfs_net::Endpoint {
 /// `/proc/net/arp`.
 pub(super) fn net_arp(_: &Kernel) -> Result<Vec<u8>> {
     let rows: Vec<(Vec<u8>, procfs_net::Neighbour<'static>)> =
-        crate::net::core().with(|stack, _| {
+        crate::net::acting().core().with(|stack, _| {
             stack
                 .neighbors()
                 .entries()

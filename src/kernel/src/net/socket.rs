@@ -39,7 +39,7 @@ use ferrix_net::{Endpoint, IpAddress, Ipv4, Ipv6, SocketId, to_v6};
 use ferrix_vfs::{Inode, Metadata, OpenFile, Readiness};
 
 use crate::fs;
-use crate::net;
+use crate::net::NetNamespace;
 use crate::sync::SpinLock;
 
 /// What kind of `AF_INET` socket this is.
@@ -109,6 +109,9 @@ struct Options {
 
 /// An `AF_INET` or `AF_INET6` socket.
 pub(crate) struct InetSocket {
+    /// The network namespace it was made in, for life: the stack its id
+    /// names a socket of.
+    ns: Arc<NetNamespace>,
     /// Which socket in the stack.
     id: SocketId,
     /// What kind it is.
@@ -132,7 +135,7 @@ fn socket_charge() -> Result<Charge, Errno> {
     Charge::bytes(
         arc_footprint::<InetSocket>()
             .saturating_add(2 * size_of::<(u32, NetSocket)>())
-            .saturating_add(2 * size_of::<(SocketId, FileOf)>()),
+            .saturating_add(2 * size_of::<((u64, SocketId), FileOf)>()),
     )
     .map_err(|_| Errno::ENOMEM)
 }
@@ -159,11 +162,12 @@ pub(crate) struct FileOf {
 ///
 /// Never taken with the net core held, and the net core is never taken with
 /// this held.
-static FILES: SpinLock<BTreeMap<SocketId, FileOf>> = SpinLock::new(BTreeMap::new());
+static FILES: SpinLock<BTreeMap<(u64, SocketId), FileOf>> = SpinLock::new(BTreeMap::new());
 
-/// The file `id` is open as, if it has one.
-pub(crate) fn file_of(id: SocketId) -> Option<FileOf> {
-    FILES.lock().get(&id).copied()
+/// The file socket `id` of network namespace `namespace` is open as, if it has
+/// one.
+pub(crate) fn file_of(namespace: u64, id: SocketId) -> Option<FileOf> {
+    FILES.lock().get(&(namespace, id)).copied()
 }
 
 impl fmt::Debug for InetSocket {
@@ -179,8 +183,8 @@ impl fmt::Debug for InetSocket {
 
 impl Drop for InetSocket {
     fn drop(&mut self) {
-        let _ = FILES.lock().remove(&self.id);
-        net::core().with(|stack, _| stack.close(self.id));
+        let _ = FILES.lock().remove(&(self.ns.id(), self.id));
+        self.ns.core().with(|stack, _| stack.close(self.id));
     }
 }
 
@@ -215,6 +219,7 @@ impl InetSocket {
     ///
     /// Whatever [`OpenFile::new`] refuses, which for a socket is nothing.
     pub(crate) fn open(
+        ns: &Arc<NetNamespace>,
         family: Family,
         kind: InetKind,
         nonblock: bool,
@@ -222,18 +227,19 @@ impl InetSocket {
     ) -> Result<Arc<OpenFile>, Errno> {
         // Before the stack has a socket to leak if it is refused.
         let charge = socket_charge()?;
-        let id = net::core().with(|stack, _| match kind {
+        let id = ns.core().with(|stack, _| match kind {
             InetKind::Stream => stack.open_tcp(family),
             InetKind::Datagram => stack.open_udp(family),
             InetKind::Echo => stack.open_icmp(family),
             InetKind::Raw { protocol } => stack.open_raw(family, protocol),
         });
-        Self::wrap(id, family, kind, nonblock, owner, charge)
+        Self::wrap(ns, id, family, kind, nonblock, owner, charge)
     }
 
     /// Put an existing stack socket behind an open file, which is what
     /// `accept` does with the connection it takes.
     fn wrap(
+        ns: &Arc<NetNamespace>,
         id: SocketId,
         family: Family,
         kind: InetKind,
@@ -243,6 +249,7 @@ impl InetSocket {
     ) -> Result<Arc<OpenFile>, Errno> {
         let ino = fs::socket::next_ino();
         let socket = Arc::new(InetSocket {
+            ns: Arc::clone(ns),
             id,
             kind,
             family,
@@ -258,7 +265,9 @@ impl InetSocket {
             }),
             _charge: charge,
         });
-        let _ = FILES.lock().insert(id, FileOf { ino, uid: owner.0 });
+        let _ = FILES
+            .lock()
+            .insert((ns.id(), id), FileOf { ino, uid: owner.0 });
         fs::socket::open_on_sockfs(socket, ino, nonblock)
     }
 
@@ -269,12 +278,14 @@ impl InetSocket {
 
     /// Whether it has a peer.
     pub(crate) fn is_connected(&self) -> bool {
-        net::core().with(|stack, _| stack.remote_endpoint(self.id).is_some())
+        self.ns
+            .core()
+            .with(|stack, _| stack.remote_endpoint(self.id).is_some())
     }
 
     /// What it can do right now.
     pub(crate) fn readiness(&self) -> Readiness {
-        let ready = net::core().look(|stack| stack.readiness(self.id));
+        let ready = self.ns.core().look(|stack| stack.readiness(self.id));
         Readiness {
             readable: ready.readable,
             writable: ready.writable,
@@ -287,7 +298,8 @@ impl InetSocket {
     /// Give it a name.
     pub(crate) fn bind(&self, raw: &[u8]) -> Result<(), Errno> {
         let endpoint = self.endpoint_of(raw)?;
-        net::core()
+        self.ns
+            .core()
             .with(|stack, _| stack.bind(self.id, endpoint))
             .map_err(errno)
     }
@@ -303,7 +315,8 @@ impl InetSocket {
         let backlog = usize::try_from(backlog.max(0))
             .unwrap_or(0)
             .min(ferrix_linux_abi::socket::SOMAXCONN);
-        net::core()
+        self.ns
+            .core()
             .with(|stack, _| stack.listen(self.id, backlog))
             .map_err(errno)
     }
@@ -326,14 +339,23 @@ impl InetSocket {
         loop {
             // Before a connection is taken, which a refusal would leak.
             let charge = socket_charge()?;
-            let taken = net::core().with(|stack, _| stack.accept(self.id));
+            let taken = self.ns.core().with(|stack, _| stack.accept(self.id));
             match taken {
                 Ok(id) => {
-                    let peer = net::core()
+                    let peer = self
+                        .ns
+                        .core()
                         .with(|stack, _| stack.remote_endpoint(id))
                         .unwrap_or(Endpoint::new(self.unspecified(), 0));
-                    let file =
-                        Self::wrap(id, self.family, self.kind, accepted_nonblock, owner, charge)?;
+                    let file = Self::wrap(
+                        &self.ns,
+                        id,
+                        self.family,
+                        self.kind,
+                        accepted_nonblock,
+                        owner,
+                        charge,
+                    )?;
                     return Ok((file, self.encode(peer)));
                 }
                 Err(Error::WouldBlock) if nonblock => return Err(Errno::EAGAIN),
@@ -351,7 +373,10 @@ impl InetSocket {
     /// and the program waits with `poll`, as Linux does.
     pub(crate) fn connect(&self, raw: &[u8], nonblock: bool) -> Result<(), Errno> {
         let endpoint = self.endpoint_of(raw)?;
-        let started = net::core().with(|stack, at| stack.connect(self.id, endpoint, at));
+        let started = self
+            .ns
+            .core()
+            .with(|stack, at| stack.connect(self.id, endpoint, at));
         match started {
             Ok(()) => {}
             Err(Error::AlreadyDone) if self.is_connected() => return Err(Errno::EISCONN),
@@ -368,7 +393,7 @@ impl InetSocket {
         loop {
             let ready = self.readiness();
             if ready.error {
-                let error = net::core().with(|stack, _| stack.take_error(self.id));
+                let error = self.ns.core().with(|stack, _| stack.take_error(self.id));
                 return Err(error.map_or(Errno::ECONNREFUSED, errno));
             }
             if ready.writable {
@@ -395,7 +420,8 @@ impl InetSocket {
         if self.kind.is_stream() && !self.is_connected() {
             return Err(Errno::ENOTCONN);
         }
-        net::core()
+        self.ns
+            .core()
             .with(|stack, _| stack.shutdown(self.id, how))
             .map_err(errno)
     }
@@ -415,7 +441,10 @@ impl InetSocket {
         let nonblock = nonblock || flags & MSG_DONTWAIT != 0;
         let deadline = self.deadline(self.options.lock().send_timeout, nonblock);
         loop {
-            let sent = net::core().with(|stack, at| stack.send(self.id, data, destination, at));
+            let sent = self
+                .ns
+                .core()
+                .with(|stack, at| stack.send(self.id, data, destination, at));
             match sent {
                 Ok(count) => return Ok(count),
                 Err(Error::WouldBlock) if nonblock => return Err(Errno::EAGAIN),
@@ -445,7 +474,10 @@ impl InetSocket {
         let nonblock = nonblock || flags & MSG_DONTWAIT != 0;
         let deadline = self.deadline(self.options.lock().receive_timeout, nonblock);
         loop {
-            let taken = net::core().with(|stack, _| stack.recv(self.id, out, peek));
+            let taken = self
+                .ns
+                .core()
+                .with(|stack, _| stack.recv(self.id, out, peek));
             match taken {
                 Ok(received) => {
                     let full = received.bytes + received.truncated;
@@ -505,7 +537,9 @@ impl InetSocket {
 
     /// The name it is bound to, encoded as a `sockaddr`.
     pub(crate) fn local_name(&self) -> Vec<u8> {
-        let endpoint = net::core()
+        let endpoint = self
+            .ns
+            .core()
             .with(|stack, _| stack.local_endpoint(self.id))
             .unwrap_or(Endpoint::new(self.unspecified(), 0));
         self.encode(endpoint)
@@ -513,7 +547,10 @@ impl InetSocket {
 
     /// The name of its peer, if it has one.
     pub(crate) fn peer_name(&self) -> Option<Vec<u8>> {
-        let endpoint = net::core().with(|stack, _| stack.remote_endpoint(self.id))?;
+        let endpoint = self
+            .ns
+            .core()
+            .with(|stack, _| stack.remote_endpoint(self.id))?;
         Some(self.encode(endpoint))
     }
 
@@ -586,7 +623,7 @@ impl InetSocket {
 
     /// Wait for the stack to move, or for a signal or the deadline.
     fn wait(&self, ready: impl FnMut() -> bool, deadline: u64) -> Result<(), Errno> {
-        fs::socket::wait_on(net::core().progress(), ready, deadline)
+        fs::socket::wait_on(self.ns.core().progress(), ready, deadline)
     }
 }
 
@@ -624,7 +661,7 @@ impl InetSocket {
             (SOL_SOCKET, SO_PROTOCOL) => Ok(self.kind.protocol(self.family)),
             (SOL_SOCKET, SO_ACCEPTCONN) => Ok(i32::from(self.is_listening())),
             (SOL_SOCKET, SO_ERROR) => {
-                let error = net::core().with(|stack, _| stack.take_error(self.id));
+                let error = self.ns.core().with(|stack, _| stack.take_error(self.id));
                 Ok(error.map_or(0, |error| i32::from(errno(error).0)))
             }
             (SOL_SOCKET, SO_SNDBUF) => Ok(i32::try_from(options.send_buffer).unwrap_or(i32::MAX)),
@@ -656,7 +693,7 @@ impl InetSocket {
 
     /// Whether it is a listening socket.
     fn is_listening(&self) -> bool {
-        net::core().with(|stack, _| {
+        self.ns.core().with(|stack, _| {
             matches!(stack.socket(self.id), Some(NetSocket::Listen(listener)) if listener.backlog > 0)
         })
     }
@@ -766,7 +803,7 @@ impl InetSocket {
 
     /// The options the stack keeps for this socket.
     fn stack_options(&self) -> ferrix_net::socket::Options {
-        net::core().with(|stack, _| {
+        self.ns.core().with(|stack, _| {
             stack
                 .socket(self.id)
                 .map_or(ferrix_net::socket::Options::default(), NetSocket::options)
@@ -775,7 +812,7 @@ impl InetSocket {
 
     /// Change the options the stack keeps.
     fn with_options(&self, body: impl FnOnce(&mut ferrix_net::socket::Options)) {
-        net::core().with(|stack, _| {
+        self.ns.core().with(|stack, _| {
             if let Some(socket) = stack.socket_mut(self.id) {
                 body(socket.options_mut());
             }
@@ -792,10 +829,12 @@ impl InetSocket {
         &self,
         body: impl FnOnce(&mut ferrix_net::socket::RawSocket) -> T,
     ) -> Result<T, Errno> {
-        net::core().with(|stack, _| match stack.socket_mut(self.id) {
-            Some(NetSocket::Raw(raw)) => Ok(body(raw)),
-            _ => Err(Errno::ENOPROTOOPT),
-        })
+        self.ns
+            .core()
+            .with(|stack, _| match stack.socket_mut(self.id) {
+                Some(NetSocket::Raw(raw)) => Ok(body(raw)),
+                _ => Err(Errno::ENOPROTOOPT),
+            })
     }
 
     /// `ICMP_FILTER`'s mask, on a raw ICMP socket.
@@ -923,7 +962,7 @@ impl InetSocket {
 
     /// Whether Nagle's algorithm is off.
     fn nodelay(&self) -> bool {
-        net::core().with(|stack, _| match stack.socket(self.id) {
+        self.ns.core().with(|stack, _| match stack.socket(self.id) {
             Some(NetSocket::Stream(stream)) => stream.connection.config().no_delay,
             _ => false,
         })
@@ -931,7 +970,7 @@ impl InetSocket {
 
     /// Turn Nagle's algorithm off or on.
     fn set_nodelay(&self, off: bool) {
-        net::core().with(|stack, _| {
+        self.ns.core().with(|stack, _| {
             if let Some(NetSocket::Stream(stream)) = stack.socket_mut(self.id) {
                 stream.connection.set_no_delay(off);
             }
@@ -940,7 +979,7 @@ impl InetSocket {
 
     /// The largest segment the connection sends.
     fn segment_size(&self) -> i32 {
-        net::core().with(|stack, _| match stack.socket(self.id) {
+        self.ns.core().with(|stack, _| match stack.socket(self.id) {
             Some(NetSocket::Stream(stream)) => i32::from(stream.connection.segment_size()),
             _ => i32::from(ferrix_nettcp::conn::DEFAULT_MSS),
         })
@@ -975,7 +1014,7 @@ impl InetSocket {
 
     /// How many bytes are waiting to be read, which `SIOCINQ` reports.
     fn queued(&self) -> usize {
-        net::core().with(|stack, _| match stack.socket(self.id) {
+        self.ns.core().with(|stack, _| match stack.socket(self.id) {
             Some(NetSocket::Stream(stream)) => stream.connection.receive_queued(),
             Some(NetSocket::Udp(socket) | NetSocket::Icmp(socket)) => {
                 socket.peek().map_or(0, |datagram| datagram.payload.len())
@@ -990,7 +1029,7 @@ impl InetSocket {
 
     /// How many bytes are waiting to be sent, which `SIOCOUTQ` reports.
     fn unsent(&self) -> usize {
-        net::core().with(|stack, _| match stack.socket(self.id) {
+        self.ns.core().with(|stack, _| match stack.socket(self.id) {
             Some(NetSocket::Stream(stream)) => stream.connection.send_queued(),
             _ => 0,
         })
@@ -1017,11 +1056,11 @@ impl Inode for InetSocket {
     /// The net core's progress queue, which every change a socket's
     /// readiness reads wakes.
     fn poll_changes(&self) -> Option<u64> {
-        Some(net::core().progress().wakes())
+        Some(self.ns.core().progress().wakes())
     }
 
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
-        visit(fs::wake::lent(net::core().progress()));
+        visit(self.ns.core().progress_source());
         true
     }
 

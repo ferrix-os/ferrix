@@ -85,6 +85,26 @@ pub enum Medium {
     Loopback,
 }
 
+/// What an interface is made of, which the kernel needs to know to carry a
+/// frame somewhere other than a wire (`docs/NETNS.md` section 3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Backing {
+    /// The loopback, or anything the stack makes itself: nothing outside the
+    /// stack carries its frames.
+    Software,
+    /// A device a driver serves. The key is stable when the interface moves
+    /// to another stack, which its index is not.
+    Device(u32),
+    /// One end of a pair of virtual Ethernet links: what leaves one arrives at
+    /// the other, wherever the other is.
+    Veth {
+        /// Which pair.
+        pair: u64,
+        /// Which of its two ends, 0 or 1.
+        end: u8,
+    },
+}
+
 /// An address configured on an interface.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Address {
@@ -134,30 +154,51 @@ pub struct Interface {
     pub addresses: Vec<Address>,
     /// What it has carried.
     pub counters: Counters,
+    /// What carries its frames.
+    pub backing: Backing,
 }
 
 impl Interface {
-    /// A loopback interface, which is up from the moment it exists.
+    /// The addresses a loopback interface owns when it is up.
     #[must_use]
-    pub fn loopback(index: u32) -> Interface {
+    pub fn loopback_addresses() -> [Address; 2] {
+        [
+            Address {
+                cidr: IpCidr::new(IpAddress::V4(Ipv4::LOOPBACK), 8),
+                peer: None,
+            },
+            Address {
+                cidr: IpCidr::new(IpAddress::V6(Ipv6::LOOPBACK), 128),
+                peer: None,
+            },
+        ]
+    }
+
+    /// A loopback interface that is down and owns nothing: what a new network
+    /// namespace starts with. Bringing it up gives it its addresses
+    /// ([`crate::Stack::set_up`]), as Linux does.
+    #[must_use]
+    pub fn loopback_down(index: u32) -> Interface {
         Interface {
             index,
             name: Name::new(b"lo"),
             medium: Medium::Loopback,
             hardware: [0; 6],
             mtu: 65_536,
-            flags: IFF_UP | IFF_LOOPBACK | IFF_RUNNING | IFF_LOWER_UP,
-            addresses: alloc::vec![
-                Address {
-                    cidr: IpCidr::new(IpAddress::V4(Ipv4::LOOPBACK), 8),
-                    peer: None,
-                },
-                Address {
-                    cidr: IpCidr::new(IpAddress::V6(Ipv6::LOOPBACK), 128),
-                    peer: None,
-                },
-            ],
+            flags: IFF_LOOPBACK,
+            addresses: Vec::new(),
             counters: Counters::default(),
+            backing: Backing::Software,
+        }
+    }
+
+    /// A loopback interface, which is up from the moment it exists.
+    #[must_use]
+    pub fn loopback(index: u32) -> Interface {
+        Interface {
+            flags: IFF_UP | IFF_LOOPBACK | IFF_RUNNING | IFF_LOWER_UP,
+            addresses: Interface::loopback_addresses().to_vec(),
+            ..Interface::loopback_down(index)
         }
     }
 
@@ -174,6 +215,7 @@ impl Interface {
             flags: IFF_BROADCAST | IFF_MULTICAST,
             addresses: Vec::new(),
             counters: Counters::default(),
+            backing: Backing::Software,
         }
     }
 

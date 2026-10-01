@@ -40,7 +40,10 @@ package FerrixIsolation {
              * subtree, and a superblock per filesystem. N3 (2026-09-30):
              * mount namespaces, copied by unshare and clone, pivot_root, a
              * native child kept in its creator's, and openat2's resolve
-             * flags. N4, user namespaces, is next. */
+             * flags. N4, user namespaces, is next. Network namespaces
+             * (docs/NETNS.md, landed 2026-10-01): a stack
+             * per namespace, a down loopback, veth pairs, devices that move
+             * with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner. */
         part every : Namespace[8..*];
         action unshare;
         action setns;
