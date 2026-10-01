@@ -43,21 +43,21 @@
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "156",
+      "lines": "157",
       "category": "defensive",
       "match": "Err(_) => cpu::flush_tlb(),",
       "why": "A page address past 4 GiB asked to be invalidated, which on this architecture cannot be a translation; everything is flushed rather than a truncated page. Every caller passes a virtual address, all of which are below 4 GiB here."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1285",
+      "lines": "1306",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU and the DK1 both reset."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1315",
+      "lines": "1336",
       "category": "defensive",
       "match": "return Err(\"this GIC is not a GICv2, and GICv3 support is not written yet\");",
       "why": "A device tree describing a GICv3 on ARMv7-A, which this kernel has no driver for here: interrupt bring-up is refused by name and the kernel stops (FX-0303). The machines it runs on -- QEMU's `virt` as the suite boots it, the STM32MP157 -- have a GICv2; a `virt` given a GICv3 would be a boot that stops, which is not coverage evidence."
@@ -113,35 +113,35 @@
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "554",
+      "lines": "564",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`classify`'s arm for a vector entry that is neither an interrupt, an undefined instruction, a system call nor an abort: reset, hypervisor trap or FIQ. The stage 3 machine check classifies each from a built frame, in its own copy under other rows; the line's only statement row is in `dispatch`'s copy, which none of those entries reaches on a running kernel -- the stubs for them are the kernel's own failure, which it stops on."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "586",
+      "lines": "596",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`abort`'s arm for a fault status that is neither translation, access flag, permission, alignment nor debug: an external abort. The stage 3 machine check decodes data and prefetch external aborts from built frames, in its own copy; the line's only statement row is in `dispatch`'s copy, which runs it only when the memory system reports an external abort, which QEMU's does not."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "595, 609, 615, 625, 627, 631-637, 642, 648",
+      "lines": "605, 619, 625, 635, 637, 641-647, 652, 658",
       "category": "failure-path",
       "match": "match kind {",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`), and `kind_name` as it inlines it there; a passing run never prints it."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "596",
+      "lines": "606",
       "category": "credited-elsewhere",
       "match": "KIND_RESET => \"reset\",",
       "why": "`kind_name` for the reset entry, in `classify`'s arm above (line 550): named by the machine check's frame in its own copy, and in `dispatch`'s only when the kernel's reset stub is taken."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "601",
+      "lines": "611",
       "category": "credited-elsewhere",
       "match": "KIND_HYP_TRAP => \"hypervisor trap\",",
       "why": "`kind_name` for the hypervisor-trap entry, as line 592."
@@ -561,14 +561,14 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "961",
+      "lines": "962",
       "category": "defensive",
       "match": ".or_else(|_| root.new_child())",
       "why": "A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1088",
+      "lines": "1089",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -1233,182 +1233,182 @@
     },
     {
       "file": "main.rs",
-      "lines": "181",
+      "lines": "186",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "296",
+      "lines": "301",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "360",
+      "lines": "365",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "373",
+      "lines": "378",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILESYSTEM` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "395",
+      "lines": "400",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PIPES_AND_FILESYSTEM_CALLS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "409",
+      "lines": "414",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILE_MAPPINGS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "433",
+      "lines": "438",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PSEUDO_FILESYSTEMS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "559",
+      "lines": "564",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::NET_CORE, \"net core self-che",
       "why": "The failure arm in `check_net`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `NET_CORE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "586",
+      "lines": "591",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_driver`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DRIVER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "626",
+      "lines": "631",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_devmgr`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DEVMGR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "658",
+      "lines": "663",
       "category": "absent-hardware",
       "match": "println!(\"  btrfs-pf not run: {}\", report.skipped.unwrap_or_",
       "why": "A power-fail boot without the third disk it churns: `test-powerfail` always attaches it, and no other gate asks for the power-fail mode."
     },
     {
       "file": "main.rs",
-      "lines": "670",
+      "lines": "675",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "684",
+      "lines": "689",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "825",
+      "lines": "830",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `PROCESSOR_DISCOVERY` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "853",
+      "lines": "858",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::STAGE4_SMP, \"stage 4 self-ch",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "908",
+      "lines": "913",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1204",
+      "lines": "1209",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1274",
+      "lines": "1279",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1281",
+      "lines": "1286",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1306",
+      "lines": "1311",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1378",
+      "lines": "1383",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1455",
+      "lines": "1460",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1463-1464",
+      "lines": "1468-1469",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1513",
+      "lines": "1518",
       "category": "absent-hardware",
       "match": "if memory.map_framebuffer(at, framebuffer.phys, len).is_err(",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1516",
+      "lines": "1521",
       "category": "absent-hardware",
       "match": "if memory.translate(at) != Some(framebuffer.phys) {",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1519",
+      "lines": "1524",
       "category": "absent-hardware",
       "match": "panic::screen::install(&framebuffer, at, len);",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
@@ -1961,42 +1961,42 @@
     },
     {
       "file": "trap.rs",
-      "lines": "266",
+      "lines": "322",
       "category": "defensive",
       "match": "None => Outcome::Return(Errno::ENOSYS.as_return_value()),",
       "why": "A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector."
     },
     {
       "file": "trap.rs",
-      "lines": "369",
+      "lines": "425",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "387",
+      "lines": "443",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "424",
+      "lines": "480",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "502, 504, 507-510",
+      "lines": "558, 560, 563-566",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "524, 529, 539, 547-549, 551",
+      "lines": "580, 585, 595, 603-605, 607",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

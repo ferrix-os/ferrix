@@ -99,6 +99,7 @@ Causes are listed most likely first.
 | [FX-1201](#fx-1201) | a btrfs volume Ferrix wrote did not read back as it was written |
 | [FX-1202](#fx-1202) | pid 1 did not move onto the root volume with the switch |
 | [FX-1301](#fx-1301) | cgroupfs did not show the job tree as cgroup v2 |
+| [FX-1302](#fx-1302) | seccomp's filter was not asked first at every entry, or not as the entry's own |
 | [FX-1501](#fx-1501) | init exited, and ferrix.onexit=panic asked for a panic |
 | [FX-1502](#fx-1502) | a kernel call init needs did not do what docs/INIT.md §11 says |
 | [FX-9001](#fx-9001) | a page fault the kernel cannot resolve |
@@ -2499,6 +2500,37 @@ accept a limit on a job the delegatee made with job_create.
 
 See: src/kernel/src/fs/cgroupfs.rs; src/kernel/src/object/job.rs;
 src/lib/fs/cgroupfs; docs/CGROUPS.md.
+
+<a id="fx-1302"></a>
+
+## FX-1302 — seccomp's filter was not asked first at every entry, or not as the entry's own
+
+Stage 13's seccomp landing S2 (docs/SECCOMP.md §3.3): the core's system call
+entries ask a registered filter about every call before anything else answers
+it. `syscall::seccomp_check::run` drives each entry this architecture has --
+SYSCALL and `int $0x80` on x86-64, `svc` on the Arm pair -- with frames of its
+own and a test-only rule in the filter's place. Every call an entry keeps for
+itself (`arch_prctl`, `set_tls`, `sigreturn`, `rt_sigreturn`) must reach the
+rule once and be answered with the rule's value, with the number, the
+instruction pointer and the first argument as the frame held them. A call must
+carry its entry's `arch` token: an `int $0x80` call is i386's and not x86-64's,
+whatever the image. A number with bits above the 32nd set must be judged as its
+low half and dispatched as no call. A call in the native range must carry a
+token of its own, so that a filter refusing every foreign `arch` refuses it and
+one allowing that token by name does not.
+
+1. An entry in src/kernel/src/arch calls `trap::filter_system_call` after one of
+   its early answers, or not at all, so a filter that denies `arch_prctl` or
+   `rt_sigreturn` is not obeyed.
+2. `arch::audit_arch` answers the image's token and not the entry's, or
+   `syscall::seccomp::data` takes the token from the process.
+3. `syscall::seccomp::data` cuts the number at another width than the filter's
+   32 bits, or judges the native range under a Linux token.
+4. The entry builds `SyscallArgs::ip` from another register than the saved
+   program counter.
+
+See: src/kernel/src/syscall/seccomp_check.rs; src/kernel/src/syscall/seccomp.rs;
+src/kernel/src/trap.rs filter_system_call; docs/SECCOMP.md §3.2, §3.3.
 
 <a id="fx-1501"></a>
 
