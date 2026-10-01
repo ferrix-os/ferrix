@@ -454,12 +454,15 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
     report.inherited += 1;
 
     // A second thread of the same process: the caller's chain too.
-    let sibling = Thread::sibling(
-        &env.process,
-        env.process.pid().saturating_add(1),
-        &env.thread,
-    )
-    .map_err(|_| "no thread for a seccomp sibling")?;
+    let sibling = Arc::new(
+        Thread::sibling(
+            &env.process,
+            env.process.pid().saturating_add(1),
+            &env.thread,
+        )
+        .map_err(|_| "no thread for a seccomp sibling")?,
+    );
+    env.process.add_thread_from(&sibling, &env.thread);
     if judge_thread(&sibling, getppid) != Some(EPERM) {
         return Err("a thread of a filtered process was not filtered");
     }
