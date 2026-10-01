@@ -38,11 +38,12 @@ use alloc::vec;
 use ferrix_bootinfo::{Arch, PAGE_SIZE, is_user_address};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
-use ferrix_linux_abi::types::SIGCHLD;
+use ferrix_linux_abi::types::{CLONE_SYSVSEM, SIGCHLD};
 
 use crate::arch;
 use crate::fs::cgroupfs;
 use crate::object::job::{self, Job};
+use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS};
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
 use crate::syscall::{attributes, fd, namespace, registry, thread_area, uaccess, userns};
@@ -95,20 +96,14 @@ const CLONE_CHILD_SETTID: u64 = 0x0100_0000;
 
 /// Give the child a mount namespace of its own.
 const CLONE_NEWNS: u64 = 0x0002_0000;
-/// ... a cgroup namespace.
-const CLONE_NEWCGROUP: u64 = 0x0200_0000;
-/// ... a UTS namespace: its own host and domain name.
-const CLONE_NEWUTS: u64 = 0x0400_0000;
-/// ... a System V IPC and POSIX message queue namespace.
-const CLONE_NEWIPC: u64 = 0x0800_0000;
 /// ... a user namespace, which is what an unprivileged sandbox asks for first.
 const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// ... a pid namespace.
 const CLONE_NEWPID: u64 = 0x2000_0000;
 /// ... a network namespace.
 const CLONE_NEWNET: u64 = 0x4000_0000;
-/// Every namespace a child could be asked to be given. A mount and a user
-/// namespace exist; the rest do not. `CLONE_NEWTIME` is not among them because it is not reachable:
+/// Every namespace a child could be asked to be given. Every one but pid and
+/// network exists. `CLONE_NEWTIME` is not among them because it is not reachable:
 /// its bit is inside `CSIGNAL`, so `clone` reads it as an exit signal, as
 /// Linux does, and [`clone3_request`] refuses `CSIGNAL` outright.
 const CLONE_NAMESPACES: u64 = CLONE_NEWNS
@@ -397,11 +392,21 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 }
 
 /// Whether the namespaces `flags` asks for can be given: `EINVAL` for one
-/// Ferrix does not have and for `CLONE_NEWNS` with `CLONE_FS`, as Linux
-/// refuses a namespace a shared fs context would leave; `EPERM` for
-/// `CLONE_NEWNS` without privilege.
+/// Ferrix does not have (pid and network), for `CLONE_NEWNS` with
+/// `CLONE_FS`, as Linux refuses a namespace a shared fs context would leave,
+/// for `CLONE_NEWIPC` with `CLONE_SYSVSEM`, and for any of the UTS, IPC and
+/// cgroup namespaces with `CLONE_THREAD`, which here shares them with its
+/// process; `EPERM` for a namespace asked without `CAP_SYS_ADMIN` (a child
+/// given a user namespace holds it there).
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
-    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER)) != 0 {
+    const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
+    if flags & (CLONE_NAMESPACES & !(CLONE_NEWNS | CLONE_NEWUSER | SMALL)) != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if flags & SMALL != 0 && flags & CLONE_THREAD != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if flags & CLONE_NEWIPC != 0 && flags & CLONE_SYSVSEM != 0 {
         return Err(Errno::EINVAL);
     }
     // CVE-2013-1858 (U5): a root shared with a process outside, then `chroot`
@@ -409,21 +414,46 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
     if flags & CLONE_NEWUSER != 0 && flags & (CLONE_FS | CLONE_THREAD) != 0 {
         return Err(Errno::EINVAL);
     }
-    if flags & CLONE_NEWNS != 0 {
-        if flags & CLONE_FS != 0 {
-            return Err(Errno::EINVAL);
-        }
-        // With a user namespace the child holds the capability in it.
-        if flags & CLONE_NEWUSER == 0
-            && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
-        {
-            return Err(Errno::EPERM);
-        }
+    if flags & CLONE_NEWNS != 0 && flags & CLONE_FS != 0 {
+        return Err(Errno::EINVAL);
+    }
+    // With a user namespace the child holds the capability in it.
+    if flags & (CLONE_NEWNS | SMALL) != 0
+        && flags & CLONE_NEWUSER == 0
+        && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
+    {
+        return Err(Errno::EPERM);
     }
     if flags & CLONE_NEWUSER != 0 {
         // Refused here, before anything is made, what `unshare` refuses the
         // same way; the namespace itself is made with the child.
         namespace::make_user_namespace(parent).map(drop)?;
+    }
+    Ok(())
+}
+
+/// Give `child`, not yet findable, the namespaces `flags` asks for: a user
+/// namespace first, which owns the rest made with it, then a copy of the
+/// parent's mount namespace, then the UTS, IPC and cgroup ones. A cgroup
+/// namespace is rooted where the parent is, not where `CLONE_INTO_CGROUP`
+/// puts the child, as Linux's `copy_cgroup_ns` reads the parent's css set.
+pub(crate) fn give_namespaces(
+    parent: &Arc<Process>,
+    child: &Arc<Process>,
+    flags: u64,
+) -> Result<(), Errno> {
+    let owner = if flags & CLONE_NEWUSER != 0 {
+        let fresh = namespace::make_user_namespace(parent)?;
+        namespace::enter_user_namespace(child, Arc::clone(&fresh));
+        fresh
+    } else {
+        parent.with_credentials(|held| Arc::clone(&held.user_ns))
+    };
+    if flags & CLONE_NEWNS != 0 {
+        namespace::copy_namespace(child.fs_context(), &owner)?;
+    }
+    if flags & (CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP) != 0 {
+        child.set_nsproxy(nsproxy::make(parent, flags, &owner, parent.job())?);
     }
     Ok(())
 }
@@ -493,13 +523,7 @@ fn clone_with(
     }
     // Its own copy of the namespace, before anything can see it: a refusal
     // goes with the child, unstarted.
-    if flags & CLONE_NEWUSER != 0 {
-        let fresh = namespace::make_user_namespace(parent)?;
-        namespace::enter_user_namespace(&child, fresh);
-    }
-    if flags & CLONE_NEWNS != 0 {
-        namespace::copy_namespace(child.fs_context())?;
-    }
+    give_namespaces(parent, &child, flags)?;
     child.set_exit_signal((flags & CSIGNAL) as u32);
     // What glibc's `posix_spawn` asks for, so that its child need not reset
     // every handler itself before `execve`. Linux leaves the alternate stack

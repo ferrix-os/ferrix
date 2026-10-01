@@ -226,7 +226,6 @@ Linux):
 | `stage13-np`, `stage13-fdinfo` | `/proc`'s private links by `ptrace_may_access`, dumpable cleared by id changes, `/proc/<pid>/fdinfo` | boot check written; last run failed on a real bug now fixed, not re-run. Overlaps `main`'s own `credentials_changed` |
 | `stage13-n5` | unprivileged mounting: `may_mount` by owner, `tmpfs` alone, locked copies, detach-don't-pin, sysctls | `mountperm` line booted on x86_64, four controls fired; other gates not run |
 | `stage13-bwrap-user` | `test-bwrap` as uid 1000 | its one run exited 1 near the `threads` line; cause not read |
-| `stage13-smallns` | UTS, IPC, cgroup namespaces, nsfs, `setns`, pidfd `setns` | boots on three architectures, 55 controls; `check`, `test-init`, coverage not run |
 | `stage13-netns` | network namespaces, veth pairs, per-namespace stacks | boots on three architectures, `test-shell`, `test-vfs`, `test-net`, 30 controls; `check` not run |
 | `stage13-timens` | time namespace | agent had not reported |
 | `stage13-pidns` | pid namespaces | boots pass; **`test-vfs` fails on x86_64**: a kernel stack overflow on the `ioctl` path, cause not found (`Process` grew by about 48 bytes) |
@@ -238,6 +237,25 @@ These branches were written against an earlier N4 and conflict with each other
 in the namespace, procfs, catalog and kmem files; they go in one at a time,
 each rebased with `git rebase --onto` the landed N4. Not started: seccomp S6,
 and N6 and N7 (Steam as uid 1000, pressure-vessel).
+
+**Landed -- the small namespaces and `setns` (built 2026-09-30, landed
+2026-10-01 after the consultant's review):** UTS, IPC and cgroup
+namespaces through `clone`, `clone3` and `unshare`; `sethostname`,
+`setdomainname`, `uname` and the two sysctls per UTS namespace; the
+System V semaphore table per IPC namespace; `/proc/<pid>/cgroup` told from
+the reader's cgroup namespace root and a `cgroup2` mount rooted there;
+`/proc/<pid>/ns/{uts,ipc,cgroup}`, all five `ns` links opening as nsfs files
+with `NS_GET_USERNS`, `NS_GET_PARENT`, `NS_GET_NSTYPE` and `NS_GET_OWNER_UID`;
+`setns` by namespace file or pidfd for mount, user, UTS, IPC and cgroup
+namespaces. Pid and network namespaces stay `EINVAL`. The `smallns` boot
+line (FX-0892) and its negative controls prove it; `docs/NAMESPACES.md` §12
+has the list and the differences from Linux (a namespace set per process,
+not per thread, among them). The review found that a native `process_create`
+child left its creator's UTS, IPC and cgroup namespaces and that a cgroup move
+was judged in the writer's namespace, not the opener's (and not at all for
+`CLONE_INTO_CGROUP` and `job_for_cgroup`); all are fixed with checks and
+controls (NAMESPACES §12). Later namespace landings extend `launch::load_native`'s
+proxy copy and its check.
 
 **Still to do:** `memory.stat`'s other keys, and a charge past `memory.max`
 reclaiming inside the job before it OOM-kills (M2), then freezing,

@@ -48,6 +48,7 @@ pub(crate) mod memfd_check;
 pub(crate) mod mmap_check;
 pub(crate) mod mount_check;
 pub(crate) mod namespace_check;
+pub(crate) mod nsfs;
 mod pages;
 pub(crate) mod partitions;
 pub(crate) mod pidfd;
@@ -59,6 +60,7 @@ pub(crate) mod root_disk;
 pub(crate) mod seam;
 pub(crate) mod signalfd;
 pub(crate) mod signalfd_check;
+pub(crate) mod smallns_check;
 pub(crate) mod socket;
 pub(crate) mod sockname;
 pub(crate) mod sysfs;
@@ -174,6 +176,19 @@ pub(crate) fn is_in(ctx: &Context, ns: &Namespace) -> bool {
         Some(own) => core::ptr::eq(Arc::as_ptr(own), ns),
         None => core::ptr::eq(Arc::as_ptr(first_namespace()), ns),
     }
+}
+
+/// The user namespace that owns mount namespace `ns`: the one that was
+/// current when it was copied, or the first for the kernel's own
+/// (`docs/NAMESPACES.md` §12).
+pub(crate) fn owner_of(ns: &Namespace) -> Arc<crate::syscall::userns::UserNamespace> {
+    ns.owner()
+        .and_then(|owner| {
+            owner
+                .downcast::<crate::syscall::userns::UserNamespace>()
+                .ok()
+        })
+        .unwrap_or_else(|| Arc::clone(crate::syscall::userns::first()))
 }
 
 /// The initramfs as the loader handed it over, kept for the root disk to

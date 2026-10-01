@@ -240,6 +240,7 @@
         "syscall/memfd.rs",
         "syscall/memory.rs",
         "syscall/namespace.rs",
+        "syscall/nsproxy.rs",
         "syscall/path.rs",
         "syscall/pipe.rs",
         "syscall/poll.rs",

@@ -150,8 +150,8 @@ pub(crate) enum Content<T: 'static> {
     IdMap(MapFile),
     /// `/proc/<pid>/fd`: a link per open descriptor.
     Descriptors,
-    /// `/proc/<pid>/ns`: a link per namespace the process is in, of which
-    /// there is one kind, `mnt` (`docs/NAMESPACES.md` §2.4).
+    /// `/proc/<pid>/ns`: a link per namespace the process is in: `mnt`,
+    /// `user`, `uts`, `ipc` and `cgroup` (`docs/NAMESPACES.md` §2.4).
     Namespaces,
     /// `/proc/<pid>/task`: a directory per thread, each holding
     /// [`PER_THREAD`].
@@ -185,13 +185,22 @@ enum NamespaceKind {
     Mount = 0,
     /// `user`.
     User = 1,
+    /// `uts`.
+    Uts = 2,
+    /// `ipc`.
+    Ipc = 3,
+    /// `cgroup`.
+    Cgroup = 4,
 }
 
 impl NamespaceKind {
     /// Every one, in the order `ns` lists them, with its name.
-    const ALL: [(NamespaceKind, &'static [u8]); 2] = [
+    const ALL: [(NamespaceKind, &'static [u8]); 5] = [
         (NamespaceKind::Mount, b"mnt"),
         (NamespaceKind::User, b"user"),
+        (NamespaceKind::Uts, b"uts"),
+        (NamespaceKind::Ipc, b"ipc"),
+        (NamespaceKind::Cgroup, b"cgroup"),
     ];
 }
 
@@ -993,6 +1002,25 @@ fn descriptor_location(pid: u32, fd: i32) -> Option<Result<Location>> {
     Some(Ok(file.location().clone()))
 }
 
+/// Where following `/proc/<pid>/ns/<kind>` leads: the namespace as an nsfs
+/// file, so that `open` of the link is a descriptor `setns` takes. Refused
+/// `EACCES` to a caller who is neither the same person nor root, as Linux
+/// refuses it without `ptrace_may_access` (`fs/nsfs.rs`).
+fn namespace_location(pid: u32, kind: NamespaceKind) -> Result<Location> {
+    let process = alive(pid)?;
+    if !fs::nsfs::may_open(&process) {
+        return Err(Errno::EACCES);
+    }
+    let kind = match kind {
+        NamespaceKind::Mount => fs::nsfs::Kind::Mount,
+        NamespaceKind::User => fs::nsfs::Kind::User,
+        NamespaceKind::Uts => fs::nsfs::Kind::Uts,
+        NamespaceKind::Ipc => fs::nsfs::Kind::Ipc,
+        NamespaceKind::Cgroup => fs::nsfs::Kind::Cgroup,
+    };
+    fs::nsfs::location(fs::nsfs::Handle::of(&process, kind))
+}
+
 /// The ids of a process's threads that have not begun to end, in order; its
 /// own pid alone for a process the kernel made without listing a thread, as
 /// `render::thread_count` counts it.
@@ -1251,6 +1279,9 @@ impl Inode for Node {
             Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
             Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
             Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Uts) => render::uts_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Ipc) => render::ipc_namespace(&*alive(pid)?),
+            Place::Namespace(pid, NamespaceKind::Cgroup) => render::cgroup_namespace(&*alive(pid)?),
             _ => Err(Errno::EINVAL),
         }
     }
@@ -1267,6 +1298,9 @@ impl Inode for Node {
     fn link_location(&self) -> Option<Result<Location>> {
         if let Place::Descriptor(pid, fd) = self.place {
             return descriptor_location(pid, fd);
+        }
+        if let Place::Namespace(pid, kind) = self.place {
+            return Some(namespace_location(pid, kind));
         }
         let Place::Entry(pid, index) = self.place else {
             return None;

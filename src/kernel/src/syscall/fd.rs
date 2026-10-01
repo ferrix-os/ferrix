@@ -648,6 +648,10 @@ pub(crate) fn sys_ioctl(
         FIONCLEX => return sys_fcntl(process, fd, F_SETFD, 0),
         _ => {}
     }
+    // A namespace file (`fs/nsfs.rs`) answers its four requests and no other.
+    if let Some(namespace) = fs::nsfs::of(&file) {
+        return fs::nsfs::ioctl(process, &namespace, request, arg);
+    }
     // By what reads and writes reach, not by what `fstat` reports: `/dev/tty`
     // is a devfs node of its own that opens the console, and busybox's shell
     // asks its job-control questions through it.

@@ -124,6 +124,7 @@ fn root() -> Caller {
         gid: 0,
         groups: Vec::new(),
         privileged: true,
+        ns: Arc::clone(sem::initial_ipc()),
     }
 }
 
@@ -135,6 +136,7 @@ fn stranger() -> Caller {
         gid: 1000,
         groups: Vec::new(),
         privileged: false,
+        ns: Arc::clone(sem::initial_ipc()),
     }
 }
 

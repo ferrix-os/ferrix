@@ -67,6 +67,7 @@ use crate::object::{self, HandleTable};
 use crate::sched::{self, Task, WaitQueue};
 use crate::syscall::credentials::Credentials;
 use crate::syscall::fd;
+use crate::syscall::nsproxy::NsProxy;
 use crate::syscall::registry;
 use crate::syscall::signal::{Origin, Posted, Signals};
 use crate::syscall::thread::{self, Thread};
@@ -215,6 +216,10 @@ pub(crate) struct Process {
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
     credentials: SpinLock<Credentials>,
+    /// Its UTS, IPC and cgroup namespaces, named together (`docs/NAMESPACES.md`
+    /// §12). A leaf lock: cloned out before anything is done with what it
+    /// names.
+    nsproxy: SpinLock<NsProxy>,
 }
 
 /// Where a program starts: the two numbers `exec::load` computes and the task
@@ -380,6 +385,7 @@ impl Process {
             // A process the kernel starts is root's. A fork child takes its
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
+            nsproxy: SpinLock::new(NsProxy::initial()),
         })
     }
 
@@ -442,6 +448,7 @@ impl Process {
         child.umask = AtomicU32::new(parent.umask());
         child.oom_score_adj = AtomicI32::new(parent.oom_score_adj());
         child.credentials = SpinLock::new(parent.credentials.lock().clone());
+        child.nsproxy = SpinLock::new(parent.nsproxy.lock().clone());
         child.identity = SpinLock::new(parent.identity.lock().clone());
         Ok(child)
     }
@@ -711,6 +718,18 @@ impl Process {
     /// together. Nothing that waits may be done inside it.
     pub(crate) fn with_credentials<R>(&self, change: impl FnOnce(&mut Credentials) -> R) -> R {
         change(&mut self.credentials.lock())
+    }
+
+    /// Its UTS, IPC and cgroup namespaces, as they are now.
+    pub(crate) fn nsproxy(&self) -> NsProxy {
+        self.nsproxy.lock().clone()
+    }
+
+    /// Put it in `proxy`'s namespaces. What it was in goes after the lock, as
+    /// the last reference to a namespace may end it.
+    pub(crate) fn set_nsproxy(&self, proxy: NsProxy) {
+        let old = core::mem::replace(&mut *self.nsproxy.lock(), proxy);
+        drop(old);
     }
 
     /// The semaphore sets it holds undo records in.

@@ -94,11 +94,14 @@ const BUILT: Set = Set::EMPTY
 /// Where a directory's children begin in its cursor space, past its files.
 const CHILD_CURSORS: u64 = 1 << 32;
 
-/// A cgroupfs instance: a view of the root job's tree.
+/// A cgroupfs instance: a view of a subtree of the job tree -- the whole of it,
+/// or, mounted by a process in a cgroup namespace, the namespace's.
 #[derive(Debug)]
 pub(crate) struct Cgroupfs {
     /// What every node shares.
     shared: Arc<Shared>,
+    /// The cgroup its root directory is.
+    root: Arc<Job>,
 }
 
 /// What every node of one instance shares.
@@ -113,11 +116,18 @@ struct Shared {
 impl Cgroupfs {
     /// A cgroupfs over the root job, stamped with the time it was made.
     pub(crate) fn new() -> Cgroupfs {
+        Cgroupfs::rooted_at(Arc::clone(job::root()))
+    }
+
+    /// A cgroupfs whose root directory is `root`: the root of a cgroup
+    /// namespace, so that a process in it sees that cgroup as `/`.
+    pub(crate) fn rooted_at(root: Arc<Job>) -> Cgroupfs {
         Cgroupfs {
             shared: Arc::new(Shared {
                 device: fs::anonymous_device(),
                 made: fs::clock().now(),
             }),
+            root,
         }
     }
 }
@@ -125,7 +135,7 @@ impl Cgroupfs {
 impl FileSystem for Cgroupfs {
     fn root(&self) -> Arc<dyn Inode> {
         Arc::new(Directory {
-            job: Arc::clone(job::root()),
+            job: Arc::clone(&self.root),
             shared: Arc::clone(&self.shared),
         })
     }
@@ -326,6 +336,11 @@ pub(crate) fn clone_target(file: &OpenFile, parent: &Process, from: &Arc<Job>) -
     if to.is_removed() {
         return Err(Errno::ENODEV);
     }
+    // Linux's `cgroup_attach_permissions`: a cloner in a cgroup namespace
+    // starts a child only inside its root.
+    if !visible_in(&parent.nsproxy().cgroup, &[from, to]) {
+        return Err(Errno::ENOENT);
+    }
     let who = access_of(parent);
     who.require(&procs_metadata(to, &directory.shared), MAY_WRITE)?;
     attach_permissions(&who, from, to, &directory.shared)?;
@@ -374,7 +389,7 @@ pub(crate) fn install() -> core::result::Result<(), Full> {
 ///
 /// One way only: nothing names a cgroup's path from a job handle, because a
 /// handle is a capability and a path is not.
-fn job_for_cgroup(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize> {
+pub(crate) fn job_for_cgroup(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize> {
     let [dirfd, rights, ..] = *registers;
     let process = process::of_host(caller).ok_or(status::BAD_HANDLE)?;
     let requested = Requested::from_register(rights).ok_or(status::INVALID_ARGS)?;
@@ -388,7 +403,10 @@ fn job_for_cgroup(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize> {
     let procs = procs_metadata(&job, &directory.shared);
     let who = access_of(process);
     let passed = Rights::DUPLICATE | Rights::TRANSFER;
-    let allowed = if who.permitted(&procs, MAY_WRITE) {
+    // A descriptor kept from before a cgroup namespace was entered names a
+    // cgroup outside its root: no write rights over it, as a write is refused.
+    let inside = visible_in(&process.nsproxy().cgroup, &[&job]);
+    let allowed = if inside && who.permitted(&procs, MAY_WRITE) {
         let limits = limit_metadata(&job, &directory.shared)
             .all(|metadata| who.permitted(&metadata, MAY_WRITE));
         let managed = passed | Rights::WAIT | Rights::MANAGE;
@@ -681,6 +699,10 @@ impl Inode for Interface {
             let opener = Writer {
                 who: caller_access(),
                 shared: Arc::clone(&self.shared),
+                // The opener's, not the writer's: a descriptor opened outside
+                // a cgroup namespace and handed in must not move a process
+                // across its root (Linux's CVE-2021-4197).
+                ns: crate::syscall::nsproxy::acting().cgroup,
             };
             Box::new(move |data: &[u8]| write_to(&job, kind, data, &opener)) as procfs::Writer
         });
@@ -892,6 +914,16 @@ struct Writer {
     who: Access,
     /// The instance, for the metadata a permission is judged by.
     shared: Arc<Shared>,
+    /// The opener's cgroup namespace, which a move is confined to.
+    ns: Arc<crate::syscall::nsproxy::CgroupNamespace>,
+}
+
+/// Whether `ns` lets its holder see, and so move a process between, the
+/// cgroups `jobs`: the first namespace sees all, another those at or under
+/// its root.
+fn visible_in(ns: &Arc<crate::syscall::nsproxy::CgroupNamespace>, jobs: &[&Arc<Job>]) -> bool {
+    Arc::ptr_eq(ns, crate::syscall::nsproxy::initial_cgroup())
+        || jobs.iter().all(|job| ns.root().contains(job))
 }
 
 /// The process writing, as the audit record's subject: the kernel when a
@@ -925,6 +957,12 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
                 Target::Writer => process::current().ok_or(Errno::ESRCH)?,
                 Target::Pid(pid) => registry::find(pid).ok_or(Errno::ESRCH)?,
             };
+            // Linux's `cgroup_procs_write_permission`: a writer in a cgroup
+            // namespace moves only between cgroups inside its own root, and
+            // is told `ENOENT`, as if the rest of the tree were not there.
+            if !visible_in(&opener.ns, &[&process.job(), job]) {
+                return Err(Errno::ENOENT);
+            }
             attach_permissions(&opener.who, &process.job(), job, &opener.shared)?;
             job.adopt(&process).map_err(move_errno)?;
         }
@@ -996,11 +1034,37 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
 }
 
 /// `/proc/<pid>/cgroup` for a process in `job`.
-pub(crate) fn proc_cgroup(job: &Job) -> Result<Vec<u8>> {
-    let names = job.path_names().map_err(|_| Errno::ENOMEM)?;
+pub(crate) fn proc_cgroup(job: &Job, root: &Job) -> Result<Vec<u8>> {
+    let names = relative_names(job, root)?;
     let mut out = Vec::new();
     render::proc_cgroup(&mut out, names.iter().map(String::as_bytes));
     Ok(out)
+}
+
+/// The names that lead from `root` to `job`, climbing with `..` where `job` is
+/// not beneath `root`: what Linux's `cgroup_path_ns` prints for a reader in a
+/// cgroup namespace rooted at `root` (`/..` once for each level of `root`
+/// below the two's closest common ancestor, then the names down to `job`). A
+/// root's own path is empty, which the renderer writes as `/`.
+pub(crate) fn relative_names(job: &Job, root: &Job) -> Result<Vec<String>> {
+    let to_job = job.path_names().map_err(|_| Errno::ENOMEM)?;
+    let to_root = root.path_names().map_err(|_| Errno::ENOMEM)?;
+    // Names are unique among siblings, so the names are the path.
+    let shared = to_job
+        .iter()
+        .zip(&to_root)
+        .take_while(|(below, above)| below == above)
+        .count();
+    let mut names = Vec::new();
+    for _ in shared..to_root.len() {
+        names.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+        names.push(String::from(".."));
+    }
+    for name in to_job.into_iter().skip(shared) {
+        names.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+        names.push(name);
+    }
+    Ok(names)
 }
 
 /// What [`check`] counted, for the boot line.

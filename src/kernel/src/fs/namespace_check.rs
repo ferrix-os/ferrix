@@ -60,6 +60,7 @@ use crate::object::process::{self as core_process, Host};
 use crate::syscall::image;
 use crate::syscall::launch;
 use crate::syscall::namespace::CLONE_NEWNS;
+use crate::syscall::nsproxy;
 use crate::syscall::process::{self, Process};
 
 /// Where the check works, in the first namespace.
@@ -239,6 +240,13 @@ pub(super) fn read_link(page: &mut Page<'_>, path: &[u8]) -> Result<Vec<u8>, &'s
 /// `/proc/<pid>/ns/mnt` of `pid`, read by the page's process.
 fn namespace_of(page: &mut Page<'_>, pid: u32) -> Result<Vec<u8>, &'static str> {
     read_link(page, format!("/proc/{pid}/ns/mnt").as_bytes())
+}
+
+/// What `/proc/<pid>/ns/<kind>` reads.
+fn ns_link(page: &mut Page<'_>, pid: u32, kind: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let mut path = format!("/proc/{pid}/ns/").into_bytes();
+    path.extend_from_slice(kind);
+    read_link(page, &path)
 }
 
 /// `/proc/<pid>/mountinfo` of the page's own process.
@@ -796,6 +804,27 @@ fn native_child_stays(
         image::Shape::Good,
         arch::USER_ARGUMENT_PROGRAM,
     );
+    // The creator first leaves the first UTS, IPC and cgroup namespaces, so that
+    // a child left in them would show (`docs/NAMESPACES.md` §12).
+    let kinds: [&[u8]; 3] = [b"uts", b"ipc", b"cgroup"];
+    let mut before = Vec::new();
+    for kind in kinds {
+        before.push(ns_link(page, creator.pid(), kind)?);
+    }
+    let owner = creator.with_credentials(|held| Arc::clone(&held.user_ns));
+    let proxy = nsproxy::make(
+        creator,
+        nsproxy::CLONE_NEWUTS | nsproxy::CLONE_NEWIPC | nsproxy::CLONE_NEWCGROUP,
+        &owner,
+        creator.job(),
+    )
+    .map_err(|_| "the creator of a native child could not leave the first small namespaces")?;
+    creator.set_nsproxy(proxy);
+    for (kind, old) in kinds.into_iter().zip(&before) {
+        if &ns_link(page, creator.pid(), kind)? == old {
+            return Err("a creator's new small namespace was not named apart");
+        }
+    }
     let host = launch::load_native(Some(&**creator as &dyn Host), &file, b"/ns-check-child")
         .map_err(|_| "a native child could not be made inside a pivoted namespace")?;
     let child = core_process::downcast::<Process>(host)
@@ -804,6 +833,10 @@ fn native_child_stays(
     let finds = |path: &[u8]| fs::namespace().resolve(&context, None, path, true).is_ok();
     let (sees_file, sees_first) = (finds(b"/file"), finds(FIRST_ONLY));
     let same = namespace_of(page, child.pid())? == namespace_of(page, creator.pid())?;
+    let mut same_small = true;
+    for kind in kinds {
+        same_small &= ns_link(page, child.pid(), kind)? == ns_link(page, creator.pid(), kind)?;
+    }
     tally.report.calls += 1;
     process::kill(&child, 137);
     drop((child, context));
@@ -812,6 +845,9 @@ fn native_child_stays(
     }
     if !same {
         return Err("a native child's /proc/<pid>/ns/mnt was not its creator's");
+    }
+    if !same_small {
+        return Err("a native child's UTS, IPC or cgroup namespace was not its creator's");
     }
     Ok(())
 }

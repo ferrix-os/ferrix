@@ -581,12 +581,34 @@ fn unmapped_owner(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &'st
         call(&victim, Syscall::Setuid, [2000, 0, 0, 0, 0, 0]),
         "the U8 process could not become uid 2000",
     )?;
-    let result = refused_what_it_does_not_own(page, tally, victim.pid());
+    let result = refused_what_it_does_not_own(page, tally, victim.pid())
+        .and_then(|()| kernel_root_keeps_override(tally));
     let at = staged(&mut owner_page, FILE)?;
     let _ = call(&owner, Syscall::Unlinkat, [AT_FDCWD as u64, at, 0, 0, 0, 0]);
     let at = staged(&mut owner_page, DEVICE)?;
     let _ = call(&owner, Syscall::Unlinkat, [AT_FDCWD as u64, at, 0, 0, 0, 0]);
     result
+}
+
+/// What U8 does not do, recorded as a check: kernel root, which made the
+/// namespace, still reads a 0600 file of an id the namespace does not map,
+/// because the file system's `Access::privileged` is `uid == 0` and has no
+/// namespace in it. Linux refuses it (`capable_wrt_inode_uidgid`); this is a
+/// difference listed in `docs/BACKLOG.md`, and the check is there so that
+/// closing it has to change this line too. It is not an escape: that process
+/// is root of the first namespace already.
+fn kernel_root_keeps_override(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let root = process::new_for_check().map_err(|_| "could not make the kernel-root process")?;
+    let mut page = page_for(&root)?;
+    tally.ok(
+        unshare(&root, CLONE_NEWUSER),
+        "unshare(CLONE_NEWUSER) was refused to root",
+    )?;
+    let file = page.put(FILE)?;
+    tally.ok(
+        call(&root, Syscall::Openat, [AT_FDCWD as u64, file, 0, 0, 0, 0]),
+        "kernel root inside a namespace it made no longer reads a 0600 file of an unmapped id",
+    )
 }
 
 /// The refusals of [`unmapped_owner`], made by the namespace's root.

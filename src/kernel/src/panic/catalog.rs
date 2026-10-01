@@ -2129,7 +2129,8 @@ pub(crate) static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
         "`sys_umount2` does not act on the mount on top of `.`, or does not write out every \
          filesystem of a detached subtree.",
         "`launch::load_native` starts a native child in the first namespace's root rather \
-         than its creator's context.",
+         than its creator's context, or in the first UTS, IPC and cgroup namespaces rather \
+         than its creator's.",
     ],
     see: "src/kernel/src/fs/namespace_check.rs; src/kernel/src/syscall/namespace.rs; \
           src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/launch.rs; \
@@ -2150,6 +2151,23 @@ pub(crate) static STAGE13_USER_NAMESPACES: Explanation = Explanation {
         "`Credentials::exec` honours a set-id bit, or gives the sets to a process that is not its namespace's root.",
     ],
     see: "src/kernel/src/fs/userns_check.rs; src/kernel/src/syscall/userns.rs; src/kernel/src/syscall/credentials.rs; src/kernel/src/syscall/namespace.rs",
+};
+
+/// For `check_small_namespaces` in `stages_check.rs`, when
+/// `fs::smallns_check::run` fails.
+pub(crate) static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
+    code: "FX-0892",
+    title: "A UTS, IPC or cgroup namespace, or setns, failed its self-check",
+    meaning: "`fs::smallns_check::run` drives the small namespaces through the system-call layer. A UTS namespace made by clone or unshare starts with its creator's host name and then keeps its own, as uname and /proc/sys/kernel/hostname tell it; uid 1000 is refused one and refused sethostname; a maker of a user namespace may name the UTS namespace it made and never the first's. An IPC namespace shares no semaphore keys with the first, counts only its own sets in SEM_INFO and ends with its last holder. In a cgroup namespace /proc/<pid>/cgroup reads / at the root and `..` for what lies outside it, a cgroupfs mounted there has the root as its own, a writer moves processes only between cgroups inside it, and a clone is rooted at its creator's cgroup. A /proc/<pid>/ns link opens as a namespace file: two opens are one inode, readlink names it, NS_GET_USERNS, NS_GET_PARENT, NS_GET_NSTYPE and NS_GET_OWNER_UID answer, and another person's link is refused. setns refuses a closed descriptor, a file that is not a namespace, a type that is not the file's, an ancestor user namespace, the caller's own, a stranger, and a child user namespace's join of the first's UTS or mount namespace, and joins where it may. Pid and network namespaces, CLONE_NEWIPC with CLONE_SYSVSEM and a thread with a new namespace are EINVAL (docs/NAMESPACES.md §12).",
+    causes: &[
+        "`nsproxy::make` shares the creator's UTS names or IPC table, or skips its CAP_SYS_ADMIN test.",
+        "`system::nameable` judges `privileged()` instead of `CAP_SYS_ADMIN` over the namespace's owner.",
+        "`cgroupfs::relative_names` ignores the reader's root or leaves out `..`.",
+        "`fsctl::filesystem_named` mounts the whole tree for a process in a cgroup namespace, or `cgroupfs::write_to` drops the move rule or judges the writer's namespace rather than the opener's, or `cgroupfs::clone_target` or `job_for_cgroup` has no namespace test.",
+        "`nsfs::ioctl` or `nsfs::related` answers a namespace the caller is not inside of, or `nsfs::may_open` admits another person.",
+        "`namespace::sys_setns` skips a capability, type or ownership test, or leaves the caller's root and working directory behind.",
+    ],
+    see: "src/kernel/src/fs/smallns_check.rs; src/kernel/src/syscall/nsproxy.rs; src/kernel/src/fs/nsfs.rs; src/kernel/src/syscall/namespace.rs; src/kernel/src/syscall/system.rs; src/kernel/src/syscall/sem.rs; src/kernel/src/fs/cgroupfs.rs",
 };
 
 /// For `check_semaphores` in `stages_check.rs`, when `syscall::sem_check::run`
@@ -2680,6 +2698,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_MOUNT_NAMESPACES,
     &STAGE13_USER_NAMESPACES,
     &SYSFS,
+    &STAGE13_SMALL_NAMESPACES,
     &STAGE9_OBJECTS,
     &STAGE9_ALLOCATION,
     &STAGE9_REFUSALS,

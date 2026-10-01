@@ -30,13 +30,15 @@
 //!
 //! [`Utsname::sysname`]: ferrix_linux_abi::types::Utsname::sysname
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_bootinfo::{Arch, PAGE_SIZE, is_user_address};
+use ferrix_kmem::Charge;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
-use ferrix_sync::IrqControl;
+use ferrix_sync::{IrqControl, Once};
 
 use crate::sync::SpinLock;
 
@@ -46,9 +48,11 @@ use crate::mm;
 use crate::smp;
 use crate::syscall::attributes::int;
 use crate::syscall::credentials;
+use crate::syscall::nsproxy;
 use crate::syscall::process::Process;
 use crate::syscall::time;
 use crate::syscall::uaccess::{self, WORD};
+use crate::syscall::userns::{self, UserNamespace};
 
 /// Bytes in each of `utsname`'s six fields.
 const FIELD: usize = 65;
@@ -75,74 +79,160 @@ pub(crate) const VERSION: &str = "#1 Ferrix 0.1.0";
 /// how many of them were given.
 type SetName = ([u8; NAME_MAX], usize);
 
-/// The host name, once something has set one. `None` reads as `ferrix`.
-static NODENAME: SpinLock<Option<SetName>> = SpinLock::new(None);
-
-/// The NIS domain name, once something has set one. `None` reads as
-/// `(none)`, which is what Linux reports before anything sets it.
-static DOMAINNAME: SpinLock<Option<SetName>> = SpinLock::new(None);
-
 /// The host name before anything sets one.
 const HOSTNAME_DEFAULT: &str = "ferrix";
 
-/// The domain name before anything sets one.
+/// The domain name before anything sets one. `(none)` is what Linux reports
+/// before anything sets it.
 const DOMAINNAME_DEFAULT: &str = "(none)";
 
-/// The name `slot` holds, or `default` if nothing has set it: its bytes,
-/// NUL-padded, and how many of them there are.
-fn name_in(slot: &SpinLock<Option<SetName>>, default: &str) -> SetName {
-    let set = *slot.lock();
-    set.unwrap_or_else(|| {
-        let mut bytes = [0_u8; NAME_MAX];
-        for (slot, byte) in bytes.iter_mut().zip(default.bytes()) {
-            *slot = byte;
-        }
-        (bytes, default.len())
+/// What a UTS namespace's names are: each `None` until something sets it,
+/// which reads as its default.
+#[derive(Debug, Clone, Copy)]
+struct Names {
+    /// The host name.
+    node: Option<SetName>,
+    /// The NIS domain name.
+    domain: Option<SetName>,
+}
+
+/// A UTS namespace: a host name and a domain name (`docs/NAMESPACES.md` §12).
+#[derive(Debug)]
+pub(crate) struct UtsNamespace {
+    /// What `/proc/<pid>/ns/uts` names.
+    id: u64,
+    /// The user namespace that was current when it was made: a holder of
+    /// `CAP_SYS_ADMIN` over it may set the names.
+    owner: Arc<UserNamespace>,
+    /// The names. A leaf lock: nothing is done under it but a copy of bytes.
+    names: SpinLock<Names>,
+    /// The kernel heap this is, charged to the job that made it (F-37).
+    _charge: Option<Charge>,
+}
+
+/// The first UTS namespace, made on first use.
+pub(crate) fn initial_uts() -> &'static Arc<UtsNamespace> {
+    static FIRST: Once<Arc<UtsNamespace>> = Once::new();
+    FIRST.call_once(|| {
+        Arc::new(UtsNamespace {
+            id: nsproxy::UTS_INIT_ID,
+            owner: Arc::clone(userns::first()),
+            names: SpinLock::new(Names {
+                node: None,
+                domain: None,
+            }),
+            _charge: None,
+        })
     })
 }
 
-/// A name as `uname` reports it, without the padding.
-fn name_bytes(slot: &SpinLock<Option<SetName>>, default: &str) -> Vec<u8> {
-    let (bytes, len) = name_in(slot, default);
-    bytes.get(..len).unwrap_or_default().to_vec()
-}
-
-/// Store `name` in `slot`, if it fits: at most [`NAME_MAX`] bytes, or
-/// `EINVAL`.
-fn set_name(slot: &SpinLock<Option<SetName>>, name: &[u8]) -> Result<(), Errno> {
+/// `default` as a name: its bytes, NUL-padded, and how many there are.
+fn default_name(default: &str) -> SetName {
     let mut bytes = [0_u8; NAME_MAX];
-    bytes
-        .get_mut(..name.len())
+    for (slot, byte) in bytes.iter_mut().zip(default.bytes()) {
+        *slot = byte;
+    }
+    (bytes, default.len())
+}
+
+/// A name as `uname` reports it, without the padding.
+fn unpadded(name: SetName) -> Vec<u8> {
+    name.0.get(..name.1).unwrap_or_default().to_vec()
+}
+
+/// A name of `bytes`, if it fits: at most [`NAME_MAX`] bytes, or `EINVAL`.
+fn name_of(bytes: &[u8]) -> Result<SetName, Errno> {
+    let mut padded = [0_u8; NAME_MAX];
+    padded
+        .get_mut(..bytes.len())
         .ok_or(Errno::EINVAL)?
-        .copy_from_slice(name);
-    *slot.lock() = Some((bytes, name.len()));
-    Ok(())
+        .copy_from_slice(bytes);
+    Ok((padded, bytes.len()))
 }
 
-/// Whether something has set the host name, rather than it reading as the
-/// default.
+impl UtsNamespace {
+    /// What `/proc/<pid>/ns/uts` names.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The user namespace that owns it.
+    pub(crate) fn owner(&self) -> &Arc<UserNamespace> {
+        &self.owner
+    }
+
+    /// The names as they are now, in one look.
+    pub(crate) fn names_padded(&self) -> (SetName, SetName) {
+        let names = *self.names.lock();
+        (
+            names.node.unwrap_or_else(|| default_name(HOSTNAME_DEFAULT)),
+            names
+                .domain
+                .unwrap_or_else(|| default_name(DOMAINNAME_DEFAULT)),
+        )
+    }
+
+    /// The host name `uname` reports as `nodename`.
+    pub(crate) fn hostname(&self) -> Vec<u8> {
+        unpadded(self.names_padded().0)
+    }
+
+    /// The domain name `uname` reports as `domainname`.
+    pub(crate) fn domainname(&self) -> Vec<u8> {
+        unpadded(self.names_padded().1)
+    }
+
+    /// Whether something has set the host name, rather than it reading as
+    /// the default.
+    pub(crate) fn hostname_is_set(&self) -> bool {
+        self.names.lock().node.is_some()
+    }
+
+    /// Set the host name, as `sethostname` does once it has read the name
+    /// and judged the caller.
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` for a name past [`NAME_MAX`].
+    pub(crate) fn set_hostname(&self, name: &[u8]) -> Result<(), Errno> {
+        let name = name_of(name)?;
+        self.names.lock().node = Some(name);
+        Ok(())
+    }
+
+    /// Set the domain name, as [`UtsNamespace::set_hostname`].
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` for a name past [`NAME_MAX`].
+    pub(crate) fn set_domainname(&self, name: &[u8]) -> Result<(), Errno> {
+        let name = name_of(name)?;
+        self.names.lock().domain = Some(name);
+        Ok(())
+    }
+
+    /// A namespace that starts with this one's names and is owned by
+    /// `owner`: Linux's `clone_uts_ns`.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` past the job's memory.
+    pub(crate) fn copy(&self, owner: Arc<UserNamespace>) -> Result<Arc<UtsNamespace>, Errno> {
+        let charge = Charge::arc::<UtsNamespace>().map_err(|_| Errno::ENOMEM)?;
+        let names = *self.names.lock();
+        crate::fallible::try_arc(UtsNamespace {
+            id: nsproxy::next_id(),
+            owner,
+            names: SpinLock::new(names),
+            _charge: Some(charge),
+        })
+        .map_err(|_| Errno::ENOMEM)
+    }
+}
+
+/// Whether something has set the first namespace's host name.
 pub(crate) fn hostname_is_set() -> bool {
-    NODENAME.lock().is_some()
-}
-
-/// The host name `uname` reports as `nodename`.
-pub(crate) fn hostname() -> Vec<u8> {
-    name_bytes(&NODENAME, HOSTNAME_DEFAULT)
-}
-
-/// The domain name `uname` reports as `domainname`.
-pub(crate) fn domainname() -> Vec<u8> {
-    name_bytes(&DOMAINNAME, DOMAINNAME_DEFAULT)
-}
-
-/// Set the host name, as `sethostname` does once it has read the name.
-pub(crate) fn set_hostname(name: &[u8]) -> Result<(), Errno> {
-    set_name(&NODENAME, name)
-}
-
-/// Set the domain name, as `setdomainname` does once it has read the name.
-pub(crate) fn set_domainname(name: &[u8]) -> Result<(), Errno> {
-    set_name(&DOMAINNAME, name)
+    initial_uts().hostname_is_set()
 }
 
 /// Answer `call` if it is one of this module's.
@@ -172,15 +262,14 @@ pub(crate) fn sys_uname(process: &Process, at: u64) -> Result<usize, Errno> {
         Arch::AArch64 => "aarch64",
         Arch::Armv7a => "armv7l",
     };
-    let (node, node_len) = name_in(&NODENAME, HOSTNAME_DEFAULT);
-    let (domain, domain_len) = name_in(&DOMAINNAME, DOMAINNAME_DEFAULT);
+    let (node, domain) = process.nsproxy().uts.names_padded();
     let fields: [&[u8]; 6] = [
         SYSNAME.as_bytes(),
-        node.get(..node_len).unwrap_or_default(),
+        node.0.get(..node.1).unwrap_or_default(),
         RELEASE.as_bytes(),
         VERSION.as_bytes(),
         machine.as_bytes(),
-        domain.get(..domain_len).unwrap_or_default(),
+        domain.0.get(..domain.1).unwrap_or_default(),
     ];
 
     // Built whole and copied once. Every field is NUL-padded because the
@@ -210,25 +299,38 @@ fn read_name(process: &Process, at: u64, len: i32) -> Result<SetName, Errno> {
     Ok((bytes, len))
 }
 
-/// `sethostname`: root's alone, and at most 64 bytes, or `EINVAL`.
+/// The UTS namespace `process` is in, if it holds `CAP_SYS_ADMIN` over the
+/// user namespace that owns it: Linux's `ns_capable(uts_ns->user_ns,
+/// CAP_SYS_ADMIN)`. Root in the first namespace does; fake root does for the
+/// namespace it made and never for the first's.
+fn nameable(process: &Process) -> Result<Arc<UtsNamespace>, Errno> {
+    let uts = process.nsproxy().uts;
+    let allowed = process
+        .with_credentials(|held| userns::capable_over(held, uts.owner(), userns::CAP_SYS_ADMIN));
+    if allowed { Ok(uts) } else { Err(Errno::EPERM) }
+}
+
+/// `sethostname`: `CAP_SYS_ADMIN` over the namespace's owner, and at most 64
+/// bytes, or `EINVAL`.
 pub(crate) fn sys_sethostname(process: &Process, at: u64, len: i32) -> Result<usize, Errno> {
-    credentials::require_privilege(process)?;
+    let uts = nameable(process)?;
     let (bytes, len) = read_name(process, at, len)?;
-    set_hostname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
+    uts.set_hostname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
     Ok(0)
 }
 
 /// `setdomainname`: as `sethostname`, for the other field.
 pub(crate) fn sys_setdomainname(process: &Process, at: u64, len: i32) -> Result<usize, Errno> {
-    credentials::require_privilege(process)?;
+    let uts = nameable(process)?;
     let (bytes, len) = read_name(process, at, len)?;
-    set_domainname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
+    uts.set_domainname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
     Ok(0)
 }
 
-/// Put the host name back to what it was before the boot checks changed it.
+/// Put the first namespace's host name back to what it was before the boot
+/// checks changed it.
 pub(crate) fn forget_hostname() {
-    *NODENAME.lock() = None;
+    initial_uts().names.lock().node = None;
 }
 
 /// Bytes in `struct sysinfo` (`linux/sysinfo.h`): a `long` of uptime, three

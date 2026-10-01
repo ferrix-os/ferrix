@@ -107,6 +107,7 @@ fn move_as(who: &Access, process: &Process, to: &Directory) -> Result<usize, Err
     let writer = Writer {
         who: who.clone(),
         shared: Arc::clone(&to.shared),
+        ns: Arc::clone(crate::syscall::nsproxy::initial_cgroup()),
     };
     let pid = alloc::format!("{}\n", process.pid());
     write_to(&to.job, Kind::Procs, pid.as_bytes(), &writer)

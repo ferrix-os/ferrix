@@ -9,8 +9,9 @@
 //!
 //! # What is kept, and where
 //!
-//! [`TABLE`] holds every set by slot, the system's one key space: Ferrix has
-//! no namespaces, so this is Linux's `init_ipc_ns`. A set is found by key
+//! An [`IpcNamespace`]'s table holds every set by slot, that namespace's one
+//! key space (Linux's `init_ipc_ns` for the first; one made by `CLONE_NEWIPC`
+//! starts empty, and its sets end with it). A set is found by key
 //! through `semget`, or by the id `semget` returned, which is its slot and a
 //! sequence number, as Linux numbers them: a removed set's id is `EINVAL`
 //! afterwards rather than someone else's set. Whether a caller may use a set
@@ -25,7 +26,7 @@
 //!
 //! # Locks
 //!
-//! Three kinds of [`SpinLock`], never one inside another: [`TABLE`], held to
+//! Three kinds of [`SpinLock`], never one inside another: a table, held to
 //! find, add or take out a set and never longer; a set's lock; and a
 //! process's [`UndoList`]. Under a set's lock nothing is taken but the
 //! scheduler's run queues, by [`sched::wake`], as `futex`'s buckets do. No
@@ -59,14 +60,17 @@ use core::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use ferrix_kmem::Charge;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
+use ferrix_sync::Once;
 
 use crate::arch::{self, StatLayout};
 use crate::sched::{self, Task, WaitQueue};
 use crate::sync::SpinLock;
 use crate::syscall::credentials;
+use crate::syscall::nsproxy;
 use crate::syscall::process::{self, Process};
 use crate::syscall::time::{self, TimeWidth};
 use crate::syscall::uaccess;
+use crate::syscall::userns::{self, UserNamespace};
 use crate::trap::Abi;
 
 // ---------------------------------------------------------------------------
@@ -146,7 +150,7 @@ const SEMUSZ: i32 = 20;
 /// [`SETS_PER_JOB`] together; what is left above them, seven bits, is the
 /// slot's sequence number.
 const SLOT_BITS: u32 = 24;
-/// Slots in [`TABLE`].
+/// Slots in a table.
 const SLOTS: usize = 1 << SLOT_BITS;
 /// The sequence numbers an id carries, keeping ids positive.
 const SEQ_MASK: u32 = 0x7F;
@@ -210,18 +214,22 @@ pub(crate) struct Caller {
     /// Whether it is root, standing in for `CAP_IPC_OWNER` and
     /// `CAP_SYS_ADMIN`.
     pub(crate) privileged: bool,
+    /// The IPC namespace it is in: the key space and ids it calls in.
+    pub(crate) ns: Arc<IpcNamespace>,
 }
 
 impl Caller {
     /// `process`, as it is now.
     pub(crate) fn of(process: &Process) -> Caller {
         let pid = process.pid();
+        let ns = process.nsproxy().ipc;
         process.with_credentials(|ids| Caller {
             pid,
             uid: ids.user.effective,
             gid: ids.group.filesystem,
             groups: ids.groups.clone(),
             privileged: ids.privileged(),
+            ns,
         })
     }
 
@@ -376,7 +384,7 @@ struct Set {
     state: SpinLock<State>,
 }
 
-/// One slot of [`TABLE`].
+/// One slot of a table.
 #[derive(Debug, Default)]
 struct Slot {
     /// The sequence number the next set made here takes.
@@ -396,12 +404,69 @@ struct Table {
     sems: usize,
 }
 
-/// The system's sets.
-static TABLE: SpinLock<Table> = SpinLock::new(Table {
-    slots: Vec::new(),
-    sets: 0,
-    sems: 0,
-});
+/// An IPC namespace: one key space and one set of ids (`docs/NAMESPACES.md`
+/// §12). Its sets end with it: they are dropped, with their charges, when the
+/// last process, descriptor or undo record naming it lets go.
+#[derive(Debug)]
+pub(crate) struct IpcNamespace {
+    /// What `/proc/<pid>/ns/ipc` names.
+    id: u64,
+    /// The user namespace that was current when it was made.
+    owner: Arc<UserNamespace>,
+    /// Its sets.
+    table: SpinLock<Table>,
+    /// The kernel heap this is, charged to the job that made it (F-37).
+    _charge: Option<Charge>,
+}
+
+/// The first IPC namespace, made on first use.
+pub(crate) fn initial_ipc() -> &'static Arc<IpcNamespace> {
+    static FIRST: Once<Arc<IpcNamespace>> = Once::new();
+    FIRST.call_once(|| {
+        Arc::new(IpcNamespace {
+            id: nsproxy::IPC_INIT_ID,
+            owner: Arc::clone(userns::first()),
+            table: SpinLock::new(Table {
+                slots: Vec::new(),
+                sets: 0,
+                sems: 0,
+            }),
+            _charge: None,
+        })
+    })
+}
+
+impl IpcNamespace {
+    /// What `/proc/<pid>/ns/ipc` names.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The user namespace that owns it.
+    pub(crate) fn owner(&self) -> &Arc<UserNamespace> {
+        &self.owner
+    }
+
+    /// A namespace with no sets, owned by `owner`.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` past the job's memory.
+    pub(crate) fn empty(owner: Arc<UserNamespace>) -> Result<Arc<IpcNamespace>, Errno> {
+        let charge = Charge::arc::<IpcNamespace>().map_err(|_| Errno::ENOMEM)?;
+        crate::fallible::try_arc(IpcNamespace {
+            id: nsproxy::next_id(),
+            owner,
+            table: SpinLock::new(Table {
+                slots: Vec::new(),
+                sets: 0,
+                sems: 0,
+            }),
+            _charge: Some(charge),
+        })
+        .map_err(|_| Errno::ENOMEM)
+    }
+}
 
 /// What a blocked caller sleeps on. Nobody wakes it as a whole: a caller's
 /// task is woken by name, as `futex`'s are.
@@ -423,7 +488,7 @@ pub(crate) struct UndoList {
     /// never taken for another's when a pid is reused.
     owner: u64,
     /// The sets' ids, each with the charge for its entry.
-    sets: SpinLock<Vec<(i32, Charge)>>,
+    sets: SpinLock<Vec<(Arc<IpcNamespace>, i32, Charge)>>,
 }
 
 impl UndoList {
@@ -436,15 +501,19 @@ impl UndoList {
     }
 
     /// Record that the process has an undo record in set `id`, once.
-    fn note(&self, id: i32) -> Result<(), Errno> {
-        if self.sets.lock().iter().any(|(held, _)| *held == id) {
+    fn note(&self, ns: &Arc<IpcNamespace>, id: i32) -> Result<(), Errno> {
+        let noted = |(space, held, _): &(Arc<IpcNamespace>, i32, Charge)| {
+            Arc::ptr_eq(space, ns) && *held == id
+        };
+        if self.sets.lock().iter().any(noted) {
             return Ok(());
         }
-        let charge = Charge::bytes(size_of::<(i32, Charge)>()).map_err(|_| Errno::ENOMEM)?;
+        let charge = Charge::bytes(size_of::<(Arc<IpcNamespace>, i32, Charge)>())
+            .map_err(|_| Errno::ENOMEM)?;
         let mut sets = self.sets.lock();
-        if !sets.iter().any(|(held, _)| *held == id) {
+        if !sets.iter().any(noted) {
             sets.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
-            sets.push((id, charge));
+            sets.push((Arc::clone(ns), id, charge));
         }
         Ok(())
     }
@@ -468,9 +537,9 @@ fn split_id(id: i32) -> Option<(usize, u32)> {
 }
 
 /// The set with id `id`, if there is one.
-fn lookup(id: i32) -> Option<Arc<Set>> {
+fn lookup(ns: &IpcNamespace, id: i32) -> Option<Arc<Set>> {
     let (slot, _) = split_id(id)?;
-    let table = TABLE.lock();
+    let table = ns.table.lock();
     let set = table.slots.get(slot)?.set.as_ref()?;
     (set.id == id).then(|| Arc::clone(set))
 }
@@ -516,7 +585,7 @@ pub(crate) fn semget_capped(
     }
     loop {
         let found = {
-            let table = TABLE.lock();
+            let table = caller.ns.table.lock();
             table
                 .slots
                 .iter()
@@ -591,7 +660,7 @@ fn create(
         undos: Vec::new(),
     };
     let job = charge.owner();
-    let mut table = TABLE.lock();
+    let mut table = caller.ns.table.lock();
     if key != IPC_PRIVATE
         && table
             .slots
@@ -808,7 +877,7 @@ pub(crate) fn semop(
     deadline: Option<u64>,
     interrupt: &dyn Interrupt,
 ) -> Result<usize, Errno> {
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let highest = sops
         .iter()
         .map(|sop| usize::from(sop.num))
@@ -829,7 +898,7 @@ pub(crate) fn semop(
         }
     }
     if undoes {
-        make_undo(&set, undo_list)?;
+        make_undo(&caller.ns, &set, undo_list)?;
     }
     let bytes = size_of::<Pending>()
         .saturating_add(ferrix_kmem::buffer_footprint::<SemBuf>(sops.len()))
@@ -874,8 +943,8 @@ pub(crate) fn semop(
 /// Make sure `set` holds an undo record for `undo_list`'s process, and that
 /// the process lists the set: before the call's operations are tried, so a
 /// queued caller's completion never has to allocate on its behalf.
-fn make_undo(set: &Arc<Set>, undo_list: &UndoList) -> Result<(), Errno> {
-    undo_list.note(set.id)?;
+fn make_undo(ns: &Arc<IpcNamespace>, set: &Arc<Set>, undo_list: &UndoList) -> Result<(), Errno> {
+    undo_list.note(ns, set.id)?;
     if set
         .state
         .lock()
@@ -1118,7 +1187,7 @@ pub(crate) fn semctl(
     let cmd = cmd & !IPC_64;
     let old_layout = layout == Layout::Narrow && !versioned;
     match cmd {
-        IPC_INFO | SEM_INFO => info(memory, cmd, arg),
+        IPC_INFO | SEM_INFO => info(caller, memory, cmd, arg),
         IPC_STAT | SEM_STAT | SEM_STAT_ANY | IPC_SET if old_layout => Err(Errno::EINVAL),
         IPC_STAT | SEM_STAT | SEM_STAT_ANY => stat(caller, memory, layout, id, cmd, arg),
         IPC_SET => set_perm(caller, memory, layout, id, arg),
@@ -1133,9 +1202,9 @@ pub(crate) fn semctl(
 
 /// `IPC_INFO` and `SEM_INFO`: the limits, and for `SEM_INFO` the sets and
 /// semaphores in use; the highest slot in use is the answer.
-fn info(memory: &dyn Memory, cmd: i32, arg: u64) -> Result<usize, Errno> {
+fn info(caller: &Caller, memory: &dyn Memory, cmd: i32, arg: u64) -> Result<usize, Errno> {
     let (highest, sets, sems) = {
-        let table = TABLE.lock();
+        let table = caller.ns.table.lock();
         let highest = table.slots.iter().rposition(|slot| slot.set.is_some());
         (highest.unwrap_or(0), table.sets, table.sems)
     };
@@ -1155,10 +1224,12 @@ fn stat(
     arg: u64,
 ) -> Result<usize, Errno> {
     let set = if cmd == IPC_STAT {
-        lookup(id)
+        lookup(&caller.ns, id)
     } else {
         let slot = usize::try_from(id).map_err(|_| Errno::EINVAL)?;
-        TABLE
+        caller
+            .ns
+            .table
             .lock()
             .slots
             .get(slot)
@@ -1215,7 +1286,7 @@ fn set_perm(
     };
     // A 16-bit mode's high half is padding a caller need not clear.
     let mode = word(20) & 0o777;
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let mut state = set.state.lock();
     if state.removed {
         return Err(Errno::EIDRM);
@@ -1232,7 +1303,7 @@ fn set_perm(
 
 /// `IPC_RMID`: take the set out, and tell everyone waiting on it `EIDRM`.
 fn remove(caller: &Caller, id: i32) -> Result<usize, Errno> {
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let (queue, undos) = {
         let mut state = set.state.lock();
         if state.removed {
@@ -1251,7 +1322,7 @@ fn remove(caller: &Caller, id: i32) -> Result<usize, Errno> {
         )
     };
     {
-        let mut table = TABLE.lock();
+        let mut table = caller.ns.table.lock();
         if let Some((index, _)) = split_id(id)
             && let Some(slot) = table.slots.get_mut(index)
             && slot
@@ -1273,7 +1344,7 @@ fn remove(caller: &Caller, id: i32) -> Result<usize, Errno> {
 
 /// `GETVAL`, `GETPID`, `GETNCNT` and `GETZCNT` of semaphore `num`.
 fn read_one(caller: &Caller, id: i32, num: i32, cmd: i32) -> Result<usize, Errno> {
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let state = set.state.lock();
     if state.removed {
         return Err(Errno::EIDRM);
@@ -1300,7 +1371,7 @@ fn read_one(caller: &Caller, id: i32, num: i32, cmd: i32) -> Result<usize, Errno
 
 /// `GETALL`: every value, as `unsigned short`s, to `arg`.
 fn get_all(caller: &Caller, memory: &dyn Memory, id: i32, arg: u64) -> Result<usize, Errno> {
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let mut out = Vec::new();
     out.try_reserve_exact(set.nsems * 2)
         .map_err(|_| Errno::ENOMEM)?;
@@ -1326,7 +1397,7 @@ fn set_value(caller: &Caller, id: i32, num: i32, value: i32) -> Result<usize, Er
     if !(0..=SEMVMX).contains(&value) {
         return Err(Errno::ERANGE);
     }
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let mut state = set.state.lock();
     if state.removed {
         return Err(Errno::EIDRM);
@@ -1355,7 +1426,7 @@ fn set_value(caller: &Caller, id: i32, num: i32, value: i32) -> Result<usize, Er
 /// `SETALL`: every value from the `unsigned short`s at `arg`, every
 /// adjustment cleared, and the queue run.
 fn set_all(caller: &Caller, memory: &dyn Memory, id: i32, arg: u64) -> Result<usize, Errno> {
-    let set = lookup(id).ok_or(Errno::EINVAL)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(set.nsems * 2)
@@ -1401,8 +1472,8 @@ fn set_all(caller: &Caller, memory: &dyn Memory, id: i32, arg: u64) -> Result<us
 /// process's release runs.
 pub(crate) fn exit(undo_list: &UndoList, pid: u32) {
     let sets = core::mem::take(&mut *undo_list.sets.lock());
-    for (id, charge) in sets {
-        let Some(set) = lookup(id) else {
+    for (ns, id, charge) in sets {
+        let Some(set) = lookup(&ns, id) else {
             continue;
         };
         let record = {
@@ -1590,5 +1661,5 @@ fn sys_ipc(process: &Process, abi: Abi, a: &[u64; 6]) -> Result<usize, Errno> {
 
 /// Sets in use, for the checks: every one they make must be gone again.
 pub(crate) fn sets_in_use() -> usize {
-    TABLE.lock().sets
+    initial_ipc().table.lock().sets
 }

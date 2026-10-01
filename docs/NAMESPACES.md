@@ -655,9 +655,32 @@ boot check that tries the attack and must be refused (§8).
   process outside it to walk out, and a same-uid process cannot reach into
   a non-dumpable one's descriptors.
 
-**What stays as it is:** `setns` (`EINVAL`), pid, network, IPC, UTS and
-cgroup namespaces (`EINVAL`), so the attack surface of joining someone
-else's namespace does not exist.
+**What stays as it is:** pid and network namespaces (`EINVAL`), and `setns`
+into either, which no descriptor can name. The UTS, IPC and cgroup
+namespaces and `setns` by descriptor are built (§12, "The small
+namespaces, built"), and the rules for joining are in the next list.
+
+**Joining and naming (S1 to S6, the small namespaces)**
+
+* **S1. Making a UTS, IPC or cgroup namespace needs `CAP_SYS_ADMIN` in the
+  user namespace the caller will be in**, and its owner is that user
+  namespace; a caller that asks for a user namespace with them holds it.
+* **S2. The names are the owner's.** `sethostname`, `setdomainname` ask
+  `CAP_SYS_ADMIN` over the UTS namespace's owner, not `privileged()`: fake
+  root names the namespace it made, nothing names the first's from a child.
+* **S3. `setns` needs `CAP_SYS_ADMIN` over the target's owner and in the
+  caller's own user namespace** (UTS, IPC, cgroup; a mount namespace also
+  `CAP_SYS_CHROOT` in the caller's own), so a process in a child user
+  namespace cannot step back into the namespaces of the one that made it.
+* **S4. A user namespace is joined only by a holder of `CAP_SYS_ADMIN` in
+  it**, never one's own or an ancestor, and never from a multithreaded
+  process or a shared fs context; it then holds every capability there.
+* **S5. A namespace file opens only for the same person or root** (Linux
+  asks `ptrace_may_access`), and `NS_GET_USERNS` and `NS_GET_PARENT` show a
+  caller only user namespaces it is inside of or above.
+* **S6. A cgroup namespace is a boundary for moves**: a writer of
+  `cgroup.procs` there names only cgroups under its root (`ENOENT`), and
+  reads every path from that root.
 
 ---
 
@@ -673,6 +696,8 @@ of the task whose call makes it, kept inside what it pays for:
 | a copied mount | `CLONE_NEWNS` copying the tree | each, as `mount` already charges one |
 | a bind mount, and each copy `MS_REC` makes | `mount(MS_BIND)` | each (the existing mount charge) |
 | a map file's opener record | `open` of `uid_map`/`gid_map` | with the open's rendered snapshot, already charged |
+| UTS, IPC and cgroup namespace | `CLONE_NEWUTS`, `CLONE_NEWIPC`, `CLONE_NEWCGROUP` | each at creation; an IPC namespace's sets as they are made, to the job that makes them |
+| a namespace file | `open` of a `/proc/<pid>/ns` link, `NS_GET_USERNS` | the inode, the detached mount and the open file, to the job that opens; the namespace it holds stays the maker's |
 
 A namespace held by a descriptor (`/proc/<pid>/ns/*` opened `O_PATH`) is
 the charged object kept alive by an open file that is itself charged. The
@@ -1171,3 +1196,256 @@ latest):
   would stop the boot at `userns_check.rs:326` (the host name), before the
   message its row quotes; it has no log. Run it and quote the message that
   fires.
+
+*Settled by the small namespaces' landing (2026-10-01).* The `EROFS`
+check has its control (the remount without `MS_RDONLY`: "a write through a
+read-only bind of /proc/sys was not refused EROFS"). U8's row is restated for
+a process whose kernel uid is not 0, `kernel_root_keeps_override` records the
+difference as a check and a BACKLOG row holds it. `userns::ACTING` stores the
+id of the task that set it and answers only for that task; it has no control,
+because it is a check-harness hook and a race on it cannot be staged from a
+boot check. The `privileged()` controls were run on this tree and their first
+message depends on the tree: "`privileged()` ignoring the namespace" stops at
+"kernel root inside a child namespace was privileged in the whole system's
+sense" (`userns_check.rs`'s `root_made`, after the host name), because
+`sethostname` here asks `capable_over` the UTS namespace's owner, as Linux's
+`ns_capable(uts_ns->user_ns)` does, and no longer `privileged()`; on the tree
+the review ran, before the UTS namespace, it stopped at the host name
+(`userns_check.rs:326`). "`privileged()` as `holds(CAP_SYS_ADMIN)`" stops at
+"root inside a namespace made a device node (CAP_MKNOD)".
+
+**The small namespaces, designed (2026-09-30, os-smallns).** UTS, IPC and
+cgroup namespaces, `setns(2)` by namespace descriptor, and the `unshare` and
+`clone` flags for all five that exist. Pid and network namespaces are other
+landings; their flags stay `EINVAL`. Stage 13's roadmap file has the rest.
+
+*The data.* A mount namespace stays in the fs context and a user namespace in
+the credentials. The other three are named together in a `NsProxy`
+(`syscall/nsproxy.rs`), one per process, behind a `SpinLock` in `Process`
+beside `credentials`:
+
+```
+NsProxy { uts: Arc<UtsNamespace>, ipc: Arc<IpcNamespace>, cgroup: Arc<CgroupNamespace> }
+UtsNamespace    { id, owner: Arc<UserNamespace>, names: SpinLock<(nodename, domainname)>, charge }
+IpcNamespace    { id, owner: Arc<UserNamespace>, table: SpinLock<sem::Table>, charge }
+CgroupNamespace { id, owner: Arc<UserNamespace>, root: Arc<Job>, charge }
+```
+
+The first of each kind is a static made on first use, with Linux's own
+inode numbers (`UTS_NS_INIT_INO` 0xEFFFFFFE, `IPC_NS_INIT_INO` 0xEFFFFFFF,
+`CGROUP_NS_INIT_INO` 0xEFFFFFFB) and the first user namespace as owner; the
+ones made after it count up from 0xF9000000, and user namespaces from
+0xF8000000, so that no two kinds share a number (the mount namespaces count
+from 0xF0000000). `fork` copies the proxy; `execve` keeps it. A mount
+namespace gains an `owner` the VFS does not interpret (an `Arc<dyn Any>` set
+once by the kernel after `Namespace::copy`), so that `setns` can ask
+`CAP_SYS_ADMIN` over it.
+
+*Where it differs from Linux.* Linux keeps the proxy per task; here it is
+per process, so a thread cannot leave its group's namespaces, and `clone`
+with `CLONE_THREAD` and any `CLONE_NEW*` is `EINVAL` (as `unshare` from a
+multithreaded process is for `CLONE_NEWUSER` already). `CLONE_NEWIPC` with
+`CLONE_SYSVSEM` is `EINVAL`, Linux's.
+
+*Making one.* `CLONE_NEWUTS`, `CLONE_NEWIPC`, `CLONE_NEWCGROUP` from `clone`,
+`clone3` and `unshare`: `CAP_SYS_ADMIN` in the user namespace the caller will
+be in (the new one if `CLONE_NEWUSER` is asked with them), `EPERM` without;
+the new namespace's owner is that user namespace. A UTS namespace starts with
+a copy of its creator's names. An IPC namespace starts empty. A cgroup
+namespace's root is the creator's own cgroup (the parent's, for `clone`,
+whatever `CLONE_INTO_CGROUP` says).
+
+*Who may set the names.* `sethostname`, `setdomainname` and the two sysctl
+files write the names of the caller's UTS namespace. The system calls need
+`CAP_SYS_ADMIN` over the namespace's owner (`capable_over`), not "kernel
+root": fake root may name the namespace it made and never the first's.
+
+*The descriptors.* `/proc/<pid>/ns/{mnt,user,uts,ipc,cgroup}` stay magic
+links whose text is `type:[N]`, and following one (`open`) now leads to an
+inode of a new filesystem, `nsfs` (`fs/nsfs.rs`), one inode per namespace and
+kind, numbered by the namespace's id: two opens are one `st_ino`. The inode
+holds the namespace strongly, so a descriptor keeps it alive; the open file is
+charged as every open file is, the namespace at its creation (F-37). The
+file's `ioctl`s are `NS_GET_USERNS` (0xb701), `NS_GET_PARENT` (0xb702, user
+namespaces only, `EPERM` for one the caller cannot see, `EINVAL` for another
+kind), `NS_GET_NSTYPE` (0xb703) and `NS_GET_OWNER_UID` (0xb704, user
+namespaces only); verified against `linux/nsfs.h` on the build host.
+
+*`setns(fd, nstype)`* in Linux's order: `EBADF`; `EINVAL` for a file that is
+not nsfs or a type that is neither 0 nor the file's; then by kind, `EPERM`
+unless `CAP_SYS_ADMIN` over the target's owner **and** in the caller's own user
+namespace (uts, ipc, cgroup); for a mount namespace also `CAP_SYS_CHROOT` in
+the caller's own, `EINVAL` for a shared fs context, and the caller's root
+and working directory become the target's root; for a user namespace `EINVAL`
+from a multithreaded process, with a shared fs context, or into the caller's
+own, `EPERM` without `CAP_SYS_ADMIN` in the target (which refuses every
+ancestor), then all capabilities there. No pidfd form: a pidfd is `EINVAL`.
+
+*Locks and order.* The proxy lock is a leaf, cloned out before use as the fs
+context is. A UTS namespace's name lock is a leaf. An IPC table's lock takes
+the place the one global table's took, before a set's state lock. Every
+namespace is allocated and charged before any spin lock is taken; a failed
+`clone` drops what it made with the child.
+
+*The sites:* `clone`/`clone3`/`unshare` flags (`family.rs`, `namespace.rs`);
+`sys_uname`, `sethostname`, `setdomainname`, the two sysctls (`system.rs`,
+`procfs/render.rs`); every `TABLE` use in `sem.rs` and the undo list, which
+now names its set's namespace; `/proc/<pid>/cgroup`, the `cgroup2` mount
+root and the `cgroup.procs` move rule (`cgroupfs.rs`, `fsctl.rs`); procfs's
+`ns` directory and `link_location`; `ioctl` (`fd.rs`); `setns`
+(`namespace.rs`).
+
+*Evidence planned:* the `smallns` boot line (FX-0892, `fs/smallns_check.rs`),
+a check and a negative control for every rule above, and `kmem_check` fills
+for the three new kinds.
+
+**The small namespaces, built (2026-09-30, os-smallns; landed 2026-10-01).** UTS, IPC and cgroup
+namespaces; `CLONE_NEWUTS`, `CLONE_NEWIPC` and `CLONE_NEWCGROUP` through
+`clone`, `clone3` and `unshare`, alone or with `CLONE_NEWUSER` and
+`CLONE_NEWNS`; namespace files; `setns` by descriptor and by pidfd. The
+design above was built as written, with the differences listed below.
+
+What a program sees:
+
+* **UTS.** `sethostname`, `setdomainname`, `uname`'s `nodename` and
+  `domainname` and `/proc/sys/kernel/{hostname,domainname}` are the caller's
+  namespace's; a new one starts from its creator's names. The right to name
+  is `CAP_SYS_ADMIN` over the namespace's owner (S2).
+* **IPC.** The semaphore table is the namespace's, with its keys, ids,
+  `IPC_INFO`, `SEM_INFO` and undo records; the sets go with the namespace.
+  There is no `/proc/sysvipc/sem` in Ferrix to make per namespace.
+* **cgroup.** The creator's cgroup is the root. `/proc/<pid>/cgroup` is told
+  from the reader's root with `..` for what lies outside it; a `cgroup2`
+  mounted by a process in the namespace has the root as its `/`; a writer of
+  `cgroup.procs` there moves processes only between cgroups beneath it
+  (`ENOENT` otherwise, Linux's `cgroup_procs_write_permission`).
+* **Files.** `open` of `/proc/<pid>/ns/{mnt,user,uts,ipc,cgroup}` is a
+  descriptor on nsfs (`fs/nsfs.rs`): one inode per namespace, `readlink` of
+  `/proc/self/fd/N` reads `uts:[N]`, the four requests of `linux/nsfs.h`
+  (`0xb701` to `0xb704`, read from the header on the build host) answer.
+* **`setns(fd, nstype)`** with a namespace file or a pidfd, by the rules of
+  S3 and S4. With a pidfd the flags are a mask of the five kinds and every
+  namespace is judged before the first is joined.
+
+How it differs from Linux, and from the design above:
+
+* **Per process, not per thread.** A `NsProxy` belongs to the process.
+  `clone(CLONE_THREAD)` with any of the three flags, and `unshare` or `setns`
+  into one from a process of several threads, are `EINVAL` (Linux allows
+  them). `unshare(CLONE_NEWUSER)` already was.
+* **A shared fs context cannot be swapped**, so `setns` into a mount
+  namespace and into a user namespace from a process that shares its fs
+  context (`CLONE_FS`) is `EINVAL`; Linux copies the struct and succeeds for
+  a mount namespace.
+* **`/proc/<pid>/ns/*` opens by the same person or root** (S5); Linux asks
+  `ptrace_may_access`, including dumpability, which Ferrix does not yet have
+  for these links (the M8 landing, NP, adds it for `root`, `cwd`, `exe`, `fd`).
+* **Native processes** (`process_create`) start in their creator's UTS, IPC
+  and cgroup namespaces, as in its mount namespace since N3
+  (`launch::load_native` carries the proxy). The first landing left them in
+  the first namespaces, which the consultant found reachable: a process with a
+  MANAGE job from `job_for_cgroup` made a child in the host's IPC namespace
+  (B1). `namespace_check.rs`'s native-child check compares `ns/uts`,
+  `ns/ipc` and `ns/cgroup` of creator and child.
+* **A cgroup move is judged in the namespace of the descriptor's holder, in
+  all three ways in.** A `cgroup.procs` write by the namespace its *opener*
+  was in, recorded at open (Linux's CVE-2021-4197 fix); `CLONE_INTO_CGROUP`
+  (`clone_target`) and native `job_for_cgroup` (no MANAGE over a cgroup
+  outside the caller's root) by the caller's. Each has a check in
+  `smallns_check.rs` and a control below (C1).
+* **Conditions for later landings (consultant, 2026-10-01).** (C2) nsfs's
+  `may_open` compares against the target's effective ids only; Linux's rule
+  compares the caller's fsuid with the target's uid, euid and suid, and
+  `readlink` of `ns/*` has no gate at all; NP replaces both by
+  `ptrace_may_access` with dumpability. (C3) NP's scope includes `ns/*`, as
+  §9's row says, and not only `root`, `cwd`, `exe` and `fd`. (C4) An nsfs
+  descriptor keeps a mount namespace alive past its last process, and `setns`
+  can drop the last reference: the write-out check owed before N5 must cover a
+  namespace ended by closing an nsfs descriptor, and N5's pinning rule must
+  say that a descriptor holds a pin.
+* **Kernel root keeps its file override in a namespace it made.** The file
+  system's `Access::privileged` is `uid == 0` and has no namespace, so kernel
+  root (which is root of the first namespace as well) reads a 0600 file of
+  an id the namespace does not map; Linux refuses it. U8's guarantee is for a
+  process whose kernel uid is not 0, and `userns_check.rs`'s
+  `kernel_root_keeps_override` records the difference.
+* **A pidfd of an exited process may still be joinable** where Linux answers
+  `ESRCH` (BACKLOG).
+* **Ids of namespaces** count from ranges of their own so that no two kinds
+  share an inode number; Linux's dynamic inode numbers are one range.
+  Mount namespaces still print `mnt:[4026531840]`-style numbers from
+  0xF0000000, user namespaces now from 0xF8000000.
+* **`sethostname` by sysctl write** is judged by the file's mode only (root's
+  0644), as before; fake root writes the file only through `sethostname`.
+* No `/proc/sys/kernel/sem` or other per-namespace IPC sysctls, and no
+  shared memory or message queues, which Ferrix does not have.
+* `NS_GET_MNTNS_ID`, `NS_GET_ID`, `NS_MNT_GET_*` and the pid requests of
+  a newer `nsfs.h` are `ENOTTY`.
+
+Evidence. The `smallns` boot line (FX-0892, `fs/smallns_check.rs`) drives
+all of it with check processes through the system-call layer: on x86_64,
+aarch64 and armv7a at `--smp 2`; `test-shell` and `test-vfs` with the static
+busybox as init on x86_64 pass with the line in their boots. The `kmem` line
+gains UTS, IPC and cgroup namespaces and namespace files (F-37, §5).
+
+Negative controls, each a one-line change run once in the queue and undone,
+each stopping the boot with `smallns self-check failed: <message>`
+(`kmem` ones with `kmem: a job made more than its limit could hold`):
+
+| Rule | The one-line change | The message |
+|---|---|---|
+| a UTS namespace is a copy, then private | `nsproxy::make` keeps the creator's namespace | a name set in a child UTS namespace reached its creator's |
+| `uname` tells the caller's names | `sys_uname` reads the first namespace's | uname did not tell a UTS namespace's own names |
+| the sysctl tells the caller's name | `hostname` renders the first's | /proc/sys/kernel/hostname did not tell the reader's own UTS namespace |
+| `unshare` gives the copy | the `unshare` branch for the three flags off | unshare(CLONE_NEWUTS) did not give a copy in a namespace of its own |
+| a namespace is named apart | a copy takes the first's number (UTS, IPC, cgroup: three changes) | a new UTS namespace was not named apart by /proc/<pid>/ns/uts; ... IPC ... ns/ipc; a new cgroup namespace was not named apart by /proc/<pid>/ns/cgroup |
+| S1 needs `CAP_SYS_ADMIN` | `if false && !allowed` in `nsproxy::make` | unshare(CLONE_NEWUTS) by uid 1000 was not refused EPERM |
+| S2 the owner's right, not `privileged()` | `nameable` tests `held.privileged()` | fake root could not set the UTS namespace it made |
+| S2 uid 1000 cannot name the first's | `nameable` lets everyone | *the `userns` line's* "fake root in a user namespace set the host name" first (the rule has two checks; the earlier one stops the boot) |
+| S3 a child cannot join the first UTS namespace | the `may_join` test off in `join_small` | a process in a child user namespace joined the first UTS namespace |
+| S3 nor the first mount namespace | the owner test off in `join_mount` | fake root joined the first mount namespace |
+| a mount namespace's owner is recorded | `copy_namespace` does not record it | a mount namespace made in a user namespace could not be joined from inside it |
+| S4 no ancestor user namespace | `check_user`'s capability test is `true` | a process joined an ancestor user namespace |
+| S4 only the owner | the owner's-uid test of `capable_over` is `true` | a user namespace was joined by someone who did not own it |
+| S4 not one's own | the own-namespace test off | setns into the user namespace the caller is in was not EINVAL |
+| S4 every capability after | `join_user` does not enter | joining a user namespace did not give every capability there |
+| `setns` of a non-namespace is `EINVAL` | `EPERM` in its place | setns of a file that is not a namespace was not EINVAL |
+| `setns` type must match | the type test off | setns with a type that is not the file's was not EINVAL |
+| `setns` changes the names | the UTS arm of `put_in_proxy` does nothing | setns into a UTS namespace did not change the names the caller tells |
+| `setns` into a mount namespace resets the working directory | the working directory kept | setns into a mount namespace left the working directory behind |
+| pidfd: no flag is `EINVAL` | the `flags == 0` test off | setns on a pidfd with no namespace flag was not EINVAL |
+| pidfd: only namespaces that exist | `CLONE_NEWPID` in the mask | setns on a pidfd with CLONE_NEWPID, which does not exist, was not EINVAL |
+| pidfd: every kind asked for | the IPC kind joins the cgroup instead | setns on a pidfd did not join every namespace asked for |
+| pidfd: capabilities after the user join | the own-capability test always runs | an owner could not join a user namespace and its UTS namespace together |
+| pidfd: and not before | the own-capability test never runs | a person with no capability joined a UTS namespace alone through a pidfd |
+| pidfd: `CLONE_NEWUSER` is joined | the user arm off | setns on a pidfd left the caller outside what it joined |
+| IPC keys are the namespace's | a new IPC namespace is the first's | a new IPC namespace saw the first's semaphore keys |
+| `SEM_INFO` counts the namespace's sets | `info` reads the first's table | SEM_INFO in a new IPC namespace counted the first's sets |
+| an IPC namespace ends with its last holder | a new one is leaked | an IPC namespace outlived its last holder |
+| `CLONE_NEWIPC` excludes `CLONE_SYSVSEM` | the test off | CLONE_NEWIPC with CLONE_SYSVSEM was not refused EINVAL |
+| no new namespace for a thread | the test off | CLONE_NEWUTS with CLONE_THREAD was not refused EINVAL |
+| pid and network stay `EINVAL` | `CLONE_NEWNET` in `unshare`'s mask | unshare(CLONE_NEWNET) was not refused |
+| B1 a native child takes its creator's UTS, IPC and cgroup namespaces | `load_native` does not copy the proxy | `mount namespace self-check failed: a native child's UTS, IPC or cgroup namespace was not its creator's` |
+| C1 a `cgroup.procs` write is judged in the opener's namespace | `write_to` asks the writer's (`acting()`) | a descriptor opened inside a cgroup namespace moved a process out of it after its writer left |
+| C1 `CLONE_INTO_CGROUP` stays inside the creator's root | the namespace test in `clone_target` off | CLONE_INTO_CGROUP started a child outside its creator's cgroup namespace |
+| C1 `job_for_cgroup` gives no MANAGE outside the root | the test answers `true` | a MANAGE handle was given for a cgroup outside the caller's cgroup namespace |
+| N3 condition: a read-only bind of `/proc/sys` refuses writes | the remount drops `MS_RDONLY` | `user namespace self-check failed: a write through a read-only bind of /proc/sys was not refused EROFS` |
+| N4 U1 `privileged()` is the first namespace's only | `privileged()` is `holds(CAP_SYS_ADMIN)` | root inside a namespace made a device node (CAP_MKNOD) |
+| N4 U1 again | `privileged()` ignores the namespace | kernel root inside a child namespace was privileged in the whole system's sense |
+| cgroup paths are the reader's | the common prefix is not counted | /proc/<pid>/cgroup did not read / at the namespace's root |
+| ... with `..` outside | `..` written as `x` | a cgroup outside the namespace's root was not shown with /.. |
+| a mount is rooted in the namespace | `cgroup2` mounts the whole tree | a cgroupfs mounted in a cgroup namespace did not have its root as / |
+| S6 a move stays inside | the rule off | a process in a cgroup namespace moved itself outside its root |
+| a clone's root is its creator's cgroup | rooted at the tree's root | a cloned cgroup namespace was not rooted at its creator's cgroup |
+| one inode per namespace | each open takes a new number | two opens of one namespace were two inodes |
+| the descriptor reads its name | the label of a UTS namespace is `ipc` | readlink of a namespace descriptor did not read its namespace's name |
+| `NS_GET_NSTYPE` | answers 0 | NS_GET_NSTYPE of a UTS namespace did not answer CLONE_NEWUTS |
+| `NS_GET_USERNS` shows only what the caller is inside | the test answers yes | NS_GET_USERNS showed a process a user namespace it is not inside of |
+| `NS_GET_PARENT` only for user namespaces | a UTS namespace answers | NS_GET_PARENT of a UTS namespace was not EINVAL |
+| `NS_GET_OWNER_UID` | answers owner + 1 | NS_GET_OWNER_UID did not tell the owner's id |
+| S5 another person's link | `may_open` always true | uid 1000 opened another person's namespace |
+| F-37: UTS, IPC, cgroup namespaces charged | `Charge::bytes(0)` for the namespace | kmem: a job made more than its limit could hold (the line before names which kind) |
+
+The namespace files' fill in `kmem_check` has no control: the detached mount
+the VFS charges bounds it, and the inode's few bytes do not change the count
+a job makes. That is a gap in the evidence, not in the code's charge.

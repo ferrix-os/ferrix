@@ -76,6 +76,7 @@ Causes are listed most likely first.
 | [FX-0887](#fx-0887) | A mount namespace failed its self-check |
 | [FX-0888](#fx-0888) | A user namespace failed its self-check |
 | [FX-0890](#fx-0890) | sysfs did not show the machine's devices as Linux shows them |
+| [FX-0892](#fx-0892) | A UTS, IPC or cgroup namespace, or setns, failed its self-check |
 | [FX-0901](#fx-0901) | the native ABI's objects failed their self-check |
 | [FX-0902](#fx-0902) | an allocation failure was not survived |
 | [FX-0903](#fx-0903) | a native call accepted what the ABI says it refuses |
@@ -1670,7 +1671,8 @@ A native child the second process makes must be in its namespace and root
 5. `sys_umount2` does not act on the mount on top of `.`, or does not write out
    every filesystem of a detached subtree.
 6. `launch::load_native` starts a native child in the first namespace's root
-   rather than its creator's context.
+   rather than its creator's context, or in the first UTS, IPC and cgroup
+   namespaces rather than its creator's.
 
 See: src/kernel/src/fs/namespace_check.rs; src/kernel/src/syscall/namespace.rs;
 src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/launch.rs;
@@ -1740,6 +1742,47 @@ says SYSFS_MAGIC, and cgroup2 mounts on fs/cgroup.
 
 See: src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs;
 src/lib/fs/sysfs; docs/SYSFS.md.
+
+<a id="fx-0892"></a>
+
+## FX-0892 — A UTS, IPC or cgroup namespace, or setns, failed its self-check
+
+`fs::smallns_check::run` drives the small namespaces through the system-call
+layer. A UTS namespace made by clone or unshare starts with its creator's host
+name and then keeps its own, as uname and /proc/sys/kernel/hostname tell it; uid
+1000 is refused one and refused sethostname; a maker of a user namespace may
+name the UTS namespace it made and never the first's. An IPC namespace shares no
+semaphore keys with the first, counts only its own sets in SEM_INFO and ends
+with its last holder. In a cgroup namespace /proc/<pid>/cgroup reads / at the
+root and `..` for what lies outside it, a cgroupfs mounted there has the root as
+its own, a writer moves processes only between cgroups inside it, and a clone is
+rooted at its creator's cgroup. A /proc/<pid>/ns link opens as a namespace file:
+two opens are one inode, readlink names it, NS_GET_USERNS, NS_GET_PARENT,
+NS_GET_NSTYPE and NS_GET_OWNER_UID answer, and another person's link is refused.
+setns refuses a closed descriptor, a file that is not a namespace, a type that
+is not the file's, an ancestor user namespace, the caller's own, a stranger, and
+a child user namespace's join of the first's UTS or mount namespace, and joins
+where it may. Pid and network namespaces, CLONE_NEWIPC with CLONE_SYSVSEM and a
+thread with a new namespace are EINVAL (docs/NAMESPACES.md §12).
+
+1. `nsproxy::make` shares the creator's UTS names or IPC table, or skips its
+   CAP_SYS_ADMIN test.
+2. `system::nameable` judges `privileged()` instead of `CAP_SYS_ADMIN` over the
+   namespace's owner.
+3. `cgroupfs::relative_names` ignores the reader's root or leaves out `..`.
+4. `fsctl::filesystem_named` mounts the whole tree for a process in a cgroup
+   namespace, or `cgroupfs::write_to` drops the move rule or judges the writer's
+   namespace rather than the opener's, or `cgroupfs::clone_target` or
+   `job_for_cgroup` has no namespace test.
+5. `nsfs::ioctl` or `nsfs::related` answers a namespace the caller is not inside
+   of, or `nsfs::may_open` admits another person.
+6. `namespace::sys_setns` skips a capability, type or ownership test, or leaves
+   the caller's root and working directory behind.
+
+See: src/kernel/src/fs/smallns_check.rs; src/kernel/src/syscall/nsproxy.rs;
+src/kernel/src/fs/nsfs.rs; src/kernel/src/syscall/namespace.rs;
+src/kernel/src/syscall/system.rs; src/kernel/src/syscall/sem.rs;
+src/kernel/src/fs/cgroupfs.rs.
 
 <a id="fx-0901"></a>
 
