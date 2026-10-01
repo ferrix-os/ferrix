@@ -453,7 +453,11 @@ fn trap_verdict() -> Result<(), &'static str> {
         }
         match crate::trap::ask(&slot, &args) {
             Some(crate::trap::Outcome::Return(value)) if value == expected => {}
-            _ => return Err("SIGSYS's context lost the syscall number"),
+            _ => {
+                return Err(
+                    "a Trap verdict was answered with something other than the call's rollback value",
+                );
+            }
         }
     }
     Ok(())

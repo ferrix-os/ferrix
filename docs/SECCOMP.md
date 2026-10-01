@@ -1767,7 +1767,8 @@ in the landing's message):
 
 | Control (sabotage) | Message |
 |---|---|
-| a trapped call answered -38 instead of rolled back | `SIGSYS's context lost the syscall number` |
+| a trapped call answered -38 instead of rolled back | `a Trap verdict was answered with something other than the call's rollback value` |
+| a trapped call marked for restart | `a trapped call left a restart marked` |
 | the i386 conversion off for a trap | `i386 si_syscall was not at offset 16` |
 | `SIGSYS` posted, not forced | `a blocked and ignored SIGSYS let a trapped call return` |
 | `PR_SPEC_ENABLE` accepted | `PR_SET_SPECULATION_CTRL enabled a mitigation` |
