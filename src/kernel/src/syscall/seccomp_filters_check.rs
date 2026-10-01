@@ -638,9 +638,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let getsid = number(Syscall::Getsid)?;
             // Blocked and ignored: a trap must still end the program.
-            thread.with_signals(|shared, own| {
-                shared.install_action(SIGSYS_NUMBER, 1, 0);
-                let _ = own.replace_blocked(1 << (SIGSYS_NUMBER - 1));
+            thread.with_signals(|shared, _| shared.install_action(SIGSYS_NUMBER, 1, 0));
+            crate::syscall::signal::change_blocked(&thread, |_, own| {
+                let _ = own.replace_blocked(crate::syscall::signal::bit(SIGSYS_NUMBER));
             });
             let at = env.put(&answering(&[(getsid, TRAP | 1)]), None)?;
             if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
@@ -845,9 +845,10 @@ fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
     let getppid = number(Syscall::Getppid)?;
     let _ = attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]);
     // A handler, and the signal blocked: a trap must come through anyway.
-    env.thread.with_signals(|shared, own| {
-        shared.install_action(SIGSYS_NUMBER, HANDLER, 0);
-        let _ = own.replace_blocked(1 << (SIGSYS_NUMBER - 1));
+    env.thread
+        .with_signals(|shared, _| shared.install_action(SIGSYS_NUMBER, HANDLER, 0));
+    signal::change_blocked(&env.thread, |_, own| {
+        let _ = own.replace_blocked(signal::bit(SIGSYS_NUMBER));
     });
     env.install(&answering(&[(getppid, TRAP | 0x1234)]), 0)?;
     if env.judges(getppid) != Some(TRAPPED) {
