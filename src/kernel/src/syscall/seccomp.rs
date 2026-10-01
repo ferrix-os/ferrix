@@ -594,7 +594,7 @@ pub(crate) fn prepare(raw: &[Insn], log: bool) -> Result<Arc<Filter>, Errno> {
         previous: None,
         cost,
         depth: 1,
-        _charge: charge,
+        _charge: Charge::bytes(0).map_err(|_| Errno::ENOMEM)?,
     })
     .map_err(|_| Errno::ENOMEM)
 }
