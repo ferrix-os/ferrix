@@ -670,7 +670,10 @@ sleep 1
 read key after < /tmp/cz/z/cpu.stat
 [ $after -gt $before ] && echo "running cgroup used the processor"
 echo 1 > /tmp/cz/z/cgroup.freeze || exit 3
-sleep 2
+while read k v; do echo "DBG fz0 $k $v"; done < /tmp/cz/z/cpu.stat
+sleep 1
+while read k v; do echo "DBG fz1 $k $v"; done < /tmp/cz/z/cpu.stat
+sleep 1
 while read key value; do [ "$key" = frozen ] && echo "cgroup.events frozen $value"; done < /tmp/cz/z/cgroup.events
 read key before < /tmp/cz/z/cpu.stat
 sleep 2
@@ -706,7 +709,11 @@ sh -c 'echo $$ > /tmp/cu/u/cgroup.procs || exit 1
 while :; do :; done' &
 sleep 1
 read key before < /tmp/cu/u/cpu.stat
-sleep 3
+while read k v; do echo "DBG cpu0 $k $v"; done < /tmp/cu/u/cpu.stat
+sleep 1
+while read k v; do echo "DBG cpu1 $k $v"; done < /tmp/cu/u/cpu.stat
+sleep 2
+while read k v; do echo "DBG cpu3 $k $v"; done < /tmp/cu/u/cpu.stat
 read key after < /tmp/cu/u/cpu.stat
 used=$((after - before))
 [ $used -gt 300000 ] && [ $used -lt 1200000 ] && echo "held to about a fifth of a processor" || echo "used $used in 3 s"
