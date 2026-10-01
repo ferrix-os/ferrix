@@ -1113,7 +1113,7 @@ package FerrixItemRequirements {
                 job's cpu.max allows, and a task kept waiting for the period to
                 end shall leave the wait at once for a kill or a signal.";
             attribute :>> criterion = "A program in a job limited to 20000 of
-                100000 microseconds is held to between a twelfth and two fifths of
+                100000 microseconds is held to between a twelfth and two thirds of
                 a processor with the throttling counted in cpu.stat, and one in a
                 job limited to 1000 of 1000000 ends within a quarter of a second
                 of its SIGKILL (the `cgroups` line, cpu).";

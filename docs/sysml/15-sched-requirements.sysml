@@ -60,7 +60,7 @@ package FerrixSchedRequirements {
                 task of the job, so that a task alone on its processor, which
                 gets no tick, is cut when its quota is used up.";
             attribute :>> criterion = "A program already running alone on its
-                processor is held to between a twelfth and two fifths of a
+                processor is held to between a twelfth and two thirds of a
                 processor by a cpu.max 20000 100000 written under it, and by being
                 moved beneath one.";
             attribute :>> parent = "H.QUOTA.10";
