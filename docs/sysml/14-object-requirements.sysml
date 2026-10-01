@@ -1360,7 +1360,7 @@ package FerrixObjectRequirements {
                 the period ends.";
             attribute :>> criterion = "A program of two counting threads in a job
                 with cpu.max 20000 100000 is held to between a twelfth and two
-                fifths of a processor, its cpu.stat counts at least 3 throttled
+                thirds of a processor, its cpu.stat counts at least 3 throttled
                 periods and its user and system time add to its usage, and with
                 cpu.max max it takes more than six tenths.";
             attribute :>> parent = "H.QUOTA.10";
