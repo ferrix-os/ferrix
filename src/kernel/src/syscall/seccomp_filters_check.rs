@@ -46,6 +46,9 @@ pub(crate) struct Report {
     pub(crate) killed: usize,
     /// Filters in the longest chain made and released.
     pub(crate) chain: usize,
+    /// Traps delivered as a signal with the call's information, read back, and
+    /// a blocked and ignored one that ended its process.
+    pub(crate) traps: usize,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -201,6 +204,7 @@ fn judge_thread(thread: &Thread, call: usize) -> Option<u32> {
     match seccomp::judge(thread, &args) {
         Some(Verdict::Continue) => Some(0),
         Some(Verdict::Errno(errno)) => Some(errno),
+        Some(Verdict::Trap) => Some(TRAPPED),
         None => None,
     }
 }
@@ -217,6 +221,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     ordering()?;
     heredity(&mut report)?;
     entry_task(&mut report)?;
+    rollback_through_the_core()?;
+    speculation(&mut report)?;
     report.chain = longest_chain()?;
     Ok(report)
 }
@@ -500,6 +506,8 @@ struct Seen {
     calls: usize,
     /// Native children judged.
     inherited: usize,
+    /// Traps whose signal and information were read back.
+    trapped: usize,
 }
 
 /// How the task ends its process when it was not killed: it must have been.
@@ -524,6 +532,10 @@ enum Ending {
     Process,
     /// Strict mode, then a call it does not allow: `SIGKILL`.
     Strict,
+    /// `TRAP`: the signal and its information, with `SIGSYS` blocked.
+    Trap,
+    /// `TRAP` with `SIGSYS` blocked and ignored: the process dies of it.
+    TrapIgnored,
 }
 
 /// Run a scenario task in a process of its own, and answer what it found and
@@ -617,6 +629,26 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             *FOUND.lock() = Some(Ok(seen));
             let _ = call(getpid, [0; 6]);
             return Err("strict mode let getpid run");
+        }
+        Some(Ending::Trap) => {
+            seen.trapped = trapped_in_the_task(&env)?;
+            return Ok(seen);
+        }
+        Some(Ending::TrapIgnored) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let getsid = number(Syscall::Getsid)?;
+            // Blocked and ignored: a trap must still end the program.
+            thread.with_signals(|shared, own| {
+                shared.install_action(SIGSYS_NUMBER, 1, 0);
+                let _ = own.replace_blocked(1 << (SIGSYS_NUMBER - 1));
+            });
+            let at = env.put(&answering(&[(getsid, TRAP | 1)]), None)?;
+            if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
+                return Err("a trapping filter was refused through the entry");
+            }
+            *FOUND.lock() = Some(Ok(seen));
+            let _ = call(getsid, [0; 6]);
+            return Err("a blocked and ignored SIGSYS let a trapped call return");
         }
         Some(Ending::Thread | Ending::Process) | None => {}
     }
@@ -737,6 +769,22 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
     }
     report.calls += 2;
     report.killed += 1;
+
+    // `TRAP`: the signal, forced past a blocked mask, with the call's
+    // information; and with `SIGSYS` ignored as well, the process dies of it.
+    let (seen, status) = scenario(Ending::Trap, false)?;
+    if status != SURVIVED {
+        return Err("a trap's check ended its process otherwise than as the check ended it");
+    }
+    report.traps += seen.trapped;
+    let (_, status) = scenario(Ending::TrapIgnored, false)?;
+    if status != SIGSYS_STATUS {
+        return Err(
+            "a blocked and ignored SIGSYS did not end the process that made a trapped call",
+        );
+    }
+    report.traps += 1;
+    report.killed += 1;
     Ok(())
 }
 
@@ -775,4 +823,174 @@ fn longest_chain() -> Result<usize, &'static str> {
     env.thread.with_seccomp(|state| *state = State::default());
     process::kill(&env.process, 137);
     Ok(made)
+}
+
+/// What `judge_thread` answers for a call a filter trapped.
+const TRAPPED: u32 = u32::MAX;
+
+/// A handler address the check gives `SIGSYS`: any address that is not
+/// `SIG_DFL` or `SIG_IGN`, since nothing runs it.
+const HANDLER: u64 = 0x0040_0000;
+
+/// `SIGSYS`.
+const SIGSYS_NUMBER: u32 = 31;
+
+/// `TRAP` in a thread that has a handler: the call does not run, `SIGSYS` is
+/// pending for this thread even though the program blocked it (a trap cannot
+/// be blocked), and the `siginfo` a handler would read says what Linux's
+/// `force_sig_seccomp` says (`docs/SECCOMP.md` §3.6, SR9). Runs in the task of
+/// a check process, because the signal is forced on the running thread.
+fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
+    use crate::syscall::signal;
+    let getppid = number(Syscall::Getppid)?;
+    let _ = attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+    // A handler, and the signal blocked: a trap must come through anyway.
+    env.thread.with_signals(|shared, own| {
+        shared.install_action(SIGSYS_NUMBER, HANDLER, 0);
+        let _ = own.replace_blocked(1 << (SIGSYS_NUMBER - 1));
+    });
+    env.install(&answering(&[(getppid, TRAP | 0x1234)]), 0)?;
+    if env.judges(getppid) != Some(TRAPPED) {
+        return Err("a TRAP result did not trap the call");
+    }
+    let taken = env
+        .thread
+        .with_signals(|shared, own| signal::take_next(shared, own))
+        .ok_or("a blocked SIGSYS let a trapped call return")?;
+    let signal::Origin::Sys {
+        errno,
+        call_addr,
+        syscall,
+        arch: token,
+    } = taken.origin
+    else {
+        return Err("a trapped call raised a signal that is not a seccomp trap");
+    };
+    if taken.signal != SIGSYS_NUMBER
+        || errno != 0x1234
+        || call_addr != 0x1000
+        || syscall != getppid as i32
+        || token != arch_token()
+    {
+        return Err("a trapped call's siginfo did not carry the call, its ip and its arch");
+    }
+    // The bytes a handler of this machine reads.
+    let info = taken.origin.encode(SIGSYS_NUMBER);
+    let word = |at: usize| {
+        info.get(at..at + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map(i32::from_le_bytes)
+    };
+    let union = if size_of::<usize>() == 8 { 16 } else { 12 };
+    let at = union + size_of::<usize>();
+    if word(0) != Some(SIGSYS_NUMBER as i32)
+        || word(4) != Some(0x1234)
+        || word(8) != Some(1)
+        || word(at) != Some(getppid as i32)
+        || word(at + 4) != Some(arch_token() as i32)
+    {
+        return Err("a trapped call's siginfo had its fields at other offsets than Linux's");
+    }
+    // The i386 program on a 64-bit kernel reads the union four bytes lower
+    // and a pointer narrower: `_syscall` at 16, `_arch` at 20.
+    if size_of::<usize>() == 8 {
+        let small = ferrix_linux_abi::sigframe32::siginfo_from_64(&info);
+        let word32 = |at: usize| {
+            small
+                .get(at..at + 4)
+                .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+                .map(i32::from_le_bytes)
+        };
+        if word32(8) != Some(1)
+            || word32(12) != Some(0x1000)
+            || word32(16) != Some(getppid as i32)
+            || word32(20) != Some(arch_token() as i32)
+        {
+            return Err("i386 si_syscall was not at offset 16");
+        }
+    }
+    Ok(1)
+}
+
+/// The `arch` token of this machine's own entry.
+fn arch_token() -> u32 {
+    arch::audit_arch(Abi::Native)
+}
+
+/// The core gives a trapped call's registers back as the program made it: the
+/// value it answers is the architecture's rollback of the call, and nothing a
+/// filter chose (`docs/SECCOMP.md` §3.6).
+fn rollback_through_the_core() -> Result<(), &'static str> {
+    use ferrix_sync::Once;
+    fn trapping(_: &SyscallArgs) -> Verdict {
+        Verdict::Trap
+    }
+    let slot: Once<crate::trap::SyscallFilter> = Once::new();
+    crate::trap::register(&slot, trapping);
+    let args = SyscallArgs {
+        abi: Abi::Native,
+        number: 0x2222,
+        args: [0x1111, 2, 3, 4, 5, 6],
+        ip: 0x1000,
+    };
+    let expected = arch::syscall_rollback_value(Abi::Native, args.number, &args.args);
+    match crate::trap::ask(&slot, &args) {
+        Some(crate::trap::Outcome::Return(value)) if value == expected => {}
+        _ => return Err("SIGSYS's context lost the syscall number"),
+    }
+    // And that value is the number on x86, the first argument on the Arm pair:
+    // what a handler finds in the register that held it.
+    let wanted = if arch::ARCH.elf_machine() == 62 {
+        0x2222
+    } else {
+        0x1111
+    };
+    if expected != wanted {
+        return Err("SIGSYS's context lost the syscall number");
+    }
+    Ok(())
+}
+
+/// What a program learns of speculation and may do about it: both features
+/// mitigated and force-disabled, enabling one `EPERM`, and a filter installed
+/// with `SPEC_ALLOW` changes nothing (SR14).
+fn speculation(report: &mut Report) -> Result<(), &'static str> {
+    let env = Env::new()?;
+    let prctl = |args: [u64; 6]| {
+        seccomp::dispatch(Syscall::Prctl, &args, &env.process, Abi::Native)
+            .unwrap_or(Err(Errno::EINVAL))
+    };
+    // Force-disabled is `PR_SPEC_PRCTL | PR_SPEC_FORCE_DISABLE`.
+    for which in [0, 1] {
+        if prctl([52, which, 0, 0, 0, 0]) != Ok(9) {
+            return Err("a mitigated speculation feature was not reported force-disabled");
+        }
+    }
+    if prctl([52, 2, 0, 0, 0, 0]) != Err(Errno::ENODEV) {
+        return Err("a feature with no control was not answered ENODEV");
+    }
+    // Asking for more mitigation is already true; for less is refused.
+    if prctl([53, 1, 4, 0, 0, 0]) != Ok(0) || prctl([53, 1, 8, 0, 0, 0]) != Ok(0) {
+        return Err("a request for more speculation mitigation was refused");
+    }
+    if prctl([53, 1, 2, 0, 0, 0]) != Err(Errno::EPERM)
+        || prctl([53, 0, 2, 0, 0, 0]) != Err(Errno::EPERM)
+    {
+        return Err("PR_SET_SPECULATION_CTRL enabled a mitigation");
+    }
+    if prctl([53, 1, 99, 0, 0, 0]) != Err(Errno::ERANGE)
+        || prctl([53, 1, 4, 1, 0, 0]) != Err(Errno::EINVAL)
+    {
+        return Err("PR_SET_SPECULATION_CTRL did not refuse a value that is no control");
+    }
+    // `SPEC_ALLOW` is accepted and turns nothing off: the feature reads the same
+    // after a filter that asked for it.
+    let _ = attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+    env.install(&answering(&[]), SPEC_ALLOW)?;
+    if prctl([52, 1, 0, 0, 0, 0]) != Ok(9) {
+        return Err("SPEC_ALLOW turned a speculation mitigation off");
+    }
+    report.probes += 6;
+    process::kill(&env.process, 137);
+    Ok(())
 }
