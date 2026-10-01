@@ -238,6 +238,7 @@ const REFUSED: isize = -1;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    crate::println!("NEGATIVE CONTROL c6-native applied: native-range calls are not given the native token");
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();

@@ -47,7 +47,7 @@ pub(crate) fn data(args: &SyscallArgs) -> SeccompData {
     let native = args.abi == Abi::Native && ferrix_native_abi::nr::is_native(args.number);
     SeccompData {
         nr: args.number as i32,
-        arch: if native {
+        arch: if false && native {
             NATIVE_ARCH
         } else {
             arch::audit_arch(args.abi)
