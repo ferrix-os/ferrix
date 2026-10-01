@@ -655,7 +655,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
                 }
                 sched::yield_now();
             }
-            if process.is_terminated() || SURVIVED_ITS_KILL.load(Ordering::Acquire) {
+            if process.is_terminated()
+                || SURVIVED_ITS_KILL.load(core::sync::atomic::Ordering::Acquire)
+            {
                 return Err("a thread killed by its filter took its whole process with it");
             }
             // Its calls still run: the filter was its own.
