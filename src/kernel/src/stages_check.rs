@@ -290,8 +290,16 @@ pub(super) fn check_seccomp_filters() {
     println!(
         "  seccomp  {} probes answered as Linux answers them, {} calls a filtered thread made \
          through the entry and judged, {} children and threads that held their creator's chain, \
-         {} processes a filter ended, and a chain of {} filters made and released",
-        checked.probes, checked.calls, checked.inherited, checked.killed, checked.chain,
+         {} processes a filter ended, a chain of {} filters made and released, and TSYNC: \
+         {} threads, forty of them made while it ran, all holding the chain after, and {} \
+         cases of its all-or-nothing rule",
+        checked.probes,
+        checked.calls,
+        checked.inherited,
+        checked.killed,
+        checked.chain,
+        checked.synced,
+        checked.refusals,
     );
 }
 
