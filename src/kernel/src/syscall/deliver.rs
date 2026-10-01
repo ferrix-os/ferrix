@@ -180,6 +180,7 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
                 // and says when the last has parked (`cgroup.events`).
                 let frozen = process.core().is_frozen();
                 if frozen {
+                    let _ = crate::sched::DBG_PARKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     process.thread_parked();
                     crate::fs::cgroupfs::settle_frozen(&process.core().job());
                 }

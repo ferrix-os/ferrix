@@ -2614,7 +2614,9 @@ fn for_each_queue_charged(mut visit: impl FnMut(usize, &mut CpuQueue)) {
 /// time is counted as user time: a task that has been neither interrupted nor
 /// descheduled since it was last charged has been running its program, since
 /// any long stay in the kernel blocks or is cut by the timer.
+pub(crate) static DBG_PARKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 pub(crate) fn charge_running() {
+    crate::console::println!("DBG parks {}", DBG_PARKS.load(core::sync::atomic::Ordering::Relaxed));
     let Some(queues) = QUEUES.get() else {
         return;
     };
