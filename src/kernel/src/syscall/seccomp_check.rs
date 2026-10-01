@@ -229,8 +229,7 @@ const REFUSED: isize = -1;
 /// Drive every entry and every call an entry keeps for itself, and require the
 /// filter to have judged each first, once, with the entry's own token.
 ///
-/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51, `L.armv7a.1`,
-/// `L.armv7a.2`
+/// Verifies: H.TRAP.16, L.trap.7, `L.x86_64.124`, `L.x86_64.125`, L.aarch64.51, `L.armv7a.1`, `L.armv7a.2`
 ///
 /// # Errors
 ///
