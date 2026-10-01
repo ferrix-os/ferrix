@@ -318,3 +318,5 @@ starts in the code, how landings are gated now, and what cost a gate on
 
 ---
 
+
+**State at wind-down (2026-10-01, os-ae):** `stage13-netns` 5e19c599c+ is green through gate.sh (ae23-* check, 3 boots, init, shell, vfs, net; controls ae-nn-01..31c, b1 FIRED); consultant ae46f413631b883c6 said OK-if, all four conditions met but not yet confirmed; main moved (7afed6fdc), so it needs a rebase, carry-coverage and a re-run of ae23 before it lands.
