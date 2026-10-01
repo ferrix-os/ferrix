@@ -575,7 +575,7 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
 }
 
 /// How long the boot task waits for a scenario.
-const PATIENCE_NANOS: u64 = 120_000_000_000;
+const PATIENCE_NANOS: u64 = 20_000_000_000;
 /// How long it lets a reaped task settle.
 const SETTLE_NANOS: u64 = 20_000_000;
 
