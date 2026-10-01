@@ -183,9 +183,16 @@ pub(crate) fn running_group() -> u32 {
 static MOVES: AtomicU64 = AtomicU64::new(0);
 
 /// A process moved to another job: every running task looks again.
+///
+/// A task of it running in user mode, alone on its processor, is not
+/// interrupted by anything and so would go on running and being charged in the
+/// job it left; every processor is kicked, so that each running task comes
+/// through the way back to user mode, where it looks, and arms its timer for
+/// the job it is in now.
 pub(crate) fn note_moved() {
     let _ = MOVES.fetch_add(1, Ordering::AcqRel);
     regroup_current();
+    rearm_timers();
 }
 
 /// Have the running task run, and charge, in its process's job, if a move
@@ -267,6 +274,40 @@ fn set_task_group(task: &Arc<Task>, index: u32) {
         slot.store(index, Ordering::Release);
     }
     <arch::Irq as IrqControl>::restore(saved);
+    // A task alone on its processor gets no tick, and its timer was armed
+    // for the job it was in: look again, for a quota it has just come under.
+    if quota::bandwidth_in_use() {
+        rearm_here();
+    }
+}
+
+/// Work out again when this processor's next timer is due.
+///
+/// A task alone on a processor is left to run with no tick, so a `cpu.max`
+/// that comes to bind it -- written under it, or the task moved beneath it --
+/// cuts nothing until something arms a timer for the moment its quota would be
+/// used up, and what arms one is a decision, which a lone task never makes.
+fn rearm_here() {
+    let saved = <arch::Irq as IrqControl>::disable();
+    if let Some(lock) = this_cpu().and_then(queue_of) {
+        lock.lock().arm_timer(crate::timer::now_nanos());
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// [`rearm_here`] on every processor: this one now, and the others by a kick,
+/// whose interrupt ends in a decision that arms the timer. For a `cpu.max`
+/// just written, which may bind tasks running anywhere.
+pub(crate) fn rearm_timers() {
+    let here = this_cpu();
+    let online = KICK_PENDING.get().map_or(0, Vec::len);
+    for cpu in 0..online {
+        if Some(cpu) == here {
+            rearm_here();
+        } else {
+            kick(cpu);
+        }
+    }
 }
 
 /// The identifier of the task running on this processor, read without a lock.
