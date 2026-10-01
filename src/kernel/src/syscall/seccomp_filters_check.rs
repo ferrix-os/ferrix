@@ -590,6 +590,7 @@ fn scenario_task(_argument: usize) {
     let found = in_the_process(ending);
     let broken = found.is_err();
     *FOUND.lock() = Some(found);
+    crate::console::println!("DEBUG scenario task exits, broken {broken}");
     process::exit_current(if broken { BROKEN } else { SURVIVED });
 }
 
@@ -659,6 +660,7 @@ fn in_the_process(ending: Option<Ending>) -> Found {
                 }
                 sched::yield_now();
             }
+            crate::console::println!("DEBUG member gone, threads {}", process.threads().len());
             if process.is_terminated()
                 || SURVIVED_ITS_KILL.load(core::sync::atomic::Ordering::Acquire)
             {
@@ -669,6 +671,7 @@ fn in_the_process(ending: Option<Ending>) -> Found {
                 return Err("a thread killed by its filter left the others without their calls");
             }
             seen.calls += 1;
+            crate::console::println!("DEBUG member scenario done");
             return Ok(seen);
         }
         Some(Ending::Leader) => {
