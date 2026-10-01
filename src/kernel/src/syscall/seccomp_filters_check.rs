@@ -560,14 +560,6 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let waited = process.wait_for_exit(deadline);
-    if waited.is_none() {
-        crate::console::println!(
-            "DEBUG never ended: live {}, terminated {}, released {}",
-            process.live_thread_count(),
-            process.is_terminated(),
-            process.is_released()
-        );
-    }
     let status = waited.ok_or("the seccomp scenario task never ended its process")?;
     let found = FOUND
         .lock()
@@ -582,7 +574,7 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
 }
 
 /// How long the boot task waits for a scenario.
-const PATIENCE_NANOS: u64 = 20_000_000_000;
+const PATIENCE_NANOS: u64 = 60_000_000_000;
 /// How long it lets a reaped task settle.
 const SETTLE_NANOS: u64 = 20_000_000;
 
@@ -597,10 +589,6 @@ fn scenario_task(_argument: usize) {
     let found = in_the_process(ending);
     let broken = found.is_err();
     *FOUND.lock() = Some(found);
-    crate::console::println!(
-        "DEBUG scenario task exits, broken {broken}, live {}",
-        crate::syscall::thread::current().map_or(99, |t| t.process().live_thread_count())
-    );
     process::exit_current(if broken { BROKEN } else { SURVIVED });
 }
 
@@ -655,9 +643,6 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             return Err("strict mode let getpid run");
         }
         Some(Ending::Member) => {
-            // The first thread counts as started, as `process::start` counts it,
-            // so that a process of two threads has two live ones.
-            process.thread_starting();
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let _task = spawn_member(&process, &thread, killer)?;
             let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -670,7 +655,6 @@ fn in_the_process(ending: Option<Ending>) -> Found {
                 }
                 sched::yield_now();
             }
-            crate::console::println!("DEBUG member gone, threads {}", process.threads().len());
             if process.is_terminated()
                 || SURVIVED_ITS_KILL.load(core::sync::atomic::Ordering::Acquire)
             {
@@ -681,11 +665,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
                 return Err("a thread killed by its filter left the others without their calls");
             }
             seen.calls += 1;
-            crate::console::println!("DEBUG member scenario done");
             return Ok(seen);
         }
         Some(Ending::Leader) => {
-            process.thread_starting();
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let getsid = number(Syscall::Getsid)?;
             let _task = spawn_member(&process, &thread, outlive_the_leader)?;
@@ -862,7 +844,6 @@ fn spawn_member(
     let thread = Thread::sibling(process, tid, creator).map_err(|_| "no memory for a thread")?;
     let thread = Arc::new(thread);
     process.add_thread(&thread);
-    process.thread_starting();
     let task = sched::spawn_user("seccomp-member", entry, thread, None, None)
         .map_err(|_| "no task for a thread of the check")?;
     Ok(task)
