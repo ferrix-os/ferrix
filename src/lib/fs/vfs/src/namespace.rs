@@ -1092,7 +1092,21 @@ impl Namespace {
         let dir_meta = dir.metadata();
         ctx.who.may_create(&dir_meta)?;
         let (uid, gid, permissions) = ctx.who.new_owner(&dir_meta, node.kind(), permissions);
-        let inode = dir.create(name, node, permissions)?;
+        let inode = match dir.create(name, node, permissions) {
+            Ok(inode) => inode,
+            Err(refused) => {
+                // A create the job's memory refused leaves nothing of the
+                // job's in the cache: the negative dentry the walk made for
+                // the name is charged to that same job, and kept in the cache
+                // it would be heap the job cannot give back, because nothing
+                // reclaims a dentry (F-37). The name is still absent; the next
+                // lookup makes the dentry again.
+                if refused == Errno::ENOMEM {
+                    self.forget(&walked.found.dentry);
+                }
+                return Err(refused);
+            }
+        };
         let made = inode.metadata();
         if made.uid != uid || made.gid != gid {
             let owner = SetAttributes {
