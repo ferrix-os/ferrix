@@ -690,6 +690,7 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             *FOUND.lock() = Some(Ok(seen));
             let _ = call(getsid, [0; 6]);
             return Err("a call a filter kills for returned");
+        }
         Some(Ending::Trap) => {
             seen.trapped = trapped_in_the_task(&env)?;
             return Ok(seen);
