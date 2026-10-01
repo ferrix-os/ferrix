@@ -1408,7 +1408,7 @@ impl Process {
     /// new first thread, which must start under it too, or the child would run
     /// the second time without its creator's filter (the consultant's B1).
     pub(crate) fn first_seccomp(&self) -> Option<crate::syscall::seccomp::State> {
-        self.first_seccomp.lock().clone()
+        self.first_seccomp.lock().take()
     }
 
     /// Its threads that have not begun to end.
