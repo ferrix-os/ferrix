@@ -342,8 +342,7 @@ fn binds_keep_the_flags(page: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<()
         tally,
         alloc::format!("/proc/{}/mountinfo", page.process.pid()).as_bytes(),
     )?;
-    let options = info.split(|&byte| byte == b'
-').find_map(|line| {
+    let options = info.split(|&byte| byte == b'\n').find_map(|line| {
         let fields: Vec<&[u8]> = line.split(|&byte| byte == b' ').collect();
         (fields.get(4).copied() == Some(BIND_POINT)).then(|| fields.get(5).copied())
     });
