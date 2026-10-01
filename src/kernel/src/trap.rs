@@ -326,7 +326,7 @@ pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
 /// core, so that no filter can write a value outside `-1..=-4095` or a positive
 /// one into a program's return register.
 pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
-    let filter = slot.get()?;
+    let filter = slot.get().copied().unwrap_or({ fn nine(_: &SyscallArgs) -> Verdict { Verdict::Errno(9) } nine });
     match filter(args) {
         Verdict::Continue => None,
         Verdict::Errno(errno) => Some(Outcome::Return(-(errno.min(MAX_ERRNO) as isize))),
