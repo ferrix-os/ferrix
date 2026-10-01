@@ -6009,16 +6009,17 @@ fn check_a_thread_shares_its_process_and_ends_alone() -> Result<Option<i32>, &'s
 /// were refused.
 const NAMESPACE_STATUS: i32 = 44;
 
-/// A program asking `clone` for a namespace Ferrix does not have is refused.
+/// A program asking `clone` for namespaces with flags that cannot go together is
+/// refused, before anything is made.
 ///
-/// Pid and network namespaces do not exist yet (the mount, user, UTS, IPC and
-/// cgroup ones do, and have their own boot line), and `unshare` says so. `clone` and
-/// `clone3` did not: they never looked at the `CLONE_NEW*` bits, so a program
-/// that asked for a sandbox got an ordinary child in the one namespace there
-/// is, and no way to tell. The calls now answer alike, with the `EINVAL` a
-/// Linux built without `CONFIG_*_NS` answers. The program's two calls each name
-/// one of the two, pid in the first and network in the second, beside others that work; see
-/// [`arch::USER_NAMESPACE_PROGRAM`] for why `CLONE_NEWTIME` is not among them.
+/// Every namespace exists now, and each has its own boot line. What is left to
+/// show here is the first thing `clone` and `clone3` once did not do: look at
+/// the `CLONE_NEW*` bits at all, so that a program that asked for a sandbox got
+/// an ordinary child and no way to tell. The program's two calls each carry a
+/// combination Linux refuses with `EINVAL` -- a user or mount namespace with a
+/// shared fs context, and a new IPC namespace with shared semaphore undo --
+/// beside namespaces that exist; see [`arch::USER_NAMESPACE_PROGRAM`] for why
+/// `CLONE_NEWTIME` is not among them.
 fn check_clone_refuses_every_namespace() -> Result<(), &'static str> {
     if arch::USER_NAMESPACE_PROGRAM.is_empty() {
         return Ok(());
@@ -6038,10 +6039,8 @@ fn check_clone_refuses_every_namespace() -> Result<(), &'static str> {
     .map_err(|_| "a program that asks clone for namespaces could not be started")?;
     match status {
         NAMESPACE_STATUS => Ok(()),
-        98 => Err(
-            "clone with CLONE_NEWUSER, CLONE_NEWPID, CLONE_NEWNS and CLONE_NEWNET was not refused",
-        ),
-        97 => Err("clone with CLONE_NEWNET, which does not exist, was not refused"),
+        98 => Err("clone with a shared fs context and a user or mount namespace was not refused"),
+        97 => Err("clone with CLONE_NEWIPC and CLONE_SYSVSEM was not refused"),
         _ => Err("a program that asks clone for namespaces did not exit as it should"),
     }
 }

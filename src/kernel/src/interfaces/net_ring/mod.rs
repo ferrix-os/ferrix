@@ -116,43 +116,53 @@ static STARTING: SpinLock<Vec<Start>> = SpinLock::new(Vec::new());
 /// which a quiesce waits out.
 static CLAIMS: Claims = Claims::new();
 
-/// Which device node each interface a ring added is served from, by the
-/// interface's index: what sysfs shows the interface inside, and which
+/// Which device node each device a ring added is served from, by the device's
+/// key (`net::device`): what sysfs shows the interface inside, and which
 /// parked interface a ring made for that device again takes up. The net core
-/// knows interfaces and not devices, and this is where the two meet.
+/// knows interfaces and not devices, and this is where the two meet. The key,
+/// and not the interface's index, because the interface may have moved to
+/// another network namespace, where it has another index
+/// (`docs/NETNS.md` section 3.2).
 static PLACED: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
 
-/// The device node the interface with index `interface` is served from, by
-/// its index in `device::devices()`; `None` for one no ring added, the
-/// loopback interface among them.
+/// The device node the interface with index `interface` in the reader's
+/// network namespace is served from, by its index in `device::devices()`;
+/// `None` for one no ring added, the loopback interface among them.
 pub(crate) fn node_of(interface: u32) -> Option<usize> {
+    let key = net::acting()
+        .core()
+        .look(|stack| match stack.interface(interface)?.backing {
+            ferrix_net::iface::Backing::Device(key) => Some(key),
+            _ => None,
+        })?;
     PLACED
         .lock()
         .iter()
-        .find(|(index, _)| *index == interface)
+        .find(|(placed, _)| *placed == key)
         .map(|(_, node)| *node)
 }
 
-/// Take interface `index` out of the net core and forget where it was.
-fn forget(index: u32) {
-    PLACED.lock().retain(|(placed, _)| *placed != index);
-    net::core().forget_interface(index);
+/// Take the device `key`'s interface out of the net core, wherever it is, and
+/// forget where it was.
+fn forget(key: u32) {
+    PLACED.lock().retain(|(placed, _)| *placed != key);
+    net::device::remove(key);
 }
 
-/// The interface a ring for device `node` added before, parked or not.
+/// The device a ring for device `node` added before, parked or not.
 fn placed_on(node: usize) -> Option<u32> {
     PLACED
         .lock()
         .iter()
         .find(|(_, placed)| *placed == node)
-        .map(|(index, _)| *index)
+        .map(|(key, _)| *key)
 }
 
 /// Take the interface a dead ring left on `node` out of the net core: for a
 /// check that made a ring on a device nobody will serve again.
 pub(crate) fn forget_device(node: &Arc<DeviceNode>) {
-    if let Some(index) = placed_on(node.index()) {
-        forget(index);
+    if let Some(key) = placed_on(node.index()) {
+        forget(key);
     }
 }
 
@@ -432,14 +442,13 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
         // the nearest it has.
         return Err(Refusal::Malformed);
     };
-    let core = net::core();
-    let index = add_or_take_up(start, &accepted.hello)?;
+    let key = add_or_take_up(start, &accepted.hello)?;
     // The driver reset the device before it sent HELLO, so what a dead one's
     // pins kept from the allocator can go back (`object::pin`'s quarantine),
     // and the kernel's configuration is read back (`DeviceNode::verify_config`).
     start.device.hello_accepted();
-    core.wake_on_transmit(index, &kernel_port);
-    core.set_carrier(index, accepted.hello.interface.flags.carrier);
+    net::device::wake_on_transmit(key, &kernel_port);
+    net::device::set_carrier(key, accepted.hello.interface.flags.carrier);
     let ready = {
         let mut bytes = [0_u8; MAX_MESSAGE];
         let written = Message::Ready
@@ -460,7 +469,7 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
         .write(ready, 1, || Ok::<Vec<Transfer>, Infallible>(vec![handed]))
         .is_err()
     {
-        core.park_interface(index);
+        net::device::park(key);
         return Err(Refusal::Malformed);
     }
     Ok(Serving {
@@ -472,7 +481,7 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
         control: Arc::clone(&start.control),
         kernel_port,
         driver_port: accepted.driver_port,
-        interface: index,
+        interface: key,
         mtu: accepted.hello.interface.mtu,
         watching: false,
         received: 0,
@@ -480,9 +489,11 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
     })
 }
 
-/// The interface a HELLO names, added to the net core or, when a ring for
-/// this device left it parked with the same name and hardware address, that
-/// one taken up again with its index, addresses and routes.
+/// The device a HELLO names, its interface added to the first network
+/// namespace or, when a ring for this device left it parked with the same
+/// name and hardware address, that one taken up again with its index,
+/// addresses and routes, wherever it has been moved to. Answers the device's
+/// key.
 ///
 /// A parked interface the HELLO does not match -- another name, another
 /// address -- is forgotten first: the device is serving something else now.
@@ -491,12 +502,12 @@ fn add_or_take_up(start: &Start, hello: &Hello) -> Result<u32, Refusal> {
     let name = hello.interface.name();
     let mac = hello.interface.mac;
     if let Some(parked) = placed_on(start.device.index()) {
-        let same = core.look(|stack| {
+        let same = net::device::look(parked, |stack, index| {
             stack
-                .interface(parked)
+                .interface(index)
                 .is_some_and(|old| old.name.as_bytes() == name && old.hardware == mac)
         });
-        if same {
+        if same == Some(true) {
             return Ok(parked);
         }
         forget(parked);
@@ -509,9 +520,12 @@ fn add_or_take_up(start: &Start, hello: &Hello) -> Result<u32, Refusal> {
     interface.flags = IFF_UP
         | if flags.broadcast { IFF_BROADCAST } else { 0 }
         | if flags.multicast { IFF_MULTICAST } else { 0 };
+    let key = net::device::new_key();
+    interface.backing = ferrix_net::iface::Backing::Device(key);
     let index = core.add_interface(interface);
-    PLACED.lock().push((index, start.device.index()));
-    Ok(index)
+    net::device::place(key, net::first(), index);
+    PLACED.lock().push((key, start.device.index()));
+    Ok(key)
 }
 
 /// How many bytes of the ring VMO the header may use.
@@ -628,7 +642,8 @@ struct Serving {
     kernel_port: Arc<Port>,
     /// Where this rings to say there are submissions.
     driver_port: Arc<Port>,
-    /// Which interface of the net core this is.
+    /// Which device of the net core this is: its key, which an interface
+    /// keeps across a move to another network namespace.
     interface: u32,
     /// The largest frame it carries.
     mtu: u32,
@@ -689,7 +704,7 @@ impl Serving {
         // Half the ring at most, so a burst of transmissions cannot leave the
         // receive side with nothing posted.
         let room = (self.side.layout().entries() / 2) as usize;
-        let frames = net::core().take_outgoing(self.interface, room);
+        let frames = net::device::take_outgoing(self.interface, room);
         for frame in frames {
             if frame.len() > self.side.layout().slot_bytes() as usize {
                 continue;
@@ -750,7 +765,7 @@ impl Serving {
             return;
         }
         self.received += 1;
-        net::core().receive(self.interface, &frame);
+        net::device::receive(self.interface, &frame);
     }
 
     /// Whether the driver has closed its end.
@@ -767,7 +782,7 @@ impl Serving {
                 match Message::decode(&message.bytes) {
                     Ok(Message::Stopped) => true,
                     Ok(Message::Link(up)) => {
-                        net::core().set_carrier(self.interface, up);
+                        net::device::set_carrier(self.interface, up);
                         false
                     }
                     _ => false,
@@ -805,7 +820,7 @@ impl Serving {
     /// every slot.
     fn finish(&mut self) {
         let abandoned = self.side.abandon();
-        net::core().park_interface(self.interface);
+        net::device::park(self.interface);
         let _ = abandoned;
         let _ = PACKET_SIGNAL;
     }

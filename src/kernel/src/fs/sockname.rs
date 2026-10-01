@@ -66,8 +66,13 @@ pub(crate) enum Name {
 /// Sockets bound to a path, by the node the bind made.
 static PATHS: SpinLock<BTreeMap<(u64, u64), Weak<Socket>>> = SpinLock::new(BTreeMap::new());
 
-/// Sockets bound to an abstract name.
-static ABSTRACT: SpinLock<BTreeMap<Vec<u8>, Weak<Socket>>> = SpinLock::new(BTreeMap::new());
+/// Sockets bound to an abstract name, by the network namespace they were made
+/// in and the name: a name is unique within a network namespace and not
+/// beyond it, as on Linux (`docs/NETNS.md`, rule NN11).
+static ABSTRACT: SpinLock<BTreeMap<AbstractKey, Weak<Socket>>> = SpinLock::new(BTreeMap::new());
+
+/// A network namespace's number and the name.
+type AbstractKey = (u64, Vec<u8>);
 
 /// Bind `socket` to `path`, answering the name it now has.
 ///
@@ -104,14 +109,19 @@ pub(crate) fn bind_path(
 /// # Errors
 ///
 /// `EADDRINUSE` if a live socket already holds it.
-pub(crate) fn bind_abstract(socket: &Arc<Socket>, name: &[u8]) -> Result<Name, Errno> {
+pub(crate) fn bind_abstract(
+    socket: &Arc<Socket>,
+    namespace: u64,
+    name: &[u8],
+) -> Result<Name, Errno> {
     let mut held = ABSTRACT.lock();
+    let key = (namespace, name.to_vec());
     // A name whose socket has gone is a free name: the entry is left behind by
     // a `Drop` that has not run yet, or by one that ran after a rebind.
-    if held.get(name).is_some_and(|weak| weak.strong_count() != 0) {
+    if held.get(&key).is_some_and(|weak| weak.strong_count() != 0) {
         return Err(Errno::EADDRINUSE);
     }
-    let _ = held.insert(name.to_vec(), Arc::downgrade(socket));
+    let _ = held.insert(key, Arc::downgrade(socket));
     Ok(Name::Abstract(name.to_vec()))
 }
 
@@ -146,22 +156,22 @@ pub(crate) fn socket_at(
 ///
 /// `ECONNREFUSED` if nobody holds it, which is what Linux answers: an
 /// abstract name that is not bound is not a path that does not exist.
-pub(crate) fn socket_named(name: &[u8]) -> Result<Arc<Socket>, Errno> {
+pub(crate) fn socket_named(namespace: u64, name: &[u8]) -> Result<Arc<Socket>, Errno> {
     ABSTRACT
         .lock()
-        .get(name)
+        .get(&(namespace, name.to_vec()))
         .and_then(Weak::upgrade)
         .ok_or(Errno::ECONNREFUSED)
 }
 
 /// Let go of a name, when the socket that held it goes.
-pub(crate) fn forget(name: &Name) {
+pub(crate) fn forget(name: &Name, namespace: u64) {
     match name {
         Name::Path { node, .. } => {
             let _ = PATHS.lock().remove(node);
         }
         Name::Abstract(bytes) => {
-            let _ = ABSTRACT.lock().remove(bytes);
+            let _ = ABSTRACT.lock().remove(&(namespace, bytes.clone()));
         }
     }
 }

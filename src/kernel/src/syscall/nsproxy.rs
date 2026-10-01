@@ -118,7 +118,7 @@ impl CgroupNamespace {
     }
 }
 
-/// The three namespaces a process is in.
+/// The namespaces a process is in besides its mount and user namespaces.
 #[derive(Debug, Clone)]
 pub(crate) struct NsProxy {
     /// Its host and domain name.
@@ -127,6 +127,9 @@ pub(crate) struct NsProxy {
     pub(crate) ipc: Arc<IpcNamespace>,
     /// Its view of the cgroup tree.
     pub(crate) cgroup: Arc<CgroupNamespace>,
+    /// Its network stack (`docs/NETNS.md` section 2.1): `None` for the first,
+    /// which is most processes and which is not made until something asks.
+    pub(crate) net: Option<Arc<crate::net::NetNamespace>>,
 }
 
 impl NsProxy {
@@ -136,6 +139,7 @@ impl NsProxy {
             uts: Arc::clone(crate::syscall::system::initial_uts()),
             ipc: Arc::clone(crate::syscall::sem::initial_ipc()),
             cgroup: Arc::clone(initial_cgroup()),
+            net: None,
         }
     }
 }

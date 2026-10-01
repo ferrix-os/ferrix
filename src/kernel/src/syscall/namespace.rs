@@ -28,6 +28,7 @@ use ferrix_vfs::{Context, Namespace};
 
 use crate::fallible;
 use crate::fs;
+use crate::net::namespace::CLONE_NEWNET;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
 use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS};
@@ -63,7 +64,16 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
     const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
-    if flags & !(CLONE_FILES | CLONE_FS | CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWPID | SMALL) != 0 {
+    if flags
+        & !(CLONE_FILES
+            | CLONE_FS
+            | CLONE_NEWNS
+            | CLONE_NEWUSER
+            | CLONE_NEWPID
+            | CLONE_NEWNET
+            | SMALL)
+        != 0
+    {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_FILES != 0 && Arc::strong_count(process.files()) > 1 {
@@ -77,7 +87,7 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     // A user namespace cannot be given to one thread of several (U5's kin:
     // Linux implies `CLONE_THREAD`'s opposite), and the small ones are a
     // process's, not a thread's, here (`docs/NAMESPACES.md` §12).
-    if flags & (CLONE_NEWUSER | SMALL) != 0 && process.tasks().len() > 1 {
+    if flags & (CLONE_NEWUSER | CLONE_NEWNET | SMALL) != 0 && process.tasks().len() > 1 {
         return Err(Errno::EINVAL);
     }
     let fresh = if flags & CLONE_NEWUSER != 0 {
@@ -90,6 +100,13 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     let owner = match &fresh {
         Some(fresh) => Arc::clone(fresh),
         None => process.with_credentials(|held| Arc::clone(&held.user_ns)),
+    };
+    // A network namespace needs `CAP_SYS_ADMIN` where the caller will be, and
+    // is owned by the user namespace it will be in.
+    let net = if flags & CLONE_NEWNET != 0 {
+        Some(make_net_namespace(process, fresh.as_ref())?)
+    } else {
+        None
     };
     // `CLONE_NEWNS` and `CLONE_NEWPID` need `CAP_SYS_ADMIN` where the caller
     // is: in the namespace it is about to have, if it asked for one.
@@ -126,7 +143,30 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     if let Some(pids) = fresh_pids {
         process.set_children_namespace(pids);
     }
+    if let Some(net) = net {
+        process.set_net_ns(net);
+    }
     Ok(0)
+}
+
+/// Make the network namespace `process` asks for, owned by `fresh` if it
+/// asked for a user namespace with it and by the one it is in otherwise.
+///
+/// # Errors
+///
+/// `EPERM` without `CAP_SYS_ADMIN` in the user namespace it will be in;
+/// `ENOMEM` past the job's memory.
+pub(crate) fn make_net_namespace(
+    process: &Process,
+    fresh: Option<&Arc<userns::UserNamespace>>,
+) -> Result<Arc<crate::net::NetNamespace>, Errno> {
+    let owner = match fresh {
+        Some(fresh) => Arc::clone(fresh),
+        None => process
+            .with_credentials(|held| held.holds(CAP_SYS_ADMIN).then(|| Arc::clone(&held.user_ns)))
+            .ok_or(Errno::EPERM)?,
+    };
+    crate::net::namespace::create(owner)
 }
 
 /// Make the user namespace `process` asks for: Linux's `create_user_ns`,

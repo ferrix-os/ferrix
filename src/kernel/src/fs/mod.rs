@@ -49,6 +49,7 @@ pub(crate) mod memfd_check;
 pub(crate) mod mmap_check;
 pub(crate) mod mount_check;
 pub(crate) mod namespace_check;
+pub(crate) mod netns_check;
 pub(crate) mod nsfs;
 mod pages;
 pub(crate) mod partitions;
