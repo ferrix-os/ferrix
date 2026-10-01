@@ -116,7 +116,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixSmpRequirements` | `22-smp-requirements.sysml` | What each unit of src/kernel/src/smp.rs does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): finding the processors and giving each a record it finds itself by, starting the secondaries, the inter-processor interrupt, the TLB shootdown -- whole and scoped, and the bound on how long it waits -- grace periods, stopping the other processors for a panic, and the scheduler's kick. The start sequences themselves, the per-processor register and the interrupt controller are each architecture's (src/kernel/src/arch/\<isa>/smp.rs), and belong to the arch slices; this is the architecture-independent half above them. |
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
 
-23 files, 103 packages, 5291 elements, 212 relations. Model digest `eef84feb1b271812`.
+23 files, 103 packages, 5315 elements, 212 relations. Model digest `bc6cc6402742e331`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4225,6 +4225,8 @@ flowchart LR
 | `L.x86_64.69` | `nativeExecveEntry` | — | — | — |
 | `L.x86_64.70` | `freshEntryClearsRegisters` | — | — | — |
 | `L.x86_64.71` | `compatExecveFromSyscall` | — | — | — |
+| `L.x86_64.124` | `theFilterIsAskedBeforeAnyAnswerOfTheEntrys` | — | — | — |
+| `L.x86_64.125` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.x86_64.72` | `int80IsAnI386Call` | — | — | — |
 | `L.x86_64.73` | `i386SignalsDeliveredOnTheWayBack` | — | — | — |
 | `L.x86_64.74` | `aForeignImageIsRefused` | — | — | — |
@@ -4286,6 +4288,7 @@ flowchart LR
 | `L.syscall.3` | `enosysIsReportedWithinItsBound` | — | — | — |
 | `L.trap.5` | `noEntryMeansEnosys` | — | — | — |
 | `L.trap.6` | `aMovedProcessRunsInItsNewJob` | — | — | — |
+| `L.trap.7` | `theRegisteredFilterIsAskedFirst` | — | — | — |
 | `L.aarch64.1` | `syndromesAreDecoded` | — | — | — |
 | `L.aarch64.2` | `faultsGetLinuxsSignal` | — | — | — |
 | `L.aarch64.3` | `programsFaultToTheirSignal` | — | — | — |
@@ -4336,6 +4339,7 @@ flowchart LR
 | `L.aarch64.47` | `theMachineStops` | — | — | — |
 | `L.aarch64.48` | `watchdogsAreFed` | — | — | — |
 | `L.aarch64.50` | `registerAccessesAreEmulable` | — | — | — |
+| `L.aarch64.51` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.claim.1` | `aNodeIsClaimedOnce` | — | — | — |
 | `L.claim.2` | `aSharedNodeUpToItsLimit` | — | — | — |
 | `L.claim.3` | `refusedUnderAnyLiveDriver` | — | — | — |
