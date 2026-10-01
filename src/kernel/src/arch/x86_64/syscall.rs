@@ -485,7 +485,7 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
-        number: frame.rax as usize,
+        number: frame.rax as u32 as usize,
         args: [
             frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
         ],
