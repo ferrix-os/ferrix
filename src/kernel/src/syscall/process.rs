@@ -1323,6 +1323,59 @@ impl Process {
         tasks.push(Arc::downgrade(task));
     }
 
+    /// List `thread`, which `creator` made with `clone(CLONE_THREAD)`, as one
+    /// of its own, and give it the creator's seccomp mode and chain *under the
+    /// lock that lists it*. A `TSYNC` holds the same lock while it walks the
+    /// list, so a thread being made either is listed already and is reached by
+    /// the sync, or copies the creator's chain after the sync gave it the new
+    /// one: never a thread listed with a chain read before the sync and so
+    /// left unfiltered (`docs/SECCOMP.md` §3.7, SR10).
+    pub(crate) fn add_thread_from(&self, thread: &Arc<Thread>, creator: &Thread) {
+        let mut threads = self.threads.lock();
+        threads.retain(|listed| listed.strong_count() > 0);
+        if !threads
+            .iter()
+            .any(|listed| core::ptr::eq(listed.as_ptr(), Arc::as_ptr(thread)))
+        {
+            threads.push(Arc::downgrade(thread));
+        }
+        thread.copy_seccomp_from(creator);
+    }
+
+    /// Whether an `execve` has claimed the process: the thread that will
+    /// replace its program has been chosen, and every other thread is about to
+    /// end.
+    pub(crate) fn exec_claimed(&self) -> bool {
+        self.exec_thread.load(Ordering::Acquire) != 0
+    }
+
+    /// Run `f` with the thread list locked and every live thread of the process
+    /// in `held`, which must be empty and have room for them all: the way
+    /// `TSYNC` reaches every thread at once. Nothing is allocated under the
+    /// lock, and `held` is dropped by the caller after it is released, so no
+    /// thread is freed under it. `Err` carries how many threads there are when
+    /// `held` has too little room, and `f` has not run.
+    pub(crate) fn with_live_threads<R>(
+        &self,
+        held: &mut Vec<Arc<Thread>>,
+        f: impl FnOnce(&[Arc<Thread>]) -> R,
+    ) -> Result<R, usize> {
+        let list = self.threads.lock();
+        if list.len() > held.capacity() {
+            return Err(list.len());
+        }
+        for listed in list.iter() {
+            if let Some(thread) = listed.upgrade()
+                && !thread.is_gone()
+            {
+                held.push(thread);
+            }
+        }
+        let answer = f(held);
+        drop(list);
+        Ok(answer)
+    }
+
     /// List `thread` as one of its own, if it is not already: before the
     /// thread can run, and for a fork child before the child is published.
     pub(crate) fn add_thread(&self, thread: &Arc<Thread>) {
@@ -1904,13 +1957,14 @@ pub(crate) fn start_forked(
 /// If the process is ending, or the scheduler has no stack for its task.
 pub(crate) fn start_thread(
     thread: Arc<Thread>,
+    creator: &Thread,
     state: crate::arch::UserState,
 ) -> Result<Arc<Task>, &'static str> {
     let process = Arc::clone(thread.process());
     if process.is_terminated() || process.exec_thread.load(Ordering::Acquire) != 0 {
         return Err("the process is ending, or another thread is replacing its program");
     }
-    process.add_thread(&thread);
+    process.add_thread_from(&thread, creator);
     let task = sched::spawn_user("thread", run_program, thread, None, Some(state))?;
     process.add_task(&task);
     // At the weight the rest of the process runs at, not at nice 0: a program
