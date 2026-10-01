@@ -429,6 +429,33 @@ the walk of the chain and closes them before it returns, as the dispatcher does
 around the call it serves, so the up to two milliseconds above are preemptible
 and are never added to the item's masked time. If a later body ran a chain
 masked, that time would be added to AoU-4's budget.
+### 2.2c What the cgroup controllers add to the time claim (2026-10-01)
+
+Four costs the controllers put on paths the claim covers, stated with their
+bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
+
+* `charge_cpu` (every tick) and `throttled_until` / `runtime_left` (the arm of
+  the next timer) walk the job's slot and every slot above it, under the
+  processor's run-queue lock with interrupts off. The cost is the job tree's
+  depth, and nothing bounds that but what a program makes (cgroupfs has no
+  `cgroup.max.depth`). A deployment that relies on a bound on the scheduler's
+  tick should bound the depth of the cgroups it runs programs in.
+* `object::oom::throttle` runs after a successful fault and after a read of a
+  cached file, and does nothing when the job and its ancestors are under their
+  `memory.high`: one walk up. When one is over, it reclaims (a scan of every
+  file object in the machine, `user::cache::reclaim`), lists the live processes
+  to wake `memory.events`' pollers (`process::live`, an allocation) and may
+  sleep a millisecond. That is a bounded pause but not a bounded cost, and it
+  can fall under a lock the reader holds: the read of a cached file is made
+  under its filesystem's lock, which on a shared writable volume is mount-wide.
+* `settle_frozen` lists the live processes and walks the job's ancestors on
+  every park, leave and move of a frozen process: O(processes x depth).
+* A throttled task sleeps in slices of a millisecond, asking at each whether
+  the way back to user mode has anything to do: a task throttled for a second
+  wakes a thousand times.
+
+None of the four is on the path of a task in a job with none of the limits set,
+which pays one load (`bandwidth_in_use`) and the `over_high` walk.
 
 ### 2.3 What is missing, per standard
 
