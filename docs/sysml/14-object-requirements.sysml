@@ -1325,13 +1325,16 @@ package FerrixObjectRequirements {
 
         requirement <'L.object.100'> theKillIsScoped : ItemLowLevel {
             attribute :>> statement = "A user fault refused by a memory limit shall
-                end, with the kill's status, a process of the job whose limit was
-                full or beneath it and none outside it, count the kill there, and
-                retry the fault.";
+                first take back clean file cache charged to the job whose limit was
+                full or beneath it and retry the fault, and only when that gave
+                back nothing end, with the kill's status, a process of that job or
+                beneath it and none outside it, count the kill there, and retry the
+                fault.";
             attribute :>> criterion = "A program writing 8 MiB in a job limited to 1
                 MiB ends by SIGKILL, exactly 1 process killed, while a process with
-                more resident memory in a sibling job lives.";
-            attribute :>> parent = "H.QUOTA.6";
+                more resident memory in a sibling job lives; a read of a file past
+                memory.max kills no process where the job's clean cache was room.";
+            attribute :>> parent = ("H.QUOTA.6", "H.QUOTA.12");
             attribute :>> unit = ("object::oom::user_fault", "object::oom::out_of_memory",
                 "object::oom::kill_within", "object::oom::at_or_above",
                 "object::quota::at_limit");
@@ -1348,11 +1351,13 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.102'> noLimitFullNoKill : ItemLowLevel {
             attribute :>> statement = "A fault that failed for want of memory with
-                no limit full, or with nothing killable in the full job, shall fail
-                as it would without the OOM kill and kill nothing.";
-            attribute :>> criterion = "A fault refused with every limit unset kills
-                0 processes and ends its program with SIGSEGV; a system call's fault
-                there answers EFAULT.";
+                no limit full shall take back clean file cache anywhere and retry
+                if that gave back any, and otherwise, like one with nothing
+                killable in the full job, fail as it would without the OOM kill
+                and kill nothing.";
+            attribute :>> criterion = "A fault refused with every limit unset and
+                no cache to take back kills 0 processes and ends its program with
+                SIGSEGV; a system call's fault there answers EFAULT.";
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::out_of_memory", "object::oom::fault",
                 "object::oom::kill_within");
@@ -1369,6 +1374,103 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::kill_within",
                 "object::oom::shared_with_the_living");
+        }
+        requirement <'L.object.106'> cpuIsChargedUp : ItemLowLevel {
+            attribute :>> statement = "charge_cpu shall charge the time a task ran
+                to its job and every job above it and to the machine, as user time
+                when the tick that ended the slice interrupted user mode and as
+                system time otherwise, and throttled_until shall report a job whose
+                subtree has used its cpu.max quota this period as throttled until
+                the period ends.";
+            attribute :>> criterion = "A program of two counting threads in a job
+                with cpu.max 20000 100000 is held to between a twelfth and two
+                fifths of a processor, its cpu.stat counts at least 3 throttled
+                periods and its user and system time add to its usage, and with
+                cpu.max max it takes more than six tenths.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("object::quota::charge_cpu",
+                "object::quota::throttled_until", "object::quota::refresh_period",
+                "object::quota::runtime_left", "object::quota::Quota::set_bandwidth");
+        }
+        requirement <'L.object.107'> aFrozenProcessParks : ItemLowLevel {
+            attribute :>> statement = "sync_freeze shall set a process frozen when
+                its job or one above it has cgroup.freeze set, whether the freeze
+                came before the process was made, before it was moved in, or after
+                it was running, and a frozen process shall report is_frozen until
+                its job is thawed, which SIGCONT does not do.";
+            attribute :>> criterion = "A program of three threads in a frozen
+                cgroup stops counting and reports frozen through cgroup.events; a
+                fork made in it, a process moved into it and one made by clone3 into
+                it start frozen; SIGCONT leaves it frozen; one moved out of it is
+                not.";
+            attribute :>> parent = "H.QUOTA.11";
+            attribute :>> unit = ("object::process::Process::sync_freeze",
+                "object::process::Process::is_frozen", "object::job::Job::freezing",
+                "object::job::Job::set_freeze", "object::job::Job::note_frozen");
+        }
+        requirement <'L.object.108'> memoryHighReclaims : ItemLowLevel {
+            attribute :>> statement = "throttle shall, for a program that just took
+                a page while its job or one above is over its memory.high, take
+                back clean cache from that job down to the mark, count the crossing
+                in memory.events high in the job whose mark it was and above, and
+                pause a millisecond if that gave back less than the excess.";
+            attribute :>> criterion = "A cgroup reading a file twice its memory.high
+                holds no more than the mark afterwards, memory.events counts the
+                crossing, and a second read takes more.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("object::oom::throttle", "object::quota::over_high",
+                "object::quota::count", "object::quota::bump", "object::quota::Counter::at",
+                "object::job::Job::wake_memory_events");
+        }
+        requirement <'L.object.109'> reclaimIsScoped : ItemLowLevel {
+            attribute :>> statement = "reclaim shall give back clean cache pages of
+                disk files whose frame is charged to the job it is asked at or
+                beneath it, never a sibling's and never a child's at or under its
+                memory.min, and every page it gave back shall read as its source
+                has it.";
+            attribute :>> criterion = "Reclaim at one cgroup leaves a sibling's
+                cached file untouched, spares a child using no more than its
+                memory.min, and what it took reads back as the source has it.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
+                "user::cache::takes", "object::quota::protected",
+                "user::vmo::Vmo::decommit_range", "object::quota::within",
+                "object::job::Job::mark", "object::quota::Quota::set_mark",
+                "object::quota::Mark::at", "user::cache::register", "user::cache::live",
+                "user::vmo::Vmo::reclaimable", "user::vmo::Vmo::pick_pages",
+                "user::vmo::Vmo::for_each_page");
+        }
+        requirement <'L.object.110'> aGoneJobStaysGone : ItemLowLevel {
+            attribute :>> statement = "job_ended shall be true for a quota slot from
+                the moment its job goes, though a task still holds the slot, and
+                false again once the slot is claimed anew, so that state kept per
+                slot is not started for a job that has gone.";
+            attribute :>> criterion = "A task of a cgroup that was removed under it
+                reads the disk, and the quota slots in use are back to what they
+                were before the cgroup.";
+            attribute :>> parent = "H.QUOTA.4";
+            attribute :>> unit = ("object::quota::job_ended", "object::quota::on_job_release");
+        }
+        requirement <'L.object.111'> theCacheIsCounted : ItemLowLevel {
+            attribute :>> statement = "resident shall count the pages of cached
+                files charged to a job and the jobs beneath it, apart from those
+                of memory filesystems, for memory.stat's file and shmem.";
+            attribute :>> criterion = "memory.stat's file equals the cache that
+                memory.current holds, and its shmem the memory filesystem's.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = "user::cache::resident";
+        }
+        requirement <'L.object.112'> anEvictedPageIsNoHole : ItemLowLevel {
+            attribute :>> statement = "A page of a disk file that was filled
+                before a private mapping's fault took its lock and was reclaimed
+                since shall not be copied or read as zeros: copy_or_zero shall
+                hand the frame back and ask for the fault to be made again, and
+                read_present shall answer that the page is absent.";
+            attribute :>> criterion = "A page reclaim took reads back as the
+                source has it, never as zeros, through a read and through a
+                fault.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
     }
 
