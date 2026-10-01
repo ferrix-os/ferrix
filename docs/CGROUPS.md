@@ -619,7 +619,9 @@ frozen process as they end a stopped one; `SIGCONT` does not thaw it, and no
 parent is told.
 
 `cgroup.events` says `frozen 1` when the cgroup is to be frozen and every live
-process beneath it has parked, and wakes its pollers when that changes
+Linux process beneath it has parked ("live" is `registry::live`, which lists
+the Linux personality's processes: **a native process is not parked by a
+freeze, and `frozen 1` can be said while a native task runs**), and wakes its pollers when that changes
 (`cgroupfs::settle_frozen`: at a freeze, a thaw, a park, a move, a thread
 leaving). A cgroup beneath a frozen one says `frozen 1` with its own
 `cgroup.freeze` at `0`. A `clone3` into a frozen cgroup starts frozen, because
@@ -646,8 +648,11 @@ by whoever looks first. A task alone on a processor gets no tick, so
 and `nr_periods`, `nr_throttled` and `throttled_usec` where `cpu` is enabled;
 `nice_usec`, `core_sched.force_idle_usec` and the burst keys have no source.
 The limit is in the audit trail as a cgroup limit (`resource::CPU_MAX`).
-A throttled task sleeps to its period's end, so a raised quota lets it go at
-the end of that period. `cpu.idle` and `cpu.max.burst` are not built.
+A throttled task sleeps to its period's end, in slices of a millisecond at each
+of which it asks whether a kill, a signal or a stop is for it (a victim of
+`SIGKILL`, `cgroup.kill` or the OOM killer is not held to the period's end), so
+a raised quota lets it go at the end of that period. `cpu.max` throttles a
+native task too, a ring-3 driver included. `cpu.idle` and `cpu.max.burst` are not built.
 
 ## 13. The `io` controller (B1, 2026-09-30)
 
