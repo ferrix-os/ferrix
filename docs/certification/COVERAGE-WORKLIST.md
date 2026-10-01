@@ -62,7 +62,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 |---|---|---:|---:|---:|---:|---|
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
 | `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 315-317, 322 |
-| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 128, 167 |
+| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 133, 172 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
 | `object/pin.rs` | `core` | 0 | 1 | 0 | 0 | - |
@@ -118,7 +118,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 730 |
+| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 737 |
 
 ---
 
@@ -142,7 +142,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1243, 1933 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1260, 1950 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
