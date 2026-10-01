@@ -1092,6 +1092,9 @@ fn a_status_in_a_pid_namespace_lists_every_number_from_the_readers_down() {
         vm_data: 0,
         vm_stack: 0,
         threads: 1,
+        no_new_privs: false,
+        seccomp: 0,
+        seccomp_filters: 0,
         cpus: 1,
     };
     let out = rendered(|out| status::render(out, &status));
