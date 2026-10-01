@@ -26,6 +26,11 @@ pub const TIMEOUT: Millis = 30_000;
 /// How many bytes are held across every datagram being reassembled.
 pub const MAX_BYTES: usize = 256 * 1024;
 
+/// How many bytes a network namespace other than the first holds: what a
+/// program that owns one can make a peer of its own fill, charged to it
+/// (`docs/NETNS.md` section 5).
+pub const NAMESPACE_BYTES: usize = 32 * 1024;
+
 /// How many pieces one datagram may arrive in.
 pub const MAX_PIECES: usize = 64;
 
@@ -74,12 +79,20 @@ struct Pending {
 }
 
 /// The datagrams being put together.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Reassembler {
     /// The datagrams in progress.
     pending: Vec<Pending>,
     /// How many bytes are held across all of them.
     held: usize,
+    /// The most bytes it will hold.
+    limit: usize,
+}
+
+impl Default for Reassembler {
+    fn default() -> Reassembler {
+        Reassembler::new()
+    }
 }
 
 impl Reassembler {
@@ -89,7 +102,24 @@ impl Reassembler {
         Reassembler {
             pending: Vec::new(),
             held: 0,
+            limit: MAX_BYTES,
         }
+    }
+
+    /// An empty reassembler that holds at most `limit` bytes.
+    #[must_use]
+    pub const fn with_limit(limit: usize) -> Reassembler {
+        Reassembler {
+            pending: Vec::new(),
+            held: 0,
+            limit,
+        }
+    }
+
+    /// Forget everything held: what a charge that cannot be paid does.
+    pub fn flush(&mut self) {
+        self.pending.clear();
+        self.held = 0;
     }
 
     /// How many bytes are held.
@@ -122,7 +152,7 @@ impl Reassembler {
         if !more {
             pending.total = Some(offset.saturating_add(payload.len()));
         }
-        if self.held.saturating_add(payload.len()) > MAX_BYTES {
+        if self.held.saturating_add(payload.len()) > self.limit {
             // Rather than evict somebody else's datagram, refuse this one: an
             // attacker choosing which datagram to displace is worse than a
             // fragment lost under load.

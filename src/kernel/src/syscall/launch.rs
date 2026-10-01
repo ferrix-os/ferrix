@@ -97,7 +97,8 @@ fn process_give(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno>
 /// running as `creator` runs, or as root with none ([`native::LoadNative`]).
 ///
 /// "As `creator` runs" is its ids and its fs context: its mount namespace,
-/// its root and its working directory (`docs/NAMESPACES.md` §2.5). A child
+/// its root and its working directory (`docs/NAMESPACES.md` §2.5), and its
+/// network namespace. A child
 /// started in the first namespace's root instead would be an escape from a
 /// namespace, or a `chroot`, in one call. A process with no creator -- one
 /// the kernel starts, as `devmgr` is -- starts in the first namespace's
@@ -134,8 +135,9 @@ pub(crate) fn load_native(
     // pruned as a pid nothing finds, and before anything can start it.
     if let Some(creator) = creator {
         attributes::inherit(creator, &child);
-        // Its UTS, IPC and cgroup namespaces too: a child left in the first
-        // ones would be out of a container in one call (`docs/NAMESPACES.md` §12).
+        // Its UTS, IPC, cgroup and network namespaces too: a child left in the
+        // first ones would be out of a container in one call
+        // (`docs/NAMESPACES.md` §12, `docs/NETNS.md` section 4).
         child.set_nsproxy(creator.nsproxy());
     }
     let process: Arc<dyn Host> = child;

@@ -3,6 +3,7 @@
 mod addresses;
 mod datagrams;
 mod harness;
+mod namespaces;
 mod packets;
 mod raw;
 mod raw_v6;
