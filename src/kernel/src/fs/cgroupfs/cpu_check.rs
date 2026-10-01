@@ -178,6 +178,8 @@ fn share(harness: &Harness, stat: &[u8]) -> Checked<u64> {
 }
 
 /// A program in a cgroup with a quota, and in a cgroup beneath one.
+///
+/// Verifies: L.object.106
 fn throttling(harness: &mut Harness) -> Checked<u64> {
     if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
         return Ok(0);
@@ -206,6 +208,8 @@ const KILL_NANOS: u64 = 250_000_000;
 /// and a `SIGKILL` for it ends it at once, not then (a kill by the cgroup or
 /// the OOM killer reaches it the same way). The quota is a millisecond in a
 /// second, so the wait a kill that was not heard would cost is long.
+///
+/// Verifies: L.sched.3, H.QUOTA.10
 fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
     if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
         return Ok(0);

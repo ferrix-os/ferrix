@@ -317,6 +317,8 @@ fn hierarchy(harness: &mut Harness, disk: &Arc<dyn BlockDevice>) -> Checked<u32>
 /// slot above it, for ever. Done as the task would: the check's own task
 /// holds the slot as a task of the job, the cgroup is removed, and then it
 /// reads.
+///
+/// Verifies: L.object.110
 fn after_its_job_went(harness: &mut Harness, disk: &Arc<dyn BlockDevice>) -> Checked<u32> {
     let before = crate::object::quota::live_slots();
     let group = Group::make(harness, b"/check-iw")?;

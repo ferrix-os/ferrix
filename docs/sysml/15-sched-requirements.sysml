@@ -42,5 +42,17 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::yield_now";
         }
+        requirement <'L.sched.3'> aThrottledTaskLeavesForAKill : ItemLowLevel {
+            attribute :>> statement = "throttle_current shall hold a task whose job
+                or one above it has used its cpu.max quota until the period ends,
+                looking every millisecond whether the way back to user mode has a
+                kill, a signal or a stop to deal with, and leaving the wait if so.";
+            attribute :>> criterion = "A program in a job with cpu.max 1000 1000000
+                that has used its millisecond ends within a quarter of a second of
+                its SIGKILL, where waiting out the period takes nine tenths of a
+                second.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("sched::throttle_current", "trap::must_attend");
+        }
     }
 }
