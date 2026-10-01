@@ -108,6 +108,22 @@ fn word(process: &Process, offset: u64) -> Checked<u32> {
     try_word(process, offset).ok_or("freeze check: the program's page could not be read")
 }
 
+/// `usage_usec` of `/check-fz`'s `cpu.stat`: what its tasks have used.
+fn usage(harness: &Harness) -> Checked<u64> {
+    let text = harness
+        .read(b"/check-fz/cpu.stat")
+        .map_err(|_| "freeze check: cpu.stat did not read")?;
+    core::str::from_utf8(&text)
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                let (key, value) = line.split_once(' ')?;
+                (key == "usage_usec").then(|| value.parse().ok()).flatten()
+            })
+        })
+        .ok_or("freeze check: cpu.stat has no usage_usec")
+}
+
 /// Wait until `ready`, or fail with `failure`.
 fn until(
     process: &Process,
@@ -309,9 +325,13 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
         "a frozen cgroup's tasks are not all blocked",
     )?;
     let still = (word(process, 0)?, word(process, 4)?);
+    let used = usage(harness)?;
     crate::sched::sleep_for(STILL_NANOS);
     if (word(process, 0)?, word(process, 4)?) != still {
         return Err("a thread of a frozen cgroup went on counting");
+    }
+    if usage(harness)? != used {
+        return Err("a frozen cgroup's threads were charged processor time while parked");
     }
 
     kill::send(process, SIGCONT, Origin::Kernel);
