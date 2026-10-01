@@ -618,7 +618,14 @@ read max < /tmp/cm/k/memory.max
 [ $current -le $max ] && echo "memory.current within memory.max" || echo "$current above $max"
 while read key kernel; do [ "$key" = kernel ] && [ $kernel -gt 0 ] && echo "memory.stat counts kernel memory"; done < /tmp/cm/k/memory.stat
 while read key count; do [ "$key" = max ] && [ $count -ge 1 ] && echo "memory.events counted the refusal"; done < /tmp/cm/k/memory.events
+for made in /tmp/km/f*; do last=$made; done
+read c0 < /tmp/cm/k/memory.current; echo "DBG c0 $c0 last $last"
+rm "$last"; read c1 < /tmp/cm/k/memory.current; echo "DBG after rm last $c1"
+n=0; for made in /tmp/km/f*; do n=$((n+1)); done; echo "DBG count $n"
 rm -r /tmp/km || exit 4
+read c2 < /tmp/cm/k/memory.current; echo "DBG after rm -r $c2"
+: > /tmp/km2x 2>/dev/null; rm -f /tmp/km2x
+read c3 < /tmp/cm/k/memory.current; echo "DBG after outer create $c3"
 read after < /tmp/cm/k/memory.current
 [ $after -eq 0 ] && echo "memory.current back to 0" || echo "memory.current $after after"
 rmdir /tmp/cm/k && echo removed
