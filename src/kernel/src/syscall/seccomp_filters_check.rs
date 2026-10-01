@@ -46,6 +46,13 @@ pub(crate) struct Report {
     pub(crate) killed: usize,
     /// Filters in the longest chain made and released.
     pub(crate) chain: usize,
+    /// What a call costs that chain, in nanoseconds: 6,554 runs of one step.
+    pub(crate) walk_many: u64,
+    /// What a call costs a chain of seven 4,096-instruction filters, the most
+    /// steps there can be, in nanoseconds.
+    pub(crate) walk_long: u64,
+    /// What releasing the longest chain costs, in nanoseconds.
+    pub(crate) release: u64,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -217,7 +224,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     ordering()?;
     heredity(&mut report)?;
     entry_task(&mut report)?;
-    report.chain = longest_chain()?;
+    let (chain, many, released) = longest_chain()?;
+    report.chain = chain;
+    report.walk_many = many;
+    report.release = released;
+    report.walk_long = longest_steps()?;
     Ok(report)
 }
 
@@ -524,6 +535,11 @@ enum Ending {
     Process,
     /// Strict mode, then a call it does not allow: `SIGKILL`.
     Strict,
+    /// A thread other than the first is killed by its filter: it alone ends.
+    Member,
+    /// The first thread is killed by its filter while another lives: the
+    /// process ends, when the other does, by `SIGSYS`.
+    Leader,
 }
 
 /// Run a scenario task in a process of its own, and answer what it found and
@@ -538,6 +554,7 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     *ENDING.lock() = Some(ending);
     let thread =
         Arc::new(Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?);
+    process.thread_starting();
     let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -625,6 +642,41 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             let _ = call(getpid, [0; 6]);
             return Err("strict mode let getpid run");
         }
+        Some(Ending::Member) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let task = spawn_member(&process, &thread, killer)?;
+            let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+            while !task.is_dead() || process.threads().len() > 1 {
+                if crate::timer::now_nanos() > patience {
+                    return Err("a thread killed by its filter never left");
+                }
+                if process.is_terminated() {
+                    return Err("a thread killed by its filter took its whole process with it");
+                }
+                sched::yield_now();
+            }
+            if process.is_terminated() || SURVIVED_ITS_KILL.load(Ordering::Acquire) {
+                return Err("a thread killed by its filter took its whole process with it");
+            }
+            // Its calls still run: the filter was its own.
+            if call(getppid, [0; 6])? < 0 {
+                return Err("a thread killed by its filter left the others without their calls");
+            }
+            seen.calls += 1;
+            return Ok(seen);
+        }
+        Some(Ending::Leader) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let getsid = number(Syscall::Getsid)?;
+            let _task = spawn_member(&process, &thread, outlive_the_leader)?;
+            let at = env.put(&answering(&[(getsid, KILL_THREAD)]), None)?;
+            if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
+                return Err("a filter that kills was refused through the entry");
+            }
+            *FOUND.lock() = Some(Ok(seen));
+            let _ = call(getsid, [0; 6]);
+            return Err("a call a filter kills for returned");
+        }
         Some(Ending::Thread | Ending::Process) | None => {}
     }
 
@@ -703,6 +755,10 @@ fn native_child(creator: &Arc<Process>, getppid: usize) -> Result<usize, &'stati
         .ok()
         .and_then(downcast::<Process>)
         .ok_or("a native child could not be made for the seccomp check")?;
+    // A start that is refused (a bad argument handle, no memory for the thread)
+    // and made again makes a new first thread, which starts under the creator's
+    // chain too: the first one is made and dropped, as a refused start's is.
+    drop(Thread::leader(&child).map_err(|_| "no thread for a native seccomp child")?);
     let thread =
         Arc::new(Thread::leader(&child).map_err(|_| "no thread for a native seccomp child")?);
     child.add_thread(&thread);
@@ -713,7 +769,10 @@ fn native_child(creator: &Arc<Process>, getppid: usize) -> Result<usize, &'stati
     let privileges = attributes::sys_prctl(&child, 39, [0; 4]);
     process::kill(&child, 137);
     if answer != Some(EPERM) {
-        return Err("a native child of a filtered process was not filtered");
+        return Err(
+            "a native child of a filtered process was not filtered once its start was refused \
+             and made again",
+        );
     }
     shown?;
     if privileges != Ok(1) {
@@ -751,13 +810,85 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
     }
     report.calls += 2;
     report.killed += 1;
+
+    // A thread other than the first killed by its filter ends alone.
+    let (seen, status) = scenario(Ending::Member, false)?;
+    if status != SURVIVED {
+        return Err(
+            "a thread killed by its filter ended its process otherwise than as the check did",
+        );
+    }
+    report.calls += seen.calls;
+    report.killed += 1;
+
+    // The first thread killed while another lives: the process ends by SIGSYS
+    // when the other does.
+    let (_, status) = scenario(Ending::Leader, false)?;
+    if status != SIGSYS_STATUS {
+        return Err("a killed leader's process did not end by SIGSYS");
+    }
+    report.killed += 1;
     Ok(())
+}
+
+/// A thread of the scenario's process, started and counted as `clone` starts
+/// one, running `entry`.
+fn spawn_member(
+    process: &Arc<Process>,
+    creator: &Thread,
+    entry: fn(usize),
+) -> Result<Arc<sched::Task>, &'static str> {
+    let tid = crate::syscall::registry::allocate_thread(process).ok_or("no thread id")?;
+    let thread = Thread::sibling(process, tid, creator).map_err(|_| "no memory for a thread")?;
+    let thread = Arc::new(thread);
+    process.add_thread(&thread);
+    process.thread_starting();
+    let task = sched::spawn_user("seccomp-member", entry, thread, None, None)
+        .map_err(|_| "no task for a thread of the check")?;
+    Ok(task)
+}
+
+/// Whether the member that killed itself came back from its call.
+static SURVIVED_ITS_KILL: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// A member that gives itself a `KILL_THREAD` filter for `getsid` and makes
+/// the call: only it ends.
+fn killer(_argument: usize) {
+    if let Some(me) = crate::syscall::thread::current() {
+        let env = Env {
+            process: Arc::clone(me.process()),
+            thread: Arc::clone(&me),
+            page: PAGE.load(core::sync::atomic::Ordering::Acquire),
+        };
+        if let Ok(getsid) = number(Syscall::Getsid)
+            && attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]) == Ok(0)
+            && env.install(&answering(&[(getsid, KILL_THREAD)]), 0).is_ok()
+        {
+            let _ = arch::drive_system_call(Abi::Native, getsid, [0; 6], 0x1000);
+            SURVIVED_ITS_KILL.store(true, core::sync::atomic::Ordering::Release);
+        }
+    }
+    process::leave_current();
+}
+
+/// A member that waits for the first thread to be gone and then ends its own
+/// thread, and with it, being the last, the process.
+fn outlive_the_leader(_argument: usize) {
+    if let Some(me) = crate::syscall::thread::current() {
+        let process = Arc::clone(me.process());
+        let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+        while process.threads().len() > 1 && crate::timer::now_nanos() < patience {
+            sched::yield_now();
+        }
+    }
+    process::exit_thread_current(0);
 }
 
 /// The longest chain Linux allows is made and released: 6,554 one-instruction
 /// filters, each pointing at the one before, dropped by one reference. A
 /// recursive release would run the kernel stack out (SR11).
-fn longest_chain() -> Result<usize, &'static str> {
+fn longest_chain() -> Result<(usize, u64, u64), &'static str> {
     let env = Env::new()?;
     // The shortest filter there is: one instruction, `ret ALLOW`.
     let one = [Insn::new(0x06, 0, 0, ALLOW)];
@@ -786,8 +917,54 @@ fn longest_chain() -> Result<usize, &'static str> {
     if made != expected {
         return Err("a chain was refused at another length than Linux's");
     }
-    // Released in one drop.
-    env.thread.with_seccomp(|state| *state = State::default());
+    // What a call pays for the longest chain, once: 6,554 filters of one
+    // instruction, each a call of the interpreter.
+    let walked = judge_cost(&env.thread, number(Syscall::Getppid)?);
+    // Released in one drop, outside the thread's lock: the state is taken out
+    // and the chain goes after the lock does. In production the last drop can
+    // fall to the reaper with preemption off, which is what this measures.
+    let old = env.thread.with_seccomp(core::mem::take);
+    let start = crate::timer::now_nanos();
+    drop(old);
+    let released = crate::timer::now_nanos().saturating_sub(start);
     process::kill(&env.process, 137);
-    Ok(made)
+    Ok((made, walked, released))
+}
+
+/// What a call costs a thread whose chain is seven filters of 4,096
+/// instructions, the most steps a chain can have, in nanoseconds.
+fn longest_steps() -> Result<u64, &'static str> {
+    let env = Env::new()?;
+    let mut long = vec![Insn::new(0x20, 0, 0, 0); MAX_INSNS - 1];
+    long.push(Insn::new(0x06, 0, 0, ALLOW));
+    let mut made = 0;
+    loop {
+        let filter =
+            seccomp::prepare(&long, false).map_err(|_| "a long filter could not be made")?;
+        match seccomp::attach(&env.thread, filter) {
+            Ok(()) => made += 1,
+            Err(Errno::ENOMEM) => break,
+            Err(_) => return Err("a long filter was refused for another reason"),
+        }
+    }
+    if made != 7 {
+        return Err(
+            "a chain of 4,096-instruction filters was refused at another length than Linux's",
+        );
+    }
+    let walked = judge_cost(&env.thread, number(Syscall::Getppid)?);
+    let old = env.thread.with_seccomp(core::mem::take);
+    drop(old);
+    process::kill(&env.process, 137);
+    Ok(walked)
+}
+
+/// The mean of a few judgments of `call` by `thread`'s chain, in nanoseconds.
+fn judge_cost(thread: &Thread, call: usize) -> u64 {
+    const ROUNDS: u64 = 20;
+    let start = crate::timer::now_nanos();
+    for _ in 0..ROUNDS {
+        let _ = core::hint::black_box(judge_thread(thread, core::hint::black_box(call)));
+    }
+    crate::timer::now_nanos().saturating_sub(start) / ROUNDS
 }

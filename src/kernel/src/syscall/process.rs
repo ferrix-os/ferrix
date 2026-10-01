@@ -1309,10 +1309,13 @@ impl Process {
         *self.first_seccomp.lock() = Some(state);
     }
 
-    /// The state its first thread is to start under, once; `None` for a
-    /// process nothing filtered made.
-    pub(crate) fn take_first_seccomp(&self) -> Option<crate::syscall::seccomp::State> {
-        self.first_seccomp.lock().take()
+    /// The state its first thread is to start under; `None` for a process
+    /// nothing filtered made. Kept and not taken: a start that is refused and
+    /// made again -- a bad argument handle, no memory for the thread -- makes a
+    /// new first thread, which must start under it too, or the child would run
+    /// the second time without its creator's filter (the consultant's B1).
+    pub(crate) fn first_seccomp(&self) -> Option<crate::syscall::seccomp::State> {
+        self.first_seccomp.lock().clone()
     }
 
     /// Its threads that have not begun to end.

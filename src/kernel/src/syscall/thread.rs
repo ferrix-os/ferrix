@@ -87,8 +87,9 @@ impl Thread {
     /// the two below are on paths that answer `ENOMEM` or `NO_MEMORY`.
     pub(crate) fn leader(process: &Arc<Process>) -> Result<Thread, AllocError> {
         // A native child of a filtered creator starts with its creator's chain
-        // (`seccomp::inherit_native`); any other first thread starts with none.
-        let seccomp = process.take_first_seccomp().unwrap_or_default();
+        // (`seccomp::inherit_native`), however many times its start is made;
+        // any other first thread starts with none.
+        let seccomp = process.first_seccomp().unwrap_or_default();
         Ok(Thread::with(
             process,
             ThreadSignals::new(Inherited::NONE)?,
@@ -171,11 +172,22 @@ impl Thread {
     pub(crate) fn with_seccomp<R>(&self, change: impl FnOnce(&mut seccomp::State) -> R) -> R {
         let mut held = self.seccomp.lock();
         let answer = change(&mut held);
-        if held.is_active() {
-            seccomp::note_filtered();
+        let active = held.is_active();
+        // Written only on change: the flag is read on every call of a filtered
+        // thread, and a store each time would bounce its cache line.
+        if active != self.filtered.load(Ordering::Relaxed) {
+            if active {
+                seccomp::note_filtered();
+            }
+            self.filtered.store(active, Ordering::Release);
         }
-        self.filtered.store(held.is_active(), Ordering::Release);
         answer
+    }
+
+    /// Read its seccomp state under its leaf lock, changing nothing and
+    /// storing nothing: what every call of a filtered thread does.
+    pub(crate) fn read_seccomp<R>(&self, read: impl FnOnce(&seccomp::State) -> R) -> R {
+        read(&self.seccomp.lock())
     }
 
     /// A copy of its seccomp state for a thread or process made of it: the

@@ -293,6 +293,13 @@ pub(super) fn check_seccomp_filters() {
          {} processes a filter ended, and a chain of {} filters made and released",
         checked.probes, checked.calls, checked.inherited, checked.killed, checked.chain,
     );
+    println!(
+        "  seccomp  a call costs {} us for the 6,554-filter chain, {} us for seven filters of \
+         4,096 instructions, the most steps there can be, and releasing the long chain costs {} us",
+        checked.walk_many / 1000,
+        checked.walk_long / 1000,
+        checked.release / 1000,
+    );
 }
 
 /// A mount's own flags: `ro`, `nodev`, `noexec` and `nosuid` enforced,

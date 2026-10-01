@@ -23,7 +23,7 @@
 //! through [`inherit_native`]; `execve` keeps it, which is what makes a
 //! filter a sandbox and not a request. A filter is charged to the job that
 //! installed it (F-37) and stays charged until the last thread and child
-//! holding it goes. Releasing a chain is iterative: a chain can be 6,553
+//! holding it goes. Releasing a chain is iterative: a chain can be 6,554
 //! filters long.
 //!
 //! # Who may install one
@@ -50,7 +50,7 @@ use crate::sched;
 use crate::sync::SpinLock;
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
-use crate::syscall::{attributes, credentials, uaccess};
+use crate::syscall::{attributes, uaccess, userns};
 use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// The `arch` a call in the native range carries.
@@ -185,7 +185,7 @@ pub(crate) struct Filter {
 
 impl Drop for Filter {
     /// Release the chain behind it by walking it, stopping at the first filter
-    /// someone else still holds. A recursive drop of a chain of 6,553 filters
+    /// someone else still holds. A recursive drop of a chain of 6,554 filters
     /// would run the kernel stack out: Linux's `__put_seccomp_filter` walks for
     /// the same reason (SR11).
     fn drop(&mut self) {
@@ -225,9 +225,11 @@ pub(crate) fn data(args: &SyscallArgs) -> SeccompData {
 enum Decision {
     /// Answer the core with this.
     Verdict(Verdict),
-    /// The thread ends, through the path `exit` takes. Not returned from the
-    /// hook's own frame: every reference is dropped first.
-    Leave,
+    /// The thread ends, through the path `exit` takes, with this status: 128
+    /// plus the signal, as Linux's `do_exit(SIGSYS)` leaves it, so that a
+    /// leader ended this way is what `wait` reports for its process. Not
+    /// returned from the hook's own frame: every reference is dropped first.
+    Leave(i32),
 }
 
 /// Whether any thread has ever held a filter. Set once and never cleared: until
@@ -274,7 +276,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     drop(thread);
     match decision {
         Decision::Verdict(verdict) => verdict,
-        Decision::Leave => process::leave_current(),
+        Decision::Leave(status) => process::exit_thread_current(status),
     }
 }
 
@@ -285,7 +287,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
 pub(crate) fn judge(thread: &Thread, args: &SyscallArgs) -> Option<Verdict> {
     match decide(thread, args) {
         Decision::Verdict(verdict) => Some(verdict),
-        Decision::Leave => None,
+        Decision::Leave(_) => None,
     }
 }
 
@@ -340,7 +342,7 @@ fn decide(thread: &Thread, args: &SyscallArgs) -> Decision {
 
 /// Judge the call `args` describes for `thread`, which is filtered.
 fn evaluate(thread: &Thread, args: &SyscallArgs) -> Decision {
-    let (mode, head) = thread.with_seccomp(|state| (state.mode, state.filter.clone()));
+    let (mode, head) = thread.read_seccomp(|state| (state.mode, state.filter.clone()));
     match mode {
         Mode::Disabled => Decision::Verdict(Verdict::Continue),
         Mode::Strict => strict(thread, args),
@@ -451,7 +453,7 @@ fn kill_thread(thread: &Thread, args: &SyscallArgs, signal: u32, logged: bool) -
         process::kill(process, 128 + signal as i32);
         return Decision::Verdict(Verdict::Errno(ENOSYS));
     }
-    Decision::Leave
+    Decision::Leave(128 + signal as i32)
 }
 
 /// Strict mode: `read`, `write`, `exit` and the signal return of the entry's
@@ -517,15 +519,13 @@ fn report(thread: &Thread, args: &SyscallArgs, what: &str, action: u32) {
 // ---------------------------------------------------------------------------
 
 /// Whether `process` may install a filter that is not its own to keep:
-/// it has set no-new-privs, or it is privileged.
-///
-/// Linux asks for `CAP_SYS_ADMIN` in the caller's user namespace. Until user
-/// namespaces are here that is the effective uid 0; from N4 on it is
-/// `ns_capable(current_user_ns(), CAP_SYS_ADMIN)` and this is the one line to
-/// change. The capability only lets a program skip no-new-privs, and a filter
-/// can only take away, so a root inside a child namespace gains nothing by it.
+/// it has set no-new-privs, or holds `CAP_SYS_ADMIN` in its own user namespace,
+/// as Linux's `ns_capable(current_user_ns(), CAP_SYS_ADMIN)` asks. The capability
+/// only lets a program skip no-new-privs, and a filter can only take away, so a
+/// root inside a child namespace gains nothing by it.
 pub(crate) fn may_install(process: &Process) -> bool {
-    attributes::get(process).no_new_privs || credentials::require_privilege(process).is_ok()
+    attributes::get(process).no_new_privs
+        || process.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
 }
 
 /// A filter of `raw`, verified and charged to the running task's job, attached
@@ -676,7 +676,7 @@ pub(crate) fn prctl_set(
 /// mode, where the call itself has already killed the caller).
 pub(crate) fn prctl_get(process: &Process) -> Result<usize, Errno> {
     let thread = thread::current_of(process).ok_or(Errno::ESRCH)?;
-    Ok(thread.with_seccomp(|state| state.mode.number()) as usize)
+    Ok(thread.read_seccomp(|state| state.mode.number()) as usize)
 }
 
 /// The calls `seccomp` and `prctl`'s seccomp options are, for the personality's

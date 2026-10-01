@@ -1041,7 +1041,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         .thread_by_tid(tid)
         .or_else(|| process.threads().into_iter().next())
         .map_or((0, 0), |thread| {
-            thread.with_seccomp(|state| (state.mode().number(), state.filters()))
+            thread.read_seccomp(|state| (state.mode().number(), state.filters()))
         });
     // Slots in the table as Linux sizes one: a power of two, 64 at least.
     let highest = process.files().lock().iter().map(|(fd, _)| fd).last();
