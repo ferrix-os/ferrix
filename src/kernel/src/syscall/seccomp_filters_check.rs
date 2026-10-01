@@ -559,9 +559,16 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    let status = process
-        .wait_for_exit(deadline)
-        .ok_or("the seccomp scenario task never ended its process")?;
+    let waited = process.wait_for_exit(deadline);
+    if waited.is_none() {
+        crate::console::println!(
+            "DEBUG never ended: live {}, terminated {}, released {}",
+            process.live_thread_count(),
+            process.is_terminated(),
+            process.is_released()
+        );
+    }
+    let status = waited.ok_or("the seccomp scenario task never ended its process")?;
     let found = FOUND
         .lock()
         .take()
@@ -590,7 +597,10 @@ fn scenario_task(_argument: usize) {
     let found = in_the_process(ending);
     let broken = found.is_err();
     *FOUND.lock() = Some(found);
-    crate::console::println!("DEBUG scenario task exits, broken {broken}");
+    crate::console::println!(
+        "DEBUG scenario task exits, broken {broken}, live {}",
+        crate::syscall::thread::current().map_or(99, |t| t.process().live_thread_count())
+    );
     process::exit_current(if broken { BROKEN } else { SURVIVED });
 }
 
