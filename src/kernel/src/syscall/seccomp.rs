@@ -34,7 +34,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint, buffer_footprint};
 use ferrix_linux_abi::errno::Errno;
@@ -50,7 +50,8 @@ use crate::sched;
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
 use crate::syscall::{attributes, credentials, uaccess};
-use crate::trap::{Abi, Outcome, SyscallArgs, Verdict};
+use crate::sync::SpinLock;
+use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// The `arch` a call in the native range carries.
 ///
@@ -220,34 +221,112 @@ enum Decision {
     Leave,
 }
 
+/// Whether any thread has ever held a filter. Set once and never cleared: until
+/// one has, no call of any program looks for its thread, and the hook costs the
+/// registration's load and this flag's.
+static EVER_FILTERED: AtomicBool = AtomicBool::new(false);
+
+/// Note that a thread now holds seccomp state, for [`check`]'s fast path.
+pub(crate) fn note_filtered() {
+    EVER_FILTERED.store(true, Ordering::Release);
+}
+
 /// The function the core asks about every system call.
 ///
 /// Allocates nothing and takes no sleeping lock: it runs on every call of
-/// every program. A thread with no filter costs the running task, its thread
-/// and one load; the rest is for a thread that has one.
+/// every program. A kernel in which no thread has installed a filter costs two
+/// loads (this flag and the boot check's probe word); a thread with none costs
+/// the running task, its thread and one more load; the rest is for a thread
+/// that has one. The chain is walked with interrupts open and under no lock.
 pub(crate) fn check(args: &SyscallArgs) -> Verdict {
-    let Some(task) = sched::current() else {
+    if PROBE_TASK.load(Ordering::Relaxed) != 0 {
+        let verdict = probed(args);
+        if verdict != Verdict::Continue {
+            return verdict;
+        }
+    }
+    if !EVER_FILTERED.load(Ordering::Acquire) {
+        return Verdict::Continue;
+    }
+    let Some(thread) = thread::current() else {
         return Verdict::Continue;
     };
-    let decision = match thread::of_task(&task) {
-        Some(thread) if thread.is_filtered() => {
-            // A filter chain can take tens of microseconds and a kill needs
-            // the locks `exit` takes, and the entry opens them a few
-            // instructions later anyway.
-            arch::enable_interrupts();
-            let decision = evaluate(thread, args);
-            arch::disable_interrupts();
-            decision
-        }
-        _ => return Verdict::Continue,
-    };
-    // The task is dropped before a thread leaves: nothing after the task
-    // ends runs to drop it.
-    drop(task);
+    if !thread.is_filtered() {
+        return Verdict::Continue;
+    }
+    // A filter chain can take tens of microseconds and a kill needs the locks
+    // `exit` takes, and the entry opens them a few instructions later anyway.
+    // The hook returns with them masked again, as the core's contract has it.
+    arch::enable_interrupts();
+    let decision = decide(&thread, args);
+    arch::disable_interrupts();
+    // The thread is dropped before it leaves: nothing after the task ends runs
+    // to drop it.
+    drop(thread);
     match decision {
         Decision::Verdict(verdict) => verdict,
         Decision::Leave => process::leave_current(),
     }
+}
+
+/// Judge the call `args` describes for `thread`, which may be any thread, not
+/// only the running one: what [`check`] does, less the interrupts and the
+/// ending of a thread, so that a boot check can ask what a thread it holds
+/// would be told. `None` is "ends the thread".
+pub(crate) fn judge(thread: &Thread, args: &SyscallArgs) -> Option<Verdict> {
+    match decide(thread, args) {
+        Decision::Verdict(verdict) => Some(verdict),
+        Decision::Leave => None,
+    }
+}
+
+/// The boot check's rule: judges the calls of one armed task and no other's.
+type Rule = fn(&SeccompData) -> Verdict;
+
+/// The task the armed probe judges, as an address; zero when none is armed.
+static PROBE_TASK: AtomicUsize = AtomicUsize::new(0);
+
+/// The armed probe's rule.
+static PROBE_RULE: SpinLock<Option<Rule>> = SpinLock::new(None);
+
+/// Judge the calls the running task makes with `rule`, until [`disarm_probe`].
+///
+/// Test-only, for the boot check that drives the four entries with frames of
+/// its own and reads what the filter was shown, which a filter program cannot
+/// say: a call made by any other task is unaffected. Only one probe can be
+/// armed at a time.
+pub(crate) fn arm_probe(rule: Rule) {
+    *PROBE_RULE.lock() = Some(rule);
+    PROBE_TASK.store(task_key(), Ordering::Release);
+}
+
+/// Stop judging by the probe.
+pub(crate) fn disarm_probe() {
+    PROBE_TASK.store(0, Ordering::Release);
+    *PROBE_RULE.lock() = None;
+}
+
+/// Who is running, as a number that is never zero: the running task's address,
+/// or 1 where no task is (the boot context before the scheduler has one).
+fn task_key() -> usize {
+    sched::current().map_or(1, |task| Arc::as_ptr(&task) as usize)
+}
+
+/// The slow path of [`check`]: a probe is armed, and this call may be its
+/// task's.
+fn probed(args: &SyscallArgs) -> Verdict {
+    let armed = PROBE_TASK.load(Ordering::Acquire);
+    if armed == 0 || armed != task_key() {
+        return Verdict::Continue;
+    }
+    let rule = *PROBE_RULE.lock();
+    rule.map_or(Verdict::Continue, |rule| rule(&data(args)))
+}
+
+/// Judge one call for a thread and decide what happens: the thread's mode, then
+/// its chain.
+fn decide(thread: &Thread, args: &SyscallArgs) -> Decision {
+    evaluate(thread, args)
 }
 
 /// Judge the call `args` describes for `thread`, which is filtered.
@@ -258,8 +337,11 @@ fn evaluate(thread: &Thread, args: &SyscallArgs) -> Decision {
         Mode::Strict => strict(thread, args),
         Mode::Dead => kill_thread(thread, args, SIGKILL, false),
         Mode::Filter => {
+            // A thread in filter mode holds at least one filter. One that
+            // holds none is a defect here, and Linux answers it with a kill
+            // (`seccomp_run_filters`'s `WARN_ON`): never "allow".
             let Some(head) = head else {
-                return Decision::Verdict(Verdict::Continue);
+                return kill_process(thread, args, KILL_PROCESS);
             };
             let data = data(args);
             let (result, log) = run_chain(&head, &data);
@@ -294,8 +376,9 @@ const SIGSYS: u32 = 31;
 /// `SIGKILL`, which ends a thread in strict mode.
 const SIGKILL: u32 = 9;
 
-/// The largest errno a filter's data may carry: Linux's `MAX_ERRNO`.
-const MAX_ERRNO: u32 = 4095;
+/// `ENOSYS`: what a call no tracer or listener can judge fails with, and what a
+/// call of a thread that is being ended is told on its way out.
+const ENOSYS: u32 = 38;
 
 /// Do what a filter's `result` says about the call.
 fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision {
@@ -311,12 +394,12 @@ fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision 
             if log {
                 report(thread, args, "errno", action);
             }
-            // The errno a filter chose, as it chose it, capped at Linux's
-            // `MAX_ERRNO`: straight into the return register, and never
-            // through the dispatcher's restart handling, so that a filter's
-            // 512 is `-512` for the program and not a restarted call (SR7).
-            let errno = data.min(MAX_ERRNO);
-            Decision::Verdict(Verdict::Answer(Outcome::Return(-(errno as isize))))
+            // The errno a filter chose, as it chose it: the core caps it at
+            // Linux's `MAX_ERRNO` and writes it straight into the return
+            // register, never through the dispatcher's restart handling, so
+            // that a filter's 512 is `-512` for the program and not a
+            // restarted call (SR7).
+            Decision::Verdict(Verdict::Errno(data))
         }
         // There is no tracer and no listener to ask, which is what Linux
         // answers when nobody asked for one: `ENOSYS`, and never "allow"
@@ -325,9 +408,7 @@ fn act(thread: &Thread, args: &SyscallArgs, result: u32, log: bool) -> Decision 
             if log {
                 report(thread, args, "unanswerable", action);
             }
-            Decision::Verdict(Verdict::Answer(Outcome::Return(
-                Errno::ENOSYS.as_return_value(),
-            )))
+            Decision::Verdict(Verdict::Errno(ENOSYS))
         }
         KILL_THREAD => kill_thread(thread, args, SIGSYS, true),
         // `KILL_PROCESS`, an action nobody defined -- Linux counts it as
@@ -345,9 +426,7 @@ fn kill_process(thread: &Thread, args: &SyscallArgs, action: u32) -> Decision {
     report(thread, args, "kill process", action);
     thread.with_seccomp(|state| state.mode = Mode::Dead);
     process::kill(thread.process(), 128 + SIGSYS as i32);
-    Decision::Verdict(Verdict::Answer(Outcome::Return(
-        Errno::ENOSYS.as_return_value(),
-    )))
+    Decision::Verdict(Verdict::Errno(ENOSYS))
 }
 
 /// End the calling thread as if killed by `signal`. If it is the last live
@@ -361,9 +440,7 @@ fn kill_thread(thread: &Thread, args: &SyscallArgs, signal: u32, logged: bool) -
     let process = thread.process();
     if process.live_thread_count() <= 1 {
         process::kill(process, 128 + signal as i32);
-        return Decision::Verdict(Verdict::Answer(Outcome::Return(
-            Errno::ENOSYS.as_return_value(),
-        )));
+        return Decision::Verdict(Verdict::Errno(ENOSYS));
     }
     Decision::Leave
 }

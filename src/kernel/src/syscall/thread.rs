@@ -171,6 +171,9 @@ impl Thread {
     pub(crate) fn with_seccomp<R>(&self, change: impl FnOnce(&mut seccomp::State) -> R) -> R {
         let mut held = self.seccomp.lock();
         let answer = change(&mut held);
+        if held.is_active() {
+            seccomp::note_filtered();
+        }
         self.filtered.store(held.is_active(), Ordering::Release);
         answer
     }
