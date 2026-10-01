@@ -84,6 +84,7 @@ Causes are listed most likely first.
 | [FX-0892](#fx-0892) | A UTS, IPC or cgroup namespace, or setns, failed its self-check |
 | [FX-0893](#fx-0893) | A network namespace failed its self-check |
 | [FX-0894](#fx-0894) | /proc let a process look into another's tree |
+| [FX-0900](#fx-0900) | Mount permissions failed their self-check |
 | [FX-0901](#fx-0901) | the native ABI's objects failed their self-check |
 | [FX-0902](#fx-0902) | an allocation failure was not survived |
 | [FX-0903](#fx-0903) | a native call accepted what the ABI says it refuses |
@@ -1997,6 +1998,33 @@ a thread of another uid's process must be refused.
 
 See: src/kernel/src/fs/procaccess_check.rs; src/kernel/src/fs/procfs.rs;
 src/kernel/src/syscall/credentials.rs.
+
+<a id="fx-0900"></a>
+
+## FX-0900 — Mount permissions failed their self-check
+
+`fs::mountperm_check::run` makes a process of uid 1000. Sharing the first
+namespace's mounts, or in a user namespace of its own that did not copy them, it
+must be refused mount (EPERM). After unshare(CLONE_NEWUSER | CLONE_NEWNS) it may
+mount a tmpfs, which comes out nosuid,nodev, and must be refused proc, devtmpfs,
+sysfs, cgroup2 and btrfs. A mount the first namespace made ro,nosuid,nodev and
+this copy holds may not have ro or nosuid cleared (EPERM), may be unmounted or
+detached by no one alone (EINVAL), and a bind of / without MS_REC over it is
+EINVAL. A plain MS_REMOUNT of the host's filesystem is EPERM and of its own
+tmpfs is allowed. A directory it mounted over in its own namespace can be
+removed by the first namespace.
+
+1. `namespace::may_mount` answers true for a process that does not hold
+   `CAP_SYS_ADMIN` over the mount namespace's owner.
+2. `fsctl::sys_mount` lets a confined process mount a filesystem other than
+   tmpfs, or leaves out nosuid,nodev.
+3. `Namespace::copy_as` is called without `lock` for a copy its owner does not
+   own, or `Namespace::remount`, `unmount_with`, `bind` or `pivot_root` ignore a
+   lock.
+4. `Namespace::busy_or_detach` counts a mount of another namespace as a pin.
+
+See: src/kernel/src/fs/mountperm_check.rs; src/kernel/src/syscall/fsctl.rs;
+src/kernel/src/syscall/namespace.rs; src/lib/fs/vfs/src/namespace.rs.
 
 <a id="fx-0901"></a>
 
