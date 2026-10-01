@@ -288,7 +288,7 @@ follow. The `pidns` boot line (FX-0891) and a pid-namespace fill in `kmem`
 prove it, each rule with a negative control; `PIDNS.md` §8 lists where it
 differs from Linux.
 
-**Done -- network namespaces (built 2026-09-30, landed 2026-10-01):**
+**Done -- network namespaces (built 2026-09-30):**
 `CLONE_NEWNET` through `clone`, `clone3` and `unshare` gives a namespace of its
 own interfaces, addresses, routes, neighbours, ports, sockets, `/proc/net` and
 netlink view, starting with a down loopback that `ip link set lo up` (netlink or

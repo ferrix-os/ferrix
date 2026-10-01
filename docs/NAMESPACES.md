@@ -1481,7 +1481,7 @@ Evidence and differences are PIDNS §8 and §9. Two things in this document
 change with it: §1.5's row for `CLONE_NEWPID` is no longer `EINVAL`, and
 the N4 "gated so far" list above is unchanged by it.
 
-**Network namespaces (2026-09-30, branch `stage13-netns`; landed 2026-10-01).**
+**Network namespaces (2026-09-30, branch `stage13-netns`).**
 `docs/NETNS.md` is the design and its §11 says what was built and how it
 differs. What touches this document's rules: U8's honoured set gains
 `CAP_NET_ADMIN` and `CAP_NET_RAW`, which a child user namespace holds over the

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "56228757e47fec11b250fd23e9de76a4b14732b0394635fb0dc309368ff33c46",
+  "digest": "0b6a2c49e243f37f3c0f35abadcb48d9873ff2ee2db2fd920dc78bf16e73b22c",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -14694,7 +14694,7 @@
           "definition": true,
           "maturity": "inProgress",
           "stage": 13,
-          "doc": "Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026-09-28): every mount's own flags enforced, MS_REMOUNT, and mountinfo. N2 (2026-09-30): binds of directories, files and sockets, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem. N3 (2026-09-30): mount namespaces, copied by unshare and clone, pivot_root, a native child kept in its creator's, and openat2's resolve flags. N4, user namespaces, is next. Network namespaces (docs/NETNS.md, landed 2026-10-01): a stack per namespace, a down loopback, veth pairs, devices that move with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner.",
+          "doc": "Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026-09-28): every mount's own flags enforced, MS_REMOUNT, and mountinfo. N2 (2026-09-30): binds of directories, files and sockets, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem. N3 (2026-09-30): mount namespaces, copied by unshare and clone, pivot_root, a native child kept in its creator's, and openat2's resolve flags. N4, user namespaces, is next. Network namespaces (docs/NETNS.md): a stack per namespace, a down loopback, veth pairs, devices that move with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
             "line": 34
