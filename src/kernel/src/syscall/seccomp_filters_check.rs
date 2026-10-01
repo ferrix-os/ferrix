@@ -554,7 +554,6 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     *ENDING.lock() = Some(ending);
     let thread =
         Arc::new(Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?);
-    process.thread_starting();
     let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -643,6 +642,9 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             return Err("strict mode let getpid run");
         }
         Some(Ending::Member) => {
+            // The first thread counts as started, as `process::start` counts it,
+            // so that a process of two threads has two live ones.
+            process.thread_starting();
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let task = spawn_member(&process, &thread, killer)?;
             let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -668,6 +670,7 @@ fn in_the_process(ending: Option<Ending>) -> Found {
             return Ok(seen);
         }
         Some(Ending::Leader) => {
+            process.thread_starting();
             let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             let getsid = number(Syscall::Getsid)?;
             let _task = spawn_member(&process, &thread, outlive_the_leader)?;
