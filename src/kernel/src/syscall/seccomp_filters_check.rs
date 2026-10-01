@@ -554,6 +554,8 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     *ENDING.lock() = Some(ending);
     let thread =
         Arc::new(Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?);
+    // Listed, as a started process lists its first thread: `threads()` counts it.
+    process.add_thread(&thread);
     let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
         .map_err(|_| "no task for the seccomp scenario")?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
