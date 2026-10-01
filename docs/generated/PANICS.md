@@ -111,6 +111,7 @@ Causes are listed most likely first.
 | [FX-1202](#fx-1202) | pid 1 did not move onto the root volume with the switch |
 | [FX-1301](#fx-1301) | cgroupfs did not show the job tree as cgroup v2 |
 | [FX-1302](#fx-1302) | seccomp's filter was not asked first at every entry, or not as the entry's own |
+| [FX-1303](#fx-1303) | a seccomp filter was not installed, judged, inherited, ordered or released as specified |
 | [FX-1501](#fx-1501) | init exited, and ferrix.onexit=panic asked for a panic |
 | [FX-1502](#fx-1502) | a kernel call init needs did not do what docs/INIT.md §11 says |
 | [FX-1503](#fx-1503) | init took or refused an input other than set_inputs says |
@@ -2911,6 +2912,40 @@ one allowing that token by name does not.
 
 See: src/kernel/src/syscall/seccomp_check.rs; src/kernel/src/syscall/seccomp.rs;
 src/kernel/src/trap.rs filter_system_call; docs/SECCOMP.md §3.2, §3.3.
+
+<a id="fx-1303"></a>
+
+## FX-1303 — a seccomp filter was not installed, judged, inherited, ordered or released as specified
+
+Stage 13's seccomp landing S3 (docs/SECCOMP.md §3.4, §3.5, §3.5a, §8.1):
+`syscall::seccomp_filters_check::run` installs filters through `seccomp(2)` and
+`prctl` as a program does, in a task that is a real thread of a check process,
+and makes the calls they judge through the core's own entry. `seccomp(2)` must
+answer Chromium's probes as Linux answers them (a NULL program is EFAULT, a flag
+not built or not known is EINVAL before the program is read), an unprivileged
+process may install a filter only with no-new-privs, a filter that fails a call
+must fail it with its errno and leave the calls it does not name alone, the
+strictest answer of a chain must win and on a tie the newest filter's data, a
+forked child, a thread and a native child of a filtered thread must hold its
+chain and show it in /proc/<pid>/status, an ERRNO of 512 must reach the program
+as -512 and one past 4095 as -4095, a thread killed by its filter must end its
+process by SIGSYS and one in strict mode by SIGKILL, and the longest chain Linux
+allows must be made and released without running the kernel stack out.
+
+1. `syscall::seccomp::set_filter` reads the program before the flags, or skips
+   the privilege rule, or does not bound the chain as Linux does.
+2. `syscall::seccomp::check` is not asked, or its flag that a thread holds a
+   filter is not set, so a filtered thread's calls run.
+3. `syscall::seccomp::run_chain` keeps another filter's answer than the
+   strictest, or the oldest filter's data on a tie.
+4. `Thread::forked`, `Thread::sibling` or `launch::load_native` does not give
+   the creator's chain to the child.
+5. A filter's errno passes through the dispatcher's restart handling, or the
+   chain's release is recursive.
+
+See: src/kernel/src/syscall/seccomp_filters_check.rs;
+src/kernel/src/syscall/seccomp.rs; src/kernel/src/syscall/thread.rs;
+docs/SECCOMP.md §3.4 to §3.5a.
 
 <a id="fx-1501"></a>
 
