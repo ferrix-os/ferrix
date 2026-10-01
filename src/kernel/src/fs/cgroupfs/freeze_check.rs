@@ -308,8 +308,12 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
         &|| Ok(job.frozen_seen() && process.every_task_blocked()),
         "a frozen cgroup's tasks are not all blocked",
     )?;
+    crate::sched::DBG_SLOT.store(job.quota_index(), core::sync::atomic::Ordering::Relaxed);
+    crate::console::println!("DBG frozen slot {} blocked", job.quota_index());
     let still = (word(process, 0)?, word(process, 4)?);
     crate::sched::sleep_for(STILL_NANOS);
+    crate::console::println!("DBG slept");
+    crate::sched::DBG_SLOT.store(0, core::sync::atomic::Ordering::Relaxed);
     if (word(process, 0)?, word(process, 4)?) != still {
         return Err("a thread of a frozen cgroup went on counting");
     }

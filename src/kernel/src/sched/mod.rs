@@ -2648,6 +2648,7 @@ fn for_each_queue_charged(mut visit: impl FnMut(usize, &mut CpuQueue)) {
 /// time is counted as user time: a task that has been neither interrupted nor
 /// descheduled since it was last charged has been running its program, since
 /// any long stay in the kernel blocks or is cut by the timer.
+pub(crate) static DBG_SLOT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 pub(crate) fn charge_running() {
     let Some(queues) = QUEUES.get() else {
         return;
