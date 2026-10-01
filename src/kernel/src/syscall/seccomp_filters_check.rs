@@ -609,7 +609,6 @@ fn in_the_process(ending: Option<Ending>) -> Found {
     let clone3 = number(Syscall::Clone3)?;
     let getuid = number(Syscall::Getuid)?;
     let getgid = number(Syscall::Getgid)?;
-    let write = number(Syscall::Write)?;
     let seccomp_call = number(Syscall::Seccomp)?;
     let mut seen = Seen::default();
     let call = |nr: usize, args: [u64; 6]| -> Result<isize, &'static str> {
@@ -624,62 +623,8 @@ fn in_the_process(ending: Option<Ending>) -> Found {
         Ok(answer)
     };
 
-    match ending {
-        Some(Ending::Strict) => {
-            // Strict mode: `write` runs (to a descriptor that is not open, so
-            // it answers EBADF and does not block), and any other call ends the
-            // thread with SIGKILL.
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            if call(seccomp_call, [SET_MODE_STRICT, 0, 0, 0, 0, 0])? != 0 {
-                return Err("strict mode was refused");
-            }
-            seen.calls += 1;
-            if call(write, [99, page, 0, 0, 0, 0])? != -9 {
-                return Err("strict mode did not let write run");
-            }
-            seen.calls += 1;
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(getpid, [0; 6]);
-            return Err("strict mode let getpid run");
-        }
-        Some(Ending::Member) => {
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            let _task = spawn_member(&process, &thread, killer)?;
-            let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-            while process.threads().len() > 1 {
-                if crate::timer::now_nanos() > patience {
-                    return Err("a thread killed by its filter never left");
-                }
-                if process.is_terminated() {
-                    return Err("a thread killed by its filter took its whole process with it");
-                }
-                sched::yield_now();
-            }
-            if process.is_terminated()
-                || SURVIVED_ITS_KILL.load(core::sync::atomic::Ordering::Acquire)
-            {
-                return Err("a thread killed by its filter took its whole process with it");
-            }
-            // Its calls still run: the filter was its own.
-            if call(getppid, [0; 6])? < 0 {
-                return Err("a thread killed by its filter left the others without their calls");
-            }
-            seen.calls += 1;
-            return Ok(seen);
-        }
-        Some(Ending::Leader) => {
-            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            let getsid = number(Syscall::Getsid)?;
-            let _task = spawn_member(&process, &thread, outlive_the_leader)?;
-            let at = env.put(&answering(&[(getsid, KILL_THREAD)]), None)?;
-            if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
-                return Err("a filter that kills was refused through the entry");
-            }
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(getsid, [0; 6]);
-            return Err("a call a filter kills for returned");
-        }
-        Some(Ending::Thread | Ending::Process) | None => {}
+    if let Some(found) = ended_early(ending, &env, &call)? {
+        return found;
     }
 
     // No-new-privs first, then a filter that fails getppid and clone3 and a
@@ -974,4 +919,79 @@ fn judge_cost(thread: &Thread, call: usize) -> u64 {
         let _ = core::hint::black_box(judge_thread(thread, core::hint::black_box(call)));
     }
     crate::timer::now_nanos().saturating_sub(start) / ROUNDS
+}
+
+/// The endings that leave before the steps every other run shares: strict
+/// mode, a member killed by its filter, and a leader killed while a member
+/// lives on. `None` for the rest; an error is the check's.
+fn ended_early(
+    ending: Option<Ending>,
+    env: &Env,
+    call: &dyn Fn(usize, [u64; 6]) -> Result<isize, &'static str>,
+) -> Result<Option<Found>, &'static str> {
+    let getppid = number(Syscall::Getppid)?;
+    let getpid = number(Syscall::Getpid)?;
+    let write = number(Syscall::Write)?;
+    let seccomp_call = number(Syscall::Seccomp)?;
+    let process = &env.process;
+    let thread = &env.thread;
+    let page = env.page;
+    let mut seen = Seen::default();
+    match ending {
+        Some(Ending::Strict) => {
+            // Strict mode: `write` runs (to a descriptor that is not open, so
+            // it answers EBADF and does not block), and any other call ends the
+            // thread with SIGKILL.
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            if call(seccomp_call, [SET_MODE_STRICT, 0, 0, 0, 0, 0])? != 0 {
+                return Err("strict mode was refused");
+            }
+            seen.calls += 1;
+            if call(write, [99, page, 0, 0, 0, 0])? != -9 {
+                return Err("strict mode did not let write run");
+            }
+            seen.calls += 1;
+            *FOUND.lock() = Some(Ok(seen));
+            let _ = call(getpid, [0; 6]);
+            Ok(Some(Err("strict mode let getpid run")))
+        }
+        Some(Ending::Member) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let _task = spawn_member(&process, &thread, killer)?;
+            let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+            while process.threads().len() > 1 {
+                if crate::timer::now_nanos() > patience {
+                    return Err("a thread killed by its filter never left");
+                }
+                if process.is_terminated() {
+                    return Err("a thread killed by its filter took its whole process with it");
+                }
+                sched::yield_now();
+            }
+            if process.is_terminated()
+                || SURVIVED_ITS_KILL.load(core::sync::atomic::Ordering::Acquire)
+            {
+                return Err("a thread killed by its filter took its whole process with it");
+            }
+            // Its calls still run: the filter was its own.
+            if call(getppid, [0; 6])? < 0 {
+                return Err("a thread killed by its filter left the others without their calls");
+            }
+            seen.calls += 1;
+            Ok(Some(Ok(seen)))
+        }
+        Some(Ending::Leader) => {
+            let _ = attributes::sys_prctl(&process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            let getsid = number(Syscall::Getsid)?;
+            let _task = spawn_member(&process, &thread, outlive_the_leader)?;
+            let at = env.put(&answering(&[(getsid, KILL_THREAD)]), None)?;
+            if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
+                return Err("a filter that kills was refused through the entry");
+            }
+            *FOUND.lock() = Some(Ok(seen));
+            let _ = call(getsid, [0; 6]);
+            Ok(Some(Err("a call a filter kills for returned")))
+        }
+        Some(Ending::Thread | Ending::Process) | None => Ok(None),
+    }
 }
