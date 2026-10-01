@@ -560,9 +560,13 @@ all`, and `test-shell`, `test-vfs` and `test-net --arch all` with ferrousli,
 all passed (tags `ae19-*`). The controls of §9 and `pid_scope`'s were run as
 `gate.sh control --expect` on 444344e4, whose kernel is c14d6c69's (the rebase
 between them touched only generated documents), tags `ae-nn-01` to `ae-nn-31`:
-each FIRED with its own message, except that NN3's open in the first namespace
-stops at the same section's earlier refusal, "a port could not be bound in a
-namespace" (`ae-nn-07b`), and NN5's `clone` control is `ae-nn-02b`.
+each FIRED with its check's message, with three to note: NN3's open in the first
+namespace stops at the same section's earlier refusal, "a port could not be bound
+in a namespace" (`ae-nn-07b`); NN5's `clone` control is `ae-nn-02b`; and
+`pid_scope`'s control (`registry::find` for `pidns::find_in`) stops at the same
+check's positive case, "a veth pair naming pid 1 of the caller's own pid
+namespace was refused" (`ae-nn-31b`), not at its `ESRCH` case. The native
+child's network-namespace control is `ae-nn-b1`.
 
 **Gated first**, on the code of e8de326e (the commits after it are documents): `cargo
 fmt` and `cargo clippy -p ferrix-kernel` on x86_64, aarch64 and armv7a; `cargo
