@@ -671,3 +671,33 @@ request has not been queued, so no barrier can wait for it.
 more than one request in flight to divide, and both would accept a value and do
 nothing. With `io` built, `cgroup.controllers` at the root lists
 `cpu io memory pids`, and the no-internal-process rule reaches `io`.
+
+## 14. Where the controllers stand (2026-10-01)
+
+Reclaim, freezing, `cpu.max` and `io` are on `main`. Each check boots on
+x86-64, AArch64 and ARMv7-A at `--smp 2`; the `io` line had been written and
+had never been booted before this landing, and was fixed once on the way (its
+quota-slot count failed when an earlier check's killed program was reaped
+between the two counts; it now waits for the count to settle). Booting it on
+ARMv7-A also showed the `kmem` fill of files leaving 156 bytes charged: the
+attempt that hits the limit leaves its name's dentry behind, which a sibling
+opening the same name used to settle, and the check now makes each name before
+it removes it.
+
+Negative controls, run on x86-64, each a one-line sabotage that stops the boot
+with the check's own message. Where the sabotage is in a path that may run
+in task context it also prints `NEGATIVE CONTROL <name>` once; the two in the
+scheduler's tick path (`cpu-charge`) and the value-only ones show the message
+alone.
+
+| Control | Sabotage | Message |
+|---|---|---|
+| io-charge | a read counts 0 bytes | io.stat does not count what a cgroup read and wrote of a disk |
+| io-parent | a charge stops at the job, not above it | a parent's io.max did not hold for its child's reads |
+| io-throttle | the wait for `io.max` is dropped | four reads under io.max rbps=16384 were not spaced out to its rate |
+| io-root | the machine's entry is not charged | the root's io.stat does not count the machine's I/O |
+| io-limit | `io.max` forgets a written `rbps` | io.max does not read back what was written |
+| cpu-throttle | a throttled task is never put to sleep | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
+| cpu-charge | the scheduler charges no slice to a job | the root's cpu.stat does not have its six keys and the machine's usage |
+| freeze-park | a frozen process does not park | cgroup.events never said frozen 1 for a frozen cgroup |
+| reclaim-none | a reclaim at a job takes nothing | a cgroup over its memory.high was not brought back to it |
