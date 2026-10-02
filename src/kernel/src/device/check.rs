@@ -81,7 +81,38 @@ pub(super) fn check_vectors(
     if let Some(node) = published.iter().find(|node| node.msix.is_some()) {
         check_msix(node, report)?;
     }
-    check_msi(published, report)
+    check_msi(published, report)?;
+    probe_nvidia(published);
+    Ok(())
+}
+
+/// WIP (never land): the NVIDIA probe of `docs/NVIDIA.md` §2.3, on a GPU
+/// passed through by libvirt. Mints the GPU's one MSI vector -- five
+/// configuration-space writes, MSI left disabled -- and builds its IOMMU
+/// domain, and says what both came to. No BAR write, no bus mastering.
+fn probe_nvidia(published: &[Arc<DeviceNode>]) {
+    for node in published.iter().filter(|node| {
+        node.pci_function()
+            .is_some_and(|function| function.vendor == 0x10DE && function.class >> 16 == 0x03)
+    }) {
+        let vector = node.vector(0);
+        let domain = node.domain().map(|domain| domain.translated());
+        crate::println!(
+            "  nvidia   {}: {} vector(s) offered, by {}; vector 0 {:?}, reads masked {:?}; IOMMU domain translated {:?}",
+            node.location(),
+            node.vector_count(),
+            if node.msi.is_some() {
+                "MSI"
+            } else if node.msix.is_some() {
+                "MSI-X"
+            } else {
+                "nothing"
+            },
+            vector.map(Vector::number),
+            vector.and_then(Vector::reads_masked),
+            domain,
+        );
+    }
 }
 
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
