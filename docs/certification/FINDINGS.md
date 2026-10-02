@@ -17,8 +17,20 @@ rebased and reviewed. **F-49**, ARMv7-A's
 `psci_system` not declaring `r12` clobbered where `psci_call` does; not yet
 fixed. **F-51**, the manifest's `checks.rs` test-file pattern counting the
 self-check switch (`src/kernel/src/checks.rs`, product code) as verification;
-closes with W-8's boot slice 21b. Until they are filed the tally above does
-not count them.
+closes with W-8's boot slice 21b. **F-58** (reserved 2026-10-02, Moderate,
+pre-existing; confirmed by the certification consultant at the review of
+the NVIDIA N0g design): VT-d table-walk coherency. `vtd.rs` never reads
+`ECAP.C`, and nothing in the kernel issues `clflush`: root and context
+entries (`write_entry`), fresh tables (`table()`'s `zero_frame`) and
+second-level entries (`mm::map_io`, `mm::unmap_io`) are written through
+the write-back direct map. On a unit without page-walk coherency, a
+cleared entry may still be read as present after its invalidation (DMA to
+a freed frame, against H.DMA.1-3), and a fresh table may be read as stale
+present entries. QEMU reports `C`=0 but walks coherently, so no gate shows
+it. The SMMUv3 side (`COHACC` not checked, `CR1` never written) is to be
+confirmed in the fix's review. It is fixed on its own, before N0g
+(`docs/NVIDIA.md` §12.3). Until they are filed the tally above does not
+count them.
 
 **Severity.** *Blocking* — a rating cannot be claimed while it stands.
 *Major* — a named objective is unmet. *Moderate* — an objective is partially
