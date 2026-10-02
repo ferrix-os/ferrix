@@ -26,11 +26,32 @@
       "purpose": "S4: Verdict::Trap (allocated by os-bd)"
     },
     {
-      "ids": ["L.iommu.47", "L.device.24-26", "L.x86_64.128-130", "L.object.117-120", "L.user.109-110"],
+      "ids": ["L.x86_64.128", "L.user.109-110"],
       "owner": "nvidia",
       "branch": "nvidia-n0",
       "date": "2026-10-02",
-      "purpose": "NVIDIA N0, the kernel prerequisites (docs/NVIDIA.md §7): DMAR scopes through bridges, MSI, the PAT and write-combining, a driver's configuration-space window, a per-driver pin budget"
+      "purpose": "NVIDIA N0a-c, the consultant's conditions fixed forward (docs/handover/2026-10-02-bridge.md, A and B): MSI, the PAT and write-combining"
+    },
+    {
+      "ids": ["L.device.24-26", "L.object.117"],
+      "owner": "nvidia",
+      "branch": "nvidia-n0d",
+      "date": "2026-10-02",
+      "purpose": "NVIDIA N0d (docs/NVIDIA.md §12.1): device_aperture's 64-bit apertures, the configuration window's refused writes and its allowlist, one configuration lock per node"
+    },
+    {
+      "ids": ["L.object.118-120"],
+      "owner": "nvidia",
+      "branch": "nvidia-n0f",
+      "date": "2026-10-02",
+      "purpose": "NVIDIA N0f (docs/NVIDIA.md §12.2): a per-device pin budget set through SET_LIMIT, refused past it, the quarantine bounded at twice it"
+    },
+    {
+      "ids": ["L.iommu.47-55", "L.x86_64.129-132", "L.device.27-28", "H.DMA.9"],
+      "owner": "nvidia",
+      "branch": "nvidia-n0g",
+      "date": "2026-10-02",
+      "purpose": "NVIDIA N0g (docs/NVIDIA.md §12.3, the consultant's OK IF C1): queued invalidation, failed invalidations, coherency flushes, interrupt remapping on VT-d, remappable MSI and I/O APIC messages, x2APIC left on, interrupt faults, the isolated-interrupts mark; a device raises only the vectors minted for it"
     },
     {
       "ids": ["L.user.111-124", "L.object.121-125", "H.MEM.20-21"],
