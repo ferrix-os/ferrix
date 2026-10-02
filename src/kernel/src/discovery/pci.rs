@@ -852,5 +852,117 @@ fn check_function(
             }
         }
     }
+    if identity.vendor == NVIDIA_VENDOR {
+        describe_nvidia(space, address, &identity, &regions, msix.as_ref(), decoding)?;
+    }
     Ok((regions, msix, decoding, found_transport, host_visible))
+}
+
+/// NVIDIA's PCI vendor ID.
+const NVIDIA_VENDOR: u16 = 0x10DE;
+
+/// The extended capability ID of Resizable BAR (PCIe base 6.0 §7.8.6).
+const EXTENDED_ID_RESIZABLE_BAR: u16 = 0x0015;
+
+/// The NVIDIA feasibility probe (`docs/NVIDIA.md` §2.3): say what a driver
+/// for an NVIDIA function would be handed -- its identity, every BAR with its
+/// width, size and placement, its capabilities, and whether Resizable BAR
+/// lets its aperture into video memory grow. Reads only; writes nothing.
+fn describe_nvidia(
+    space: &Space,
+    address: Address,
+    identity: &ferrix_pci::header::Identity,
+    regions: &[Region],
+    msix: Option<&(Capability, MsiX)>,
+    decoding: bool,
+) -> Result<(), Failure> {
+    use core::fmt::Write as _;
+    crate::println!(
+        "  nvidia   {address}: {:04x}:{:04x} rev {:02x} class {:02x}{:02x}{:02x}, memory decoding {}",
+        identity.vendor,
+        identity.device,
+        identity.revision,
+        identity.class.base,
+        identity.class.sub,
+        identity.class.interface,
+        if decoding { "on" } else { "off" },
+    );
+    for region in regions {
+        match region.bar {
+            bar::Bar::Memory {
+                address: at,
+                wide,
+                prefetchable,
+            } => crate::println!(
+                "  nvidia   {address}: BAR{} memory {}-bit{} {} KiB at {at:#x}",
+                region.index,
+                if wide { 64 } else { 32 },
+                if prefetchable { " prefetchable" } else { "" },
+                region.size / 1024,
+            ),
+            bar::Bar::Io { port } => crate::println!(
+                "  nvidia   {address}: BAR{} I/O {} bytes at port {port:#x}",
+                region.index,
+                region.size,
+            ),
+        }
+    }
+    let mut standard = alloc::string::String::new();
+    for capability in Capabilities::new(space, address) {
+        let capability = capability?;
+        let _ = write!(standard, " {:02x}@{:#x}", capability.id, capability.offset);
+    }
+    let mut extended = alloc::string::String::new();
+    let mut resizable = None;
+    for capability in ExtendedCapabilities::new(space, address) {
+        let capability = capability?;
+        if capability.id == EXTENDED_ID_RESIZABLE_BAR {
+            resizable = Some(capability.offset);
+        }
+        let _ = write!(extended, " {:04x}@{:#x}", capability.id, capability.offset);
+    }
+    crate::println!("  nvidia   {address}: capabilities{standard}; extended{extended}");
+    if let Some((_, table)) = msix {
+        crate::println!(
+            "  nvidia   {address}: MSI-X {} vectors, table in BAR{} at {:#x}",
+            table.table_size,
+            table.table.bar,
+            table.table.offset,
+        );
+    }
+    // The CPU's path to the registers: NV_PMC_BOOT_0, at BAR0's start, names
+    // the architecture and implementation, and reading it changes nothing.
+    // NV_PMC_BOOT_42 at 0xA00 does the same for chips that outgrew BOOT_0.
+    if decoding
+        && let Some(region) = regions.iter().find(|region| region.index == 0)
+        && let Ok(virt) = vmap::map_device(region.bar.address(), 0x1000)
+    {
+        let registers = Mmio::at(virt);
+        crate::println!(
+            "  nvidia   {address}: BAR0 read: NV_PMC_BOOT_0 {:#010x}, NV_PMC_BOOT_42 {:#010x}",
+            registers.read32(0),
+            registers.read32(0xA00),
+        );
+        let _ = vmap::unmap_device(virt);
+    }
+    if let Some(at) = resizable {
+        // Each entry: a capability register of supported sizes (bit n + 4 is
+        // 2^n MiB) and a control register (BAR index in bits 2:0, the
+        // number of entries in bits 7:5 of the first, the size in 13:8).
+        let first = space.read32(address, at + 8);
+        let entries = ((first >> 5) & 0x7).max(1);
+        for entry in 0..entries {
+            let base = at + 4 + 8 * entry as u16;
+            let supported = space.read32(address, base);
+            let control = space.read32(address, base + 4);
+            crate::println!(
+                "  nvidia   {address}: resizable BAR{}: now {} MiB, sizes {:#x} (bit n+4 = 2^n MiB), more {:#x}",
+                control & 0x7,
+                1u64 << ((control >> 8) & 0x3F),
+                supported,
+                control >> 16,
+            );
+        }
+    }
+    Ok(())
 }
