@@ -11,12 +11,10 @@
 //! the tree has no checksum for. So the sums of an extent must go exactly
 //! when its last reference does.
 
-use alloc::vec::Vec;
-
 use ferrix_btrfs::items::{CSUM_TREE_OBJECTID, EXTENT_CSUM_KEY, EXTENT_CSUM_OBJECTID};
 use ferrix_btrfs::tree::{BtrfsKey, HEADER_SIZE, ITEM_SIZE};
 
-use crate::{Error, Result, WriteDevice, WriteVolume};
+use crate::{Error, Result, WriteDevice, WriteVolume, fallible};
 
 /// Bytes per checksum.
 const CSUM_SIZE: u64 = 4;
@@ -48,20 +46,34 @@ pub(crate) fn delete_range<D: WriteDevice>(
         if item_end <= start || key.offset >= end {
             continue;
         }
-        volume.delete(CSUM_TREE_OBJECTID, &key)?;
-        if key.offset < start {
+        // The parts kept are copied before the item goes, so running out
+        // of memory for them changes nothing.
+        let head = if key.offset < start {
             let keep = ((start - key.offset) / sector).saturating_mul(CSUM_SIZE);
             let head = data
                 .get(..usize::try_from(keep).map_err(|_| Error::ItemTooLarge)?)
                 .unwrap_or_default();
-            volume.insert(CSUM_TREE_OBJECTID, key, head.to_vec())?;
-        }
-        if item_end > end {
+            Some(fallible::copy(head)?)
+        } else {
+            None
+        };
+        let tail = if item_end > end {
             let skip = ((end - key.offset) / sector).saturating_mul(CSUM_SIZE);
             let tail = data
                 .get(usize::try_from(skip).map_err(|_| Error::ItemTooLarge)?..)
                 .unwrap_or_default();
-            volume.insert(CSUM_TREE_OBJECTID, csum_key(end), tail.to_vec())?;
+            Some(fallible::copy(tail)?)
+        } else {
+            None
+        };
+        volume.delete(CSUM_TREE_OBJECTID, &key)?;
+        if let Some(head) = head {
+            // FALLIBLE: the tree's own insert, which reports running out of memory.
+            volume.insert(CSUM_TREE_OBJECTID, key, head)?;
+        }
+        if let Some(tail) = tail {
+            // FALLIBLE: the tree's own insert.
+            volume.insert(CSUM_TREE_OBJECTID, csum_key(end), tail)?;
         }
     }
     Ok(())
@@ -87,7 +99,11 @@ pub(crate) fn insert_sums<D: WriteDevice>(
     let per_item = per_item.saturating_sub(1).max(1);
     let mut at = start;
     for piece in sums.chunks(per_item) {
-        let data: Vec<u8> = piece.iter().flat_map(|sum| sum.to_le_bytes()).collect();
+        let mut data = fallible::with_capacity(piece.len().saturating_mul(CSUM_SIZE as usize))?;
+        for sum in piece {
+            fallible::extend_from_slice(&mut data, &sum.to_le_bytes())?;
+        }
+        // FALLIBLE: the tree's own insert.
         volume.insert(CSUM_TREE_OBJECTID, csum_key(at), data)?;
         at = at.saturating_add((piece.len() as u64).saturating_mul(sector));
     }

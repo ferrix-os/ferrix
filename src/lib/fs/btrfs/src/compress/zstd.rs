@@ -320,6 +320,7 @@ fn decode_blocks<'i>(
         window.begin_block();
         let used = match (header >> 1) & 3 {
             BLOCK_RAW => {
+                // NOALLOC: `Window::push` writes into the caller's buffer; this crate has no `alloc`.
                 window.push(body.get(..size)?)?;
                 size
             }

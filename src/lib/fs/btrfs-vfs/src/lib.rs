@@ -702,15 +702,18 @@ pub(crate) fn entry_kind(kind: u8) -> Option<FileType> {
 
 /// The error an operation on a mounted volume reports. Anything wrong with the
 /// bytes, or with reading them, is `EIO`: by now the volume was accepted, so a
-/// bad node is damage, not a question of what the device holds.
+/// bad node is damage, not a question of what the device holds. A device that
+/// ran out of memory is `ENOMEM`, which says nothing about the volume.
 const fn errno(error: BtrfsError) -> Errno {
-    let _ = error;
-    Errno::EIO
+    match error {
+        BtrfsError::OutOfMemory => Errno::ENOMEM,
+        _ => Errno::EIO,
+    }
 }
 
 /// The error a mount reports: `EINVAL` for a device that is not a volume this
-/// reader accepts, as Linux's `mount` does, and `EIO` for one that is but
-/// cannot be read.
+/// reader accepts, as Linux's `mount` does, `ENOMEM` when memory ran out, and
+/// `EIO` for one that is but cannot be read.
 pub(crate) const fn mount_errno(error: BtrfsError) -> Errno {
     match error {
         BtrfsError::BadMagic
@@ -721,6 +724,7 @@ pub(crate) const fn mount_errno(error: BtrfsError) -> Errno {
         | BtrfsError::UnsupportedProfile(_)
         | BtrfsError::BadSectorSize(_)
         | BtrfsError::BadNodeSize(_) => Errno::EINVAL,
+        BtrfsError::OutOfMemory => Errno::ENOMEM,
         _ => Errno::EIO,
     }
 }

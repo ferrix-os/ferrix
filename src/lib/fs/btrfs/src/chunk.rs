@@ -473,6 +473,7 @@ impl<'a> Iterator for SysChunkArray<'a> {
         if self.done || self.at >= self.bytes.len() {
             return None;
         }
+        // NOALLOC: the iterator's own `entry` parser; this crate has no `alloc`.
         match self.entry() {
             Ok((key, item, next)) => {
                 self.at = next;
@@ -803,6 +804,7 @@ impl<S: ChunkStorage> ChunkMap<S> {
         let mut count = 0usize;
         for entry in SysChunkArray::new(array) {
             let (key, item) = entry?;
+            // NOALLOC: `ChunkMap::insert` fills caller-supplied storage; this crate has no `alloc`.
             self.insert(key.offset, &item)?;
             count = count.saturating_add(1);
         }

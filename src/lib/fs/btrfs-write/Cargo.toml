@@ -9,6 +9,12 @@ publish = false
 
 [dependencies]
 ferrix-btrfs.workspace = true
+ferrix-fallible.workspace = true
+
+# Test-only: the size classes the kernel's reserve holds, which every map
+# node this crate makes must fit (`tests/oom.rs`).
+[dev-dependencies]
+ferrix-heap.workspace = true
 
 [lints]
 workspace = true

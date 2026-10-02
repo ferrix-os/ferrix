@@ -26,8 +26,6 @@
 //! before the superblock is the whole crash-safety argument: without it the
 //! device may make the superblock durable before a node it names.
 
-use alloc::collections::BTreeSet;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::items::{
@@ -47,7 +45,7 @@ use crate::ranges::RangeSet;
 use crate::refs::Head;
 
 use crate::volume::TreeId;
-use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume};
+use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume, fallible};
 
 /// The free-space tree's id.
 pub(crate) const FREE_SPACE_TREE_OBJECTID: u64 = 10;
@@ -84,6 +82,12 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// open. On failure nothing the last commit wrote has been touched — the
     /// old superblock still names the old trees — and the transaction is
     /// aborted; [`WriteVolume::abort`] rereads the committed state.
+    ///
+    /// One failure comes after the new superblock is down: memory running
+    /// out while the free space this commit unpinned is given back. The
+    /// commit is then on the disk and the transaction is aborted all the
+    /// same, so what is reread is the new commit, and the caller was told of
+    /// a failure that did not lose anything.
     pub fn commit(&mut self) -> Result<()> {
         self.guarded_with(None, |volume| {
             if !volume.is_dirty() && !volume.chunks_changed && !volume.has_log() {
@@ -98,8 +102,8 @@ impl<D: WriteDevice> WriteVolume<D> {
             volume.settle()?;
             volume.write_nodes()?;
             volume.device.flush()?;
-            volume.write_superblocks()?;
-            volume.finish_commit()
+            let primary = volume.write_superblocks()?;
+            volume.finish_commit(primary)
         })
     }
 
@@ -165,6 +169,17 @@ impl<D: WriteDevice> WriteVolume<D> {
         for (backref, delta) in &head.deltas {
             record.apply(*backref, *delta)?;
         }
+        // Made before anything is deleted, so running out of memory for
+        // them changes nothing.
+        let key = match head.level {
+            Some(level) => BtrfsKey::new(bytenr, METADATA_ITEM_KEY, u64::from(level)),
+            None => BtrfsKey::new(bytenr, EXTENT_ITEM_KEY, head.num_bytes),
+        };
+        let items = if record.total() == 0 {
+            Vec::new()
+        } else {
+            record.to_items(&key, self.max_inline_extent())?
+        };
         for (key, _) in &existing {
             self.delete(EXTENT_TREE_OBJECTID, key)?;
         }
@@ -179,11 +194,8 @@ impl<D: WriteDevice> WriteVolume<D> {
             }
             return self.space.release(bytenr, head.num_bytes);
         }
-        let key = match head.level {
-            Some(level) => BtrfsKey::new(bytenr, METADATA_ITEM_KEY, u64::from(level)),
-            None => BtrfsKey::new(bytenr, EXTENT_ITEM_KEY, head.num_bytes),
-        };
-        for (item_key, data) in record.to_items(&key, self.max_inline_extent())? {
+        for (item_key, data) in items {
+            // FALLIBLE: the tree's own insert, which reports running out of memory.
             self.insert(EXTENT_TREE_OBJECTID, item_key, data)?;
         }
         if !had_item {
@@ -200,17 +212,17 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Rewrite the item of every block group whose usage changed. Whether
     /// anything was written.
     fn write_block_group_items(&mut self) -> Result<bool> {
-        let dirty: Vec<(u64, u64, u64, u64)> = self
-            .space
-            .groups()
-            .filter(|group| group.item_dirty)
-            .map(|group| (group.start, group.length, group.used, group.flags))
-            .collect();
+        let dirty: Vec<(u64, u64, u64, u64)> = fallible::collect(
+            self.space
+                .groups()
+                .filter(|group| group.item_dirty)
+                .map(|group| (group.start, group.length, group.used, group.flags)),
+        )?;
         for group in self.space.groups_mut() {
             group.item_dirty = false;
         }
         for &(start, length, used, flags) in &dirty {
-            let mut data = vec![0u8; 24];
+            let mut data = fallible::zeroed(24)?;
             put_u64(&mut data, 0, used).ok_or(Error::ItemTooLarge)?;
             put_u64(&mut data, 8, FIRST_CHUNK_TREE_OBJECTID).ok_or(Error::ItemTooLarge)?;
             put_u64(&mut data, 16, flags).ok_or(Error::ItemTooLarge)?;
@@ -223,32 +235,26 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Make the free-space tree say what each block group will have free once
     /// this transaction commits. Whether anything was written.
     fn sync_free_space_tree(&mut self) -> Result<bool> {
-        let work: Vec<(u64, u64, RangeSet, RangeSet, bool)> = self
-            .space
-            .groups()
-            .map(|group| {
-                (
-                    group.start,
-                    group.length,
-                    group.on_disk.clone(),
-                    group.committed_free(),
-                    group.bitmaps,
-                )
-            })
-            .filter(|(_, _, old, new, bitmaps)| old != new || *bitmaps)
-            .collect();
-        for (start, length, old, new, bitmaps) in &work {
-            self.write_group_free_space(*start, *length, old, new, *bitmaps)?;
-            for group in self
-                .space
-                .groups_mut()
-                .filter(|group| group.start == *start)
-            {
-                group.on_disk = new.clone();
+        let mut work: Vec<(u64, u64, RangeSet, RangeSet, bool)> = Vec::new();
+        for group in self.space.groups() {
+            let new = group.committed_free()?;
+            if group.on_disk != new || group.bitmaps {
+                let old = group.on_disk.try_clone()?;
+                fallible::push(
+                    &mut work,
+                    (group.start, group.length, old, new, group.bitmaps),
+                )?;
+            }
+        }
+        let changed = !work.is_empty();
+        for (start, length, old, new, bitmaps) in work {
+            self.write_group_free_space(start, length, &old, &new, bitmaps)?;
+            if let Some(group) = self.space.groups_mut().find(|group| group.start == start) {
+                group.on_disk = new;
                 group.bitmaps = false;
             }
         }
-        Ok(!work.is_empty())
+        Ok(changed)
     }
 
     /// Replace one block group's free-space items with `new`'s runs.
@@ -274,6 +280,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                 self.delete(tree, &key)?;
             }
             for (run, len) in new.iter() {
+                // FALLIBLE: the tree's own insert.
                 self.insert(
                     tree,
                     BtrfsKey::new(run, FREE_SPACE_EXTENT_KEY, len),
@@ -285,6 +292,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                 self.delete(tree, &BtrfsKey::new(run, FREE_SPACE_EXTENT_KEY, len))?;
             }
             for (run, len) in runs_only_in(new, old) {
+                // FALLIBLE: the tree's own insert.
                 self.insert(
                     tree,
                     BtrfsKey::new(run, FREE_SPACE_EXTENT_KEY, len),
@@ -293,7 +301,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             }
         }
         let count = u32::try_from(new.runs()).map_err(|_| Error::ItemTooLarge)?;
-        let mut info = vec![0u8; 8];
+        let mut info = fallible::zeroed(8)?;
         put_u32(&mut info, 0, count).ok_or(Error::ItemTooLarge)?;
         put_u32(&mut info, 4, 0).ok_or(Error::ItemTooLarge)?;
         self.update(
@@ -306,12 +314,12 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Point each moved tree's `ROOT_ITEM` at its new root. Whether anything
     /// was written.
     fn write_root_items(&mut self) -> Result<bool> {
-        let stale: Vec<TreeId> = self
-            .stale_roots
-            .iter()
-            .copied()
-            .filter(|&tree| tree != ROOT_TREE_OBJECTID && tree != CHUNK_TREE_OBJECTID)
-            .collect();
+        let stale: Vec<TreeId> = fallible::collect(
+            self.stale_roots
+                .iter()
+                .copied()
+                .filter(|&tree| tree != ROOT_TREE_OBJECTID && tree != CHUNK_TREE_OBJECTID),
+        )?;
         for &tree in &stale {
             let _ = self.stale_roots.remove(&tree);
             let root = self.root(tree)?;
@@ -336,8 +344,8 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Serialise every node the transaction owns and write each copy.
     pub(crate) fn write_nodes(&mut self) -> Result<()> {
         let size = self.nodesize() as usize;
-        let mut buf = vec![0u8; size];
-        let addresses: Vec<u64> = self.dirty.keys().copied().collect();
+        let mut buf = fallible::zeroed(size)?;
+        let addresses: Vec<u64> = fallible::collect(self.dirty.keys().copied())?;
         for logical in addresses {
             let node = self.node(logical)?;
             node.write(
@@ -356,7 +364,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// The new superblock, for the copy at `offset`.
     fn build_superblock(&self, offset: u64) -> Result<Vec<u8>> {
         let bad = Error::Inconsistent("superblock field out of range");
-        let mut out = self.superblock.clone();
+        let mut out = fallible::copy(&self.superblock)?;
         let root = self.root(ROOT_TREE_OBJECTID)?;
         let chunk = self.root(CHUNK_TREE_OBJECTID)?;
         put_u64(&mut out, sb::BYTENR, offset).ok_or(bad)?;
@@ -419,34 +427,51 @@ impl<D: WriteDevice> WriteVolume<D> {
     }
 
     /// Write the primary superblock durably, then every mirror the device is
-    /// large enough to hold.
-    fn write_superblocks(&mut self) -> Result<()> {
+    /// large enough to hold. Returns the primary, which is the committed
+    /// superblock from now on: kept rather than built again, so nothing
+    /// after the commit point needs memory for it.
+    fn write_superblocks(&mut self) -> Result<Vec<u8>> {
         let size = SUPERBLOCK_SIZE as u64;
-        for (index, &offset) in SUPERBLOCK_OFFSETS.iter().enumerate() {
-            if offset.saturating_add(size) > self.geometry.device_size {
-                continue;
-            }
-            let block = self.build_superblock(offset)?;
-            if index == 0 {
-                self.device.write_durable(offset, &block)?;
-            } else {
-                self.device.write_at(offset, &block)?;
+        let mut primary = None;
+        let mirrors = SUPERBLOCK_OFFSETS.iter().skip(1);
+        // Every mirror is built before the primary is written, so the last
+        // allocation of the commit comes before its commit point.
+        let mut built = Vec::new();
+        for &offset in mirrors {
+            if offset.saturating_add(size) <= self.geometry.device_size {
+                fallible::push(&mut built, (offset, self.build_superblock(offset)?))?;
             }
         }
-        Ok(())
+        if PRIMARY_OFFSET.saturating_add(size) <= self.geometry.device_size {
+            let block = self.build_superblock(PRIMARY_OFFSET)?;
+            self.device.write_durable(PRIMARY_OFFSET, &block)?;
+            primary = Some(block);
+        }
+        for (offset, block) in built {
+            self.device.write_at(offset, &block)?;
+        }
+        primary.ok_or(Error::Inconsistent("device too small for a superblock"))
     }
 
     /// The transaction is on disk: its nodes are committed ones now, pinned
-    /// space is free, and the next transaction starts.
-    fn finish_commit(&mut self) -> Result<()> {
-        self.superblock = self.build_superblock(PRIMARY_OFFSET)?;
+    /// space is free, and the next transaction starts. `primary` is the
+    /// superblock the commit wrote.
+    fn finish_commit(&mut self, primary: Vec<u8>) -> Result<()> {
+        self.superblock = primary;
         self.committed = self.transid;
         self.transid = self.transid.saturating_add(1);
         let written = core::mem::take(&mut self.dirty);
         if self.clean.len().saturating_add(written.len()) > 4096 {
-            self.clean.clear();
+            self.clean = written;
+        } else {
+            // A cache: a node that finds no room in it is read again when
+            // next wanted, from where this commit just put it.
+            for (logical, node) in written {
+                if fallible::insert(&mut self.clean, logical, node).is_err() {
+                    break;
+                }
+            }
         }
-        self.clean.extend(written);
         self.space.unpin()?;
         self.chunks_changed = false;
         Ok(())
@@ -500,7 +525,6 @@ pub(crate) fn sealed(mut block: Vec<u8>) -> Result<Vec<u8>> {
 }
 
 /// The runs of `a` that are not runs of `b`, both in canonical form.
-fn runs_only_in(a: &RangeSet, b: &RangeSet) -> Vec<(u64, u64)> {
-    let theirs: BTreeSet<(u64, u64)> = b.iter().collect();
-    a.iter().filter(|run| !theirs.contains(run)).collect()
+fn runs_only_in<'a>(a: &'a RangeSet, b: &'a RangeSet) -> impl Iterator<Item = (u64, u64)> + 'a {
+    a.iter().filter(|&(start, len)| !b.has_run(start, len))
 }

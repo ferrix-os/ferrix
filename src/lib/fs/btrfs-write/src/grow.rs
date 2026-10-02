@@ -19,7 +19,6 @@
 //! So the chunk joins the in-memory layout and allocator first, and the items
 //! are written after, allocating from it like any other group.
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::chunk::{BLOCK_GROUP_PROFILE_MASK, Stripe};
@@ -37,7 +36,7 @@ use crate::extent::{
 };
 use crate::ranges::RangeSet;
 use crate::space::{BlockGroup, Kind};
-use crate::{Error, Result, WriteDevice, WriteVolume};
+use crate::{Error, Result, WriteDevice, WriteVolume, fallible};
 
 /// Device space below this is never allocated: it holds the boot area and
 /// the primary superblock. Linux's `BTRFS_DEVICE_RANGE_RESERVED`.
@@ -77,18 +76,18 @@ impl<D: WriteDevice> WriteVolume<D> {
     }
 
     /// The unallocated stretches of the device.
-    fn device_holes(&self) -> RangeSet {
+    fn device_holes(&self) -> Result<RangeSet> {
         let mut holes = RangeSet::new();
-        let _ = holes.insert(
+        let _ = holes.try_insert(
             DEVICE_RESERVED,
             self.geometry.device_size.saturating_sub(DEVICE_RESERVED),
-        );
+        )?;
         for chunk in self.chunks.iter() {
             for stripe in &chunk.stripes {
-                let _ = holes.remove(stripe.offset, chunk.length);
+                let _ = holes.try_remove(stripe.offset, chunk.length)?;
             }
         }
-        holes
+        Ok(holes)
     }
 
     /// How many copies of each block a chunk of `kind` holds: two for DUP.
@@ -97,11 +96,18 @@ impl<D: WriteDevice> WriteVolume<D> {
     }
 
     /// Device space no chunk holds yet, in the whole mebibytes a chunk can
-    /// be made of.
-    fn unallocated(&self) -> u64 {
-        self.device_holes().iter().fold(0u64, |sum, (_, len)| {
+    /// be made of: measured when the chunks change, by
+    /// [`Self::measure_unallocated`], because measuring allocates and every
+    /// operation's admission asks.
+    const fn unallocated(&self) -> u64 {
+        self.unallocated
+    }
+
+    /// Measure what [`Self::unallocated`] answers from the chunks.
+    pub(crate) fn measure_unallocated(&self) -> Result<u64> {
+        Ok(self.device_holes()?.iter().fold(0u64, |sum, (_, len)| {
             sum.saturating_add(len - len % CHUNK_ALIGN)
-        })
+        }))
     }
 
     /// Unallocated device space data chunks leave alone, so the trees can
@@ -143,7 +149,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     pub(crate) fn place_chunk(&self, kind: Kind) -> Result<Chunk> {
         let profile = self.profile_for(kind);
         let copies = self.copies(kind);
-        let holes = self.device_holes();
+        let holes = self.device_holes()?;
         let mut size = self.chunk_size(kind);
         if kind == Kind::Data {
             let spare = self.unallocated().saturating_sub(self.tree_headroom());
@@ -161,7 +167,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             if size == 0 {
                 return Err(Error::NoSpace);
             }
-            if let Some(stripes) = place_stripes(&holes, size, copies) {
+            if let Some(stripes) = try_place_stripes(&holes, size, copies)? {
                 break stripes;
             }
             size /= 2;
@@ -171,34 +177,48 @@ impl<D: WriteDevice> WriteVolume<D> {
             logical: self.chunks.next_logical().next_multiple_of(CHUNK_ALIGN),
             length: size,
             type_bits: kind.bits() | profile,
-            stripes: stripes
-                .iter()
-                .map(|&offset| Stripe {
-                    devid: self.geometry.devid,
-                    offset,
-                    dev_uuid: self.geometry.dev_uuid,
-                })
-                .collect(),
+            stripes: fallible::collect(stripes.iter().map(|&offset| Stripe {
+                devid: self.geometry.devid,
+                offset,
+                dev_uuid: self.geometry.dev_uuid,
+            }))?,
         })
     }
 
-    /// Make `chunk`, which [`Self::place_chunk`] placed, a block group, and
-    /// record it everywhere.
-    pub(crate) fn add_chunk(&mut self, chunk: &Chunk) -> Result<()> {
+    /// What [`Self::add_chunk`] puts in memory for `chunk`: its block group,
+    /// and a copy of it for the layout. Made before anything changes, so
+    /// running out of memory for them aborts nothing.
+    pub(crate) fn chunk_parts(&self, chunk: &Chunk) -> Result<(BlockGroup, Chunk)> {
         // The free-space item below covers the whole chunk, as Linux's
         // `add_block_group_free_space` writes it, but a stripe placed over
         // the 64 MiB or 256 GiB superblock must still not be allocated there.
         let mut free = RangeSet::new();
-        let _ = free.insert(chunk.logical, chunk.length);
-        self.space.insert(BlockGroup::new(
+        let _ = free.try_insert(chunk.logical, chunk.length)?;
+        let group = BlockGroup::new(
             chunk.logical,
             chunk.length,
             chunk.type_bits,
             0,
             free,
-            chunk.superblock_stripes(),
-        ))?;
-        self.chunks.insert(chunk.clone())?;
+            chunk.superblock_stripes()?,
+        )?;
+        Ok((group, chunk.try_clone()?))
+    }
+
+    /// Make `chunk`, which [`Self::place_chunk`] placed, a block group, and
+    /// record it everywhere; `group` and `copy` are its
+    /// [`Self::chunk_parts`].
+    pub(crate) fn add_chunk(
+        &mut self,
+        chunk: &Chunk,
+        group: BlockGroup,
+        copy: Chunk,
+    ) -> Result<()> {
+        // FALLIBLE: the allocator's own insert, which reports running out of memory.
+        self.space.insert(group)?;
+        // FALLIBLE: the layout's own insert.
+        self.chunks.insert(copy)?;
+        self.unallocated = self.measure_unallocated()?;
         self.chunks_changed = true;
         self.record_chunk(chunk)
     }
@@ -206,20 +226,22 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Write the items describing a new chunk into the four trees.
     fn record_chunk(&mut self, chunk: &Chunk) -> Result<()> {
         let bad = Error::Inconsistent("chunk item does not encode");
-        let item = chunk.item_bytes(self.sectorsize()).ok_or(bad)?;
+        let item = chunk.item_bytes(self.sectorsize())?;
+        // FALLIBLE: the tree's own insert, which reports running out of memory.
         self.insert(
             CHUNK_TREE_OBJECTID,
             BtrfsKey::new(FIRST_CHUNK_TREE_OBJECTID, CHUNK_ITEM_KEY, chunk.logical),
             item,
         )?;
         for stripe in &chunk.stripes {
-            let mut extent = vec![0u8; 48];
+            let mut extent = fallible::zeroed(48)?;
             put_u64(&mut extent, 0, CHUNK_TREE_OBJECTID).ok_or(bad)?;
             put_u64(&mut extent, 8, FIRST_CHUNK_TREE_OBJECTID).ok_or(bad)?;
             put_u64(&mut extent, 16, chunk.logical).ok_or(bad)?;
             put_u64(&mut extent, 24, chunk.length).ok_or(bad)?;
             put(&mut extent, 32, &self.geometry.chunk_tree_uuid).ok_or(bad)?;
             let key = BtrfsKey::new(stripe.devid, DEV_EXTENT_KEY, stripe.offset);
+            // FALLIBLE: the tree's own insert.
             self.insert(DEV_TREE_OBJECTID, key, extent)?;
         }
         let dev_key = BtrfsKey::new(DEV_ITEMS_OBJECTID, DEV_ITEM_KEY, self.geometry.devid);
@@ -228,20 +250,23 @@ impl<D: WriteDevice> WriteVolume<D> {
             .ok_or(Error::Inconsistent("device has no DEV_ITEM"))?;
         put_u64(&mut dev_item, 16, self.device_bytes_used()).ok_or(bad)?;
         self.update(CHUNK_TREE_OBJECTID, dev_key, dev_item)?;
-        let mut group = vec![0u8; 24];
+        let mut group = fallible::zeroed(24)?;
         put_u64(&mut group, 0, 0).ok_or(bad)?;
         put_u64(&mut group, 8, FIRST_CHUNK_TREE_OBJECTID).ok_or(bad)?;
         put_u64(&mut group, 16, chunk.type_bits).ok_or(bad)?;
         let key = BtrfsKey::new(chunk.logical, BLOCK_GROUP_ITEM_KEY, chunk.length);
+        // FALLIBLE: the tree's own insert.
         self.insert(EXTENT_TREE_OBJECTID, key, group)?;
-        let mut info = vec![0u8; 8];
+        let mut info = fallible::zeroed(8)?;
         put_u32(&mut info, 0, 1).ok_or(bad)?;
         let tree = FREE_SPACE_TREE_OBJECTID;
+        // FALLIBLE: the tree's own insert.
         self.insert(
             tree,
             BtrfsKey::new(chunk.logical, FREE_SPACE_INFO_KEY, chunk.length),
             info,
         )?;
+        // FALLIBLE: the tree's own insert.
         self.insert(
             tree,
             BtrfsKey::new(chunk.logical, FREE_SPACE_EXTENT_KEY, chunk.length),
@@ -259,12 +284,8 @@ impl<D: WriteDevice> WriteVolume<D> {
             .filter(|chunk| chunk.kind() == Kind::System.bits())
         {
             let key = BtrfsKey::new(FIRST_CHUNK_TREE_OBJECTID, CHUNK_ITEM_KEY, chunk.logical);
-            out.extend_from_slice(&key_bytes(&key));
-            out.extend(
-                chunk
-                    .item_bytes(self.sectorsize())
-                    .ok_or(Error::Inconsistent("chunk item does not encode"))?,
-            );
+            fallible::extend_from_slice(&mut out, &key_bytes(&key))?;
+            fallible::extend_from_slice(&mut out, &chunk.item_bytes(self.sectorsize())?)?;
         }
         if out.len() > ferrix_btrfs::superblock::SYS_CHUNK_ARRAY_SIZE {
             return Err(Error::NoSpace);
@@ -275,13 +296,25 @@ impl<D: WriteDevice> WriteVolume<D> {
 
 /// Where `copies` stripes of `size` bytes go in `holes`, each at the first
 /// aligned place left; `None` if they do not all fit.
-pub(crate) fn place_stripes(holes: &RangeSet, size: u64, copies: u64) -> Option<Vec<u64>> {
-    let mut holes = holes.clone();
+pub(crate) fn try_place_stripes(
+    holes: &RangeSet,
+    size: u64,
+    copies: u64,
+) -> Result<Option<Vec<u64>>> {
+    let mut holes = holes.try_clone()?;
     let mut stripes = Vec::new();
     while (stripes.len() as u64) < copies {
-        let (at, _) = holes.first_prefix(size, size, CHUNK_ALIGN, 0)?;
-        let _ = holes.remove(at, size);
-        stripes.push(at);
+        let Some((at, _)) = holes.first_prefix(size, size, CHUNK_ALIGN, 0) else {
+            return Ok(None);
+        };
+        let _ = holes.try_remove(at, size)?;
+        fallible::push(&mut stripes, at)?;
     }
-    Some(stripes)
+    Ok(Some(stripes))
+}
+
+/// [`try_place_stripes`], for the tests.
+#[cfg(test)]
+pub(crate) fn place_stripes(holes: &RangeSet, size: u64, copies: u64) -> Option<Vec<u64>> {
+    try_place_stripes(holes, size, copies).expect("host memory")
 }

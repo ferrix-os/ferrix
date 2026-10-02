@@ -24,7 +24,6 @@
 //! a panic — until it is unmounted.
 
 use alloc::sync::Arc;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -85,7 +84,8 @@ impl Device for Disk {
     /// that does not is read into a bounce buffer of whole sectors and copied
     /// out, so the trait's contract holds on any sector size. Any failure,
     /// including a read past the end of the disk, is `DeviceRead` at the
-    /// offset asked for; the volume reader turns that into `EIO`.
+    /// offset asked for; the volume reader turns that into `EIO`. No memory
+    /// for the bounce buffer is `OutOfMemory`, which it turns into `ENOMEM`.
     fn read_at(
         &mut self,
         physical: u64,
@@ -104,7 +104,8 @@ impl Device for Disk {
         }
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
-        let mut bounce = vec![0u8; bytes];
+        let mut bounce =
+            crate::fallible::try_filled(0u8, bytes).map_err(|_| BtrfsError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let taken = bounce.get(skip..skip + buf.len()).ok_or(failed)?;
@@ -135,7 +136,8 @@ impl WriteDevice for Disk {
         }
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
-        let mut bounce = vec![0u8; bytes];
+        let mut bounce =
+            crate::fallible::try_filled(0u8, bytes).map_err(|_| WriteError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let patch = bounce.get_mut(skip..skip + data.len()).ok_or(failed)?;

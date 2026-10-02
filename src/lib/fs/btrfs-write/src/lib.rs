@@ -55,6 +55,11 @@
 //! As in `ferrix-btrfs`: no `unsafe`, no indexing, no panics. A node read from
 //! the disk is parsed and checked by `ferrix-btrfs` before this crate edits it,
 //! and a node this crate writes is built from typed items, never patched.
+//!
+//! Nor does running out of memory stop the machine: every allocation goes
+//! through the `fallible` module and fails as [`Error::OutOfMemory`], which
+//! aborts the transaction like any other failure part-way through an edit,
+//! and changes nothing before the first one.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -71,6 +76,7 @@ mod chunks;
 mod commit;
 mod csum;
 pub mod extent;
+mod fallible;
 pub mod fs;
 mod grow;
 pub mod log;
@@ -188,11 +194,18 @@ pub enum Error {
     /// transaction, and takes no more changes; see
     /// [`WriteVolume::reload_read_only`].
     ReadOnly,
+    /// Memory ran out. Before an operation's first change nothing happened;
+    /// after it, the transaction is aborted like any other half-done one.
+    OutOfMemory,
 }
 
 impl From<BtrfsError> for Error {
     fn from(error: BtrfsError) -> Self {
-        Error::Volume(error)
+        match error {
+            // A device that ran out of memory says nothing about the volume.
+            BtrfsError::OutOfMemory => Error::OutOfMemory,
+            error => Error::Volume(error),
+        }
     }
 }
 
@@ -216,6 +229,7 @@ impl fmt::Display for Error {
             Error::TooManyLinks => f.write_str("too many links"),
             Error::Aborted => f.write_str("transaction aborted by an earlier failure"),
             Error::ReadOnly => f.write_str("read-only since a transaction was aborted"),
+            Error::OutOfMemory => f.write_str("out of memory"),
         }
     }
 }

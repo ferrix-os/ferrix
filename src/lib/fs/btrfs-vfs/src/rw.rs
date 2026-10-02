@@ -89,6 +89,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 
+use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::items::Timespec as BtrfsTime;
 use ferrix_btrfs_write::fs::NewInode;
 use ferrix_btrfs_write::{Error as WriteError, Unsupported, WriteDevice, WriteVolume};
@@ -1229,6 +1230,7 @@ fn errno(error: WriteError) -> Errno {
         WriteError::NoSpace => Errno::ENOSPC,
         WriteError::ItemTooLarge => Errno::ENAMETOOLONG,
         WriteError::Unsupported(_) | WriteError::ReadOnly => Errno::EROFS,
+        WriteError::OutOfMemory | WriteError::Volume(BtrfsError::OutOfMemory) => Errno::ENOMEM,
         // Damage, a failed write, or a transaction that gave up: the volume
         // is no longer to be trusted, and every answer is EIO.
         _ => Errno::EIO,
@@ -1251,6 +1253,7 @@ fn mount_errno(error: WriteError) -> Errno {
         ) => Errno::EROFS,
         WriteError::Unsupported(_) => Errno::EINVAL,
         WriteError::Volume(error) => crate::mount_errno(error),
+        WriteError::OutOfMemory => Errno::ENOMEM,
         _ => Errno::EIO,
     }
 }

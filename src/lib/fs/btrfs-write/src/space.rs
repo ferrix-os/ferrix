@@ -30,7 +30,7 @@ use ferrix_btrfs::chunk::{
 
 use crate::chunks::STRIPE_LEN;
 use crate::ranges::RangeSet;
-use crate::{Error, Result};
+use crate::{Error, Result, fallible};
 
 /// What a block group holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +77,8 @@ impl Kind {
 }
 
 /// One block group.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct BlockGroup {
     /// First logical address: the chunk's.
     pub start: u64,
@@ -118,18 +119,16 @@ impl BlockGroup {
     }
 
     /// What the free-space tree must say once this transaction commits.
-    #[must_use]
-    pub fn committed_free(&self) -> RangeSet {
-        let mut all = self.free.clone();
-        let _ = all.absorb(&self.pinned);
-        let _ = all.absorb(&self.reserved);
-        all
+    pub fn committed_free(&self) -> Result<RangeSet> {
+        let mut all = self.free.try_clone()?;
+        let _ = all.try_absorb(&self.pinned)?;
+        let _ = all.try_absorb(&self.reserved)?;
+        Ok(all)
     }
 
     /// A group whose free-space tree lists `on_disk` as free, held as
     /// extents: all of it allocatable but the superblock stripes in
     /// `excluded`.
-    #[must_use]
     pub fn new(
         start: u64,
         length: u64,
@@ -137,10 +136,10 @@ impl BlockGroup {
         used: u64,
         on_disk: RangeSet,
         excluded: RangeSet,
-    ) -> Self {
-        let mut free = on_disk.clone();
-        let reserved = free.extract(&excluded);
-        BlockGroup {
+    ) -> Result<Self> {
+        let mut free = on_disk.try_clone()?;
+        let reserved = free.try_extract(&excluded)?;
+        Ok(BlockGroup {
             start,
             length,
             flags,
@@ -152,19 +151,20 @@ impl BlockGroup {
             excluded,
             reserved,
             bitmaps: false,
-        }
+        })
     }
 
     /// Make `ranges`, which nothing uses any more, free again, except that
     /// the part in a superblock stripe goes back to `reserved`.
-    fn give_back(&mut self, mut ranges: RangeSet) -> bool {
-        let reserved = ranges.extract(&self.excluded);
-        self.reserved.absorb(&reserved) & self.free.absorb(&ranges)
+    fn give_back(&mut self, mut ranges: RangeSet) -> Result<bool> {
+        let reserved = ranges.try_extract(&self.excluded)?;
+        Ok(self.reserved.try_absorb(&reserved)? & self.free.try_absorb(&ranges)?)
     }
 }
 
 /// Every block group, and the transaction's allocations.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
+#[cfg_attr(test, derive(Clone))]
 pub struct Space {
     groups: BTreeMap<u64, BlockGroup>,
     /// Allocated since the last commit.
@@ -178,9 +178,10 @@ pub struct Space {
 impl Space {
     /// Add a block group found at mount or made by a chunk allocation.
     pub fn insert(&mut self, group: BlockGroup) -> Result<()> {
-        if self.groups.insert(group.start, group).is_some() {
+        if self.groups.contains_key(&group.start) {
             return Err(Error::Inconsistent("block group listed twice"));
         }
+        let _ = fallible::insert(&mut self.groups, group.start, group)?;
         Ok(())
     }
 
@@ -263,10 +264,10 @@ impl Space {
     /// Mark `[at, at + len)` allocated in this transaction.
     fn take(&mut self, kind: Kind, at: u64, len: u64) -> Result<()> {
         let group = self.group_of_mut(at)?;
-        if !group.free.remove(at, len) {
+        if !group.free.try_remove(at, len)? {
             return Err(Error::Inconsistent("allocated space that was not free"));
         }
-        if !self.allocated.insert(at, len) {
+        if !self.allocated.try_insert(at, len)? {
             return Err(Error::Inconsistent("allocated the same space twice"));
         }
         if let Some(cursor) = self.cursor.get_mut(kind.index()) {
@@ -294,9 +295,9 @@ impl Space {
         // allocation may name an extent in one. It is in use all the same.
         let group = self.group_of_mut(at)?;
         let mut wanted = RangeSet::new();
-        let _ = wanted.insert(at, len);
-        let stripes = group.reserved.extract(&wanted);
-        if !group.free.absorb(&stripes) {
+        let _ = wanted.try_insert(at, len)?;
+        let stripes = group.reserved.try_extract(&wanted)?;
+        if !group.free.try_absorb(&stripes)? {
             return Err(Error::Inconsistent("superblock stripe was also free"));
         }
         self.take(kind, at, len)
@@ -305,11 +306,11 @@ impl Space {
     /// Give back an extent nothing refers to any more: at once if this
     /// transaction allocated it, after the commit if the last commit uses it.
     pub fn release(&mut self, at: u64, len: u64) -> Result<()> {
-        if self.allocated.remove(at, len) {
+        if self.allocated.try_remove(at, len)? {
             let group = self.group_of_mut(at)?;
             let mut released = RangeSet::new();
-            let _ = released.insert(at, len);
-            if group.give_back(released) {
+            let _ = released.try_insert(at, len)?;
+            if group.give_back(released)? {
                 return Ok(());
             }
             return Err(Error::Inconsistent("released space that was already free"));
@@ -317,7 +318,7 @@ impl Space {
         let group = self.group_of_mut(at)?;
         if group.free.overlaps(at, len)
             || group.reserved.overlaps(at, len)
-            || !group.pinned.insert(at, len)
+            || !group.pinned.try_insert(at, len)?
         {
             return Err(Error::Inconsistent("freed space that was already free"));
         }
@@ -342,7 +343,7 @@ impl Space {
     pub fn unpin(&mut self) -> Result<()> {
         for group in self.groups.values_mut() {
             let pinned = core::mem::take(&mut group.pinned);
-            if !group.give_back(pinned) {
+            if !group.give_back(pinned)? {
                 return Err(Error::Inconsistent("pinned space was also free"));
             }
         }

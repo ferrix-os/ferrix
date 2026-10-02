@@ -10,7 +10,6 @@
 //! something already uses.
 
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::BtrfsError;
@@ -34,7 +33,7 @@ use crate::ranges::RangeSet;
 use crate::refs::DelayedRefs;
 use crate::space::{BlockGroup, Space};
 use crate::volume::{Geometry, Root};
-use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume};
+use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume, fallible};
 
 /// `compat_ro` bit: the free-space tree exists.
 const FREE_SPACE_TREE: u64 = 1 << 0;
@@ -76,7 +75,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Load the committed state and nothing more: no orphan cleanup, so the
     /// transaction starts empty. What a checker wants.
     pub(crate) fn open_committed(mut device: D) -> Result<Self> {
-        let mut block = vec![0u8; SUPERBLOCK_SIZE];
+        let mut block = fallible::zeroed(SUPERBLOCK_SIZE)?;
         device.read_at(PRIMARY_OFFSET, &mut block, ReadKind::Metadata)?;
         let sb = Superblock::parse_at(&block, PRIMARY_OFFSET)?;
         check_writable(&sb)?;
@@ -84,6 +83,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         let mut chunks = Chunks::default();
         for entry in sb.sys_chunk_array() {
             let (key, item) = entry?;
+            // FALLIBLE: the layout's own insert, which reports running out of memory.
             chunks.insert(Chunk::from_item(key.offset, &item)?)?;
         }
         let mut volume = WriteVolume {
@@ -98,7 +98,8 @@ impl<D: WriteDevice> WriteVolume<D> {
                 device_size: dev.total_bytes,
             },
             chunks,
-            superblock: block.clone(),
+            unallocated: 0,
+            superblock: fallible::copy(&block)?,
             committed: sb.generation(),
             transid: sb.generation().saturating_add(1),
             dirty: BTreeMap::new(),
@@ -116,24 +117,27 @@ impl<D: WriteDevice> WriteVolume<D> {
             admitting: false,
             edits: 0,
         };
-        let _ = volume.roots.insert(
+        let _ = fallible::insert(
+            &mut volume.roots,
             CHUNK_TREE_OBJECTID,
             Root {
                 bytenr: sb.chunk_root(),
                 level: sb.chunk_root_level(),
                 generation: sb.chunk_root_generation(),
             },
-        );
-        let _ = volume.roots.insert(
+        )?;
+        let _ = fallible::insert(
+            &mut volume.roots,
             ROOT_TREE_OBJECTID,
             Root {
                 bytenr: sb.root(),
                 level: sb.root_level(),
                 generation: sb.generation(),
             },
-        );
+        )?;
         volume.geometry.chunk_tree_uuid = volume.read_chunk_tree_uuid(sb.chunk_root())?;
         volume.load_chunks()?;
+        volume.unallocated = volume.measure_unallocated()?;
         volume.load_roots()?;
         volume.load_block_groups()?;
         // A log the last mount left behind holds items that are not in the
@@ -173,6 +177,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             device: _,
             geometry,
             chunks,
+            unallocated,
             superblock,
             committed,
             transid,
@@ -198,6 +203,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         }
         self.geometry = geometry;
         self.chunks = chunks;
+        self.unallocated = unallocated;
         self.superblock = superblock;
         self.committed = committed;
         self.transid = transid;
@@ -219,7 +225,7 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     fn read_chunk_tree_uuid(&mut self, chunk_root: u64) -> Result<[u8; 16]> {
         let size = self.geometry.nodesize as usize;
-        let mut buf = vec![0u8; size];
+        let mut buf = fallible::zeroed(size)?;
         let copies = self
             .chunks
             .copies(chunk_root, u64::from(self.geometry.nodesize))?;
@@ -238,6 +244,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         for (key, data) in self.range(CHUNK_TREE_OBJECTID, &from, &to)? {
             let item = ChunkItem::parse(&data)?;
             item.check_sectorsize(key.offset, self.geometry.sectorsize)?;
+            // FALLIBLE: the layout's own insert.
             self.chunks.insert(Chunk::from_item(key.offset, &item)?)?;
         }
         let dev_key = BtrfsKey::new(DEV_ITEMS_OBJECTID, DEV_ITEM_KEY, self.geometry.devid);
@@ -279,7 +286,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                         level: item.level,
                         generation: item.generation,
                     };
-                    let _ = self.roots.insert(id, root);
+                    let _ = fallible::insert(&mut self.roots, id, root)?;
                 }
                 ROOT_REF_KEY | ROOT_BACKREF_KEY => {
                     return Err(Error::Unsupported(Unsupported::Subvolumes));
@@ -303,14 +310,11 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// A block group for every chunk, with its usage and free space.
     fn load_block_groups(&mut self) -> Result<()> {
-        let chunks: Vec<(u64, u64, u64, RangeSet)> = self
-            .chunks
-            .iter()
-            .map(|chunk| {
-                let stripes = chunk.superblock_stripes();
-                (chunk.logical, chunk.length, chunk.type_bits, stripes)
-            })
-            .collect();
+        let chunks: Vec<(u64, u64, u64, RangeSet)> =
+            fallible::collect_ok(self.chunks.iter().map(|chunk| {
+                let stripes = chunk.superblock_stripes()?;
+                Ok((chunk.logical, chunk.length, chunk.type_bits, stripes))
+            }))?;
         for (start, length, type_bits, superblocks) in chunks {
             let key = BtrfsKey::new(start, BLOCK_GROUP_ITEM_KEY, length);
             let item = self
@@ -326,8 +330,9 @@ impl<D: WriteDevice> WriteVolume<D> {
             // they are taken out here, as Linux's `add_new_free_space` skips
             // what `exclude_super_stripes` excluded.
             let (free, bitmaps) = self.load_free_space(start, length)?;
-            let mut group = BlockGroup::new(start, length, flags, used, free, superblocks);
+            let mut group = BlockGroup::new(start, length, flags, used, free, superblocks)?;
             group.bitmaps = bitmaps;
+            // FALLIBLE: the allocator's own insert, which reports running out of memory.
             self.space.insert(group)?;
         }
         Ok(())
@@ -355,7 +360,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             }
             match key.item_type {
                 FREE_SPACE_EXTENT_KEY if !bitmaps => {
-                    if !free.insert(key.objectid, key.offset) {
+                    if !free.try_insert(key.objectid, key.offset)? {
                         return Err(bad);
                     }
                     extents = extents.saturating_add(1);
@@ -394,7 +399,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                     .objectid
                     .checked_add(bit.saturating_mul(sector))
                     .ok_or(bad)?;
-                if !free.insert(at, sector) {
+                if !free.try_insert(at, sector)? {
                     return Err(bad);
                 }
             }

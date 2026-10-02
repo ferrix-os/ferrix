@@ -210,6 +210,7 @@ pub(super) fn execute(
     if count == 0 {
         // No modes byte and no bitstream: anything more is not this format.
         ensure(rest.is_empty())?;
+        // NOALLOC: `Window::push` writes into the caller's buffer; this crate has no `alloc`.
         return window.push(literals);
     }
     let (&modes, rest) = rest.split_first()?;
@@ -234,11 +235,13 @@ pub(super) fn execute(
         let sequence = decoder.next(index == count)?;
         let offset = resolve_offset(sequence.offset_value, sequence.literals, repeats)?;
         let (now, later) = unused.split_at_checked(sequence.literals)?;
+        // NOALLOC: `Window::push` writes into the caller's buffer; this crate has no `alloc`.
         window.push(now)?;
         window.copy_match(offset, sequence.match_length)?;
         unused = later;
     }
     ensure(decoder.bits.finished_exactly())?;
+    // NOALLOC: `Window::push` writes into the caller's buffer; this crate has no `alloc`.
     window.push(unused)
 }
 
@@ -309,6 +312,7 @@ impl<'t> State<'t> {
     }
 
     fn entry(&self) -> Option<Entry> {
+        // NOALLOC: a decoding table's `entry` lookup; this crate has no `alloc`.
         self.table.entry(self.state)
     }
 
@@ -347,9 +351,10 @@ impl<'a> Decoder<'a> {
     /// length; states update literal length, match length, offset; and the
     /// last sequence updates none.
     fn next(&mut self, last: bool) -> Option<Sequence> {
+        // NOALLOC: each FSE state's `entry` lookup; this crate has no `alloc`.
         let ll = self.literal_lengths.entry()?;
-        let of = self.offsets.entry()?;
-        let ml = self.match_lengths.entry()?;
+        let of = self.offsets.entry()?; // NOALLOC: as above.
+        let ml = self.match_lengths.entry()?; // NOALLOC: as above.
 
         let offset_code = u32::from(of.symbol);
         ensure(offset_code <= u32::from(OFFSETS.max_symbol))?;

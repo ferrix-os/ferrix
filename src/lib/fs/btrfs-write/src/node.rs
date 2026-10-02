@@ -18,7 +18,7 @@ use ferrix_btrfs::crc32c;
 use ferrix_btrfs::tree::{BtrfsKey, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, KeyPtr, Node};
 
 use crate::bytes::{put, put_key, put_u8, put_u32, put_u64};
-use crate::{Error, Result, Unsupported};
+use crate::{Error, Result, Unsupported, fallible};
 
 /// Header flag: the node has been written to disk at least once.
 pub const HEADER_FLAG_WRITTEN: u64 = 1 << 0;
@@ -31,7 +31,11 @@ pub const MIXED_BACKREF_REV: u64 = 1;
 const BACKREF_REV_SHIFT: u32 = 56;
 
 /// One leaf item: its key and its payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Clone` outside the tests, nor are [`Body`] and [`TreeNode`]: a copy
+/// allocates, and the write path moves nodes rather than copying them.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct LeafItem {
     /// The key the leaf is sorted by.
     pub key: BtrfsKey,
@@ -40,7 +44,8 @@ pub struct LeafItem {
 }
 
 /// What a node holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub enum Body {
     /// A leaf's items, in key order.
     Leaf(Vec<LeafItem>),
@@ -49,7 +54,8 @@ pub enum Body {
 }
 
 /// A node being read or changed by a transaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct TreeNode {
     /// The logical address the node lives at, and records in its header.
     pub bytenr: u64,
@@ -87,16 +93,14 @@ impl TreeNode {
             return Err(Error::Unsupported(Unsupported::SharedBlock));
         }
         let body = if node.is_leaf() {
-            Body::Leaf(
-                node.items()
-                    .map(|item| LeafItem {
-                        key: item.key,
-                        data: item.data.to_vec(),
-                    })
-                    .collect(),
-            )
+            Body::Leaf(fallible::collect_ok(node.items().map(|item| {
+                Ok(LeafItem {
+                    key: item.key,
+                    data: fallible::copy(item.data)?,
+                })
+            }))?)
         } else {
-            Body::Internal(node.key_ptrs().collect())
+            Body::Internal(fallible::collect(node.key_ptrs())?)
         };
         Ok(TreeNode {
             bytenr: header.bytenr,
@@ -171,58 +175,63 @@ impl TreeNode {
         self.used() > self.capacity(nodesize)
     }
 
+    /// The bytes each item or pointer takes in the node, in order.
+    fn sizes(&self) -> impl Iterator<Item = usize> + '_ {
+        let (items, ptrs) = match &self.body {
+            Body::Leaf(items) => (items.as_slice(), 0),
+            Body::Internal(ptrs) => (&[][..], ptrs.len()),
+        };
+        items
+            .iter()
+            .map(|item| ITEM_SIZE.saturating_add(item.data.len()))
+            .chain(core::iter::repeat_n(KEY_PTR_SIZE, ptrs))
+    }
+
     /// Where to cut an overfull node so that every piece fits.
     ///
     /// The pieces are of about equal size rather than filled in turn, so that
     /// a leaf filled by appending does not split into a full leaf and a
     /// nearly empty one, only to split again on the next insert. `None` if a
     /// single item is larger than a whole node.
-    #[must_use]
-    pub fn split_points(&self, nodesize: u32) -> Option<Vec<Range<usize>>> {
+    pub fn split_points(&self, nodesize: u32) -> Result<Option<Vec<Range<usize>>>> {
         let capacity = self.capacity(nodesize);
-        let sizes: Vec<usize> = match &self.body {
-            Body::Leaf(items) => items
-                .iter()
-                .map(|item| ITEM_SIZE.saturating_add(item.data.len()))
-                .collect(),
-            Body::Internal(ptrs) => ptrs.iter().map(|_| KEY_PTR_SIZE).collect(),
-        };
-        if capacity == 0 || sizes.iter().any(|&size| size > capacity) {
-            return None;
+        if capacity == 0 || self.sizes().any(|size| size > capacity) {
+            return Ok(None);
         }
-        let total = sizes
-            .iter()
-            .fold(0usize, |sum, &size| sum.saturating_add(size));
+        let total = self.sizes().fold(0usize, usize::saturating_add);
         let pieces = total.div_ceil(capacity).max(2);
         let target = total.div_ceil(pieces);
-        let mut ranges = Vec::new();
+        let mut ranges = fallible::with_capacity(pieces)?;
         let (mut start, mut filled) = (0usize, 0usize);
-        for (index, &size) in sizes.iter().enumerate() {
+        for (index, size) in self.sizes().enumerate() {
             let over = filled.saturating_add(size);
             if filled > 0 && (over > target || over > capacity) {
-                ranges.push(start..index);
+                fallible::push(&mut ranges, start..index)?;
                 start = index;
                 filled = 0;
             }
             filled = filled.saturating_add(size);
         }
-        ranges.push(start..sizes.len());
-        Some(ranges)
+        fallible::push(&mut ranges, start..self.nritems())?;
+        Ok(Some(ranges))
     }
 
     /// Cut the node at `points`, keeping the first piece and returning the
     /// bodies of the rest in order.
-    pub fn split_off(&mut self, points: &[Range<usize>]) -> Vec<Body> {
-        let mut rest = Vec::new();
+    ///
+    /// On [`Error::OutOfMemory`] the node may have lost pieces already cut:
+    /// this runs inside an edit, which the failure aborts.
+    pub fn split_off(&mut self, points: &[Range<usize>]) -> Result<Vec<Body>> {
+        let mut rest = fallible::with_capacity(points.len().saturating_sub(1))?;
         for range in points.iter().skip(1).rev() {
             let body = match &mut self.body {
-                Body::Leaf(items) => Body::Leaf(items.split_off(range.start)),
-                Body::Internal(ptrs) => Body::Internal(ptrs.split_off(range.start)),
+                Body::Leaf(items) => Body::Leaf(fallible::split_off(items, range.start)?),
+                Body::Internal(ptrs) => Body::Internal(fallible::split_off(ptrs, range.start)?),
             };
-            rest.push(body);
+            fallible::push(&mut rest, body)?;
         }
         rest.reverse();
-        rest
+        Ok(rest)
     }
 
     /// Serialise the node into `out`, which must be exactly one node long.

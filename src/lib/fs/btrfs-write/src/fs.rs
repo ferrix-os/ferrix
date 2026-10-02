@@ -24,7 +24,6 @@
 //!
 //! Timestamps come from the caller: this crate has no clock.
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::crc32c;
@@ -39,7 +38,7 @@ use ferrix_btrfs::tree::{BtrfsKey, HEADER_SIZE, ITEM_SIZE};
 use crate::bytes::{put, put_key, put_u8, put_u16, put_u32, put_u64};
 use crate::extent::Backref;
 use crate::volume::Need;
-use crate::{Error, Result, WriteDevice, WriteVolume};
+use crate::{Error, Result, WriteDevice, WriteVolume, fallible};
 
 /// The tree every file lives in: the top-level subvolume, the only one this
 /// writer opens.
@@ -62,7 +61,8 @@ const FILE_EXTENT_SIZE: usize = 53;
 pub type DirRecord = (u64, u64, u8, Vec<u8>);
 
 /// A file extent as the fs tree records it, owned.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 struct FileExtentItem {
     /// File offset: the key's offset.
     start: u64,
@@ -94,7 +94,7 @@ impl FileExtentItem {
             num_bytes: 0,
         };
         match extent.body {
-            ExtentDataBody::Inline(bytes) => item.inline = bytes.to_vec(),
+            ExtentDataBody::Inline(bytes) => item.inline = fallible::copy(bytes)?,
             ExtentDataBody::Regular(file) | ExtentDataBody::Prealloc(file) => {
                 item.disk_bytenr = file.disk_bytenr;
                 item.disk_num_bytes = file.disk_num_bytes;
@@ -139,33 +139,59 @@ impl FileExtentItem {
         })
     }
 
-    fn encode(&self) -> Option<Vec<u8>> {
+    /// A piece of this regular extent: `num_bytes` of it from `offset`
+    /// into the extent, at file offset `start`.
+    const fn piece(&self, start: u64, offset: u64, num_bytes: u64) -> FileExtentItem {
+        FileExtentItem {
+            start,
+            generation: self.generation,
+            ram_bytes: self.ram_bytes,
+            compression: self.compression,
+            kind: self.kind,
+            inline: Vec::new(),
+            disk_bytenr: self.disk_bytenr,
+            disk_num_bytes: self.disk_num_bytes,
+            offset,
+            num_bytes,
+        }
+    }
+
+    /// The item's payload. [`Error::ItemTooLarge`] for inline bytes no item
+    /// could hold.
+    fn encode(&self) -> Result<Vec<u8>> {
         let len = if self.is_inline() {
-            FILE_EXTENT_HEADER.checked_add(self.inline.len())?
+            FILE_EXTENT_HEADER
+                .checked_add(self.inline.len())
+                .ok_or(Error::ItemTooLarge)?
         } else {
             FILE_EXTENT_SIZE
         };
-        let mut out = vec![0u8; len];
-        put_u64(&mut out, 0, self.generation)?;
-        put_u64(&mut out, 8, self.ram_bytes)?;
-        put_u8(&mut out, 16, self.compression)?;
-        put_u8(&mut out, 20, self.kind)?;
+        let mut out = fallible::zeroed(len)?;
+        self.encode_into(&mut out).ok_or(Error::ItemTooLarge)?;
+        Ok(out)
+    }
+
+    /// Lay the payload out in `out`, which is exactly its size.
+    fn encode_into(&self, out: &mut [u8]) -> Option<()> {
+        put_u64(out, 0, self.generation)?;
+        put_u64(out, 8, self.ram_bytes)?;
+        put_u8(out, 16, self.compression)?;
+        put_u8(out, 20, self.kind)?;
         if self.is_inline() {
-            put(&mut out, FILE_EXTENT_HEADER, &self.inline)?;
+            put(out, FILE_EXTENT_HEADER, &self.inline)?;
         } else {
-            put_u64(&mut out, 21, self.disk_bytenr)?;
-            put_u64(&mut out, 29, self.disk_num_bytes)?;
-            put_u64(&mut out, 37, self.offset)?;
-            put_u64(&mut out, 45, self.num_bytes)?;
+            put_u64(out, 21, self.disk_bytenr)?;
+            put_u64(out, 29, self.disk_num_bytes)?;
+            put_u64(out, 37, self.offset)?;
+            put_u64(out, 45, self.num_bytes)?;
         }
-        Some(out)
+        Some(())
     }
 }
 
 /// An `INODE_ITEM` payload.
-#[must_use]
-pub fn encode_inode(item: &InodeItem) -> Vec<u8> {
-    let mut out = vec![0u8; INODE_ITEM_SIZE];
+pub fn encode_inode(item: &InodeItem) -> Result<Vec<u8>> {
+    let mut out = fallible::zeroed(INODE_ITEM_SIZE)?;
     let mut fields = || -> Option<()> {
         put_u64(&mut out, 0, item.generation)?;
         put_u64(&mut out, 8, item.transid)?;
@@ -192,7 +218,7 @@ pub fn encode_inode(item: &InodeItem) -> Vec<u8> {
     };
     // Every offset is a constant inside the 160 bytes just allocated.
     let _ = fields();
-    out
+    Ok(out)
 }
 
 /// The directory-entry type for an inode's mode.
@@ -211,35 +237,46 @@ pub const fn entry_type(mode: u32) -> u8 {
     }
 }
 
+/// `header` zero bytes and then `name`, for a record `fill` lays out;
+/// [`Error::ItemTooLarge`] for a name the record cannot hold.
+fn encode_named(
+    header: usize,
+    name: &[u8],
+    fill: impl FnOnce(&mut [u8]) -> Option<()>,
+) -> Result<Vec<u8>> {
+    let mut out = fallible::zeroed(header.checked_add(name.len()).ok_or(Error::ItemTooLarge)?)?;
+    fill(&mut out)
+        .and_then(|()| put(&mut out, header, name))
+        .ok_or(Error::ItemTooLarge)?;
+    Ok(out)
+}
+
 /// A directory entry payload, for a `DIR_ITEM` or `DIR_INDEX`.
-fn encode_dir_entry(ino: u64, transid: u64, kind: u8, name: &[u8]) -> Option<Vec<u8>> {
-    let mut out = vec![0u8; 30usize.checked_add(name.len())?];
-    put_key(&mut out, 0, &BtrfsKey::new(ino, INODE_ITEM_KEY, 0))?;
-    put_u64(&mut out, 17, transid)?;
-    put_u16(&mut out, 25, 0)?;
-    put_u16(&mut out, 27, u16::try_from(name.len()).ok()?)?;
-    put_u8(&mut out, 29, kind)?;
-    put(&mut out, 30, name)?;
-    Some(out)
+fn encode_dir_entry(ino: u64, transid: u64, kind: u8, name: &[u8]) -> Result<Vec<u8>> {
+    encode_named(30, name, |out| {
+        put_key(out, 0, &BtrfsKey::new(ino, INODE_ITEM_KEY, 0))?;
+        put_u64(out, 17, transid)?;
+        put_u16(out, 25, 0)?;
+        put_u16(out, 27, u16::try_from(name.len()).ok()?)?;
+        put_u8(out, 29, kind)
+    })
 }
 
 /// One `INODE_REF` record.
-fn encode_ref(index: u64, name: &[u8]) -> Option<Vec<u8>> {
-    let mut out = vec![0u8; 10usize.checked_add(name.len())?];
-    put_u64(&mut out, 0, index)?;
-    put_u16(&mut out, 8, u16::try_from(name.len()).ok()?)?;
-    put(&mut out, 10, name)?;
-    Some(out)
+fn encode_ref(index: u64, name: &[u8]) -> Result<Vec<u8>> {
+    encode_named(10, name, |out| {
+        put_u64(out, 0, index)?;
+        put_u16(out, 8, u16::try_from(name.len()).ok()?)
+    })
 }
 
 /// One `INODE_EXTREF` record.
-fn encode_extref(parent: u64, index: u64, name: &[u8]) -> Option<Vec<u8>> {
-    let mut out = vec![0u8; 18usize.checked_add(name.len())?];
-    put_u64(&mut out, 0, parent)?;
-    put_u64(&mut out, 8, index)?;
-    put_u16(&mut out, 16, u16::try_from(name.len()).ok()?)?;
-    put(&mut out, 18, name)?;
-    Some(out)
+fn encode_extref(parent: u64, index: u64, name: &[u8]) -> Result<Vec<u8>> {
+    encode_named(18, name, |out| {
+        put_u64(out, 0, parent)?;
+        put_u64(out, 8, index)?;
+        put_u16(out, 16, u16::try_from(name.len()).ok()?)
+    })
 }
 
 /// A name a directory may hold: one to 255 bytes, not `.` or `..`, with no
@@ -291,7 +328,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         let mut item = *item;
         item.transid = self.transid;
         item.sequence = item.sequence.wrapping_add(1);
-        self.update(FS_TREE, inode_key(ino), encode_inode(&item))
+        self.update(FS_TREE, inode_key(ino), encode_inode(&item)?)
     }
 
     /// The inode `name` in directory `dir` names, and its entry type.
@@ -369,7 +406,8 @@ impl<D: WriteDevice> WriteVolume<D> {
             mtime: new.now,
             otime: new.now,
         };
-        self.insert(FS_TREE, inode_key(ino), encode_inode(&item))?;
+        // FALLIBLE: the tree's own insert, which reports running out of memory.
+        self.insert(FS_TREE, inode_key(ino), encode_inode(&item)?)?;
         self.add_name(dir, name, ino, entry_type(new.mode), new.now)?;
         Ok(ino)
     }
@@ -396,13 +434,13 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// The three items of a name, and the directory's size and times.
     fn add_name(&mut self, dir: u64, name: &[u8], ino: u64, kind: u8, now: Timespec) -> Result<()> {
-        let bad = Error::ItemTooLarge;
         let index = self.next_dir_index(dir)?;
-        let entry = encode_dir_entry(ino, self.transid, kind, name).ok_or(bad)?;
+        let entry = encode_dir_entry(ino, self.transid, kind, name)?;
         let hash_key = BtrfsKey::new(dir, DIR_ITEM_KEY, name_hash(name));
         let mut shared = self.get(FS_TREE, &hash_key)?.unwrap_or_default();
-        shared.extend_from_slice(&entry);
+        fallible::extend_from_slice(&mut shared, &entry)?;
         self.put(FS_TREE, hash_key, shared)?;
+        // FALLIBLE: the tree's own insert.
         self.insert(FS_TREE, BtrfsKey::new(dir, DIR_INDEX_KEY, index), entry)?;
         self.add_ref(ino, dir, index, name)?;
         let mut parent = self.require_inode(dir)?;
@@ -418,14 +456,14 @@ impl<D: WriteDevice> WriteVolume<D> {
     fn add_ref(&mut self, ino: u64, parent: u64, index: u64, name: &[u8]) -> Result<()> {
         let key = BtrfsKey::new(ino, INODE_REF_KEY, parent);
         let mut refs = self.get(FS_TREE, &key)?.unwrap_or_default();
-        let record = encode_ref(index, name).ok_or(Error::ItemTooLarge)?;
+        let record = encode_ref(index, name)?;
         if refs.len().saturating_add(record.len()) <= self.max_item_size() / 2 || refs.is_empty() {
-            refs.extend_from_slice(&record);
+            fallible::extend_from_slice(&mut refs, &record)?;
             return self.put(FS_TREE, key, refs);
         }
         let key = BtrfsKey::new(ino, INODE_EXTREF_KEY, extref_hash(parent, name));
         let mut refs = self.get(FS_TREE, &key)?.unwrap_or_default();
-        refs.extend_from_slice(&encode_extref(parent, index, name).ok_or(Error::ItemTooLarge)?);
+        fallible::extend_from_slice(&mut refs, &encode_extref(parent, index, name)?)?;
         if refs.len() > self.max_item_size() / 2 {
             return Err(Error::TooManyLinks);
         }
@@ -461,6 +499,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         item.ctime = now;
         self.write_inode(ino, &item)?;
         if item.nlink == 0 {
+            // FALLIBLE: the tree's own insert.
             self.insert(
                 FS_TREE,
                 BtrfsKey::new(ORPHAN_OBJECTID, ORPHAN_ITEM_KEY, ino),
@@ -481,10 +520,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             let entry = DirItemIter::new(data.get(at..)?, DIR_ITEM_KEY)
                 .next()?
                 .ok()?;
-            Some((
-                entry.name.to_vec(),
-                30 + entry.name.len() + entry.data.len(),
-            ))
+            Some((entry.name, 30 + entry.name.len() + entry.data.len()))
         })?;
         if kept.is_empty() {
             self.delete(FS_TREE, &hash_key)?;
@@ -514,7 +550,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             if let Some(index) = index {
                 let kept = without_record(&refs, name, |data, at| {
                     let record = InodeRefIter::new(data.get(at..)?).next()?.ok()?;
-                    Some((record.name.to_vec(), 10 + record.name.len()))
+                    Some((record.name, 10 + record.name.len()))
                 })?;
                 if kept.is_empty() {
                     self.delete(FS_TREE, &key)?;
@@ -540,10 +576,10 @@ impl<D: WriteDevice> WriteVolume<D> {
             let record = ferrix_btrfs::items::InodeExtrefIter::new(data.get(at..)?)
                 .next()?
                 .ok()?;
-            let named = if record.parent == parent {
-                record.name.to_vec()
+            let named: &[u8] = if record.parent == parent {
+                record.name
             } else {
-                Vec::new()
+                &[]
             };
             Some((named, 18 + record.name.len()))
         })?;
@@ -617,12 +653,15 @@ impl<D: WriteDevice> WriteVolume<D> {
             if entry.location.item_type != INODE_ITEM_KEY {
                 continue;
             }
-            out.push((
-                key.offset,
-                entry.location.objectid,
-                entry.kind,
-                entry.name.to_vec(),
-            ));
+            fallible::push(
+                &mut out,
+                (
+                    key.offset,
+                    entry.location.objectid,
+                    entry.kind,
+                    fallible::copy(entry.name)?,
+                ),
+            )?;
         }
         Ok(out)
     }
@@ -647,11 +686,11 @@ impl<D: WriteDevice> WriteVolume<D> {
     pub fn orphans(&mut self) -> Result<Vec<u64>> {
         let from = BtrfsKey::new(ORPHAN_OBJECTID, ORPHAN_ITEM_KEY, 0);
         let to = BtrfsKey::new(ORPHAN_OBJECTID, ORPHAN_ITEM_KEY, u64::MAX);
-        Ok(self
-            .range(FS_TREE, &from, &to)?
-            .into_iter()
-            .map(|(key, _)| key.offset)
-            .collect())
+        fallible::collect(
+            self.range(FS_TREE, &from, &to)?
+                .into_iter()
+                .map(|(key, _)| key.offset),
+        )
     }
 
     /// Store `target` as the contents of symlink `ino`: one inline extent.
@@ -665,21 +704,25 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// Replace every extent of `ino` with one inline extent holding `data`.
     fn write_inline(&mut self, ino: u64, data: &[u8]) -> Result<()> {
-        self.drop_extents(ino, 0, u64::MAX)?;
         let extent = FileExtentItem {
             start: 0,
             generation: self.transid,
             ram_bytes: data.len() as u64,
             compression: 0,
             kind: FILE_EXTENT_INLINE,
-            inline: data.to_vec(),
+            inline: fallible::copy(data)?,
             disk_bytenr: 0,
             disk_num_bytes: 0,
             offset: 0,
             num_bytes: 0,
         };
+        // Made before the old extents go, so running out of memory for it
+        // changes nothing.
+        let item = extent.encode()?;
+        self.drop_extents(ino, 0, u64::MAX)?;
         let key = BtrfsKey::new(ino, EXTENT_DATA_KEY, 0);
-        self.insert(FS_TREE, key, extent.encode().ok_or(Error::ItemTooLarge)?)?;
+        // FALLIBLE: the tree's own insert.
+        self.insert(FS_TREE, key, item)?;
         let mut item = self.require_inode(ino)?;
         item.size = data.len() as u64;
         item.nbytes = data.len() as u64;
@@ -704,7 +747,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         for (key, data) in self.range(FS_TREE, &first, &last)? {
             let extent = FileExtentItem::parse(&key, &data, sector)?;
             if extent.end(u64::from(sector)) > start && extent.start < end {
-                out.push(extent);
+                fallible::push(&mut out, extent)?;
             }
         }
         Ok(out)
@@ -725,12 +768,9 @@ impl<D: WriteDevice> WriteVolume<D> {
         let mut added = 0u64;
         for extent in self.extents_overlapping(ino, start, end)? {
             let key = BtrfsKey::new(ino, EXTENT_DATA_KEY, extent.start);
-            self.delete(FS_TREE, &key)?;
-            removed = removed.saturating_add(extent.counted_bytes());
-            if let Some(backref) = extent.backref(ino) {
-                self.refs
-                    .add(extent.disk_bytenr, extent.disk_num_bytes, None, backref, -1)?;
-            }
+            // What is kept of the extent is made before it goes, so running
+            // out of memory for it changes nothing.
+            let mut kept = [None, None];
             if extent.is_inline() {
                 // An inline extent covers the file's start; one that starts
                 // before the cut keeps its leading bytes.
@@ -739,30 +779,34 @@ impl<D: WriteDevice> WriteVolume<D> {
                         .map_err(|_| Error::ItemTooLarge)?;
                     let head = FileExtentItem {
                         ram_bytes: keep as u64,
-                        inline: extent.inline.get(..keep).unwrap_or_default().to_vec(),
-                        ..extent.clone()
+                        inline: fallible::copy(extent.inline.get(..keep).unwrap_or_default())?,
+                        ..extent.piece(extent.start, extent.offset, extent.num_bytes)
                     };
-                    added = added.saturating_add(head.ram_bytes);
-                    self.insert(FS_TREE, key, head.encode().ok_or(Error::ItemTooLarge)?)?;
+                    let bytes = head.encode()?;
+                    kept[0] = Some((head, bytes));
                 }
-                continue;
+            } else {
+                let extent_end = extent.end(sector);
+                if extent.start < start {
+                    let head = extent.piece(extent.start, extent.offset, start - extent.start);
+                    let bytes = head.encode()?;
+                    kept[0] = Some((head, bytes));
+                }
+                if extent_end > end {
+                    let offset = extent.offset.saturating_add(end - extent.start);
+                    let tail = extent.piece(end, offset, extent_end - end);
+                    let bytes = tail.encode()?;
+                    kept[1] = Some((tail, bytes));
+                }
             }
-            let extent_end = extent.end(sector);
-            if extent.start < start {
-                let head = FileExtentItem {
-                    num_bytes: start - extent.start,
-                    ..extent.clone()
-                };
-                added = added.saturating_add(self.insert_piece(ino, &head)?);
+            self.delete(FS_TREE, &key)?;
+            removed = removed.saturating_add(extent.counted_bytes());
+            if let Some(backref) = extent.backref(ino) {
+                self.refs
+                    .add(extent.disk_bytenr, extent.disk_num_bytes, None, backref, -1)?;
             }
-            if extent_end > end {
-                let tail = FileExtentItem {
-                    start: end,
-                    offset: extent.offset.saturating_add(end - extent.start),
-                    num_bytes: extent_end - end,
-                    ..extent.clone()
-                };
-                added = added.saturating_add(self.insert_piece(ino, &tail)?);
+            for (piece, bytes) in kept.into_iter().flatten() {
+                added = added.saturating_add(self.insert_piece(ino, &piece, bytes)?);
             }
         }
         if removed != 0 || added != 0 {
@@ -773,11 +817,12 @@ impl<D: WriteDevice> WriteVolume<D> {
         Ok(())
     }
 
-    /// Insert one piece of a cut extent, with its reference. Returns what it
-    /// adds to `nbytes`.
-    fn insert_piece(&mut self, ino: u64, piece: &FileExtentItem) -> Result<u64> {
+    /// Insert one piece of a cut extent, whose item is `bytes`, with its
+    /// reference. Returns what it adds to `nbytes`.
+    fn insert_piece(&mut self, ino: u64, piece: &FileExtentItem, bytes: Vec<u8>) -> Result<u64> {
         let key = BtrfsKey::new(ino, EXTENT_DATA_KEY, piece.start);
-        self.insert(FS_TREE, key, piece.encode().ok_or(Error::ItemTooLarge)?)?;
+        // FALLIBLE: the tree's own insert, which reports running out of memory.
+        self.insert(FS_TREE, key, bytes)?;
         if let Some(backref) = piece.backref(ino) {
             self.refs
                 .add(piece.disk_bytenr, piece.disk_num_bytes, None, backref, 1)?;
@@ -841,15 +886,23 @@ impl<D: WriteDevice> WriteVolume<D> {
         let mut done = 0u64;
         while offset.saturating_add(done) < aligned_end {
             let want = (aligned_end - offset - done).min(MAX_EXTENT);
+            // The buffer is made before the space is taken, at the most the
+            // extent can be, so running out of memory for it takes nothing.
+            let mut chunk =
+                fallible::with_capacity(usize::try_from(want).map_err(|_| Error::ItemTooLarge)?)?;
             let (at, len) = self.alloc_data(want, sector)?;
             let from = usize::try_from(done).map_err(|_| Error::ItemTooLarge)?;
             let upto =
                 usize::try_from(done.saturating_add(len)).map_err(|_| Error::ItemTooLarge)?;
-            let mut chunk = data
-                .get(from..upto.min(data.len()))
-                .unwrap_or_default()
-                .to_vec();
-            chunk.resize(usize::try_from(len).map_err(|_| Error::ItemTooLarge)?, 0);
+            fallible::extend_from_slice(
+                &mut chunk,
+                data.get(from..upto.min(data.len())).unwrap_or_default(),
+            )?;
+            fallible::resize(
+                &mut chunk,
+                usize::try_from(len).map_err(|_| Error::ItemTooLarge)?,
+                0,
+            )?;
             self.write_data(at, &chunk)?;
             let piece = FileExtentItem {
                 start: offset.saturating_add(done),
@@ -864,7 +917,8 @@ impl<D: WriteDevice> WriteVolume<D> {
                 num_bytes: len,
             };
             let key = BtrfsKey::new(ino, EXTENT_DATA_KEY, piece.start);
-            self.insert(FS_TREE, key, piece.encode().ok_or(Error::ItemTooLarge)?)?;
+            // FALLIBLE: the tree's own insert, which reports running out of memory.
+            self.insert(FS_TREE, key, piece.encode()?)?;
             if let Some(backref) = piece.backref(ino) {
                 self.refs.add(at, len, None, backref, 1)?;
             }
@@ -888,7 +942,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             return Ok(());
         }
         let mut bytes =
-            vec![0u8; usize::try_from(extent.ram_bytes).map_err(|_| Error::ItemTooLarge)?];
+            fallible::zeroed(usize::try_from(extent.ram_bytes).map_err(|_| Error::ItemTooLarge)?)?;
         self.copy_extent(&extent, 0, &mut bytes)?;
         self.drop_extents(ino, 0, u64::from(self.sectorsize()))?;
         self.write_regular(ino, 0, &bytes)
@@ -900,10 +954,8 @@ impl<D: WriteDevice> WriteVolume<D> {
         for physical in self.chunks.copies(at, data.len() as u64)? {
             self.device.write_at(physical, data)?;
         }
-        let sums: Vec<u32> = data
-            .chunks(self.sectorsize() as usize)
-            .map(crc32c)
-            .collect();
+        let sums: Vec<u32> =
+            fallible::collect(data.chunks(self.sectorsize() as usize).map(crc32c))?;
         crate::csum::insert_sums(self, at, &sums)
     }
 
@@ -924,9 +976,8 @@ impl<D: WriteDevice> WriteVolume<D> {
                 let keep = extent
                     .inline
                     .get(..usize::try_from(size).map_err(|_| Error::ItemTooLarge)?)
-                    .unwrap_or_default()
-                    .to_vec();
-                self.write_inline(ino, &keep)?;
+                    .unwrap_or_default();
+                self.write_inline(ino, keep)?;
             }
             Some(_) if size == 0 => self.drop_extents(ino, 0, u64::MAX)?,
             _ => {
@@ -956,7 +1007,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         {
             return Ok(());
         }
-        let mut buf = vec![0u8; usize::try_from(sector).map_err(|_| Error::ItemTooLarge)?];
+        let mut buf = fallible::zeroed(usize::try_from(sector).map_err(|_| Error::ItemTooLarge)?)?;
         let read = self.read_file(ino, start, &mut buf)?;
         if read == 0 {
             return Ok(());
@@ -993,11 +1044,16 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// Fill `dest` with an extent's file bytes from `skip` into its range.
     /// Holes and preallocated extents read as the zeros already there.
     fn copy_extent(&mut self, extent: &FileExtentItem, skip: u64, dest: &mut [u8]) -> Result<()> {
-        let plain = if extent.is_inline() {
+        // What the extent holds in the file's terms, and where in it the
+        // file's bytes start: the inline bytes as they are, or what a
+        // compressed extent expands to.
+        let expanded;
+        let (plain, start): (&[u8], usize) = if extent.is_inline() {
             if extent.compression == 0 {
-                extent.inline.clone()
+                (&extent.inline, 0)
             } else {
-                self.expand(extent.compression, &extent.inline, extent.ram_bytes)?
+                expanded = self.expand(extent.compression, &extent.inline, extent.ram_bytes)?;
+                (&expanded, 0)
             }
         } else if extent.disk_bytenr == 0 || extent.kind != FILE_EXTENT_REG {
             return Ok(());
@@ -1008,14 +1064,17 @@ impl<D: WriteDevice> WriteVolume<D> {
                 .saturating_add(skip);
             return self.read_data(at, dest);
         } else {
-            let mut stored =
-                vec![0u8; usize::try_from(extent.disk_num_bytes).map_err(|_| Error::ItemTooLarge)?];
+            let mut stored = fallible::zeroed(
+                usize::try_from(extent.disk_num_bytes).map_err(|_| Error::ItemTooLarge)?,
+            )?;
             self.read_data(extent.disk_bytenr, &mut stored)?;
-            let whole = self.expand(extent.compression, &stored, extent.ram_bytes)?;
+            expanded = self.expand(extent.compression, &stored, extent.ram_bytes)?;
             let from = usize::try_from(extent.offset).map_err(|_| Error::ItemTooLarge)?;
-            whole.get(from..).unwrap_or_default().to_vec()
+            (&expanded, from)
         };
         let src = plain
+            .get(start..)
+            .unwrap_or_default()
             .get(usize::try_from(skip).unwrap_or(usize::MAX)..)
             .unwrap_or_default();
         let n = dest.len().min(src.len());
@@ -1040,8 +1099,9 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// Decompress an extent's stored bytes into `ram_bytes` bytes.
     fn expand(&self, compression: u8, input: &[u8], ram_bytes: u64) -> Result<Vec<u8>> {
-        let mut out = vec![0u8; usize::try_from(ram_bytes).map_err(|_| Error::ItemTooLarge)?];
-        let mut work = vec![0u8; ferrix_btrfs::compress::zstd::Workspace::SIZE];
+        let mut out =
+            fallible::zeroed(usize::try_from(ram_bytes).map_err(|_| Error::ItemTooLarge)?)?;
+        let mut work = fallible::zeroed(ferrix_btrfs::compress::zstd::Workspace::SIZE)?;
         let mut workspace = ferrix_btrfs::compress::zstd::Workspace::new(&mut work)?;
         let len = ferrix_btrfs::compress::decompress(
             compression,
@@ -1125,7 +1185,7 @@ impl<D: WriteDevice> WriteVolume<D> {
 fn without_record(
     payload: &[u8],
     name: &[u8],
-    record: impl Fn(&[u8], usize) -> Option<(Vec<u8>, usize)>,
+    record: impl for<'a> Fn(&'a [u8], usize) -> Option<(&'a [u8], usize)>,
 ) -> Result<Vec<u8>> {
     let mut at = 0usize;
     while at < payload.len() {
@@ -1133,8 +1193,11 @@ fn without_record(
             record(payload, at).ok_or(Error::Inconsistent("malformed name record"))?;
         let next = at.saturating_add(len);
         if found == name {
-            let mut kept = payload.get(..at).unwrap_or_default().to_vec();
-            kept.extend_from_slice(payload.get(next..).unwrap_or_default());
+            let before = payload.get(..at).unwrap_or_default();
+            let after = payload.get(next..).unwrap_or_default();
+            let mut kept = fallible::with_capacity(before.len().saturating_add(after.len()))?;
+            fallible::extend_from_slice(&mut kept, before)?;
+            fallible::extend_from_slice(&mut kept, after)?;
             return Ok(kept);
         }
         at = next;

@@ -50,6 +50,7 @@ impl<'o> Window<'o> {
 
     /// Append `bytes`.
     pub(super) fn push(&mut self, bytes: &[u8]) -> Option<()> {
+        // NOALLOC: `Window::reserve` claims room in the caller's buffer; this crate has no `alloc`.
         let (start, end) = self.reserve(bytes.len())?;
         self.buffer.get_mut(start..end)?.copy_from_slice(bytes);
         self.position = end;
@@ -58,6 +59,7 @@ impl<'o> Window<'o> {
 
     /// Append `len` copies of `byte`.
     pub(super) fn fill(&mut self, byte: u8, len: usize) -> Option<()> {
+        // NOALLOC: `Window::reserve` claims room in the caller's buffer; this crate has no `alloc`.
         let (start, end) = self.reserve(len)?;
         self.buffer.get_mut(start..end)?.fill(byte);
         self.position = end;
@@ -73,6 +75,7 @@ impl<'o> Window<'o> {
     pub(super) fn copy_match(&mut self, offset: usize, len: usize) -> Option<()> {
         ensure(offset != 0)?;
         let source = self.position.checked_sub(offset)?;
+        // NOALLOC: `Window::reserve` claims room in the caller's buffer; this crate has no `alloc`.
         let (mut written, end) = self.reserve(len)?;
         while written < end {
             let (before, after) = self.buffer.split_at_mut_checked(written)?;

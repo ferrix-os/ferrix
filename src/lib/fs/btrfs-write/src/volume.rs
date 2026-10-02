@@ -7,7 +7,6 @@
 //! them share: getting a node, and getting a node this transaction may edit.
 
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::BtrfsError;
@@ -20,7 +19,7 @@ use crate::extent::Backref;
 use crate::node::{Body, TreeNode};
 use crate::refs::DelayedRefs;
 use crate::space::{Kind, Space};
-use crate::{Error, Result, WriteDevice};
+use crate::{Error, Result, WriteDevice, fallible};
 
 /// A tree's id: its object id in the root tree, or 1 and 3 for the root and
 /// chunk trees, whose roots the superblock names.
@@ -105,6 +104,9 @@ pub struct WriteVolume<D> {
     pub(crate) device: D,
     pub(crate) geometry: Geometry,
     pub(crate) chunks: Chunks,
+    /// Device space no chunk holds, in whole mebibytes; see
+    /// [`WriteVolume::measure_unallocated`].
+    pub(crate) unallocated: u64,
     /// The primary superblock as last committed.
     pub(crate) superblock: Vec<u8>,
     /// Generation of the last commit.
@@ -356,12 +358,14 @@ impl<D: WriteDevice> WriteVolume<D> {
     }
 
     /// Make a chunk of `kind`. [`Error::NoSpace`] when the device has no
-    /// room for one, with nothing changed; a failure after the chunk was
-    /// placed leaves it half-recorded, and aborts the transaction.
+    /// room for one, and [`Error::OutOfMemory`] when what it needs in memory
+    /// could not be made, both with nothing changed; a failure after the
+    /// chunk was placed leaves it half-recorded, and aborts the transaction.
     pub(crate) fn grow(&mut self, kind: Kind) -> Result<()> {
         let placed = self.place_chunk(kind)?;
+        let (group, copy) = self.chunk_parts(&placed)?;
         self.growing = true;
-        let made = self.add_chunk(&placed);
+        let made = self.add_chunk(&placed, group, copy);
         self.growing = false;
         if let Err(error) = made {
             self.abort_with(error);
@@ -413,9 +417,10 @@ impl<D: WriteDevice> WriteVolume<D> {
             .ok_or(Error::Volume(BtrfsError::MissingRoot(tree)))
     }
 
-    pub(crate) fn set_root(&mut self, tree: TreeId, root: Root) {
-        let _ = self.roots.insert(tree, root);
-        let _ = self.stale_roots.insert(tree);
+    pub(crate) fn set_root(&mut self, tree: TreeId, root: Root) -> Result<()> {
+        let _ = fallible::insert(&mut self.roots, tree, root)?;
+        let _ = fallible::insert_into_set(&mut self.stale_roots, tree)?;
+        Ok(())
     }
 
     /// Make sure the node at `logical` is in memory, checking what the
@@ -439,7 +444,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         if self.clean.len() >= CLEAN_NODES {
             self.clean.clear();
         }
-        let _ = self.clean.insert(logical, node);
+        let _ = fallible::insert(&mut self.clean, logical, node)?;
         Ok(())
     }
 
@@ -448,7 +453,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// second.
     pub(crate) fn read_node(&mut self, logical: u64) -> Result<TreeNode> {
         let size = self.geometry.nodesize as usize;
-        let mut buf = vec![0u8; size];
+        let mut buf = fallible::zeroed(size)?;
         let mut last = Error::Volume(BtrfsError::NotMapped(logical));
         for physical in self
             .chunks
@@ -463,6 +468,8 @@ impl<D: WriteDevice> WriteVolume<D> {
                     return TreeNode::from_node(&node);
                 }
                 Ok(_) => last = Error::Volume(BtrfsError::BadTree { logical }),
+                // Not the copy's fault: another copy would meet the same.
+                Err(BtrfsError::OutOfMemory) => return Err(Error::OutOfMemory),
                 Err(error) => last = Error::Volume(error),
             }
         }
@@ -536,7 +543,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             level,
             body,
         };
-        let _ = self.dirty.insert(at, node);
+        let _ = fallible::insert(&mut self.dirty, at, node)?;
         Ok(at)
     }
 
@@ -586,7 +593,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         )?;
         node.bytenr = at;
         node.generation = self.transid;
-        let _ = self.dirty.insert(at, node);
+        let _ = fallible::insert(&mut self.dirty, at, node)?;
         Ok(at)
     }
 
@@ -600,7 +607,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                 level: root.level,
                 generation: self.transid,
             };
-            self.set_root(tree, moved);
+            self.set_root(tree, moved)?;
             return Ok(moved);
         }
         Ok(root)

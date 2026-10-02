@@ -861,3 +861,76 @@ fn a_writeback_the_volume_has_no_room_for_keeps_its_pages() {
         vec![7u8; usize::try_from(mapped_len).unwrap()]
     );
 }
+
+/// A disk that runs out of memory on every read and write while `starved`
+/// is set, as one reading and writing through buffers it allocates does.
+#[derive(Clone, Debug)]
+struct Starved {
+    disk: Disk,
+    starved: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Starved {
+    fn starve(&self, on: bool) {
+        self.starved.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn is_starved(&self) -> bool {
+        self.starved.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Device for Starved {
+    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+        if self.is_starved() {
+            return Err(BtrfsError::OutOfMemory);
+        }
+        self.disk.read_at(physical, buf, kind)
+    }
+}
+
+impl ferrix_btrfs_write::WriteDevice for Starved {
+    fn write_at(&mut self, physical: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+        if self.is_starved() {
+            return Err(ferrix_btrfs_write::Error::OutOfMemory);
+        }
+        self.disk.write_at(physical, data)
+    }
+
+    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn memory_running_out_is_enomem_and_the_mount_keeps_its_last_commit() {
+    let disk = Disk::new(BLANK);
+    let device = Starved {
+        disk: disk.clone(),
+        starved: Arc::default(),
+    };
+    let fs = RwBtrfs::mount(
+        device.clone(),
+        0x0800_0013,
+        storage(),
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let root = fs.root();
+    let kept = make_file(&root, b"kept", &[1u8; 50_000]);
+    fs.sync().unwrap();
+    drop(make_file(&root, b"lost", &[2u8; 50_000]));
+    // The commit cannot write for memory: ENOMEM, not EIO, and the
+    // transaction is gone as after any failed commit.
+    device.starve(true);
+    assert_eq!(fs.sync(), Err(Errno::ENOMEM));
+    device.starve(false);
+    assert_eq!(read_all(&kept), vec![1u8; 50_000]);
+    assert!(fs.root().lookup(b"lost").is_err());
+    drop((kept, root, fs));
+    let fs = mount(&disk);
+    assert!(fs.root().lookup(b"kept").is_ok());
+    assert!(fs.root().lookup(b"lost").is_err());
+}

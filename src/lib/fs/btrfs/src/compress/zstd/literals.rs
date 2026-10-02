@@ -119,6 +119,7 @@ fn coded_header(block: &[u8], format: u8) -> Option<CodedSizes> {
         header,
         regenerated: size(4)?,
         compressed: size(4 + width)?,
+        // NOALLOC: `format != 0` compares the header's format bits; no macro.
         four_streams: format != 0,
     })
 }

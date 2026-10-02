@@ -18,18 +18,17 @@
 //! the fix-up climbs: a change at one level only ever moves pointers *after*
 //! the one the path went through.
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_btrfs::tree::{BtrfsKey, KeyPtr, MAX_LEVEL};
 
 use crate::node::{Body, LeafItem};
 use crate::volume::{Root, TreeId};
-use crate::{Error, Result, WriteDevice, WriteVolume};
+use crate::{Error, Result, WriteDevice, WriteVolume, fallible};
 
 /// The route a search took: at each level, the node and the slot in it.
 /// Index 0 is the leaf.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Path {
     levels: Vec<(u64, usize)>,
 }
@@ -70,7 +69,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         if root.level > MAX_LEVEL {
             return Err(Error::Inconsistent("tree deeper than btrfs allows"));
         }
-        let mut levels = vec![(0u64, 0usize); usize::from(root.level) + 1];
+        let mut levels = fallible::filled((0u64, 0usize), usize::from(root.level) + 1)?;
         let (mut logical, mut level, mut generation) = (root.bytenr, root.level, root.generation);
         loop {
             self.load(logical, level, generation)?;
@@ -111,7 +110,9 @@ impl<D: WriteDevice> WriteVolume<D> {
             return Ok(None);
         }
         let (leaf, slot) = path.at(0)?;
-        Ok(self.leaf_item(leaf, slot)?.map(|item| item.data.clone()))
+        self.leaf_item(leaf, slot)?
+            .map(|item| fallible::copy(&item.data))
+            .transpose()
     }
 
     /// Insert an item. [`Error::Exists`] if the key is taken.
@@ -182,7 +183,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                 let item = items.get_mut(slot).ok_or(MALFORMED)?;
                 item.data = data;
             } else if slot <= items.len() {
-                items.insert(slot, LeafItem { key, data });
+                fallible::insert_at(items, slot, LeafItem { key, data })?;
             } else {
                 return Err(MALFORMED);
             }
@@ -250,15 +251,20 @@ impl<D: WriteDevice> WriteVolume<D> {
         let nodesize = self.nodesize();
         let points = self
             .node(logical)?
-            .split_points(nodesize)
+            .split_points(nodesize)?
             .ok_or(Error::ItemTooLarge)?;
-        let bodies = self.node_mut(logical)?.split_off(&points);
+        // FALLIBLE: the node's own `split_off`, which reports running out of memory.
+        let bodies = self.node_mut(logical)?.split_off(&points)?;
         let level8 = u8::try_from(level).map_err(|_| MALFORMED)?;
-        let mut ptrs = vec![KeyPtr {
-            key: self.first_key(logical)?,
-            blockptr: logical,
-            generation: self.transid,
-        }];
+        let mut ptrs = fallible::with_capacity(bodies.len().saturating_add(1))?;
+        fallible::push(
+            &mut ptrs,
+            KeyPtr {
+                key: self.first_key(logical)?,
+                blockptr: logical,
+                generation: self.transid,
+            },
+        )?;
         for body in bodies {
             let key = match &body {
                 Body::Leaf(items) => items.first().map(|item| item.key),
@@ -266,11 +272,14 @@ impl<D: WriteDevice> WriteVolume<D> {
             }
             .ok_or(MALFORMED)?;
             let at = self.new_node(tree, level8, body)?;
-            ptrs.push(KeyPtr {
-                key,
-                blockptr: at,
-                generation: self.transid,
-            });
+            fallible::push(
+                &mut ptrs,
+                KeyPtr {
+                    key,
+                    blockptr: at,
+                    generation: self.transid,
+                },
+            )?;
         }
         match parent {
             Some((parent, slot)) => {
@@ -287,7 +296,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                         entry.generation = transid;
                         let after = slot.checked_add(1).ok_or(MALFORMED)?;
                         for (offset, ptr) in rest.enumerate() {
-                            children.insert(after.saturating_add(offset), ptr);
+                            fallible::insert_at(children, after.saturating_add(offset), ptr)?;
                         }
                         Ok(())
                     }
@@ -307,7 +316,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                         level: up,
                         generation: self.transid,
                     },
-                );
+                )?;
                 // A root split into more pieces than a node holds pointers
                 // would need another level; the pieces are few, but check.
                 if self.node(at)?.overflows(nodesize) {
@@ -350,12 +359,12 @@ impl<D: WriteDevice> WriteVolume<D> {
             if root.level == 0 {
                 return Ok(());
             }
-            let ptrs = match &self.node(root.bytenr)?.body {
-                Body::Internal(ptrs) => ptrs.clone(),
+            let (count, first) = match &self.node(root.bytenr)?.body {
+                Body::Internal(ptrs) => (ptrs.len(), ptrs.first().copied()),
                 Body::Leaf(_) => return Err(MALFORMED),
             };
-            match ptrs.as_slice() {
-                [] => {
+            match (count, first) {
+                (0, _) => {
                     self.free_node(tree, root.bytenr)?;
                     let at = self.new_node(tree, 0, Body::Leaf(Vec::new()))?;
                     self.set_root(
@@ -365,10 +374,10 @@ impl<D: WriteDevice> WriteVolume<D> {
                             level: 0,
                             generation: self.transid,
                         },
-                    );
+                    )?;
                     return Ok(());
                 }
-                [only] => {
+                (1, Some(only)) => {
                     self.free_node(tree, root.bytenr)?;
                     self.set_root(
                         tree,
@@ -377,7 +386,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                             level: root.level - 1,
                             generation: only.generation,
                         },
-                    );
+                    )?;
                     // A root's generation is the transaction that last wrote
                     // it, which for the new root must be this one.
                     let _ = self.cow_root(tree)?;
@@ -397,7 +406,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         let (path, _) = self.search(tree, key, false)?;
         let (leaf, slot) = path.at(0)?;
         if let Some(item) = self.leaf_item(leaf, slot)? {
-            return Ok(Some((item.key, item.data.clone())));
+            return Ok(Some((item.key, fallible::copy(&item.data)?)));
         }
         for level in 1..=path.top() {
             let (logical, slot) = path.at(level)?;
@@ -408,9 +417,10 @@ impl<D: WriteDevice> WriteVolume<D> {
                 continue;
             };
             let leaf = self.descend(ptr, level - 1, true)?;
-            return Ok(self
+            return self
                 .leaf_item(leaf, 0)?
-                .map(|item| (item.key, item.data.clone())));
+                .map(|item| Ok((item.key, fallible::copy(&item.data)?)))
+                .transpose();
         }
         Ok(None)
     }
@@ -430,9 +440,10 @@ impl<D: WriteDevice> WriteVolume<D> {
             slot.checked_sub(1)
         };
         if let Some(slot) = within {
-            return Ok(self
+            return self
                 .leaf_item(leaf, slot)?
-                .map(|item| (item.key, item.data.clone())));
+                .map(|item| Ok((item.key, fallible::copy(&item.data)?)))
+                .transpose();
         }
         for level in 1..=path.top() {
             let (logical, slot) = path.at(level)?;
@@ -443,9 +454,10 @@ impl<D: WriteDevice> WriteVolume<D> {
             let leaf = self.descend(ptr, level - 1, false)?;
             let count = self.node(leaf)?.nritems();
             let last = count.checked_sub(1).ok_or(MALFORMED)?;
-            return Ok(self
+            return self
                 .leaf_item(leaf, last)?
-                .map(|item| (item.key, item.data.clone())));
+                .map(|item| Ok((item.key, fallible::copy(&item.data)?)))
+                .transpose();
         }
         Ok(None)
     }
@@ -484,7 +496,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             if found > *to {
                 break;
             }
-            out.push((found, data));
+            fallible::push(&mut out, (found, data))?;
             match successor(&found) {
                 Some(next) => key = next,
                 None => break,

@@ -16,10 +16,11 @@
 use alloc::collections::BTreeMap;
 
 use crate::extent::Backref;
-use crate::{Error, Result};
+use crate::{Error, Result, fallible};
 
 /// The pending changes to one extent's references.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct Head {
     /// The extent's length.
     pub num_bytes: u64,
@@ -30,7 +31,8 @@ pub struct Head {
 }
 
 /// Heads by extent address.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
+#[cfg_attr(test, derive(Clone))]
 pub struct DelayedRefs {
     heads: BTreeMap<u64, Head>,
 }
@@ -40,11 +42,11 @@ impl DelayedRefs {
     /// freshly allocated extent nothing ends up referring to must still be
     /// given back.
     pub fn touch(&mut self, bytenr: u64, num_bytes: u64, level: Option<u8>) -> Result<()> {
-        let head = self.heads.entry(bytenr).or_insert(Head {
+        let head = fallible::entry(&mut self.heads, bytenr, || Head {
             num_bytes,
             level,
             deltas: BTreeMap::new(),
-        });
+        })?;
         if head.num_bytes != num_bytes || head.level != level {
             return Err(Error::Inconsistent("one extent queued with two sizes"));
         }
@@ -65,7 +67,7 @@ impl DelayedRefs {
             .heads
             .get_mut(&bytenr)
             .ok_or(Error::Inconsistent("delayed ref head vanished"))?;
-        let entry = head.deltas.entry(backref).or_insert(0);
+        let entry = fallible::entry(&mut head.deltas, backref, || 0)?;
         *entry = entry
             .checked_add(delta)
             .ok_or(Error::Inconsistent("delayed ref overflow"))?;

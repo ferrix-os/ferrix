@@ -75,6 +75,7 @@ pub(super) fn stored(bits: &mut Bits<'_>, out: &mut Output<'_>) -> Option<()> {
     if len != !nlen {
         return None;
     }
+    // NOALLOC: `Output::extend` writes into the caller's buffer; this crate has no `alloc`.
     out.extend(bits.bytes(usize::from(len))?)
 }
 
@@ -174,6 +175,7 @@ fn symbols(bits: &mut Bits<'_>, out: &mut Output<'_>, litlen: &LitLen, dist: &Di
     loop {
         match litlen.decode(bits)? {
             END_OF_BLOCK => return Some(()),
+            // NOALLOC: `Output::push` writes into the caller's buffer; this crate has no `alloc`.
             literal @ 0..=255 => out.push(u8::try_from(literal).ok()?)?,
             symbol => {
                 let length = length(bits, symbol)?;

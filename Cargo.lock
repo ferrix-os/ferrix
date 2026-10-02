@@ -125,6 +125,8 @@ name = "ferrix-btrfs-write"
 version = "0.1.0"
 dependencies = [
  "ferrix-btrfs",
+ "ferrix-fallible",
+ "ferrix-heap",
 ]
 
 [[package]]

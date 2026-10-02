@@ -793,3 +793,93 @@ fn a_nodatasum_file_is_read_without_checking_as_linux_reads_it() {
     );
     assert_eq!(&after[..100], &before[..100], "and nothing else changed");
 }
+
+/// A device that runs out of memory on its `fail_at`th read, as one that
+/// serves reads through a cache or a bounce buffer it allocates would.
+struct Starved<'a> {
+    device: &'a mut PackedDevice,
+    reads: u64,
+    fail_at: u64,
+}
+
+impl Device for Starved<'_> {
+    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+        self.reads += 1;
+        if self.reads == self.fail_at {
+            return Err(BtrfsError::OutOfMemory);
+        }
+        self.device.read_at(physical, buf, kind)
+    }
+}
+
+/// Open `packed`, look `name` up in the root directory and read it whole, on
+/// a device that runs out of memory at its `fail_at`th read. The first
+/// error, or the file, and how many reads were made.
+fn open_and_read(packed: &[u8], name: &[u8], fail_at: u64) -> (Result<Vec<u8>, BtrfsError>, u64) {
+    let f = &mut Fixture::new(packed);
+    let mut device = Starved {
+        device: &mut f.device,
+        reads: 0,
+        fail_at,
+    };
+    let result = (|| {
+        let volume = Volume::open(&mut device, &mut f.chunks, &mut f.node)?;
+        let sub = volume.default_subvolume();
+        let mut buffers = ReadBuffers::new((
+            &mut f.compressed[..],
+            &mut f.plain[..],
+            &mut f.zstd[..],
+            &mut f.csum_node[..],
+        ))?;
+        let entry = sub
+            .lookup(&mut device, sub.root_dir(), name, &mut f.node)?
+            .ok_or(BtrfsError::MissingInode(0))?;
+        let Target::Inode(ino) = entry.target else {
+            return Err(BtrfsError::MissingInode(0));
+        };
+        let mut contents = Vec::new();
+        let mut piece = vec![0u8; 3001];
+        loop {
+            let offset = contents.len() as u64;
+            let n = sub.read(
+                &mut device,
+                ino,
+                offset,
+                &mut piece,
+                &mut f.node,
+                &mut buffers,
+            )?;
+            if n == 0 {
+                return Ok(contents);
+            }
+            contents.extend_from_slice(&piece[..n]);
+        }
+    })();
+    (result, device.reads)
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "reopens real images once per read they make")]
+fn a_device_out_of_memory_is_answered_as_such_at_every_read() {
+    // Plain and compressed extents, and DUP, whose damaged first copies are
+    // read from the second: running out of memory is not damage, and is
+    // neither retried from another copy nor reported as anything else.
+    for (packed, name) in [
+        (IMAGES[0].1, &b"big.txt"[..]),
+        (IMAGES[3].1, b"big.txt"),
+        (DUP, b"data.bin"),
+    ] {
+        let (whole, reads) = open_and_read(packed, name, 0);
+        let whole = whole.unwrap();
+        assert!(reads > 5 && !whole.is_empty());
+        for fail_at in 1..=reads {
+            let (result, made) = open_and_read(packed, name, fail_at);
+            assert_eq!(
+                result,
+                Err(BtrfsError::OutOfMemory),
+                "read {fail_at} of {reads}"
+            );
+            assert_eq!(made, fail_at, "nothing is read after memory ran out");
+        }
+    }
+}

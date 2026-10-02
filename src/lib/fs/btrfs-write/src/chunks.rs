@@ -18,10 +18,14 @@ use ferrix_btrfs::superblock::{PRIMARY_OFFSET, SUPERBLOCK_OFFSETS};
 
 use crate::bytes::{put, put_u16, put_u32, put_u64};
 use crate::ranges::RangeSet;
-use crate::{Error, Result, Unsupported};
+use crate::{Error, Result, Unsupported, fallible};
 
 /// One chunk: a logical range and the physical places it is stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Clone` outside the tests: a copy allocates, and is
+/// [`Chunk::try_clone`].
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct Chunk {
     /// First logical address.
     pub(crate) logical: u64,
@@ -40,7 +44,7 @@ impl Chunk {
     /// writable: every other profile either stripes or spans devices.
     pub(crate) fn from_item(logical: u64, item: &ChunkItem<'_>) -> Result<Chunk> {
         let profile = item.type_bits() & BLOCK_GROUP_PROFILE_MASK;
-        let stripes: Vec<Stripe> = item.stripes().collect();
+        let stripes: Vec<Stripe> = fallible::collect(item.stripes())?;
         let copies = if profile == BLOCK_GROUP_DUP { 2 } else { 1 };
         if (profile != 0 && profile != BLOCK_GROUP_DUP) || stripes.len() != copies {
             return Err(Error::Unsupported(Unsupported::Profile));
@@ -50,6 +54,16 @@ impl Chunk {
             length: item.length(),
             type_bits: item.type_bits(),
             stripes,
+        })
+    }
+
+    /// A copy of the chunk.
+    pub(crate) fn try_clone(&self) -> Result<Chunk> {
+        Ok(Chunk {
+            logical: self.logical,
+            length: self.length,
+            type_bits: self.type_bits,
+            stripes: fallible::copy(&self.stripes)?,
         })
     }
 
@@ -73,10 +87,10 @@ impl Chunk {
     /// free-space tree still lists these ranges as free — Linux never takes
     /// them out of it — so only the allocator may not hand them out: a tree
     /// block placed there is overwritten by the next commit's superblocks.
-    pub(crate) fn superblock_stripes(&self) -> RangeSet {
+    pub(crate) fn superblock_stripes(&self) -> Result<RangeSet> {
         let mut out = RangeSet::new();
         if self.logical < PRIMARY_OFFSET {
-            out.add(self.logical, PRIMARY_OFFSET.min(self.end()) - self.logical);
+            out.try_add(self.logical, PRIMARY_OFFSET.min(self.end()) - self.logical)?;
         }
         for &offset in &SUPERBLOCK_OFFSETS {
             for stripe in &self.stripes {
@@ -89,35 +103,45 @@ impl Chunk {
                 // SINGLE and DUP stripes are whole copies, so the offset
                 // into the stripe is the offset into the chunk.
                 let at = self.logical.saturating_add(within);
-                out.add(at, STRIPE_LEN.min(self.end() - at));
+                out.try_add(at, STRIPE_LEN.min(self.end() - at))?;
             }
         }
-        out
+        Ok(out)
     }
 
     /// The `CHUNK_ITEM` payload for this chunk, as the kernel writes one for
     /// a single-device volume.
-    pub(crate) fn item_bytes(&self, sectorsize: u32) -> Option<Vec<u8>> {
+    pub(crate) fn item_bytes(&self, sectorsize: u32) -> Result<Vec<u8>> {
+        let bad = Error::Inconsistent("chunk item does not encode");
+        let len = 32usize
+            .checked_mul(self.stripes.len())
+            .and_then(|stripes| stripes.checked_add(48))
+            .ok_or(bad)?;
+        let mut out = fallible::zeroed(len)?;
+        self.encode_item(&mut out, sectorsize).ok_or(bad)?;
+        Ok(out)
+    }
+
+    /// Lay the `CHUNK_ITEM` out in `out`, which is exactly its size.
+    fn encode_item(&self, out: &mut [u8], sectorsize: u32) -> Option<()> {
         let num = u16::try_from(self.stripes.len()).ok()?;
-        let mut out =
-            alloc::vec![0u8; 48usize.checked_add(32usize.checked_mul(self.stripes.len())?)?];
-        put_u64(&mut out, 0, self.length)?;
+        put_u64(out, 0, self.length)?;
         // The owner is always the extent tree's id, for historical reasons.
-        put_u64(&mut out, 8, ferrix_btrfs::items::EXTENT_TREE_OBJECTID)?;
-        put_u64(&mut out, 16, STRIPE_LEN)?;
-        put_u64(&mut out, 24, self.type_bits)?;
-        put_u32(&mut out, 32, STRIPE_LEN as u32)?;
-        put_u32(&mut out, 36, STRIPE_LEN as u32)?;
-        put_u32(&mut out, 40, sectorsize)?;
-        put_u16(&mut out, 44, num)?;
-        put_u16(&mut out, 46, 1)?;
+        put_u64(out, 8, ferrix_btrfs::items::EXTENT_TREE_OBJECTID)?;
+        put_u64(out, 16, STRIPE_LEN)?;
+        put_u64(out, 24, self.type_bits)?;
+        put_u32(out, 32, STRIPE_LEN as u32)?;
+        put_u32(out, 36, STRIPE_LEN as u32)?;
+        put_u32(out, 40, sectorsize)?;
+        put_u16(out, 44, num)?;
+        put_u16(out, 46, 1)?;
         for (index, stripe) in self.stripes.iter().enumerate() {
             let at = 48usize.checked_add(index.checked_mul(32)?)?;
-            put_u64(&mut out, at, stripe.devid)?;
-            put_u64(&mut out, at.checked_add(8)?, stripe.offset)?;
-            put(&mut out, at.checked_add(16)?, &stripe.dev_uuid)?;
+            put_u64(out, at, stripe.devid)?;
+            put_u64(out, at.checked_add(8)?, stripe.offset)?;
+            put(out, at.checked_add(16)?, &stripe.dev_uuid)?;
         }
-        Some(out)
+        Some(())
     }
 }
 
@@ -125,7 +149,8 @@ impl Chunk {
 pub(crate) const STRIPE_LEN: u64 = 64 * 1024;
 
 /// Every chunk of the volume, by logical address.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct Chunks {
     by_logical: BTreeMap<u64, Chunk>,
 }
@@ -149,7 +174,7 @@ impl Chunks {
         {
             return Err(Error::Volume(BtrfsError::BadChunk));
         }
-        let _ = self.by_logical.insert(chunk.logical, chunk);
+        let _ = fallible::insert(&mut self.by_logical, chunk.logical, chunk)?;
         Ok(())
     }
 
@@ -169,16 +194,12 @@ impl Chunks {
         if logical.checked_add(len).is_none_or(|end| end > chunk.end()) {
             return Err(Error::Volume(BtrfsError::NotMapped(chunk.end())));
         }
-        chunk
-            .stripes
-            .iter()
-            .map(|stripe| {
-                stripe
-                    .offset
-                    .checked_add(within)
-                    .ok_or(Error::Volume(BtrfsError::NotMapped(logical)))
-            })
-            .collect()
+        fallible::collect_ok(chunk.stripes.iter().map(|stripe| {
+            stripe
+                .offset
+                .checked_add(within)
+                .ok_or(Error::Volume(BtrfsError::NotMapped(logical)))
+        }))
     }
 
     /// Every chunk, in logical order.

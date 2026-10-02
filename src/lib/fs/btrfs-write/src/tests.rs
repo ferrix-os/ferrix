@@ -33,6 +33,7 @@ mod fsops;
 mod full;
 mod inodes;
 mod log;
+mod oom;
 mod powerfail;
 
 const BLOCK: usize = 4096;

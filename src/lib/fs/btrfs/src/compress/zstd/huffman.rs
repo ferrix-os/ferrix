@@ -111,6 +111,7 @@ fn fse_weights(body: &[u8], weights: &mut [u8]) -> Option<usize> {
     let mut emitted = 0usize;
     let mut turn = 0usize;
     loop {
+        // NOALLOC: a decoding table's `entry` lookup; this crate has no `alloc`.
         let entry = table.entry(*states.get(turn)?)?;
         *weights.get_mut(emitted)? = entry.symbol;
         emitted = emitted.checked_add(1)?;
@@ -118,6 +119,7 @@ fn fse_weights(body: &[u8], weights: &mut [u8]) -> Option<usize> {
         *states.get_mut(turn)? = usize::from(entry.baseline).checked_add(step)?;
         turn ^= 1;
         if bits.overflowed() {
+            // NOALLOC: a decoding table's `entry` lookup; this crate has no `alloc`.
             let last = table.entry(*states.get(turn)?)?;
             *weights.get_mut(emitted)? = last.symbol;
             return emitted.checked_add(1);

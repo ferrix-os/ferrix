@@ -671,3 +671,52 @@ fn a_read_past_the_end_is_empty_and_the_last_page_is_zero_padded() {
     let got = file.read_at(expected.size - tail, &mut last).unwrap();
     assert_eq!(got as u64, tail, "a read is clamped to the file's size");
 }
+
+/// A device that runs out of memory on every read while `starved` is set,
+/// as one reading through a buffer it must allocate does.
+#[derive(Clone)]
+struct Starved {
+    image: Image,
+    starved: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Device for Starved {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> core::result::Result<(), BtrfsError> {
+        if self.starved.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(BtrfsError::OutOfMemory);
+        }
+        self.image.read_at(physical, buf, kind)
+    }
+}
+
+#[test]
+fn a_device_out_of_memory_is_enomem_not_eio() {
+    let (_, packed) = IMAGES[0];
+    let starved = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let device = Starved {
+        image: Image::new(packed),
+        starved: Arc::clone(&starved),
+    };
+    assert_eq!(
+        Btrfs::mount(device.clone(), 42, heap()).err(),
+        Some(Errno::ENOMEM),
+        "a mount that could not read for memory is not a bad volume"
+    );
+    starved.store(false, std::sync::atomic::Ordering::Relaxed);
+    let fs = Btrfs::mount(device, 42, heap()).unwrap();
+    let file = fs.root().lookup(b"big.txt").unwrap();
+    starved.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut piece = vec![0u8; 3001];
+    assert_eq!(file.read_at(0, &mut piece).err(), Some(Errno::ENOMEM));
+    starved.store(false, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        read_all(&file).len(),
+        140_000,
+        "and it reads once there is memory"
+    );
+}

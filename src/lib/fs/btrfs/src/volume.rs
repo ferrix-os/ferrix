@@ -87,7 +87,10 @@ pub trait Device {
     ///
     /// A short device or a failed read is an error, typically
     /// [`BtrfsError::DeviceRead`]; a partially filled buffer must never be
-    /// reported as success.
+    /// reported as success. A read that could not get the memory it needed
+    /// is [`BtrfsError::OutOfMemory`], which every caller passes on as it is:
+    /// it says nothing about the volume, so it is never retried from another
+    /// copy or reported as damage.
     ///
     /// `kind` says what the bytes are for; see [`ReadKind`].
     fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError>;
@@ -460,6 +463,8 @@ impl<S: ChunkStorage> Volume<S> {
         for copy in 0..self.copies(at.bytenr).max(1) {
             match self.read_node_copy(device, at, block, copy) {
                 Ok(header) => return Ok(Node::reparsed(block, header)),
+                // Not the copy's fault: another copy would meet the same.
+                Err(BtrfsError::OutOfMemory) => return Err(BtrfsError::OutOfMemory),
                 Err(error) => {
                     let _ = first.get_or_insert(error);
                 }
@@ -590,6 +595,7 @@ fn add_chunk<S: ChunkStorage>(
     sectorsize: u32,
 ) -> Result<(), BtrfsError> {
     item.check_sectorsize(logical, sectorsize)?;
+    // NOALLOC: `ChunkMap::insert` fills caller-supplied storage; this crate has no `alloc`.
     map.insert(logical, item)
 }
 

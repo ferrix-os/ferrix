@@ -20,14 +20,14 @@
 //! The record is parsed whole, edited as a map, and written whole, for the
 //! same reason nodes are (see [`crate::node`]).
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
 use ferrix_btrfs::crc32c::crc32c_update;
 use ferrix_btrfs::tree::BtrfsKey;
 
 use crate::bytes::{get_u8, get_u32, get_u64, put_u8, put_u32, put_u64};
-use crate::{Error, Result, Unsupported};
+use crate::{Error, Result, Unsupported, fallible};
 
 /// An allocated extent; for data, and for tree blocks on volumes without
 /// skinny metadata. The key's offset is the length.
@@ -159,7 +159,8 @@ pub fn hash_extent_data_ref(root: u64, objectid: u64, offset: u64) -> u64 {
 }
 
 /// An extent item and every back-reference to the extent, inline or keyed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct ExtentRecord {
     /// Transaction that allocated the extent.
     pub generation: u64,
@@ -245,7 +246,10 @@ impl ExtentRecord {
 
     /// Count a reference in. A reference found twice is damage.
     fn add(&mut self, backref: Backref, count: u64) -> Result<()> {
-        if count == 0 || self.refs.insert(backref, count).is_some() {
+        if count == 0 || self.refs.contains_key(&backref) {
+            return Err(Error::Inconsistent("extent reference repeated or zero"));
+        }
+        if fallible::insert(&mut self.refs, backref, count)?.is_some() {
             return Err(Error::Inconsistent("extent reference repeated or zero"));
         }
         Ok(())
@@ -277,8 +281,10 @@ impl ExtentRecord {
         }
         if next == 0 {
             let _ = self.refs.remove(&backref);
+        } else if let Some(count) = self.refs.get_mut(&backref) {
+            *count = next;
         } else {
-            let _ = self.refs.insert(backref, next);
+            let _ = fallible::insert(&mut self.refs, backref, next)?;
         }
         Ok(())
     }
@@ -293,34 +299,38 @@ impl ExtentRecord {
     /// Linux's `insert_extent_data_ref` does.
     pub fn to_items(&self, key: &BtrfsKey, max_inline: usize) -> Result<Vec<(BtrfsKey, Vec<u8>)>> {
         let bad = Error::Inconsistent("extent record does not encode");
-        let mut ordered: Vec<(&Backref, u64)> = self.refs.iter().map(|(r, &c)| (r, c)).collect();
-        ordered.sort_by(|(a, _), (b, _)| {
+        let mut ordered: Vec<(&Backref, u64)> =
+            fallible::collect(self.refs.iter().map(|(r, &c)| (r, c)))?;
+        // Unstable, which sorts in place, and the same order the map's own
+        // gave a stable sort: two references alike in type and sequence --
+        // data references whose hashes collide -- stay in the map's order.
+        ordered.sort_unstable_by(|(a, _), (b, _)| {
             a.key_type()
                 .cmp(&b.key_type())
                 .then(b.sequence().cmp(&a.sequence()))
+                .then(a.cmp(b))
         });
-        let mut item = alloc::vec![0u8; EXTENT_ITEM_SIZE];
+        let mut item = fallible::zeroed(EXTENT_ITEM_SIZE)?;
         put_u64(&mut item, 0, self.total()).ok_or(bad)?;
         put_u64(&mut item, 8, self.generation).ok_or(bad)?;
         put_u64(&mut item, 16, self.flags).ok_or(bad)?;
-        let mut rest = ordered.iter();
-        let mut keyed = Vec::new();
-        for &(backref, count) in rest.by_ref() {
+        let mut keyed = ordered.as_slice();
+        while let Some((&(backref, count), rest)) = keyed.split_first() {
             if item.len().saturating_add(backref.inline_size()) > max_inline {
-                keyed.push((backref, count));
                 break;
             }
-            push_inline(&mut item, backref, count).ok_or(bad)?;
+            push_inline(&mut item, backref, count)?;
+            keyed = rest;
         }
-        keyed.extend(rest.map(|&(backref, count)| (backref, count)));
-        let mut items = alloc::vec![(*key, item)];
-        let mut taken: BTreeMap<u64, ()> = BTreeMap::new();
-        for (backref, count) in keyed {
-            let (item_key, data) =
-                keyed_item(key.objectid, backref, count, &mut taken).ok_or(bad)?;
-            items.push((item_key, data));
+        let mut items = fallible::with_capacity(keyed.len().saturating_add(1))?;
+        fallible::push(&mut items, (*key, item))?;
+        let mut taken = BTreeSet::new();
+        for &(backref, count) in keyed {
+            let keyed_item = keyed_item(key.objectid, backref, count, &mut taken)?;
+            fallible::push(&mut items, keyed_item)?;
         }
-        items.sort_by_key(|(k, _)| *k);
+        // Every key differs, so an unstable sort is the stable one.
+        items.sort_unstable_by_key(|(k, _)| *k);
         Ok(items)
     }
 }
@@ -373,9 +383,15 @@ fn parse_data_ref(data: &[u8], at: usize) -> Option<(Backref, u64)> {
 }
 
 /// Append one inline reference to an extent item.
-fn push_inline(item: &mut Vec<u8>, backref: &Backref, count: u64) -> Option<()> {
+fn push_inline(item: &mut Vec<u8>, backref: &Backref, count: u64) -> Result<()> {
+    let bad = Error::Inconsistent("extent record does not encode");
     let at = item.len();
-    item.resize(at.checked_add(backref.inline_size())?, 0);
+    fallible::resize(item, at.checked_add(backref.inline_size()).ok_or(bad)?, 0)?;
+    encode_inline(item, at, backref, count).ok_or(bad)
+}
+
+/// Lay one inline reference out at `at`, in room already made for it.
+fn encode_inline(item: &mut [u8], at: usize, backref: &Backref, count: u64) -> Option<()> {
     put_u8(item, at, backref.key_type())?;
     let body = at.checked_add(1)?;
     match *backref {
@@ -413,20 +429,19 @@ fn keyed_item(
     bytenr: u64,
     backref: &Backref,
     count: u64,
-    taken: &mut BTreeMap<u64, ()>,
-) -> Option<(BtrfsKey, Vec<u8>)> {
+    taken: &mut BTreeSet<u64>,
+) -> Result<(BtrfsKey, Vec<u8>)> {
+    let bad = Error::Inconsistent("extent record does not encode");
     match *backref {
-        Backref::Tree { root } => {
-            Some((BtrfsKey::new(bytenr, TREE_BLOCK_REF_KEY, root), Vec::new()))
-        }
-        Backref::SharedBlock { parent } => Some((
+        Backref::Tree { root } => Ok((BtrfsKey::new(bytenr, TREE_BLOCK_REF_KEY, root), Vec::new())),
+        Backref::SharedBlock { parent } => Ok((
             BtrfsKey::new(bytenr, SHARED_BLOCK_REF_KEY, parent),
             Vec::new(),
         )),
         Backref::SharedData { parent } => {
-            let mut data = alloc::vec![0u8; 4];
-            put_u32(&mut data, 0, u32::try_from(count).ok()?)?;
-            Some((BtrfsKey::new(bytenr, SHARED_DATA_REF_KEY, parent), data))
+            let mut data = fallible::zeroed(4)?;
+            put_u32(&mut data, 0, u32::try_from(count).map_err(|_| bad)?).ok_or(bad)?;
+            Ok((BtrfsKey::new(bytenr, SHARED_DATA_REF_KEY, parent), data))
         }
         Backref::Data {
             root,
@@ -434,13 +449,13 @@ fn keyed_item(
             offset,
         } => {
             let mut slot = hash_extent_data_ref(root, objectid, offset);
-            while taken.contains_key(&slot) {
-                slot = slot.checked_add(1)?;
+            while taken.contains(&slot) {
+                slot = slot.checked_add(1).ok_or(bad)?;
             }
-            let _ = taken.insert(slot, ());
-            let mut data = alloc::vec![0u8; DATA_REF_SIZE];
-            put_data_ref(&mut data, 0, root, objectid, offset, count)?;
-            Some((BtrfsKey::new(bytenr, EXTENT_DATA_REF_KEY, slot), data))
+            let _ = fallible::insert_into_set(taken, slot)?;
+            let mut data = fallible::zeroed(DATA_REF_SIZE)?;
+            put_data_ref(&mut data, 0, root, objectid, offset, count).ok_or(bad)?;
+            Ok((BtrfsKey::new(bytenr, EXTENT_DATA_REF_KEY, slot), data))
         }
     }
 }

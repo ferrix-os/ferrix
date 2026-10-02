@@ -47,7 +47,7 @@ use crate::extent::Backref;
 use crate::fs::FS_TREE;
 use crate::space::Kind;
 use crate::volume::Root;
-use crate::{Error, Result, WriteDevice, WriteVolume};
+use crate::{Error, Result, WriteDevice, WriteVolume, fallible};
 
 /// The object id every log tree has: Linux's `BTRFS_TREE_LOG_OBJECTID`.
 pub const TREE_LOG_OBJECTID: u64 = 0u64.wrapping_sub(6);
@@ -85,8 +85,10 @@ impl<D: WriteDevice> WriteVolume<D> {
             volume.forget_logged(ino)?;
             let mut sums = Vec::new();
             for (key, data) in items {
-                if key.item_type == EXTENT_DATA_KEY {
-                    sums.extend(logged_extent(&key, &data, volume.sectorsize())?);
+                if key.item_type == EXTENT_DATA_KEY
+                    && let Some(range) = logged_extent(&key, &data, volume.sectorsize())?
+                {
+                    fallible::push(&mut sums, range)?;
                 }
                 volume.put(TREE_LOG_OBJECTID, key, data)?;
             }
@@ -104,14 +106,15 @@ impl<D: WriteDevice> WriteVolume<D> {
         }
         self.ensure_space(64)?;
         let at = self.new_node(TREE_LOG_OBJECTID, 0, crate::node::Body::Leaf(Vec::new()))?;
-        let _ = self.roots.insert(
+        let _ = fallible::insert(
+            &mut self.roots,
             TREE_LOG_OBJECTID,
             Root {
                 bytenr: at,
                 level: 0,
                 generation: self.transid,
             },
-        );
+        )?;
         Ok(())
     }
 
@@ -160,7 +163,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             volume.write_nodes()?;
             volume.device.flush()?;
             volume.seal_log(log)?;
-            let mut block = volume.superblock.clone();
+            let mut block = fallible::copy(&volume.superblock)?;
             let bad = Error::Inconsistent("superblock field out of range");
             put_u64(&mut block, SB_LOG_ROOT, log.bytenr).ok_or(bad)?;
             put_u64(&mut block, SB_LOG_ROOT_TRANSID, volume.transid).ok_or(bad)?;
@@ -188,7 +191,9 @@ impl<D: WriteDevice> WriteVolume<D> {
         self.collect_blocks(log, &mut blocks)?;
         for (bytenr, _) in blocks {
             if let Some(node) = self.dirty.remove(&bytenr) {
-                let _ = self.clean.insert(bytenr, node);
+                // The clean nodes are a cache, and this one is on the disk:
+                // with no room for it, it is read again when next wanted.
+                let _ = fallible::insert(&mut self.clean, bytenr, node);
             }
         }
         Ok(())
@@ -222,13 +227,17 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// Every block of the tree at `root`, with its level.
     fn collect_blocks(&mut self, root: Root, out: &mut Vec<(u64, u8)>) -> Result<()> {
-        let mut stack = alloc::vec![(root.bytenr, root.level, root.generation)];
+        let mut stack = Vec::new();
+        fallible::push(&mut stack, (root.bytenr, root.level, root.generation))?;
         while let Some((at, level, generation)) = stack.pop() {
             self.load(at, level, generation)?;
-            out.push((at, level));
+            fallible::push(out, (at, level))?;
             if let crate::node::Body::Internal(ptrs) = &self.node(at)?.body {
-                for ptr in ptrs.clone() {
-                    stack.push((ptr.blockptr, level.saturating_sub(1), ptr.generation));
+                for ptr in ptrs {
+                    fallible::push(
+                        &mut stack,
+                        (ptr.blockptr, level.saturating_sub(1), ptr.generation),
+                    )?;
                 }
             }
         }
@@ -253,7 +262,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             level,
             generation,
         };
-        let _ = self.roots.insert(TREE_LOG_OBJECTID, root);
+        let _ = fallible::insert(&mut self.roots, TREE_LOG_OBJECTID, root)?;
         // Everything the log holds is read now, blocks and items both, and
         // nothing is read from it again. The edits below allocate from the
         // committed free space, which includes the log's own blocks — it was
@@ -289,17 +298,15 @@ impl<D: WriteDevice> WriteVolume<D> {
         for (key, data) in &items {
             match key.item_type {
                 INODE_ITEM_KEY => {
-                    let _ = logged.entry(key.objectid).or_default();
+                    let _ = fallible::entry(&mut logged, key.objectid, Vec::new)?;
                 }
                 EXTENT_DATA_KEY => {
                     let extent = ExtentData::parse_item(key, data, self.sectorsize())?;
                     let end = extent
                         .end(key, self.sectorsize())
                         .ok_or(Error::Inconsistent("logged extent ends nowhere"))?;
-                    logged
-                        .entry(key.objectid)
-                        .or_default()
-                        .push((key.offset, end));
+                    let ranges = fallible::entry(&mut logged, key.objectid, Vec::new)?;
+                    fallible::push(ranges, (key.offset, end))?;
                 }
                 _ => {}
             }
@@ -308,7 +315,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             match key.item_type {
                 EXTENT_CSUM_KEY => self.replay_sums(&key, &data, &restored)?,
                 EXTENT_DATA_KEY => self.replay_extent(&key, data, &mut restored)?,
-                INODE_ITEM_KEY => stat.push((key, data)),
+                INODE_ITEM_KEY => fallible::push(&mut stat, (key, data))?,
                 _ => self.put(FS_TREE, key, data)?,
             }
         }
@@ -358,10 +365,12 @@ impl<D: WriteDevice> WriteVolume<D> {
                 // holds it and the replay must take it back, exactly where
                 // it is, before anything else can have it.
                 if self.extent_items(file.disk_bytenr)?.is_empty() {
-                    self.space
-                        .reserve(file.disk_bytenr, file.disk_num_bytes, Kind::Data)?;
+                    let (at, len) = (file.disk_bytenr, file.disk_num_bytes);
+                    // FALLIBLE: the allocator's own `reserve`, which takes
+                    // space, and reports running out of memory for it.
+                    self.space.reserve(at, len, Kind::Data)?;
                 }
-                let _ = restored.insert(file.disk_bytenr, file.disk_num_bytes);
+                let _ = restored.try_insert(file.disk_bytenr, file.disk_num_bytes)?;
             }
             self.refs.add(
                 file.disk_bytenr,
@@ -397,7 +406,7 @@ impl<D: WriteDevice> WriteVolume<D> {
                 if run.is_empty() {
                     start = at;
                 }
-                run.extend_from_slice(sum);
+                fallible::extend_from_slice(&mut run, sum)?;
                 continue;
             }
             self.put_sums(start, core::mem::take(&mut run))?;

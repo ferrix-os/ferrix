@@ -192,6 +192,11 @@ pub enum BtrfsError {
         /// [`items::COMPRESS_ZSTD`] and friends.
         compression: u8,
     },
+    /// Memory ran out. This crate allocates nothing, so it never makes this
+    /// itself: a [`volume::Device`] whose read needs memory -- a bounce
+    /// buffer, a cache block -- answers it, and the reader passes it on
+    /// rather than calling a volume that could not be read damaged.
+    OutOfMemory,
 }
 
 impl fmt::Display for BtrfsError {
@@ -271,6 +276,7 @@ impl fmt::Display for BtrfsError {
             BtrfsError::BadCompressedData { compression } => {
                 write!(f, "corrupt stream for compression type {compression}")
             }
+            BtrfsError::OutOfMemory => f.write_str("out of memory"),
         }
     }
 }
