@@ -53,7 +53,13 @@
 //!
 //! Until the release, a quarantined page stays reachable by its device, and
 //! so by that device's next driver, which is the dead one's successor in the
-//! same trust domain; nothing else can reach it. Once released, a frame is
+//! same trust domain; nothing else can reach it -- with one exception, for a
+//! short while. A driver that served fault windows (`user::window`) lent some
+//! of the pinned pages to its clients, and its death revokes them on the
+//! window death task, after its handles close. Until that revoke has run, a
+//! client may still write a lent page through its own mapping, so such a
+//! write can show in the quarantine's sums as if the device had written late.
+//! It lands only in the dead driver's own pages, as a late device write does. Once released, a frame is
 //! zeroed before a new owner can read it, as every frame handed to a VMO is
 //! (O.SCRUB). A pin closed by a live driver is not quarantined: a live
 //! driver resets its device before it unpins, as the ring specifications say.

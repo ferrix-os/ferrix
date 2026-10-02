@@ -254,11 +254,11 @@ pub(crate) use x86_64::{
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{USER_RMAP_PROGRAM, flush_tlb_page, send_ipi_to};
+pub(crate) use aarch64::{USER_RMAP_PROGRAM, USER_WINDOW_PROGRAM, flush_tlb_page, send_ipi_to};
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::{USER_RMAP_PROGRAM, flush_tlb_page, send_ipi_to};
+pub(crate) use armv7a::{USER_RMAP_PROGRAM, USER_WINDOW_PROGRAM, flush_tlb_page, send_ipi_to};
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::{USER_RMAP_PROGRAM, flush_tlb_page, send_ipi_to};
+pub(crate) use x86_64::{USER_RMAP_PROGRAM, USER_WINDOW_PROGRAM, flush_tlb_page, send_ipi_to};
 
 // Ordering memory a device reaches by DMA, and a register write after it (F-44).
 #[cfg(target_arch = "aarch64")]

@@ -190,6 +190,8 @@ fn space_errors() -> Result<u32, &'static str> {
         ),
         (SpaceError::PastEnd(4), "PastEnd(4)"),
         (SpaceError::Unreadable(5), "Unreadable(5)"),
+        (SpaceError::WindowFault(6), "WindowFault(6)"),
+        (SpaceError::WindowChange, "WindowChange"),
     ];
     for (error, name) in space {
         let _ = names(&error, name)?;

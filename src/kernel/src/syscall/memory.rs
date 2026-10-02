@@ -77,10 +77,18 @@ pub(crate) fn refused(error: SpaceError) -> Errno {
     match error {
         SpaceError::OutOfMemory | SpaceError::Backing(_) => Errno::ENOMEM,
         SpaceError::Unreadable(_) => Errno::EIO,
-        SpaceError::NotUserRange(_) | SpaceError::BadRange => Errno::EINVAL,
+        // A fault window is unmapped, replaced, moved or reprotected only
+        // whole: anything else is refused with the map unchanged.
+        SpaceError::NotUserRange(_) | SpaceError::BadRange | SpaceError::WindowChange => {
+            Errno::EINVAL
+        }
         // A copy into a file mapping past the file's end is EFAULT from a
-        // system call, where the same touch from user mode is SIGBUS.
-        SpaceError::NotMapped(_) | SpaceError::Refused(_) | SpaceError::PastEnd(_) => Errno::EFAULT,
+        // system call, where the same touch from user mode is SIGBUS; so is
+        // a copy into a fault window's page the server did not serve.
+        SpaceError::NotMapped(_)
+        | SpaceError::Refused(_)
+        | SpaceError::PastEnd(_)
+        | SpaceError::WindowFault(_) => Errno::EFAULT,
     }
 }
 
@@ -211,6 +219,11 @@ fn place(process: &Process, addr: u64, len: u64, flags: u32) -> Result<FilePlace
     // simply starts above the floor.
     if addr < MMAP_MIN_ADDR {
         return Err(Errno::EPERM);
+    }
+    // A fault window is replaced only whole: a fixed mapping over part of
+    // one is refused, with nothing changed, whichever kind of fixed it is.
+    if process.space().cuts_window(addr, len) {
+        return Err(Errno::EINVAL);
     }
     if flags & MAP_FIXED_NOREPLACE == 0 {
         // Plain MAP_FIXED replaces whatever is there. Unmapping first is what

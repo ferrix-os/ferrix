@@ -88,6 +88,9 @@ pub(crate) enum Object {
     /// The one there is goes into pid 1's table with `MANAGE` and no other
     /// right: it is neither duplicated nor sent, and goes when pid 1 goes.
     Starter,
+    /// A fault window's server (`user::window`): its identity, which is
+    /// neither duplicated nor sent, and whose close is its death.
+    WindowServer(Arc<crate::user::window::ServerHandle>),
     /// The capability to read the audit record
     /// (`docs/certification/AUDIT.md` §4): a token with nothing in it, as
     /// the record is the kernel's one store. Pid 1 is given the one there
@@ -118,6 +121,7 @@ impl Object {
             | Object::Pin(_)
             | Object::Process(_)
             | Object::Port(_)
+            | Object::WindowServer(_)
             | Object::Starter
             | Object::Audit => Signals::NONE,
         }
@@ -140,6 +144,7 @@ impl Object {
             | Object::Device(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
+            | Object::WindowServer(_)
             | Object::Starter
             | Object::Audit => &QUIET,
         }
@@ -310,6 +315,7 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Port(_)
+            | Object::WindowServer(_)
             | Object::Starter
             | Object::Audit => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,

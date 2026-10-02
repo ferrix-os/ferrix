@@ -567,7 +567,8 @@ fn handle_page_fault(frame: &mut arch::TrapFrame, fault: PageFault) {
         match resolved {
             Err(Some(
                 crate::user::space::SpaceError::PastEnd(address)
-                | crate::user::space::SpaceError::Unreadable(address),
+                | crate::user::space::SpaceError::Unreadable(address)
+                | crate::user::space::SpaceError::WindowFault(address),
             )) => user_fault_as(
                 frame,
                 &trap,

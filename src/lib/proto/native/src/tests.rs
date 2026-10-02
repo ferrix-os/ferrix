@@ -953,6 +953,52 @@ fn an_address_query_tells_a_short_buffer_from_a_complete_one() {
 }
 
 // ---------------------------------------------------------------------------
+// Fault windows
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_window_insert_lays_its_entries_out_as_the_kernel_reads_them() {
+    use crate::window::{Page, WindowServer};
+    let sys = Recorder::default();
+    let server = WindowServer::from_owned(owned(&sys, 0xD1));
+    let pool = Vmo::from_owned(owned(&sys, 0xD2));
+    sys.answer(|raw| {
+        let [server, window, entries, count, ..] = raw.args();
+        assert_eq!((server, window, count), (0xD1, 7, 2));
+        let bytes = raw.memory(entries, 48).unwrap().to_vec();
+        let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+        let half = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        assert_eq!((word(0), word(8), half(16), half(20)), (3, 9, 0xD2, 0));
+        assert_eq!((word(24), word(32), half(40), half(44)), (4, 10, 0xD2, 1));
+        0
+    });
+    let pages = [
+        Page {
+            offset: 3,
+            vmo: &pool,
+            index: 9,
+            write: false,
+        },
+        Page {
+            offset: 4,
+            vmo: &pool,
+            index: 10,
+            write: true,
+        },
+    ];
+    server.insert(7, &pages).unwrap();
+    sys.fails(status::BAD_STATE);
+    assert_eq!(server.insert(7, &pages[..1]), Err(Error::BadState));
+    server.revoke(7, 2, 5).unwrap();
+    server.answer(7, 11, true).unwrap();
+    server.answer(7, 12, false).unwrap();
+    let made_calls = sys.take();
+    assert_eq!(made_calls[2], made(nr::WINDOW_REVOKE, &[0xD1, 7, 2, 5]));
+    assert_eq!(made_calls[3], made(nr::WINDOW_ANSWER, &[0xD1, 7, 11, 0]));
+    assert_eq!(made_calls[4], made(nr::WINDOW_ANSWER, &[0xD1, 7, 12, 1]));
+}
+
+// ---------------------------------------------------------------------------
 // Coverage
 // ---------------------------------------------------------------------------
 
@@ -1014,6 +1060,10 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = mapping.map(None);
     let _ = device.pin(&vmo, 0, 1, PinAccess::ReadOnly);
     let _ = Pin::from_owned(handle()).addresses(&mut []);
+    let server = crate::window::WindowServer::from_owned(handle());
+    let _ = server.insert(1, &[]);
+    let _ = server.revoke(1, 0, 1);
+    let _ = server.answer(1, 1, true);
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();

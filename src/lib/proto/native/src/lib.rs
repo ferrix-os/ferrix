@@ -48,6 +48,7 @@ pub mod pending;
 pub mod pin;
 pub mod port;
 pub mod vmo;
+pub mod window;
 
 #[cfg(test)]
 mod tests;

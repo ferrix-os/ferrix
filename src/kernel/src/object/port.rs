@@ -46,7 +46,10 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use ferrix_native_abi::signals::Signals;
-use ferrix_native_abi::types::{PACKET_INTERRUPT, PACKET_SIGNAL, PACKET_USER, PortPacket};
+use ferrix_native_abi::types::{
+    PACKET_INTERRUPT, PACKET_SIGNAL, PACKET_USER, PACKET_WINDOW_FAULT, PACKET_WINDOW_UNMAPPED,
+    PortPacket,
+};
 use ferrix_sync::IrqSpinLock;
 
 use crate::arch;
@@ -245,7 +248,9 @@ impl Port {
         let packet = queue.packets.pop_front()?;
         match packet.kind {
             PACKET_USER => queue.users = queue.users.saturating_sub(1),
-            PACKET_SIGNAL => queue.promised = queue.promised.saturating_sub(1),
+            PACKET_SIGNAL | PACKET_WINDOW_FAULT | PACKET_WINDOW_UNMAPPED => {
+                queue.promised = queue.promised.saturating_sub(1);
+            }
             _ => {}
         }
         Some(packet)
@@ -271,7 +276,9 @@ impl Port {
             if queue.push_fitting(packet, true) {
                 match kind {
                     PACKET_USER => queue.users += 1,
-                    PACKET_SIGNAL => queue.promised += 1,
+                    PACKET_SIGNAL | PACKET_WINDOW_FAULT | PACKET_WINDOW_UNMAPPED => {
+                        queue.promised += 1;
+                    }
                     _ => {}
                 }
             }
@@ -328,6 +335,21 @@ impl Promise {
     /// Whether anyone still holds the port.
     pub(crate) fn is_live(&self) -> bool {
         self.port.strong_count() > 0
+    }
+
+    /// Queue `packet` on the room this promised, which a fault window's
+    /// packets are (`user::window`): it allocates nothing and cannot be
+    /// refused. The promise goes with the packet and is released when the
+    /// packet is taken, as a signal packet's is; so `packet.kind` must be one
+    /// [`Port::take`] counts as promised. Wakes the port's waiters; call
+    /// with no lock held that a wake-up might need.
+    pub(crate) fn keep(mut self, packet: PortPacket) {
+        let port = core::mem::take(&mut self.port);
+        drop(self);
+        if let Some(port) = port.upgrade() {
+            let _ = port.queue.lock().push_fitting(packet, false);
+            port.waiters.wake_all();
+        }
     }
 
     /// The port, if anyone still holds it.

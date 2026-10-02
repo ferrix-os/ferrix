@@ -82,9 +82,11 @@
 //!
 //! # Lock order
 //!
-//! This space's lock, then a VMO's mapper list, then the VMO's pages. No VMO
-//! lock is ever held while a space's lock is taken, no two spaces' locks are
-//! ever held together, and no shootdown waits under any of them.
+//! This space's lock, then a VMO's mapper list, then the VMO's pages. For a
+//! fault window (`user::window`) it is this space's lock, then the window's,
+//! then a VMO's pages. No VMO or window lock is ever held while a space's lock
+//! is taken, no two spaces' locks are ever held together, and no shootdown
+//! waits under any of them.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::{Arc, Weak};
@@ -107,6 +109,7 @@ use crate::fallible;
 use crate::mm;
 use crate::smp::{self, CpuMask, TlbPages};
 use crate::user::vmo::{Kept, Own, Retired, ShadowCopies, Sharing, Vmo, VmoError};
+use crate::user::window::{FaultWindow, Waits, WindowError};
 
 /// The lowest address a program may map anything at: 64 KiB, the
 /// `vm.mmap_min_addr` Linux distributions ship.
@@ -142,6 +145,13 @@ pub(crate) enum SpaceError {
     /// not be read from it: a `SIGBUS` too, as Linux gives for a mapped page
     /// whose read fails.
     Unreadable(u64),
+    /// The address is in a fault window whose server answered the fault with
+    /// an error, has died, or is the faulting process itself: a `SIGBUS`,
+    /// `BUS_ADRERR` at the address.
+    WindowFault(u64),
+    /// The change would split, move or reprotect a fault window, or cover
+    /// part of one: `EINVAL`, with nothing changed.
+    WindowChange,
 }
 
 impl fmt::Display for SpaceError {
@@ -157,6 +167,10 @@ impl fmt::Display for SpaceError {
             SpaceError::Unreadable(at) => {
                 write!(f, "the mapped file's page at {at:#x} is unreadable")
             }
+            SpaceError::WindowFault(at) => {
+                write!(f, "the fault window's server did not serve the page at {at:#x}")
+            }
+            SpaceError::WindowChange => f.write_str("a fault window is changed only whole"),
         }
     }
 }
@@ -215,6 +229,10 @@ struct Inner {
     /// region -- `mremap`, `mprotect` -- may not touch: a native VMO's size
     /// and the rights its protection stands for belong to its handle.
     native: BTreeSet<u64>,
+    /// The fault windows its regions name, by the id the region carries.
+    /// Every id here is attached to its window, and detached as its region
+    /// leaves the map, which is where a window's mapping count goes down.
+    windows: BTreeMap<u64, Arc<FaultWindow>>,
 }
 
 impl Inner {
@@ -283,6 +301,7 @@ impl AddressSpace {
                     shadows: BTreeMap::new(),
                     next_id: 1,
                     native: BTreeSet::new(),
+                    windows: BTreeMap::new(),
                 },
             )
         })
@@ -632,6 +651,14 @@ fn attach_child(child: &Arc<AddressSpace>) -> Result<(), SpaceError> {
             .attach(Arc::downgrade(child), id, Sharing::Private)
             .map_err(|_| SpaceError::OutOfMemory)?;
     }
+    // A fork shares a window: the child is one more mapping of it, and its
+    // faults are served as the parent's. A child let go after one of these
+    // failed detaches only those listed (`FaultWindow::detach`).
+    for (&id, window) in &inner.windows {
+        window
+            .attach(Arc::downgrade(child), id)
+            .map_err(|_| SpaceError::OutOfMemory)?;
+    }
     Ok(())
 }
 
@@ -640,6 +667,7 @@ fn attach_child(child: &Arc<AddressSpace>) -> Result<(), SpaceError> {
 fn map_error(error: ferrix_vma::VmaError) -> SpaceError {
     match error {
         ferrix_vma::VmaError::NoMemory => SpaceError::OutOfMemory,
+        ferrix_vma::VmaError::Window => SpaceError::WindowChange,
         _ => SpaceError::BadRange,
     }
 }
@@ -677,7 +705,7 @@ impl AddressSpace {
         }
         let (id, offset) = match region.backing {
             Backing::Anonymous { id, offset } | Backing::File { id, offset } => (id, offset),
-            Backing::Device { .. } => return None,
+            Backing::Device { .. } | Backing::Window { .. } => return None,
         };
         let into_region = address.checked_sub(region.range.start())?;
         let object = Arc::clone(inner.objects.get(&id)?);
@@ -880,6 +908,13 @@ impl AddressSpace {
             mm::deallocate_frames(root, 0);
             return Err(SpaceError::OutOfMemory);
         };
+        let mut windows = BTreeMap::new();
+        for (&id, window) in &inner.windows {
+            if fallible::insert(&mut windows, id, Arc::clone(window)).is_err() {
+                mm::deallocate_frames(root, 0);
+                return Err(SpaceError::OutOfMemory);
+            }
+        }
 
         // Only now the parent's map is marked and copied, and its writable
         // translations to the shared pages taken down.
@@ -918,6 +953,7 @@ impl AddressSpace {
                     // space's table.
                     next_id,
                     native,
+                    windows,
                 },
             )
         })
@@ -945,9 +981,69 @@ impl AddressSpace {
     /// segmentation fault, and [`SpaceError::Refused`] if the region does not
     /// permit the access, which is the other one.
     pub(crate) fn fault(&self, address: u64, access: Access) -> Result<(), SpaceError> {
+        self.fault_as(address, access, Waits::Never)
+    }
+
+    /// [`AddressSpace::fault`] for a program's own fault, from the trap path:
+    /// the one kind of fault that may wait for a fault window's server.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::fault`], and [`SpaceError::WindowFault`] for a
+    /// fault window's page its server did not serve.
+    pub(crate) fn user_fault(&self, address: u64, access: Access) -> Result<(), SpaceError> {
+        self.fault_as(address, access, Waits::OnServer)
+    }
+
+    /// [`AddressSpace::fault`], waiting for a fault window's server only if
+    /// `waits` says it may: the mode is the caller's type, not a choice made
+    /// here.
+    fn fault_as(&self, address: u64, access: Access, waits: Waits) -> Result<(), SpaceError> {
         fault_requested();
         self.fill_file_page(address)?;
+        self.serve_window_page(address, access, waits)?;
         self.resolve(address, access)
+    }
+
+    /// Before a fault on a fault window: have its server put the page in,
+    /// if the window lacks it, or lacks it writable and this is a write.
+    ///
+    /// From the same position a file's page is filled from: the region is
+    /// looked up under the lock, and the server asked after the lock is let
+    /// go, since the fault waits for the answer ([`FaultWindow::forward`]).
+    /// A region unmapped in between costs a fault the server answers for
+    /// nobody; the window, which this holds, outlives the wait.
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::WindowFault`] when the server refused, died, or is the
+    /// faulting process; [`SpaceError::Refused`] for a kernel access to a
+    /// page the window lacks, which never waits; and
+    /// [`SpaceError::OutOfMemory`] when the fault could not be noted.
+    fn serve_window_page(&self, address: u64, access: Access, waits: Waits) -> Result<(), SpaceError> {
+        let (window, offset) = {
+            let inner = self.inner.lock();
+            let Some(region) = inner.map.find(address) else {
+                return Ok(());
+            };
+            let Backing::Window { id } = region.backing else {
+                return Ok(());
+            };
+            if !permits(region.flags, access) {
+                return Ok(());
+            }
+            let offset = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start()) / PAGE_SIZE;
+            let Some(window) = inner.windows.get(&id).map(Arc::clone) else {
+                return Ok(());
+            };
+            (window, offset)
+        };
+        match window.forward(offset, access.write, waits) {
+            Ok(()) => Ok(()),
+            Err(WindowError::NoMemory) => Err(SpaceError::OutOfMemory),
+            Err(WindowError::Absent) => Err(SpaceError::Refused(address)),
+            Err(_) => Err(SpaceError::WindowFault(address)),
+        }
     }
 
     /// [`AddressSpace::fault`] once a file's page is in its object: find the
@@ -980,6 +1076,10 @@ impl AddressSpace {
             } => {
                 let physical = physical.saturating_add(into_region);
                 return self.fault_device(page, physical, region.flags, cached);
+            }
+            // A window's page is whatever its server put in its table.
+            Backing::Window { id } => {
+                return self.fault_window(&inner, id, page, into_region / PAGE_SIZE, region.flags, access);
             }
             // A private file mapping reads the file's pages until it writes
             // one, and writes into a shadow object of its own.
@@ -1395,8 +1495,7 @@ impl AddressSpace {
                     return Err(SpaceError::Refused(address));
                 }
                 if let Some(physical) = mm::translate_in(self.root * PAGE_SIZE, address)
-                    && (!access.write
-                        || writable_in_place(&inner, &region, address, physical / PAGE_SIZE))
+                    && usable_in_place(&inner, &region, address, physical / PAGE_SIZE, access)
                 {
                     let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
                     let answer = touch(virt);
@@ -1444,7 +1543,7 @@ impl AddressSpace {
         let Some(physical) = mm::translate_in(self.root * PAGE_SIZE, address) else {
             return Ok(None);
         };
-        if access.write && !writable_in_place(&inner, &region, address, physical / PAGE_SIZE) {
+        if !usable_in_place(&inner, &region, address, physical / PAGE_SIZE, access) {
             return Ok(None);
         }
         let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
@@ -1504,7 +1603,7 @@ impl AddressSpace {
         let cpus = {
             let mut inner = self.inner.lock();
             let removed = inner.map.remove(range).map_err(map_error)?;
-            self.take_down(&removed, &mut freeing, &mut pages);
+            self.take_down(&inner, &removed, &mut freeing, &mut pages);
             self.begin_shootdown(&inner)
         };
 
@@ -1523,15 +1622,32 @@ impl AddressSpace {
     ///
     /// Phase one of an unmap, called with the lock held. Nothing is freed
     /// here, because nothing may be until every processor has been told.
-    fn take_down(&self, removed: &[Unmapping], freeing: &mut Vec<Freeing>, pages: &mut TlbPages) {
+    ///
+    /// A fault window's region that leaves is one mapping fewer of the window
+    /// ([`FaultWindow::detach`]), counted here, without allocating, before
+    /// the unmap returns -- and so the window's `UNMAPPED` packet, if this
+    /// was its last mapping. Its entries are left to the window: this space's
+    /// shootdown is still to run.
+    fn take_down(
+        &self,
+        inner: &Inner,
+        removed: &[Unmapping],
+        freeing: &mut Vec<Freeing>,
+        pages: &mut TlbPages,
+    ) {
         for unmapping in removed {
             self.unmap_range(unmapping.range, pages);
+            if let Backing::Window { id } = unmapping.backing
+                && let Some(window) = inner.windows.get(&id)
+            {
+                window.detach(self, id);
+            }
             let owned = match unmapping.backing {
                 Backing::Anonymous { id, offset } => Some((id, offset, false)),
                 // A private file mapping's own pages are its shadow's; the
                 // file's are never an unmapper's to take.
                 Backing::File { id, offset } if !unmapping.flags.shared => Some((id, offset, true)),
-                Backing::File { .. } | Backing::Device { .. } => None,
+                Backing::File { .. } | Backing::Device { .. } | Backing::Window { .. } => None,
             };
             if let Some((id, offset, shadow)) = owned {
                 note(
@@ -1621,6 +1737,7 @@ impl AddressSpace {
             native,
             files,
             shadows,
+            windows,
             ..
         } = inner;
         // Room to hand the files back first. Without it a file mapping no
@@ -1632,6 +1749,11 @@ impl AddressSpace {
         // pass per id asked about: a space with thousands of regions and as
         // many objects made every unmap quadratic under this lock.
         let named = Named::of(map);
+        // A window no region names any more was detached as its region left
+        // (`take_down`); dropping this space's reference lets its entries go
+        // once nothing else holds it -- after this space's shootdown, which
+        // has returned by the time `give_back` runs this.
+        windows.retain(|&id, _| named.contains(id));
         let gone = files.keys().filter(|&&id| !named.contains(id)).count();
         let Ok(mut unkept) = fallible::try_with_capacity(gone) else {
             let kept = |id: u64| named.contains(id) || files.contains_key(&id);
@@ -1751,6 +1873,8 @@ impl AddressSpace {
                 {
                     offset
                 }
+                // A window's pages are numbered from its region's start.
+                Backing::Window { id } if id == object => 0,
                 _ => continue,
             };
             let region_first = offset / PAGE_SIZE;
@@ -2016,6 +2140,14 @@ impl AddressSpace {
             let mut inner = self.inner.lock();
 
             let region = *inner.map.find(old).ok_or(SpaceError::NotMapped(old))?;
+            // A window is never moved or resized, and a fixed destination may
+            // not cover part of one: refused before anything changes.
+            if region.backing.is_window()
+                || matches!(destination, Destination::Fixed(target)
+                    if user_range(target, new_len).is_some_and(|range| inner.map.cuts_window(range)))
+            {
+                return Err(SpaceError::WindowChange);
+            }
             if region.range.end() < old_range.end() {
                 return Err(SpaceError::NotMapped(old));
             }
@@ -2258,7 +2390,7 @@ impl AddressSpace {
     ) -> Result<(), SpaceError> {
         if fixed {
             let removed = inner.map.remove(new_range).map_err(map_error)?;
-            self.take_down(&removed, freeing, pages);
+            self.take_down(inner, &removed, freeing, pages);
         }
         let _ = inner.map.remove(old_range).map_err(map_error)?;
         self.unmap_range(old_range, pages);
@@ -2400,7 +2532,7 @@ fn shared_object(map: &ferrix_vma::AddressSpace, id: u64) -> bool {
                 Backing::Anonymous { id: named, .. } | Backing::File { id: named, .. } => {
                     named == id
                 }
-                Backing::Device { .. } => false,
+                Backing::Device { .. } | Backing::Window { .. } => false,
             }
     })
 }
@@ -2614,6 +2746,117 @@ impl AddressSpace {
             },
         )
         .map_err(|_| SpaceError::OutOfMemory)
+    }
+
+    /// Translate one page of a fault window's region to the frame its table
+    /// shows there, with `inner`, this space's lock, held: the order the
+    /// module gives, which is what keeps a revoke racing this from finding
+    /// the frame installed after it took the entry out (`user::window`).
+    ///
+    /// The translation's write permission is the lesser of the region's and
+    /// the entry's, and its memory type the entry's, which is its VMO's. A
+    /// page the table lacks, or has read-only for a write, is left as it is:
+    /// the access faults again and is forwarded again, never resolved here.
+    /// A page already present that the entry permits was resolved by another
+    /// processor first.
+    fn fault_window(
+        &self,
+        inner: &Inner,
+        id: u64,
+        page: u64,
+        offset: u64,
+        flags: VmaFlags,
+        access: Access,
+    ) -> Result<(), SpaceError> {
+        let Some(window) = inner.windows.get(&id) else {
+            return Err(SpaceError::NotMapped(page));
+        };
+        let Some((frame, write, uncached)) = window.shows(offset, access.write) else {
+            return Ok(());
+        };
+        if mm::translate_in(self.root * PAGE_SIZE, page).is_some() {
+            return Ok(());
+        }
+        mm::map_in(
+            self.root * PAGE_SIZE,
+            page,
+            frame * PAGE_SIZE,
+            PAGE_SIZE,
+            MapFlags {
+                read: true,
+                write: write && flags.write,
+                execute: false,
+                user: true,
+                global: false,
+                device: false,
+                uncached,
+            },
+        )
+        .map_err(|_| SpaceError::OutOfMemory)
+    }
+
+    /// Map fault window `window`, all of it, at `place`: what a subsystem in
+    /// the load ring does when a program maps a device file whose driver
+    /// serves faults. Returns where it went.
+    ///
+    /// The region is one region for its whole life (`Backing::Window`):
+    /// shared, so a fork shares it, and never executable -- asked for, that
+    /// is refused, as it is from `mprotect`. The window counts the mapping
+    /// before the region exists, so a region is never there that the window
+    /// does not count; nothing is committed, and its pages arrive as the
+    /// server puts them in.
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::Refused`] for an executable mapping;
+    /// [`SpaceError::NotUserRange`] outside the user half;
+    /// [`SpaceError::BadRange`] for a range overlapping a mapping, or a window
+    /// that has closed; and [`SpaceError::OutOfMemory`].
+    pub(crate) fn map_fault_window(
+        &self,
+        window: Arc<FaultWindow>,
+        place: FilePlace,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        if flags.execute {
+            return Err(SpaceError::Refused(match place {
+                FilePlace::Fixed(at) => at,
+                FilePlace::Anywhere(_) => 0,
+            }));
+        }
+        let len = window
+            .pages()
+            .checked_mul(PAGE_SIZE)
+            .ok_or(SpaceError::BadRange)?;
+        let mut inner = self.inner.lock();
+        let range = file_placement(&inner.map, place, len)?;
+        let id = inner.next_id;
+        inner.next_id = inner.next_id.saturating_add(1);
+        let flags = VmaFlags {
+            execute: false,
+            shared: true,
+            grows_down: false,
+            ..flags
+        };
+        window
+            .attach(self.me.clone(), id)
+            .map_err(|why| match why {
+                WindowError::NoMemory => SpaceError::OutOfMemory,
+                _ => SpaceError::BadRange,
+            })?;
+        // FALLIBLE: the map's insert refuses with `VmaError::NoMemory`.
+        if let Err(error) = inner.map.insert(range, flags, Backing::Window { id }) {
+            window.detach(self, id);
+            return Err(map_error(error));
+        }
+        let Ok(held) = fallible::reserve() else {
+            // Just inserted whole, so taking it out splits nothing.
+            let _ = inner.map.remove_quietly(range);
+            window.detach(self, id);
+            return Err(SpaceError::OutOfMemory);
+        };
+        let _ = fallible::insert_held(&held, &mut inner.windows, id, window);
+        Ok(range.start())
     }
 
     /// Reserve `len` bytes wherever they fit, and say where that was.
@@ -3004,6 +3247,13 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Whether a fixed mapping of `len` bytes at `at` would cover part of a
+    /// fault window rather than all of it, which `mmap` refuses before it
+    /// unmaps anything.
+    pub(crate) fn cuts_window(&self, at: u64, len: u64) -> bool {
+        user_range(at, len).is_some_and(|range| self.inner.lock().map.cuts_window(range))
+    }
+
     /// The open file a file mapping's region names by `id`, for
     /// `/proc/<pid>/maps`.
     pub(crate) fn mapped_file(&self, id: u64) -> Option<Arc<dyn Any + Send + Sync>> {
@@ -3342,7 +3592,8 @@ impl AddressSpace {
                 },
                 backing,
             ) => {
-                let device = matches!(backing, Backing::Device { .. });
+                // A window answers as a device's region does.
+                let device = matches!(backing, Backing::Device { .. } | Backing::Window { .. });
                 return if (not_on_device && device) || (not_on_locked && locked) {
                     Err(Declined::Invalid)
                 } else {
@@ -3357,7 +3608,7 @@ impl AddressSpace {
             {
                 return Err(Declined::Invalid);
             }
-            (_, Backing::Device { .. }) => return Err(Declined::Invalid),
+            (_, Backing::Device { .. } | Backing::Window { .. }) => return Err(Declined::Invalid),
             (_, Backing::Anonymous { id, offset }) => (id, offset, false),
             (_, Backing::File { id, offset }) => (id, offset, true),
         };
@@ -3427,6 +3678,11 @@ fn owner<'a>(inner: &'a Inner, range: &Freeing) -> Option<&'a Arc<Vmo>> {
 /// go through a mapping with the device's own attributes. Asked before any
 /// translation is taken, so no direct-map address is ever formed for such a
 /// page.
+///
+/// A fault window's region is copyable: its pages are RAM of a VMO the server
+/// holds. A kernel copy reaches only a page the window has, cached, and for a
+/// write writable ([`writable_in_place`]); one it lacks fails rather than wait
+/// for the server.
 fn copyable(region: &Vma) -> bool {
     !matches!(region.backing, Backing::Device { .. })
 }
@@ -3457,6 +3713,30 @@ fn writable_in_place(inner: &Inner, region: &Vma, address: u64, frame: Frame) ->
     }
 }
 
+/// Whether a kernel copy may use `frame`, which `address` translates to in
+/// `region`, for `access` as it is: for a write, a frame
+/// [`writable_in_place`]; and in a fault window, only the frame its table
+/// shows there, cached, writable for a write ([`window_page`]).
+fn usable_in_place(inner: &Inner, region: &Vma, address: u64, frame: Frame, access: Access) -> bool {
+    if region.backing.is_window() {
+        return window_page(inner, region, address, access.write) == Some(frame);
+    }
+    !access.write || writable_in_place(inner, region, address, frame)
+}
+
+/// The frame a window region shows at `address` that a kernel copy may use
+/// for `write`: one the window has, writable for a write, and cached, since
+/// the copy goes through the direct map's cached view. `None` otherwise, and
+/// for a region that is not a window's.
+fn window_page(inner: &Inner, region: &Vma, address: u64, write: bool) -> Option<Frame> {
+    let Backing::Window { id } = region.backing else {
+        return None;
+    };
+    let offset = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start()) / PAGE_SIZE;
+    let (frame, _, uncached) = inner.windows.get(&id)?.shows(offset, write)?;
+    (!uncached).then_some(frame)
+}
+
 /// Whether any region still names object `id`.
 fn still_named(map: &ferrix_vma::AddressSpace, id: u64) -> bool {
     map.iter().any(|region| naming(region) == Some(id))
@@ -3465,7 +3745,7 @@ fn still_named(map: &ferrix_vma::AddressSpace, id: u64) -> bool {
 /// The object id `region` names, if it names one.
 fn naming(region: &Vma) -> Option<u64> {
     match region.backing {
-        Backing::Anonymous { id, .. } | Backing::File { id, .. } => Some(id),
+        Backing::Anonymous { id, .. } | Backing::File { id, .. } | Backing::Window { id } => Some(id),
         // A window's keeper is kept under its id; registers have none.
         Backing::Device { id, .. } => (id != 0).then_some(id),
     }
@@ -3544,9 +3824,16 @@ impl Drop for AddressSpace {
                 vmo.lower_shared_may_write();
             }
         }
+        // A space going is each window it maps one mapping fewer, as an unmap
+        // of the region would be: allocating nothing and waiting for nothing,
+        // since this may run in the reaper's preemption window.
+        for (&id, window) in &inner.windows {
+            window.detach(me, id);
+        }
         inner.objects.clear();
         inner.files.clear();
         inner.shadows.clear();
+        inner.windows.clear();
 
         // Tables a fault that ran out of memory made above the page it could
         // not map, which hold nothing and so were in no region's unmapping.

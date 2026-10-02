@@ -478,6 +478,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::DeviceClock => device_clock(process, handle(a[0]), a[1], a[2]),
         NativeCall::IoMappingMap => io_mapping_map(process, handle(a[0]), a[1]),
         NativeCall::VmoPin => vmo_pin(process, handle(a[0]), handle(a[1]), a[2], a[3], a[4]),
+        NativeCall::WindowInsert => window_insert(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::WindowRevoke => window_revoke(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::WindowAnswer => window_answer(process, handle(a[0]), a[1], a[2], a[3]),
         NativeCall::VmoPinAddresses => vmo_pin_addresses(process, handle(a[0]), a[1], a[2]),
         NativeCall::PortCreate => port_create(process),
         NativeCall::PortQueue => port_queue(process, handle(a[0]), a[1]),
@@ -2192,7 +2195,9 @@ fn space_status(why: SpaceError) -> Errno {
         | SpaceError::NotMapped(_)
         | SpaceError::Backing(_)
         | SpaceError::PastEnd(_)
-        | SpaceError::Unreadable(_) => status::INVALID_ARGS,
+        | SpaceError::Unreadable(_)
+        | SpaceError::WindowFault(_)
+        | SpaceError::WindowChange => status::INVALID_ARGS,
     }
 }
 
@@ -2327,6 +2332,124 @@ fn object_wait_async(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fault windows (`user::window`, `docs/NVIDIA.md` §11.4): what a server does
+// with the windows its clients map. The windows are made, and the server
+// handle given, by the subsystem in the load ring that serves the device
+// file; these three calls are all a server has.
+// ---------------------------------------------------------------------------
+
+/// The fault window `window` of the server whose handle is `server`, which
+/// must carry `MANAGE`.
+fn window_of(
+    process: &Process,
+    server: Handle,
+    window: u64,
+) -> Result<Arc<crate::user::window::FaultWindow>, Errno> {
+    let server = process.with_handles(|table| {
+        let (object, rights) = table.get(server).map_err(table_error)?;
+        let Object::WindowServer(handle) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(Rights::MANAGE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(Arc::clone(handle.server()))
+    })?;
+    server.window(window).ok_or(status::INVALID_ARGS)
+}
+
+/// The status a window's refusal travels as.
+fn window_status(why: crate::user::window::WindowError) -> Errno {
+    use crate::user::window::WindowError;
+    match why {
+        WindowError::NoMemory => status::NO_MEMORY,
+        WindowError::Closed | WindowError::Dead => status::BAD_STATE,
+        WindowError::BadEntry
+        | WindowError::Refused
+        | WindowError::Absent => status::INVALID_ARGS,
+    }
+}
+
+/// `window_insert`: at most [`nr::WINDOW_INSERT_MAX`] entries, every VMO
+/// handle checked for `READ`, and `WRITE` for a writable entry, before the
+/// window sees any of them.
+fn window_insert(
+    process: &Process,
+    server: Handle,
+    window: u64,
+    entries: u64,
+    count: u64,
+) -> Result<usize, Errno> {
+    use ferrix_native_abi::types::{WINDOW_ENTRY_WRITE, WindowEntry};
+    let count = within(count, crate::user::window::INSERT_MAX)?;
+    if count == 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let window = window_of(process, server, window)?;
+    let bytes = copy_in(process, entries, count * size_of::<WindowEntry>())?;
+    let mut batch = fallible::try_with_capacity(count).map_err(|_| status::NO_MEMORY)?;
+    process.with_handles(|table| {
+        for raw in bytes.chunks_exact(size_of::<WindowEntry>()) {
+            let word = |at: usize| {
+                raw.get(at..at + 8)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map_or(0, u64::from_le_bytes)
+            };
+            let half = |at: usize| {
+                raw.get(at..at + 4)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map_or(0, u32::from_le_bytes)
+            };
+            let (offset, index, vmo, flags) = (word(0), word(8), half(16), half(20));
+            if flags & !WINDOW_ENTRY_WRITE != 0 {
+                return Err(status::INVALID_ARGS);
+            }
+            let write = flags & WINDOW_ENTRY_WRITE != 0;
+            let needed = if write {
+                Rights::READ | Rights::WRITE
+            } else {
+                Rights::READ
+            };
+            let vmo = vmo_in(table, Handle(vmo), needed)?;
+            // NOALLOC: room for `count` entries was had above.
+            batch.push((offset, vmo, index, write));
+        }
+        Ok(())
+    })?;
+    window.insert(&batch).map_err(window_status)?;
+    Ok(0)
+}
+
+/// `window_revoke`.
+fn window_revoke(
+    process: &Process,
+    server: Handle,
+    window: u64,
+    first: u64,
+    pages: u64,
+) -> Result<usize, Errno> {
+    let window = window_of(process, server, window)?;
+    if pages == 0 || first >= window.pages() {
+        return Err(status::INVALID_ARGS);
+    }
+    window.revoke(first, pages);
+    Ok(0)
+}
+
+/// `window_answer`.
+fn window_answer(
+    process: &Process,
+    server: Handle,
+    window: u64,
+    token: u64,
+    answer: u64,
+) -> Result<usize, Errno> {
+    let window = window_of(process, server, window)?;
+    window.answer(token, answer == 0);
+    Ok(0)
+}
+
 /// Register `observer` on `target`, or `None` for an object with no signal
 /// that changes.
 fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>> {
@@ -2340,6 +2463,7 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::Interrupt(_)
         | Object::IoMapping(_)
         | Object::Pin(_)
+        | Object::WindowServer(_)
         | Object::Starter
         | Object::Audit => None,
     }

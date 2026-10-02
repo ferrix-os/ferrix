@@ -1147,6 +1147,15 @@ impl AddressSpace {
             .is_some_and(|span| span.iter().any(|region| region.backing.is_window()))
     }
 
+    /// Whether taking `range` out of the map would cut a window region
+    /// rather than take it out whole: what [`AddressSpace::remove`] and
+    /// [`AddressSpace::map_fixed`] refuse, for a caller that must know before
+    /// it changes anything else -- `mremap` with a fixed destination.
+    #[must_use]
+    pub fn cuts_window(&self, range: PageRange) -> bool {
+        self.refuse_partial_window(range).is_err()
+    }
+
     /// Refuses a carve of `range` that would cut a window region rather than
     /// take it out whole: one that starts inside it or ends inside it.
     fn refuse_partial_window(&self, range: PageRange) -> Result<(), VmaError> {

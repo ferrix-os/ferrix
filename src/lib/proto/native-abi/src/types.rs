@@ -40,6 +40,34 @@ pub const PACKET_USER: u32 = 0;
 pub const PACKET_SIGNAL: u32 = 1;
 /// A packet a bound interrupt produced.
 pub const PACKET_INTERRUPT: u32 = 2;
+/// A fault window's client faulted on a page the window lacks, or wrote to
+/// one it has read-only. `key` is the window, `data[0]` the token to answer
+/// with `window_answer`, and `data[1]` the page offset in the window, with
+/// [`WINDOW_FAULT_WRITE`] set for a write.
+pub const PACKET_WINDOW_FAULT: u32 = 3;
+/// A fault window's last mapping went: no client maps it any more. `key` is
+/// the window. Queued once per window, before the unmap that caused it
+/// returns.
+pub const PACKET_WINDOW_UNMAPPED: u32 = 4;
+/// In a [`PACKET_WINDOW_FAULT`]'s `data[1]`: the access was a write.
+pub const WINDOW_FAULT_WRITE: u64 = 1 << 63;
+
+/// One page `window_insert` puts into a fault window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct WindowEntry {
+    /// The page offset in the window.
+    pub offset: u64,
+    /// The page index in the VMO.
+    pub index: u64,
+    /// The handle to the VMO.
+    pub vmo: u32,
+    /// [`WINDOW_ENTRY_WRITE`] for a page clients may write, or zero.
+    pub flags: u32,
+}
+
+/// [`WindowEntry`]'s flag: clients may write the page.
+pub const WINDOW_ENTRY_WRITE: u32 = 1;
 
 /// `port_fd`'s flag: the descriptor is closed on `execve`, as `O_CLOEXEC`
 /// makes one.

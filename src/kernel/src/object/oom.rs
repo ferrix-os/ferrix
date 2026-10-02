@@ -101,7 +101,7 @@ pub(crate) fn user_fault(
     address: u64,
     access: Access,
 ) -> Result<(), SpaceError> {
-    match space.fault(address, access) {
+    match space.user_fault(address, access) {
         Err(error) if is_charge_refusal(&error) => match out_of_memory(space) {
             Answer::Refused => Err(error),
             Answer::Retry | Answer::Victim => Ok(()),

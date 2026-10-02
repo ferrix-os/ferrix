@@ -98,6 +98,12 @@ impl Rights {
     /// reach those pages, and it is kept, or given back by closing it, where it
     /// was made.
     pub const PIN: Rights = Rights(Rights::READ.0);
+    /// What a handle to a fault window's server carries: [`Rights::MANAGE`]
+    /// for `window_insert`, `window_revoke` and `window_answer`, and nothing
+    /// else. No [`Rights::DUPLICATE`] and no [`Rights::TRANSFER`]: the handle
+    /// is the server's identity, so there is one, and its close is the
+    /// server's death, which fails every fault waiting on it.
+    pub const WINDOW_SERVER: Rights = Rights(Rights::MANAGE.0);
     /// What a handle to a process carries.
     ///
     /// [`Rights::WAIT`] to hear that it has ended, directly or through a port,

@@ -67,6 +67,10 @@
 //! `mremap`, `munmap`'s give-back -- does phase one under it and hands the rest
 //! to [`Vmo::retire`] once it has let go, naming itself so that phase two does
 //! not come back for its lock.
+//!
+//! A fault window (`user::window`) sits between the two: an address space's
+//! lock, then a window's, then the pages of a VMO whose page the window
+//! holds. No window lock is held while a space's lock is taken.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
@@ -435,6 +439,14 @@ impl Vmo {
             Some(filler) => filler.fill(self, index),
             None => Ok(()),
         }
+    }
+
+    /// Whether the object is anonymous memory rather than a file's pages:
+    /// no source fills it, and no file length bounds it. What a fault window
+    /// takes pages from (`user::window`): a file's page can be truncated
+    /// away, which is no page a server may lend.
+    pub(crate) fn is_anonymous(&self) -> bool {
+        self.filler.is_none() && self.bound.load(Ordering::Acquire) == u64::MAX
     }
 
     /// Whether the object's mappings bypass the caches.

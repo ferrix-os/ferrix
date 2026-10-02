@@ -115,6 +115,14 @@ pub const LOG_CONTROL_CREATE: usize = 0x1051;
 pub const DEVMGR_START: usize = 0x1052;
 /// [`NativeCall::AuditRead`].
 pub const AUDIT_READ: usize = 0x1053;
+/// [`NativeCall::WindowInsert`].
+pub const WINDOW_INSERT: usize = 0x1058;
+/// [`NativeCall::WindowRevoke`].
+pub const WINDOW_REVOKE: usize = 0x1059;
+/// [`NativeCall::WindowAnswer`].
+pub const WINDOW_ANSWER: usize = 0x105A;
+/// The most entries one [`NativeCall::WindowInsert`] takes.
+pub const WINDOW_INSERT_MAX: u64 = 512;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -378,10 +386,34 @@ pub enum NativeCall {
     /// given (`docs/certification/AUDIT.md` §4). Never blocks: a reader
     /// polls.
     AuditRead,
+    /// `window_insert(server, window, entries, count)`: put `count` pages,
+    /// at most [`WINDOW_INSERT_MAX`], into fault window `window` of the
+    /// server whose handle is `server` (needs `MANAGE`). `entries` points to
+    /// `count` [`crate::types::WindowEntry`]s, each naming a page of a VMO
+    /// the caller holds (`READ`, and `WRITE` for a writable entry), committed,
+    /// of anonymous memory, at a page offset inside the window. The page is
+    /// held in place until it is revoked. An entry where the window already
+    /// has one replaces it only after the old one is out of every client's
+    /// tables. All or nothing: one bad entry and none is put in
+    /// (`INVALID_ARGS`, `ACCESS_DENIED` or `BAD_HANDLE`); `BAD_STATE` for a
+    /// window that is dead or that no client maps any more.
+    WindowInsert,
+    /// `window_revoke(server, window, first, pages)`: take the pages
+    /// `first..first + pages` out of fault window `window` (needs `MANAGE`
+    /// on `server`), out of every client's tables, with one shootdown, and
+    /// only then let go of them. Pages the window does not have are skipped.
+    WindowRevoke,
+    /// `window_answer(server, window, token, status)`: answer the fault
+    /// with `token`, from a [`crate::types::PACKET_WINDOW_FAULT`] packet, of
+    /// fault window `window` (needs `MANAGE` on `server`). A `status` of
+    /// zero lets the faulting thread retry its access, which faults again if
+    /// the page is still not there; any other gives it `SIGBUS`. An answer
+    /// to a fault no thread waits for any more is ignored.
+    WindowAnswer,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 46] = [
+pub const ALL: [NativeCall; 49] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -428,6 +460,9 @@ pub const ALL: [NativeCall; 46] = [
     NativeCall::LogControlCreate,
     NativeCall::DevmgrStart,
     NativeCall::AuditRead,
+    NativeCall::WindowInsert,
+    NativeCall::WindowRevoke,
+    NativeCall::WindowAnswer,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -489,6 +524,9 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         LOG_CONTROL_CREATE => NativeCall::LogControlCreate,
         DEVMGR_START => NativeCall::DevmgrStart,
         AUDIT_READ => NativeCall::AuditRead,
+        WINDOW_INSERT => NativeCall::WindowInsert,
+        WINDOW_REVOKE => NativeCall::WindowRevoke,
+        WINDOW_ANSWER => NativeCall::WindowAnswer,
         _ => return None,
     };
     Some(call)
@@ -544,5 +582,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::LogControlCreate => LOG_CONTROL_CREATE,
         NativeCall::DevmgrStart => DEVMGR_START,
         NativeCall::AuditRead => AUDIT_READ,
+        NativeCall::WindowInsert => WINDOW_INSERT,
+        NativeCall::WindowRevoke => WINDOW_REVOKE,
+        NativeCall::WindowAnswer => WINDOW_ANSWER,
     }
 }
