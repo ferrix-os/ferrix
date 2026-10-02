@@ -142,6 +142,7 @@ pub(crate) fn dispatch_with<P: Personality>(
     if args.abi == Abi::Native && ferrix_native_abi::nr::is_native(args.number) {
         return native_call(args);
     }
+    profile(args.number);
     // The table is the entry's (`crate::trap::Abi`), each behind its own
     // clamp in the facade.
     let decoded = match args.abi {
@@ -194,6 +195,64 @@ pub(crate) fn report_unanswered(lines: u32) {
 }
 
 /// One `ENOSYS`, reported if [`report_unanswered`] left room for it.
+static PROFILE: [core::sync::atomic::AtomicU64; 512] = [const { core::sync::atomic::AtomicU64::new(0) }; 512];
+static PROFILE_PIDS: [core::sync::atomic::AtomicU64; 2048] = [const { core::sync::atomic::AtomicU64::new(0) }; 2048];
+static SAMPLES: [core::sync::atomic::AtomicU64; 65536] = [const { core::sync::atomic::AtomicU64::new(0) }; 65536];
+static SAMPLED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static LAST_DUMP: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+pub(crate) fn sample(ip: u64, user: bool) {
+    let pid = crate::sched::current()
+        .and_then(|task| crate::syscall::thread::of_task(&task).map(|thread| u64::from(thread.process().pid())))
+        .unwrap_or(0);
+    let tagged = if user {
+        (pid << 47) | (ip & ((1 << 47) - 1))
+    } else {
+        (1 << 63) | (pid << 32) | (ip & 0xffff_ffff)
+    };
+    let at = SAMPLED.fetch_add(1, Ordering::Relaxed) % SAMPLES.len();
+    SAMPLES[at].store(tagged, Ordering::Relaxed);
+}
+fn top(list: &[core::sync::atomic::AtomicU64], n: usize) -> alloc::vec::Vec<(u64, usize)> {
+    let mut v: alloc::vec::Vec<(u64, usize)> = list.iter().enumerate().map(|(i, c)| (c.swap(0, Ordering::Relaxed), i)).filter(|(c, _)| *c > 0).collect();
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    v.truncate(n);
+    v
+}
+static WATCHED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+fn profile(number: usize) {
+    if matches!(number, 27 | 29 | 30 | 31 | 67) && WATCHED.fetch_add(1, Ordering::Relaxed) < 3000 {
+        let pid = crate::syscall::process::current().map_or(0, |process| process.pid());
+        println!("  watched  pid {pid} called {number}");
+    }
+    if let Some(slot) = PROFILE.get(number) { let _ = slot.fetch_add(1, Ordering::Relaxed); }
+    if let Some(process) = crate::syscall::process::current() {
+        if let Some(slot) = PROFILE_PIDS.get(process.pid() as usize) { let _ = slot.fetch_add(1, Ordering::Relaxed); }
+    }
+    let now = crate::timer::now_nanos();
+    let last = LAST_DUMP.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 10_000_000_000 || LAST_DUMP.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+        return;
+    }
+    let taken = SAMPLED.swap(0, Ordering::Relaxed).min(SAMPLES.len());
+    let mut all: alloc::vec::Vec<u64> = SAMPLES[..taken].iter().map(|s| s.swap(0, Ordering::Relaxed)).collect();
+    all.sort_unstable();
+    let mut runs: alloc::vec::Vec<(usize, u64)> = alloc::vec::Vec::new();
+    let mut i = 0;
+    while i < all.len() { let mut j = i; while j < all.len() && all[j] == all[i] { j += 1; } runs.push((j - i, all[i])); i = j; }
+    runs.sort_unstable_by(|a, b| b.cmp(a));
+    runs.truncate(400);
+    println!("  profile  {} ms samples {taken} calls {:?} pids {:?}", now / 1_000_000, top(&PROFILE, 16), top(&PROFILE_PIDS, 12));
+    for (count, t) in &runs {
+        let kernel = *t >> 63 == 1;
+        if kernel {
+            println!("  sample-k {count} pid {} at {:#x}", (t >> 32) & 0x7fff_ffff, 0xffff_ffff_0000_0000 | (t & 0xffff_ffff));
+        } else {
+            println!("  sample-ip {count} pid {} at {:#x}", t >> 47, t & ((1 << 47) - 1));
+        }
+    }
+}
+
+
 pub(crate) fn unanswered(call: Option<Syscall>, number: usize) {
     let room = UNANSWERED_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
         left.checked_sub(1)

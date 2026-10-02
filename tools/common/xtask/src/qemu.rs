@@ -2337,7 +2337,8 @@ fn attach_data_image(command: &mut Command, arch: Arch, args: &Args) {
     let Some(volume) = &args.data_image else {
         return;
     };
-    let (snapshot, said) = if args.data_image_kept {
+    let kept = args.data_image_kept || std::env::var_os("FERRIX_KEEP_DATA_IMAGE").is_some();
+    let (snapshot, said) = if kept {
         ("", "kept")
     } else {
         (",snapshot=on", "snapshot")

@@ -116,9 +116,13 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
         // it is acknowledged, and the architectures disagree about both.
         // So the architecture claims, dispatches and retires; what crosses
         // back into generic code is a number.
-        Trap::Interrupt(_) => {
+        Trap::Interrupt(line) => {
             if frame.came_from_user() {
                 let _ = USER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
+            }
+            #[cfg(target_arch = "x86_64")]
+            if line == 0xFE - 32 {
+                crate::syscall::sample(frame.instruction_pointer(), frame.came_from_user());
             }
             arch::service_interrupts(frame, crate::irq::dispatch);
             // And only now, with the controller told this interrupt is done,

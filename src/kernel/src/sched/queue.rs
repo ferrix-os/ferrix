@@ -552,7 +552,8 @@ impl CpuQueue {
             .decision_in_ns()
             .map(|left| now.saturating_add(left));
 
-        match [sleeper, slice].into_iter().flatten().min() {
+        let profile_tick = (!self.is_running_idle()).then(|| now.saturating_add(1_000_000));
+        match [sleeper, slice, profile_tick].into_iter().flatten().min() {
             Some(at) => crate::timer::after(at.saturating_sub(now).max(MIN_ARM_NS)),
             None => crate::timer::stop(),
         }
