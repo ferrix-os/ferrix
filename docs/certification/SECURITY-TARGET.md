@@ -28,18 +28,25 @@ running as unprivileged user processes.
 
 ### 1.2 Physical and logical scope
 
-The TOE is the `core` and `item` rings of [ITEM.md](ITEM.md): **51,525 lines of
-Rust**, built for x86-64, AArch64 and ARMv7-A from the reference configuration.
+The TOE is the `core` and `item` rings of [ITEM.md](ITEM.md): **79,079 lines of
+Rust** (64,788 of the kernel and 14,291 of two library crates, re-measured
+2026-10-02), built for x86-64, AArch64 and ARMv7-A from the reference configuration.
 It comprises the memory manager (buddy allocator, VMOs, address spaces, page
 tables), the scheduler, the capability object system (handles, channels, ports,
 jobs, interrupts, I/O mappings), the trap and system-call entry paths, the
 IOMMU drivers (VT-d, SMMUv3), SMP bring-up and TLB shootdown, firmware table
-parsing, device enumeration, and the panic path.
+parsing, device enumeration, and the panic path. Since 2026-10-02 it also
+comprises the btrfs reader and write path, the library crates `ferrix-btrfs`
+and `ferrix-btrfs-write`: from the `Device`
+and `WriteDevice` traits the kernel's block layer answers, up to `Volume` and
+`WriteVolume`.
 
-**Outside the TOE**, running on it without being trusted by it: the VFS, btrfs,
-procfs, sysfs and tmpfs; the TCP/IP stack; the Linux system-call personality,
+**Outside the TOE**, running on it without being trusted by it: the VFS, the
+btrfs glue on it (`ferrix-btrfs-vfs` and `src/kernel/src/fs/btrfs*.rs`: the
+page cache, the commit interval, what `fsync` commits), procfs, sysfs and
+tmpfs; the TCP/IP stack; the Linux system-call personality,
 from its dispatcher to its `mmap`, `futex`, rlimits and POSIX threads; the
-ring-3 device drivers; and all user software. 47,528 lines of kernel code
+ring-3 device drivers; and all user software. 64,036 lines of kernel code
 are in this category and the boundary is enforced at build time by
 `tools/common/check/check-item-boundary.py`.
 
@@ -59,6 +66,10 @@ outside the TOE; it is covered by A.FIRMWARE in §3.3.
   DMA into memory it was not given.
 * **Residual information protection.** A physical frame is zeroed before it is
   handed to a new owner.
+* **Hostile volumes and stored data.** The btrfs reader and writer parse a
+  volume as hostile input, refuse a node or data sector that fails its
+  checksum or does not match what refers to it, and commit by copy-on-write
+  with the superblock written last, after a flush.
 * **Resource bounding.** Jobs are where the TOE's quotas attach: a job and
   the jobs beneath it are bounded in the tasks, the memory of their programs
   -- their frames, and the kernel heap the Linux personality holds for them
@@ -99,12 +110,16 @@ assumes time and space partitioning the TOE does not yet offer as a service.
 | AS.HANDLE | The handle tables that name every capability a process holds |
 | AS.DEVICE | Device registers and DMA-capable memory |
 | AS.CPU | Processor time and the scheduling invariants that apportion it |
+| AS.VOLUME | The contents of a btrfs volume the TOE reads and writes, as last committed |
 
 ### 3.2 Threats
 
 The threat agent is **unprivileged code running on the TOE**: a user process, a
 ring-3 device driver, or the Linux personality itself. All are outside the TSF
 and all are assumed hostile, which is the central design claim being made.
+Since btrfs joined the TOE there is one more: **whoever wrote the storage
+medium** -- a volume made elsewhere, a disk plugged in, or the ring-3 block
+driver answering the TOE's reads with bytes of its choosing.
 
 | Id | Threat |
 |---|---|
@@ -115,6 +130,7 @@ and all are assumed hostile, which is the central design claim being made.
 | T.RESIDUAL | A process recovers data left in a physical frame by a previous owner. |
 | T.EXHAUST | A process consumes memory, CPU or object-table capacity so as to deny service to others. |
 | T.CONFUSE | A process induces the TOE to act on a user-supplied pointer or length without validation. |
+| T.MEDIA | A volume crafted or damaged by whoever wrote the medium, or bytes a ring-3 block driver returns, induce the TOE's btrfs code to read or write outside its buffers, panic, loop without bound, or return damaged data as valid. |
 
 ### 3.3 Assumptions
 
@@ -124,6 +140,7 @@ and all are assumed hostile, which is the central design claim being made.
 | A.FIRMWARE | UEFI, TF-A and the loader behave as specified and deliver an unmodified TOE image. The TOE performs no secure or measured boot (§9.2). |
 | A.ADMIN | Whoever composes the system image and selects which drivers run is trusted to do so competently. |
 | A.HARDWARE | The MMU, IOMMU and interrupt controller behave as their specifications state. |
+| A.STORAGE | The storage device under the TOE's `WriteDevice` keeps its flush and FUA promises: every write that returned before a flush is durable when the flush returns ([SAFETY-MANUAL.md](SAFETY-MANUAL.md) AoU-16). |
 | A.PROCESSOR | The processor offers the speculation controls [SPECULATION.md](SPECULATION.md) builds on, and they behave as the vendor states: SAFETY-MANUAL AoU-11, checkable from the boot log. |
 | A.AUTH | The authentication service of [docs/AUTH.md](../AUTH.md), `authd`, and the programs that act on its verdict (`login`, `su`, `sessiond`, the compositor) are competently built, as A.ADMIN has image composition. They rely on the TOE for O.ISOLATE, O.CAPABILITY and O.SCRUB, and on the Linux personality's uid model and its `SO_PEERCRED`, both in the uncertified load ring. |
 
@@ -149,6 +166,7 @@ and all are assumed hostile, which is the central design claim being made.
 | O.QUOTA | Bound the memory, objects and CPU a job may consume. | T.EXHAUST |
 | O.VALIDATE | Validate every user-supplied pointer, length and handle at the system-call boundary before use. | T.CONFUSE, T.MEMORY |
 | O.FAILSAFE | On detecting an inconsistent internal state, halt rather than continue. | T.ESCALATE |
+| O.MEDIA | Parse every structure read from a btrfs volume as hostile input, answering an error rather than reading or writing outside a buffer, panicking or looping without bound; and refuse, or read from its other copy, a node or data sector that fails its checksum or does not match what refers to it. | T.MEDIA |
 | O.AUDIT | Record each decision P.ACCOUNTABILITY names where the TSF makes it, in storage only the TSF writes, numbered so that a gap shows, with the boot's configuration among the records; let only the holder of a read-only capability read them. | P.ACCOUNTABILITY |
 
 ### 4.2 For the operational environment
@@ -161,6 +179,7 @@ and all are assumed hostile, which is the central design claim being made.
 | OE.HARDWARE | MMU, IOMMU and interrupt controller conform to specification (A.HARDWARE). |
 | OE.PROCESSOR | The TOE runs, built `--mitigations on`, only on a processor whose boot log reports no side-channel hazard uncovered (A.PROCESSOR). |
 | OE.AUTH | People are identified and authenticated by `authd`, which alone holds credentials, in ring 3 and outside the TOE, and security-relevant events of that kind are recorded in its audit log ([docs/AUTH.md](../AUTH.md) §3.6) (A.AUTH). |
+| OE.STORAGE | Storage keeps its flush and FUA promises, and a medium whose contents a safety or security function relies on is protected against deliberate change by the environment, which CRC-32C does not detect (A.STORAGE, §9.8). |
 | OE.AUDIT_STORE | The audit records the TOE's reader has written to the root volume (`/var/log/audit/<id>.bin`) are protected, kept and reviewed by the operational environment: the TOE claims nothing for them once written ([AUDIT.md](AUDIT.md) §7), as A.ADMIN has image composition. |
 
 ---
@@ -199,6 +218,20 @@ and a process outside every domain, the default, has no such exception
 any previous information content is made unavailable upon **allocation** of a
 physical frame to any object.
 
+**FDP_SDI.2** Stored data integrity monitoring and action. The TSF shall
+monitor user data stored in containers controlled by the TSF for **a
+checksum mismatch, and a tree node whose address, level, generation or
+filesystem differs from what its parent names,** on all objects, based on
+the following attributes: **the CRC-32C btrfs keeps for every tree node and,
+except in a file marked `nodatasum`, every data sector**. Upon detection of a
+data integrity error, the TSF shall **read the other copy where the chunk
+keeps one, and otherwise answer an error and return none of the damaged
+bytes**.
+
+*Refinement.* "Integrity error" is refined to accidental change. CRC-32C is
+not a keyed check, and a volume written by an attacker can carry checksums
+that match (§9.8).
+
 ### FMT — security management
 
 **FMT_MSA.1** Management of security attributes. The TSF shall restrict the
@@ -224,8 +257,14 @@ check fails**.
 from the platform timer.
 
 **FPT_TDC.1** Inter-TSF basic TSF data consistency. The TSF shall consistently
-interpret **handles, VMO offsets and lengths supplied by untrusted subjects**
-when shared with the TSF.
+interpret **handles, VMO offsets and lengths supplied by untrusted subjects,
+and the superblocks, chunk items, tree nodes, items and compressed extents of
+a btrfs volume,** when shared with the TSF.
+
+*Refinement.* For a volume, "consistently interpret" is: every structure is
+bounds-checked against the buffer it was read into before any field is used,
+and one that is malformed is answered with an error, never a panic or an
+access outside the buffer (O.MEDIA).
 
 ### FRU — resource utilisation
 
@@ -354,6 +393,7 @@ How the TOE meets each objective, with the evidence that exists today.
 | O.QUOTA | A quota slot per job in `src/kernel/src/object/quota.rs`, charged hierarchically at every task, frame and native object a job's programs make and uncharged wherever each goes (the frame record keeps its slot); the kernel heap the Linux personality holds for its programs charged as memory, in bytes, by a `src/lib/kernel/kmem` token kept in each object (F-37); a per-job weight applied to each task's in `sched`. Set by `job_set_limit` or cgroupfs. What is bounded otherwise is in §9.7. | `object/quota_check.rs`, every boot: *"a fork loop refused at its job's 8 tasks; faults refused at 47 pages (3 of them page tables, beside 512 bytes of its regions' heap) while a sibling job faulted in 48; objects refused at 5; one task alone in its job kept 50.0% of a processor against eight in another; every counter back to zero and every quota slot given back"*; `fs/kmem_check.rs`, every boot: *"at a 32 KiB memory limit a job made 34 files, 14 pipes, 5 socket pairs, 70 descriptors in flight, 128 epoll registrations, 31 eventfds, 255 regions of one mapping and 454 record locks, and was refused one more of each -- ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged came back"* (x86-64, 2026-09-26); eight negative controls (W-13, W-15) |
 | O.VALIDATE | `src/kernel/src/syscall/uaccess.rs`, backed on x86-64 by SMEP and SMAP since 2026-09-25, and on AArch64 by PAN where the CPU has it. The reference `cortex-a72` does not, and ARMv7-A cannot (V-01). | `syscall/check.rs`, 9,537 lines, 427 refusal assertions; the boot reports *SMEP on, SMAP on* |
 | O.FAILSAFE | `src/kernel/src/panic.rs` with a catalogue of explanations. | `tools/common/check/check-panic-audit.py`; `gen-panic-catalog.py --check` |
+| O.MEDIA | `src/lib/fs/btrfs` (`ferrix-btrfs`): `forbid(unsafe_code)`, every field read through `slice::get` and checked length arithmetic, a node or data sector read from the first copy that passes its checksum and its parent's expectations; `src/lib/fs/btrfs-write`, which edits only nodes the reader has parsed and checked. | host tests naming `H.STORE.1`, `H.STORE.2` and `L.btrfs.1` to `L.btrfs.11` (TRACEABILITY.md); the `btrfs_read` fuzz target over resealed real images; stage 11's and 12's boot checks |
 | O.AUDIT | `src/kernel/src/audit.rs`, in the core ring: two rings of static storage under leaf `IrqSpinLock`s, fairness per budget, the boot's own records pinned; a record at each decision's site; `Object::Audit` and `audit_read`, the handle only pid 1 holds; init keeping the records in `/var/log/audit/<id>.bin` ([AUDIT.md](AUDIT.md)). | `audit/check.rs`, every boot: the store on stores of its own and the kernel's, and at the end of boot *"13 kinds of decision the boot's checks made are recorded, each with its outcome and the subject that decided it"* (x86-64, 2026-09-27), with a negative control for every recording site; `syscall/native_check.rs`: the handle reads, refuses without `READ` and cannot be sent; `test-init`: the record read back from the volume, the power-off's number, and a `ferrix.checks=skip` boot's record read from outside; `H.AUD.1` to `H.AUD.13` |
 
 ---
@@ -363,7 +403,8 @@ How the TOE meets each objective, with the evidence that exists today.
 ### 8.1 Threats to objectives
 Each threat in §3.2 is countered by at least one objective in §4.1, as the
 *Counters* column records. T.MEMORY and T.ESCALATE are each countered by more
-than one, since they are the threats the TOE exists to address. O.AUDIT
+than one, since they are the threats the TOE exists to address. T.MEDIA
+is countered by O.MEDIA alone. O.AUDIT
 counters no threat: it meets P.ACCOUNTABILITY, the one policy of §3.4, and
 nothing else is claimed to meet it.
 
@@ -379,6 +420,7 @@ nothing else is claimed to meet it.
 | O.QUOTA | FRU_RSA.1 |
 | O.VALIDATE | FPT_TDC.1 |
 | O.FAILSAFE | FPT_FLS.1 |
+| O.MEDIA | FPT_TDC.1, FDP_SDI.2 |
 | O.AUDIT | FAU_GEN.1, FAU_GEN.2, FAU_SAR.1, FAU_SAR.2, FAU_STG.1, FAU_STG.4, FPT_STM.1 |
 
 ### 8.3 Why EAL5 is the right claim
@@ -407,6 +449,7 @@ them. Three are unmet, each by design.
 | FDP_IFC.1 | FDP_IFF.1 | yes |
 | FDP_IFF.1 | FDP_IFC.1, FMT_MSA.3 | yes (3) |
 | FDP_RIP.2 | none | -- |
+| FDP_SDI.2 | none | -- |
 | FMT_MSA.1 | FDP_ACC.1 or FDP_IFC.1, FMT_SMR.1, FMT_SMF.1 | FDP_ACC.1 yes; **FMT_SMR.1 no** (2); **FMT_SMF.1 no** (2) |
 | FMT_MSA.3 | FMT_MSA.1, FMT_SMR.1 | FMT_MSA.1 yes; **FMT_SMR.1 no** (2) |
 | FPT_FLS.1 | none | -- |
@@ -538,3 +581,32 @@ no limit above it, which the TOE bounds by nothing but the machine (A.ADMIN,
 AoU-5). And the processor is shared by weight, not capped: a job alone on an
 idle machine may use all of it, which is a choice, stated in §5, rather than
 a gap.
+
+### 9.8 btrfs: what is claimed for a volume, and what is not
+btrfs joined the TOE on 2026-10-02 (the customer's decision). What an
+evaluator would press on:
+
+* **CRC-32C is not authentication.** FDP_SDI.2 finds accidental damage.
+  Whoever can write the medium can write a volume whose checksums match and
+  whose files say anything; O.MEDIA promises only that the TOE parses such a
+  volume safely, not that it can tell it is false. OE.STORAGE carries the
+  rest.
+* **The TOE does not decide when data becomes durable.** The VFS glue above
+  `WriteVolume` -- its page cache, its 32 MiB commit threshold and its commit
+  interval, what `fsync` commits -- is load. The TOE promises what a commit
+  and a log commit keep once they return (ASR-9), not when a program's write
+  reaches one.
+* **The write path is not fuzzed.** `btrfs_read` drives the reader; nothing
+  drives `WriteVolume` over hostile images
+  ([VULNERABILITY-ANALYSIS.md](VULNERABILITY-ANALYSIS.md), T.MEDIA).
+* **Allocation failure in the write path** is still fatal while it is being
+  made fallible (`H.STORE.7`, [MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md)
+  §1.8, F-56), and an allocation sized from the disk can be driven to it.
+* **Arithmetic is not linted.** The release kernel has no overflow checks,
+  so an unchecked sum of two fields of a hostile volume wraps and only the
+  bounds check after it stands; clippy's `arithmetic_side_effects` reports
+  112 sites in the two crates (`L.btrfs.23`, F-56).
+* **It runs on the load's behalf, under the load's locks.** The time a
+  commit or a read takes is spent inside the VFS's calls and under its
+  locks, which is (c) of [CLAIM.md](CLAIM.md) §3.1; no bound on it is
+  claimed ([MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) §2.2d).

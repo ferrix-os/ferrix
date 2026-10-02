@@ -50,7 +50,9 @@ package FerrixItemRequirements {
              * breaks the trace loudly. */
         attribute unit : String[1..*] {
             doc /* `path::function` or `path::Type::method`, relative to
-                 * src/kernel/src: `mm::zero_frame`. */
+                 * src/kernel/src: `mm::zero_frame`; or, for a library crate
+                 * of the item, the same from the crate's src/ led by the
+                 * crate's name: `ferrix_btrfs::volume::Volume::read_node`. */
         }
     }
 
@@ -1313,6 +1315,108 @@ package FerrixItemRequirements {
                 port's lock for good reaches the port whole, after at most 10,000,000
                 attempts at the lock, on each architecture, 3 of 3.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+    }
+
+    package Storage {
+        doc /* The btrfs reader and write path, `ferrix-btrfs` and
+             * `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and
+             * ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the
+             * `Device` and `WriteDevice` traits the kernel's block layer
+             * answers, above it `Volume` and `WriteVolume`; the VFS glue on top
+             * (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so
+             * these promise what the two crates do at `Volume` and
+             * `WriteVolume`, not what a program sees through a mount. The
+             * low-level requirements are part 24. */
+
+        requirement <'H.STORE.1'> untrustedVolumesAnswered : ItemHighLevel {
+            attribute :>> statement = "The btrfs reader and writer shall answer
+                every volume image, whatever its bytes, with a value or an error,
+                without reading or writing outside a buffer, panicking or looping
+                without bound.";
+            attribute :>> criterion = "Each of 4,096 single-byte patches of a
+                superblock, and of a leaf, parses or is refused, and every accessor of
+                what parses answers; every truncation and single-bit flip of a zlib,
+                LZO and zstd stream decodes or is refused within its output buffer;
+                0 panics. The `btrfs_read` fuzzer adds resealed images outside this
+                criterion; the write path, which parses every node through the
+                reader, has no hostile-image check of its own yet (TODO.md).";
+            attribute :>> parent = "O.MEDIA";
+        }
+        requirement <'H.STORE.2'> damageNotReturnedAsData : ItemHighLevel {
+            attribute :>> statement = "A tree node or data sector whose checksum,
+                address, level, generation or filesystem disagrees with what refers to
+                it shall never be returned as valid: the reader shall read another
+                copy where the chunk keeps one, and otherwise answer an error.";
+            attribute :>> criterion = "A flipped bit in a superblock, a tree node or
+                a data sector, a pointer to the wrong generation, and damage inside a
+                compressed extent are each refused with an error; with the first copy
+                of a DUP node or sector damaged, the read returns the second copy's
+                bytes.";
+            attribute :>> parent = ("O.MEDIA", "ASR-9");
+        }
+        requirement <'H.STORE.3'> aCommitIsAllOrNothing : ItemHighLevel {
+            attribute :>> statement = "A commit shall overwrite nothing the last
+                commit's trees reach, and shall write the superblock that names the
+                new trees only after a flush has made every node it names durable, so
+                that the volume is at every instant either the last commit or the new
+                one.";
+            attribute :>> criterion = "In the device's record of a commit a flush
+                comes directly before the primary superblock, the primary is made
+                durable before any mirror, and no node is written after it; the
+                commit's writes replayed without its superblocks leave a volume that
+                checks clean and holds exactly the last commit.";
+            attribute :>> parent = "ASR-9";
+        }
+        requirement <'H.STORE.4'> promisesSurviveAPowerCut : ItemHighLevel {
+            attribute :>> statement = "What a commit or a log commit returned success
+                for shall be found, no older, when the volume is opened after a power
+                cut at any later point, the log replayed if the superblock names
+                one.";
+            attribute :>> criterion = "Of 100 cuts over 4 random scenarios of writes,
+                logs and commits, each rebuilt as the device may have left the disk,
+                every one opens, checks clean down to free space and checksums, and
+                rolls back no completed promise.";
+            attribute :>> parent = "ASR-9";
+        }
+        requirement <'H.STORE.5'> nothingInUseIsHandedOut : ItemHighLevel {
+            attribute :>> statement = "The writer shall never allocate a block the last
+                commit, the running transaction or a superblock copy uses, and each
+                commit shall leave the extent tree, the block groups' usage, the
+                free-space tree and the superblock's totals agreeing with each
+                other.";
+            attribute :>> criterion = "After 3,000 random edits on each of two
+                fixtures, and on volumes grown until a chunk covers a superblock
+                mirror, the writer's checker finds every tree block's and data
+                extent's references, each block group's usage and free space and the
+                superblock's total consistent, and no allocation lies over a mirror's
+                stripe.";
+            attribute :>> parent = "ASR-9";
+        }
+        requirement <'H.STORE.6'> aFullVolumeRefusesBeforeItChanges : ItemHighLevel {
+            attribute :>> statement = "An operation the volume has no room for shall
+                be refused with no space before it changes anything, leaving the
+                transaction able to commit; an operation that fails after it changed
+                something shall abort the transaction, so that none of it is
+                committed, and the volume reloaded at its last commit shall take no
+                further change.";
+            attribute :>> criterion = "On a 128 MiB volume filled with data, with
+                file names until its trees are full, and with data extents until the
+                device has no room, each refusal is NoSpace (ENOSPC through a mount),
+                the transaction is not aborted and its commit succeeds; a commit whose
+                device write fails leaves a mount that reads the last commit and
+                answers EROFS to every change.";
+            attribute :>> parent = "ASR-9";
+        }
+        requirement <'H.STORE.7'> allocationFailureIsAnswered : ItemHighLevel {
+            attribute :>> statement = "An allocation the btrfs writer cannot make shall
+                be answered to its caller as an error, aborting the transaction if an
+                edit had begun, and never as a panic or a stop of the element.";
+            attribute :>> criterion = "With every allocation of the writer's
+                operations failed in turn, each operation succeeds or answers an
+                error, no panic is taken, and the volume reopened from the device is
+                the last commit and checks clean.";
+            attribute :>> parent = ("O.QUOTA", "ASR-9");
         }
     }
 }

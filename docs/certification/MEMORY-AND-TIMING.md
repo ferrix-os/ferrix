@@ -241,7 +241,9 @@ it.
    with an OS that also hosts a compiler.
 
 **Verdict: F-23 is closed** for what it measured: allocation failure in the
-item's own source is reported, not fatal, and the build says so. Two item
+item's own source is reported, not fatal, and the build says so. That was the
+kernel's part of the item; the btrfs crates, which joined it on 2026-10-02,
+are not converted yet, and are F-56's (§1.8). Two item
 calls still run load code whose allocations are fatal (§1.3), which the
 closure did not claim and the first version of this section implied. The bound it also names is
 not claimed, and is exported to the integrator as AoU-5.
@@ -326,6 +328,62 @@ KVM's figure is the one to read: TCG's are emulation, and its AArch64
 exclusive-monitor loop makes the refusal's second lock the slow one. A flood
 costs no more per refusal than a grant, since past its 64 a second a refusal
 is a counter bumped under the ring's lock, not a record written.
+
+### 1.8 btrfs — the reader and the write path
+
+The btrfs crates joined the item on 2026-10-02, and what §1.1 to §1.5 say of
+the item's own source does not yet hold for one of them.
+
+**The reader allocates nothing.** `ferrix-btrfs` is `no_std` without
+`alloc`: its chunk map's storage, its node buffer and the buffers a file
+read expands extents into are lent by its caller (`ChunkStorage`,
+`ExtentBuffers`), and a volume with more chunks than the map holds is
+refused with `ChunkMapFull`, not grown into. Its memory is what the caller
+lends: one node (at most 64 KiB), two extent buffers of 128 KiB and zstd's
+workspace, at the size the kernel's glue picks.
+
+**The write path allocates, and today fatally.** `ferrix-btrfs-write` holds
+the running transaction in memory -- every node it copied (`dirty`), the
+delayed reference changes, each block group's free, pinned and reserved
+ranges -- and a cache of nodes read and unchanged (`clean`). Its
+allocations are the standard library's infallible ones: a refusal is the
+allocation error handler, FX-0008, as it is for the load (§1.3). The
+fallible-allocation gate reads both crates since 2026-10-02 and records 185
+unmarked sites as debt, 166 in the write path and 19 in the reader; the
+reader's are calls named like an allocating method (`insert`, `extend`) on
+its own fixed-size types, since the crate does not link `alloc`, and want a
+`NOALLOC:` mark, not a conversion. Converting the write path is in progress
+on the branch `btrfs-fallible` (`H.STORE.7`, `L.btrfs.22`, TODO.md §4.7,
+F-56); until it lands, AoU-5 covers the write path as it covers the
+load.
+
+**What bounds it, and what does not.**
+
+| What | Bound | Where it is set |
+|---|---|---|
+| Clean nodes cached | 4,096 nodes, then dropped (`CLEAN_NODES`): 64 MiB of 16 KiB nodes, before the in-memory form's overhead | the item, `volume.rs` |
+| Nodes a transaction holds (`dirty`) | none in the item; the glue commits once `dirty_bytes()` or the data written reaches 32 MiB (`COMMIT_THRESHOLD`) | the load, `ferrix-btrfs-vfs` `rw.rs` |
+| A writeback's copy buffer | 256 pages, 1 MiB (`WRITEBACK_PAGES`) | the load, `rw.rs` |
+| Delayed references, ranges per block group | none: they grow with the transaction's edits and the volume's fragmentation | -- |
+| A log replayed at mount | none: proportional to the log the last mount left | the item, `log.rs` |
+| The commit's settling loop | 64 passes (`SETTLE_PASSES`), then `Inconsistent` | the item, `commit.rs` |
+
+So the write path's memory is bounded only by the load's commit threshold,
+and between commits by nothing the item sets; a job driving btrfs writes is
+charged for its pages, not for the transaction's nodes (V-05's "a btrfs
+transaction's changed nodes").
+
+**Space on the volume** is a separate budget with its own reserves, kept so
+that a full volume refuses before it changes anything (`H.STORE.6`): an
+operation needs room for its own worst case, 64 nodes (`EDIT_RESERVE`), and
+a node per MiB of data it writes (`Need::data`); the commit's, a node per 16
+it has changed plus 128 (`commit_reserve`); and, unless it frees space, a
+global reserve of 256 nodes (`GLOBAL_RESERVE`) a deletion may use. The
+commit's share and the data write's are **estimates**, shown sufficient on
+the 128 MiB fixture only: deriving them, and testing a full-size
+transaction on full trees, is open (`docs/BACKLOG.md`, TODO.md §4.7 item 5).
+The first 1 MiB of the device is never allocated (`DEVICE_RESERVED`), nor is
+any superblock copy's stripe (`L.btrfs.16`).
 
 ---
 
@@ -461,6 +519,26 @@ the two switches a round trip makes. A domain removes it, and it is the one
 part of the switch a domain changes (SPECULATION.md §3). The p99 is three to
 four times the p50 on a shared host. These are measurements of one
 configuration, not a bound.
+
+### 2.2d btrfs
+
+No time bound is claimed for the btrfs crates either, and their time is
+spent inside the load's calls, under the load's locks (CLAIM.md §3.1 (c)).
+What bounds the work in them:
+
+* **A lookup** descends at most eight levels (`MAX_LEVEL` 7), each a node
+  read, a CRC-32C over the node, and a binary search; a damaged copy costs
+  one more read per copy the chunk keeps. **A walk** is linear in the keys
+  it visits, which ascend strictly. **A compressed extent** expands into at
+  most 128 KiB.
+* **A commit** settles in at most 64 passes, each linear in what the
+  transaction changed, then writes each changed node to each of its copies,
+  flushes, and writes the superblocks, the primary made durable by a second
+  flush or a FUA write. How long a flush takes is the device's, and nothing
+  in the item bounds it.
+* **Opening a volume for writing** reads the chunk, root and block-group
+  trees and the free-space tree, and replays whatever log the last mount
+  left, unmeasured on a full volume (`docs/BACKLOG.md`).
 
 ### 2.3 What is missing, per standard
 

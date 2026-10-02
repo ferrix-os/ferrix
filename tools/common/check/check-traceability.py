@@ -25,7 +25,12 @@ attributes, each a string or a parenthesised list of strings:
 
 `unit` (low level only) names the code, `path::function` or
 `path::Type::method` relative to src/kernel/src -- `mm::zero_frame`,
-`object::quota::Quota::charge` -- and must be the item's product code.
+`object::quota::Quota::charge` -- and must be the item's product code. A
+library crate the manifest's `crates` puts in the `core` or `item` ring is
+named the same way from its src/, led by the crate's name:
+`ferrix_btrfs::volume::Volume::read_node`. Its product files are the ones
+check-item-boundary.py's `item_crate_product_files` lists, and they are
+sorted for the "no unintended function" report with the kernel's.
 
 Verification is named where the check is, in a doc line on the function:
 
@@ -420,34 +425,71 @@ def _impl_type(header: str) -> str:
     return path.split("::")[-1].strip()
 
 
-class Units:
-    """Resolve `path::function` against src/kernel/src, product code of the item only."""
+def item_crate_modules() -> dict[tuple[str, ...], str]:
+    """`{(crate, *module): repository-relative file}` for the product files of
+    every `core` and `item` library crate in the manifest: `ferrix-btrfs`'s
+    src/volume.rs is `("ferrix_btrfs", "volume")`. Empty for a manifest, or a
+    boundary gate, that classifies no crates."""
+    listing = getattr(boundary, "item_crate_product_files", None)
+    if listing is None:
+        return {}
+    manifest = boundary.load_manifest()
+    entries = manifest.get("crates", {}).get("members", {})
+    out: dict[tuple[str, ...], str] = {}
+    for package, path in listing(manifest):
+        src = f"{entries[package]['path']}/src/"
+        name = package.replace("-", "_")
+        out[(name,) + boundary.module_of_file(path.removeprefix(src))] = path
+    return out
 
-    def __init__(self, files: dict[str, str] | None = None, product: set[str] | None = None):
+
+class Units:
+    """Resolve `path::function` against src/kernel/src and the item's library
+    crates, product code of the item only.
+
+    A kernel file is keyed by its path under src/kernel/src (`mm.rs`), a
+    crate's by its path from the repository's root (`src/lib/fs/btrfs/src/
+    volume.rs`), which no kernel path can be."""
+
+    def __init__(
+        self,
+        files: dict[str, str] | None = None,
+        product: set[str] | None = None,
+        crates: dict[tuple[str, ...], str] | None = None,
+    ):
         self._files = files
         self._product = product
+        self._crates = crates
         self._functions: dict[str, list] = {}
+
+    def crates(self) -> dict[tuple[str, ...], str]:
+        if self._crates is None:
+            self._crates = item_crate_modules()
+        return self._crates
 
     def files(self) -> dict[str, str]:
         if self._files is None:
             self._files = {rel: "" for rel in boundary.kernel_files()}
+            self._files.update({rel: "" for rel in self.crates().values()})
         return self._files
 
     def product(self) -> set[str]:
         if self._product is None:
             manifest = boundary.load_manifest()
-            ring_of, _, _ = boundary.classify(manifest, list(self.files()))
+            kernel = [rel for rel in self.files() if rel not in set(self.crates().values())]
+            ring_of, _, _ = boundary.classify(manifest, kernel)
             self._product = {
                 rel
                 for rel, ring in ring_of.items()
                 if ring in ("core", "item") and not boundary.is_test_file(rel, manifest)
-            }
+            } | set(self.crates().values())
         return self._product
 
     def source(self, rel: str) -> str:
         text = self.files().get(rel, "")
         if not text:
-            text = (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
+            base = ROOT if rel in set(self.crates().values()) else KERNEL_SRC
+            text = (base / rel).read_text(encoding="utf-8", errors="replace")
             self.files()[rel] = text
         return text
 
@@ -456,8 +498,18 @@ class Units:
             self._functions[rel] = functions_in(self.source(rel))
         return self._functions[rel]
 
+    def module_of(self, rel: str) -> tuple[str, ...]:
+        """The module path a unit names `rel` by."""
+        for module, path in self.crates().items():
+            if path == rel:
+                return module
+        return boundary.module_of_file(rel)
+
     def module_files(self) -> dict[tuple[str, ...], str]:
-        return {boundary.module_of_file(rel): rel for rel in self.files()}
+        crate_files = set(self.crates().values())
+        out = {boundary.module_of_file(rel): rel for rel in self.files() if rel not in crate_files}
+        out.update(self.crates())
+        return out
 
     def __call__(self, unit: str) -> str | None:
         segments = [s for s in unit.strip().split("::") if s]
@@ -472,7 +524,7 @@ class Units:
                 rel, rest = modules[module], segments[cut:]
                 break
         else:
-            return "names no module of src/kernel/src"
+            return "names no module of src/kernel/src or of an item crate"
         if rel not in self.product():
             return f"{rel} is not the item's product code"
         if len(rest) == 1:
@@ -497,7 +549,7 @@ class Units:
         """Every product function of the item: `(unit, file, fn line)`."""
         out = []
         for rel in sorted(self.product()):
-            module = "::".join(boundary.module_of_file(rel))
+            module = "::".join(self.module_of(rel))
             for name, first, _, owner in self.functions(rel):
                 parts = [p for p in (module, owner, name) if p]
                 out.append(("::".join(parts), rel, first))
@@ -1380,7 +1432,7 @@ def self_test() -> list[str]:
     for element in elements:
         element.source = "t.sysml"
     requirements, ids, problems = requirements_of(elements)
-    units = Units(dict(_KERNEL), product={"mm.rs"})
+    units = Units(dict(_KERNEL), product={"mm.rs"}, crates={})
     problems += check_requirements(requirements, {"O.SCRUB", "ASR-5"}, units)
     for expected in _MODEL_EXPECT:
         if not any(expected in p for p in problems):
@@ -1392,6 +1444,25 @@ def self_test() -> list[str]:
         failures.append(f"model: H.MEM.1 read as {good}")
     if [r.area for r in requirements if r.id == "L.mm.1"] != ["Mm"]:
         failures.append("model: L.mm.1's area is not its package")
+
+    crate_file = "src/lib/x/src/volume.rs"
+    crated = Units(
+        {**_KERNEL, crate_file: "pub struct V;\nimpl V {\n    pub fn read(&self) -> u8 { 0 }\n}\n"},
+        product={"mm.rs", crate_file},
+        crates={("ferrix_x", "volume"): crate_file},
+    )
+    got = {
+        unit: crated(unit)
+        for unit in ("ferrix_x::volume::V::read", "ferrix_x::volume::read", "ferrix_y::volume::V::read")
+    }
+    if (
+        got["ferrix_x::volume::V::read"] is not None
+        or "is a method of V" not in str(got["ferrix_x::volume::read"])
+        or "names no module" not in str(got["ferrix_y::volume::V::read"])
+        or "ferrix_x::volume::V::read" not in crated.names()
+        or "mm::zero_frame" not in crated.names()
+    ):
+        failures.append(f"crate units: {got}, names {crated.names()}")
 
     found, problems = scan_verifiers(_CHECK, "check.rs", "kernel")
     got = [(v.function, v.line, v.ids) for v in found]

@@ -241,6 +241,7 @@ fn power_fail(seed: u64, steps: usize, cuts: usize) {
     }
 }
 
+/// Verifies: L.btrfs.14, H.STORE.4
 #[test]
 fn a_cut_anywhere_leaves_a_volume_that_mounts_and_holds_its_promises() {
     for seed in 1..=4 {

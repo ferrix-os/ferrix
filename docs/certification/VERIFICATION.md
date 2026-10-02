@@ -63,6 +63,19 @@ The largest bodies of in-kernel test code sit against the item: `syscall/
 check.rs` at 9,537 lines, `object/check.rs` at 3,318, `user/check.rs` at 1,263,
 `sched/check.rs` at 1,201.
 
+**The btrfs crates are the exception** (in the item since 2026-10-02). Their
+evidence is host tests, not boots: 8,278 lines of tests over images
+`mkfs.btrfs` made and over a device in memory that records every write and
+flush, so that a power cut at any point can be rebuilt and the volume opened
+again, and the writer's own checker, which recomputes every reference,
+usage and free-space count from the trees. `L.btrfs.1` to `L.btrfs.23` name
+them (TRACEABILITY.md). Stage 11's and 12's boot checks
+(`fs/btrfs_check.rs`, `fs/btrfs_write_check.rs`,
+`fs/btrfs_powerfail.rs`) run the crates under
+the kernel too, but are load-ring checks of the glue and name no item
+requirement. §3's coverage is of the kernel's boots and does not measure
+these crates; a floor for them is TODO.md §4.7.
+
 ---
 
 ## 3. Structural coverage

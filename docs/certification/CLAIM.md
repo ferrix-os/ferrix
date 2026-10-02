@@ -34,9 +34,19 @@ in what order to close it.
 
 "Linux software on a kernel that can be assured" will be read as "Linux
 software becomes assured". It cannot. [SAFETY-MANUAL.md](SAFETY-MANUAL.md)
-AoU-3 already excludes the Linux personality, the VFS, btrfs, the network
-stack and every ring-3 driver from any claim, and forbids a safety function
-there.
+AoU-3 already excludes the Linux personality, the VFS, the network stack and
+every ring-3 driver from any claim, and forbids a safety function there.
+
+btrfs is the one part of the Linux layer that moved: on 2026-10-02 the
+customer decided that the btrfs reader and write path (`ferrix-btrfs`,
+`ferrix-btrfs-write`) are certified for as long as they run inside the
+kernel, and they joined the item. What that adds to the claim is narrow
+and is ASR-9's: data on a volume is returned as stored or refused, and what
+a commit reported durable survives a power cut, on a single-device volume
+of the shape the writer maintains, against accident rather than an
+attacker, on storage that honours flush (AoU-15, AoU-16). It does not make
+files assured as a program sees them: the VFS glue above the two crates --
+the page cache, when a write is committed, what `fsync` does -- stays load.
 
 The claim that can be made true is **mixed criticality**. Unmodified Linux
 software runs in non-safety (QM) partitions beside safety functions that run
@@ -84,14 +94,30 @@ standard.
 
 ### 3.1 Where the Linux layer sits
 
-The item today is 63,653 lines of product code, 55,548 of them `core`, by
-the item-boundary gate on 65639967. It holds memory protection,
+The item today is 79,079 lines of product code by the item-boundary gate on
+5625d22f (2026-10-02): 64,788 in the kernel, 56,644 of them `core`, and
+14,291 in two library crates. It holds memory protection,
 scheduling, capability objects, trap and system-call entry, the IOMMU, SMP,
-device discovery, and the native ABI a safety process uses. The Linux layer
-(the personality, VFS, btrfs, net, namespaces, procfs) is outside, as the
-`load` ring: 58,395 kernel lines, plus the libraries it calls, which the
-gate does not count (the btrfs crates about 25k, network about 16k, vfs
-about 13k, by `wc` with tests). It stays outside.
+device discovery, and the native ABI a safety process uses, and since
+2026-10-02 the btrfs reader and write path, those two crates (without their
+8,278 lines of host tests). Their
+interface below is the `Device` and `WriteDevice` traits the kernel's block
+layer answers, and above it `Volume` and `WriteVolume`. The Linux layer (the
+personality, VFS, the btrfs glue on the VFS -- `ferrix-btrfs-vfs` and the
+kernel's `fs/btrfs*.rs` --, net, namespaces, procfs) is outside, as the
+`load` ring: 64,036 kernel lines, plus the libraries it calls, which the
+gate does not count but for `ferrix-btrfs-vfs`'s 2,185 (network about 16k,
+vfs about 13k, by `wc` with tests).
+It stays outside.
+
+The two btrfs crates are an unusual member of the item: the item's code,
+called only by the load. They run in ring 0 on the load's threads, under the
+load's locks, parsing a volume whose bytes come from a ring-3 block driver
+and whoever wrote the medium. So their own claims are about their interface
+-- total over any image, damage refused, a commit all or nothing -- and
+(a) to (d) below apply to how the load calls them, not to them: they are
+`forbid(unsafe_code)`, their allocations are being made fallible (TODO.md),
+and their time is spent inside the load's calls.
 
 The problem is that the load runs **in ring 0, in the item's address
 space**. AoU-3 says "the element's own enforcement is what bounds their

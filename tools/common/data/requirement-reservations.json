@@ -24,13 +24,6 @@
       "branch": "stage13-s4",
       "date": "2026-10-01",
       "purpose": "S4: Verdict::Trap (allocated by os-bd)"
-    },
-    {
-      "ids": ["H.STORE.1-7", "L.btrfs.1-23"],
-      "owner": "ferrix-po",
-      "branch": "btrfs-cert-docs",
-      "date": "2026-10-02",
-      "purpose": "btrfs joins the certified item: the storage area's high-level requirements and the btrfs reader's and writer's low-level ones"
     }
   ]
 }

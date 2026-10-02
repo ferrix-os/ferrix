@@ -221,6 +221,7 @@ fn check_listing(
     );
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 #[cfg_attr(
     miri,
@@ -230,6 +231,7 @@ fn the_uncompressed_image_reads_back_exactly() {
     check_image("none");
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 #[cfg_attr(
     miri,
@@ -239,6 +241,7 @@ fn the_zlib_image_reads_back_exactly() {
     check_image("zlib");
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 #[cfg_attr(
     miri,
@@ -248,6 +251,7 @@ fn the_lzo_image_reads_back_exactly() {
     check_image("lzo");
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 #[cfg_attr(
     miri,
@@ -257,6 +261,7 @@ fn the_zstd_image_reads_back_exactly() {
     check_image("zstd");
 }
 
+/// Verifies: L.btrfs.7
 #[test]
 fn a_missing_name_is_a_miss_not_an_error() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -266,6 +271,7 @@ fn a_missing_name_is_a_miss_not_an_error() {
     assert_eq!(found, Ok(None), "an absent name is None");
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 fn a_read_past_the_end_returns_nothing_and_a_listing_can_resume() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -320,6 +326,7 @@ fn a_read_past_the_end_returns_nothing_and_a_listing_can_resume() {
     assert!(rest.iter().all(|&i| i > first[0]), "and continues after it");
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 fn a_hole_reads_as_zeroes() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -366,6 +373,7 @@ fn dir_entry(name: &[u8], kind: u8) -> Vec<u8> {
     bytes
 }
 
+/// Verifies: L.btrfs.7
 #[test]
 fn a_lookup_refuses_an_entry_filed_under_another_names_hash() {
     let key_for = |name: &[u8]| BtrfsKey::new(256, DIR_ITEM_KEY, name_hash(name));
@@ -399,6 +407,7 @@ fn a_lookup_refuses_an_entry_filed_under_another_names_hash() {
     );
 }
 
+/// Verifies: L.btrfs.7
 #[test]
 fn names_no_directory_can_hold_are_refused() {
     let longest = [b'x'; 255];
@@ -457,6 +466,7 @@ fn find_item(
     }
 }
 
+/// Verifies: L.btrfs.7
 #[test]
 fn a_listing_refuses_a_name_with_a_slash_in_it() {
     // A hostile image, checksummed: the first entry of the root directory's
@@ -482,6 +492,7 @@ fn a_listing_refuses_a_name_with_a_slash_in_it() {
     );
 }
 
+/// Verifies: L.btrfs.7
 #[test]
 fn a_lookup_refuses_a_name_that_no_longer_matches_its_hash() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -512,6 +523,7 @@ fn a_lookup_refuses_a_name_that_no_longer_matches_its_hash() {
     );
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 fn a_read_refuses_an_extent_that_starts_inside_the_one_before() {
     // `sparse.bin` is 8 KiB written at 0, then 4 KiB at 1 MiB. Refile the
@@ -558,6 +570,7 @@ fn a_read_refuses_an_extent_that_starts_inside_the_one_before() {
     );
 }
 
+/// Verifies: L.btrfs.8
 #[test]
 fn read_buffers_smaller_than_an_extent_are_refused() {
     let mut small = vec![0u8; 4096];
@@ -607,6 +620,7 @@ fn first_extent(
     (ino, file, extent.compression)
 }
 
+/// Verifies: L.btrfs.11, H.STORE.2
 #[test]
 fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
     let f = &mut Fixture::new(IMAGES[0].1);
@@ -665,6 +679,7 @@ fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
     );
 }
 
+/// Verifies: L.btrfs.11, H.STORE.2
 #[test]
 fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
     let f = &mut Fixture::new(DUP);
@@ -714,6 +729,7 @@ fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
     );
 }
 
+/// Verifies: L.btrfs.11, H.STORE.2
 #[test]
 fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
     let (name, packed) = IMAGES[1];
@@ -744,6 +760,7 @@ fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
     );
 }
 
+/// Verifies: L.btrfs.11
 #[test]
 fn a_nodatasum_file_is_read_without_checking_as_linux_reads_it() {
     let f = &mut Fixture::new(IMAGES[0].1);

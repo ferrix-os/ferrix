@@ -96,6 +96,7 @@ fn refs_past_the_inline_limit_become_keyed_items() {
     assert_eq!(parsed, record);
 }
 
+/// Verifies: L.btrfs.17
 #[test]
 fn a_count_cannot_go_below_zero() {
     let mut record = ExtentRecord::new(9, EXTENT_FLAG_TREE_BLOCK);

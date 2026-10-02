@@ -28,9 +28,9 @@ still has to happen. It happens at the integrator, and this item's certificate
 | | |
 |---|---|
 | Element | Ferrix certified item, `core` + `item` rings |
-| Size | 49,431 lines of product code, 38,989 of it in `core` |
-| Scope | memory protection, scheduling, capability objects, trap and syscall entry, IOMMU, SMP, device enumeration |
-| Not in scope | VFS, btrfs, network stack, Linux personality, ring-3 drivers — 44,215 lines of uncertified load |
+| Size | 79,079 lines of product code: 64,788 in the kernel, 56,644 of it in `core`, and 14,291 in the two btrfs crates ([ITEM.md](ITEM.md) §2, 2026-10-02) |
+| Scope | memory protection, scheduling, capability objects, trap and syscall entry, IOMMU, SMP, device enumeration; since 2026-10-02 the btrfs reader and write path (`ferrix-btrfs`, `ferrix-btrfs-write`) |
+| Not in scope | VFS, the btrfs glue on it (`ferrix-btrfs-vfs`, `src/kernel/src/fs/btrfs*.rs`), network stack, Linux personality, ring-3 drivers — 64,036 lines of uncertified load in the kernel |
 | Reference configuration | x86-64, AArch64, ARMv7-A; release profile; rustc 1.97.1; zero Cargo features; built `--mitigations on`, the default |
 
 The boundary is enforced on every build by `tools/common/check/check-item-boundary.py`, so
@@ -59,10 +59,19 @@ integrator whose system needs something else must say so (§4, AoU-1).
 | ASR-6 | On detecting an inconsistent internal state, the element shall enter its safe state rather than continue. | `panic.rs` with a catalogued explanation | `check-panic-audit.py`; the safe state is defined in §3 |
 | ASR-7 | Data supplied by a partition shall be validated before use. | `syscall/uaccess.rs` | 427 refusal assertions in `syscall/check.rs` |
 | ASR-8 | Admission of a real-time workload shall be refused when the set is unschedulable. | EDF with CBS admission | **partially met** — see AoU-4 |
+| ASR-9 | Data the element has stored on a volume shall be returned as it was stored or refused with an error, never returned altered, and what a commit has reported durable shall survive a loss of power. | the btrfs crates: checksums on every node and data sector, copy-on-write, a flush before the superblock | host tests of both crates, with 100 power cuts rebuilt from a device's record of its writes — see AoU-15, AoU-16 |
 
 ASR-1 to ASR-7 are met on the reference configuration, with the architecture
 exceptions in §4. **ASR-8 is partially met** and is the one an integrator must
-read most carefully.
+read most carefully. **ASR-9 is met at the btrfs crates' interface**,
+`Volume` and `WriteVolume`, for a single-device volume of `SINGLE` or `DUP`
+chunks with CRC-32C checksums, under AoU-15 and AoU-16. *Altered* means
+changed by accident -- a flipped bit, a torn or misdirected write, a stale
+block: CRC-32C is not a cryptographic check, and a volume written by an
+attacker can carry checksums that match (AoU-15). When a program's write
+becomes a commit is the VFS's choice, which is load (AoU-3): ASR-9 promises
+what `WriteVolume::commit` and `commit_log` keep, not what `fsync` through a
+mount does.
 
 ### Why the element uses `unsafe`
 
@@ -148,10 +157,14 @@ See §3. The integrator shall ensure that a halted processor is a safe outcome
 in the system, or provide external means to reach a safe outcome from it.
 
 ### AoU-3 — the uncertified load is untrusted
-The VFS, btrfs, the network stack, the Linux personality and all ring-3 drivers
-are outside the element and carry no assurance claim. The integrator shall not
-place a safety function in them, and shall treat their output as untrusted
-input. The element's own enforcement is what bounds their failure.
+The VFS, the network stack, the Linux personality and all ring-3 drivers are
+outside the element and carry no assurance claim. So is the btrfs glue the
+VFS calls -- `ferrix-btrfs-vfs` and `src/kernel/src/fs/btrfs*.rs`, its page
+cache, its commit interval and when an `fsync` commits -- though the btrfs
+reader and write path beneath it are in the element since 2026-10-02 (ASR-9).
+The integrator shall not place a safety function in the load, and shall treat
+its output as untrusted input. The element's own enforcement is what bounds
+their failure.
 
 ### AoU-4 — no worst-case execution time is provided
 The element provides admission control, partitioned scheduling, bounded
@@ -165,7 +178,11 @@ shall treat ASR-8 as unmet until they have. (Finding F-24.)
 ### AoU-5 — the heap is not bounded per partition, and exhaustion outside the element is fatal
 The element allocates dynamically, and reports allocation failure at every
 site in its own source. A native call answers `NO_MEMORY`, a Linux call
-`ENOMEM` (`EAGAIN` from `madvise`), and the element carries on.
+`ENOMEM` (`EAGAIN` from `madvise`), and the element carries on. The
+exception since 2026-10-02 is the btrfs write path, which joined the element
+with its allocations still infallible; they are being converted (`H.STORE.7`,
+F-56), and until then a refusal there stops the element with FX-0008, as one
+in the load does.
 `tools/common/check/check-fallible-alloc.py` fails the build on an allocation that does
 not report failure, and every boot proves the handling by failing allocations
 under the native calls ([MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) §1). Two
@@ -319,6 +336,37 @@ different criticality shall not share a domain. A marking is recorded as a
 `DOMAIN` audit event, which is how an assessor finds every domain on a
 running system.
 
+### AoU-15 — a volume is untrusted input, and only as authentic as its medium
+The element parses a btrfs volume as hostile input in ring 0: whatever its
+bytes, the reader and writer answer an error rather than read or write
+outside a buffer, panic or loop without bound (`H.STORE.1`), and a block or
+sector whose checksum, address, level or generation is wrong is refused or
+read from its other copy (`H.STORE.2`). A damaged volume is not an internal
+inconsistency: it is answered with an error, and a failed write turns the
+mount read-only at its last commit, never the safe state of §3. Two limits
+follow, and the integrator shall design for both. CRC-32C detects accident,
+not intent: whoever can write the medium, or a ring-3 block driver
+answering reads, can supply a volume whose checksums match and whose
+contents are false. The integrator shall not rely on stored data for a
+safety function unless the medium is protected against deliberate change by
+means of its own, and shall treat an I/O error from the volume as an outcome
+of any read. And only volumes the writer maintains are written: one device,
+`SINGLE` or `DUP` chunks, CRC-32C, skinny metadata, the free-space tree,
+`NO_HOLES`, no subvolumes, quotas or shared blocks; any other is read only,
+or refused.
+
+### AoU-16 — the storage device keeps its flush and FUA promises
+ASR-9's half about power loss rests on one property of the device below the
+element's `WriteDevice` interface: every write that returned before a flush
+is durable when the flush returns, and a write with FUA is durable when it
+returns. The commit writes its nodes, flushes, and only then writes the
+superblock (`H.STORE.3`). A device, controller, emulator or host cache mode
+that acknowledges a flush it has not done can make the superblock durable
+before a node it names, and the volume may then not mount after a power cut.
+The integrator shall use storage, and a virtual disk configuration, that
+honours flush and FUA, and shall not run the element over a write cache
+that is volatile and claims otherwise.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —
@@ -339,6 +387,7 @@ cause.
 | FM-8 | A partition is starved of processor time | ASR-8 violated | none at runtime; the `quota` boot line checks one job's share against another's | EEVDF eligibility, EDF admission; a job's share of a contended processor is its weight's, whatever its task count | no WCET, so no bound is provable (AoU-4) |
 | FM-9 | Kernel stack overflow | page fault at the instruction that overflowed | **guard page below every kernel stack**, and a boot check that the guard is unmapped | `vmap` reserves an unmapped page on each side of every allocation; no recursion in the element | the loader-provided boot stack is not guarded (early boot only) |
 | FM-10 | A processor stops answering a TLB shootdown or grace period (x86-64) | none while the wait lasts: nothing is freed and no narrowed permission relied on until every processor answers; then the safe state (FX-0001, FX-0002, FX-0003) | `smp::wait_for` and `take_turn`: a wall-clock floor (1 s, 5 s) **and** a count of the waiter's own polls, which stretches with the emulator's slowness | the count is in guest units, so a slow machine is not called stuck; a stuck processor answers no count and is still found (negative control: 1.8 s under KVM, 5.1 s under `tcg`, 32 s under the coverage plugin) | a host that stops running one virtual processor and keeps running the waiter can still end the wait early: availability lost, never integrity |
+| FM-11 | Stored data is altered or lost: a torn commit, a write the device reordered, damage on the medium, a hostile image | ASR-9 violated: wrong bytes returned as a file's, or a volume that no longer mounts | a CRC-32C on every node and data sector, and each node's address, level, generation and filesystem checked against its parent; the second copy read where the chunk keeps one | copy-on-write: nothing the last commit reaches is overwritten, and the superblock is written after a flush; a failed transaction is aborted and the volume reloaded read only at its last commit | deliberate alteration with matching checksums (AoU-15); a device that does not honour flush (AoU-16); log replay and orphan cleanup at mount are not measured against a full volume, and can still fail the mount there (`docs/BACKLOG.md`) |
 
 **FM-9 was recorded as the worst entry in this table and that was wrong.**
 Every kernel stack is guard-paged at both ends: `crate::vmap` reserves an

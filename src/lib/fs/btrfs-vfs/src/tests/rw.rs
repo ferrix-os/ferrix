@@ -570,6 +570,7 @@ fn statfs_says_it_is_btrfs() {
     assert!(stat.blocks_free > 0 && stat.blocks_free <= stat.blocks);
 }
 
+/// Verifies: L.btrfs.20, H.STORE.6
 #[test]
 fn a_full_volume_answers_enospc_and_stays_usable() {
     // A `dd` into a nearly full /data latched the whole mount into EIO: the
@@ -670,6 +671,7 @@ impl ferrix_btrfs_write::WriteDevice for Failing {
     }
 }
 
+/// Verifies: L.btrfs.21, H.STORE.6
 #[test]
 fn an_aborted_transaction_leaves_the_mount_read_only_at_its_last_commit() {
     let disk = Disk::new(BLANK);
@@ -728,6 +730,7 @@ fn an_aborted_transaction_leaves_the_mount_read_only_at_its_last_commit() {
     assert!(fs.root().lookup(b"lost").is_err());
 }
 
+/// Verifies: L.btrfs.21
 #[test]
 fn an_aborted_volume_whose_last_commit_cannot_be_read_says_so_once() {
     let disk = Disk::new(BLANK);
@@ -769,6 +772,7 @@ fn an_aborted_volume_whose_last_commit_cannot_be_read_says_so_once() {
     );
 }
 
+/// Verifies: L.btrfs.20
 #[test]
 fn creates_on_full_trees_answer_enospc_and_the_mount_stays_writable() {
     // 22,738 creates on this fixture used to end in an aborted transaction

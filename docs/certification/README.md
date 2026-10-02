@@ -67,15 +67,18 @@ Not Ferrix. Ferrix's acceptance test is that it hosts `rustc` and builds
 itself, which requires a general-purpose OS with a browser, a compositor and a
 self-hosting toolchain — the opposite of a frozen, analysable configuration.
 
-The item is a **51,525-line subset of the kernel**, defined in
+The item is **79,079 lines of product code: a 64,788-line subset of the
+kernel and, since 2026-10-02, the two btrfs crates' 14,291**, defined in
 [`tools/common/data/certification-item.json`](../../tools/common/data/certification-item.json) and
 enforced on every build by `tools/common/check/check-item-boundary.py`. Memory protection,
 scheduling, capability objects, the trap and syscall entry paths, the IOMMU,
-SMP and device enumeration are inside; the VFS, btrfs, the network stack, the
-Linux personality -- its dispatcher, `mmap`, `futex` and threads included --
-and the drivers are uncertified load above it, 53,420 lines of it.
+SMP, device enumeration and the btrfs reader and write path are inside; the
+VFS with the btrfs glue on it, the network stack, the Linux personality -- its
+dispatcher, `mmap`, `futex` and threads included -- and the drivers are
+uncertified load above it, 64,036 lines of it in the kernel (ITEM.md §2,
+re-measured 2026-10-02).
 
-The boundary is nested so it can ratchet inward: a 52,417-line `core` ring is
+The boundary is nested so it can ratchet inward: a 56,644-line `core` ring is
 named now as the destination for a later EAL6+ or ASIL D effort, so that
 raising the target does not mean rewriting every artifact scoped to the old
 boundary.
@@ -84,19 +87,19 @@ boundary.
 
 | | |
 |---|---:|
-| Item product code | 61,621 lines |
-| Uncertified load | 53,420 lines |
+| Item product code | 79,079 lines: 64,788 in the kernel, 14,291 in the btrfs crates (2026-10-02) |
+| Uncertified load | 64,036 lines in the kernel (2026-10-02) |
 | In-kernel self-tests | 42,634 lines |
-| Statement coverage, certified item | **90.1%** x86-64, **89.9%** AArch64, **84.5%** ARMv7-A |
+| Statement coverage, certified item's kernel files | **90.1%** x86-64, **89.9%** AArch64, **84.5%** ARMv7-A; the btrfs crates are not measured (F-56) |
 | Statement coverage, core ring | 90.8% x86-64, 90.8% AArch64, 84.1% ARMv7-A |
-| Unreached statements | x86-64 762 — 438 argued, 227 hardware absent, **97 need a test**; AArch64 746 — 400, 201, **145**; ARMv7-A 1,131 — 557, 444, **130** |
+| Unreached statements, kernel files | x86-64 762 — 438 argued, 227 hardware absent, **97 need a test**; AArch64 746 — 400, 201, **145**; ARMv7-A 1,131 — 557, 444, **130** |
 | SOUP in the item | **0** |
 | External crates, host-side | 21 |
 | Upward boundary references | **0**, from 94 at the start of the work (29 and 62 before the gate could resolve module paths) |
 | `unsafe` blocks, all documented | 800 |
 | `unsafe` sites in the item traced to the requirement they serve | **663** of 663, under 14 obligations; a new untraced one fails the build (F-26) |
-| Directly recursive functions in the item | **0**, of 2,173 |
-| Allocations in the item that stop the machine when memory runs out | **0** in its source; 73 at bring-up, by design; 13 in the load `process_create` and `process_start` run, recorded, and the load's callees beyond those (F-23, MEMORY-AND-TIMING.md §1.3) |
+| Directly recursive functions in the item | **0**, of 2,173 in its kernel files and of 635 in the btrfs crates |
+| Allocations in the item that stop the machine when memory runs out | **0** in its kernel files; 73 at bring-up, by design; 13 in the load `process_create` and `process_start` run, recorded, and the load's callees beyond those (F-23, MEMORY-AND-TIMING.md §1.3). **185** in the btrfs crates since they joined on 2026-10-02, recorded as debt and being converted: 166 in the write path, 19 in the reader that are names, not allocations (F-56, MEMORY-AND-TIMING.md §1.8) |
 | Job quotas the ST claims (FRU_RSA.1) that are built | **3** of 3, as refined: a job's memory -- its programs' frames and page tables and the kernel heap the Linux personality holds for them -- native objects and tasks, each refused at its limit with a sibling going on, and a processor shared by job weight (one task alone kept 50.0% against eight) (F-35, F-37 closed) |
 | Kinds of kernel heap a program can make and keep through the Linux calls, charged to its job | **13** of 13 the audit found, each refused at a 32 KiB limit at boot; per-task state and machine-wide tables with fixed bounds argued (F-37) |
 | SMEP + SMAP (x86-64) | **on** |
@@ -106,12 +109,14 @@ boundary.
 | Writable mappings of the kernel's text | **0**, every mapping of its frames swept each boot; the direct map's alias was one until 2026-09-26 (F-34) |
 | Assembly | 500 lines, 22 allow-listed sites, outside the Pixel 7 loader |
 | Cargo features in `src/kernel/`/`src/boot/common/uefi/` | 0 |
-| Requirements of the item, each with a statement, a pass/fail criterion and its parent, gated | **95** high-level (`H.*`) decomposing all 8 objectives and all 8 ASRs; **518** low-level (105 `L.object.*`, 44 `L.iommu.*`, 61 `L.mm.*`, 105 `L.user.*`, 32 `L.smp.*`, 2 `L.sched.*`, 119 `L.x86_64.*`, 6 `L.trap.*`, 3 `L.syscall.*`, 41 `L.console.*`); **338** named by a check that proves each whole, 275 in the baseline of the unverified (TRACEABILITY.md, W-8) |
-| Product functions of the item no low-level requirement names | **0** of 261 in `object/`, of 96 in `iommu`, of 297 in `mm`, `vmap`, `early` and `user`, of 57 in `smp` and of 74 in `console`, where a new one fails the build (object/: 175 named, 84 accessors, 2 check code; iommu: 77 named, 19 accessors; memory: 236 named, 49 accessors, 12 check code; smp: 38 named, 17 accessors, 2 check code; console: 62 named, 10 accessors, 2 check code); 874 of 2,346 item-wide, the subsystems still to write (F-15) |
+| Requirements of the item, each with a statement, a pass/fail criterion and its parent, gated | **121** high-level (`H.*`) decomposing all 10 objectives and all 9 ASRs; **647** low-level (126 `L.x86_64.*`, 109 `L.object.*`, 107 `L.user.*`, 62 `L.mm.*`, 52 `L.aarch64.*`, 44 `L.iommu.*`, 41 `L.console.*`, 32 `L.smp.*`, 23 `L.btrfs.*`, 21 `L.device.*`, 9 `L.claim.*`, 7 `L.trap.*`, 5 `L.quiesce.*`, 3 `L.syscall.*`, 3 `L.armv7a.*`, 2 `L.sched.*`, 1 `L.discovery.*`); **444** named by a check that proves each whole, 324 in the baseline of the unverified (TRACEABILITY.md, W-8; 2026-10-02) |
+| Product functions of the item no low-level requirement names | **0** of 261 in `object/`, of 96 in `iommu`, of 297 in `mm`, `vmap`, `early` and `user`, of 57 in `smp` and of 74 in `console`, where a new one fails the build (object/: 175 named, 84 accessors, 2 check code; iommu: 77 named, 19 accessors; memory: 236 named, 49 accessors, 12 check code; smp: 38 named, 17 accessors, 2 check code; console: 62 named, 10 accessors, 2 check code); 882 of 3,093 item-wide on 2026-10-02, the subsystems still to write (F-15), 286 of them among the btrfs crates' 635 (138 named, 211 accessors; F-56) |
 
-The coverage rows were measured on 2026-09-27 over the item as W-5 left it,
-the Linux dispatcher's routing and five of the personality's files in the load
-ring ([ITEM.md](ITEM.md) §2); the other rows are measured on the same tree.
+The coverage rows were measured on 2026-09-27 over the item's kernel files as
+W-5 left them, the Linux dispatcher's routing and five of the personality's
+files in the load ring ([ITEM.md](ITEM.md) §2); the other rows are measured on
+the same tree but for the btrfs crates' figures, of 2026-10-02. The crates are
+exercised by host tests, which no coverage run measures (F-56).
 
 Two of these were unknown before this audit and are the reason it was worth
 doing. The kernel had **no structural coverage measurement at all** — the
@@ -232,9 +237,10 @@ complexity and recursion gate (F-25, closed).
 *Missing:* independent assessment, which EN 50716 permits to be less
 independent at SIL 2 than above but not absent (F-27). Dynamic memory remains
 pervasive, and Annex A still discourages it. Its failure is now reported at
-every site in the item, where it used to stop the machine (F-23, closed). What
-is left is an exported application condition: no bound, and a load whose
-allocation failure is fatal (AoU-5).
+every site in the item's kernel files, where it used to stop the machine
+(F-23, closed); the btrfs write path, in the item since 2026-10-02, is being
+converted (F-56). What is left is an exported application condition: no
+bound, and a load whose allocation failure is fatal (AoU-5).
 
 ## 4. What would actually move the needle
 

@@ -486,16 +486,19 @@ fn edit_against_model(packed: &[u8], seed: u64, steps: usize) {
     assert_eq!(found, model, "the committed tree holds what the model does");
 }
 
+/// Verifies: L.btrfs.17, H.STORE.5
 #[test]
 fn random_edits_on_the_blank_volume_match_a_model() {
     edit_against_model(BLANK, 1, 3000);
 }
 
+/// Verifies: L.btrfs.17, H.STORE.5
 #[test]
 fn random_edits_on_a_populated_volume_match_a_model() {
     edit_against_model(POPULATED, 2, 3000);
 }
 
+/// Verifies: L.btrfs.17
 #[test]
 fn deleting_everything_added_shrinks_the_tree_back() {
     let mut volume = WriteVolume::open(MemDevice::new(BLANK)).unwrap();
@@ -603,6 +606,7 @@ pub(crate) fn past_the_mirror() -> MemDevice {
     volume.into_device()
 }
 
+/// Verifies: L.btrfs.16, H.STORE.5
 #[test]
 fn no_tree_block_is_allocated_over_a_superblock_mirror() {
     let device = past_the_mirror();
@@ -639,6 +643,7 @@ pub(crate) fn grown_over_the_mirror() -> (MemDevice, u64) {
     (volume.into_device(), logical)
 }
 
+/// Verifies: L.btrfs.16, H.STORE.5
 #[test]
 fn a_new_chunk_over_a_superblock_mirror_keeps_the_mirror_out_of_allocation() {
     let (device, logical) = grown_over_the_mirror();
@@ -655,6 +660,7 @@ fn a_new_chunk_over_a_superblock_mirror_keeps_the_mirror_out_of_allocation() {
     }
 }
 
+/// Verifies: L.btrfs.13, L.btrfs.14, H.STORE.3
 #[test]
 fn a_crash_before_the_superblock_leaves_the_last_commit() {
     let mut volume = WriteVolume::open(MemDevice::new(BLANK)).unwrap();
@@ -686,6 +692,7 @@ fn a_crash_before_the_superblock_leaves_the_last_commit() {
     );
 }
 
+/// Verifies: L.btrfs.13, H.STORE.3
 #[test]
 fn the_commit_flushes_before_the_superblock() {
     let mut volume = WriteVolume::open(MemDevice::new(BLANK)).unwrap();

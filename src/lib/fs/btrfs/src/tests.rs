@@ -22,6 +22,7 @@ use super::*;
 // CRC-32C
 // ---------------------------------------------------------------------------
 
+/// Verifies: L.btrfs.1
 #[test]
 fn crc32c_matches_the_published_vectors() {
     // Castagnoli, the polynomial btrfs checksums with. These three appear in
@@ -177,6 +178,7 @@ fn put_u64(bytes: &mut [u8], at: usize, value: u64) {
     bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn a_well_formed_superblock_parses() {
     let bytes = SuperblockBuilder::new().build();
@@ -203,6 +205,7 @@ fn a_well_formed_superblock_parses() {
     assert_eq!(superblock.total_bytes(), 1 << 30);
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn a_superblock_with_the_wrong_magic_is_refused() {
     let mut bytes = SuperblockBuilder::new().build();
@@ -213,6 +216,7 @@ fn a_superblock_with_the_wrong_magic_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.1, H.STORE.2
 #[test]
 fn a_superblock_with_a_bad_checksum_is_refused() {
     let bytes = SuperblockBuilder::new().build_corrupt();
@@ -225,6 +229,7 @@ fn a_superblock_with_a_bad_checksum_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn a_truncated_superblock_is_refused() {
     let bytes = SuperblockBuilder::new().build();
@@ -236,6 +241,7 @@ fn a_truncated_superblock_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn a_superblock_whose_sizes_disagree_is_refused() {
     let sizes = |sector: u32, node: u32, leaf: u32| {
@@ -277,6 +283,7 @@ fn a_superblock_whose_sizes_disagree_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn a_superblock_naming_an_impossible_root_is_refused() {
     let with = |at: usize, value: &[u8]| SuperblockBuilder::new().field(at, value).build();
@@ -331,6 +338,7 @@ fn a_superblock_naming_an_impossible_root_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.1
 #[test]
 fn an_unsupported_checksum_type_is_reported() {
     // 1, 2 and 3 are xxhash, sha256 and blake2. They are real, and this reader
@@ -403,6 +411,7 @@ const CHUNK_RAID1: u64 = 16;
 const CHUNK_DUP: u64 = 32;
 const CHUNK_RAID0: u64 = 8;
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_single_chunk_maps_logical_to_physical() {
     let item_bytes = chunk_item(1 << 20, CHUNK_DATA, &[(1, 0x400_0000)]);
@@ -439,6 +448,7 @@ fn a_single_chunk_maps_logical_to_physical() {
     );
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn mirrored_profiles_read_from_the_first_stripe() {
     // DUP and RAID1 both keep a whole copy per stripe, so a *read* can be
@@ -482,6 +492,7 @@ fn mirrored_profiles_read_from_the_first_stripe() {
     }
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn the_profile_of_an_unsupported_layout_is_reported() {
     assert!(!ChunkProfile::from_type(CHUNK_RAID0).is_supported());
@@ -489,6 +500,7 @@ fn the_profile_of_an_unsupported_layout_is_reported() {
     assert!(ChunkProfile::from_type(CHUNK_DATA | CHUNK_DUP).is_supported());
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_chunk_item_with_no_stripes_is_refused() {
     let item_bytes = chunk_item(1 << 20, CHUNK_DATA, &[]);
@@ -498,6 +510,7 @@ fn a_chunk_item_with_no_stripes_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_truncated_chunk_item_is_refused() {
     let item_bytes = chunk_item(1 << 20, CHUNK_DATA, &[(1, 0x1000)]);
@@ -509,6 +522,7 @@ fn a_truncated_chunk_item_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn the_system_chunk_array_bootstraps_the_map() {
     // This array is the only way to read the chunk tree, because finding the
@@ -534,6 +548,7 @@ fn the_system_chunk_array_bootstraps_the_map() {
     assert_eq!(map.logical_to_physical(0x100_0000), Some((1, 0x400_0000)));
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_full_chunk_map_reports_rather_than_overruns() {
     let item_bytes = chunk_item(1 << 20, CHUNK_DATA, &[(1, 0)]);
@@ -550,6 +565,7 @@ fn a_full_chunk_map_reports_rather_than_overruns() {
     assert_eq!(map.len(), 2);
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_chunk_overlapping_one_already_mapped_is_refused() {
     // A covers 16 MiB from 0x100_0000. Before this check, B inside it was
@@ -588,6 +604,7 @@ fn a_chunk_overlapping_one_already_mapped_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn adjacent_and_repeated_chunks_are_accepted() {
     // The boundary cases the overlap check must not catch: a chunk starting
@@ -636,6 +653,7 @@ fn stripes(count: u64) -> Vec<(u64, u64)> {
     (1..=count).map(|devid| (devid, devid << 24)).collect()
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_chunk_item_btrfs_would_not_write_is_refused() {
     let single = chunk_item(1 << 20, CHUNK_DATA, &stripes(1));
@@ -729,6 +747,7 @@ fn a_chunk_item_btrfs_would_not_write_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn every_layout_btrfs_writes_still_parses() {
     // The boundary of each rule above: the exact stripe counts, the longest
@@ -781,6 +800,7 @@ fn every_layout_btrfs_writes_still_parses() {
     }
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn a_chunk_must_agree_with_the_volume_sector_size() {
     let bytes = chunk_item(1 << 20, CHUNK_DATA, &stripes(1));
@@ -812,6 +832,7 @@ fn sys_array_entry(key: BtrfsKey, item: &[u8]) -> Vec<u8> {
     entry
 }
 
+/// Verifies: L.btrfs.3
 #[test]
 fn the_system_chunk_array_holds_only_system_chunk_items() {
     let system = chunk_item(1 << 20, CHUNK_SYSTEM, &stripes(1));
@@ -999,6 +1020,7 @@ fn an_internal_node_yields_its_key_pointers() {
     assert_eq!(pointers[1].key, BtrfsKey::new(300, 1, 0));
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn searching_finds_a_key_and_reports_where_an_absent_one_would_go() {
     let bytes = sample_leaf();
@@ -1023,6 +1045,7 @@ fn searching_finds_a_key_and_reports_where_an_absent_one_would_go() {
     );
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn a_node_read_from_the_wrong_address_is_refused() {
     // The header records where the node was written. If it disagrees with where
@@ -1038,6 +1061,7 @@ fn a_node_read_from_the_wrong_address_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.2, H.STORE.2
 #[test]
 fn a_node_with_a_bad_checksum_is_refused() {
     let mut bytes = sample_leaf();
@@ -1051,6 +1075,7 @@ fn a_node_with_a_bad_checksum_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn a_node_claiming_more_items_than_it_can_hold_is_refused() {
     let mut bytes = sample_leaf();
@@ -1067,6 +1092,7 @@ fn a_node_claiming_more_items_than_it_can_hold_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn an_item_running_past_the_node_is_refused() {
     let mut bytes = sample_leaf();
@@ -1084,6 +1110,7 @@ fn an_item_running_past_the_node_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn items_out_of_order_are_refused() {
     let bytes = leaf(
@@ -1112,6 +1139,7 @@ fn move_payload(bytes: &mut [u8], slot: usize, offset: u32, size: u32) {
     bytes[0..4].copy_from_slice(&computed.to_le_bytes());
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn leaf_payloads_that_are_not_packed_back_to_back_are_refused() {
     // `sample_leaf` packs 32, 17 and 8 bytes down from the end of the node:
@@ -1139,6 +1167,7 @@ fn leaf_payloads_that_are_not_packed_back_to_back_are_refused() {
     }
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn a_packed_leaf_parses_up_to_its_boundaries() {
     // An empty payload between two others takes no bytes, and a single item
@@ -1170,6 +1199,7 @@ fn a_packed_leaf_parses_up_to_its_boundaries() {
     );
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn a_node_deeper_than_any_tree_is_refused() {
     // Level 7 is the root of the deepest tree btrfs builds; 8 is no node at
@@ -1190,6 +1220,7 @@ fn a_node_deeper_than_any_tree_is_refused() {
     }
 }
 
+/// Verifies: L.btrfs.2
 #[test]
 fn a_truncated_node_is_refused() {
     let bytes = sample_leaf();
@@ -1205,6 +1236,7 @@ fn a_truncated_node_is_refused() {
 // Item payloads
 // ---------------------------------------------------------------------------
 
+/// Verifies: L.btrfs.4
 #[test]
 fn an_inode_item_is_decoded() {
     let mut bytes = vec![0u8; 160];
@@ -1224,6 +1256,7 @@ fn an_inode_item_is_decoded() {
     assert!(!inode.is_symlink());
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn a_truncated_inode_item_is_refused() {
     let bytes = vec![0u8; 100];
@@ -1233,6 +1266,7 @@ fn a_truncated_inode_item_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn several_directory_entries_pack_into_one_item() {
     // Names whose hashes collide land in the same item, so a reader that stops
@@ -1258,6 +1292,7 @@ fn several_directory_entries_pack_into_one_item() {
     assert_eq!(entries[1].location.objectid, 258);
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn a_directory_item_with_a_name_past_the_end_stops_cleanly() {
     let mut bytes = Vec::new();
@@ -1305,6 +1340,7 @@ fn dir_records_parse(payload: &[u8], item_type: u8) -> bool {
     DirItemIter::new(payload, item_type).all(|entry| entry.is_ok())
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn a_directory_entry_btrfs_would_not_write_is_refused() {
     let longest = [b'n'; 255];
@@ -1381,6 +1417,7 @@ fn inode_ref(name: &[u8]) -> Vec<u8> {
     bytes
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn an_inode_ref_name_is_between_one_and_255_bytes() {
     let parses = |payload: &[u8]| InodeRefIter::new(payload).all(|entry| entry.is_ok());
@@ -1393,6 +1430,7 @@ fn an_inode_ref_name_is_between_one_and_255_bytes() {
     assert!(!parses(&inode_ref(b"")), "an empty name is refused");
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn extent_data_is_decoded_in_all_three_forms() {
     // Inline: the data follows the twenty-one byte header.
@@ -1434,6 +1472,7 @@ fn extent_data_is_decoded_in_all_three_forms() {
     );
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn a_truncated_extent_item_is_refused() {
     let bytes = vec![0u8; 10];
@@ -1479,6 +1518,7 @@ fn check_extent(at: u64, bytes: &[u8]) -> Result<(), BtrfsError> {
     ExtentData::parse_item(&BtrfsKey::new(257, 108, at), bytes, 4096).map(|_| ())
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn an_extent_btrfs_would_not_write_is_refused() {
     const REG: u8 = 1;
@@ -1568,6 +1608,7 @@ fn an_extent_btrfs_would_not_write_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn every_extent_btrfs_writes_still_parses() {
     const DISK: u64 = 0x50_0000;
@@ -1609,6 +1650,7 @@ fn every_extent_btrfs_writes_still_parses() {
     }
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn an_extent_ends_where_linux_says_it_does() {
     let key = |at| BtrfsKey::new(257, 108, at);
@@ -1634,6 +1676,7 @@ fn an_extent_ends_where_linux_says_it_does() {
 // The one that matters most
 // ---------------------------------------------------------------------------
 
+/// Verifies: L.btrfs.1, L.btrfs.2, H.STORE.1
 #[test]
 fn parsing_never_panics_on_corrupt_input() {
     // A disk can be corrupt, and from stage 11 this runs in ring 0 with nothing
@@ -1695,6 +1738,7 @@ fn poke_item(data: &[u8]) {
     }
 }
 
+/// Verifies: L.btrfs.1, L.btrfs.2
 #[test]
 fn parsing_never_panics_on_arbitrary_short_input() {
     for length in 0..300usize {
@@ -1760,6 +1804,7 @@ fn the_extref_hash_is_the_key_offset_mkfs_btrfs_files_extrefs_under() {
     assert_eq!(items::extref_hash(257, &name(b"link-178-")), 37_574_397);
 }
 
+/// Verifies: L.btrfs.4
 #[test]
 fn inode_extref_records_parse_and_ones_linux_refuses_are_refused() {
     use crate::items::{

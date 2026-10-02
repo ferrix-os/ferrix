@@ -112,6 +112,24 @@
       "demonstrated_by": [
         "src/kernel/src/sched/check.rs"
       ]
+    },
+    {
+      "id": "ASR-9",
+      "statement": "Data the element has stored on a volume shall be returned as it was stored or refused with an error, never returned altered, and what a commit has reported durable shall survive a loss of power.",
+      "status": "met at the btrfs crates' interface, for single-device SINGLE or DUP volumes with CRC-32C, under AoU-15 and AoU-16; accidental alteration only",
+      "implemented_by": [
+        "src/lib/fs/btrfs/src/volume.rs::read_node",
+        "src/lib/fs/btrfs/src/fs.rs::verify_sectors",
+        "src/lib/fs/btrfs-write/src/commit.rs::commit",
+        "src/lib/fs/btrfs-write/src/commit.rs::write_superblocks",
+        "src/lib/fs/btrfs-write/src/space.rs::unpin"
+      ],
+      "demonstrated_by": [
+        "src/lib/fs/btrfs/src/fs/tests.rs::a_data_sector_that_fails_its_checksum_is_an_error_not_bytes",
+        "src/lib/fs/btrfs/src/volume/tests.rs::a_dup_node_whose_first_copy_fails_is_read_from_the_second",
+        "src/lib/fs/btrfs-write/src/tests.rs::the_commit_flushes_before_the_superblock",
+        "src/lib/fs/btrfs-write/src/tests/powerfail.rs::a_cut_anywhere_leaves_a_volume_that_mounts_and_holds_its_promises"
+      ]
     }
   ],
   "failure_modes": [
@@ -177,6 +195,16 @@
         "src/kernel/src/smp.rs::patience",
         "src/kernel/src/smp.rs::take_turn"
       ]
+    },
+    {
+      "id": "FM-11",
+      "mitigated_by": [
+        "src/lib/fs/btrfs/src/volume.rs::read_node_copy",
+        "src/lib/fs/btrfs/src/fs.rs::verify_sectors",
+        "src/lib/fs/btrfs-write/src/volume.rs::cow",
+        "src/lib/fs/btrfs-write/src/commit.rs::write_superblocks",
+        "src/lib/fs/btrfs-write/src/open.rs::reload_read_only"
+      ]
     }
   ],
   "assumptions_of_use": [
@@ -193,7 +221,9 @@
     "AoU-11",
     "AoU-12",
     "AoU-13",
-    "AoU-14"
+    "AoU-14",
+    "AoU-15",
+    "AoU-16"
   ],
   "//unsafe_obligations": [
     "Why unsafe exists in the certified item (finding F-26): a closed set,",

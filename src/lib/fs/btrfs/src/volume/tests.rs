@@ -196,6 +196,7 @@ fn every_image_mounts_and_finds_its_fs_tree() {
     }
 }
 
+/// Verifies: L.btrfs.6
 #[test]
 #[cfg_attr(
     miri,
@@ -224,6 +225,7 @@ fn a_walk_visits_every_key_once_in_order() {
     }
 }
 
+/// Verifies: L.btrfs.6
 #[test]
 fn a_walk_stops_when_the_visitor_breaks() {
     with_volume(IMAGES[0].1, |device, volume, node| {
@@ -243,6 +245,7 @@ fn a_walk_stops_when_the_visitor_breaks() {
     });
 }
 
+/// Verifies: L.btrfs.6
 #[test]
 #[cfg_attr(
     miri,
@@ -300,6 +303,7 @@ fn a_node_buffer_smaller_than_a_node_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.1, H.STORE.2
 #[test]
 fn a_corrupt_superblock_is_refused() {
     let mut device = PackedDevice::new(IMAGES[0].1);
@@ -315,6 +319,7 @@ fn a_corrupt_superblock_is_refused() {
     );
 }
 
+/// Verifies: L.btrfs.10, H.STORE.2
 #[test]
 fn a_corrupt_tree_node_is_refused_not_misread() {
     with_volume(IMAGES[0].1, |device, volume, node| {
@@ -331,6 +336,7 @@ fn a_corrupt_tree_node_is_refused_not_misread() {
     });
 }
 
+/// Verifies: L.btrfs.10
 #[test]
 fn a_device_error_propagates() {
     with_volume(IMAGES[0].1, |device, volume, node| {
@@ -345,6 +351,7 @@ fn a_device_error_propagates() {
     });
 }
 
+/// Verifies: L.btrfs.10, H.STORE.2
 #[test]
 fn a_pointer_to_the_wrong_generation_is_refused() {
     with_volume(IMAGES[0].1, |device, volume, node| {
@@ -362,6 +369,7 @@ fn a_pointer_to_the_wrong_generation_is_refused() {
     });
 }
 
+/// Verifies: L.btrfs.10, H.STORE.2
 #[test]
 fn a_dup_node_whose_first_copy_fails_is_read_from_the_second() {
     let mut device = PackedDevice::new(DUP);
@@ -398,6 +406,7 @@ fn a_dup_node_whose_first_copy_fails_is_read_from_the_second() {
     );
 }
 
+/// Verifies: L.btrfs.10
 #[test]
 fn a_volume_whose_root_tree_has_one_bad_copy_still_opens() {
     let mut device = PackedDevice::new(DUP);
@@ -428,6 +437,7 @@ fn a_volume_whose_root_tree_has_one_bad_copy_still_opens() {
     );
 }
 
+/// Verifies: L.btrfs.10
 #[test]
 fn a_tree_deeper_than_btrfs_allows_is_refused() {
     with_volume(IMAGES[0].1, |device, volume, node| {
@@ -443,6 +453,7 @@ fn a_tree_deeper_than_btrfs_allows_is_refused() {
     });
 }
 
+/// Verifies: L.btrfs.6
 #[test]
 fn predecessor_steps_through_every_field() {
     assert_eq!(

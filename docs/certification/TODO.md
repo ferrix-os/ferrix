@@ -472,6 +472,69 @@ release no slot (*"the checks' jobs are gone and their quota slots are
 not"*); and have `Pipe::new` forget its charge (*"kmem: objects gone and
 their heap still charged to their job"*, on pipes).
 
+### 4.7 btrfs in the item
+**Decided 2026-10-02** (the customer): the btrfs reader and write path,
+`ferrix-btrfs` and `ferrix-btrfs-write`, are in the item; `ferrix-btrfs-vfs`
+and `src/kernel/src/fs/btrfs*.rs` stay load. Written so far: `H.STORE.1` to
+`H.STORE.7` (part 13), `L.btrfs.1` to `L.btrfs.23` (part 24), ASR-9, FM-11,
+AoU-15 and AoU-16 (SAFETY-MANUAL.md), O.MEDIA, T.MEDIA, A.STORAGE,
+FDP_SDI.2 and §9.8 (SECURITY-TARGET.md), V-08 and V-09
+(VULNERABILITY-ANALYSIS.md), and MEMORY-AND-TIMING.md §1.8 and §2.2d. What
+is left, each with how to know it is done:
+
+1. **Fallible allocation in the write path** (`H.STORE.7`, `L.btrfs.22`;
+   in progress on the branch `btrfs-fallible`). Done when
+   `check-fallible-alloc.py` reads both crates and finds no unmarked site,
+   a host test fails every allocation of a create, a data write, a commit
+   and an open in turn and names `L.btrfs.22` and `H.STORE.7` in its
+   `Verifies:` line, and both leave `traceability-baseline.json`. Until
+   then AoU-5's FX-0008 covers a refused allocation there, as it covers the
+   load's.
+2. **The item-scoped gates read the crates** (the branch
+   `btrfs-cert-boundary`): the boundary, unsafe, panic, complexity and
+   fallible-allocation gates. `check-traceability.py` resolves a
+   `ferrix_btrfs::` unit through that branch's `item_crate_product_files`
+   (branch `btrfs-cert-docs`), so part 24's units resolve only once both
+   are on `main`. Done when `cargo xtask check` passes there and
+   TRACEABILITY.md lists the crates' functions among the item's. Then
+   `coverage-report.py` and `decision-coverage.py`, still kernel-only,
+   are item 3's.
+3. **A coverage floor for host crates.** `coverage-floor.json` and
+   VERIFICATION.md §3 measure the kernel's boots; the two crates are
+   exercised by host tests, which no coverage run measures. Done when the
+   crates' statement and decision coverage under their host tests is
+   measured, committed and ratcheted, and what is not covered is justified
+   as the kernel's residual is.
+4. **A write-path fuzzer** (V-09). Done when a fuzz target opens bent and
+   resealed images with `WriteVolume::open`, replays their logs, edits and
+   commits them, and requires no panic and no hang, and the reopened volume
+   passes the writer's checker or is refused; and CI runs it as it runs
+   `btrfs_read`.
+5. **The reserves derived, and mount on a full volume** (`docs/BACKLOG.md`,
+   "btrfs on a full volume, what the certification consultant left open",
+   (a) to (c)). Done when `commit_reserve` and `Need::data` are derived
+   rather than estimated and a full-size transaction is shown to commit on
+   full trees; a reload whose own log replay aborts is tested; and log
+   replay and orphan cleanup at mount are measured against a full volume.
+6. **The two refusals no test opens** (`L.btrfs.9`, `L.btrfs.12`, in the
+   baseline): images with each feature the reader or the writer refuses,
+   opened, and the refusal named.
+7. **Miri over `src/lib/fs/btrfs`** in CI (`docs/BACKLOG.md`), with the
+   whole-image tests ignored under it.
+8. **Arithmetic that cannot overflow** (`L.btrfs.23`, the certification
+   consultant's advice). The release kernel builds without overflow checks,
+   so an unchecked sum of two values read from a volume wraps silently, and
+   `dev` and `iterate`, which keep them, panic on it. Done when
+   clippy's `arithmetic_side_effects` is denied for both crates' product
+   code with no site left -- 112 on 2026-10-02, 56 in each -- or each
+   remaining one argued at the site, and `L.btrfs.23` leaves the baseline
+   on that gate.
+9. **The counts.** README.md, CLAIM.md §3.1, SECURITY-TARGET.md §1.2 and
+   SAFETY-MANUAL.md §1 carry ITEM.md §2's re-measure of 2026-10-02 (79,079
+   lines: 64,788 kernel, 14,291 crates). SECURITY-TARGET.md §2.2 and §8.3
+   and VERIFICATION.md §4 still argue from older totals; re-measure and
+   reconcile them at the next pass.
+
 ## 5. Tools
 
 ### 5.1 Evaluate Ferrocene — **F-17**

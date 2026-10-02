@@ -116,8 +116,9 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixArmv7aRequirements` | `21-armv7a-requirements.sysml` | ARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own beyond these: what the system call path does for the filter the core asks about every call (seccomp, `docs/SECCOMP.md` §3.3), and what its switch barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9). The rest of the architecture waits in the baseline with the other architectures' unwritten rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of part 19 hold. |
 | `FerrixSmpRequirements` | `22-smp-requirements.sysml` | What each unit of src/kernel/src/smp.rs does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): finding the processors and giving each a record it finds itself by, starting the secondaries, the inter-processor interrupt, the TLB shootdown -- whole and scoped, and the bound on how long it waits -- grace periods, stopping the other processors for a panic, and the scheduler's kick. The start sequences themselves, the per-processor register and the interrupt controller are each architecture's (src/kernel/src/arch/\<isa>/smp.rs), and belong to the arch slices; this is the architecture-independent half above them. |
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
+| `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 
-24 files, 107 packages, 5368 elements, 213 relations. Model digest `33033f1fd9129757`.
+25 files, 114 packages, 5518 elements, 214 relations. Model digest `67dadd5e23ed3f22`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4459,6 +4460,29 @@ flowchart LR
 | `L.console.39` | `theScreenStopsForGood` | — | — | — |
 | `L.console.40` | `aRamoopsZoneIsReadOrRefused` | — | — | — |
 | `L.console.41` | `theTreeChoosesThePort` | — | — | — |
+| `L.btrfs.1` | `superblocksParsedOrRefused` | — | — | — |
+| `L.btrfs.2` | `nodesParsedOrRefused` | — | — | — |
+| `L.btrfs.3` | `chunksMappedOrRefused` | — | — | — |
+| `L.btrfs.4` | `itemsParsedOrRefused` | — | — | — |
+| `L.btrfs.5` | `decompressionStaysInItsBuffer` | — | — | — |
+| `L.btrfs.6` | `walksAscendAndEnd` | — | — | — |
+| `L.btrfs.7` | `namesChecked` | — | — | — |
+| `L.btrfs.8` | `fileReadsBounded` | — | — | — |
+| `L.btrfs.9` | `volumesTheReaderWouldMisreadRefused` | — | — | — |
+| `L.btrfs.23` | `noArithmeticOverflows` | — | — | — |
+| `L.btrfs.10` | `nodesReadFromAGoodCopy` | — | — | — |
+| `L.btrfs.11` | `dataSectorsVerified` | — | — | — |
+| `L.btrfs.12` | `volumesTheWriterCannotKeepRefused` | — | — | — |
+| `L.btrfs.13` | `superblockLast` | — | — | — |
+| `L.btrfs.14` | `committedBlocksNeverOverwritten` | — | — | — |
+| `L.btrfs.15` | `aLogKeepsItsPromise` | — | — | — |
+| `L.btrfs.16` | `superblockStripesExcluded` | — | — | — |
+| `L.btrfs.17` | `bookkeepingSettles` | — | — | — |
+| `L.btrfs.18` | `rangeSetsExact` | — | — | — |
+| `L.btrfs.19` | `everyCopyGetsAStripe` | — | — | — |
+| `L.btrfs.20` | `refusedBeforeTheFirstEdit` | — | — | — |
+| `L.btrfs.21` | `anAbortedTransactionIsDropped` | — | — | — |
+| `L.btrfs.22` | `allocationsAreFallible` | — | — | — |
 
 A design rule is upheld by a gate rather than allocated to a part, so the P and N families are expected to be verified but untraced. A goal requirement is traced by the dependency the stage that discharges it draws.
 
