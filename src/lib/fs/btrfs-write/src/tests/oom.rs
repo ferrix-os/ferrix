@@ -11,9 +11,10 @@
 //! * if the transaction was not aborted, the failure changed nothing: the
 //!   rest of the script, run again from the operation that failed, ends in
 //!   exactly the volume an undisturbed run makes;
-//! * if it was aborted, the volume reopens at its last commit -- the one
-//!   before the script, or the script's own if its superblock was already
-//!   down -- and [`check`] finds it consistent.
+//! * if it was aborted, the volume reopens at the commit before the script
+//!   -- never the script's own: nothing allocates once its superblock is
+//!   down, so no error is ever reported for a commit on the disk -- and
+//!   [`check`] finds it consistent.
 //!
 //! `ferrix_fallible`'s policy is process-wide but this one reads a
 //! thread-local budget, so the other tests in the binary, running beside
@@ -34,6 +35,7 @@ use super::{BLANK, MemDevice, POPULATED, check, items};
 use crate::chunks::Chunk;
 use crate::extent::Backref;
 use crate::node::TreeNode;
+use crate::ranges::RangeSet;
 use crate::refs::Head;
 use crate::space::BlockGroup;
 use crate::volume::Root;
@@ -240,15 +242,17 @@ fn run_failing_at(packed: &[u8], at: u64, persist: bool, after: &(u64, Tree)) ->
     };
     let volume = if let Some(cause) = volume.aborted() {
         assert_eq!(cause, Error::OutOfMemory, "allocation {at}: abort cause");
-        // The transaction is gone: what reopens is a commit, whole.
+        // The transaction is gone: what reopens is the last commit, whole.
+        // Never the script's own: nothing allocates once its superblock is
+        // down, so no failure can be reported for a commit on the disk.
         let mut volume = volume.abort().unwrap();
+        assert_eq!(
+            volume.generation(),
+            before_generation,
+            "allocation {at}: an error was reported for a commit that is on the disk"
+        );
         let tree = items(&mut volume, FS_TREE_OBJECTID);
-        if volume.generation() == before_generation {
-            assert!(tree == before, "allocation {at}: not the last commit");
-        } else {
-            assert_eq!(volume.generation(), after.0, "allocation {at}");
-            assert!(tree == after.1, "allocation {at}: not the script's commit");
-        }
+        assert!(tree == before, "allocation {at}: not the last commit");
         volume
     } else {
         // Nothing changed: the script goes on from the step that failed and
@@ -344,10 +348,12 @@ fn opening_out_of_memory_answers_out_of_memory() {
         arm(u64::MAX, false);
         let _ = WriteVolume::open(MemDevice::new(packed)).unwrap();
         let made = disarm();
+        let (_, generation, tree) = fresh(packed);
         for at in sample(made) {
             for persist in [false, true] {
+                let disk = Shared(Rc::new(RefCell::new(MemDevice::new(packed))));
                 arm(at, persist);
-                let opened = WriteVolume::open(MemDevice::new(packed));
+                let opened = WriteVolume::open(disk.clone());
                 let _ = disarm();
                 match opened {
                     // Past the last allocation, or one only the node cache
@@ -355,9 +361,24 @@ fn opening_out_of_memory_answers_out_of_memory() {
                     Ok(_) => {}
                     Err(error) => assert_eq!(error, Error::OutOfMemory, "allocation {at}"),
                 }
+                // A failed open wrote nothing: the disk opens again and checks
+                // clean, holding what an undisturbed open found.
+                let mut volume = WriteVolume::open(disk.clone()).unwrap();
+                assert_eq!(volume.generation(), generation, "allocation {at}");
+                let reopened = items_shared(&mut volume);
+                drop(volume);
+                check(&disk.0.borrow());
+                assert!(reopened == tree, "allocation {at}: the tree changed");
             }
         }
     }
+}
+
+/// The fs tree of a volume over a [`Shared`] disk.
+fn items_shared(volume: &mut WriteVolume<Shared>) -> Tree {
+    volume
+        .range(FS_TREE_OBJECTID, &BtrfsKey::MIN, &BtrfsKey::MAX)
+        .unwrap()
 }
 
 #[test]
@@ -462,4 +483,111 @@ fn find_shared(volume: &mut WriteVolume<Shared>, name: &[u8]) -> u64 {
         .unwrap()
         .unwrap_or_else(|| panic!("{} is gone", name.escape_ascii()))
         .0
+}
+
+/// `set` after `edit` runs with its first allocation failing: the error, and
+/// whether the set is as it was.
+fn edit_failing<T: core::fmt::Debug>(
+    set: &RangeSet,
+    edit: impl FnOnce(&mut RangeSet) -> crate::Result<T>,
+) -> (crate::Result<T>, bool) {
+    let mut edited = set.clone();
+    arm(1, false);
+    let result = edit(&mut edited);
+    let _ = disarm();
+    let unchanged = edited == *set;
+    (result, unchanged)
+}
+
+/// One edit of a range set, answering whether it took.
+type Edit = fn(&mut RangeSet) -> crate::Result<bool>;
+
+#[test]
+fn a_range_set_edit_out_of_memory_leaves_the_set_as_it_was() {
+    let mut set = RangeSet::new();
+    assert!(set.insert(100, 100));
+    assert!(set.insert(400, 100));
+    // Each edit below has to make a run of its own: one allocation, failed.
+    let cases: [(&str, Edit); 6] = [
+        ("a new run on its own", |s| s.try_insert(300, 10)),
+        ("a new run joining the one after", |s| s.try_insert(350, 50)),
+        ("a cut in the middle of a run", |s| s.try_remove(120, 10)),
+        ("a cut at the start of a run", |s| s.try_remove(100, 10)),
+        ("a union starting a new run", |s| {
+            s.try_add(50, 100).map(|()| true)
+        }),
+        ("a union across two runs", |s| {
+            s.try_add(90, 400).map(|()| true)
+        }),
+    ];
+    for (what, edit) in cases {
+        let (result, unchanged) = edit_failing(&set, edit);
+        assert_eq!(result.err(), Some(Error::OutOfMemory), "{what}");
+        assert!(unchanged, "{what}: the set changed");
+    }
+    // An edit of a run in place allocates nothing, so nothing can fail it.
+    let in_place: [(&str, Edit); 3] = [
+        ("joining the run before", |s| s.try_insert(200, 10)),
+        ("a cut at the end of a run", |s| s.try_remove(190, 10)),
+        ("a union extending a run", |s| {
+            s.try_add(150, 100).map(|()| true)
+        }),
+    ];
+    for (what, edit) in in_place {
+        let (result, _) = edit_failing(&set, edit);
+        assert_eq!(result.ok(), Some(true), "{what}");
+    }
+}
+
+/// A device that answers its `fail_at`th read with `OutOfMemory`.
+#[derive(Debug, Clone)]
+struct Starving {
+    disk: MemDevice,
+    reads: u64,
+    fail_at: u64,
+}
+
+impl Device for Starving {
+    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+        self.reads += 1;
+        if self.reads == self.fail_at {
+            return Err(BtrfsError::OutOfMemory);
+        }
+        self.disk.read_at(physical, buf, kind)
+    }
+}
+
+impl WriteDevice for Starving {
+    fn write_at(&mut self, physical: u64, data: &[u8]) -> crate::Result<()> {
+        self.disk.write_at(physical, data)
+    }
+
+    fn flush(&mut self) -> crate::Result<()> {
+        self.disk.flush()
+    }
+}
+
+#[test]
+fn a_node_read_out_of_memory_is_not_retried_from_the_other_copy() {
+    let device = Starving {
+        disk: MemDevice::new(BLANK),
+        reads: 0,
+        fail_at: 0,
+    };
+    let mut volume = WriteVolume::open(device).unwrap();
+    let root = volume.root(FS_TREE_OBJECTID).unwrap();
+    let copies = volume.chunks.copies(root.bytenr, 1).unwrap();
+    assert_eq!(copies.len(), 2, "the fixture's metadata is DUP");
+    // Nothing cached: the next lookup reads the fs tree's root, and its
+    // first copy answers that memory ran out. The second copy would read
+    // fine, and must not be asked.
+    volume.clean.clear();
+    volume.device.reads = 0;
+    volume.device.fail_at = 1;
+    let read = volume.get(FS_TREE_OBJECTID, &BtrfsKey::MIN);
+    assert_eq!(read.err(), Some(Error::OutOfMemory));
+    assert_eq!(volume.device.reads, 1, "the other copy was read");
+    assert_eq!(volume.aborted(), None, "a read aborts nothing");
+    volume.device.fail_at = 0;
+    assert!(volume.get(FS_TREE_OBJECTID, &BtrfsKey::MIN).is_ok());
 }

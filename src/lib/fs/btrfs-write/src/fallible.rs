@@ -24,13 +24,22 @@
 //!
 //! # What a failure does to a transaction
 //!
-//! Nothing different from any other failure. An allocation made before an
-//! operation's first change returns [`Error::OutOfMemory`] with the
-//! transaction as it was; one made after aborts the transaction through
-//! `WriteVolume::guarded` and `WriteVolume::operation`, and the volume is
-//! reopened at its last commit. Most buffers are made before the edit that
-//! takes them -- a payload is built, then inserted -- so most failures are of
-//! the first kind.
+//! Nothing different from any other failure, which is to say:
+//!
+//! * inside an edit -- every tree edit runs in `WriteVolume::guarded`, and
+//!   the commit is one -- running out of memory aborts the transaction, even
+//!   when it comes before the edit's first change: `guarded` aborts on every
+//!   error but `Exists` and `NotFound`, and cannot tell where one came from.
+//!   So every failure during a commit aborts;
+//! * in an operation's own code before its first edit -- building a payload,
+//!   reading the items it needs -- it returns [`Error::OutOfMemory`] with the
+//!   transaction as it was. Payloads are built before the edit that takes
+//!   them for this reason;
+//! * reads outside any operation change nothing either way.
+//!
+//! An aborted transaction is discarded and the volume reopened at its last
+//! commit. No failure is reported for a commit that is on the disk: what the
+//! commit needs after its primary superblock is written is made before it.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;

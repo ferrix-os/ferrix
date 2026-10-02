@@ -109,6 +109,7 @@ pub(crate) struct Report {
 /// Verifies: L.object.7, H.MEM.11
 pub(crate) fn run() -> Result<Report, &'static str> {
     let drawn = check_a_section_completes_on_the_reserve()?;
+    let drawn = drawn.saturating_add(check_a_library_insert_runs_in_a_section()?);
     let mut report = check_the_native_calls_survive()?;
     report.drawn = drawn;
     report.torn_down = check_a_teardown_needs_no_memory()?;
@@ -216,6 +217,56 @@ fn check_a_section_completes_on_the_reserve() -> Result<u64, &'static str> {
     let failed = fallible::stop_injecting();
     if !refused_arc || !refused_insert || failed < 2 || !refused_map.is_empty() {
         return Err("a section whose reserve could not be filled went ahead");
+    }
+    Ok(drawn)
+}
+
+/// A library crate's map insert -- `ferrix_fallible::try_map_insert`, which
+/// the btrfs writer makes all its inserts through -- runs in the reserved
+/// section the kernel installed at boot (`fallible::install_library_sections`):
+/// with the heap refusing every allocation inside sections, a run of inserts
+/// completes on the reserve alone; with the reserve refused its filling, an
+/// insert fails before it starts and leaves the map as it was; and a map
+/// whose nodes are larger than any size class is refused outright. A kernel
+/// that never installed the section fails all three: the inserts would run
+/// on the heap, outside any section, and could not fail at all.
+fn check_a_library_insert_runs_in_a_section() -> Result<u64, &'static str> {
+    let (drawn_before, _) = mm::reserve_counts();
+    mm::bypass_heap_in_sections(true);
+    let mut map = BTreeMap::new();
+    let mut inserted = Ok(());
+    for key in 0..200_u64 {
+        if let Err(error) = ferrix_fallible::try_map_insert(&mut map, key, !key) {
+            inserted = Err(error);
+            break;
+        }
+    }
+    mm::bypass_heap_in_sections(false);
+    let (drawn_after, _) = mm::reserve_counts();
+    inserted.map_err(|_| "a library map insert was refused although its section was entered")?;
+    if map.len() != 200 || !map.iter().all(|(key, value)| *value == !key) {
+        return Err("a library map built on the reserve does not hold what was inserted");
+    }
+    let drawn = drawn_after.saturating_sub(drawn_before);
+    if drawn < 2 {
+        return Err("a library map insert did not run in a reserved section");
+    }
+
+    let (_, refused_before) = mm::reserve_counts();
+    // Preemption off, so the refusal and the insert are on one processor.
+    crate::sched::preempt_disable();
+    mm::refuse_reserve_fills(true);
+    let refused = ferrix_fallible::try_map_insert(&mut map, 1000, 0);
+    mm::refuse_reserve_fills(false);
+    crate::sched::preempt_enable();
+    let (_, refused_after) = mm::reserve_counts();
+    if refused.is_ok() || refused_after <= refused_before || map.len() != 200 {
+        return Err("a library map insert went ahead in a section that could not be entered");
+    }
+
+    let mut wide: BTreeMap<u64, [u8; 256]> = BTreeMap::new();
+    if ferrix_fallible::try_map_insert(&mut wide, 1, [0; 256]).is_ok() || !wide.is_empty() {
+        return Err("a library map whose nodes no size class holds was not refused");
     }
     Ok(drawn)
 }

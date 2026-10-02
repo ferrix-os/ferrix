@@ -118,6 +118,12 @@ static REFUSED: AtomicU64 = AtomicU64::new(0);
 /// section can tell. For the boot check that proves the reserve serves.
 static BYPASS_HEAP: AtomicBool = AtomicBool::new(false);
 
+/// The processor (its logical number plus one) whose sections are all
+/// refused, as if the heap could not fill its reserve; zero for none. For the
+/// boot check that proves a section that cannot be entered refuses before its
+/// operation runs. One processor, so the rest of the machine is untouched.
+static REFUSE_FILL: AtomicU64 = AtomicU64::new(0);
+
 /// This processor's slot. Interrupts must be masked.
 fn slot() -> Option<&'static UnsafeCell<CpuReserve>> {
     let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
@@ -170,6 +176,10 @@ pub(crate) fn reserve(large: Option<Layout>) -> Result<Reserved, AllocError> {
 
 /// Fill this processor's reserve and count a section open.
 fn enter(large: Option<Layout>) -> Result<(), AllocError> {
+    let refused = REFUSE_FILL.load(Ordering::Acquire);
+    if refused != 0 && Some(refused) == this_cpu_tag() {
+        return Err(AllocError);
+    }
     let cell = slot().ok_or(AllocError)?;
     // SAFETY: (SHARED) this processor's own slot, with interrupts masked by `reserve`:
     // see `Reserves`. The reference ends with this function, and nothing in
@@ -249,6 +259,20 @@ pub(super) fn bypassing_heap() -> bool {
 /// section completes on the reserve alone.
 pub(crate) fn bypass_heap_in_sections(on: bool) {
     BYPASS_HEAP.store(on, Ordering::Release);
+}
+
+/// This processor's logical number plus one, as [`REFUSE_FILL`] holds it.
+fn this_cpu_tag() -> Option<u64> {
+    let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
+    u64::try_from(cpu).ok()?.checked_add(1)
+}
+
+/// Make every section on this processor refused, as if the heap could not
+/// fill its reserve, or stop. For the boot check in `object/alloc_check.rs`,
+/// which runs with preemption off across the window.
+pub(crate) fn refuse_reserve_fills(on: bool) {
+    let tag = if on { this_cpu_tag().unwrap_or(0) } else { 0 };
+    REFUSE_FILL.store(tag, Ordering::Release);
 }
 
 /// Allocations served from a reserve, and sections refused, since boot.

@@ -9,7 +9,8 @@
 //! * `pinned` — what this transaction freed but the last commit still uses.
 //!   Handing it out would let a new node overwrite a node of the committed
 //!   tree before the new superblock is down. It returns to `free` only after
-//!   the commit ([`Space::unpin`]);
+//!   the commit ([`Space::unpin`], made before the commit point by
+//!   [`Space::prepare_unpin`]);
 //! * `on_disk` — what the free-space tree says is free. The commit makes the
 //!   tree say `free ∪ pinned ∪ reserved`, because once the new superblock is
 //!   down the pinned space is free on disk, and writes the difference;
@@ -160,6 +161,13 @@ impl BlockGroup {
         let reserved = ranges.try_extract(&self.excluded)?;
         Ok(self.reserved.try_absorb(&reserved)? & self.free.try_absorb(&ranges)?)
     }
+}
+
+/// Every group's free and reserved space as [`Space::unpin`] will leave it,
+/// by group start.
+#[derive(Debug)]
+pub struct Unpinned {
+    groups: alloc::vec::Vec<(u64, RangeSet, RangeSet)>,
 }
 
 /// Every block group, and the transaction's allocations.
@@ -338,17 +346,40 @@ impl Space {
         Ok(())
     }
 
-    /// After a commit: pinned space is free now, and nothing is allocated in
-    /// the next transaction yet.
-    pub fn unpin(&mut self) -> Result<()> {
-        for group in self.groups.values_mut() {
-            let pinned = core::mem::take(&mut group.pinned);
-            if !group.give_back(pinned)? {
+    /// What every group's `free` and `reserved` become once this
+    /// transaction's pinned space is given back, made now: before the commit
+    /// point, where running out of memory is still an answer. [`Space::unpin`]
+    /// puts it in place after the superblock is down, allocating nothing.
+    pub fn prepare_unpin(&self) -> Result<Unpinned> {
+        let mut groups = fallible::with_capacity(self.groups.len())?;
+        for group in self.groups.values() {
+            let mut free = group.free.try_clone()?;
+            let mut reserved = group.reserved.try_clone()?;
+            let mut pinned = group.pinned.try_clone()?;
+            let stripes = pinned.try_extract(&group.excluded)?;
+            if !(reserved.try_absorb(&stripes)? & free.try_absorb(&pinned)?) {
                 return Err(Error::Inconsistent("pinned space was also free"));
+            }
+            fallible::push(&mut groups, (group.start, free, reserved))?;
+        }
+        Ok(Unpinned { groups })
+    }
+
+    /// After a commit: pinned space is free now, and nothing is allocated in
+    /// the next transaction yet. `unpinned` is what [`Space::prepare_unpin`]
+    /// made of these groups before the commit point; nothing here allocates,
+    /// so nothing here can fail once the commit is on the disk.
+    pub fn unpin(&mut self, unpinned: Unpinned) {
+        for (group, (start, free, reserved)) in self.groups.values_mut().zip(unpinned.groups) {
+            // The groups are the ones it was made from: nothing adds or
+            // drops a group between the two, and both walk them in order.
+            if group.start == start {
+                group.free = free;
+                group.reserved = reserved;
+                group.pinned.clear();
             }
         }
         self.allocated.clear();
-        Ok(())
     }
 
     /// Bytes in use across every group: the superblock's `bytes_used`.

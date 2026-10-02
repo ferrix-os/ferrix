@@ -58,8 +58,9 @@
 //!
 //! Nor does running out of memory stop the machine: every allocation goes
 //! through the `fallible` module and fails as [`Error::OutOfMemory`], which
-//! aborts the transaction like any other failure part-way through an edit,
-//! and changes nothing before the first one.
+//! aborts the transaction like any other failure inside an edit or a commit,
+//! and changes nothing when it comes in an operation's own code before its
+//! first edit (the `fallible` module says which is which).
 
 #![no_std]
 #![forbid(unsafe_code)]

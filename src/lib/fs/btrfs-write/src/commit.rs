@@ -83,11 +83,11 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// old superblock still names the old trees — and the transaction is
     /// aborted; [`WriteVolume::abort`] rereads the committed state.
     ///
-    /// One failure comes after the new superblock is down: memory running
-    /// out while the free space this commit unpinned is given back. The
-    /// commit is then on the disk and the transaction is aborted all the
-    /// same, so what is reread is the new commit, and the caller was told of
-    /// a failure that did not lose anything.
+    /// Running out of memory anywhere in it aborts the transaction; none of
+    /// it can happen after the primary superblock is written, because
+    /// everything the commit needs past that point -- the superblock it
+    /// keeps, the space it gives back -- is made before. (A mirror's write
+    /// can still fail after it, as a device error.)
     pub fn commit(&mut self) -> Result<()> {
         self.guarded_with(None, |volume| {
             if !volume.is_dirty() && !volume.chunks_changed && !volume.has_log() {
@@ -102,8 +102,12 @@ impl<D: WriteDevice> WriteVolume<D> {
             volume.settle()?;
             volume.write_nodes()?;
             volume.device.flush()?;
+            // The last allocations of the commit: what unpinning leaves, and
+            // the superblocks. Past the primary's write nothing allocates.
+            let unpinned = volume.space.prepare_unpin()?;
             let primary = volume.write_superblocks()?;
-            volume.finish_commit(primary)
+            volume.finish_commit(primary, unpinned);
+            Ok(())
         })
     }
 
@@ -455,8 +459,11 @@ impl<D: WriteDevice> WriteVolume<D> {
 
     /// The transaction is on disk: its nodes are committed ones now, pinned
     /// space is free, and the next transaction starts. `primary` is the
-    /// superblock the commit wrote.
-    fn finish_commit(&mut self, primary: Vec<u8>) -> Result<()> {
+    /// superblock the commit wrote, and `unpinned` the free space
+    /// [`crate::space::Space::prepare_unpin`] made before it. Allocates
+    /// nothing that can fail the commit: a node the clean cache has no room
+    /// for is read again when next wanted.
+    fn finish_commit(&mut self, primary: Vec<u8>, unpinned: crate::space::Unpinned) {
         self.superblock = primary;
         self.committed = self.transid;
         self.transid = self.transid.saturating_add(1);
@@ -464,17 +471,14 @@ impl<D: WriteDevice> WriteVolume<D> {
         if self.clean.len().saturating_add(written.len()) > 4096 {
             self.clean = written;
         } else {
-            // A cache: a node that finds no room in it is read again when
-            // next wanted, from where this commit just put it.
             for (logical, node) in written {
                 if fallible::insert(&mut self.clean, logical, node).is_err() {
                     break;
                 }
             }
         }
-        self.space.unpin()?;
+        self.space.unpin(unpinned);
         self.chunks_changed = false;
-        Ok(())
     }
 
     /// Delete the checksums of the data extent at `[bytenr, bytenr + len)`,
