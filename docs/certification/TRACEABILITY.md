@@ -15,13 +15,13 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 122 | 69 | 53 |
-| Low (`L.*`) | 732 | 461 | 271 |
+| Low (`L.*`) | 733 | 462 | 271 |
 
-1368 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1374 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1368 |
+| Named by a low-level requirement | 1374 |
 | Accessors, covered by the requirement they serve | 791 |
 | Check code in a product file | 55 |
 | Named by none | 882 |
@@ -1108,6 +1108,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.device.19` | DeviceNode::describe shall report a device tree node as not PCI, with its binding and its first two apertures. | A published virtio,mmio or board node's device_info names no PCI location, its binding, and its apertures 0 and 1. | H.DMA.5 | `device::DeviceNode::describe` | *baselined* | — | — | — |
 | `L.device.20` | An MSI-X vector shall be minted, masked or unmasked only for a published node. | A node not in the published list asked for an MSI-X vector answers none, and a vector naming one refuses to mask. | H.IRQ.1 | `device::DeviceNode::vector`, `device::Vector::set_masked` | *baselined* | — | — | — |
 | `L.device.21` | DeviceNode::input_functions shall allow eight input claims of an STM32 USB host's node, and one of every other. | An STM32 USB host's node answers 8 and a PCI function answers 1. | H.DEV.1 | `device::DeviceNode::input_functions` | *baselined* | — | — | — |
+| `L.device.22` | A PCI function with an MSI capability and no MSI-X table shall be offered one vector, minted once with INTx off and the message masked, masked and unmasked by its mask bit or, without one, its enable bit, and none past the one message. | On x86-64, QEMU's edu device's vector 0 minted twice is one vector with no handler on its number, vector 1 is refused, it reads masked as minted and as told, and edu's raised interrupt arrives twice unmasked and not while masked. | H.IRQ.1, H.IRQ.2, H.IRQ.3 | `device::MsiFunction::mint`, `device::MsiFunction::set_masked`, `device::MsiFunction::is_masked`, `device::MsiFunction::mapped`, `device::MsiFunction::of`, `device::DeviceNode::vector`, `device::DeviceNode::vector_count` | `src/kernel/src/device/check.rs::check_msi` | not reached | not built | not built |
 | `L.discovery.1` | description::of shall read a machine by its ACPI tables when they open, whether or not a device tree came too, by its device tree when the tables do not open and the tree parses, and by neither otherwise; and shall not parse the tree when the tables open. | For ACPI only, both, tables that fail to open beside a tree, a tree only, and neither, the description is ACPI, ACPI with the tree unopened, the tree, the tree and neither. | H.DMA.1, H.DMA.5 | `discovery::description::of` | `src/lib/platform/description/src/tests.rs::acpi_only_is_read_by_its_tables`, `src/lib/platform/description/src/tests.rs::acpi_beside_a_tree_is_read_by_its_tables`, `src/lib/platform/description/src/tests.rs::unreadable_tables_beside_a_tree_are_read_by_the_tree`, `src/lib/platform/description/src/tests.rs::a_tree_only_is_read_by_the_tree`, `src/lib/platform/description/src/tests.rs::neither_is_neither` | host test | host test | host test |
 | `L.btrfs.2` | Node::parse shall answer any bytes with a node or an error, and every accessor of a node it returns shall answer without a panic. | Each of 4,096 single-byte patches of a well-formed leaf parses or is refused, and every accessor of each that parses answers. | H.STORE.1 | `ferrix_btrfs::tree::Node::parse`, `ferrix_btrfs::tree::Node::parse_unchecked_address`, `ferrix_btrfs::tree::Node::check_capacity`, `ferrix_btrfs::tree::Node::check_leaf`, `ferrix_btrfs::tree::Node::check_internal`, `ferrix_btrfs::tree::NodeHeader::parse` | `src/lib/fs/btrfs/src/tests.rs::parsing_never_panics_on_corrupt_input` | host test | host test | host test |
 | `L.btrfs.31` | Node::parse shall refuse a node that records another address than the one it was read from, with WrongAddress. | A node parsed at another address than its own is refused with WrongAddress naming both. | H.STORE.2 | `ferrix_btrfs::tree::Node::parse` | `src/lib/fs/btrfs/src/tests.rs::a_node_read_from_the_wrong_address_is_refused` | host test | host test | host test |
@@ -1452,6 +1453,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/console/log_check.rs::wrap_overrun_and_partial` | kernel | L.console.26, L.console.27, L.console.28 |
 | `src/kernel/src/device/check.rs::check_dma_switch` | kernel | L.device.9 |
 | `src/kernel/src/device/check.rs::check_exclusive` | kernel | L.device.5 |
+| `src/kernel/src/device/check.rs::check_msi` | kernel | L.device.22 |
 | `src/kernel/src/device/check.rs::check_msix` | kernel | L.device.6, L.device.7 |
 | `src/kernel/src/device/check.rs::check_node` | kernel | L.device.1, L.device.2, L.device.3, L.device.4 |
 | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | kernel | L.object.52, L.object.61 |

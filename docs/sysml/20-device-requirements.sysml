@@ -340,6 +340,22 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DEV.1";
             attribute :>> unit = "device::DeviceNode::input_functions";
         }
+        requirement <'L.device.22'> msiMintedMaskedAndDelivered : ItemLowLevel {
+            attribute :>> statement = "A PCI function with an MSI capability and no
+                MSI-X table shall be offered one vector, minted once with INTx off
+                and the message masked, masked and unmasked by its mask bit or,
+                without one, its enable bit, and none past the one message.";
+            attribute :>> criterion = "On x86-64, QEMU's edu device's vector 0
+                minted twice is one vector with no handler on its number, vector 1
+                is refused, it reads masked as minted and as told, and edu's raised
+                interrupt arrives twice unmasked and not while masked.";
+            attribute :>> parent = ("H.IRQ.1", "H.IRQ.2", "H.IRQ.3");
+            attribute :>> unit = ("device::MsiFunction::mint",
+                "device::MsiFunction::set_masked", "device::MsiFunction::is_masked",
+                "device::MsiFunction::mapped", "device::MsiFunction::of",
+                "device::DeviceNode::vector",
+                "device::DeviceNode::vector_count");
+        }
         requirement <'L.discovery.1'> oneDescriptionAnsweredOnce : ItemLowLevel {
             attribute :>> statement = "description::of shall read a machine by its
                 ACPI tables when they open, whether or not a device tree came too,

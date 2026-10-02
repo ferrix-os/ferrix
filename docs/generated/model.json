@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "17c5d6e44813507d3c5f471e0a98d6655781a253619d312fb71dec0b5e30f3ab",
+  "digest": "8dd51327c22a85e0473550d821bf242a1ebbf411cf6509a3a0c3bc005237dd5c",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -105,7 +105,7 @@
   ],
   "summary": {
     "packages": 122,
-    "elements": 5955,
+    "elements": 5960,
     "maturity": {
       "implemented": 277,
       "inProgress": 15,
@@ -57360,6 +57360,63 @@
               ]
             },
             {
+              "name": "msiMintedMaskedAndDelivered",
+              "qualifiedName": "FerrixDeviceRequirements::Nodes::msiMintedMaskedAndDelivered",
+              "kind": "requirement",
+              "shortName": "L.device.22",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 343
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::Nodes::msiMintedMaskedAndDelivered",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A PCI function with an MSI capability and no MSI-X table shall be offered one vector, minted once with INTx off and the message masked, masked and unmasked by its mask bit or, without one, its enable bit, and none past the one message.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 347
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::Nodes::msiMintedMaskedAndDelivered",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On x86-64, QEMU's edu device's vector 0 minted twice is one vector with no handler on its number, vector 1 is refused, it reads masked as minted and as told, and edu's raised interrupt arrives twice unmasked and not while masked.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 351
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::Nodes::msiMintedMaskedAndDelivered",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.IRQ.1\", \"H.IRQ.2\", \"H.IRQ.3\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 352
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::Nodes::msiMintedMaskedAndDelivered",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::MsiFunction::mint\", \"device::MsiFunction::set_masked\", \"device::MsiFunction::is_masked\", \"device::MsiFunction::mapped\", \"device::MsiFunction::of\", \"device::DeviceNode::vector\", \"device::DeviceNode::vector_count\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 357
+                  }
+                }
+              ]
+            },
+            {
               "name": "oneDescriptionAnsweredOnce",
               "qualifiedName": "FerrixDeviceRequirements::Nodes::oneDescriptionAnsweredOnce",
               "kind": "requirement",
@@ -57367,7 +57424,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 343
+                "line": 359
               },
               "children": [
                 {
@@ -57378,7 +57435,7 @@
                   "value": "\"description::of shall read a machine by its ACPI tables when they open, whether or not a device tree came too, by its device tree when the tables do not open and the tree parses, and by neither otherwise; and shall not parse the tree when the tables open.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 348
+                    "line": 364
                   }
                 },
                 {
@@ -57389,7 +57446,7 @@
                   "value": "\"For ACPI only, both, tables that fail to open beside a tree, a tree only, and neither, the description is ACPI, ACPI with the tree unopened, the tree, the tree and neither.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 351
+                    "line": 367
                   }
                 },
                 {
@@ -57400,7 +57457,7 @@
                   "value": "(\"H.DMA.1\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 352
+                    "line": 368
                   }
                 },
                 {
@@ -57411,7 +57468,7 @@
                   "value": "\"discovery::description::of\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 353
+                    "line": 369
                   }
                 }
               ]
@@ -57425,7 +57482,7 @@
           "doc": "The quiesce in src/kernel/src/syscall/native.rs: every core that serves a device waited out, its DMA turned off, and the claims a core keeps past its driver let go, before the next driver is given it.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 357
+            "line": 373
           },
           "children": [
             {
@@ -57436,7 +57493,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 363
+                "line": 379
               },
               "children": [
                 {
@@ -57447,7 +57504,7 @@
                   "value": "\"device_quiesce shall be refused with ACCESS_DENIED through a device handle without MANAGE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 365
+                    "line": 381
                   }
                 },
                 {
@@ -57458,7 +57515,7 @@
                   "value": "\"A quiesce through a handle to the device without MANAGE answers ACCESS_DENIED.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 367
+                    "line": 383
                   }
                 },
                 {
@@ -57469,7 +57526,7 @@
                   "value": "\"H.OBJ.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 368
+                    "line": 384
                   }
                 },
                 {
@@ -57480,7 +57537,7 @@
                   "value": "\"syscall::native::device_quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 369
+                    "line": 385
                   }
                 }
               ]
@@ -57493,7 +57550,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 371
+                "line": 387
               },
               "children": [
                 {
@@ -57504,7 +57561,7 @@
                   "value": "\"A quiesce shall answer BAD_STATE, changing nothing, while a driver serves the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 373
+                    "line": 389
                   }
                 },
                 {
@@ -57515,7 +57572,7 @@
                   "value": "\"A quiesce of the device a running driver serves answers BAD_STATE, and the driver goes on serving it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 375
+                    "line": 391
                   }
                 },
                 {
@@ -57526,7 +57583,7 @@
                   "value": "\"H.DEV.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 376
+                    "line": 392
                   }
                 },
                 {
@@ -57537,7 +57594,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 377
+                    "line": 393
                   }
                 }
               ]
@@ -57550,7 +57607,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 379
+                "line": 395
               },
               "children": [
                 {
@@ -57561,7 +57618,7 @@
                   "value": "\"A quiesce made as a driver dies shall wait for every core serving the device to let go, turn the device's DMA off, let go the claims a core keeps past its driver, and answer success.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 383
+                    "line": 399
                   }
                 },
                 {
@@ -57572,7 +57629,7 @@
                   "value": "\"A quiesce the instant a block driver's handles close answers success, and the next driver is given a ring on the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 386
+                    "line": 402
                   }
                 },
                 {
@@ -57583,7 +57640,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 387
+                    "line": 403
                   }
                 },
                 {
@@ -57594,7 +57651,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 388
+                    "line": 404
                   }
                 }
               ]
@@ -57607,7 +57664,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 390
+                "line": 406
               },
               "children": [
                 {
@@ -57618,7 +57675,7 @@
                   "value": "\"The kernel shall quiesce every device a dead devmgr's drivers served before a devmgr started again is handed them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 393
+                    "line": 409
                   }
                 },
                 {
@@ -57629,7 +57686,7 @@
                   "value": "\"Restarting devmgr.service starts a second devmgr, which is given the devices and starts their drivers.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 395
+                    "line": 411
                   }
                 },
                 {
@@ -57640,7 +57697,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 396
+                    "line": 412
                   }
                 },
                 {
@@ -57651,7 +57708,7 @@
                   "value": "\"syscall::native::quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 397
+                    "line": 413
                   }
                 }
               ]
@@ -57664,7 +57721,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 399
+                "line": 415
               },
               "children": [
                 {
@@ -57675,7 +57732,7 @@
                   "value": "\"A quiesce whose device a core has not let go within its patience shall answer TIMED_OUT, and one whose DMA cannot be turned off BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 402
+                    "line": 418
                   }
                 },
                 {
@@ -57686,7 +57743,7 @@
                   "value": "\"A quiesce with a core that never lets go answers TIMED_OUT; one on a function whose configuration space cannot be mapped answers BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 405
+                    "line": 421
                   }
                 },
                 {
@@ -57697,7 +57754,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 406
+                    "line": 422
                   }
                 },
                 {
@@ -57708,7 +57765,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 407
+                    "line": 423
                   }
                 }
               ]

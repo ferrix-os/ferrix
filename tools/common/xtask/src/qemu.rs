@@ -1966,7 +1966,9 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
 /// device it is given and where a passed-through GPU wants to be
 /// (`docs/NVIDIA.md` §2.3): the DMAR names a root port by a sub-hierarchy
 /// scope, and stage 10's out-of-domain fault then proves that a function
-/// below a bridge gets a translated domain.
+/// below a bridge gets a translated domain. A second root port holds QEMU's
+/// `edu` device, which has MSI and no MSI-X, for stage 10's MSI check
+/// (`device::check::check_msi`).
 fn attach_rng(command: &mut Command, arch: Arch) {
     let rng = match arch {
         Arch::Armv7a => "virtio-rng-pci,disable-legacy=on",
@@ -1974,7 +1976,14 @@ fn attach_rng(command: &mut Command, arch: Arch) {
         Arch::AArch64 => "virtio-rng-pci,disable-legacy=on,iommu_platform=on",
     };
     if arch == Arch::X86_64 {
-        let _ = command.args(["-device", "pcie-root-port,id=ferrix.port0,chassis=1,slot=1"]);
+        let _ = command.args([
+            "-device",
+            "pcie-root-port,id=ferrix.port0,chassis=1,slot=1",
+            "-device",
+            "pcie-root-port,id=ferrix.port1,chassis=2,slot=2",
+            "-device",
+            "edu,bus=ferrix.port1",
+        ]);
     }
     let _ = command.args(["-device", rng]);
 }

@@ -54,9 +54,14 @@
 //! message is a write the device makes, so nothing arrives until whoever gives
 //! the device DMA does that.
 //!
-//! Masking an MSI-X vector is a write to its entry's mask bit, which the
-//! interrupt controller cannot reach, so [`Vector::mask`] knows which kind it
-//! is. It takes no lock: an interrupt handler calls it.
+//! A PCI function with no MSI-X table but an MSI capability gets one vector
+//! from it, minted the same way: `INTx` off, the message programmed and
+//! masked. Ampere GPUs signal this way (`docs/NVIDIA.md` §2.3).
+//!
+//! Masking an MSI-X vector is a write to its entry's mask bit, and masking an
+//! MSI vector a write to its capability's mask bit, or its enable bit where it
+//! has none. The interrupt controller can reach neither, so [`Vector::mask`]
+//! knows which kind it is. It takes no lock: an interrupt handler calls it.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Arc;
@@ -73,7 +78,10 @@ use ferrix_native_abi::types::{
 use ferrix_pci::Address;
 use ferrix_pci::bar::{Bar, Region};
 use ferrix_pci::capability::{Capability, MSIX_ENTRY_SIZE, MsiX};
-use ferrix_pci::header::{COMMAND, COMMAND_BUS_MASTER, COMMAND_MEMORY_SPACE, Identity};
+use ferrix_pci::header::{
+    COMMAND, COMMAND_BUS_MASTER, COMMAND_INTERRUPT_DISABLE, COMMAND_MEMORY_SPACE, Identity,
+};
+use ferrix_pci::msi::{self, Msi};
 use ferrix_pci::msix::{
     self, CAPABILITY_CONTROL, CONTROL_ENABLE, CONTROL_FUNCTION_MASK, ENTRY_ADDRESS_HIGH,
     ENTRY_ADDRESS_LOW, ENTRY_DATA, ENTRY_VECTOR_CONTROL, VECTOR_CONTROL_MASKED,
@@ -171,6 +179,12 @@ enum Masking {
         /// The entry.
         entry: u16,
     },
+    /// At the MSI capability of a published node: its vector's mask bit
+    /// where it has one, and its enable bit where it has not.
+    Msi {
+        /// The node's index in [`devices`].
+        node: usize,
+    },
 }
 
 /// An interrupt a driver may be given, and nothing else.
@@ -219,16 +233,18 @@ impl Vector {
         self.set_masked(false)
     }
 
-    /// Whether a delivery may leave it unmasked: an edge-triggered MSI-X
-    /// vector, whose message does not stay asserted and whose mask is a write
-    /// to device memory (`object::interrupt`'s module documentation). A line
+    /// Whether a delivery may leave it unmasked: an edge-triggered MSI-X or
+    /// MSI vector, whose message does not stay asserted and whose mask is a
+    /// write to the device (`object::interrupt`'s module documentation). A line
     /// the controller holds is masked per delivery whatever its trigger.
     pub(crate) const fn coalesces(self) -> bool {
-        matches!(self.masking, Masking::MsiX { .. }) && matches!(self.trigger, Some(Trigger::Edge))
+        matches!(self.masking, Masking::MsiX { .. } | Masking::Msi { .. })
+            && matches!(self.trigger, Some(Trigger::Edge))
     }
 
     /// Whether it reads back masked, where that can be read: an MSI-X
-    /// entry's vector control. `None` for a controller line.
+    /// entry's vector control, or an MSI capability's mask or enable bit.
+    /// `None` for a controller line.
     pub(crate) fn reads_masked(self) -> Option<bool> {
         match self.masking {
             Masking::Controller => None,
@@ -236,6 +252,10 @@ impl Vector {
                 .get(node)
                 .and_then(|node| node.msix.as_ref())
                 .and_then(|table| table.is_masked(entry)),
+            Masking::Msi { node } => devices()
+                .get(node)
+                .and_then(|node| node.msi.as_ref())
+                .and_then(MsiFunction::is_masked),
         }
     }
 
@@ -249,6 +269,11 @@ impl Vector {
                 .and_then(|node| node.msix.as_ref())
                 .ok_or("the vector's device is not published")?
                 .set_masked(entry, masked),
+            Masking::Msi { node } => devices()
+                .get(node)
+                .and_then(|node| node.msi.as_ref())
+                .ok_or("the vector's device is not published")?
+                .set_masked(masked),
         }
     }
 }
@@ -352,6 +377,157 @@ impl Reserved {
         self.ranges
             .iter()
             .any(|&(start, end)| aperture.overlaps(start, end))
+    }
+}
+
+/// A PCI function's MSI capability, for one that has no MSI-X table, and
+/// the one vector minted from it.
+///
+/// One message, never more (`ferrix_pci::msi`). Minting turns `INTx` off in
+/// the command register, so a function whose MSI is masked by its enable bit
+/// cannot fall back to a pin nothing listens on, and leaves the message
+/// masked. A function that can mask its vector is masked by its mask bit; one
+/// that cannot is masked by turning MSI off, which drops what it would have
+/// raised meanwhile. That is safe only for what [`Vector::coalesces`] masks:
+/// a vector already pending, whose driver services the device anyway, and the
+/// mask a holder's drop leaves.
+struct MsiFunction {
+    /// The function's requester ID, which its message writes carry.
+    requester: u32,
+    /// Physical address of the function's configuration space.
+    config_phys: u64,
+    /// The capability, decoded.
+    msi: Msi,
+    /// The function's legacy configuration space, mapped from the first mint
+    /// for good. Read by interrupt handlers, and `Once::get` takes no lock.
+    config: Once<Result<Mmio, &'static str>>,
+    /// The vector minted, once one is.
+    minted: IrqSpinLock<Option<u32>, arch::Irq>,
+}
+
+impl fmt::Debug for MsiFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MsiFunction")
+            .field("requester", &self.requester)
+            .field("config_phys", &self.config_phys)
+            .field("msi", &self.msi)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MsiFunction {
+    /// The MSI capability `seen` found: only for a function with no MSI-X
+    /// capability to offer instead, on a machine that does not signal by
+    /// line.
+    fn of(address: Address, seen: &Seen<'_>, has_msix: bool) -> Option<Self> {
+        if has_msix || seen.intx.is_some() {
+            return None;
+        }
+        Some(MsiFunction {
+            requester: u32::from(address.requester_id()),
+            config_phys: seen.config_phys?,
+            msi: seen.msi?,
+            config: Once::new(),
+            minted: IrqSpinLock::new(None),
+        })
+    }
+
+    /// The configuration space, once the first mint mapped it.
+    fn mapped(&self) -> Option<Mmio> {
+        match self.config.get() {
+            Some(&Ok(config)) => Some(config),
+            _ => None,
+        }
+    }
+
+    /// Mask or unmask the vector. Takes no lock.
+    fn set_masked(&self, masked: bool) -> Result<(), &'static str> {
+        let config = self
+            .mapped()
+            .ok_or("the vector's MSI capability is not mapped")?;
+        match self.msi.mask() {
+            Some(at) => {
+                // Bit 0 is the one message; the other bits are vectors this
+                // never enables, kept as they are.
+                let value = config.read32(u64::from(at));
+                config.write32(u64::from(at), if masked { value | 1 } else { value & !1 });
+            }
+            None => {
+                let at = u64::from(self.msi.capability + msi::CONTROL);
+                let control = config.read16(at);
+                config.write16(
+                    at,
+                    if masked {
+                        control & !msi::CONTROL_ENABLE
+                    } else {
+                        Msi::enabled(control)
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the vector reads back masked.
+    fn is_masked(&self) -> Option<bool> {
+        let config = self.mapped()?;
+        Some(match self.msi.mask() {
+            Some(at) => config.read32(u64::from(at)) & 1 != 0,
+            None => {
+                config.read16(u64::from(self.msi.capability + msi::CONTROL)) & msi::CONTROL_ENABLE
+                    == 0
+            }
+        })
+    }
+
+    /// The vector, minting it if nothing has.
+    ///
+    /// The first mint maps configuration space, turns `INTx` off, programs
+    /// the message with the vector masked, and enables one message --
+    /// masked by its enable bit where there is no mask bit, which means
+    /// leaving MSI off until the holder unmasks it.
+    fn mint(&self, node: usize) -> Result<Vector, &'static str> {
+        let vector = |number| Vector {
+            number,
+            trigger: Some(Trigger::Edge),
+            masking: Masking::Msi { node },
+        };
+        let config = (*self.config.call_once(|| {
+            vmap::map_device(self.config_phys, LEGACY_CONFIG_BYTES)
+                .map(Mmio::at)
+                .map_err(|_| "the function's configuration space could not be mapped")
+        }))?;
+        let mut minted = self.minted.lock();
+        if let Some(number) = *minted {
+            return Ok(vector(number));
+        }
+        let control_at = u64::from(self.msi.capability + msi::CONTROL);
+        let control = config.read16(control_at);
+        // Off while it is programmed, so that no half-written message is
+        // ever sent.
+        config.write16(control_at, control & !msi::CONTROL_ENABLE);
+        let command = config.read16(u64::from(COMMAND));
+        config.write16(u64::from(COMMAND), command | COMMAND_INTERRUPT_DISABLE);
+        let message = arch::msi_allocate(self.requester)?;
+        if !self.msi.reaches(message.address) {
+            return Err("the message's address is above what a 32-bit MSI capability holds");
+        }
+        let base = u64::from(self.msi.capability);
+        config.write32(base + u64::from(msi::ADDRESS_LOW), message.address as u32);
+        if self.msi.wide {
+            config.write32(
+                base + u64::from(msi::ADDRESS_HIGH),
+                (message.address >> 32) as u32,
+            );
+        }
+        config.write16(u64::from(self.msi.data()), message.data as u16);
+        if let Some(at) = self.msi.mask() {
+            let value = config.read32(u64::from(at));
+            config.write32(u64::from(at), value | 1);
+            config.write16(control_at, Msi::enabled(control));
+        }
+        *minted = Some(message.number);
+        Ok(vector(message.number))
     }
 }
 
@@ -562,6 +738,8 @@ pub(crate) struct Seen<'a> {
     /// The line its `INTx` pin drives, on a machine with no MSI controller:
     /// then its one vector, and its MSI-X table is not offered.
     pub(crate) intx: Option<GicInterrupt>,
+    /// Its MSI capability, decoded, if it has one.
+    pub(crate) msi: Option<Msi>,
 }
 
 /// What enumeration read off a PCI function and kept, because whoever starts
@@ -676,6 +854,8 @@ pub(crate) struct DeviceNode {
     /// A PCI function's MSI-X table, when it has one vectors can be minted
     /// from.
     msix: Option<MsixTable>,
+    /// A PCI function's MSI capability, when it has no MSI-X table to offer.
+    msi: Option<MsiFunction>,
     /// The IOMMU domain its DMA goes through, made the first time it is asked
     /// for.
     domain: SpinLock<Option<Arc<iommu::Domain>>>,
@@ -709,6 +889,7 @@ impl DeviceNode {
             apertures: Vec::new(),
             vectors: Vec::new(),
             msix: None,
+            msi: None,
             domain: SpinLock::new(None),
             withheld: 0,
             interrupt_tables: Vec::new(),
@@ -809,6 +990,7 @@ impl DeviceNode {
             .and_then(|(config_phys, found)| {
                 MsixTable::of(address, config_phys, found, regions, reserved)
             });
+        node.msi = MsiFunction::of(address, seen, msix.is_some());
         node
     }
 
@@ -1035,6 +1217,9 @@ impl DeviceNode {
     /// How many vectors the device can be asked for: a device tree node's
     /// interrupts, a PCI function's MSI-X entries, or its one `INTx` line.
     pub(crate) fn vector_count(&self) -> usize {
+        if self.msi.is_some() {
+            return 1;
+        }
         self.msix
             .as_ref()
             .map_or(self.vectors.len(), |table| usize::from(table.table_size))
@@ -1094,16 +1279,20 @@ impl DeviceNode {
     /// the table has no such entry, the node is not published yet, or the
     /// architecture has no vector left to give.
     pub(crate) fn vector(&self, index: usize) -> Option<Vector> {
-        let Some(table) = &self.msix else {
+        if self.msix.is_none() && self.msi.is_none() {
             return self.vectors.get(index).copied();
-        };
+        }
         let published = devices()
             .get(self.index)
             .is_some_and(|node| core::ptr::eq(node.as_ref(), self));
         if !published {
             return None;
         }
-        table.mint(self.index, u16::try_from(index).ok()?).ok()
+        match (&self.msix, &self.msi) {
+            (Some(table), _) => table.mint(self.index, u16::try_from(index).ok()?).ok(),
+            (None, Some(msi)) if index == 0 => msi.mint(self.index).ok(),
+            _ => None,
+        }
     }
 }
 
@@ -1197,6 +1386,12 @@ pub(crate) struct Report {
     /// MSI-X vectors the check minted: one, from the first such table, or
     /// none when the architecture has no vector to give.
     pub(crate) msix_minted: usize,
+    /// PCI functions offered an MSI message, having no MSI-X table.
+    pub(crate) msi_functions: usize,
+    /// MSI vectors the check minted: one, from QEMU's `edu`, or none.
+    pub(crate) msi_minted: usize,
+    /// MSI deliveries the check saw `edu` make, unmasked.
+    pub(crate) msi_delivered: usize,
     /// Requests refused, each exactly as the rule requires.
     pub(crate) refusals: usize,
 }
@@ -1317,10 +1512,7 @@ pub(crate) fn publish<'f>(
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());
     report.nodes = published.len();
-    report.msix_tables = published.iter().filter(|node| node.msix.is_some()).count();
-    if let Some(node) = published.iter().find(|node| node.msix.is_some()) {
-        check::check_msix(node, &mut report)?;
-    }
+    check::check_vectors(published, &mut report)?;
     check::check_dma_switch(published)?;
     Ok(report)
 }

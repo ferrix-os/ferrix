@@ -52,13 +52,14 @@ use ferrix_bootinfo::BootView;
 use ferrix_fdt::{EcamHost, Fdt, GicInterrupt};
 use ferrix_pci::bar::{self, Region};
 use ferrix_pci::capability::{
-    self as pci_capability, Capabilities, Capability, ExtendedCapabilities, ID_MSIX, MsiX,
+    self as pci_capability, Capabilities, Capability, ExtendedCapabilities, ID_MSI, ID_MSIX, MsiX,
 };
 use ferrix_pci::ecam::{Layout, Window};
 use ferrix_pci::header::{
     BusNumbers, CLASS_BRIDGE, COMMAND, COMMAND_MEMORY_SPACE, Endpoint, HeaderKind,
     SUBCLASS_HOST_BRIDGE,
 };
+use ferrix_pci::msi::Msi;
 use ferrix_pci::topology::Bridge;
 use ferrix_pci::virtio::{self as virtio_pci, SharedMemory, TYPE_ENTROPY, TYPE_GPU, Transport};
 use ferrix_pci::walk::{Function, Walk};
@@ -694,6 +695,12 @@ fn check_host(
         let secondary_bus = BusNumbers::read(&space, function.address)
             .ok()
             .map(|numbers| numbers.secondary);
+        // An MSI capability, offered by the registry only where there is no
+        // MSI-X table (`DeviceNode::pci`).
+        let msi = pci_capability::find(&space, function.address, ID_MSI)
+            .ok()
+            .flatten()
+            .map(|capability| Msi::read(&space, function.address, capability));
         // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
         nodes.push(DeviceNode::pci(
             function.address,
@@ -703,6 +710,7 @@ fn check_host(
                 transport: transport.as_ref(),
                 subsystem,
                 secondary_bus,
+                msi,
                 host_visible: host_visible.as_ref(),
                 intx,
             },

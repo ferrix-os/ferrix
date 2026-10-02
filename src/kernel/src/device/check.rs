@@ -17,10 +17,11 @@ use ferrix_pci::header::{COMMAND, COMMAND_BUS_MASTER, COMMAND_MEMORY_SPACE};
 
 use super::{
     DeviceNode, FIRST_SHARED_INTERRUPT, Failure, LEGACY_CONFIG_BYTES, Location, Report, Reserved,
-    Trigger,
+    Trigger, Vector,
 };
 use crate::mmio::Mmio;
-use crate::{irq, vmap};
+use crate::object::interrupt::Interrupt;
+use crate::{irq, timer, vmap};
 
 /// Mint one PCI node's first MSI-X vector and require it to behave as one:
 /// the same vector when asked again, no handler already on its number, an
@@ -32,7 +33,7 @@ use crate::{irq, vmap};
 /// entry is left masked; a driver that asks for entry 0 gets this vector.
 ///
 /// Verifies: L.device.6, L.device.7
-pub(super) fn check_msix(node: &DeviceNode, report: &mut Report) -> Result<(), Failure> {
+fn check_msix(node: &DeviceNode, report: &mut Report) -> Result<(), Failure> {
     let fail = |what| Failure {
         location: node.location(),
         what,
@@ -67,6 +68,137 @@ pub(super) fn check_msix(node: &DeviceNode, report: &mut Report) -> Result<(), F
         return Err(fail("a minted MSI-X entry did not mask as told"));
     }
     Ok(())
+}
+
+/// The message-signalled vector checks, on the published nodes: the first
+/// MSI-X table's ([`check_msix`]) and QEMU's `edu` device's MSI
+/// ([`check_msi`]).
+pub(super) fn check_vectors(
+    published: &[Arc<DeviceNode>],
+    report: &mut Report,
+) -> Result<(), Failure> {
+    report.msix_tables = published.iter().filter(|node| node.msix.is_some()).count();
+    if let Some(node) = published.iter().find(|node| node.msix.is_some()) {
+        check_msix(node, report)?;
+    }
+    check_msi(published, report)
+}
+
+/// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
+/// its interrupt on request (QEMU's `docs/specs/edu.rst`).
+const EDU: (u16, u16) = (0x1234, 0x11E8);
+/// `edu`'s register that raises its interrupt with the bits written.
+const EDU_RAISE: u64 = 0x60;
+/// `edu`'s register that clears the bits written from its interrupt status.
+const EDU_ACKNOWLEDGE: u64 = 0x64;
+/// How long a raised MSI may take to arrive, or a masked one to stay away.
+const MSI_WAIT_NANOS: u64 = 50_000_000;
+
+/// Whether `interrupt` goes pending within [`MSI_WAIT_NANOS`].
+fn arrives(interrupt: &Interrupt) -> bool {
+    let deadline = timer::now_nanos().saturating_add(MSI_WAIT_NANOS);
+    while timer::now_nanos() <= deadline {
+        if interrupt.is_pending() {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+    interrupt.is_pending()
+}
+
+/// Mint the one MSI vector of QEMU's `edu` device, if the machine has one,
+/// and require it to behave as one: the same vector when asked again, none
+/// past the one message, no handler already on its number, masked as minted,
+/// unmasked and masked as told, delivered when the device raises it, and not
+/// delivered while masked -- `edu` cannot mask its vector, so that is its
+/// enable bit, with `INTx` off so that nothing arrives by a pin either.
+///
+/// Only `edu`: a vector is spent for good and the function's interrupt
+/// configuration is written, which on a real machine belongs to the driver
+/// that will hold it (`docs/NVIDIA.md` §2.3). The device is left with MSI
+/// off and bus mastering off, as it was found.
+///
+/// Verifies: L.device.22
+fn check_msi(nodes: &[Arc<DeviceNode>], report: &mut Report) -> Result<(), Failure> {
+    report.msi_functions = nodes.iter().filter(|node| node.msi.is_some()).count();
+    let Some(node) = nodes.iter().find(|node| {
+        node.msi.is_some()
+            && node
+                .pci_function()
+                .is_some_and(|function| (function.vendor, function.device) == EDU)
+    }) else {
+        return Ok(());
+    };
+    let fail = |what| Failure {
+        location: node.location(),
+        what,
+    };
+    if node.vector_count() != 1 || node.vector(1).is_some() {
+        return Err(fail("a vector past the one MSI message was minted"));
+    }
+    report.refusals += 1;
+    let Some(first) = node.vector(0) else {
+        return Ok(());
+    };
+    report.msi_minted += 1;
+    if node.vector(0) != Some(first) {
+        return Err(fail("an MSI message was minted twice as different vectors"));
+    }
+    if irq::is_registered(first.number()) {
+        return Err(fail("an MSI vector was minted on a number with a handler"));
+    }
+    if first.reads_masked() != Some(true) {
+        return Err(fail("a minted MSI vector was not masked"));
+    }
+    let unmasked = first.set_masked(false).map(|()| first.reads_masked());
+    let masked = first.set_masked(true).map(|()| first.reads_masked());
+    if unmasked != Ok(Some(false)) || masked != Ok(Some(true)) {
+        return Err(fail("a minted MSI vector did not mask as told"));
+    }
+
+    let registers = node
+        .apertures()
+        .first()
+        .and_then(|aperture| vmap::map_device(aperture.phys(), 0x1000).ok())
+        .ok_or_else(|| fail("edu's registers could not be mapped"))?;
+    let delivered = deliver(node, Mmio::at(registers), first);
+    let _ = vmap::unmap_device(registers);
+    report.msi_delivered += delivered.map_err(fail)?;
+    Ok(())
+}
+
+/// Raise `edu`'s interrupt with its vector claimed, masked and unmasked:
+/// the deliveries seen, which must be the two unmasked ones.
+fn deliver(node: &DeviceNode, edu: Mmio, vector: Vector) -> Result<usize, &'static str> {
+    // A message is a write the device makes: bus mastering on, and nothing
+    // pinned, so that it reaches nothing else.
+    node.enable_dma()?;
+    let result = (|| {
+        let interrupt =
+            Interrupt::new(vector).map_err(|_| "edu's MSI vector could not be claimed")?;
+        let mut seen = 0;
+        for (round, masked) in [(1u32, false), (2, true), (4, false)] {
+            if masked {
+                vector.mask()?;
+            }
+            edu.write32(EDU_RAISE, round);
+            let arrived = arrives(&interrupt);
+            edu.write32(EDU_ACKNOWLEDGE, round);
+            if masked {
+                vector.unmask()?;
+            }
+            match (masked, arrived) {
+                (false, true) => seen += 1,
+                (false, false) => return Err("edu raised its MSI and nothing arrived"),
+                (true, true) => return Err("edu's MSI arrived while it was masked"),
+                (true, false) => {}
+            }
+            interrupt.acknowledge()?;
+        }
+        Ok(seen)
+    })();
+    node.disable_dma()?;
+    result
 }
 
 /// Require no two apertures anywhere to overlap, no vector to be held twice,
