@@ -47,8 +47,15 @@ const DESKTOP_PATH: &str = "etc/yserver.sh";
 /// `--library-path` takes the place of the `LD_LIBRARY_PATH` that desktop
 /// gives its clients for ferrousli. Its log is `/tmp/yserver.log`, at the
 /// `RUST_LOG` the compositor's configuration gives, or `info`.
+///
+/// It renders on lavapipe even where the desktop has Venus. Every frame
+/// yserver hands hyprix is read back to the CPU, and on Venus that read,
+/// and every client image written, crosses memory Ferrix maps uncached
+/// (the device calls it write-combining): Steam's maximized window took
+/// 22 ms a frame to read back and its uploads half the server's time. On
+/// lavapipe both are copies in RAM. Venus pays once hyprix takes dmabufs.
 const DESKTOP_SCRIPT: &str = r#"export YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1
-export RUST_LOG="${RUST_LOG:-info}"
+export RUST_LOG="${RUST_LOG:-info}" VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json
 unset LD_LIBRARY_PATH
 exec /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
     /data/yserver/yserver :0 -nolisten tcp > /tmp/yserver.log 2>&1
