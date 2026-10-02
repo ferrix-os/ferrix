@@ -1824,3 +1824,244 @@ mod stage2_bits {
         assert_eq!(ArmStage2::address(u64::MAX), PhysAddr(0xFF_FFFF_F000));
     }
 }
+
+mod coherence_bits {
+    use super::*;
+    use crate::coherence::{Clean, Unpublished, Walked};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// What happened to memory, in order.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Event {
+        /// Eight bytes written at an address, with a value.
+        Write(u64, u64),
+        /// A range cleaned to memory.
+        Clean(u64, u64),
+        /// A table frame handed out.
+        Table(u64),
+    }
+
+    type Log = Rc<RefCell<Vec<Event>>>;
+
+    /// [`Memory`], logging each write and table.
+    struct Logged {
+        memory: Memory,
+        log: Log,
+    }
+
+    // SAFETY: every access is `Memory`'s, whose argument this inherits.
+    unsafe impl PhysMem for Logged {
+        fn read(&self, at: PhysAddr) -> u64 {
+            self.memory.read(at)
+        }
+
+        fn write(&mut self, at: PhysAddr, value: u64) {
+            self.log.borrow_mut().push(Event::Write(at.0, value));
+            self.memory.write(at, value);
+        }
+
+        fn allocate_table(&mut self) -> Option<PhysAddr> {
+            let table = self.memory.allocate_table()?;
+            self.log.borrow_mut().push(Event::Table(table.0));
+            Some(table)
+        }
+    }
+
+    /// A clean that logs the range.
+    struct Recorded(Log);
+
+    impl Clean for Recorded {
+        fn clean(&mut self, at: PhysAddr, len: u64) {
+            self.0.borrow_mut().push(Event::Clean(at.0, len));
+        }
+    }
+
+    /// A VT-d tree with its root, and the log.
+    fn tree() -> (Logged, Mapper<VtdSecondLevel>, Log) {
+        let log: Log = Rc::default();
+        let (memory, mapper) = Memory::with_root::<VtdSecondLevel>();
+        (
+            Logged {
+                memory,
+                log: log.clone(),
+            },
+            mapper,
+            log,
+        )
+    }
+
+    /// Whether a clean after position `from` in `log` covers the eight
+    /// bytes at `at`.
+    fn cleaned_after(log: &[Event], from: usize, at: u64) -> bool {
+        log[from..].iter().any(|event| {
+            matches!(*event, Event::Clean(start, len) if start <= at && at + 8 <= start + len)
+        })
+    }
+
+    /// On a walker that does not snoop, every entry the mapper writes is
+    /// cleaned after it is written, and every fresh table is cleaned whole
+    /// before the entry that links it is written.
+    ///
+    /// Verifies: `L.iommu.56`
+    /// Verifies: `L.iommu.57`
+    #[test]
+    fn every_write_is_cleaned_and_every_table_before_its_link() {
+        let (mut memory, mapper, log) = tree();
+        let mut writes = Unpublished::new(false);
+        let mut walked = Walked::new(&mut memory, &mut writes, Recorded(log.clone()));
+        mapper
+            .map_range(
+                &mut walked,
+                VirtAddr(0x40_0000_0000 - 0x20_0000),
+                PhysAddr(0x8000_0000),
+                PAGE_SIZE,
+                MapFlags::DMA,
+            )
+            .unwrap();
+        assert!(
+            !writes.is_published(),
+            "the leaf is noted and not yet cleaned"
+        );
+        writes.publish(&mut Recorded(log.clone()));
+        assert!(writes.is_published());
+        let log = log.borrow().clone();
+        let mut tables = 0;
+        for (index, event) in log.iter().enumerate() {
+            match *event {
+                Event::Write(at, value) => {
+                    assert!(
+                        cleaned_after(&log, index, at),
+                        "the write at {at:#x} was cleaned"
+                    );
+                    if VtdSecondLevel::is_present(value)
+                        && let Some(table) =
+                            log[..index].iter().find_map(|earlier| match *earlier {
+                                Event::Table(table)
+                                    if table == VtdSecondLevel::address(value).0 =>
+                                {
+                                    Some(table)
+                                }
+                                _ => None,
+                            })
+                    {
+                        let linked_at = index;
+                        let cleaned = log[..linked_at].contains(&Event::Clean(table, PAGE_SIZE));
+                        assert!(
+                            cleaned,
+                            "the table at {table:#x} was cleaned before its link"
+                        );
+                        tables += 1;
+                    }
+                }
+                Event::Clean(..) | Event::Table(..) => {}
+            }
+        }
+        assert_eq!(tables, 2, "two tables below the root, each linked once");
+        assert_eq!(writes.counts(), (3, 2), "three entries and two tables");
+    }
+
+    /// An unmap's writes, the leaf and the links to the tables it empties,
+    /// are noted and cleaned the same way.
+    ///
+    /// Verifies: `L.iommu.56`
+    #[test]
+    fn an_unmap_cleans_what_it_clears() {
+        let (mut memory, mapper, log) = tree();
+        let virt = VirtAddr(0x1000_0000);
+        mapper
+            .map_range(
+                &mut memory,
+                virt,
+                PhysAddr(0x8000_0000),
+                PAGE_SIZE,
+                MapFlags::DMA,
+            )
+            .unwrap();
+        log.borrow_mut().clear();
+        let mut writes = Unpublished::new(false);
+        let mut walked = Walked::new(&mut memory, &mut writes, Recorded(log.clone()));
+        let _ = mapper
+            .unmap_range(&mut walked, virt, PAGE_SIZE, |_| {})
+            .unwrap();
+        assert!(!writes.is_published());
+        writes.publish(&mut Recorded(log.clone()));
+        let log = log.borrow().clone();
+        let written: Vec<u64> = log
+            .iter()
+            .filter_map(|event| match *event {
+                Event::Write(at, 0) => Some(at),
+                _ => None,
+            })
+            .collect();
+        assert!(!written.is_empty(), "the leaf was cleared");
+        for (index, event) in log.iter().enumerate() {
+            if let Event::Write(at, _) = *event {
+                assert!(
+                    cleaned_after(&log, index, at),
+                    "the clear at {at:#x} was cleaned"
+                );
+            }
+        }
+    }
+
+    /// On a walker that snoops, nothing is noted and nothing cleaned, and
+    /// the record always reads as published.
+    ///
+    /// Verifies: `L.iommu.56`
+    #[test]
+    fn a_coherent_walker_cleans_nothing() {
+        let (mut memory, mapper, log) = tree();
+        let mut writes = Unpublished::new(true);
+        let mut walked = Walked::new(&mut memory, &mut writes, Recorded(log.clone()));
+        mapper
+            .map_range(
+                &mut walked,
+                VirtAddr(0),
+                PhysAddr(0x8000_0000),
+                PAGE_SIZE,
+                MapFlags::DMA,
+            )
+            .unwrap();
+        assert!(writes.is_published());
+        assert!(writes.is_coherent());
+        assert_eq!(writes.counts(), (0, 0));
+        assert!(
+            !log.borrow()
+                .iter()
+                .any(|event| matches!(event, Event::Clean(..))),
+            "nothing cleaned"
+        );
+    }
+
+    /// A write noted and never published is what the check catches: the
+    /// record says so until it is cleaned, and a record past its room cleans
+    /// early rather than forgetting a write.
+    ///
+    /// Verifies: `L.iommu.56`
+    #[test]
+    fn an_unpublished_write_is_seen_and_a_full_record_cleans_early() {
+        let log: Log = Rc::default();
+        let mut clean = Recorded(log.clone());
+        let mut writes = Unpublished::new(false);
+        writes.wrote(PhysAddr(0x1000), 16, &mut clean);
+        assert!(!writes.is_published(), "a write not cleaned is seen");
+        writes.publish(&mut clean);
+        assert!(writes.is_published());
+        for index in 0..20 {
+            writes.wrote(PhysAddr(0x2000 + index * 8), 8, &mut clean);
+        }
+        writes.fresh_table(PhysAddr(0x9000), &mut clean);
+        assert!(writes.is_published(), "a fresh table publishes with it");
+        writes.publish(&mut clean);
+        let log = log.borrow();
+        for index in 0..20 {
+            assert!(
+                log.contains(&Event::Clean(0x2000 + index * 8, 8)),
+                "write {index} was cleaned"
+            );
+        }
+        assert!(log.contains(&Event::Clean(0x9000, PAGE_SIZE)));
+        assert_eq!(writes.counts(), (21, 1));
+    }
+}

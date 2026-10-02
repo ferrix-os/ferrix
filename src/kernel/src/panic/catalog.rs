@@ -1632,6 +1632,10 @@ pub(crate) static STAGE10_IOMMU: Explanation = Explanation {
         "`Domain::unpin` accepted a pin another domain took, or kept counting pages it had \
          unpinned.",
         "No frame could be allocated for the check.",
+        "On a VT-d unit whose walk does not snoop the caches (`ECAP.C` clear, as QEMU's reports), \
+         a table entry or a fresh table was written and not cleaned to memory before the \
+         invalidation or map that published it, so the unit could walk a stale entry (finding \
+         F-58; `iommu/check.rs` check_cleaning).",
     ],
     see: "src/kernel/src/iommu.rs Domain; src/kernel/src/iommu/check.rs check_domains; \
           src/kernel/src/device.rs DeviceNode::domain; \

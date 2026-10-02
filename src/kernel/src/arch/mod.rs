@@ -336,6 +336,18 @@ pub(crate) use armv7a::clean_for_device;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::clean_for_device;
 
+// Cache maintenance for an IOMMU whose table walk does not snoop the caches
+// (VT-d's ECAP.C clear): the entries a processor wrote through its cached
+// direct map are written back to memory, and waited for, before the unit is
+// told to read them (finding F-58). Unlike `clean_for_device`, x86-64 does
+// it too, by `clflush`: a PC's devices snoop, its IOMMU's walk may not.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::clean_for_walker;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::clean_for_walker;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::clean_for_walker;
+
 // The same, and the lines dropped too: for memory a program will share with
 // such a device through a mapping past the caches (`vmo_pin`'s
 // `PIN_COHERENT`), where a line left in the cache could be written back over

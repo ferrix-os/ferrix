@@ -18,6 +18,17 @@
 //!   kernel asks: every event in it, of whatever type
 //!   ([`Unit::take_fault`]).
 //!
+//! # Only a unit whose walk snoops
+//!
+//! The stream table, the queues and the stage-2 tables are written through
+//! the cached direct map, and nothing here cleans them to memory. So a unit
+//! is brought up only if `IDR0.COHACC` says its table and queue accesses are
+//! coherent with the processors' caches, and only once `CR1` and each
+//! entry's walk say those accesses are write-back cacheable and inner
+//! shareable, as Linux's `arm_smmu_device_reset` and its stage-2 entries do.
+//! A unit without `COHACC` is refused, not cleaned for: no machine this
+//! kernel runs on has one (finding F-58).
+//!
 //! # Every domain maps the MSI doorbell
 //!
 //! QEMU sends a device's MSI writes through its stream like any other DMA; the
@@ -28,6 +39,7 @@
 use alloc::collections::BTreeSet;
 
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_paging::coherence::Unpublished;
 use ferrix_paging::stage2::ArmStage2;
 use ferrix_paging::{MapError, MapFlags};
 use ferrix_sync::IrqSpinLock;
@@ -51,6 +63,9 @@ const IDR5: u64 = 0x14;
 const CR0: u64 = 0x20;
 /// Control register 0's acknowledgement.
 const CR0ACK: u64 = 0x24;
+/// Control register 1: the cacheability and shareability of the unit's
+/// own accesses to its tables and queues.
+const CR1: u64 = 0x28;
 /// Control register 2.
 const CR2: u64 = 0x2C;
 /// Global errors.
@@ -81,6 +96,9 @@ const EVENTQ_OVERFLOW: u32 = 1 << 31;
 const IDR0_S2P: u32 = 1 << 0;
 /// IDR0: the translation table formats, bits 3:2; bit 3 set means `AArch64`.
 const IDR0_TTF_AARCH64: u32 = 1 << 3;
+/// IDR0: the unit's accesses to its tables and queues are coherent with
+/// the processors' caches.
+const IDR0_COHACC: u32 = 1 << 4;
 /// IDR0: VMIDs are sixteen bits rather than eight.
 const IDR0_VMID16: u32 = 1 << 18;
 /// IDR1: how many bits of stream ID the unit decodes, bits 5:0.
@@ -96,6 +114,10 @@ const SMMUEN: u32 = 1 << 0;
 const EVENTQEN: u32 = 1 << 2;
 /// CR0: the command queue is on.
 const CMDQEN: u32 = 1 << 3;
+/// CR1: the stream table and the queues are read and written write-back
+/// cacheable, inner and outer, and inner shareable: `TABLE_SH` and
+/// `QUEUE_SH` 3, `TABLE_OC`, `TABLE_IC`, `QUEUE_OC` and `QUEUE_IC` 1.
+const CR1_WALKS: u32 = 3 << 10 | 1 << 8 | 1 << 6 | 3 << 4 | 1 << 2 | 1;
 /// CR2: record an event for a stream ID past the table.
 const RECINVSID: u32 = 1 << 1;
 /// GERROR: the command queue stopped on an error.
@@ -150,9 +172,11 @@ const EVENT_READ: u64 = 1 << 3;
 const STE_VALID: u64 = 1;
 /// STE word 0, `Config` in bits 3:1: stage 2 translates, stage 1 bypassed.
 const STE_S2_TRANSLATE: u64 = 0b110 << 1;
-/// STE word 5 for this driver's walk: `S2T0SZ` 25, `S2SL0` 1, a 4 KiB
-/// `S2TG`, `S2PS` 2 for 40 bits, `S2AA64`, and `S2R` so faults are recorded.
-const STE_S2_WALK: u64 = 25 | 1 << 6 | 2 << 16 | 1 << 19 | 1 << 26;
+/// STE word 5 for this driver's walk: `S2T0SZ` 25, `S2SL0` 1, the walk
+/// write-back cacheable and inner shareable (`S2IR0` and `S2OR0` 1, `S2SH0`
+/// 3), a 4 KiB `S2TG`, `S2PS` 2 for 40 bits, `S2AA64`, and `S2R` so faults
+/// are recorded.
+const STE_S2_WALK: u64 = 25 | 1 << 6 | 1 << 8 | 1 << 10 | 3 << 12 | 2 << 16 | 1 << 19 | 1 << 26;
 
 /// Command: make the unit reread a stream table entry.
 const CMD_CFGI_STE: u64 = 0x03;
@@ -242,6 +266,9 @@ impl Unit {
         if idr0 & IDR0_S2P == 0 || idr0 & IDR0_TTF_AARCH64 == 0 {
             return refuse("it has no AArch64 stage 2");
         }
+        if idr0 & IDR0_COHACC == 0 {
+            return refuse("its table and queue accesses do not snoop the caches");
+        }
         if registers.read32(IDR1) & IDR1_SIDSIZE < STREAM_BITS {
             return refuse("it decodes fewer stream ID bits than the table covers");
         }
@@ -287,6 +314,11 @@ impl Unit {
     /// Point the unit at its table and queues, and turn the queues on.
     fn program(&self, events: u64) -> Result<(), &'static str> {
         self.control(0, "it never stopped")?;
+        // Only while the queues and translation are off.
+        self.registers.write32(CR1, CR1_WALKS);
+        if self.registers.read32(CR1) != CR1_WALKS {
+            return Err("it did not take cacheable walks of its table and queues");
+        }
         write64(self.registers, STRTAB_BASE, self.table);
         self.registers.write32(STRTAB_BASE_CFG, STREAM_BITS);
         write64(
@@ -463,7 +495,14 @@ impl Unit {
         phys: u64,
         flags: MapFlags,
     ) -> Result<(), MapError> {
-        mm::map_io::<ArmStage2>(attached.root, iova, phys, flags)
+        // A unit without COHACC was refused, so nothing needs cleaning.
+        mm::map_io::<ArmStage2>(
+            attached.root,
+            iova,
+            phys,
+            flags,
+            &mut Unpublished::new(true),
+        )
     }
 
     /// Take the page at `iova` out of `attached`'s tables, holding every table
@@ -479,7 +518,7 @@ impl Unit {
         iova: u64,
         tables: &mut mm::UnlinkedTables,
     ) -> Result<(), MapError> {
-        mm::unmap_io::<ArmStage2>(attached.root, iova, tables)
+        mm::unmap_io::<ArmStage2>(attached.root, iova, tables, &mut Unpublished::new(true))
     }
 
     /// Where `attached`'s tables send an access to `iova`.

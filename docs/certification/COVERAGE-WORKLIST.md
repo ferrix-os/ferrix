@@ -51,7 +51,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | `arch/x86_64/trap.rs` | `core` | 22 | - | - | 22 | 51, 54-67, 70, 72, 77-81 |
 | `arch/x86_64/syscall.rs` | `core` | 6 | - | - | 6 | 412, 615, 618-619, 621, 628 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 202, 482, 491 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1312-1313 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1313-1314 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 336 |
 
 ---
@@ -118,7 +118,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 730 |
+| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 731 |
 
 ---
 
@@ -151,7 +151,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1320 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1323 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

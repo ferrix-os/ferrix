@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 122 | 70 | 52 |
-| Low (`L.*`) | 748 | 478 | 270 |
+| Low (`L.*`) | 751 | 481 | 270 |
 
-1407 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1416 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1407 |
-| Accessors, covered by the requirement they serve | 801 |
+| Named by a low-level requirement | 1416 |
+| Accessors, covered by the requirement they serve | 799 |
 | Check code in a product file | 55 |
 | Named by none | 889 |
 
@@ -576,6 +576,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.iommu.44` | Every fault read from a unit, by the fault audit or through a domain, shall be written to the audit record as one DMA_FAULT, refused, naming the device's stream and the page it addressed, with the kernel as its subject. | On a boot where a unit translates, the audit record holds a DMA_FAULT from the out-of-domain probe, refused, with pid 0; with the record's event swapped at recorded, or its subject made a process, the end-of-boot audit check fails naming it. | H.DMA.2 | `iommu::recorded`, `audit::record`, `audit::Store::record_at` | `src/kernel/src/audit/check.rs::booted` | reached | not reached | not reached |
 | `L.iommu.45` | A DMAR scope's path shall be followed through each bridge's secondary bus, and a function shall count as its own requester only if every bridge from it up to its root bus is a PCIe port (root, upstream or downstream): behind a PCIe-to-PCI or conventional bridge, on a bus two bridges claim, or under a loop of bus numbers, it is aliased, never its own. | Host tests: a path is followed through each bridge's secondary bus; a function behind a root port or a switch is its own requester; one named by a path through a PCIe-to-PCI bridge, on a bus two bridges claim, on a bus no bridge explains below a named bridge, or under a loop of bus numbers is not; only Express port types 4, 5 and 6 forward a requester ID; a scope path with an odd byte is not whole. | H.DMA.1 | `discovery::pci::learn_bridges`, `iommu::claims` | `src/lib/platform/pci/src/tests.rs::only_a_pcie_port_forwards_a_requester_id_unchanged`, `src/lib/platform/pci/src/topology.rs::a_longer_path_is_followed_through_each_bridge_s_secondary_bus`, `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_root_port_keeps_its_own_requester_id`, `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_switch_keeps_its_own_requester_id`, `src/lib/platform/pci/src/topology.rs::behind_a_pcie_to_pci_bridge_the_requester_id_is_an_alias`, `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_pcie_to_pci_bridge_is_never_its_own`, `src/lib/platform/pci/src/topology.rs::a_bus_two_bridges_claim_is_never_its_own`, `src/lib/platform/pci/src/topology.rs::a_bus_no_bridge_explains_is_never_taken_for_the_function_s_own`, `src/lib/platform/pci/src/topology.rs::a_loop_of_bus_numbers_ends_aliased` | host test | host test | host test |
 | `L.iommu.46` | place_dmar shall place a function that a DRHD's endpoint or sub-hierarchy scope reaches, as its own requester, behind that DRHD's unit, and domain_for shall attach a translated domain for it on that unit; a function the scope reaches under an alias, or by a path that is not whole, shall be unresolved and get no domain. | On x86-64 under KVM and TCG every PCI function, the virtio-rng and edu below PCIe root ports included, is placed behind the unit with 0 bypassing and 0 unresolved, and the out-of-domain probe's write from the rng below a root port (stream 0x100) is faulted by the unit; with domains not following scopes the boot panics on the rng's untranslated DMA, and with placement ignoring sub-hierarchies test-boot fails on 2 bypassing. | H.DMA.1 | `iommu::place_dmar`, `iommu::Scope::places`, `iommu::vtd_unit_for`, `iommu::learn_bridge`, `iommu::bring_up_vtd` | `tools/common/xtask/src/qemu.rs::iommu_problem`, `tools/common/xtask/src/qemu.rs::fault_problem` | xtask gate | xtask gate | xtask gate |
+| `L.iommu.56` | On a VT-d unit whose ECAP.C is clear, every root, context and second-level entry the kernel writes shall be cleaned from the processor's caches to memory (clflush of each line written, then mfence) before the context-cache or IOTLB invalidation that publishes it, and before a map returns; an invalidation whose change left a write not cleaned shall be refused and counted. On a unit whose ECAP.C is set, nothing shall be cleaned. | On x86-64 under KVM and TCG, where QEMU's unit reports ECAP.C clear, the iommu line counts the entry writes cleaned and 0 publish points with a write left uncleaned, and test-boot requires the line; with the clean before an unmap's return dropped, the boot panics with 4 of 16 publish points finding a write not cleaned, and with the clean before an attach's invalidation dropped, both attaches are refused and the boot panics with 2 of 4. Host tests: every entry the mapper writes, on a map and on an unmap, is cleaned after it is written; a walker that snoops cleans nothing; a write noted and not cleaned reads as unpublished, and a full record cleans early. | H.DMA.2, H.DMA.3 | `iommu::vtd::Unit::open`, `iommu::vtd::Unit::writes`, `iommu::vtd::Unit::publish`, `iommu::vtd::Unit::map`, `iommu::vtd::Unit::unmap`, `iommu::vtd::Unit::detach`, `iommu::vtd::Unit::invalidate_context`, `iommu::vtd::Unit::invalidate_iotlb`, `iommu::vtd::write_entry`, `iommu::vtd::require_published`, `iommu::vtd::settle`, `iommu::vtd::cleaning`, `mm::WalkerClean::clean`, `arch::x86_64::cpu::clean_for_walker` | `src/kernel/src/iommu/check.rs::check_cleaning`, `src/lib/kernel/paging/src/tests.rs::every_write_is_cleaned_and_every_table_before_its_link`, `src/lib/kernel/paging/src/tests.rs::an_unmap_cleans_what_it_clears`, `src/lib/kernel/paging/src/tests.rs::a_coherent_walker_cleans_nothing`, `src/lib/kernel/paging/src/tests.rs::an_unpublished_write_is_seen_and_a_full_record_cleans_early`, `tools/common/xtask/src/qemu.rs::cleaning_problem` | reached | reached | reached |
+| `L.iommu.57` | On a VT-d unit whose ECAP.C is clear, every table frame the kernel zeroes for the unit to walk -- the root table, a context table, a domain's second-level root and each second-level table the mapper adds -- shall be cleaned to memory whole before any entry that links it is written. | On x86-64 under KVM and TCG the iommu line counts the fresh tables cleaned, more than 0. Host tests: each table the mapper adds below the root is cleaned whole before the entry that links it is written. | H.DMA.2, H.DMA.3 | `iommu::vtd::table`, `iommu::vtd::Unit::attach`, `iommu::vtd::Unit::install`, `mm::map_io` | `src/kernel/src/iommu/check.rs::check_cleaning`, `src/lib/kernel/paging/src/tests.rs::every_write_is_cleaned_and_every_table_before_its_link` | reached | reached | reached |
+| `L.iommu.58` | An SMMUv3 whose IDR0.COHACC is clear shall be left alone, with the reason printed. One that is brought up shall have CR1 set, while its queues and translation are off, to write-back cacheable, inner shareable accesses to its stream table and queues, read back as written, and each stream table entry's stage-2 walk shall be write-back cacheable and inner shareable. | On AArch64 the SMMUv3 is brought up and the out-of-domain write is faulted through it; with COHACC's test inverted, the unit is left alone as not snooping and test-boot fails on no write outside a translated domain faulted. | H.DMA.2, H.DMA.3 | `iommu::smmuv3::Unit::open`, `iommu::smmuv3::Unit::program`, `iommu::smmuv3::Unit::attach` | `tools/common/xtask/src/qemu.rs::fault_problem` | xtask gate | xtask gate | xtask gate |
 
 ### MemoryManagement
 
@@ -1492,6 +1495,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/interfaces/block_ring/check.rs::refusals` | kernel | L.quiesce.1 |
 | `src/kernel/src/interfaces/block_ring/check.rs::round` | kernel | L.quiesce.2, H.DEV.2, H.DEV.4 |
 | `src/kernel/src/interfaces/block_ring/check.rs::run` | kernel | L.quiesce.3 |
+| `src/kernel/src/iommu/check.rs::check_cleaning` | kernel | L.iommu.56 |
+| `src/kernel/src/iommu/check.rs::check_cleaning` | kernel | L.iommu.57 |
 | `src/kernel/src/iommu/check.rs::check_dma_faults` | kernel | H.DMA.6 |
 | `src/kernel/src/iommu/check.rs::check_domains` | kernel | L.device.8 |
 | `src/kernel/src/iommu/check.rs::pin_and_unpin` | kernel | L.iommu.19, L.iommu.20, L.iommu.21, L.iommu.22, L.iommu.29, H.DMA.3 |
@@ -1790,6 +1795,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/objects/src/tests.rs::a_slot_whose_generations_run_out_is_retired_rather_than_wrapped` | host | H.OBJ.15 |
 | `src/lib/kernel/objects/src/tests.rs::duplicate_needs_the_right_and_cannot_add_rights` | host | H.OBJ.3 |
 | `src/lib/kernel/objects/src/tests.rs::replace_closes_the_original_and_cannot_add_rights` | host | H.OBJ.14 |
+| `src/lib/kernel/paging/src/tests.rs::a_coherent_walker_cleans_nothing` | host | L.iommu.56 |
+| `src/lib/kernel/paging/src/tests.rs::an_unmap_cleans_what_it_clears` | host | L.iommu.56 |
+| `src/lib/kernel/paging/src/tests.rs::an_unpublished_write_is_seen_and_a_full_record_cleans_early` | host | L.iommu.56 |
+| `src/lib/kernel/paging/src/tests.rs::every_write_is_cleaned_and_every_table_before_its_link` | host | L.iommu.56 |
+| `src/lib/kernel/paging/src/tests.rs::every_write_is_cleaned_and_every_table_before_its_link` | host | L.iommu.57 |
 | `src/lib/kernel/paging/src/tests.rs::write_combining_selects_pat_entry_one_and_reads_back` | host | L.x86_64.127 |
 | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host | L.sched.1 |
 | `src/lib/kernel/sched/src/tests.rs::yielding_alone_leaves_the_request_as_it_was` | host | L.sched.2 |
@@ -1822,8 +1832,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/init_file.rs::judge_k7_read` | gate | L.console.14 |
 | `tools/common/xtask/src/init_file.rs::test` | gate | L.x86_64.98, H.BOOT.6 |
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
+| `tools/common/xtask/src/qemu.rs::cleaning_problem` | gate | L.iommu.56 |
 | `tools/common/xtask/src/qemu.rs::entropy_problem` | gate | L.x86_64.113 |
-| `tools/common/xtask/src/qemu.rs::fault_problem` | gate | L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, L.iommu.46, H.DMA.2 |
+| `tools/common/xtask/src/qemu.rs::fault_problem` | gate | L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, L.iommu.46, L.iommu.58, H.DMA.2 |
 | `tools/common/xtask/src/qemu.rs::iommu_problem` | gate | L.iommu.2, L.iommu.46 |
 | `tools/common/xtask/src/qemu.rs::msi_problem` | gate | L.device.22 |
 | `tools/common/xtask/src/qemu.rs::reset_problem` | gate | L.x86_64.99, H.BOOT.7 |

@@ -14,16 +14,32 @@
 //! * **translation on**, after which a function with no context entry reaches
 //!   nothing at all.
 //!
+//! # A unit whose walk does not snoop
+//!
+//! A unit with `ECAP.C` clear reads its root, context and second-level
+//! entries from memory, past every processor's cache, and this kernel writes
+//! them through the cached direct map. So on such a unit every entry written
+//! is noted in an [`Unpublished`] record and cleaned to memory --
+//! `clflush`, then `mfence` ([`crate::arch::clean_for_walker`]) -- before
+//! the invalidation that publishes it, and a fresh table is cleaned whole
+//! before anything links it ([`table`]). Each invalidation, and the end of
+//! each change, checks the record is empty, and counts what it finds for
+//! stage 10's check (finding F-58). QEMU's unit reports `C` clear, though it
+//! walks coherently, so every boot test runs this path. A unit with `C` set
+//! is written as before, with nothing noted or cleaned.
+//!
 //! Queued invalidation, interrupt remapping and fault events are not used.
 //! QEMU honours the register interface while queued invalidation is off, and
 //! the kernel's MSI-X messages are compatibility format, which QEMU passes
 //! through untouched until interrupt remapping is enabled.
 
 use alloc::collections::{BTreeMap, BTreeSet};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_paging::coherence::Unpublished;
 use ferrix_paging::vtd::VtdSecondLevel;
-use ferrix_paging::{MapError, MapFlags};
+use ferrix_paging::{MapError, MapFlags, PhysAddr};
 use ferrix_pci::Address;
 use ferrix_sync::IrqSpinLock;
 
@@ -61,6 +77,10 @@ const SRTP: u32 = 1 << 30;
 /// not to turn it off: translation, queued invalidation, interrupt remapping
 /// and compatibility-format interrupts.
 const STANDING: u32 = 1 << 31 | 1 << 26 | 1 << 25 | 1 << 23;
+
+/// ECAP: page-walk coherency, the unit's walk snoops the processors' caches.
+/// Clear, every table write is cleaned to memory before it is published.
+const ECAP_C: u64 = 1 << 0;
 
 /// CAP: the unit needs its write buffer flushed after every change, which this
 /// driver does not do.
@@ -106,6 +126,47 @@ const AW_39: u64 = 1;
 /// How long a command may take before the unit is given up on.
 const PATIENCE_NANOS: u64 = 100_000_000;
 
+/// Why a publish was refused: a table write not cleaned to memory.
+const UNCLEANED_WHY: &str = "a table write was not cleaned to memory before it was published";
+
+/// Units opened whose walk does not snoop.
+static UNITS_CLEANING: AtomicU64 = AtomicU64::new(0);
+/// Entry writes cleaned to memory on those units.
+static ENTRIES_CLEANED: AtomicU64 = AtomicU64::new(0);
+/// Fresh tables cleaned whole on those units.
+static TABLES_CLEANED: AtomicU64 = AtomicU64::new(0);
+/// Publish points that checked their record: invalidations and the end of
+/// each change.
+static PUBLISHES_CHECKED: AtomicU64 = AtomicU64::new(0);
+/// Publish points that found a write not cleaned.
+static UNCLEANED: AtomicU64 = AtomicU64::new(0);
+
+/// What the units' cleaning did, for stage 10's check.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Cleaning {
+    /// Units whose walk does not snoop.
+    pub(crate) units: u64,
+    /// Entry writes cleaned to memory.
+    pub(crate) entries: u64,
+    /// Fresh tables cleaned whole.
+    pub(crate) tables: u64,
+    /// Publish points checked.
+    pub(crate) checked: u64,
+    /// Publish points that found a write not cleaned.
+    pub(crate) uncleaned: u64,
+}
+
+/// What every unit's cleaning has done since boot.
+pub(crate) fn cleaning() -> Cleaning {
+    Cleaning {
+        units: UNITS_CLEANING.load(Ordering::Relaxed),
+        entries: ENTRIES_CLEANED.load(Ordering::Relaxed),
+        tables: TABLES_CLEANED.load(Ordering::Relaxed),
+        checked: PUBLISHES_CHECKED.load(Ordering::Relaxed),
+        uncleaned: UNCLEANED.load(Ordering::Relaxed),
+    }
+}
+
 /// One remapping unit.
 #[derive(Debug)]
 pub(crate) struct Unit {
@@ -119,6 +180,9 @@ pub(crate) struct Unit {
     iotlb: u64,
     /// Whether the unit is in caching mode.
     caching: bool,
+    /// Whether the unit's walk snoops the caches (`ECAP.C`). If not, every
+    /// table write is cleaned to memory before it is published.
+    coherent: bool,
     /// How many domain identifiers the unit supports.
     identifiers: u32,
     /// The tables' bookkeeping.
@@ -189,15 +253,22 @@ impl Unit {
         if registers.read32(GSTS) & TE != 0 {
             return refuse("firmware left it translating");
         }
-        let Some(root) = table() else {
+        let coherent = ecap & ECAP_C != 0;
+        let mut writes = Unpublished::new(coherent);
+        let Some(root) = table(&mut writes) else {
             return refuse("no frame for its root table");
         };
+        settle(&writes);
+        if !coherent {
+            let _ = UNITS_CLEANING.fetch_add(1, Ordering::Relaxed);
+        }
         Ok(Unit {
             registers,
             root,
             faults: ((cap >> 24) & 0x3FF) * 16,
             iotlb: ((ecap >> 8) & 0x3FF) * 16 + 8,
             caching: cap & CAP_CM != 0,
+            coherent,
             identifiers: 1 << (4 + 2 * (cap & 0b111)),
             tables: IrqSpinLock::new(Tables::default()),
             taken: IrqSpinLock::new(None),
@@ -215,8 +286,11 @@ impl Unit {
     pub(crate) fn enable(&self) -> Result<(), &'static str> {
         write64(self.registers, RTADDR, self.root);
         self.command(SRTP, "it never took its root table")?;
-        self.invalidate_context(CCMD_GLOBAL)?;
-        self.invalidate_iotlb(IOTLB_GLOBAL)?;
+        // The root table was cleaned when `open` made it, and nothing has
+        // been written since.
+        let writes = self.writes();
+        self.invalidate_context(CCMD_GLOBAL, &writes)?;
+        self.invalidate_iotlb(IOTLB_GLOBAL, &writes)?;
         // A fault firmware left recorded would otherwise be read as ours.
         if self.registers.read32(self.faults + 12) & FRCD_F != 0 {
             self.registers.write32(self.faults + 12, FRCD_F);
@@ -301,8 +375,13 @@ impl Unit {
     /// Why it could not: no frames, no identifier left, the function already
     /// attached, or a unit that never finished invalidating.
     pub(crate) fn attach(&self, function: Address) -> Result<Attached, &'static str> {
-        let root = table().ok_or("no frame for a domain's tables")?;
-        let attached = match self.install(function, root) {
+        let mut writes = self.writes();
+        let root = table(&mut writes).ok_or("no frame for a domain's tables")?;
+        let installed = self.install(function, root, &mut writes);
+        // A failed install may still have linked a new context table.
+        self.publish(&mut writes);
+        settle(&writes);
+        let attached = match installed {
             Ok(attached) => attached,
             Err(why) => {
                 mm::deallocate_frames(root / PAGE_SIZE, 0);
@@ -310,12 +389,21 @@ impl Unit {
             }
         };
         // If this fails the entry stays, and so do the tables it points at.
-        self.invalidate_context(CCMD_DEVICE | u64::from(function.requester_id()) << 16)?;
+        self.invalidate_context(
+            CCMD_DEVICE | u64::from(function.requester_id()) << 16,
+            &writes,
+        )?;
         Ok(attached)
     }
 
-    /// Write `function`'s context entry to point at `root`.
-    fn install(&self, function: Address, root: u64) -> Result<Attached, &'static str> {
+    /// Write `function`'s context entry to point at `root`, noting each
+    /// write in `writes`.
+    fn install(
+        &self,
+        function: Address,
+        root: u64,
+        writes: &mut Unpublished,
+    ) -> Result<Attached, &'static str> {
         let mut tables = self.tables.lock();
         // Room for both records before anything is written, so a failure
         // leaves the unit as it was.
@@ -324,9 +412,9 @@ impl Unit {
         let context = match tables.contexts.get(&bus) {
             Some(&context) => context,
             None => {
-                let context = table().ok_or("no frame for a context table")?;
+                let context = table(writes).ok_or("no frame for a context table")?;
                 let _ = crate::fallible::insert_held(&held, &mut tables.contexts, bus, context);
-                write_entry(self.root + u64::from(bus) * 16, context | PRESENT);
+                write_entry(self.root + u64::from(bus) * 16, context | PRESENT, writes);
                 context
             }
         };
@@ -341,8 +429,8 @@ impl Unit {
         let _ = crate::fallible::insert_into_set_held(&held, &mut tables.identifiers, identifier);
         // The high half first, so the entry is never present with a stale
         // domain identifier or address width.
-        write_entry(entry + 8, AW_39 | u64::from(identifier) << 8);
-        write_entry(entry, root | PRESENT);
+        write_entry(entry + 8, AW_39 | u64::from(identifier) << 8, writes);
+        write_entry(entry, root | PRESENT, writes);
         Ok(Attached {
             function,
             identifier,
@@ -366,10 +454,18 @@ impl Unit {
             .copied()
             .ok_or("the function's bus has no context table")?;
         let entry = context + devfn(attached.function) * 16;
-        write_entry(entry, 0);
-        write_entry(entry + 8, 0);
-        self.invalidate_context(CCMD_DEVICE | u64::from(attached.function.requester_id()) << 16)?;
-        self.invalidate_iotlb(IOTLB_DOMAIN | u64::from(attached.identifier) << 32)?;
+        let mut writes = self.writes();
+        write_entry(entry, 0, &mut writes);
+        write_entry(entry + 8, 0, &mut writes);
+        // In memory before the invalidation, or a unit that does not snoop
+        // could still read the entry as present and reach the frames below.
+        self.publish(&mut writes);
+        settle(&writes);
+        self.invalidate_context(
+            CCMD_DEVICE | u64::from(attached.function.requester_id()) << 16,
+            &writes,
+        )?;
+        self.invalidate_iotlb(IOTLB_DOMAIN | u64::from(attached.identifier) << 32, &writes)?;
         let _ = self.tables.lock().identifiers.remove(&attached.identifier);
         mm::deallocate_frames(attached.root / PAGE_SIZE, 0);
         Ok(())
@@ -387,7 +483,14 @@ impl Unit {
         phys: u64,
         flags: MapFlags,
     ) -> Result<(), MapError> {
-        mm::map_io::<VtdSecondLevel>(attached.root, iova, phys, flags)
+        let mut writes = self.writes();
+        let mapped = mm::map_io::<VtdSecondLevel>(attached.root, iova, phys, flags, &mut writes);
+        // Published here: outside caching mode no invalidation follows a map,
+        // and the device may use the address once this returns.
+        self.publish(&mut writes);
+        settle(&writes);
+        let _ = require_published(&writes);
+        mapped
     }
 
     /// Take the page at `iova` out of `attached`'s tables. The unit may still
@@ -402,7 +505,13 @@ impl Unit {
         iova: u64,
         tables: &mut mm::UnlinkedTables,
     ) -> Result<(), MapError> {
-        mm::unmap_io::<VtdSecondLevel>(attached.root, iova, tables)
+        let mut writes = self.writes();
+        let unmapped = mm::unmap_io::<VtdSecondLevel>(attached.root, iova, tables, &mut writes);
+        // In memory before the caller's [`Unit::flush`] invalidates the IOTLB.
+        self.publish(&mut writes);
+        settle(&writes);
+        let _ = require_published(&writes);
+        unmapped
     }
 
     /// Where `attached`'s tables send an access to `iova`, walked as the unit
@@ -422,7 +531,27 @@ impl Unit {
         if after_map && !self.caching {
             return Ok(());
         }
-        self.invalidate_iotlb(IOTLB_DOMAIN | u64::from(attached.identifier) << 32)
+        // `map` and `unmap` cleaned what they wrote before they returned.
+        self.invalidate_iotlb(
+            IOTLB_DOMAIN | u64::from(attached.identifier) << 32,
+            &self.writes(),
+        )
+    }
+
+    /// A record for this unit's table writes: one that notes and cleans
+    /// them if the unit's walk does not snoop, and one that does nothing if
+    /// it does. Every change to the tables -- N0g's interrupt remapping table
+    /// and invalidation queue included -- writes through one, with
+    /// [`write_entry`] and [`table`], and [`Unit::publish`]es it before the
+    /// unit is told.
+    pub(crate) fn writes(&self) -> Unpublished {
+        Unpublished::new(self.coherent)
+    }
+
+    /// Clean every write `writes` noted to memory, and wait until it is
+    /// there.
+    pub(crate) fn publish(&self, writes: &mut Unpublished) {
+        writes.publish(&mut mm::WalkerClean);
     }
 
     /// Set `bit` in GCMD, keeping every standing enable, and wait for GSTS to
@@ -435,7 +564,10 @@ impl Unit {
     }
 
     /// Invalidate the context cache for `scope`, and wait until it has.
-    fn invalidate_context(&self, scope: u64) -> Result<(), &'static str> {
+    /// Refused if `writes`, the record of what the change wrote, holds a
+    /// write not cleaned to memory.
+    fn invalidate_context(&self, scope: u64, writes: &Unpublished) -> Result<(), &'static str> {
+        require_published(writes)?;
         let _held = self.commands.enter()?;
         write64(self.registers, CCMD, ICC | scope);
         self.wait(
@@ -444,8 +576,10 @@ impl Unit {
         )
     }
 
-    /// Invalidate the IOTLB for `scope`, and wait until it has.
-    fn invalidate_iotlb(&self, scope: u64) -> Result<(), &'static str> {
+    /// Invalidate the IOTLB for `scope`, and wait until it has. Refused as
+    /// [`Unit::invalidate_context`] is.
+    fn invalidate_iotlb(&self, scope: u64, writes: &Unpublished) -> Result<(), &'static str> {
+        require_published(writes)?;
         let _held = self.commands.enter()?;
         write64(self.registers, self.iotlb, IVT | scope);
         self.wait(
@@ -471,11 +605,41 @@ fn devfn(function: Address) -> u64 {
     u64::from(function.device()) << 3 | u64::from(function.function())
 }
 
-/// A zeroed frame for a table, by physical address.
-fn table() -> Option<u64> {
+/// A zeroed frame for a table the unit walks, by physical address: a root,
+/// context or second-level root table, and N0g's interrupt remapping table
+/// and invalidation queue.
+///
+/// On a unit that does not snoop, the frame is cleaned to memory whole
+/// before it is returned, so before anything can link it: stale memory
+/// under a fresh table reads as present entries.
+pub(crate) fn table(writes: &mut Unpublished) -> Option<u64> {
     let frame = mm::allocate_frames(0)?;
     mm::zero_frame(frame);
+    writes.fresh_table(PhysAddr(frame * PAGE_SIZE), &mut mm::WalkerClean);
     Some(frame * PAGE_SIZE)
+}
+
+/// Count what `writes` noted, once its change is done.
+fn settle(writes: &Unpublished) {
+    let (entries, tables) = writes.counts();
+    let _ = ENTRIES_CLEANED.fetch_add(entries, Ordering::Relaxed);
+    let _ = TABLES_CLEANED.fetch_add(tables, Ordering::Relaxed);
+}
+
+/// The check at a publish point: every write `writes` noted has been
+/// cleaned to memory. Counted either way, for stage 10's check.
+///
+/// # Errors
+///
+/// [`UNCLEANED_WHY`], for a write not cleaned.
+fn require_published(writes: &Unpublished) -> Result<(), &'static str> {
+    let _ = PUBLISHES_CHECKED.fetch_add(1, Ordering::Relaxed);
+    if writes.is_published() {
+        Ok(())
+    } else {
+        let _ = UNCLEANED.fetch_add(1, Ordering::Relaxed);
+        Err(UNCLEANED_WHY)
+    }
 }
 
 /// Read the table entry at physical address `at`.
@@ -488,11 +652,13 @@ fn read_entry(at: u64) -> u64 {
     unsafe { core::ptr::read_volatile(mm::direct_map(at) as *const u64) }
 }
 
-/// Write the table entry at physical address `at`.
-fn write_entry(at: u64, value: u64) {
+/// Write the table entry at physical address `at`, and note it in `writes`
+/// to be cleaned before it is published.
+pub(crate) fn write_entry(at: u64, value: u64, writes: &mut Unpublished) {
     // SAFETY: (DMA) as `read_entry`: a whole, aligned eight-byte entry in a table
     // only this unit's code writes.
     unsafe { core::ptr::write_volatile(mm::direct_map(at) as *mut u64, value) };
+    writes.wrote(PhysAddr(at), 8, &mut mm::WalkerClean);
 }
 
 /// Read a 64-bit register as two 32-bit halves, low first.

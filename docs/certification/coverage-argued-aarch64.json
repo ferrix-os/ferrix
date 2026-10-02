@@ -155,7 +155,7 @@
     },
     {
       "file": "arch/aarch64/mod.rs",
-      "lines": "1264",
+      "lines": "1267",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU resets."
@@ -750,56 +750,56 @@
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "239",
+      "lines": "263",
       "category": "defensive",
       "match": "Err(why)",
       "why": "A unit that cannot do what this driver asks -- no stage 2, no 16-bit VMIDs, a table too small -- or whose registers cannot be mapped: left alone, its functions untranslated. QEMU's SMMUv3 offers all of it."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "305",
+      "lines": "337",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of program is the return of a unit that never started its queues or never finished its first command: QEMU's SMMUv3 always does."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "339-340",
+      "lines": "371-372",
       "category": "defensive",
       "match": ".write32(EVENTQ_CONS, consumed | (producer & EVENTQ_OVERFLOW",
       "why": "The event queue overflowed: 128 events unread. The audit reads it at the end of boot, and a passing boot records one event, the probe's."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "382",
+      "lines": "414",
       "category": "absent-hardware",
       "match": "return Err(\"the stream is past the table this driver keeps\")",
       "why": "A stream past the table this driver keeps (2^STREAM_BITS entries): a requester ID that large, on a machine with that many PCI functions or a high segment mapping. virt's requester IDs fit."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "402-403",
+      "lines": "434-435",
       "category": "defensive",
       "match": "mm::deallocate_frames(root / PAGE_SIZE, 0);",
       "why": "No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "409",
+      "lines": "441",
       "category": "defensive",
       "match": "self.release(attached);",
       "why": "No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "449",
+      "lines": "481",
       "category": "credited-elsewhere",
       "match": "fn release(&self, attached: Attached) {",
       "why": "Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls."
     },
     {
       "file": "iommu/smmuv3.rs",
-      "lines": "452",
+      "lines": "484",
       "category": "credited-elsewhere",
       "match": "}",
       "why": "Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls."
@@ -974,84 +974,84 @@
     },
     {
       "file": "mm.rs",
-      "lines": "329",
+      "lines": "330",
       "category": "defensive",
       "match": "frames.insert_free(start / PAGE_SIZE, (hole - start) / PAGE_SIZE);",
       "why": "The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it."
     },
     {
       "file": "mm.rs",
-      "lines": "390",
+      "lines": "391",
       "category": "credited-elsewhere",
       "match": "count(Route::Allocated, blocks << ferrix_frame::MAX_ORDER);",
       "why": "Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates."
     },
     {
       "file": "mm.rs",
-      "lines": "511",
+      "lines": "512",
       "category": "failure-path",
       "match": "pub(crate) fn print_frame_delta(check: &str, leaked: i64) {",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "517",
+      "lines": "518",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "520",
+      "lines": "521",
       "category": "failure-path",
       "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "1162",
+      "lines": "1185",
       "category": "credited-elsewhere",
       "match": "if !pages.make_room(page_bound) || !tables.make_room(table_bound) {",
       "why": "The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`."
     },
     {
       "file": "mm.rs",
-      "lines": "1712-1714",
+      "lines": "1735-1737",
       "category": "failure-path",
       "match": "pub(crate) fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "1730-1733",
+      "lines": "1753-1756",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1743",
+      "lines": "1766",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1745",
+      "lines": "1768",
       "category": "failure-path",
       "match": "routes(Route::Released),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1747",
+      "lines": "1770",
       "category": "failure-path",
       "match": "routes(Route::HeapReturned),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1749",
+      "lines": "1772",
       "category": "failure-path",
       "match": "routes(Route::KernelTables),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."

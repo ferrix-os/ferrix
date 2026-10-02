@@ -55,6 +55,7 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use ferrix_bootinfo::{BootView, MemKind, MemRegion, PAGE_SIZE, direct_map_runs};
 use ferrix_frame::{Frame, Frames, PageEntry};
 use ferrix_heap::{Backing, Heap, Request};
+use ferrix_paging::coherence::{Clean, Unpublished, Walked};
 use ferrix_paging::{Encoding, MapFlags, Mapper, PhysAddr, PhysMem, Released, VirtAddr};
 use ferrix_sync::IrqSpinLock;
 
@@ -1046,16 +1047,22 @@ pub(crate) fn prune_in(root: u64, virt: u64, len: u64) {
 /// allocator through the direct map, and the caller owns the tree, so no lock
 /// is taken. One page at a time, so no block mapping is ever built, which a
 /// unit without superpages could not walk.
+///
+/// Every entry it writes and every table it makes is noted in `writes`, for a
+/// unit whose walk does not snoop the caches (finding F-58): a fresh table is
+/// cleaned to memory before it is linked, and the entries wait for the
+/// caller's [`Unpublished::publish`].
 pub(crate) fn map_io<E: Encoding>(
     root: u64,
     iova: u64,
     phys: u64,
     flags: MapFlags,
+    writes: &mut Unpublished,
 ) -> Result<(), ferrix_paging::MapError> {
     let mut mapper: Mapper<E> = Mapper::new(PhysAddr(root));
     mapper.pages_only();
     mapper.map_range(
-        &mut KernelPhysMem,
+        &mut Walked::new(&mut KernelPhysMem, writes, WalkerClean),
         VirtAddr(iova),
         PhysAddr(phys),
         PAGE_SIZE,
@@ -1071,19 +1078,35 @@ pub(crate) fn map_io<E: Encoding>(
 /// well as the leaf (VT-d's paging-structure caches, the SMMU's walk cache),
 /// and would walk a freed table as the processor would (finding F-36). The
 /// caller releases `tables` after the unit's flush has completed.
+///
+/// Every entry it clears is noted in `writes`, as [`map_io`]'s are.
 pub(crate) fn unmap_io<E: Encoding>(
     root: u64,
     iova: u64,
     tables: &mut UnlinkedTables,
+    writes: &mut Unpublished,
 ) -> Result<(), ferrix_paging::MapError> {
     let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
-    let _ = mapper.unmap_range(&mut KernelPhysMem, VirtAddr(iova), PAGE_SIZE, |freed| {
+    let mut kernel = KernelPhysMem;
+    let mut memory = Walked::new(&mut kernel, writes, WalkerClean);
+    let _ = mapper.unmap_range(&mut memory, VirtAddr(iova), PAGE_SIZE, |freed| {
         if let Released::Table { phys } = freed {
             // NOALLOC: the list is linked through the tables themselves.
             tables.push(phys);
         }
     })?;
     Ok(())
+}
+
+/// Cleaning for an IOMMU whose table walk does not snoop the caches: the
+/// range, through the direct map, by [`crate::arch::clean_for_walker`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WalkerClean;
+
+impl Clean for WalkerClean {
+    fn clean(&mut self, at: PhysAddr, len: u64) {
+        crate::arch::clean_for_walker(physmap(at.0), len);
+    }
 }
 
 /// Where I/O address `iova` leads in the IOMMU tree rooted at `root`, walked

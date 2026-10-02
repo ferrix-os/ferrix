@@ -599,5 +599,62 @@ package FerrixIommuRequirements {
             attribute :>> unit = ("iommu::place_dmar", "iommu::Scope::places",
                 "iommu::vtd_unit_for", "iommu::learn_bridge", "iommu::bring_up_vtd");
         }
+        requirement <'L.iommu.56'> aWriteIsInMemoryBeforeItIsPublished : ItemLowLevel {
+            attribute :>> statement = "On a VT-d unit whose ECAP.C is clear, every
+                root, context and second-level entry the kernel writes shall be
+                cleaned from the processor's caches to memory (clflush of each line
+                written, then mfence) before the context-cache or IOTLB invalidation
+                that publishes it, and before a map returns; an invalidation whose
+                change left a write not cleaned shall be refused and counted. On a
+                unit whose ECAP.C is set, nothing shall be cleaned.";
+            attribute :>> criterion = "On x86-64 under KVM and TCG, where QEMU's
+                unit reports ECAP.C clear, the iommu line counts the entry writes
+                cleaned and 0 publish points with a write left uncleaned, and
+                test-boot requires the line; with the clean before an unmap's
+                return dropped, the boot panics with 4 of 16 publish points finding
+                a write not cleaned, and with the clean before an attach's
+                invalidation dropped, both attaches are refused and the boot panics
+                with 2 of 4. Host tests: every entry the mapper writes, on a map and
+                on an unmap, is cleaned after it is written; a walker that snoops
+                cleans nothing; a write noted and not cleaned reads as unpublished,
+                and a full record cleans early.";
+            attribute :>> parent = ("H.DMA.2", "H.DMA.3");
+            attribute :>> unit = ("iommu::vtd::Unit::open", "iommu::vtd::Unit::writes",
+                "iommu::vtd::Unit::publish", "iommu::vtd::Unit::map",
+                "iommu::vtd::Unit::unmap", "iommu::vtd::Unit::detach",
+                "iommu::vtd::Unit::invalidate_context", "iommu::vtd::Unit::invalidate_iotlb",
+                "iommu::vtd::write_entry", "iommu::vtd::require_published",
+                "iommu::vtd::settle", "iommu::vtd::cleaning", "mm::WalkerClean::clean",
+                "arch::x86_64::cpu::clean_for_walker");
+        }
+        requirement <'L.iommu.57'> aFreshTableIsInMemoryBeforeItIsLinked : ItemLowLevel {
+            attribute :>> statement = "On a VT-d unit whose ECAP.C is clear, every
+                table frame the kernel zeroes for the unit to walk -- the root
+                table, a context table, a domain's second-level root and each
+                second-level table the mapper adds -- shall be cleaned to memory
+                whole before any entry that links it is written.";
+            attribute :>> criterion = "On x86-64 under KVM and TCG the iommu line
+                counts the fresh tables cleaned, more than 0. Host tests: each
+                table the mapper adds below the root is cleaned whole before the
+                entry that links it is written.";
+            attribute :>> parent = ("H.DMA.2", "H.DMA.3");
+            attribute :>> unit = ("iommu::vtd::table", "iommu::vtd::Unit::attach",
+                "iommu::vtd::Unit::install", "mm::map_io");
+        }
+        requirement <'L.iommu.58'> anSmmuWalksCoherently : ItemLowLevel {
+            attribute :>> statement = "An SMMUv3 whose IDR0.COHACC is clear shall be
+                left alone, with the reason printed. One that is brought up shall
+                have CR1 set, while its queues and translation are off, to
+                write-back cacheable, inner shareable accesses to its stream table
+                and queues, read back as written, and each stream table entry's
+                stage-2 walk shall be write-back cacheable and inner shareable.";
+            attribute :>> criterion = "On AArch64 the SMMUv3 is brought up and the
+                out-of-domain write is faulted through it; with COHACC's test
+                inverted, the unit is left alone as not snooping and test-boot fails
+                on no write outside a translated domain faulted.";
+            attribute :>> parent = ("H.DMA.2", "H.DMA.3");
+            attribute :>> unit = ("iommu::smmuv3::Unit::open",
+                "iommu::smmuv3::Unit::program", "iommu::smmuv3::Unit::attach");
+        }
     }
 }

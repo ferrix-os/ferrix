@@ -4,7 +4,7 @@ The audit register for the item defined in [ITEM.md](ITEM.md). One entry per
 finding, each naming what was measured, which objective it bears on, and what
 would close it.
 
-17 findings are open and 42 are closed, of 59. F-57, a device a ring-3 driver controls able to raise any interrupt vector on x86-64, because no interrupt remapping is programmed, was found by the certification consultant's review of `nvidia-n0` on 2026-10-02 and is pre-existing; NVIDIA's N0g is to close it before N1 hands a GPU and its firmware to a driver. F-56, the btrfs crates joining the item on 2026-10-02 without its evidence -- no structural coverage, requirements traced in part, 166 allocations still fatal and 19 name matches awaiting their arguments, no overflow lint, and two unsafe infrastructure crates in no ring -- was opened by the certification consultant the same day; its allocation gap closed the same day too, when the write path's allocations were made fallible and the reader's name matches argued. F-55, a system call copying from mapped device memory through the direct map, which stopped the machine when the window lay past the direct map, was found by os-fd on the Venus desktop on 2026-09-30 and closed on 2026-10-01 when the user-copy paths began refusing device memory with `EFAULT` through a checked alias; the render node may be opened to users as far as it is concerned. F-54, a channel read answering that its peer had closed while the peer's last message was still queued, was found by FX-1151's investigation of the net ring's check under WHPX and closed on 2026-09-29 by reading the peer's flag before the queue; the certification consultant recorded it on 2026-09-30, after the fix had landed without review. F-53, `docs/INIT.md` promising that init remounts `/` and `/data` read-only at shutdown when the kernel refused every `MS_REMOUNT`, was found by the certification consultant's review of the namespaces design and closed on 2026-09-28 with the per-mount flags of `docs/NAMESPACES.md` N1. F-48, an ARMv7-A signal handler installed without `SA_RESTORER` killed when it returned, because its return sequence was on a stack no page of which may run, was found by the W-8 reading of arch/armv7a and closed on 2026-09-27. F-50, the GICv2 distributor's read-modify-writes unlocked, so that two cores enabling neighbouring lines could leave a shared interrupt routed nowhere, was found by the W-8 reading of arch/arm_common and closed on 2026-09-27. F-47, the Security Target claiming seventeen SFRs without saying whether their dependencies were met, was found and closed on 2026-09-27 with a dependency table that justifies the three unmet ones; F-52, the conformance claim naming no CC version, was found the same day and waits on the Security Target's owner. F-21b, the TOE claiming no audit, closed on 2026-09-27 when the audit record of the TSF's own decisions was built and claimed (FAU under O.AUDIT) and authentication was the environment's (OE.AUTH). F-44, the barrier of the virtqueue the item drives left empty, so that an Arm core could let the device see an index before what it publishes, was found and closed on 2026-09-27, on an argument no emulator can test. F-45, the virtqueue indices the device shares read and written a byte at a time, was found by the stage 10 seam investigation and closed on 2026-09-27. F-43, O.WXN and ASR-2 claiming W^X for every mapping when a program may map its own pages writable and executable, was found on 2026-09-27 and waits on the customer's choice between enforcing it and narrowing the claim. F-42, a channel write refused for memory closing the handles it carried, was found by the F-10 coverage work and closed on 2026-09-27. F-13 was measured on 2026-09-27 and stays open: 37.5%, 32.6% and 28.7% of the item's object-code decisions, guards left out, took both ways on x86-64, AArch64 and ARMv7-A, and 50.2%, 48.6% and 48.8% counted by source line. F-26 closed on 2026-09-27 when every unsafe site in the item was traced to one of fourteen obligations, each tied to the requirement or hazard it serves, and the gate began refusing an untraced one. F-41, a page `mprotect` made writable after a `fork` writing into the other process's copy, was found and closed on 2026-09-27. F-10 was re-measured on 2026-09-27 over the checks written for it module by module: 89.5% of the certified item's statements on x86-64 (90.1% at its re-measure on e5f3110f, with the F-10 slices of native.rs and object/ in and 97 still needing a test, new code since measured for the first time), 90.2% on AArch64 and 84.8% on ARMv7-A, with 77, 146 and 130 still needing a test and every other unreached statement argued or put down to absent hardware. F-38, F-39 and F-40 were found by other work on 2026-09-26 and recorded by the certification review that work now goes through, and all three closed the same day with their fixes: F-39, a native process any user made running as root; F-38, a device model writing a dead driver's frames after they were given back; and F-40, a delegated job lifting its own limits, closed by a job right of its own for setting limits. F-37 closed when every kind of kernel heap a program can make and keep through the Linux personality was charged to its job against its memory limit -- thirteen kinds, each refused at the limit by a boot check while a sibling goes on -- and five leaks and missing checks the same audit found were fixed (2026-09-26); System V semaphore sets, undo records and blocked `semop` waiters, built on 2026-09-28, are a fourteenth kind, charged the same way, and System V shared memory segments, built on 2026-10-02, a fifteenth. F-35 closed when the job quotas were built -- a job's tasks, its user memory, its native objects and its share of a processor, each refused at its limit by a boot check while a sibling job goes on -- and `FRU_RSA.1` was refined to exactly those; F-37 was opened the same day for what they leave out, the kernel heap a job drives through the Linux personality (2026-09-26). F-36, a user page table freed before the shootdown that another processor's walk caches still needed, was found and closed the same day, and F-23's gate was found blind to a load file the item's own `process_create` runs, and was made to read it (2026-09-26). F-35 was opened when the vulnerability analysis was read against the code: the job quotas the Security Target claims for T.EXHAUST are not built (2026-09-26). F-23 closed when every allocation in the item was made to report failure, with a gate that counts the ones that do not (2026-09-26). F-10 is re-measured at 74.7% on x86-64, 73.7% on AArch64 and 70.9% on ARMv7-A, the 81.9% published before having been wrong, and then at 82.2% on x86-64 once two more defects of the tool were fixed and x86-64's architecture code, `trap` and `smp` were covered or argued statement by statement, F-07, F-09 and F-33 closed, which leaves the boundary with no upward reference, F-31 closed when its layout half, KASLR, was built after its side-channel half, and F-34, a writable alias of the kernel's text in the direct map, was found and closed the same day (2026-09-26). No finding here is closed by argument:
+17 findings are open and 43 are closed, of 60. F-58, VT-d's table writes reaching a unit whose walk does not snoop only through the processor's caches, so that a cleared entry could still be walked after its invalidation, was found by the certification consultant's review of the NVIDIA N0g design on 2026-10-02 and is pre-existing; it closed the same day, when every entry and every fresh table began to be cleaned to memory before it is published on such a unit, and an SMMUv3 without coherent walks began to be refused. F-57, a device a ring-3 driver controls able to raise any interrupt vector on x86-64, because no interrupt remapping is programmed, was found by the certification consultant's review of `nvidia-n0` on 2026-10-02 and is pre-existing; NVIDIA's N0g is to close it before N1 hands a GPU and its firmware to a driver. F-56, the btrfs crates joining the item on 2026-10-02 without its evidence -- no structural coverage, requirements traced in part, 166 allocations still fatal and 19 name matches awaiting their arguments, no overflow lint, and two unsafe infrastructure crates in no ring -- was opened by the certification consultant the same day; its allocation gap closed the same day too, when the write path's allocations were made fallible and the reader's name matches argued. F-55, a system call copying from mapped device memory through the direct map, which stopped the machine when the window lay past the direct map, was found by os-fd on the Venus desktop on 2026-09-30 and closed on 2026-10-01 when the user-copy paths began refusing device memory with `EFAULT` through a checked alias; the render node may be opened to users as far as it is concerned. F-54, a channel read answering that its peer had closed while the peer's last message was still queued, was found by FX-1151's investigation of the net ring's check under WHPX and closed on 2026-09-29 by reading the peer's flag before the queue; the certification consultant recorded it on 2026-09-30, after the fix had landed without review. F-53, `docs/INIT.md` promising that init remounts `/` and `/data` read-only at shutdown when the kernel refused every `MS_REMOUNT`, was found by the certification consultant's review of the namespaces design and closed on 2026-09-28 with the per-mount flags of `docs/NAMESPACES.md` N1. F-48, an ARMv7-A signal handler installed without `SA_RESTORER` killed when it returned, because its return sequence was on a stack no page of which may run, was found by the W-8 reading of arch/armv7a and closed on 2026-09-27. F-50, the GICv2 distributor's read-modify-writes unlocked, so that two cores enabling neighbouring lines could leave a shared interrupt routed nowhere, was found by the W-8 reading of arch/arm_common and closed on 2026-09-27. F-47, the Security Target claiming seventeen SFRs without saying whether their dependencies were met, was found and closed on 2026-09-27 with a dependency table that justifies the three unmet ones; F-52, the conformance claim naming no CC version, was found the same day and waits on the Security Target's owner. F-21b, the TOE claiming no audit, closed on 2026-09-27 when the audit record of the TSF's own decisions was built and claimed (FAU under O.AUDIT) and authentication was the environment's (OE.AUTH). F-44, the barrier of the virtqueue the item drives left empty, so that an Arm core could let the device see an index before what it publishes, was found and closed on 2026-09-27, on an argument no emulator can test. F-45, the virtqueue indices the device shares read and written a byte at a time, was found by the stage 10 seam investigation and closed on 2026-09-27. F-43, O.WXN and ASR-2 claiming W^X for every mapping when a program may map its own pages writable and executable, was found on 2026-09-27 and waits on the customer's choice between enforcing it and narrowing the claim. F-42, a channel write refused for memory closing the handles it carried, was found by the F-10 coverage work and closed on 2026-09-27. F-13 was measured on 2026-09-27 and stays open: 37.5%, 32.6% and 28.7% of the item's object-code decisions, guards left out, took both ways on x86-64, AArch64 and ARMv7-A, and 50.2%, 48.6% and 48.8% counted by source line. F-26 closed on 2026-09-27 when every unsafe site in the item was traced to one of fourteen obligations, each tied to the requirement or hazard it serves, and the gate began refusing an untraced one. F-41, a page `mprotect` made writable after a `fork` writing into the other process's copy, was found and closed on 2026-09-27. F-10 was re-measured on 2026-09-27 over the checks written for it module by module: 89.5% of the certified item's statements on x86-64 (90.1% at its re-measure on e5f3110f, with the F-10 slices of native.rs and object/ in and 97 still needing a test, new code since measured for the first time), 90.2% on AArch64 and 84.8% on ARMv7-A, with 77, 146 and 130 still needing a test and every other unreached statement argued or put down to absent hardware. F-38, F-39 and F-40 were found by other work on 2026-09-26 and recorded by the certification review that work now goes through, and all three closed the same day with their fixes: F-39, a native process any user made running as root; F-38, a device model writing a dead driver's frames after they were given back; and F-40, a delegated job lifting its own limits, closed by a job right of its own for setting limits. F-37 closed when every kind of kernel heap a program can make and keep through the Linux personality was charged to its job against its memory limit -- thirteen kinds, each refused at the limit by a boot check while a sibling goes on -- and five leaks and missing checks the same audit found were fixed (2026-09-26); System V semaphore sets, undo records and blocked `semop` waiters, built on 2026-09-28, are a fourteenth kind, charged the same way, and System V shared memory segments, built on 2026-10-02, a fifteenth. F-35 closed when the job quotas were built -- a job's tasks, its user memory, its native objects and its share of a processor, each refused at its limit by a boot check while a sibling job goes on -- and `FRU_RSA.1` was refined to exactly those; F-37 was opened the same day for what they leave out, the kernel heap a job drives through the Linux personality (2026-09-26). F-36, a user page table freed before the shootdown that another processor's walk caches still needed, was found and closed the same day, and F-23's gate was found blind to a load file the item's own `process_create` runs, and was made to read it (2026-09-26). F-35 was opened when the vulnerability analysis was read against the code: the job quotas the Security Target claims for T.EXHAUST are not built (2026-09-26). F-23 closed when every allocation in the item was made to report failure, with a gate that counts the ones that do not (2026-09-26). F-10 is re-measured at 74.7% on x86-64, 73.7% on AArch64 and 70.9% on ARMv7-A, the 81.9% published before having been wrong, and then at 82.2% on x86-64 once two more defects of the tool were fixed and x86-64's architecture code, `trap` and `smp` were covered or argued statement by statement, F-07, F-09 and F-33 closed, which leaves the boundary with no upward reference, F-31 closed when its layout half, KASLR, was built after its side-channel half, and F-34, a writable alias of the kernel's text in the direct map, was found and closed the same day (2026-09-26). No finding here is closed by argument:
 a finding closes when the thing it describes stops being true and something in
 the build says so.
 
@@ -17,20 +17,8 @@ rebased and reviewed. **F-49**, ARMv7-A's
 `psci_system` not declaring `r12` clobbered where `psci_call` does; not yet
 fixed. **F-51**, the manifest's `checks.rs` test-file pattern counting the
 self-check switch (`src/kernel/src/checks.rs`, product code) as verification;
-closes with W-8's boot slice 21b. **F-58** (reserved 2026-10-02, Moderate,
-pre-existing; confirmed by the certification consultant at the review of
-the NVIDIA N0g design): VT-d table-walk coherency. `vtd.rs` never reads
-`ECAP.C`, and nothing in the kernel issues `clflush`: root and context
-entries (`write_entry`), fresh tables (`table()`'s `zero_frame`) and
-second-level entries (`mm::map_io`, `mm::unmap_io`) are written through
-the write-back direct map. On a unit without page-walk coherency, a
-cleared entry may still be read as present after its invalidation (DMA to
-a freed frame, against H.DMA.1-3), and a fresh table may be read as stale
-present entries. QEMU reports `C`=0 but walks coherently, so no gate shows
-it. The SMMUv3 side (`COHACC` not checked, `CR1` never written) is to be
-confirmed in the fix's review. It is fixed on its own, before N0g
-(`docs/NVIDIA.md` §12.3). Until they are filed the tally above does not
-count them.
+closes with W-8's boot slice 21b. Until they are filed the tally above
+does not count them. (F-58, reserved here on 2026-10-02, is filed below.)
 
 **Severity.** *Blocking* — a rating cannot be claimed while it stands.
 *Major* — a named objective is unmet. *Moderate* — an objective is partially
@@ -2098,6 +2086,72 @@ the page in before refusing it" (FX-0901); `direct_map_ram` answering for
 everything stopped it with "a page past all RAM has a checked direct-map
 alias" (FX-0203); and `space.rs` unfixed reproduced F-55's own fault through
 `copy_from_user_through` from `sys_writev_at_width`.
+
+### F-58 — a VT-d unit whose walk does not snoop could read stale table entries
+**Found 2026-10-02, closed 2026-10-02** (found by the certification
+consultant at the review of the NVIDIA N0g design, `nvidia-n0-designs`
+adb49fdfe, ruling 1 and condition G8; pre-existing, not introduced by any
+NVIDIA branch; closed by branch `f58-coherency`).
+
+*Was:* **Moderate.** `vtd.rs` never read `ECAP.C`, the unit's page-walk
+coherency, and nothing in the kernel issued `clflush`. Root and context
+entries (`write_entry`), fresh tables (`table()`'s `zero_frame`) and
+second-level entries and tables (`mm::map_io`, `mm::unmap_io`) were all
+written through the write-back direct map. A unit with `C` clear reads its
+tables from memory, past the processors' caches, so on one a cleared entry
+could still be read as present after its invalidation -- a device reaching
+a frame already given back, against H.DMA.2 and H.DMA.3 -- and a fresh
+table over stale memory could be read as present entries. QEMU's unit
+reports `C` clear but walks coherently, so no gate could show it. The
+same class was confirmed in `smmuv3.rs`: it never checked `IDR0.COHACC`,
+never wrote `CR1`, and gave each stream's stage-2 walk non-cacheable,
+non-shareable attributes (`S2IR0`, `S2OR0` and `S2SH0` zero), while its
+stream table, queues and tables are written through the cached direct
+map.
+
+*Now:* a VT-d unit with `C` clear has every write to a table it walks
+noted in a record (`ferrix_paging::coherence::Unpublished`), and cleaned
+to memory -- `clflush` of each line, then `mfence`
+(`arch::clean_for_walker`) -- before the invalidation that publishes it,
+and before a map returns, since outside caching mode no invalidation
+follows a map. The mapper's own writes go through the record
+(`ferrix_paging::coherence::Walked`), and a fresh table frame is cleaned
+whole before anything links it (`vtd::table`, which N0g's interrupt
+remapping table and invalidation queue use too). Each invalidation, and
+the end of each change, checks the record is empty: an invalidation that
+finds a write not cleaned is refused, and every such finding is counted. A
+unit with `C` set is written as before, with nothing noted or cleaned.
+The register-based invalidations are unchanged; N0g moves the publish
+point to its queue. An `SMMUv3` without `COHACC` is now left alone, with
+the reason printed, rather than cleaned for: no machine the kernel runs on
+has one. One that is brought up gets `CR1` set to write-back cacheable,
+inner shareable accesses to its stream table and queues, read back, and a
+write-back, inner shareable stage-2 walk in each stream table entry, as
+Linux's `arm_smmu_device_reset` and its stage-2 entries have them.
+Requirements L.iommu.56, L.iommu.57 and L.iommu.58.
+
+*Checked by the build:* stage 10's IOMMU check prints what the VT-d unit
+cleaned -- "26 entry writes and 10 fresh tables cleaned to memory on 1
+VT-d units that do not snoop, 16 publish points found none left
+uncleaned" on x86-64 under KVM -- and fails the boot (FX-1003) on any
+publish point that found a write not cleaned, or on a unit that does not
+snoop and cleaned nothing; test-boot requires the line on x86-64, where
+QEMU's unit reports `C` clear. Host tests in `ferrix-paging` show every
+entry the mapper writes, on a map and an unmap, cleaned after it is
+written, each table it adds cleaned whole before its link is written, and
+nothing cleaned for a walker that snoops. On AArch64 the `SMMUv3` comes up
+with `COHACC` checked and `CR1` read back, and faults the out-of-domain
+write. Negative controls, run and not committed: the clean before an
+unmap's return dropped stopped the x86-64 boot with "stage 10 self-check
+failed: 4 of 16 VT-d publish points found a table write not cleaned to
+memory"; the clean before an attach's invalidation dropped had both
+attaches refused ("gets no translated domain: a table write was not
+cleaned to memory before it was published") and stopped it with "2 of 4";
+and `COHACC`'s test inverted left AArch64's unit alone ("its table and
+queue accesses do not snoop the caches"), and test-boot failed on no write
+outside a translated domain faulted. No machine at hand has a unit that
+does not snoop, so the cleaning itself is shown by its accounting and the
+SDM, not by a stale read prevented.
 
 ## F. Organisational
 

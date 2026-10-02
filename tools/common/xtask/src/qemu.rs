@@ -144,6 +144,12 @@ pub(crate) fn test_boot_lines(
                     watched.log.display()
                 )));
             }
+            if let Some(problem) = cleaning_problem(arch, &watched.lines) {
+                return Err(Error::new(format!(
+                    "{arch}: {problem}.\n  Serial output is in {}",
+                    watched.log.display()
+                )));
+            }
             if let Some(problem) = iommu_problem(&watched.lines) {
                 return Err(Error::new(format!(
                     "{arch}: {problem}.\n  Serial output is in {}",
@@ -294,6 +300,29 @@ fn msi_problem(arch: Arch, lines: &[String]) -> Option<String> {
         ));
     }
     None
+}
+
+/// What stage 10's IOMMU check prints when a VT-d unit whose walk does not
+/// snoop had its table writes cleaned to memory before each was published.
+const CLEANED: &str = "fresh tables cleaned to memory on ";
+
+/// Why an x86-64 boot did not show its VT-d table writes cleaned, if it did
+/// not.
+///
+/// QEMU's `intel-iommu` reports `ECAP.C` clear, so on every x86-64 machine
+/// this tool boots the kernel takes the cleaning path (finding F-58), and
+/// stage 10's check must have printed what it cleaned; a boot without the
+/// line ran the path unchecked, or not at all.
+///
+/// Verifies: L.iommu.56
+fn cleaning_problem(arch: Arch, lines: &[String]) -> Option<String> {
+    if arch != Arch::X86_64 {
+        return None;
+    }
+    if lines.iter().any(|line| line.contains(CLEANED)) {
+        return None;
+    }
+    Some("the kernel never said it cleaned its VT-d table writes to memory".to_owned())
 }
 
 /// What stage 10's IOMMU discovery prints after the number of PCI functions
@@ -473,7 +502,7 @@ fn devmgr_problem(lines: &[String]) -> Option<String> {
 /// ARMv7-A's case, and says so in the same degraded-trusted-mode line. The
 /// coverage suite boots it for the Pixel 7's path, which has no ACPI.
 ///
-/// Verifies: L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, L.iommu.46, H.DMA.2
+/// Verifies: L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, L.iommu.46, L.iommu.58, H.DMA.2
 fn fault_problem(arch: Arch, lines: &[String]) -> Option<String> {
     if arch == Arch::Armv7a {
         return None;
@@ -2856,8 +2885,9 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 #[cfg(test)]
 mod tests {
     use super::{
-        Arch, SUCCESS_MARKER, UNCHECKED_MARKER, devmgr_problem, entropy_problem, fault_problem,
-        iommu_problem, msi_problem, namespace_problem, parse_qemu_version, xstate_problem,
+        Arch, SUCCESS_MARKER, UNCHECKED_MARKER, cleaning_problem, devmgr_problem, entropy_problem,
+        fault_problem, iommu_problem, msi_problem, namespace_problem, parse_qemu_version,
+        xstate_problem,
     };
 
     /// A secret goes in any case and every time, and nothing else does.
@@ -2984,6 +3014,21 @@ mod tests {
         assert!(
             entropy_problem(&old).is_some(),
             "a kernel that does not say"
+        );
+    }
+
+    #[test]
+    fn an_x86_64_boot_without_its_table_writes_cleaned_fails() {
+        let cleaned = lines(&[
+            "  iommu    26 entry writes and 10 fresh tables cleaned to memory on 1 VT-d units that do not snoop, 16 publish points found none left uncleaned",
+        ]);
+        assert_eq!(cleaning_problem(Arch::X86_64, &cleaned), None);
+        let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
+        assert!(cleaning_problem(Arch::X86_64, &silent).is_some());
+        assert_eq!(
+            cleaning_problem(Arch::AArch64, &silent),
+            None,
+            "an SMMU snoops"
         );
     }
 

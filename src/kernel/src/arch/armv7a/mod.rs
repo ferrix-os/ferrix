@@ -25,6 +25,9 @@ pub(crate) use cpu::clean_invalidate_to_poc as flush_for_device;
 /// Clean a buffer out of the data cache for a device that reads memory past
 /// it (see [`crate::arch::clean_for_device`]).
 pub(crate) use cpu::clean_to_poc as clean_for_device;
+/// The same for an IOMMU's table walk that does not snoop the caches (see
+/// [`crate::arch::clean_for_walker`]): to the point of coherency, and waited for.
+pub(crate) use cpu::clean_to_poc as clean_for_walker;
 pub(crate) use cpu::sync_instructions;
 mod trap;
 

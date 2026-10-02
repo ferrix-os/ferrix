@@ -4,6 +4,7 @@ mod apic;
 mod clock;
 pub(crate) mod console;
 mod cpu;
+pub(crate) use cpu::clean_for_walker;
 pub(crate) use cpu::dma_barrier;
 mod gdt;
 pub(crate) mod mmio;

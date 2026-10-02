@@ -98,6 +98,14 @@ pub(crate) fn check_iommu() {
         domains.refusals,
         domains.waits,
     );
+    match check_cleaning(super::vtd::cleaning()) {
+        Ok(Some(line)) => println!("  iommu    {line}"),
+        Ok(None) => {}
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
     match object::pin::check::check_quarantine(device::devices()) {
         Ok(true) => println!(
             "  iommu    a dead driver's pin was quarantined, a pin past the quarantine's cap \
@@ -109,6 +117,53 @@ pub(crate) fn check_iommu() {
             "stage 10 self-check failed: {problem}"
         ),
     }
+}
+
+/// Every table write on a VT-d unit whose walk does not snoop was cleaned to
+/// memory before it was published (finding F-58): no publish point --
+/// invalidation, or the end of a change -- found a write noted and not
+/// cleaned, and the boot's domains made some to clean. QEMU's unit reports
+/// `ECAP.C` clear, so this runs on every x86-64 boot test.
+///
+/// `None` on a machine with no such unit.
+///
+/// # Errors
+///
+/// A publish point that found a write not cleaned, or a unit that cleaned
+/// nothing over a boot that attached and pinned through it.
+///
+/// Verifies: L.iommu.56
+/// Verifies: L.iommu.57
+fn check_cleaning(
+    cleaning: super::vtd::Cleaning,
+) -> Result<Option<alloc::string::String>, alloc::string::String> {
+    if cleaning.uncleaned != 0 {
+        return Err(alloc::format!(
+            "{} of {} VT-d publish points found a table write not cleaned to memory",
+            cleaning.uncleaned,
+            cleaning.checked
+        ));
+    }
+    if cleaning.units == 0 {
+        return Ok(None);
+    }
+    if cleaning.entries == 0 || cleaning.tables == 0 || cleaning.checked == 0 {
+        return Err(alloc::format!(
+            "a VT-d unit that does not snoop cleaned {} entries and {} tables over {} publish \
+             points",
+            cleaning.entries,
+            cleaning.tables,
+            cleaning.checked
+        ));
+    }
+    Ok(Some(alloc::format!(
+        "{} entry writes and {} fresh tables cleaned to memory on {} VT-d units that do not \
+         snoop, {} publish points found none left uncleaned",
+        cleaning.entries,
+        cleaning.tables,
+        cleaning.units,
+        cleaning.checked
+    )))
 }
 
 /// What the domain check found.
