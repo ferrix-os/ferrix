@@ -54,6 +54,13 @@
       "purpose": "NVIDIA N0g (docs/NVIDIA.md §12.3, the consultant's OK IF C1): queued invalidation, failed invalidations, coherency flushes, interrupt remapping on VT-d, remappable MSI and I/O APIC messages, x2APIC left on, interrupt faults, the isolated-interrupts mark; a device raises only the vectors minted for it"
     },
     {
+      "ids": ["L.iommu.56-58"],
+      "owner": "f58",
+      "branch": "f58-coherency",
+      "date": "2026-10-02",
+      "purpose": "F-58: page-walk coherency (the consultant's ruling 1 and G8 of 2026-10-02): VT-d entries and fresh tables cleaned to memory before they are published on ECAP.C=0, and an SMMUv3 refused without COHACC with its table and queue walks made cacheable"
+    },
+    {
       "ids": ["L.user.111-124", "L.object.121-125", "H.MEM.20-21"],
       "owner": "nvidia",
       "branch": "nvidia-c3k",
