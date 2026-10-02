@@ -306,6 +306,8 @@ pub(super) struct Device {
     pub(super) complete_backwards: bool,
     /// The MSI-X vector configuration changes are raised on.
     pub(super) config_vector: u16,
+    /// How many times the driver read the device status.
+    pub(super) status_reads: core::cell::Cell<u32>,
 }
 
 impl Device {
@@ -330,6 +332,7 @@ impl Device {
             cursor_log: Vec::new(),
             cursor_image: Vec::new(),
             misbehave: Misbehave::default(),
+            status_reads: core::cell::Cell::new(0),
             protocol_errors: Vec::new(),
             streams: Vec::new(),
             complete_backwards: false,
@@ -371,6 +374,7 @@ impl Device {
             },
             NUM_QUEUES => 2,
             DEVICE_STATUS => {
+                self.status_reads.set(self.status_reads.get() + 1);
                 u32::from(self.status)
                     | if self.misbehave.needs_reset && self.status != 0 {
                         u32::from(STATUS_DEVICE_NEEDS_RESET)

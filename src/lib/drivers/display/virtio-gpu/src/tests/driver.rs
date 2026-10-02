@@ -16,7 +16,8 @@ use ferrix_virtio::pci::FEATURE_VERSION_1;
 use super::fake::{Bus, Device, Handle, PAGE, Region};
 use crate::pipeline::{Pipeline, Request, Step};
 use crate::{
-    CONTROL_SLOTS, DeviceError, DevicePages, Done, Driver, Options, Parts, SubmitError, Teardown,
+    CONFIG_LOOK_EVERY, CONTROL_SLOTS, DeviceError, DevicePages, Done, Driver, ISR_CONFIG, Options,
+    Parts, SubmitError, Teardown,
 };
 
 pub(super) type TestDriver = Driver<Handle, Region, Region>;
@@ -471,7 +472,7 @@ fn a_partial_flush_then_off_and_detach() {
 #[test]
 fn a_device_that_breaks_the_protocol_is_failed() {
     type Setup = fn(&mut Device);
-    let cases: [(Setup, DeviceError); 3] = [
+    let cases: [(Setup, DeviceError); 2] = [
         (
             |device| device.misbehave.written = Some(8),
             DeviceError::Protocol(ferrix_virtio::gpu::GpuError::ResponseTooShort(8)),
@@ -479,10 +480,6 @@ fn a_device_that_breaks_the_protocol_is_failed() {
         (
             |device| device.misbehave.response = Some(0x1107),
             DeviceError::Protocol(ferrix_virtio::gpu::GpuError::UnknownResponse(0x1107)),
-        ),
-        (
-            |device| device.misbehave.needs_reset = true,
-            DeviceError::NeedsReset,
         ),
     ];
     for (misbehave, expected) in cases {
@@ -525,4 +522,68 @@ fn display_events_are_read_and_cleared() {
     assert_eq!(driver.take_events(), 1);
     assert_eq!(driver.take_events(), 0);
     let _ = PAGE;
+}
+
+/// A device that needs a reset says so with a configuration change, which
+/// under MSI-X shares the control queue's vector: an interrupt that brings
+/// no completion. The driver reads the status then, and not on an interrupt
+/// that brought one -- but on every [`CONFIG_LOOK_EVERY`]th all the same,
+/// and whenever asked after a wait ([`Driver::check_needs_reset`]).
+#[test]
+fn a_device_that_needs_a_reset_is_failed_at_its_next_quiet_interrupt() {
+    let (_bus, device, mut driver) = build((64, 16));
+    device.borrow_mut().misbehave.needs_reset = true;
+    driver
+        .submit(&Command::ResourceUnref { resource_id: 1 })
+        .expect("submitted");
+    device.borrow_mut().serve();
+    let reads = device.borrow().status_reads.get();
+    assert!(
+        driver.on_interrupt().is_ok(),
+        "an interrupt with a completion"
+    );
+    assert_eq!(device.borrow().status_reads.get(), reads, "status not read");
+    assert!(driver.take_done().expect("taken").is_some());
+    assert_eq!(driver.on_interrupt(), Err(DeviceError::NeedsReset));
+    assert_eq!(driver.fault(), Some(DeviceError::NeedsReset));
+    assert_eq!(
+        driver.submit(&Command::GetDisplayInfo),
+        Err(SubmitError::Broken)
+    );
+    assert!(matches!(driver.shutdown(), Teardown::Released(_)));
+
+    let (_bus, device, mut driver) = build((64, 16));
+    device.borrow_mut().misbehave.needs_reset = true;
+    assert_eq!(driver.check_needs_reset(), Err(DeviceError::NeedsReset));
+    assert_eq!(driver.fault(), Some(DeviceError::NeedsReset));
+}
+
+/// Interrupts that bring completions read no register but the queue's own
+/// memory, except every [`CONFIG_LOOK_EVERY`]th; one that brings none reads
+/// the status and says the configuration may have changed.
+#[test]
+fn only_a_quiet_or_a_periodic_interrupt_reads_the_device_status() {
+    let (_bus, device, mut driver) = build((64, 16));
+    let before = device.borrow().status_reads.get();
+    let mut looked = 0;
+    for _ in 0..CONFIG_LOOK_EVERY * 2 {
+        driver
+            .submit(&Command::ResourceUnref { resource_id: 1 })
+            .expect("submitted");
+        device.borrow_mut().serve();
+        let isr = driver.on_interrupt().expect("interrupt");
+        if isr & ISR_CONFIG != 0 {
+            looked += 1;
+        }
+        while driver.take_done().expect("taken").is_some() {}
+    }
+    assert_eq!(looked, 2, "every CONFIG_LOOK_EVERYth interrupt looks");
+    assert_eq!(device.borrow().status_reads.get() - before, 2);
+    let isr = driver.on_interrupt().expect("a quiet interrupt");
+    assert_ne!(
+        isr & ISR_CONFIG,
+        0,
+        "a quiet interrupt may be a configuration change"
+    );
+    assert_eq!(device.borrow().status_reads.get() - before, 3);
 }

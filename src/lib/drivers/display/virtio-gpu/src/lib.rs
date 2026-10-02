@@ -90,6 +90,15 @@ mod tests;
 /// ISR status bit: a queue has something for the driver.
 pub const ISR_QUEUE: u8 = 1;
 
+/// How many interrupts may bring completions before [`Driver::on_interrupt`]
+/// looks at the configuration anyway: a configuration change that arrived
+/// together with completions is seen within this many.
+pub const CONFIG_LOOK_EVERY: u32 = 64;
+
+/// How long a driver with a command in flight waits for an interrupt before
+/// it asks [`Driver::check_needs_reset`].
+pub const WATCH_NANOS: u64 = 100_000_000;
+
 /// ISR status bit: the device configuration changed, which for a GPU means a
 /// display was attached or detached.
 pub const ISR_CONFIG: u8 = 2;
@@ -436,6 +445,8 @@ pub struct Driver<T, R, A> {
     info: Info,
     notify_off: u16,
     reset_polls: u32,
+    /// Interrupts taken, for [`CONFIG_LOOK_EVERY`].
+    interrupts: u32,
     fault: Option<DeviceError>,
     /// What each slot, and then the large place, holds while the device has
     /// it.
@@ -748,6 +759,7 @@ where
             },
             notify_off: active.notify_off,
             reset_polls: polls,
+            interrupts: 0,
             fault: None,
             in_flight: [None; CONTROL_SLOTS + 1],
             posted: false,
@@ -774,6 +786,26 @@ where
     #[must_use]
     pub const fn fault(&self) -> Option<DeviceError> {
         self.fault
+    }
+
+    /// Read the device status for `DEVICE_NEEDS_RESET` now, whatever the
+    /// last interrupt looked like: for a driver that has waited
+    /// [`WATCH_NANOS`] for a command in flight and heard nothing, in case the
+    /// configuration change that announced a reset came together with a
+    /// completion and [`Driver::on_interrupt`] did not look.
+    ///
+    /// # Errors
+    ///
+    /// [`DeviceError::NeedsReset`], or the fault the driver already has.
+    pub fn check_needs_reset(&mut self) -> Result<(), DeviceError> {
+        if let Some(fault) = self.fault {
+            return Err(fault);
+        }
+        if self.transport.read8(DEVICE_STATUS) & STATUS_DEVICE_NEEDS_RESET != 0 {
+            self.break_down(DeviceError::NeedsReset);
+            return Err(DeviceError::NeedsReset);
+        }
+        Ok(())
     }
 
     /// Whether any command is in flight.
@@ -988,6 +1020,19 @@ where
     /// bits, so a display change is not lost; the control queue's
     /// completions are [`Driver::take_done`]'s.
     ///
+    /// [`ISR_CONFIG`] in the answer says the configuration may have changed
+    /// and [`Driver::display_changed`] is worth asking: the ISR said so, or
+    /// -- under MSI-X, which has no ISR byte and shares the control queue's
+    /// vector with configuration changes -- the interrupt brought no
+    /// completion on either queue, which is what a configuration change's
+    /// looks like, or it is the [`CONFIG_LOOK_EVERY`]th. Only then is the
+    /// device status read for `DEVICE_NEEDS_RESET`, which the specification
+    /// has a device announce with a configuration change (virtio 1.2
+    /// §2.1.2). Both are register reads that leave the guest; under KVM
+    /// each waits for QEMU's lock, which QEMU holds while it shows a frame,
+    /// and read on every interrupt they were nine tenths of this driver's
+    /// time with a video playing.
+    ///
     /// # Errors
     ///
     /// How the device broke the protocol.
@@ -996,7 +1041,16 @@ where
         if let Some(fault) = self.fault {
             return Err(fault);
         }
-        if self.transport.read8(DEVICE_STATUS) & STATUS_DEVICE_NEEDS_RESET != 0 {
+        self.interrupts = self.interrupts.wrapping_add(1);
+        let news = self.queue.has_used() || self.cursor_queue.has_used();
+        let config =
+            isr & ISR_CONFIG != 0 || !news || self.interrupts.is_multiple_of(CONFIG_LOOK_EVERY);
+        let isr = if config {
+            isr | ISR_CONFIG
+        } else {
+            isr & !ISR_CONFIG
+        };
+        if config && self.transport.read8(DEVICE_STATUS) & STATUS_DEVICE_NEEDS_RESET != 0 {
             self.break_down(DeviceError::NeedsReset);
             return Err(DeviceError::NeedsReset);
         }

@@ -57,7 +57,7 @@ use ferrix_virtio::gpu::{self, Command, DeviceConfig, DeviceError as Refusal, Me
 use ferrix_virtio::pci::{CommonConfig, NO_VECTOR};
 use ferrix_virtio_gpu::pipeline::{Pipeline, Request, Step as Next, TransferOffset};
 use ferrix_virtio_gpu::{
-    CAPSET_ROOM, CONTROL_SLOTS, CommandArea, DevicePages, Driver, ISR_QUEUE, Options, Parts,
+    CAPSET_ROOM, CONTROL_SLOTS, CommandArea, DevicePages, Driver, ISR_CONFIG, ISR_QUEUE, Options, Parts, WATCH_NANOS,
     SLOT_AREA_BYTES, SubmitError, Teardown, Transport,
 };
 
@@ -1348,7 +1348,14 @@ fn run_command_in(
         .map_err(|_| Step::Device)?;
     let mut deferred = Deferred::new();
     let result = loop {
-        let packet = port.wait(Deadline::Never).map_err(|_| Step::Events)?;
+        let packet = match port.wait(watch(driver)) {
+            Ok(packet) => packet,
+            Err(Error::TimedOut) => {
+                driver.check_needs_reset().map_err(|_| Step::Device)?;
+                continue;
+            }
+            Err(_) => return Err(Step::Events),
+        };
         if (packet.kind, packet.key) != (PACKET_INTERRUPT, KEY_INTERRUPT) {
             deferred.keep(&packet);
             continue;
@@ -1872,7 +1879,16 @@ impl Serving {
             if let Some(stopped) = self.advance()? {
                 return Ok(stopped);
             }
-            let packet = self.port.wait(Deadline::Never).map_err(|_| Step::Events)?;
+            let packet = match self.port.wait(watch(&self.driver)) {
+                Ok(packet) => packet,
+                Err(Error::TimedOut) => {
+                    self.driver
+                        .check_needs_reset()
+                        .map_err(|_| Step::Faulted)?;
+                    continue;
+                }
+                Err(_) => return Err(Step::Events),
+            };
             // A packet given back by a command's wait is a user packet
             // standing for the signal it was, so both forms are read alike.
             match (packet.kind, packet.key) {
@@ -1926,8 +1942,8 @@ impl Serving {
     /// Take the device's completions and hand each to whoever posted it,
     /// and note a change of the device's displays.
     fn completions(&mut self) -> Result<(), Step> {
-        let _ = self.driver.on_interrupt().map_err(|_| Step::Faulted)?;
-        if self.driver.display_changed() {
+        let isr = self.driver.on_interrupt().map_err(|_| Step::Faulted)?;
+        if isr & ISR_CONFIG != 0 && self.driver.display_changed() {
             self.modes_stale = true;
         }
         while let Some(done) = self.driver.take_done().map_err(|_| Step::Faulted)? {
@@ -2421,4 +2437,19 @@ fn pin_entries(
         }
     }
     Ok((pin, count))
+}
+
+/// How long to wait for the device: for good with nothing in flight, and
+/// otherwise [`WATCH_NANOS`], after which the driver looks at the device
+/// status itself -- an interrupt that brought completions does not
+/// (`Driver::on_interrupt`), so a reset announced in one could otherwise
+/// leave a command waited for that never comes.
+fn watch(driver: &Gpu) -> Deadline {
+    if !driver.is_busy() {
+        return Deadline::Never;
+    }
+    match ferrix_rt::linux::monotonic_nanos() {
+        Ok(now) => Deadline::At(now.saturating_add(WATCH_NANOS)),
+        Err(_) => Deadline::Never,
+    }
 }
