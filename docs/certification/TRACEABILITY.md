@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 122 | 69 | 53 |
-| Low (`L.*`) | 731 | 460 | 271 |
+| Low (`L.*`) | 732 | 461 | 271 |
 
-1366 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1368 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1366 |
+| Named by a low-level requirement | 1368 |
 | Accessors, covered by the requirement they serve | 791 |
 | Check code in a product file | 55 |
-| Named by none | 881 |
+| Named by none | 882 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -528,10 +528,10 @@ Each system-level requirement, and the high-level requirements that name it as t
 |---|---|---|---|---|---|---|---|---|
 | `L.iommu.1` | units shall name every VT-d unit a DMAR describes and every SMMUv3 an IORT, or without ACPI a device tree, describes, each once and none at address 0 or of length 0, with the length of registers no driver may be given. | The discovery line counts 1 VT-d unit and 0 SMMUv3s on x86-64, and 0 and 1 on AArch64 and ARMv7-A, as the machines xtask boots configure them. | H.DMA.1, H.DMA.5 | `iommu::units`, `iommu::add`, `iommu::unit_at` | *baselined* | — | — | — |
 | `L.iommu.2` | report shall count on the console the PCI functions firmware places behind a unit, those it places behind none, and those it describes in a way the kernel cannot follow. | On every machine xtask test-boot boots, the discovery line is printed and counts 1 or more PCI functions behind a unit and 0 unresolved. | H.DMA.1 | `iommu::report`, `iommu::discover` | `tools/common/xtask/src/qemu.rs::iommu_problem` | xtask gate | xtask gate | xtask gate |
-| `L.iommu.3` | place_dmar shall place a function that a single-hop endpoint scope of a DRHD on its segment names behind that DRHD's unit, as its requester ID. | On x86-64 each of the 9 PCI functions is reported behind the unit at the DRHD's register base as the stream bus << 8 \| device << 3 \| function. | H.DMA.1 | `iommu::place_dmar`, `iommu::behind`, `iommu::discover` | *baselined* | — | — | — |
+| `L.iommu.3` | place_dmar shall place a function that a single-hop endpoint scope of a DRHD on its segment names behind that DRHD's unit, as its requester ID. | On x86-64 each PCI function on bus 0 is reported behind the unit at the DRHD's register base as the stream bus << 8 \| device << 3 \| function. | H.DMA.1 | `iommu::place_dmar`, `iommu::behind`, `iommu::discover` | *baselined* | — | — | — |
 | `L.iommu.4` | place_iort shall place a function behind the SMMUv3 that its segment's root complex maps its requester ID to, as the stream ID the mapping gives, and a function mapped to an ITS group behind no unit. | On AArch64 each of the 5 PCI functions is reported behind the SMMUv3 at the IORT's base address as the stream its root complex's ID mapping gives. | H.DMA.1 | `iommu::place_iort`, `iommu::behind` | *baselined* | — | — | — |
 | `L.iommu.5` | place_tree shall place a function behind the SMMUv3 its ECAM host's iommu-map names for its requester ID, as the stream ID the map gives, taking the host that names the function's segment or the only host. | On ARMv7-A each of the 5 PCI functions is reported behind the SMMUv3 the device tree gives as the stream its host's iommu-map gives. | H.DMA.1 | `iommu::place_tree`, `iommu::behind` | *baselined* | — | — | — |
-| `L.iommu.6` | A function firmware describes in a way the kernel cannot follow -- a DMAR scope through a bridge or below one on its segment, an IORT mapping to a node that is not there or to an SMMUv1 or v2, a device tree whose hosts cannot be told apart, a map naming a unit that is not among the units -- shall be counted unresolved, never bypassing. | Each of those descriptions, given for a function no endpoint scope or mapping otherwise places, is counted 1 unresolved and 0 bypassing. | H.DMA.1 | `iommu::place_dmar`, `iommu::place_iort`, `iommu::place_tree`, `iommu::behind` | *baselined* | — | — | — |
+| `L.iommu.6` | A function firmware describes in a way the kernel cannot follow -- a DMAR scope whose path runs through a function that is not a bridge, or a function below a named bridge whose DMA arrives under a bridge's alias, an IORT mapping to a node that is not there or to an SMMUv1 or v2, a device tree whose hosts cannot be told apart, a map naming a unit that is not among the units -- shall be counted unresolved, never bypassing. | Each of those descriptions, given for a function no endpoint scope or mapping otherwise places, is counted 1 unresolved and 0 bypassing. | H.DMA.1 | `iommu::place_dmar`, `iommu::place_iort`, `iommu::place_tree`, `iommu::behind` | *baselined* | — | — | — |
 
 ### BringUpAndDomains
 
@@ -574,6 +574,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.iommu.42` | A fault taken that no check provoked shall be counted stray, and apart when it is not a refused access, whether a check, the clearing before a probe or the audit took it. | An SMMUv3 event and a VT-d overflow no check registered each raise the stray count and the stray-event count by 1. | H.DMA.6 | `iommu::count_if_stray`, `iommu::Domain::take_fault`, `iommu::Domain::clear_faults` | *baselined* | — | — | — |
 | `L.iommu.43` | audit_faults shall take the faults every translating unit holds, up to 256 a unit, and report the faults no check provoked since translation went on, the first it read itself, and the provoked ones it found late. | With 1 stray fault left in a unit's record, the audit reports 1 unit read, 1 stray and that fault as the first. | H.DMA.6 | `iommu::audit_faults`, `iommu::drain`, `iommu::recorded` | *baselined* | — | — | — |
 | `L.iommu.44` | Every fault read from a unit, by the fault audit or through a domain, shall be written to the audit record as one DMA_FAULT, refused, naming the device's stream and the page it addressed, with the kernel as its subject. | On a boot where a unit translates, the audit record holds a DMA_FAULT from the out-of-domain probe, refused, with pid 0; with the record's event swapped at recorded, or its subject made a process, the end-of-boot audit check fails naming it. | H.DMA.2 | `iommu::recorded`, `audit::record`, `audit::Store::record_at` | `src/kernel/src/audit/check.rs::booted` | reached | not reached | not reached |
+| `L.iommu.45` | place_dmar shall follow a DMAR device scope's path through the bridges enumeration found, and shall place a sub-hierarchy scope's bridge, and every function below it whose path up to the bridge crosses only PCIe ports, behind the DRHD's unit as the function's own requester ID. | Host tests: a path is followed through each bridge's secondary bus; a function behind a root port or a switch is its own requester; one behind a PCIe-to-PCI bridge, on a bus no bridge explains, or under a loop of bus numbers is aliased, never its own. On x86-64 the virtio-rng function behind a PCIe root port is placed behind the unit, 0 functions are unresolved, and its out-of-domain write is faulted. | H.DMA.1 | `iommu::place_dmar`, `iommu::learn_bridge`, `iommu::Scope::places`, `iommu::vtd_unit_for` | `src/lib/platform/pci/src/topology.rs::a_longer_path_is_followed_through_each_bridge_s_secondary_bus`, `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_root_port_keeps_its_own_requester_id`, `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_switch_keeps_its_own_requester_id`, `src/lib/platform/pci/src/topology.rs::behind_a_pcie_to_pci_bridge_the_requester_id_is_an_alias`, `src/lib/platform/pci/src/topology.rs::a_bus_no_bridge_explains_is_never_taken_for_the_function_s_own`, `src/lib/platform/pci/src/topology.rs::a_loop_of_bus_numbers_ends_aliased`, `tools/common/xtask/src/qemu.rs::iommu_problem` | xtask gate | xtask gate | xtask gate |
 
 ### MemoryManagement
 
@@ -1768,6 +1769,12 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/platform/description/src/tests.rs::acpi_only_is_read_by_its_tables` | host | L.discovery.1 |
 | `src/lib/platform/description/src/tests.rs::neither_is_neither` | host | L.discovery.1 |
 | `src/lib/platform/description/src/tests.rs::unreadable_tables_beside_a_tree_are_read_by_the_tree` | host | L.discovery.1 |
+| `src/lib/platform/pci/src/topology.rs::a_bus_no_bridge_explains_is_never_taken_for_the_function_s_own` | host | L.iommu.45 |
+| `src/lib/platform/pci/src/topology.rs::a_longer_path_is_followed_through_each_bridge_s_secondary_bus` | host | L.iommu.45 |
+| `src/lib/platform/pci/src/topology.rs::a_loop_of_bus_numbers_ends_aliased` | host | L.iommu.45 |
+| `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_root_port_keeps_its_own_requester_id` | host | L.iommu.45 |
+| `src/lib/platform/pci/src/topology.rs::an_endpoint_behind_a_switch_keeps_its_own_requester_id` | host | L.iommu.45 |
+| `src/lib/platform/pci/src/topology.rs::behind_a_pcie_to_pci_bridge_the_requester_id_is_an_alias` | host | L.iommu.45 |
 | `src/lib/proto/audit/src/tests.rs::a_record_is_its_sixty_four_bytes_in_order_little_endian` | host | H.AUD.13 |
 | `tools/common/xtask/src/init.rs::audit_read_back` | gate | H.AUD.10 |
 | `tools/common/xtask/src/init.rs::checks_skipped` | gate | H.AUD.12 |
@@ -1778,6 +1785,6 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
 | `tools/common/xtask/src/qemu.rs::entropy_problem` | gate | L.x86_64.113 |
 | `tools/common/xtask/src/qemu.rs::fault_problem` | gate | L.iommu.7, L.iommu.10, L.iommu.35, L.iommu.36, H.DMA.2 |
-| `tools/common/xtask/src/qemu.rs::iommu_problem` | gate | L.iommu.2 |
+| `tools/common/xtask/src/qemu.rs::iommu_problem` | gate | L.iommu.2, L.iommu.45 |
 | `tools/common/xtask/src/qemu.rs::reset_problem` | gate | L.x86_64.99, H.BOOT.7 |
 | `tools/common/xtask/src/qemu.rs::test_boot_lines` | gate | L.x86_64.97 |

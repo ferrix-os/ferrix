@@ -66,7 +66,7 @@ package FerrixIommuRequirements {
             attribute :>> statement = "place_dmar shall place a function that a
                 single-hop endpoint scope of a DRHD on its segment names behind that
                 DRHD's unit, as its requester ID.";
-            attribute :>> criterion = "On x86-64 each of the 9 PCI functions is
+            attribute :>> criterion = "On x86-64 each PCI function on bus 0 is
                 reported behind the unit at the DRHD's register base as the stream
                 bus << 8 | device << 3 | function.";
             attribute :>> parent = "H.DMA.1";
@@ -96,8 +96,9 @@ package FerrixIommuRequirements {
         }
         requirement <'L.iommu.6'> whatCannotBeFollowedIsUnresolved : ItemLowLevel {
             attribute :>> statement = "A function firmware describes in a way the
-                kernel cannot follow -- a DMAR scope through a bridge or below one
-                on its segment, an IORT mapping to a node that is not there or to an
+                kernel cannot follow -- a DMAR scope whose path runs through a
+                function that is not a bridge, or a function below a named bridge
+                whose DMA arrives under a bridge's alias, an IORT mapping to a node that is not there or to an
                 SMMUv1 or v2, a device tree whose hosts cannot be told apart, a map
                 naming a unit that is not among the units -- shall be counted
                 unresolved, never bypassing.";
@@ -562,6 +563,23 @@ package FerrixIommuRequirements {
             attribute :>> parent = "H.DMA.2";
             attribute :>> unit = ("iommu::recorded", "audit::record",
                 "audit::Store::record_at");
+        }
+        requirement <'L.iommu.45'> dmarBridgesAreFollowed : ItemLowLevel {
+            attribute :>> statement = "place_dmar shall follow a DMAR device
+                scope's path through the bridges enumeration found, and shall place
+                a sub-hierarchy scope's bridge, and every function below it whose
+                path up to the bridge crosses only PCIe ports, behind the DRHD's
+                unit as the function's own requester ID.";
+            attribute :>> criterion = "Host tests: a path is followed through each
+                bridge's secondary bus; a function behind a root port or a switch
+                is its own requester; one behind a PCIe-to-PCI bridge, on a bus no
+                bridge explains, or under a loop of bus numbers is aliased, never
+                its own. On x86-64 the virtio-rng function behind a PCIe root port
+                is placed behind the unit, 0 functions are unresolved, and its
+                out-of-domain write is faulted.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::place_dmar", "iommu::learn_bridge",
+                "iommu::Scope::places", "iommu::vtd_unit_for");
         }
     }
 }

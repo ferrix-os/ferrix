@@ -783,6 +783,25 @@ fn the_standard_list_is_walked_in_order_with_reserved_bits_masked() {
 }
 
 #[test]
+fn only_a_pcie_port_forwards_a_requester_id_unchanged() {
+    let mut bus = Bus::new();
+    // Port types 4, 5 and 6 forward; a PCIe-to-PCI bridge (7), an endpoint
+    // (0) and a bridge with no Express capability do not.
+    for (device, kind) in [(1, 4u16), (2, 5), (3, 6), (4, 7), (5, 0)] {
+        let mut d = Device::bridge(0, device, device);
+        d.capabilities(0x40);
+        d.capability(0x40, ID_PCI_EXPRESS, 0x00);
+        d.put16(0x42, kind << 4 | 0x2);
+        bus.put(at(0, device, 0), d);
+    }
+    bus.put(at(0, 6, 0), Device::bridge(0, 6, 6));
+    let forwards: Vec<_> = (1..=6)
+        .map(|device| capability::forwards_requester(&bus, at(0, device, 0)).unwrap())
+        .collect();
+    assert_eq!(forwards, vec![true, true, true, false, false, false]);
+}
+
+#[test]
 fn no_list_is_walked_without_the_status_bit_or_on_an_empty_slot() {
     let mut bus = Bus::new();
     let mut d = Device::endpoint(1, 1);

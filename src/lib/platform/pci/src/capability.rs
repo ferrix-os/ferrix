@@ -179,6 +179,39 @@ pub fn find<C: ConfigSpace + ?Sized>(
     Ok(None)
 }
 
+/// Where a PCI Express capability's capabilities register is, from the
+/// capability: its device or port type is bits 7:4.
+pub const EXPRESS_CAPABILITIES: u16 = 0x02;
+/// Express device or port type: a root port of a root complex.
+pub const EXPRESS_ROOT_PORT: u8 = 0x4;
+/// Express device or port type: a switch's upstream port.
+pub const EXPRESS_UPSTREAM_PORT: u8 = 0x5;
+/// Express device or port type: a switch's downstream port.
+pub const EXPRESS_DOWNSTREAM_PORT: u8 = 0x6;
+
+/// Whether `function` is a PCI Express port, which forwards the requester ID
+/// of what passes through it unchanged: a root port, or a switch's upstream
+/// or downstream port. A PCIe-to-PCI bridge, a conventional bridge and
+/// anything without the capability are not, since what they forward arrives
+/// with their own alias (`crate::topology`).
+///
+/// # Errors
+///
+/// What the capability walk refused.
+pub fn forwards_requester<C: ConfigSpace + ?Sized>(
+    space: &C,
+    function: Address,
+) -> Result<bool, PciError> {
+    let Some(express) = find(space, function, ID_PCI_EXPRESS)? else {
+        return Ok(false);
+    };
+    let kind = (space.read16(function, express.offset + EXPRESS_CAPABILITIES) >> 4) & 0xF;
+    Ok(matches!(
+        kind as u8,
+        EXPRESS_ROOT_PORT | EXPRESS_UPSTREAM_PORT | EXPRESS_DOWNSTREAM_PORT
+    ))
+}
+
 /// One entry in the extended list.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ExtendedCapability {

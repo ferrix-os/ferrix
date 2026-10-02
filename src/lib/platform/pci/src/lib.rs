@@ -74,6 +74,7 @@ pub mod capability;
 pub mod ecam;
 pub mod header;
 pub mod msix;
+pub mod topology;
 pub mod virtio;
 pub mod walk;
 

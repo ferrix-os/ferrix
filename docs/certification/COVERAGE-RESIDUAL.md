@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 682 | 401 | 148 | **133** |
-| aarch64 | debug | 706 | 367 | 163 | **176** |
-| armv7a | debug | 1089 | 511 | 368 | **210** |
+| x86_64 | debug | 681 | 401 | 147 | **133** |
+| aarch64 | debug | 701 | 362 | 163 | **176** |
+| armv7a | debug | 1083 | 505 | 368 | **210** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,7 +16,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**682** unreached statements, debug profile.
+**681** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -24,7 +24,7 @@ The statements in the certified item that the measured suite did not reach, on e
 | Reached only when the kernel is stopping | 139 | 20% |
 | Reached only when something has already failed | 73 | 11% |
 | Run, and credited to another line | 9 | 1% |
-| Hardware the measured machine does not have | 148 | 22% |
+| Hardware the measured machine does not have | 147 | 22% |
 | Needs a test | 133 | 20% |
 
 ### x86_64: Unreachable on the measured architecture — 180 statements
@@ -105,7 +105,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 148 statements
+### x86_64: Hardware the measured machine does not have — 147 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -116,7 +116,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 10 | `core` | `arch/x86_64/clock.rs` |
 | 7 | `core` | `arch/x86_64/speculation.rs` |
 | 6 | `core` | `discovery/fdt.rs` |
-| 6 | `core` | `iommu.rs` |
+| 5 | `core` | `iommu.rs` |
 | 5 | `core` | `iommu/vtd.rs` |
 | 5 | `item` | `syscall/native.rs` |
 | 4 | `core` | `arch/x86_64/console.rs` |
@@ -161,7 +161,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 302 statements
+### x86_64: argued line by line — 301 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -228,51 +228,50 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `init.rs` | 445 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
 | `init.rs` | 485 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
 | `init.rs` | 487 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
-| `iommu.rs` | 153-154 | Unreachable on the measured architecture | Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over. |
-| `iommu.rs` | 160 | Unreachable on the measured architecture | Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over. |
-| `iommu.rs` | 220 | Hardware the measured machine does not have | A DMAR device scope this does not follow: a sub-hierarchy, or an endpoint with no single hop. QEMU's DMAR lists single-hop endpoint scopes only. |
-| `iommu.rs` | 225 | Hardware the measured machine does not have | A DMAR device scope this does not follow: a sub-hierarchy, or an endpoint with no single hop. QEMU's DMAR lists single-hop endpoint scopes only. |
-| `iommu.rs` | 235-237 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 239 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 242 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 245 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 247 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 249 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 263 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 266-267 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 269 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 272 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 275 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 278 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
-| `iommu.rs` | 330-331 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: q35's DMAR puts every function behind its one VT-d unit. |
-| `iommu.rs` | 348 | Unreachable on the measured architecture | The branch for a device tree, which the x86-64 loader never hands over. |
-| `iommu.rs` | 352 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
-| `iommu.rs` | 535 | Unreachable on the measured architecture | The SMMUv3 variant's fields, printed only for a domain an SMMUv3 translates, which no x86-64 machine has. |
-| `iommu.rs` | 575 | Unreachable on the measured architecture | The SMMUv3 arm, for a domain an SMMUv3 translates, which no x86-64 machine has. |
+| `iommu.rs` | 156-157 | Unreachable on the measured architecture | Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over. |
+| `iommu.rs` | 163 | Unreachable on the measured architecture | Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over. |
+| `iommu.rs` | 249 | Hardware the measured machine does not have | A DMAR device scope this does not follow: a sub-hierarchy, or an endpoint with no single hop. QEMU's DMAR lists single-hop endpoint scopes only. |
+| `iommu.rs` | 270-272 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 274 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 277 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 280 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 282 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 284 | Unreachable on the measured architecture | Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 298 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 301-302 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 304 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 307 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 310 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 313 | Unreachable on the measured architecture | Places a function through a device tree, which the x86-64 loader never hands over's iommu-map. |
+| `iommu.rs` | 365-366 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: q35's DMAR puts every function behind its one VT-d unit. |
+| `iommu.rs` | 384 | Unreachable on the measured architecture | The branch for a device tree, which the x86-64 loader never hands over. |
+| `iommu.rs` | 388 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
+| `iommu.rs` | 571 | Unreachable on the measured architecture | The SMMUv3 variant's fields, printed only for a domain an SMMUv3 translates, which no x86-64 machine has. |
 | `iommu.rs` | 611 | Unreachable on the measured architecture | The SMMUv3 arm, for a domain an SMMUv3 translates, which no x86-64 machine has. |
-| `iommu.rs` | 739 | Hardware the measured machine does not have | A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has. |
-| `iommu.rs` | 777 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 790 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 795 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 798 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 935 | Reached only when something has already failed | A VT-d unit that would not enable: its functions get untranslated domains. QEMU's unit always enables. |
-| `iommu.rs` | 952-953 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 956-958 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 961 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 964 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 967 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 972-973 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 976 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 981-982 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 984 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 986 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 988 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 1021-1022 | Unreachable on the measured architecture | The SMMUv3 branch, for the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 1054-1057 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 1061 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 1133 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 1217 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 1219 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 647 | Unreachable on the measured architecture | The SMMUv3 arm, for a domain an SMMUv3 translates, which no x86-64 machine has. |
+| `iommu.rs` | 775 | Hardware the measured machine does not have | A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has. |
+| `iommu.rs` | 813 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 826 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 831 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 834 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 1026 | Reached only when something has already failed | A VT-d unit that would not enable: its functions get untranslated domains. QEMU's unit always enables. |
+| `iommu.rs` | 1043-1044 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1047-1049 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1052 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1055 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1058 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1063-1064 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1067 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1072-1073 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1075 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1077 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1079 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1112-1113 | Unreachable on the measured architecture | The SMMUv3 branch, for the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1158-1161 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1165 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 1237 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 1321 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 1323 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
 | `main.rs` | 186 | Reached only when the kernel is stopping | The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 301 | Reached only when the kernel is stopping | The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 365 | Reached only when the kernel is stopping | The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
@@ -390,25 +389,25 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**706** unreached statements, debug profile.
+**701** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
-| Unreachable on the measured architecture | 154 | 22% |
+| Unreachable on the measured architecture | 149 | 21% |
 | Reached only when the kernel is stopping | 122 | 17% |
-| Reached only when something has already failed | 81 | 11% |
+| Reached only when something has already failed | 81 | 12% |
 | Run, and credited to another line | 10 | 1% |
 | Hardware the measured machine does not have | 163 | 23% |
 | Needs a test | 176 | 25% |
 
-### aarch64: Unreachable on the measured architecture — 154 statements
+### aarch64: Unreachable on the measured architecture — 149 statements
 
 Justified. These statements belong to another architecture or another board, and no run on aarch64 can reach them. The same code is ordinary covered code where it belongs, so this justification is per configuration and the other architectures owe their own.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 111 | `core` | `iommu/vtd.rs` |
-| 31 | `core` | `iommu.rs` |
+| 26 | `core` | `iommu.rs` |
 | 11 | `core` | `platform/google/gs201/watchdog.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
@@ -531,7 +530,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 301 statements
+### aarch64: argued line by line — 296 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -619,41 +618,39 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `init.rs` | 445 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
 | `init.rs` | 485 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
 | `init.rs` | 487 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
-| `iommu.rs` | 146 | Unreachable on the measured architecture | The loop over the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 198 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 200-201 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 204 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 207-209 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 149 | Unreachable on the measured architecture | The loop over the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
 | `iommu.rs` | 213-214 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 225 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 249 | Hardware the measured machine does not have | An IORT that sends a function to an SMMUv1 or v2, which this driver does not program: virt's IORT names only its SMMUv3. |
-| `iommu.rs` | 269 | Hardware the measured machine does not have | A single PCI host whose device tree node names no linux,pci-domain: virt's names one. |
-| `iommu.rs` | 330-331 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: virt's IORT, and its device tree's iommu-map on the device-tree boots, put every PCI function behind its SMMUv3 (on ARMv7-A the unit is described and the functions placed behind it; the kernel leaves it alone there). |
-| `iommu.rs` | 352 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
-| `iommu.rs` | 520 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 522 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 525 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 574 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 592 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 217 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 220 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 249 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 284 | Hardware the measured machine does not have | An IORT that sends a function to an SMMUv1 or v2, which this driver does not program: virt's IORT names only its SMMUv3. |
+| `iommu.rs` | 304 | Hardware the measured machine does not have | A single PCI host whose device tree node names no linux,pci-domain: virt's names one. |
+| `iommu.rs` | 365-366 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: virt's IORT, and its device tree's iommu-map on the device-tree boots, put every PCI function behind its SMMUv3 (on ARMv7-A the unit is described and the functions placed behind it; the kernel leaves it alone there). |
+| `iommu.rs` | 388 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
+| `iommu.rs` | 556 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 558 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 561 | Unreachable on the measured architecture | The VT-d variant's fields, printed only for a domain a VT-d unit translates, which no Arm machine has. |
 | `iommu.rs` | 610 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 777 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 790 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 795 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 917-918 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 922-923 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 925 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 929 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 932 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 935 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 937 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 967 | Reached only when something has already failed | An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables. |
-| `iommu.rs` | 969 | Reached only when something has already failed | An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables. |
-| `iommu.rs` | 1001-1002 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1004-1005 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1016 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1133 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 1217 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 1219 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 628 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 646 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 813 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 826 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 831 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 990-991 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 995-996 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 998 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1002 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1023 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1026 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1028 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1058 | Reached only when something has already failed | An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables. |
+| `iommu.rs` | 1060 | Reached only when something has already failed | An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables. |
+| `iommu.rs` | 1092-1093 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1095-1096 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1107 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1237 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 1321 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 1323 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
 | `iommu/smmuv3.rs` | 238 | Reached only when something has already failed | A unit that cannot do what this driver asks -- no stage 2, no 16-bit VMIDs, a table too small -- or whose registers cannot be mapped: left alone, its functions untranslated. QEMU's SMMUv3 offers all of it. |
 | `iommu/smmuv3.rs` | 304 | Reached only when something has already failed | The closing row of program is the return of a unit that never started its queues or never finished its first command: QEMU's SMMUv3 always does. |
 | `iommu/smmuv3.rs` | 338-339 | Reached only when something has already failed | The event queue overflowed: 128 events unread. The audit reads it at the end of boot, and a passing boot records one event, the probe's. |
@@ -770,25 +767,25 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**1089** unreached statements, debug profile.
+**1083** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
-| Unreachable on the measured architecture | 247 | 23% |
+| Unreachable on the measured architecture | 241 | 22% |
 | Reached only when the kernel is stopping | 177 | 16% |
 | Reached only when something has already failed | 68 | 6% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 368 | 34% |
 | Needs a test | 210 | 19% |
 
-### armv7a: Unreachable on the measured architecture — 247 statements
+### armv7a: Unreachable on the measured architecture — 241 statements
 
 Justified. These statements belong to another architecture or another board, and no run on armv7a can reach them. The same code is ordinary covered code where it belongs, so this justification is per configuration and the other architectures owe their own.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 111 | `core` | `iommu/vtd.rs` |
-| 65 | `core` | `iommu.rs` |
+| 59 | `core` | `iommu.rs` |
 | 39 | `core` | `object/pin.rs` |
 | 24 | `core` | `arch/arm_common/stm32_usart.rs` |
 | 5 | `core` | `mm.rs` |
@@ -915,7 +912,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/task.rs` |
 | 3 | | *and 3 more files* |
 
-### armv7a: argued line by line — 436 statements
+### armv7a: argued line by line — 430 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -1009,92 +1006,89 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `init.rs` | 445 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
 | `init.rs` | 485 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
 | `init.rs` | 487 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
-| `iommu.rs` | 145-146 | Unreachable on the measured architecture | The loop over the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 152-154 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 198 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 200-201 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 204 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 207-209 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 148-149 | Unreachable on the measured architecture | The loop over the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 155-157 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
 | `iommu.rs` | 213-214 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 225 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 235-237 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 239 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 242 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 245 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 247 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 249 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 269 | Hardware the measured machine does not have | A single PCI host whose device tree node names no linux,pci-domain: virt's names one. |
-| `iommu.rs` | 330-331 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: virt's IORT, and its device tree's iommu-map on the device-tree boots, put every PCI function behind its SMMUv3 (on ARMv7-A the unit is described and the functions placed behind it; the kernel leaves it alone there). |
-| `iommu.rs` | 339-340 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 341 | Unreachable on the measured architecture | The arm for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 352 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
-| `iommu.rs` | 403 | Hardware the measured machine does not have | A fault record, made only by a unit translating a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 520 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 522 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 525 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 530 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 532 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 535 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 553-554 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 563 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 572 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 574 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
-| `iommu.rs` | 575 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 590 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 592 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 217 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 220 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 249 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 270-272 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 274 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 277 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 280 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 282 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 284 | Unreachable on the measured architecture | Places a function through the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 304 | Hardware the measured machine does not have | A single PCI host whose device tree node names no linux,pci-domain: virt's names one. |
+| `iommu.rs` | 365-366 | Hardware the measured machine does not have | A function the firmware puts behind no unit, or describes in a way this cannot follow: virt's IORT, and its device tree's iommu-map on the device-tree boots, put every PCI function behind its SMMUv3 (on ARMv7-A the unit is described and the functions placed behind it; the kernel leaves it alone there). |
+| `iommu.rs` | 375-376 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 388 | Reached only when something has already failed | A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either. |
+| `iommu.rs` | 439 | Hardware the measured machine does not have | A fault record, made only by a unit translating a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 556 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 558 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 561 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 566 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 568 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 571 | Hardware the measured machine does not have | Printed only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 589-590 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 599 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
 | `iommu.rs` | 608 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
 | `iommu.rs` | 610 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
 | `iommu.rs` | 611 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 686 | Hardware the measured machine does not have | A domain's fault, read only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 692 | Hardware the measured machine does not have | The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 697 | Hardware the measured machine does not have | The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 704 | Hardware the measured machine does not have | Faults cleared only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 738 | Hardware the measured machine does not have | The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 739 | Hardware the measured machine does not have | A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has. |
-| `iommu.rs` | 741-742 | Hardware the measured machine does not have | The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 775-776 | Hardware the measured machine does not have | The unpin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 777 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 788, 797, 821-822 | Hardware the measured machine does not have | The translated branches of an unpin and of a pin's undo, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 790 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 794 | Hardware the measured machine does not have | The unpin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 795 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 813-814 | Hardware the measured machine does not have | Maps pages into the tables of a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 818 | Hardware the measured machine does not have | Maps pages into the tables of a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 903 | Unreachable on the measured architecture | The branch for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 906 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 917-918 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 922-923 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 925 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 929 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 932 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 935 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 952-953 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 956-958 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 961 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 964 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 967 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 972-973 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 976 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 981-982 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 984 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 986 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 988 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 1001-1002 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1004-1005 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1016 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 1022 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1030-1032 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1055-1057 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 1061-1062 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 1120 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1124 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1131 | Hardware the measured machine does not have | Counts a fault a unit recorded, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1133 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 1210-1211 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1213 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 1217 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 1219 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
-| `iommu.rs` | 1222 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 626 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 628 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 644 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 646 | Unreachable on the measured architecture | The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has. |
+| `iommu.rs` | 647 | Hardware the measured machine does not have | Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 722 | Hardware the measured machine does not have | A domain's fault, read only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 728 | Hardware the measured machine does not have | The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 733 | Hardware the measured machine does not have | The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 740 | Hardware the measured machine does not have | Faults cleared only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 774 | Hardware the measured machine does not have | The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 775 | Hardware the measured machine does not have | A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has. |
+| `iommu.rs` | 777-778 | Hardware the measured machine does not have | The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 811-812 | Hardware the measured machine does not have | The unpin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 813 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 824, 833, 857-858 | Hardware the measured machine does not have | The translated branches of an unpin and of a pin's undo, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 826 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 830 | Hardware the measured machine does not have | The unpin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 831 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
+| `iommu.rs` | 849-850 | Hardware the measured machine does not have | Maps pages into the tables of a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 854 | Hardware the measured machine does not have | Maps pages into the tables of a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 976 | Unreachable on the measured architecture | The branch for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 979 | Unreachable on the measured architecture | The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 990-991 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 995-996 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 998 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1002 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1023 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1026 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1043-1044 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1047-1049 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1052 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1055 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1058 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1063-1064 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1067 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1072-1073 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1075 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1077 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1079 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1092-1093 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1095-1096 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1107 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 1113 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1121-1123 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1159-1161 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1165-1166 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 1224 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1228 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1235 | Hardware the measured machine does not have | Counts a fault a unit recorded, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1237 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 1314-1315 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1317 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 1321 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 1323 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 1326 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
 | `main.rs` | 186 | Reached only when the kernel is stopping | The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 301 | Reached only when the kernel is stopping | The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 365 | Reached only when the kernel is stopping | The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |

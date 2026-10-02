@@ -17,11 +17,13 @@
 //!
 //! # What cannot be followed is said, not guessed
 //!
-//! A DMAR scope that names a function through a bridge, a mapping that points
-//! at a node or phandle that is not there, and a device tree host this cannot
-//! tell apart from another are reported as unresolved rather than as behind
-//! no IOMMU. The difference matters: a function counted as bypassing is one a
-//! domain will never be built for.
+//! A DMAR scope is followed through the bridges enumeration found, down to
+//! a function behind a root port or a switch. A path through something that
+//! is not a bridge, a function whose DMA arrives under a PCIe-to-PCI bridge's
+//! alias, a mapping that points at a node or phandle that is not there, and a
+//! device tree host this cannot tell apart from another are reported as
+//! unresolved rather than as behind no IOMMU. The difference matters: a
+//! function counted as bypassing is one a domain will never be built for.
 //!
 //! # Domains
 //!
@@ -62,6 +64,7 @@ use ferrix_bootinfo::{BootView, PAGE_SIZE};
 use ferrix_fdt::{EcamHost, Fdt};
 use ferrix_paging::{MapError, MapFlags};
 use ferrix_pci::Address;
+use ferrix_pci::topology::{self, Bridge};
 use ferrix_sync::Once;
 
 use crate::device::{DeviceNode, Location};
@@ -190,12 +193,22 @@ fn behind(units: &[Unit], phys: u64, stream: u32) -> Behind {
 
 /// Where the DMAR puts `function`.
 ///
-/// Only single-hop endpoint scopes name a function this can match. A scope
-/// through a bridge, or one covering everything below a bridge, on the
-/// function's segment makes an unmatched function unresolved rather than
-/// bypassing: it may be one of those.
-fn place_dmar(table: &dmar::Dmar<'_>, units: &[Unit], function: Address) -> Behind {
-    let endpoint = (function.bus(), function.device(), function.function());
+/// An endpoint scope names a function by its path from a start bus, and a
+/// sub-hierarchy scope names a bridge, the bridge and everything below it
+/// (VT-d 4.0 §8.3.1). Paths longer than one hop, and the buses below a
+/// bridge, are followed through the bridges enumeration found
+/// (`ferrix_pci::topology`). A function below a named bridge is placed only
+/// when its own requester ID is what arrives there -- every bridge on the way
+/// a PCIe port -- because a domain is built for that ID. One whose DMA
+/// arrives under a bridge's alias, and a path through something that is not
+/// a bridge, leave it unresolved rather than bypassing: it may be one of
+/// those.
+fn place_dmar(
+    table: &dmar::Dmar<'_>,
+    units: &[Unit],
+    bridges: &[Bridge],
+    function: Address,
+) -> Behind {
     let mut unfollowed = false;
     for structure in table.structures() {
         let Structure::Drhd(unit) = structure else {
@@ -205,20 +218,31 @@ fn place_dmar(table: &dmar::Dmar<'_>, units: &[Unit], function: Address) -> Behi
             continue;
         }
         for scope in unit.device_scopes() {
-            match scope.kind {
-                dmar::SCOPE_PCI_ENDPOINT => match scope.endpoint() {
-                    Some(found) if found == endpoint => {
-                        return behind(
-                            units,
-                            unit.register_base,
-                            u32::from(function.requester_id()),
-                        );
-                    }
-                    Some(_) => {}
-                    None => unfollowed = true,
-                },
-                SCOPE_PCI_SUB_HIERARCHY => unfollowed = true,
-                _ => {}
+            if scope.kind != dmar::SCOPE_PCI_ENDPOINT && scope.kind != SCOPE_PCI_SUB_HIERARCHY {
+                continue;
+            }
+            let Some(named) =
+                topology::follow_path(function.segment(), scope.start_bus, scope.path(), bridges)
+            else {
+                unfollowed = true;
+                continue;
+            };
+            let own = named == function
+                || (scope.kind == SCOPE_PCI_SUB_HIERARCHY
+                    && match topology::behind(function, named, bridges) {
+                        topology::Behind::Own => true,
+                        topology::Behind::Aliased => {
+                            unfollowed = true;
+                            false
+                        }
+                        topology::Behind::No => false,
+                    });
+            if own {
+                return behind(
+                    units,
+                    unit.register_base,
+                    u32::from(function.requester_id()),
+                );
             }
         }
     }
@@ -227,6 +251,17 @@ fn place_dmar(table: &dmar::Dmar<'_>, units: &[Unit], function: Address) -> Behi
     } else {
         Behind::Nothing
     }
+}
+
+/// The bridges PCI enumeration found, every host's, for following DMAR
+/// scopes through them: filled once at stage 10, before any function on a
+/// bus behind one is examined, and only read from then on.
+static BRIDGES: SpinLock<Vec<Bridge>> = SpinLock::new(Vec::new());
+
+/// Record a bridge PCI enumeration found (`discovery::pci`).
+pub(crate) fn learn_bridge(bridge: Bridge) {
+    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
+    BRIDGES.lock().push(bridge);
 }
 
 /// Where the IORT puts `function`: its segment's root complex, one mapping
@@ -336,9 +371,10 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
         let tables = firmware.acpi();
         let dmar = tables.dmar().ok();
         let iort = tables.iort().ok();
+        let bridges = BRIDGES.lock();
         for &function in &functions {
             let found = match (&dmar, &iort) {
-                (Some(table), _) => place_dmar(table, &units, function),
+                (Some(table), _) => place_dmar(table, &units, &bridges, function),
                 (None, Some(table)) => place_iort(table, &units, function),
                 (None, None) => Behind::Nothing,
             };
@@ -849,12 +885,49 @@ impl Drop for Domain {
 struct Programmed {
     /// VT-d units translating.
     vtd: Vec<vtd::Unit>,
-    /// The functions the DMAR's endpoint scopes name, with their unit's index.
+    /// The functions the DMAR's single-hop endpoint scopes name, with their
+    /// unit's index.
     behind: Vec<(Address, usize)>,
+    /// The DMAR's other PCI scopes -- longer paths, and sub-hierarchies --
+    /// with their unit's index: followed through the bridges enumeration
+    /// finds, once it has ([`learn_bridge`]).
+    scopes: Vec<(Scope, usize)>,
     /// `SMMUv3`s translating.
     smmu: Vec<smmuv3::Unit>,
     /// The requester IDs IORT root complexes send to them.
     streams: Vec<StreamMap>,
+}
+
+/// A DMAR device scope kept past bring-up, whose path is followed only once
+/// enumeration has found the bridges it runs through.
+#[derive(Debug)]
+struct Scope {
+    /// The segment of its unit.
+    segment: u16,
+    /// Whether it names a bridge and everything below it.
+    hierarchy: bool,
+    /// The bus its path starts on.
+    start_bus: u8,
+    /// Its `(device, function)` hops.
+    path: Vec<(u8, u8)>,
+}
+
+impl Scope {
+    /// Whether it puts `function` behind its unit as `function`'s own
+    /// requester ID.
+    fn places(&self, function: Address, bridges: &[Bridge]) -> bool {
+        let Some(named) = topology::follow_path(
+            self.segment,
+            self.start_bus,
+            self.path.iter().copied(),
+            bridges,
+        ) else {
+            return false;
+        };
+        named == function
+            || (self.hierarchy
+                && topology::behind(function, named, bridges) == topology::Behind::Own)
+    }
 }
 
 /// A range of requester IDs on one segment that an IORT root complex sends to
@@ -927,6 +1000,24 @@ fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mu
                     .behind
                     // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
                     .extend(endpoints(&unit).map(|address| (address, index)));
+                for scope in unit.device_scopes() {
+                    let hierarchy = scope.kind == SCOPE_PCI_SUB_HIERARCHY;
+                    // Single-hop endpoints are in `behind` already.
+                    let longer_path =
+                        scope.kind == dmar::SCOPE_PCI_ENDPOINT && scope.endpoint().is_none();
+                    if !hierarchy && !longer_path {
+                        continue;
+                    }
+                    let kept = Scope {
+                        segment: unit.segment,
+                        hierarchy,
+                        start_bus: scope.start_bus,
+                        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                        path: scope.path().collect(),
+                    };
+                    // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                    programmed.scopes.push((kept, index));
+                }
                 // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
                 programmed.vtd.push(opened);
                 report.vtd += 1;
@@ -1037,11 +1128,24 @@ pub(crate) fn domain_for(function: Address) -> Domain {
 }
 
 /// The VT-d unit the DMAR puts `function` behind, if it is translating.
+///
+/// A single-hop endpoint scope names it directly; any other scope is
+/// followed through the bridges enumeration found, which a function below a
+/// root port is examined after (`discovery::pci`).
 fn vtd_unit_for(programmed: &'static Programmed, function: Address) -> Option<&'static vtd::Unit> {
-    let &(_, index) = programmed
+    let named = programmed
         .behind
         .iter()
-        .find(|(address, _)| *address == function)?;
+        .find(|(address, _)| *address == function)
+        .map(|&(_, index)| index);
+    let index = named.or_else(|| {
+        let bridges = BRIDGES.lock();
+        programmed
+            .scopes
+            .iter()
+            .find(|(scope, _)| scope.places(function, &bridges))
+            .map(|&(_, index)| index)
+    })?;
     programmed.vtd.get(index)
 }
 

@@ -270,6 +270,10 @@ const BEHIND_IOMMU: &str = " PCI functions behind one";
 /// not follow.
 const UNRESOLVED: &str = " unresolved";
 
+/// What it prints after the number of functions firmware puts behind no
+/// unit.
+const BYPASSING: &str = " bypassing";
+
 /// The `virt` machine the Arm architectures boot, with an `SMMUv3` for stage
 /// 10's IOMMU domains, and stage 2 on it, which those domains are made of.
 ///
@@ -293,7 +297,7 @@ pub(crate) const VIRT_MACHINE: [&str; 4] = [
 /// leaves a function unresolved reads it differently from the firmware that
 /// wrote it.
 ///
-/// Verifies: L.iommu.2
+/// Verifies: L.iommu.2, L.iommu.45
 fn iommu_problem(lines: &[String]) -> Option<String> {
     let Some(line) = lines.iter().find(|line| line.contains(BEHIND_IOMMU)) else {
         return Some("the kernel never reported where its IOMMUs are".to_owned());
@@ -307,6 +311,15 @@ fn iommu_problem(lines: &[String]) -> Option<String> {
     if count_before(line, UNRESOLVED) != Some(0) {
         return Some(format!(
             "an IOMMU description could not be followed: `{}`",
+            line.trim()
+        ));
+    }
+    // Every function on these machines is behind their unit, the ones below
+    // a root port included (`docs/NVIDIA.md` §2.3): one counted bypassing
+    // is a description the kernel misread as naming nothing.
+    if count_before(line, BYPASSING) != Some(0) {
+        return Some(format!(
+            "a PCI function was placed behind no IOMMU: `{}`",
             line.trim()
         ));
     }
@@ -1948,12 +1961,21 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
 /// (`do_check_inuse_chunk`) and resets when a device offers
 /// `VIRTIO_F_ACCESS_PLATFORM`, with or without an SMMU, while the loader is
 /// still running on its boot services.
+///
+/// On x86-64 it sits behind a PCIe root port, where libvirt puts every
+/// device it is given and where a passed-through GPU wants to be
+/// (`docs/NVIDIA.md` §2.3): the DMAR names a root port by a sub-hierarchy
+/// scope, and stage 10's out-of-domain fault then proves that a function
+/// below a bridge gets a translated domain.
 fn attach_rng(command: &mut Command, arch: Arch) {
-    let rng = if arch == Arch::Armv7a {
-        "virtio-rng-pci,disable-legacy=on"
-    } else {
-        "virtio-rng-pci,disable-legacy=on,iommu_platform=on"
+    let rng = match arch {
+        Arch::Armv7a => "virtio-rng-pci,disable-legacy=on",
+        Arch::X86_64 => "virtio-rng-pci,disable-legacy=on,iommu_platform=on,bus=ferrix.port0",
+        Arch::AArch64 => "virtio-rng-pci,disable-legacy=on,iommu_platform=on",
     };
+    if arch == Arch::X86_64 {
+        let _ = command.args(["-device", "pcie-root-port,id=ferrix.port0,chassis=1,slot=1"]);
+    }
     let _ = command.args(["-device", rng]);
 }
 
@@ -2941,6 +2963,10 @@ mod tests {
             "  iommu    0 VT-d units, 1 SMMUv3s; 1 PCI functions behind one, 0 bypassing, 1 unresolved",
         ]);
         assert!(iommu_problem(&unresolved).is_some(), "one unresolved");
+        let bypassing = lines(&[
+            "  iommu    1 VT-d units, 0 SMMUv3s; 10 PCI functions behind one, 2 bypassing, 0 unresolved",
+        ]);
+        assert!(iommu_problem(&bypassing).is_some(), "two bypassing");
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
         assert!(iommu_problem(&silent).is_some(), "no line at all");
     }

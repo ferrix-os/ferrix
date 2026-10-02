@@ -59,6 +59,7 @@ use ferrix_pci::header::{
     BusNumbers, CLASS_BRIDGE, COMMAND, COMMAND_MEMORY_SPACE, Endpoint, HeaderKind,
     SUBCLASS_HOST_BRIDGE,
 };
+use ferrix_pci::topology::Bridge;
 use ferrix_pci::virtio::{self as virtio_pci, SharedMemory, TYPE_ENTROPY, TYPE_GPU, Transport};
 use ferrix_pci::walk::{Function, Walk};
 use ferrix_pci::{Address, ConfigSpace, PciError};
@@ -615,6 +616,29 @@ impl Finder for Enumeration {
     }
 }
 
+/// Tell the IOMMU about every bridge among `found`, before any function is
+/// examined: it follows a DMAR scope through them to a function below a root
+/// port, and the entropy check asks it for such a function's domain.
+///
+/// # Errors
+///
+/// What a bridge's capability walk refused.
+fn learn_bridges(space: &Space, found: &[Function]) -> Result<(), Failure> {
+    for function in found {
+        let Ok(numbers) = BusNumbers::read(space, function.address) else {
+            continue;
+        };
+        let forwards_requester = pci_capability::forwards_requester(space, function.address)?;
+        crate::iommu::learn_bridge(Bridge {
+            address: function.address,
+            secondary: numbers.secondary,
+            subordinate: numbers.subordinate,
+            forwards_requester,
+        });
+    }
+    Ok(())
+}
+
 /// Walk one host and examine everything it reaches.
 fn check_host(
     host: Host,
@@ -643,6 +667,8 @@ fn check_host(
     if found.is_empty() {
         return Err(Failure::NothingAnswered { phys: host.phys });
     }
+
+    learn_bridges(&space, &found)?;
 
     for function in found {
         let (regions, msix, decoding, transport, host_visible) =
