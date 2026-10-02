@@ -169,6 +169,29 @@ pub(crate) fn insert_into_set_held<T: Ord>(
     set.insert(value)
 }
 
+/// The [`ferrix_fallible::Section`] for library crates, which cannot name
+/// [`reserve`]: one map insert, in a reserved section. `node` is the largest
+/// node the insert can make; one larger than a size class is refused, as
+/// [`insert_held`] refuses it at compile time, because the reserve holds
+/// nothing that size.
+fn library_section(node: usize, run: &mut dyn FnMut()) -> Result<(), AllocError> {
+    if node > LARGEST_CLASS {
+        return Err(AllocError);
+    }
+    // Not `section`: `ferrix_fallible::in_section` has asked the injection
+    // policy already, and asking twice would count one allocation as two.
+    let _held = crate::mm::reserve(None)?;
+    run();
+    Ok(())
+}
+
+/// Let library crates' map inserts into the reserve -- the btrfs writer's,
+/// through `ferrix_fallible::in_section`. Once, at boot, before any of them
+/// can run.
+pub(crate) fn install_library_sections() {
+    let _ = ferrix_fallible::set_section(library_section);
+}
+
 // ---------------------------------------------------------------------------
 // Failure injection
 // ---------------------------------------------------------------------------

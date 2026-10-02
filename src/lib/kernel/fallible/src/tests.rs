@@ -496,3 +496,69 @@ fn a_set_insert_is_a_map_insert() {
         assert!(log.iter().all(|(size, _)| *size <= bound));
     }
 }
+
+std::thread_local! {
+    /// Whether [`test_section`] refuses, as a reserve that cannot be filled.
+    static SECTION_REFUSES: Cell<bool> = const { Cell::new(false) };
+    /// The node bound [`test_section`] was last asked about.
+    static SECTION_NODE: Cell<usize> = const { Cell::new(0) };
+    /// Whether [`test_section`] is running an operation now.
+    static IN_SECTION: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A host's section, as the kernel's: refuse before running anything, or run
+/// the operation inside.
+fn test_section(node: usize, run: &mut dyn FnMut()) -> Result<(), AllocError> {
+    SECTION_NODE.with(|seen| seen.set(node));
+    if SECTION_REFUSES.with(Cell::get) {
+        return Err(AllocError);
+    }
+    IN_SECTION.with(|inside| inside.set(true));
+    run();
+    IN_SECTION.with(|inside| inside.set(false));
+    Ok(())
+}
+
+#[test]
+fn a_library_map_insert_runs_in_the_hosts_section_or_not_at_all() {
+    let _ = set_section(test_section);
+    assert!(
+        !set_section(test_section),
+        "only the first section is installed"
+    );
+    let mut map = BTreeMap::new();
+    assert_eq!(try_map_insert(&mut map, 1u64, 2u32), Ok(None));
+    assert_eq!(SECTION_NODE.with(Cell::get), map_node_bound::<u64, u32>());
+    assert_eq!(in_section(8, || IN_SECTION.with(Cell::get)), Ok(true));
+
+    SECTION_REFUSES.with(|refuses| refuses.set(true));
+    assert_eq!(try_map_insert(&mut map, 3, 4), Err(AllocError));
+    assert_eq!(try_map_entry(&mut map, 3, || 4).err(), Some(AllocError));
+    let mut set = BTreeSet::new();
+    assert_eq!(try_set_insert(&mut set, 1u64), Err(AllocError));
+    assert!(set.is_empty());
+    assert_eq!(map.len(), 1, "a refused insert leaves the map as it was");
+    SECTION_REFUSES.with(|refuses| refuses.set(false));
+
+    *try_map_entry(&mut map, 5, || 6).unwrap() += 1;
+    assert_eq!(map.get(&5), Some(&7));
+    assert_eq!(try_set_insert(&mut set, 1), Ok(true));
+
+    // The injection policy is asked first, and the section never entered.
+    fn policy() -> bool {
+        INJECT.with(Cell::get)
+    }
+    let _ = set_injector(policy);
+    arm(true);
+    INJECT.with(|on| on.set(true));
+    SECTION_NODE.with(|seen| seen.set(0));
+    let injected = try_map_insert(&mut map, 9, 9);
+    INJECT.with(|on| on.set(false));
+    assert_eq!(injected, Err(AllocError));
+    assert_eq!(
+        SECTION_NODE.with(Cell::get),
+        0,
+        "the section was not entered"
+    );
+    assert_eq!(map.len(), 2);
+}

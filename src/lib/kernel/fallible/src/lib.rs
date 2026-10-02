@@ -24,7 +24,10 @@
 //! and [`btree_node_bound`] bounds the nodes a map insert makes. The tests in
 //! `tests.rs` measure both with a recording allocator, so a toolchain whose
 //! `alloc` did something else would fail here rather than in a machine that
-//! had run out of memory.
+//! had run out of memory. A library crate that cannot name the kernel -- the
+//! btrfs writer -- reaches the same reserve through [`in_section`] and
+//! [`try_map_insert`], which run one map insert in the section the kernel
+//! installs at boot with [`set_section`].
 //!
 //! # Failure injection
 //!
@@ -39,7 +42,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::Layout;
@@ -485,6 +488,116 @@ impl fmt::Write for Growing {
     fn write_str(&mut self, piece: &str) -> fmt::Result {
         try_push_str(&mut self.string, piece).map_err(|_| fmt::Error)
     }
+}
+
+// ---------------------------------------------------------------------------
+// The ordered maps, for a crate that cannot reach the kernel's reserve
+// ---------------------------------------------------------------------------
+
+/// How a host runs one ordered-map operation so that it cannot stop the
+/// machine: `run` makes the allocations of one `BTreeMap` or `BTreeSet`
+/// insert, each a node of at most `node` bytes ([`btree_node_bound`]), and
+/// nothing else. The host either runs it where those allocations cannot
+/// fail and answers `Ok`, or does not run it and answers [`AllocError`].
+///
+/// The kernel's is a reserved section (`src/kernel/src/fallible.rs`): it fills
+/// this processor's reserve first, which is where failure is reported, and
+/// serves the insert from the reserve if the heap refuses.
+pub type Section = fn(node: usize, run: &mut dyn FnMut()) -> Result<(), AllocError>;
+
+/// The host's [`Section`], installed once at boot.
+static SECTION: Once<Section> = Once::new();
+
+/// Install the host's [`Section`]. Only the first call has an effect, and it
+/// says so by returning `true`.
+///
+/// Until one is installed -- on the host, in tests -- an operation passed to
+/// [`in_section`] runs as it is: only the injection policy can fail it, and a
+/// heap that refuses one of its nodes calls the allocation error handler as
+/// any `BTreeMap` insert does.
+pub fn set_section(section: Section) -> bool {
+    let mut installed = false;
+    let _ = SECTION.call_once(|| {
+        installed = true;
+        section
+    });
+    installed
+}
+
+/// Run `op`, one insert into an ordered map whose nodes are at most `node`
+/// bytes, inside the host's [`Section`].
+///
+/// For a library crate: the kernel's reserve is not its to enter, and this
+/// is how it gets there. `op` must allocate nothing but the map's nodes --
+/// a value to be inserted is made before, fallibly -- and wait for nothing:
+/// the kernel runs it with interrupts masked.
+///
+/// # Errors
+///
+/// [`AllocError`] when the injection policy says so or the section cannot
+/// be entered. `op` has not run, and what it owned is dropped.
+pub fn in_section<R>(node: usize, op: impl FnOnce() -> R) -> Result<R, AllocError> {
+    check()?;
+    let Some(section) = SECTION.get() else {
+        return Ok(op());
+    };
+    let mut op = Some(op);
+    let mut out = None;
+    section(node, &mut || {
+        if let Some(op) = op.take() {
+            out = Some(op());
+        }
+    })?;
+    out.ok_or(AllocError)
+}
+
+/// [`btree_node_bound`] for a `BTreeMap<K, V>`.
+#[must_use]
+pub const fn map_node_bound<K, V>() -> usize {
+    let align = if align_of::<K>() > align_of::<V>() {
+        align_of::<K>()
+    } else {
+        align_of::<V>()
+    };
+    btree_node_bound(size_of::<K>(), size_of::<V>(), align)
+}
+
+/// `map.insert(key, value)`, inside the host's [`Section`].
+///
+/// # Errors
+///
+/// As [`in_section`]; `key` and `value` are dropped and `map` is unchanged.
+pub fn try_map_insert<K: Ord, V>(
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    value: V,
+) -> Result<Option<V>, AllocError> {
+    in_section(map_node_bound::<K, V>(), || map.insert(key, value))
+}
+
+/// `map.entry(key).or_insert_with(make)`, inside the host's [`Section`].
+/// `make` runs inside it too, so it must allocate nothing.
+///
+/// # Errors
+///
+/// As [`in_section`]; `map` is unchanged.
+pub fn try_map_entry<K: Ord, V>(
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    make: impl FnOnce() -> V,
+) -> Result<&mut V, AllocError> {
+    in_section(map_node_bound::<K, V>(), || {
+        map.entry(key).or_insert_with(make)
+    })
+}
+
+/// `set.insert(value)`, inside the host's [`Section`].
+///
+/// # Errors
+///
+/// As [`in_section`]; `value` is dropped and `set` is unchanged.
+pub fn try_set_insert<T: Ord>(set: &mut BTreeSet<T>, value: T) -> Result<bool, AllocError> {
+    in_section(map_node_bound::<T, ()>(), || set.insert(value))
 }
 
 // ---------------------------------------------------------------------------

@@ -1321,6 +1321,7 @@ fn bring_up_memory(view: &BootView<'_>) -> mm::Stats {
             "no memory for the boot processor's allocation reserve"
         );
     }
+    fallible::install_library_sections();
     report_memory(&stats);
     console::screen::start(view);
     stats
