@@ -77,6 +77,9 @@ pub(super) fn check_programs() {
     // the root, whose context the check's process is made in.
     check_semaphores();
 
+    // System V shared memory, the same way, beside them.
+    check_shared_memory();
+
     // The filter the core's entries ask first about every call, driven through
     // each entry with frames of the check's own.
     check_seccomp();
@@ -237,6 +240,25 @@ pub(super) fn check_semaphores() {
          from another job once its maker had ended; a job refused ENOSPC at {} sets while a \
          sibling made one",
         checked.calls, checked.refusals, checked.waits, checked.per_job,
+    );
+}
+
+/// System V shared memory: keys, the layouts, who may attach, `IPC_RMID`
+/// deferred to the last detach, and the per-job bound.
+pub(super) fn check_shared_memory() {
+    let checked = match syscall::shm_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE7_SHARED_MEMORY,
+            "System V shared memory self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  shm      {} shared memory calls answered as Linux answers them, {} of them refusals; \
+         a removed segment kept, SHM_DEST, until its last detach and then gone; root attached \
+         a stranger's mode-0600 segment; a job refused ENOSPC at {} segments while a sibling \
+         made one",
+        checked.calls, checked.refusals, checked.per_job,
     );
 }
 
@@ -1025,7 +1047,7 @@ pub(super) fn check_kernel_memory() {
     println!(
         "  kmem     at a {} KiB memory limit a job made {} files, {} pipes, {} socket pairs, \
          {} descriptors in flight, {} epoll registrations, {} eventfds, {} regions of one \
-         mapping, {} record locks, {} semaphore sets, {} mount namespaces of {} mounts, {} user, {} UTS, {} IPC, {} cgroup and {} pid namespaces, {} pid numbers and {} namespace files, and \
+         mapping, {} record locks, {} semaphore sets, {} shared memory segments, {} mount namespaces of {} mounts, {} user, {} UTS, {} IPC, {} cgroup and {} pid namespaces, {} pid numbers and {} namespace files, and \
          was refused one more of each -- \
          ENOMEM, ENOLCK for a lock -- while a sibling made one; every byte of heap charged \
          came back",
@@ -1039,6 +1061,7 @@ pub(super) fn check_kernel_memory() {
         2 * report.regions + 1,
         report.locks,
         report.sets,
+        report.segments,
         report.namespaces,
         fs::kmem_check::TREE,
         report.user_namespaces,

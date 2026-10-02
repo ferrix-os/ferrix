@@ -247,7 +247,9 @@ package FerrixObjects {
              * test-shell), a Rust program's threads (test-threads) and rustc
              * compiling hello.rs (test-rustc). The boot test puts every number in 0..=600
              * through dispatch. Still ENOSYS, each named at its arm: swap,
-             * modules, System V IPC, acct, vhangup and rseq. */
+             * modules, System V message queues, acct, vhangup and rseq.
+             * System V semaphores (syscall/sem.rs) and shared memory
+             * (syscall/shm.rs) are answered, per IPC namespace. */
         attribute groups : SyscallGroup[1..*];
         #implemented action syscallEntry {
             doc /* The assembly trampoline; then Rust. Stage 6's, and it fills
@@ -301,7 +303,9 @@ package FerrixObjects {
              * console a terminal with a line discipline since stage 7
              * (fs/terminal.rs) and pseudo-terminals stage 18's (fs/pty.rs),
              * and every call job control is made of has been answered since
-             * stage 7; zinc uses them. System V IPC is ENOSYS. */
+             * stage 7; zinc uses them. System V semaphores and shared
+             * memory are answered (syscall/sem.rs, syscall/shm.rs, for
+             * Steam); its message queues are ENOSYS. */
     }
 
     // -----------------------------------------------------------------------

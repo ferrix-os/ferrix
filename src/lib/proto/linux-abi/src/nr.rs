@@ -2054,6 +2054,17 @@ pub mod i386 {
     /// Operate on System V semaphores with a 64-bit `timespec` timeout. i386
     /// has no direct `semop` or 32-bit `semtimedop`; those go through [`IPC`].
     pub const SEMTIMEDOP_TIME64: usize = 420;
+    /// Create or look up a System V shared memory segment, directly: the
+    /// number Linux 5.1 gave i386.
+    pub const SHMGET: usize = 395;
+    /// Query or control a System V shared memory segment, directly. The
+    /// `cmd` carries `IPC_64` as it does through [`IPC`].
+    pub const SHMCTL: usize = 396;
+    /// Attach a System V shared memory segment, directly; the address is the
+    /// answer, where [`IPC`]'s `SHMAT` stores it through a pointer.
+    pub const SHMAT: usize = 397;
+    /// Detach a System V shared memory segment, directly.
+    pub const SHMDT: usize = 398;
     /// Report the blocked signals that are pending.
     pub const RT_SIGPENDING: usize = 176;
     /// Sleep until a signal arrives.
@@ -4172,6 +4183,10 @@ fn i386_recent(nr: usize) -> Option<Syscall> {
         i386::SEMGET => Syscall::Semget,
         i386::SEMCTL => Syscall::Semctl,
         i386::SEMTIMEDOP_TIME64 => Syscall::SemtimedopTime64,
+        i386::SHMGET => Syscall::Shmget,
+        i386::SHMCTL => Syscall::Shmctl,
+        i386::SHMAT => Syscall::Shmat,
+        i386::SHMDT => Syscall::Shmdt,
         i386::PIDFD_OPEN => Syscall::PidfdOpen,
         i386::OPENAT2 => Syscall::Openat2,
         i386::FACCESSAT2 => Syscall::Faccessat2,

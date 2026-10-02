@@ -249,6 +249,8 @@
         "syscall/registry.rs",
         "syscall/sem.rs",
         "syscall/sem_check.rs",
+        "syscall/shm.rs",
+        "syscall/shm_check.rs",
         "syscall/seccomp.rs",
         "syscall/seccomp_check.rs",
         "syscall/signal.rs",

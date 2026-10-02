@@ -85,6 +85,8 @@ pub(crate) mod seccomp;
 pub(crate) mod seccomp_check;
 pub(crate) mod sem;
 pub(crate) mod sem_check;
+pub(crate) mod shm;
+pub(crate) mod shm_check;
 pub(crate) mod signal;
 pub(crate) mod signalfd;
 pub(crate) mod sigpage;

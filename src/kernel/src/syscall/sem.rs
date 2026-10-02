@@ -241,28 +241,28 @@ impl Caller {
 
 /// A set's `ipc_perm`, less its key and sequence number, which never change.
 #[derive(Debug, Clone, Copy)]
-struct Perm {
+pub(crate) struct Perm {
     /// The owner.
-    uid: u32,
+    pub(crate) uid: u32,
     /// The owner's group.
-    gid: u32,
+    pub(crate) gid: u32,
     /// The creator.
-    cuid: u32,
+    pub(crate) cuid: u32,
     /// The creator's group.
-    cgid: u32,
+    pub(crate) cgid: u32,
     /// The nine permission bits.
-    mode: u32,
+    pub(crate) mode: u32,
 }
 
 /// Read permission, in a class's three bits.
-const READ: u32 = 4;
+pub(crate) const READ: u32 = 4;
 /// Alter permission: Linux's `S_IWUGO` for a semaphore.
 const ALTER: u32 = 2;
 
 impl Perm {
     /// Linux's `ipcperms`: whether `caller` has every bit of `wanted` in the
     /// class it falls in, owner, group or other; root always has.
-    fn allows(&self, caller: &Caller, wanted: u32) -> bool {
+    pub(crate) fn allows(&self, caller: &Caller, wanted: u32) -> bool {
         let granted = if caller.uid == self.uid || caller.uid == self.cuid {
             self.mode >> 6
         } else if caller.in_group(self.gid) || caller.in_group(self.cgid) {
@@ -275,7 +275,7 @@ impl Perm {
 
     /// Linux's `ipcctl_obtain_check`: whether `caller` may change or remove
     /// the set -- its owner or creator, or root.
-    fn owned_by(&self, caller: &Caller) -> bool {
+    pub(crate) fn owned_by(&self, caller: &Caller) -> bool {
         caller.uid == self.uid || caller.uid == self.cuid || caller.privileged
     }
 }
@@ -415,6 +415,8 @@ pub(crate) struct IpcNamespace {
     owner: Arc<UserNamespace>,
     /// Its sets.
     table: SpinLock<Table>,
+    /// Its shared memory segments (`syscall::shm`).
+    pub(crate) shm: SpinLock<crate::syscall::shm::Table>,
     /// The kernel heap this is, charged to the job that made it (F-37).
     _charge: Option<Charge>,
 }
@@ -431,6 +433,7 @@ pub(crate) fn initial_ipc() -> &'static Arc<IpcNamespace> {
                 sets: 0,
                 sems: 0,
             }),
+            shm: SpinLock::new(crate::syscall::shm::Table::new()),
             _charge: None,
         })
     })
@@ -462,6 +465,7 @@ impl IpcNamespace {
                 sets: 0,
                 sems: 0,
             }),
+            shm: SpinLock::new(crate::syscall::shm::Table::new()),
             _charge: Some(charge),
         })
         .map_err(|_| Errno::ENOMEM)
@@ -526,7 +530,7 @@ impl Default for UndoList {
 }
 
 /// Seconds of real time, for `sem_otime` and `sem_ctime`.
-fn now_seconds() -> i64 {
+pub(crate) fn now_seconds() -> i64 {
     i64::try_from(time::realtime_nanos() / 1_000_000_000).unwrap_or(i64::MAX)
 }
 
@@ -1262,9 +1266,33 @@ fn set_perm(
     id: i32,
     arg: u64,
 ) -> Result<usize, Errno> {
-    // Only the `ipc64_perm`'s uid, gid and mode are read, as Linux reads
-    // them: the first 24 bytes, the same at every width.
     let _ = layout;
+    let (uid, gid, mode) = read_perm(memory, arg)?;
+    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
+    let mut state = set.state.lock();
+    if state.removed {
+        return Err(Errno::EIDRM);
+    }
+    if !state.perm.owned_by(caller) {
+        return Err(Errno::EPERM);
+    }
+    state.perm.uid = uid;
+    state.perm.gid = gid;
+    state.perm.mode = mode;
+    state.ctime = now_seconds();
+    Ok(0)
+}
+
+/// The owner, group and nine mode bits `IPC_SET` reads from the caller's
+/// `*id64_ds` at `arg`, as kernel ids. Only the `ipc64_perm`'s uid, gid and
+/// mode are read, as Linux reads them: the first 24 bytes, the same at every
+/// width and for every kind of IPC object.
+///
+/// # Errors
+///
+/// `EFAULT` for memory that cannot be read; `EINVAL` for an id the caller's
+/// user namespace does not map.
+pub(crate) fn read_perm(memory: &dyn Memory, arg: u64) -> Result<(u32, u32, u32), Errno> {
     let mut perm = [0_u8; 24];
     memory.read(arg, &mut perm)?;
     let word = |at: usize| {
@@ -1285,20 +1313,7 @@ fn set_perm(
         None => (word(4), word(8)),
     };
     // A 16-bit mode's high half is padding a caller need not clear.
-    let mode = word(20) & 0o777;
-    let set = lookup(&caller.ns, id).ok_or(Errno::EINVAL)?;
-    let mut state = set.state.lock();
-    if state.removed {
-        return Err(Errno::EIDRM);
-    }
-    if !state.perm.owned_by(caller) {
-        return Err(Errno::EPERM);
-    }
-    state.perm.uid = uid;
-    state.perm.gid = gid;
-    state.perm.mode = mode;
-    state.ctime = now_seconds();
-    Ok(0)
+    Ok((uid, gid, word(20) & 0o777))
 }
 
 /// `IPC_RMID`: take the set out, and tell everyone waiting on it `EIDRM`.
@@ -1619,10 +1634,10 @@ fn sys_semctl(
 }
 
 /// i386's `ipc(call, first, second, third, ptr, fifth)` for the semaphore
-/// operations, as Linux's `compat_ksys_ipc` unpacks them; the message queue
-/// and shared memory ones are `ENOSYS`, as before. The call's upper half is
-/// its `IPC_64` version, which only the older message and shared-memory
-/// operations read; masked off here.
+/// operations, as Linux's `compat_ksys_ipc` unpacks them, and for the shared
+/// memory ones through `shm::sys_ipc`; the message queue ones are `ENOSYS`,
+/// as before. The call's upper half is its `IPC_64` version, which only the
+/// older message and shared-memory operations read; masked off here.
 fn sys_ipc(process: &Process, abi: Abi, a: &[u64; 6]) -> Result<usize, Errno> {
     let [call, first, second, third, ptr, fifth] = *a;
     let operation = call as u32 & 0xFFFF;
@@ -1656,7 +1671,7 @@ fn sys_ipc(process: &Process, abi: Abi, a: &[u64; 6]) -> Result<usize, Errno> {
                 u64::from(arg),
             )
         }
-        _ => Err(Errno::ENOSYS),
+        _ => crate::syscall::shm::sys_ipc(process, abi, a).unwrap_or(Err(Errno::ENOSYS)),
     }
 }
 

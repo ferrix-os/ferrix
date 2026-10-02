@@ -2284,6 +2284,32 @@ pub(crate) static STAGE7_SEMAPHORES: Explanation = Explanation {
           src/kernel/src/syscall/process.rs Process::release",
 };
 
+/// For `check_shared_memory` in `stages_check.rs`, when
+/// `syscall::shm_check::run` fails.
+pub(crate) static STAGE7_SHARED_MEMORY: Explanation = Explanation {
+    code: "FX-0703",
+    title: "System V shared memory failed its self-check",
+    meaning: "`syscall::shm_check::run` makes shared memory segments through the functions \
+              `shmget`, `shmat` and `shmctl` reach. A key must find its segment, and IPC_EXCL, a \
+              missing key, a size of zero, past SHMMAX or past the segment's, and a stranger's \
+              access to a segment of mode 0600 are refused as Linux refuses them. IPC_STAT must \
+              put the mode, shm_segsz, shm_cpid and shm_nattch where the UAPI headers do in the \
+              32-bit, x86-64 and generic layouts, and IPC_INFO and SHM_INFO must report the \
+              limits and the use. An attach must be refused without the mode's permission and \
+              allowed to root over a stranger's mode-0600 segment. IPC_RMID while attached must \
+              free the key and keep the segment, SHM_DEST, until its last detach, and then take \
+              it out. A job must be refused ENOSPC at its per-job bound while a sibling makes \
+              one, and every segment the check made must be gone with its charge.",
+    causes: &[
+        "`attach` checks the permission after it counts the attach, or not at all.",
+        "`Attachment::drop` does not take a removed segment out, or `remove` takes out one \
+         still attached.",
+        "`encode_shmid` writes a field at an offset another layout uses.",
+        "`create` counts the segments of every job, or of none, against the per-job bound.",
+    ],
+    see: "src/kernel/src/syscall/shm_check.rs; src/kernel/src/syscall/shm.rs",
+};
+
 /// For `check_eventfd` in `stages_check.rs`, when the eventfd check fails.
 pub(crate) static STAGE8_EVENTFD: Explanation = Explanation {
     code: "FX-0882",
@@ -2757,6 +2783,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,
     &STAGE7_SEMAPHORES,
+    &STAGE7_SHARED_MEMORY,
     &STAGE8_ROOT,
     &STAGE8_FILESYSTEM,
     &CONSOLE_DESCRIPTORS,

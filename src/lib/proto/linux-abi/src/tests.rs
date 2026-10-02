@@ -3298,7 +3298,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 239] = [
+const I386_NUMBERS: [(usize, usize, usize); 243] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3492,6 +3492,10 @@ const I386_NUMBERS: [(usize, usize, usize); 239] = [
     (i386::SEMGET, 393, arm::SEMGET),
     (i386::SEMCTL, 394, arm::SEMCTL),
     (i386::SEMTIMEDOP_TIME64, 420, arm::SEMTIMEDOP_TIME64),
+    (i386::SHMGET, 395, arm::SHMGET),
+    (i386::SHMCTL, 396, arm::SHMCTL),
+    (i386::SHMAT, 397, arm::SHMAT),
+    (i386::SHMDT, 398, arm::SHMDT),
     (i386::RT_SIGPENDING, 176, arm::RT_SIGPENDING),
     (i386::PAUSE, 29, arm::PAUSE),
     (i386::PIDFD_OPEN, 434, arm::PIDFD_OPEN),

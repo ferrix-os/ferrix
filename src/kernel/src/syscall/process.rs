@@ -1109,6 +1109,13 @@ impl Process {
         // the ending left them, as Linux's `exit_sem` runs before
         // `exit_notify`. Spin locks and wakes only; see `sem::exit`.
         sem::exit(&self.sem_undo, self.pid());
+        // Its System V shared memory attaches are let go now too, as Linux's
+        // `exit_mm` lets them go before `exit_notify`: a parent's `wait4`
+        // sees the attach count without them, and a removed segment goes
+        // with its last attach rather than when this process is reaped. No
+        // other process shares the space: `clone` refuses `CLONE_VM` without
+        // `CLONE_THREAD`, and `vfork` copies.
+        crate::syscall::shm::exit(self.space());
         // Nothing of it can run any more, so it leaves its job's count: a job
         // is empty once its last member gets here, not once that member is
         // reaped, which is what `cgroup.events` says on Linux too.

@@ -73,7 +73,7 @@ fn protection(prot: u32) -> Result<VmaFlags, Errno> {
 }
 
 /// Everything an address space can refuse, as the program sees it.
-fn refused(error: SpaceError) -> Errno {
+pub(crate) fn refused(error: SpaceError) -> Errno {
     match error {
         SpaceError::OutOfMemory | SpaceError::Backing(_) => Errno::ENOMEM,
         SpaceError::Unreadable(_) => Errno::EIO,

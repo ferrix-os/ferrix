@@ -60,6 +60,8 @@ pub(crate) struct Report {
     pub(crate) locks: usize,
     /// System V semaphore sets of one semaphore each.
     pub(crate) sets: usize,
+    /// System V shared memory segments of one page each.
+    pub(crate) segments: usize,
     /// Mount namespaces, each a copy of one holding [`TREE`] mounts, as
     /// `unshare(CLONE_NEWNS)` copies them (`docs/NAMESPACES.md` §5).
     pub(crate) namespaces: usize,
@@ -110,6 +112,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         report.locks = locks(&tree)?;
         report.sets = kind(&tree, "semaphore sets", |_| {
             crate::syscall::sem_check::private_set(1, 0o600)
+        })?;
+        report.segments = kind(&tree, "shared memory segments", |_| {
+            crate::syscall::shm_check::private_segment(PAGE_SIZE, 0o600)
         })?;
         report.namespaces = namespaces(&tree)?;
         report.user_namespaces = user_namespaces(&tree)?;

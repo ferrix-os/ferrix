@@ -56,6 +56,7 @@ Causes are listed most likely first.
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
 | [FX-0702](#fx-0702) | System V semaphores failed their self-check |
+| [FX-0703](#fx-0703) | System V shared memory failed its self-check |
 | [FX-0801](#fx-0801) | the root filesystem could not be built |
 | [FX-0802](#fx-0802) | the root filesystem failed its self-check |
 | [FX-0810](#fx-0810) | a new process could not be given the console as descriptors 0, 1 and 2 |
@@ -1088,6 +1089,32 @@ while a sibling makes one, and every set the check made must be gone.
 
 See: src/kernel/src/syscall/sem_check.rs; src/kernel/src/syscall/sem.rs;
 src/kernel/src/syscall/process.rs Process::release.
+
+<a id="fx-0703"></a>
+
+## FX-0703 — System V shared memory failed its self-check
+
+`syscall::shm_check::run` makes shared memory segments through the functions
+`shmget`, `shmat` and `shmctl` reach. A key must find its segment, and IPC_EXCL,
+a missing key, a size of zero, past SHMMAX or past the segment's, and a
+stranger's access to a segment of mode 0600 are refused as Linux refuses them.
+IPC_STAT must put the mode, shm_segsz, shm_cpid and shm_nattch where the UAPI
+headers do in the 32-bit, x86-64 and generic layouts, and IPC_INFO and SHM_INFO
+must report the limits and the use. An attach must be refused without the mode's
+permission and allowed to root over a stranger's mode-0600 segment. IPC_RMID
+while attached must free the key and keep the segment, SHM_DEST, until its last
+detach, and then take it out. A job must be refused ENOSPC at its per-job bound
+while a sibling makes one, and every segment the check made must be gone with
+its charge.
+
+1. `attach` checks the permission after it counts the attach, or not at all.
+2. `Attachment::drop` does not take a removed segment out, or `remove` takes out
+   one still attached.
+3. `encode_shmid` writes a field at an offset another layout uses.
+4. `create` counts the segments of every job, or of none, against the per-job
+   bound.
+
+See: src/kernel/src/syscall/shm_check.rs; src/kernel/src/syscall/shm.rs.
 
 <a id="fx-0801"></a>
 
