@@ -24,9 +24,17 @@ pub(crate) struct Slot {
     pub(crate) width: u32,
     /// Its size in pixels.
     pub(crate) height: u32,
+    /// Its `wl_shm` format: [`ARGB8888`] or [`XRGB8888`].
+    pub(crate) format: u32,
     /// Committed and not yet released.
     pub(crate) busy: bool,
 }
+
+/// `wl_shm`'s `ARGB8888`: B, G, R and premultiplied alpha in memory.
+pub(crate) const ARGB8888: u32 = 0;
+
+/// `wl_shm`'s `XRGB8888`: B, G, R and a byte that means nothing.
+pub(crate) const XRGB8888: u32 = 1;
 
 /// Copy premultiplied RGBA (tiny-skia's order) into premultiplied `ARGB8888`
 /// as `wl_shm` lays it out on a little-endian machine: B, G, R, A.

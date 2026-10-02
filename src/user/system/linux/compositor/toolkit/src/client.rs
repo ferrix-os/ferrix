@@ -1017,7 +1017,7 @@ impl Client {
             };
             paint(&mut pixmap);
         }
-        let at = self.free_slot(surface, pixel_width, pixel_height, len)?;
+        let at = self.free_slot(surface, pixel_width, pixel_height, len, buffer::ARGB8888)?;
         let Some(state) = self.surfaces.get_mut(&surface) else {
             return Ok(false);
         };
@@ -1025,9 +1025,81 @@ impl Client {
             return Ok(false);
         };
         buffer::swizzle_into(&scratch, slot.shared.bytes_mut());
+        state.scratch = scratch;
+        self.commit_slot(surface, at, (pixel_width, pixel_height), scale, &[])
+    }
+
+    /// Hand the compositor a frame of a size of the program's own, as
+    /// [`Client::draw_sized`] does, written by `fill` straight into the
+    /// `wl_shm` buffer: rows of `width` pixels, each four bytes in memory
+    /// order B, G, R and alpha -- an X `ZPixmap` at 32 bits per pixel --
+    /// with no painter and no copy in between. An `opaque` frame's alpha
+    /// bytes are ignored (`XRGB8888`); otherwise they are premultiplied
+    /// alpha (`ARGB8888`).
+    ///
+    /// `fill` must write the whole buffer, which holds whatever an earlier
+    /// frame left there. It answers `None` when it did not, and the frame
+    /// is not committed; otherwise what changed since the frame before, in
+    /// buffer pixels as `(x, y, width, height)`, and empty for all of it:
+    /// the compositor need only take those parts up again.
+    ///
+    /// # Errors
+    ///
+    /// Shared memory that cannot be made.
+    pub fn draw_pixels(
+        &mut self,
+        surface: SurfaceId,
+        (width, height): (u32, u32),
+        opaque: bool,
+        fill: impl FnOnce(&mut [u8]) -> Option<Vec<(u32, u32, u32, u32)>>,
+    ) -> Result<bool, Error> {
+        if self
+            .surfaces
+            .get(&surface)
+            .is_none_or(|state| state.configured.is_none())
+        {
+            return Ok(false);
+        }
+        let Some(len) = buffer::length(width, height) else {
+            return Ok(false);
+        };
+        let format = if opaque {
+            buffer::XRGB8888
+        } else {
+            buffer::ARGB8888
+        };
+        let at = self.free_slot(surface, width, height, len, format)?;
+        let Some(slot) = self
+            .surfaces
+            .get_mut(&surface)
+            .and_then(|state| state.slots.get_mut(at))
+        else {
+            return Ok(false);
+        };
+        let Some(damage) = fill(slot.shared.bytes_mut()) else {
+            return Ok(false);
+        };
+        self.commit_slot(surface, at, (width, height), 1, &damage)
+    }
+
+    /// Attach the surface's buffer `at`, damage `damage` of it (all of it
+    /// when empty) and commit, at buffer scale `scale`.
+    fn commit_slot(
+        &mut self,
+        surface: SurfaceId,
+        at: usize,
+        (pixel_width, pixel_height): (u32, u32),
+        scale: u32,
+        damage: &[(u32, u32, u32, u32)],
+    ) -> Result<bool, Error> {
+        let Some(state) = self.surfaces.get_mut(&surface) else {
+            return Ok(false);
+        };
+        let Some(slot) = state.slots.get_mut(at) else {
+            return Ok(false);
+        };
         slot.busy = true;
         let buffer = slot.buffer;
-        state.scratch = scratch;
         let object = state.surface;
         let resend_scale = state.sent_scale != scale;
         state.sent_scale = scale;
@@ -1040,28 +1112,29 @@ impl Client {
             wl_surface::request::ATTACH,
             &[Arg::Object(buffer), Arg::Int(0), Arg::Int(0)],
         )?;
-        if version >= 4 {
-            self.send(
-                object,
-                wl_surface::request::DAMAGE_BUFFER,
-                &[
-                    Arg::Int(0),
-                    Arg::Int(0),
-                    int(pixel_width),
-                    int(pixel_height),
-                ],
-            )?;
-        } else {
-            self.send(
-                object,
-                wl_surface::request::DAMAGE,
-                &[
-                    Arg::Int(0),
-                    Arg::Int(0),
-                    int(pixel_width / scale),
-                    int(pixel_height / scale),
-                ],
-            )?;
+        let whole = [(0, 0, pixel_width, pixel_height)];
+        let rects = if damage.is_empty() { &whole[..] } else { damage };
+        for &(x, y, width, height) in rects {
+            if version >= 4 {
+                self.send(
+                    object,
+                    wl_surface::request::DAMAGE_BUFFER,
+                    &[int(x), int(y), int(width), int(height)],
+                )?;
+            } else {
+                // Surface coordinates: rounded outwards at the scale.
+                let scale = scale.max(1);
+                let (left, top) = (x / scale, y / scale);
+                let (right, bottom) = (
+                    x.saturating_add(width).div_ceil(scale),
+                    y.saturating_add(height).div_ceil(scale),
+                );
+                self.send(
+                    object,
+                    wl_surface::request::DAMAGE,
+                    &[int(left), int(top), int(right - left), int(bottom - top)],
+                )?;
+            }
         }
         self.send(object, wl_surface::request::COMMIT, &[])?;
         Ok(true)
@@ -1926,6 +1999,7 @@ impl Client {
         width: u32,
         height: u32,
         len: usize,
+        format: u32,
     ) -> Result<usize, Error> {
         let Some(state) = self.surfaces.get_mut(&surface) else {
             return Err(Error::Other("no such surface".to_owned()));
@@ -1933,7 +2007,9 @@ impl Client {
         let mut stale = Vec::new();
         let mut kept = Vec::new();
         for slot in state.slots.drain(..) {
-            if !slot.busy && (slot.width != width || slot.height != height) {
+            if !slot.busy
+                && (slot.width != width || slot.height != height || slot.format != format)
+            {
                 stale.push(slot);
             } else {
                 kept.push(slot);
@@ -1943,16 +2019,17 @@ impl Client {
         let found = state
             .slots
             .iter()
-            .position(|slot| !slot.busy && slot.width == width && slot.height == height);
+            .position(|slot| {
+                !slot.busy && slot.width == width && slot.height == height && slot.format == format
+            });
         for slot in stale {
             self.destroy_slot(slot);
         }
         if let Some(at) = found {
             return Ok(at);
         }
-        // ARGB8888 is wl_shm format 0.
         let (pool, buffer, shared) =
-            self.shm_buffer(width, height, len, 0, Role::SurfaceBuffer(surface))?;
+            self.shm_buffer(width, height, len, format, Role::SurfaceBuffer(surface))?;
         let Some(state) = self.surfaces.get_mut(&surface) else {
             return Err(Error::Other("no such surface".to_owned()));
         };
@@ -1962,6 +2039,7 @@ impl Client {
             buffer,
             width,
             height,
+            format,
             busy: false,
         });
         Ok(state.slots.len().saturating_sub(1))
