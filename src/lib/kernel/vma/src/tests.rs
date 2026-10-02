@@ -1990,3 +1990,192 @@ fn the_ceiling_moves_and_bounds_what_is_placed() {
     assert_eq!(space.set_high(LOW), Err(VmaError::ZeroLength));
     check(&space);
 }
+
+// -- Fault windows --------------------------------------------------------
+//
+// A window region is one region for its whole life (`Backing::Window`): no
+// operation splits, merges, moves or marks it, and the ones that would are
+// refused with nothing changed.
+
+/// A shared read-write window region's flags.
+const WINDOW_FLAGS: VmaFlags = VmaFlags {
+    shared: true,
+    ..VmaFlags::READ_WRITE
+};
+
+fn window(id: u64) -> Backing {
+    Backing::Window { id }
+}
+
+/// A space with a window at `0x1_0000..0x1_4000` between two anonymous
+/// regions that touch it on both sides.
+fn space_with_window() -> AddressSpace {
+    let mut space = space();
+    map(&mut space, 0xc000, 0x1_0000, VmaFlags::READ_WRITE);
+    assert_eq!(
+        space.insert(range(0x1_0000, 0x1_4000), WINDOW_FLAGS, window(9)),
+        Ok(())
+    );
+    map(&mut space, 0x1_4000, 0x1_8000, VmaFlags::READ_WRITE);
+    check(&space);
+    space
+}
+
+#[test]
+fn a_window_is_never_merged_with_its_neighbours() {
+    let neighboured = space_with_window();
+    assert_eq!(
+        extents(&neighboured),
+        vec![
+            (0xc000, 0x1_0000),
+            (0x1_0000, 0x1_4000),
+            (0x1_4000, 0x1_8000)
+        ]
+    );
+    // Not even with a second window of the same object right after it.
+    let mut twins = space();
+    twins
+        .insert(range(0x1_0000, 0x1_2000), WINDOW_FLAGS, window(9))
+        .unwrap();
+    twins
+        .insert(range(0x1_2000, 0x1_4000), WINDOW_FLAGS, window(9))
+        .unwrap();
+    check(&twins);
+    assert_eq!(twins.region_count(), 2);
+}
+
+#[test]
+fn a_window_must_be_shared_and_never_executable() {
+    let mut space = space();
+    let private = VmaFlags::READ_WRITE;
+    let executable = VmaFlags {
+        execute: true,
+        ..WINDOW_FLAGS
+    };
+    assert_eq!(
+        space.insert(range(0x1_0000, 0x1_4000), private, window(1)),
+        Err(VmaError::Window)
+    );
+    assert_eq!(
+        space.insert(range(0x1_0000, 0x1_4000), executable, window(1)),
+        Err(VmaError::Window)
+    );
+    assert_eq!(
+        space
+            .map_fixed(range(0x1_0000, 0x1_4000), executable, window(1))
+            .map(|_| ()),
+        Err(VmaError::Window)
+    );
+    assert_eq!(
+        space.insert_region(Vma {
+            range: range(0x1_0000, 0x1_4000),
+            flags: WINDOW_FLAGS,
+            backing: window(1),
+            cow: true,
+        }),
+        Err(VmaError::Window)
+    );
+    assert!(space.is_empty());
+}
+
+#[test]
+fn part_of_a_window_cannot_be_unmapped() {
+    let mut space = space_with_window();
+    let before = space.clone();
+    for (start, end) in [
+        (0x1_0000, 0x1_1000), // its first page
+        (0x1_3000, 0x1_4000), // its last page
+        (0x1_1000, 0x1_3000), // its middle
+        (0xc000, 0x1_2000),   // its neighbour and its front
+        (0x1_2000, 0x1_8000), // its back and its neighbour
+    ] {
+        assert_eq!(
+            space.remove(range(start, end)).map(|_| ()),
+            Err(VmaError::Window)
+        );
+        assert_eq!(
+            space.remove_quietly(range(start, end)),
+            Err(VmaError::Window)
+        );
+        assert_eq!(
+            space
+                .map_fixed(range(start, end), VmaFlags::READ_WRITE, anon(start))
+                .map(|_| ()),
+            Err(VmaError::Window)
+        );
+        assert_eq!(space, before, "a refused change changed the map");
+    }
+}
+
+#[test]
+fn a_whole_window_unmaps_as_one_region() {
+    let mut space = space_with_window();
+    let removed = space.remove(range(0xe000, 0x1_6000)).unwrap();
+    check(&space);
+    assert_eq!(
+        reported(&removed),
+        vec![
+            (0xe000, 0x1_0000),
+            (0x1_0000, 0x1_4000),
+            (0x1_4000, 0x1_6000)
+        ]
+    );
+    assert_eq!(removed.get(1).map(|gone| gone.backing), Some(window(9)));
+    assert_eq!(
+        extents(&space),
+        vec![(0xc000, 0xe000), (0x1_6000, 0x1_8000)]
+    );
+
+    // And a fixed mapping over exactly the window replaces it.
+    let mut space = space_with_window();
+    let replaced = space
+        .map_fixed(
+            range(0x1_0000, 0x1_4000),
+            VmaFlags::READ_WRITE,
+            anon(0x1_0000),
+        )
+        .unwrap();
+    check(&space);
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(replaced.first().map(|gone| gone.backing), Some(window(9)));
+    assert_eq!(
+        space.find(0x1_2000).map(|vma| vma.backing.is_window()),
+        Some(false)
+    );
+}
+
+#[test]
+fn no_protection_change_touches_a_window() {
+    let mut space = space_with_window();
+    let before = space.clone();
+    for (start, end) in [
+        (0x1_0000, 0x1_4000),
+        (0x1_1000, 0x1_2000),
+        (0xc000, 0x1_8000),
+    ] {
+        assert_eq!(
+            space.protect(range(start, end), VmaFlags::READ),
+            Err(VmaError::Window)
+        );
+        assert_eq!(space, before);
+    }
+    // Its neighbours still change.
+    space
+        .protect(range(0xc000, 0x1_0000), VmaFlags::READ)
+        .unwrap();
+    check(&space);
+}
+
+#[test]
+fn fork_shares_a_window_unmarked() {
+    let mut space = space_with_window();
+    let child = space.clone_for_fork().unwrap();
+    check(&space);
+    check(&child);
+    for side in [&space, &child] {
+        let region = side.find(0x1_2000).unwrap();
+        assert_eq!(region.backing, window(9));
+        assert_eq!(region.range, range(0x1_0000, 0x1_4000));
+        assert!(!region.cow, "a window was marked copy-on-write");
+    }
+}

@@ -107,6 +107,11 @@ pub enum VmaError {
     /// unmapping removed. Nothing was changed: the room is reserved before
     /// anything is touched.
     NoMemory,
+    /// The operation would change a fault window other than by taking it
+    /// out whole: cover part of one, change its permissions, or make one
+    /// executable or private. Nothing was changed. A window is one region
+    /// for its whole life ([`Backing::Window`]).
+    Window,
 }
 
 impl From<ferrix_fallible::AllocError> for VmaError {
@@ -126,6 +131,7 @@ impl fmt::Display for VmaError {
             VmaError::NotMapped => "part of the range is not mapped",
             VmaError::BackingOverflow => "the backing object would extend past its own end",
             VmaError::NoMemory => "there was no memory for the map to change",
+            VmaError::Window => "the range would change a fault window other than whole",
         };
         formatter.write_str(message)
     }
@@ -331,6 +337,24 @@ pub enum Backing {
         /// registers, as the device said it may be.
         cached: bool,
     },
+    /// A fault window: a range whose pages a server puts in and takes out
+    /// again, page by page, and whose faults the server answers.
+    ///
+    /// # One region for its whole life
+    ///
+    /// A window's pages are named by their offset from the window's start,
+    /// and the server, the kernel's window object and every address space
+    /// mapping it all agree on that. So a window region is never split,
+    /// merged, moved or made copy-on-write, and the operations that would do
+    /// one of those refuse with [`VmaError::Window`] instead: an unmap or a
+    /// fixed mapping that covers part of it, an `mprotect` that touches it.
+    /// Taken out whole, by an unmap or a fixed mapping covering all of it,
+    /// it goes like any region. It is always shared, so `fork` shares it,
+    /// and never executable.
+    Window {
+        /// Opaque to this crate: the kernel's name for the window object.
+        id: u64,
+    },
 }
 
 impl Backing {
@@ -361,7 +385,16 @@ impl Backing {
                 id,
                 cached,
             },
+            // Never reached: a window is never split, so nothing is ever cut
+            // from its front. Unchanged, so the match stays total.
+            Backing::Window { id } => Backing::Window { id },
         }
+    }
+
+    /// Whether this is a fault window's backing.
+    #[must_use]
+    pub const fn is_window(self) -> bool {
+        matches!(self, Backing::Window { .. })
     }
 }
 
@@ -473,7 +506,19 @@ fn validate_backing(backing: Backing, len: u64) -> Result<(), VmaError> {
         Backing::Anonymous { offset, .. } => validate_backing_base(offset, len),
         Backing::File { offset, .. } => validate_backing_base(offset, len),
         Backing::Device { physical, .. } => validate_backing_base(physical, len),
+        // A window's pages are named from its start, so there is no offset
+        // that could leave anything.
+        Backing::Window { .. } => Ok(()),
     }
+}
+
+/// A window region is shared and never executable: what [`Backing::Window`]
+/// promises, checked wherever a region is made.
+fn validate_window(flags: VmaFlags, backing: Backing) -> Result<(), VmaError> {
+    if backing.is_window() && (!flags.shared || flags.execute) {
+        return Err(VmaError::Window);
+    }
+    Ok(())
 }
 
 /// A backing offset has to be page-aligned for the same reason an address
@@ -509,7 +554,12 @@ fn fit_top_down(gap_start: u64, gap_end: u64, len: u64, align: u64) -> Option<u6
 /// physical home, so neither can be copied; everything else private and
 /// writable must be.
 fn needs_cow(region: &Vma) -> bool {
-    region.flags.write && !region.flags.shared && !matches!(region.backing, Backing::Device { .. })
+    region.flags.write
+        && !region.flags.shared
+        && !matches!(
+            region.backing,
+            Backing::Device { .. } | Backing::Window { .. }
+        )
 }
 
 /// Describes a region as an [`Unmapping`] of the sub-range `range`, whose
@@ -718,9 +768,10 @@ impl AddressSpace {
     /// # Errors
     ///
     /// [`VmaError::OutOfRange`] outside the window, [`VmaError::Overlap`] if
-    /// anything is mapped there, and [`VmaError::Misaligned`] or
+    /// anything is mapped there, [`VmaError::Misaligned`] or
     /// [`VmaError::BackingOverflow`] for a backing offset that cannot cover
-    /// the range. On any of them the map is unchanged.
+    /// the range, and [`VmaError::Window`] for a window region that is private
+    /// or executable. On any of them the map is unchanged.
     pub fn insert(
         &mut self,
         range: PageRange,
@@ -747,10 +798,15 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// As [`AddressSpace::insert`]. On any of them the map is unchanged.
+    /// As [`AddressSpace::insert`], and [`VmaError::Window`] for a window
+    /// region marked copy-on-write. On any of them the map is unchanged.
     pub fn insert_region(&mut self, region: Vma) -> Result<(), VmaError> {
         self.check_range(region.range)?;
         validate_backing(region.backing, region.range.bytes())?;
+        validate_window(region.flags, region.backing)?;
+        if region.backing.is_window() && region.cow {
+            return Err(VmaError::Window);
+        }
         if self.overlaps(region.range) {
             return Err(VmaError::Overlap);
         }
@@ -768,9 +824,11 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// [`VmaError::OutOfRange`] outside the window, and
+    /// [`VmaError::OutOfRange`] outside the window,
     /// [`VmaError::Misaligned`] or [`VmaError::BackingOverflow`] for an
-    /// unusable backing offset. In either case nothing has been changed.
+    /// unusable backing offset, and [`VmaError::Window`] if the range covers
+    /// part of a window region, or the new region is a private or executable
+    /// window. In any case nothing has been changed.
     pub fn map_fixed(
         &mut self,
         range: PageRange,
@@ -779,6 +837,8 @@ impl AddressSpace {
     ) -> Result<Vec<Unmapping>, VmaError> {
         self.check_range(range)?;
         validate_backing(backing, range.bytes())?;
+        validate_window(flags, backing)?;
+        self.refuse_partial_window(range)?;
         // A carve splits at most one region, and the new one goes in after.
         let mut unmapped = self.room_to_carve(range, 2)?;
         self.carve(range, &mut |removed| {
@@ -801,10 +861,12 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// [`VmaError::OutOfRange`] if the range leaves the window, in which case
-    /// nothing has been changed.
+    /// [`VmaError::OutOfRange`] if the range leaves the window, and
+    /// [`VmaError::Window`] if it covers part of a window region; in either
+    /// case nothing has been changed.
     pub fn remove(&mut self, range: PageRange) -> Result<Vec<Unmapping>, VmaError> {
         self.check_range(range)?;
+        self.refuse_partial_window(range)?;
         let mut unmapped = self.room_to_carve(range, 1)?;
         self.carve(range, &mut |removed| {
             let _ = ferrix_fallible::push_within(&mut unmapped, removed);
@@ -821,10 +883,12 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// [`VmaError::OutOfRange`], or [`VmaError::NoMemory`] when a split found
-    /// no room; in either case nothing has been changed.
+    /// [`VmaError::OutOfRange`], [`VmaError::Window`] as for
+    /// [`AddressSpace::remove`], or [`VmaError::NoMemory`] when a split found
+    /// no room; in any case nothing has been changed.
     pub fn remove_quietly(&mut self, range: PageRange) -> Result<(), VmaError> {
         self.check_range(range)?;
+        self.refuse_partial_window(range)?;
         // Only a range strictly inside one region splits it, and only that
         // needs room. The standard library's own reserve rather than the
         // injecting one: with the room there it allocates nothing, and a test
@@ -891,13 +955,17 @@ impl AddressSpace {
     ///
     /// # Errors
     ///
-    /// [`VmaError::OutOfRange`] outside the window, and [`VmaError::NotMapped`]
-    /// if any page of the range is unmapped. As in Linux the call is all or
-    /// nothing: on either error the map is unchanged.
+    /// [`VmaError::OutOfRange`] outside the window, [`VmaError::NotMapped`]
+    /// if any page of the range is unmapped, and [`VmaError::Window`] if any
+    /// page of it is a window's. As in Linux the call is all or nothing: on
+    /// any error the map is unchanged.
     pub fn protect(&mut self, range: PageRange, flags: VmaFlags) -> Result<(), VmaError> {
         self.check_range(range)?;
         if !self.is_fully_mapped(range) {
             return Err(VmaError::NotMapped);
+        }
+        if self.touches_window(range) {
+            return Err(VmaError::Window);
         }
         // Each edge may split one region.
         self.grow(2)?;
@@ -1039,6 +1107,11 @@ impl AddressSpace {
         if validate_backing(region.backing, region.range.bytes()).is_err() {
             return Err("region backing cannot cover the region");
         }
+        if validate_window(region.flags, region.backing).is_err()
+            || (region.backing.is_window() && region.cow)
+        {
+            return Err("window region is private, executable or copy-on-write");
+        }
         Ok(())
     }
 
@@ -1063,6 +1136,32 @@ impl AddressSpace {
         self.regions
             .get(index)
             .is_some_and(|region| region.range.start < range.end)
+    }
+
+    /// Whether any window region shares a page with `range`.
+    fn touches_window(&self, range: PageRange) -> bool {
+        let first = self.first_touching(range.start);
+        let last = self.first_beyond(range.end);
+        self.regions
+            .get(first..last)
+            .is_some_and(|span| span.iter().any(|region| region.backing.is_window()))
+    }
+
+    /// Refuses a carve of `range` that would cut a window region rather than
+    /// take it out whole: one that starts inside it or ends inside it.
+    fn refuse_partial_window(&self, range: PageRange) -> Result<(), VmaError> {
+        let first = self.first_touching(range.start);
+        let last = self.first_beyond(range.end);
+        let cut = self.regions.get(first..last).is_some_and(|span| {
+            span.iter().any(|region| {
+                region.backing.is_window()
+                    && (region.range.start < range.start || region.range.end > range.end)
+            })
+        });
+        if cut {
+            return Err(VmaError::Window);
+        }
+        Ok(())
     }
 
     /// Whether every page of `range` is mapped, with no hole anywhere in it.
