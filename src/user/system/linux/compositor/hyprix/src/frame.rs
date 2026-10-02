@@ -70,6 +70,12 @@ pub struct Output<'a> {
     /// How long drawing the counter took, which the drawing fills in: what
     /// the counter's "Rendertime (No Overlay)" takes away.
     pub overlay_took: Duration,
+    /// What the screen's buffer was given, in its own pixels, for the
+    /// flip, which the drawing fills in and leaves to the caller
+    /// ([`flip`]): the clients are told their frame is done before it, as
+    /// the flip waits for the host to show the frame and nothing a client
+    /// draws next depends on that.
+    pub flip: Option<Damage>,
 }
 
 /// A frame drawn on a GPU: the canvas, and what is kept behind the windows.
@@ -518,6 +524,7 @@ fn shown(target: &mut Output<'_>) -> Result<(), String> {
         gamma,
         present,
         transform,
+        flip,
         ..
     } = target;
     let transform = *transform;
@@ -587,7 +594,14 @@ fn shown(target: &mut Output<'_>) -> Result<(), String> {
     if let Some(gamma) = gamma {
         gamma.apply(backend.buffer(), stride, written);
     }
-    timed(Phase::Flip, || backend.present(written)).map_err(|error| error.to_string())
+    *flip = Some(written.clone());
+    Ok(())
+}
+
+/// Hand the screen's buffer to the card, `damage` of it changed: the flip
+/// [`shown`] left for after the clients' frame callbacks.
+pub(crate) fn flip(backend: &mut dyn Backend, damage: &Damage) -> Result<(), String> {
+    timed(Phase::Flip, || backend.present(damage)).map_err(|error| error.to_string())
 }
 
 /// Write `pixels`, the rows of `rect` of a turned monitor's frame as the GPU

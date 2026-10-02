@@ -167,6 +167,16 @@ impl Compositor<'_> {
             self.tally.drawn,
             refresh_ns(&self.screens),
         );
+        // And only now each screen's flip, which waits for the host to show
+        // the frame: on QEMU's GL display that is the window's next repaint,
+        // on VNC a read of the whole screen back. Clients told their frame
+        // was done before it draw their next one meanwhile; told after it,
+        // a video's frames missed one compositor frame in three.
+        for (which, damage) in std::mem::take(&mut drew.flips) {
+            if let Some(screen) = self.screens.get_mut(which) {
+                crate::frame::flip(screen.backend.as_mut(), &damage)?;
+            }
+        }
         self.count_frame(began.elapsed(), &drew);
         if self.tally.drawn == 1 {
             // The screens are up and the first frame is on them. This is
@@ -485,6 +495,7 @@ impl Compositor<'_> {
             present: frame.screen,
             overlay: picture.as_ref(),
             overlay_took: Duration::ZERO,
+            flip: None,
         };
         let result = if dark {
             crate::frame::draw_dark(&mut target, &frame.canvas)
@@ -504,6 +515,9 @@ impl Compositor<'_> {
             )
         };
         let overlay_took = target.overlay_took;
+        if let Some(damage) = target.flip.take() {
+            drew.flips.push((which, damage));
+        }
         if with.overlay_on {
             self.overlay
                 .rendered(&screen.name, screen_began.elapsed(), overlay_took);
@@ -641,4 +655,8 @@ struct Drew {
     /// Whether a screen is lost and not yet back: the next frame is
     /// owed so that it is looked for again.
     waiting: bool,
+    /// Each screen drawn and its flip, still to be made: after the
+    /// clients' frame callbacks, so a client draws its next frame while
+    /// the host shows this one.
+    flips: Vec<(usize, compositor_render::Damage)>,
 }
