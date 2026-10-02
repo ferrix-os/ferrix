@@ -140,13 +140,13 @@ fn starts(line: &str, want: &str) -> bool {
     line.contains(want)
 }
 
-/// `test-sem`, and `test-threads`, the other musl program booted as init,
-/// which shares its arm of `main`'s dispatch.
+/// `test-sem`, and `test-threads` and `test-shm`, the other musl programs
+/// booted as init, which share its arm of `main`'s dispatch.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
-    if command == "test-sem" {
-        test_sem(args)
-    } else {
-        crate::threads::test_threads(args)
+    match command {
+        "test-sem" => test_sem(args),
+        "test-shm" => crate::shm::test_shm(args),
+        _ => crate::threads::test_threads(args),
     }
 }
 

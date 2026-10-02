@@ -10,6 +10,7 @@
 //! cargo xtask test-vfs  --arch all --init PATH/{arch}/busybox [--timeout SECONDS]
 //! cargo xtask test-threads --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-sem --arch all [--i686] [--timeout SECONDS]
+//! cargo xtask test-shm --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-procfs --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-rustc [--accel kvm] [--memory M] [--timeout SECONDS]
 //! cargo xtask test-selfhost [--accel kvm] [--release] [--smp N] [--memory M] [--timeout SECONDS] [--plan DIR]
@@ -125,6 +126,7 @@ mod sem;
 mod serial;
 mod sha256;
 mod shell;
+mod shm;
 mod ssh;
 mod start_page;
 mod steam;
@@ -236,6 +238,9 @@ COMMANDS:
                   image runs a 32-bit x86 build of it)
     test-sem      Boot sem-test as init and require System V semaphores across forks: a SEM_UNDO mutex, undo at a kill,
                   EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)
+    test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
+                  attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
+                  ipc(117) and 395-398)
     test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
                   a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits (--i686: 32-bit x86)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
@@ -567,7 +572,7 @@ fn run() -> Result<()> {
         "bench-seam" => seam::bench_seam(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "test-install" => installer::test_install(&args),
-        "test-threads" | "test-sem" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
         "test-procfs" => procfs::test_procfs(&args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" => pkg::test_pkg(&args),
