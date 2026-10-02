@@ -2133,7 +2133,9 @@ Requirements L.iommu.56, L.iommu.57 and L.iommu.58.
 *Checked by the build:* stage 10's IOMMU check prints what the VT-d unit
 cleaned -- "26 entry writes and 10 fresh tables cleaned to memory on 1
 VT-d units that do not snoop, 16 publish points found none left
-uncleaned" on x86-64 under KVM -- and fails the boot (FX-1003) on any
+uncleaned" on x86-64 under TCG, 28 and 11 on one boot under KVM, the
+counts following the tables the boot's pins add -- and fails the boot
+(FX-1003) on any
 publish point that found a write not cleaned, or on a unit that does not
 snoop and cleaned nothing; test-boot requires the line on x86-64, where
 QEMU's unit reports `C` clear. Host tests in `ferrix-paging` show every
