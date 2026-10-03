@@ -66,6 +66,41 @@ restoring the working tree destroys work unless nothing unstaged is provably
 there. And judge a gate by its exit status and its output — never through
 `gate | tail && next`, whose status is `tail`'s.
 
+## Components live in repositories of their own
+
+ferrousli (with the programs ported onto it, in its `apps/`), zinc, the Pixel 7
+tools and the website are repositories of their own in the ferrix-os
+organization since 2026-10-03. `components.toml` names each one, the path it is
+checked out at -- the path it had in this tree -- and the commit this tree is
+gated with. Every `cargo xtask` command clones a missing component and moves a
+clean checkout that is behind its pin, so a new worktree needs no extra step;
+`cargo xtask components` shows where each one stands.
+
+A change to a component is two landings, in order:
+
+1. **In the component.** Work in its checkout inside your worktree: it is a
+   git repository of its own, with `origin` at ferrix-os/<name>. Commit there
+   (the authorship rule above applies, and its CI checks it), gate it from your
+   worktree as before -- xtask uses a checkout that is not at its pin as it
+   is -- and push its `main`.
+2. **In this tree.** `cargo xtask pin-components` writes the pushed commit to
+   `components.toml`; commit that, with whatever of this tree the change needs,
+   and land it as any other change. Until then nobody else builds with it.
+
+A change that spans this tree and a component lands the component first: a pin
+names only a commit its repository already has, and `pin-components` refuses
+any other. Never leave a component checkout at an unpushed commit in a landing.
+The website's images stay in `docs/brand/` here, because the README uses them;
+after changing them, run the website repository's Website workflow by hand.
+
+A branch from before the move still has the component's files in this tree.
+Rebase it onto `main` and move its commits to the component's paths into the
+component's repository (`git format-patch --relative=<path>`, then `git am` in
+the checkout). Checking out a commit from before the move and back again
+empties a component's checkout; xtask then stops and says so, and deleting the
+directory lets the next command clone it again. Gate slots drop their
+component checkouts before every checkout for that reason.
+
 ## Splitting one piece of work across several agents
 
 On 2026-09-24 one session split the init and stage 13's cgroups across five

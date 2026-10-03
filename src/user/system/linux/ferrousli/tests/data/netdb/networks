@@ -1,3 +1,0 @@
-# The networks file the tests read, in the ranges reserved for documentation.
-loopback	127
-test-net	192.0.2		documentation	example

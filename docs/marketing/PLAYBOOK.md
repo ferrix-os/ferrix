@@ -24,7 +24,7 @@ and documentation; it is not the product headline.
 
 - The website has a descriptive title and summary, canonical URL, social
   preview tags, structured data and an XML sitemap. GitHub Pages serves it at
-  <https://ferrix-os.github.io/ferrix/>.
+  <https://ferrix-os.github.io/>.
 - The repository has a homepage, description, focused topics, README,
   contribution guide, issue forms and Discussions. The live description and
   topics were refreshed on 2026-09-27; `tools/common/release/github-setup.sh`
@@ -72,7 +72,7 @@ recommends clear titles, useful content, crawlable pages and descriptive
 links. It says there is no way to guarantee a first-place ranking. The
 [sitemap guide](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
 calls for absolute canonical URLs; it does not promise indexing. The website
-already has a sitemap at <https://ferrix-os.github.io/ferrix/sitemap.xml>.
+already has a sitemap at <https://ferrix-os.github.io/sitemap.xml>.
 
 After deployment, add the GitHub Pages URL to Google Search Console and Bing
 Webmaster Tools, verify ownership and submit the sitemap. The owner must do

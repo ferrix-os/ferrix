@@ -61,6 +61,6 @@ for a technical claim. Avoid grand claims about changing computing or
 not a promise that every Linux program works. Mention the Claude-led build
 process when explaining the project, after explaining what Ferrix does.
 
-For a press mention, link to the [website](https://ferrix-os.github.io/ferrix/)
+For a press mention, link to the [website](https://ferrix-os.github.io/)
 and [source repository](https://github.com/ferrix-os/ferrix). Ferrix is MIT
 licensed; see [LICENSE](../../LICENSE) for the terms.

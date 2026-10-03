@@ -186,7 +186,8 @@ pub(crate) fn ensure() -> Result<()> {
     sync(&manifest()?)
 }
 
-/// `cargo xtask components` and `pin-components`.
+/// `cargo xtask components` and `pin-components`, each after [`ensure`] has
+/// brought every checkout it may move to its pin.
 ///
 /// # Errors
 ///
@@ -215,9 +216,9 @@ pub(crate) fn command(command: &str) -> Result<()> {
 fn describe(state: &State) -> String {
     match state {
         State::InTree => "in this tree".to_owned(),
-        State::Missing => "not checked out (any command clones it)".to_owned(),
+        State::Missing => "not checked out".to_owned(),
         State::AtPin => "at the pin".to_owned(),
-        State::Behind(head) => format!("behind the pin, at {} (any command moves it)", short(head)),
+        State::Behind(head) => format!("behind the pin, at {}", short(head)),
         State::Own { head, dirty } => format!(
             "at {}{}: somebody's work, used as it is",
             short(head),
@@ -245,11 +246,26 @@ pub(crate) fn state(component: &Component) -> Result<State> {
         return Ok(State::InTree);
     };
     let dir = checkout(component);
-    if !dir.exists() {
+    // Its own `.git`, not the directory: a cache restored into the path
+    // (CI's `target/`) makes the directory without the checkout, and git run
+    // in it would answer for this tree instead.
+    if !dir.join(".git").exists() {
         return Ok(State::Missing);
     }
     let head = git(&dir, &["rev-parse", "HEAD"])?;
-    let dirty = !git(&dir, &["status", "--porcelain"])?.is_empty();
+    let status = git(&dir, &["status", "--porcelain"])?;
+    let dirty = !status.is_empty();
+    if head == *pin && emptied(&status) {
+        return Err(Error::new(format!(
+            "{}: the checkout at {} is at its pin with every change a deleted file: a \
+             checkout of this tree across the move of {} out of it emptied it. \
+             Delete {} and run any xtask command to clone it again.",
+            component.name,
+            component.path,
+            component.name,
+            dir.display()
+        )));
+    }
     if !dirty && head != *pin && !has_commit(&dir, pin) {
         // A pin moved past what this checkout has fetched: fetch, so that a
         // checkout that is only behind is not taken for somebody's work.
@@ -262,6 +278,19 @@ pub(crate) fn state(component: &Component) -> Result<State> {
         return Ok(State::Behind(head));
     }
     Ok(State::Own { head, dirty })
+}
+
+/// Whether `git status --porcelain` says only that tracked files are gone.
+///
+/// That is what a checkout of this tree from before a component moved out,
+/// and back, leaves: git wrote the component's files into the directory as
+/// this tree's, and took them out again. Work of somebody's own is not only
+/// deletions.
+fn emptied(status: &str) -> bool {
+    !status.is_empty()
+        && status
+            .lines()
+            .all(|line| line.trim_start().starts_with("D "))
 }
 
 /// Move every checkout that is behind its pin, or missing, to the pin.
@@ -360,23 +389,37 @@ fn fetch(component: &Component) -> Result<()> {
         short(pin),
         component.path
     );
-    let parent = dir.parent().unwrap_or(&dir);
-    fs::create_dir_all(parent)
-        .map_err(|error| Error::new(format!("{}: {error}", parent.display())))?;
-    let reference = mirror.to_string_lossy().into_owned();
-    let target = dir.to_string_lossy().into_owned();
-    let _ = git(
-        parent,
-        &[
-            "clone",
-            "--quiet",
-            "--no-checkout",
-            "--reference",
-            &reference,
-            &component.repo,
-            &target,
-        ],
-    )?;
+    if dir.exists() {
+        // Something is there already -- a restored cache's `target/` -- so
+        // make the checkout around it: what `clone --reference` does, by hand.
+        let _ = git(&dir, &["init", "--quiet"])?;
+        let alternates = dir.join(".git/objects/info/alternates");
+        fs::write(
+            &alternates,
+            format!("{}\n", mirror.join("objects").display()),
+        )
+        .map_err(|error| Error::new(format!("{}: {error}", alternates.display())))?;
+        let _ = git(&dir, &["remote", "add", "origin", &component.repo])?;
+        let _ = git(&dir, &["fetch", "--quiet", "origin"])?;
+    } else {
+        let parent = dir.parent().unwrap_or(&dir);
+        fs::create_dir_all(parent)
+            .map_err(|error| Error::new(format!("{}: {error}", parent.display())))?;
+        let reference = mirror.to_string_lossy().into_owned();
+        let target = dir.to_string_lossy().into_owned();
+        let _ = git(
+            parent,
+            &[
+                "clone",
+                "--quiet",
+                "--no-checkout",
+                "--reference",
+                &reference,
+                &component.repo,
+                &target,
+            ],
+        )?;
+    }
     if !has_commit(&dir, pin) {
         let _ = git(&dir, &["fetch", "--quiet", "origin", pin])?;
     }
@@ -503,6 +546,18 @@ mod tests {
         assert_eq!(parsed[1].commit.as_deref(), Some(other));
         assert!(out.starts_with("# keep\n") && out.ends_with('\n'));
         assert!(repin(&text, "c", PIN, other).is_err());
+    }
+
+    #[test]
+    fn only_deletions_is_a_checkout_emptied_by_the_move() {
+        assert!(emptied(" D Cargo.toml\n D src/main.rs"));
+        assert!(
+            emptied("D Cargo.toml\n D src/main.rs"),
+            "as `git` trimmed it"
+        );
+        assert!(!emptied(" D Cargo.toml\n M src/main.rs"), "an edit is work");
+        assert!(!emptied("?? new.rs"), "a new file is work");
+        assert!(!emptied(""), "clean");
     }
 
     #[test]

@@ -140,9 +140,9 @@ directory:
 | `src/user/system/linux/compositor/` | hyprix, the terminal and every Wayland piece. |
 | `src/user/system/linux/init/` | `/sbin/init`, getty and the unit files. |
 | `src/user/system/linux/pkg/` | `/bin/pkg`, the package manager: lists, installs and removes the apps' packages (`docs/APPS.md` §7). |
-| `src/user/system/linux/zinc/` | The zsh-compatible shell. |
+| `src/user/system/linux/zinc/` | The zsh-compatible shell. Its own repository, ferrix-os/zinc, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/media/` | The resampler and the playback through `/dev/snd` that the sound server and the `badapple` app share (`docs/MEDIA.md`), and the PulseAudio-protocol server and its client (`docs/AUDIO.md`, U2). ferrix-90's since 2026-09-27. Bad Apple!!'s player and its video format are the `badapple` app since 2026-10-01. |
-| `src/user/system/linux/ferrousli/` | The C library written in Rust, its dynamic linker, and the toolkit programs are ported against it with (`tools/ports/`), with the libraries they link; the ported programs themselves are apps, in its `apps/` (`src/user/apps/` below). |
+| `src/user/system/linux/ferrousli/` | The C library written in Rust, its dynamic linker, and the toolkit programs are ported against it with (`tools/ports/`), with the libraries they link; the ported programs themselves are apps, in its `apps/` (`src/user/apps/` below). Its own repository, ferrix-os/ferrousli, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/drivers/nvrm/` | NVIDIA's driver host (`docs/NVIDIA.md`). `src/` is `nvrm` itself, so far N1b's skeleton: a static ferrousli program, in C, that devmgr starts as its `Gpu` kind's driver, with a native entry (`src/start.c`) that builds the stack ferrousli starts from, and the native calls it makes (`src/native.h`). `test/hold.c` is the init `cargo xtask test-nvrm` boots beside it. `uvm-kpi/` is the Linux-compatible headers and runtime, in C, that NVIDIA's `nvidia-uvm` is built against from a fetched tree, and `uvm-selftest`, which runs UVM's own tests on it with no GPU (§11.3, C0a). Both are C and a Makefile, not a cargo workspace; `cargo xtask test-nvrm` and `test-uvm` build them against ferrousli and boot them on Ferrix. |
 
 ## `src/user/apps/`
@@ -191,7 +191,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `tools/common/steam/` | What `cargo xtask run-steam`, `test-steam-window` and `test-steam-store` carry into the guest: the scripts that start and watch Steam, its stand-ins, and in `workarounds/` the C shims for kernel gaps, each headed with its gap and the owner of the real fix (`docs/STEAM.md`). |
 | `tools/common/data/` | The allow-lists, baselines and registers the checks read. |
 | `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`). |
-| `tools/vendor/google/pixel7/` | The Pixel 7 launcher app (`android/`), its host helper and the desktop monitor (`monitor/`). |
+| `tools/vendor/google/pixel7/` | The Pixel 7 launcher app (`android/`), its host helper and the desktop monitor (`monitor/`). Its own repository, ferrix-os/pixel7, checked out here at its pin (`components.toml`). |
 
 ## `docs/`
 
@@ -201,7 +201,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `docs/roadmap/`, `docs/sysml/`, `docs/certification/`, `docs/generated/` | The roadmap, the SysML model, the certification evidence, and what is generated from them. |
 | `docs/vendor/<vendor>/<device>/` | Notes on one board or phone. |
 | `docs/brand/`, `docs/marketing/` | The brand kit and the press copy. |
-| `docs/website/` | The public website, deployed to GitHub Pages. |
+| `docs/website/` | The public website at https://ferrix-os.github.io/. Its own repository, ferrix-os/ferrix-os.github.io, which deploys it, checked out here at its pin (`components.toml`). |
 
 ## Not in the repository
 

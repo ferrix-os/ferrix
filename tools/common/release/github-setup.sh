@@ -14,7 +14,7 @@ repo=ferrix-os/ferrix
 # Keep the public description short enough to read in repository search.
 gh repo edit "$repo" \
   --description "Linux apps without Linux. Ferrix is an experimental Rust OS with a Wayland desktop and drivers outside the kernel." \
-  --homepage "https://ferrix-os.github.io/ferrix/" \
+  --homepage "https://ferrix-os.github.io/" \
   --enable-discussions \
   --enable-issues \
   --enable-wiki=false
@@ -25,9 +25,10 @@ gh api -X PUT "repos/$repo/topics" --input - <<'JSON'
 {"names":["rust","operating-system","osdev","kernel","rust-kernel","linux-compatibility","userland","wayland","btrfs","qemu","aarch64","ai-agents"]}
 JSON
 
-# Pages from Actions (the Website workflow deploys it).
-gh api -X POST "repos/$repo/pages" -f build_type=workflow >/dev/null 2>&1 \
-  || gh api -X PUT "repos/$repo/pages" -f build_type=workflow
+# Pages from Actions, in the website's own repository, whose Website
+# workflow deploys it to https://ferrix-os.github.io/ (components.toml).
+gh api -X POST "repos/ferrix-os/ferrix-os.github.io/pages" -f build_type=workflow >/dev/null 2>&1 \
+  || gh api -X PUT "repos/ferrix-os/ferrix-os.github.io/pages" -f build_type=workflow
 
 # Private vulnerability reporting, which SECURITY.md points to.
 gh api -X PUT "repos/$repo/private-vulnerability-reporting"

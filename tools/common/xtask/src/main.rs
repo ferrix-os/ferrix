@@ -570,9 +570,7 @@ fn command_of(args: &Args) -> Result<&str> {
         println!("{USAGE}");
         return Err(Error::new("no command given"));
     };
-    if !matches!(command, "components" | "pin-components") {
-        components::ensure()?;
-    }
+    components::ensure()?;
     Ok(command)
 }
 

@@ -1,6 +1,0 @@
-# The protocols file the tests read. `hopopt` is not in the table built into
-# the library, so an answer for it can only have come from here, and `tcp`
-# is numbered differently from the real one for the same reason.
-hopopt	0	HOPOPT
-tcp	200	TCP
-udp	17	UDP

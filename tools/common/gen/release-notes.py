@@ -44,7 +44,7 @@ def main():
     print("---")
     print(f"Boot it: `git checkout {tag} && cargo xtask run --arch x86_64`. "
           f"Everything else is in the [README]({REPO}/blob/{tag}/README.md) "
-          f"and on the [website](https://ferrix-os.github.io/ferrix/).")
+          f"and on the [website](https://ferrix-os.github.io/).")
 
 
 if __name__ == "__main__":

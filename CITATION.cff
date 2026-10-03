@@ -5,6 +5,6 @@ type: software
 authors:
   - name: Sebastian Dauenhauer
 repository-code: https://github.com/ferrix-os/ferrix
-url: https://ferrix-os.github.io/ferrix/
+url: https://ferrix-os.github.io/
 license: MIT
 keywords: [operating system, Rust, Linux ABI, userland drivers, btrfs, Wayland]

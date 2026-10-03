@@ -1,7 +1,0 @@
-# The ethers file the tests read. The addresses are from the range reserved
-# for documentation by RFC 7042: 00:00:5e:00:53:00 to ...:ff.
-00:00:5E:00:53:01	first.example.test
-00:00:5e:00:53:02	second.example.test
-# A comment names no host, and a line without a name is not an entry.
-#00:00:5e:00:53:03	commented.example.test
-00:00:5e:00:53:04

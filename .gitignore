@@ -13,3 +13,9 @@ __pycache__/
 /remote-desktop.toml
 /docs/roadmap/book/
 /_site
+# Components: repositories of their own, checked out here at their pins by
+# xtask (components.toml).
+/src/user/system/linux/ferrousli/
+/src/user/system/linux/zinc/
+/tools/vendor/google/pixel7/
+/docs/website/

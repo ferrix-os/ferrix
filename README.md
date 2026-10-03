@@ -18,7 +18,7 @@ Ferrix is still experimental. Authentication and parts of process isolation
 are unfinished, so it is not ready to be your everyday OS.
 
 [Boot Ferrix](#boot-ferrix) · [See what works](#what-works) ·
-[Read the technical guide](docs/GUIDE.md) · [Visit the website](https://ferrix-os.github.io/ferrix/)
+[Read the technical guide](docs/GUIDE.md) · [Visit the website](https://ferrix-os.github.io/)
 
 ![Ferrix's Wayland desktop with Chrome, btop and a terminal](docs/brand/screenshots/desktop-hero.png)
 
