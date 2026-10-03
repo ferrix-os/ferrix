@@ -19,7 +19,7 @@
 //! | flipped | one byte of the core, not pinned again | the pin |
 //! | unpinned | the program with its pin still zero | the unset pin |
 //! | other build | the core linked against nvrm, pinned | the build-id |
-//! | past 2 GiB | the data segment moved to 0x8000_0000 | the range |
+//! | past 2 GiB | the data segment moved to `0x8000_0000` | the range |
 //! | rwx segment | the text segment made writable | write and execute |
 //! | bad magic | the export header's first byte | the magic |
 //! | rwx mapping | a page mapped rwx, `--control-rwx` | the maps check |
@@ -119,9 +119,10 @@ fn field<const N: usize>(bytes: &[u8], at: usize) -> Result<u64> {
     let slice = bytes
         .get(at..at + N)
         .ok_or_else(|| Error::new("the core is shorter than its headers say"))?;
-    let mut word = [0_u8; 8];
-    word[..N].copy_from_slice(slice);
-    Ok(u64::from_le_bytes(word))
+    Ok(slice
+        .iter()
+        .rev()
+        .fold(0, |value, byte| value << 8 | u64::from(*byte)))
 }
 
 /// The core's loadable segments' program header offsets, in order.
@@ -145,8 +146,23 @@ fn loads(core: &[u8]) -> Result<Vec<usize>> {
 }
 
 /// Write `value` as `N` little-endian bytes at `at`.
-fn set<const N: usize>(bytes: &mut [u8], at: usize, value: u64) {
-    bytes[at..at + N].copy_from_slice(&value.to_le_bytes()[..N]);
+fn set<const N: usize>(bytes: &mut [u8], at: usize, value: u64) -> Result<()> {
+    let slice = bytes
+        .get_mut(at..at + N)
+        .ok_or_else(|| Error::new("the core is shorter than its headers say"))?;
+    for (index, byte) in slice.iter_mut().enumerate() {
+        *byte = value.to_le_bytes().get(index).copied().unwrap_or(0);
+    }
+    Ok(())
+}
+
+/// Flip the low bit of the byte at `at`.
+fn flip(bytes: &mut [u8], at: usize) -> Result<()> {
+    let byte = bytes
+        .get_mut(at)
+        .ok_or_else(|| Error::new("the core is shorter than its headers say"))?;
+    *byte ^= 1;
+    Ok(())
 }
 
 /// The changed cores, by the name each goes on the volume as.
@@ -156,17 +172,17 @@ fn changed_cores(core: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>> {
     };
     let mut flipped = core.to_vec();
     let middle = flipped.len() / 2;
-    flipped[middle] ^= 1;
+    flip(&mut flipped, middle)?;
     // The data segment's address and its physical twin at 2 GiB.
     let mut past = core.to_vec();
-    set::<8>(&mut past, data + 16, 0x8000_0000);
-    set::<8>(&mut past, data + 24, 0x8000_0000);
+    set::<8>(&mut past, data + 16, 0x8000_0000)?;
+    set::<8>(&mut past, data + 24, 0x8000_0000)?;
     let mut rwx = core.to_vec();
-    set::<4>(&mut rwx, text + 4, 7);
+    set::<4>(&mut rwx, text + 4, 7)?;
     let mut magic = core.to_vec();
     let header =
         usize::try_from(field::<8>(core, rodata + 8)?).map_err(|_| Error::new("offset"))?;
-    magic[header] ^= 1;
+    flip(&mut magic, header)?;
     Ok(vec![
         ("flipped-core", flipped),
         ("past-2gib-core", past),

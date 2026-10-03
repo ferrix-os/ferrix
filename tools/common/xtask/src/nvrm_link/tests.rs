@@ -1,7 +1,7 @@
 use super::{CASES, PASSED, changed_cores, judge, loads, script};
 
 /// A core's headers as nvrm-core.ld lays them out: the ELF header, three
-/// PT_LOADs and PT_GNU_STACK, then the read-only segment's bytes at 0x1000.
+/// `PT_LOAD`s and `PT_GNU_STACK`, then the read-only segment's bytes at 0x1000.
 fn core() -> Vec<u8> {
     let mut bytes = vec![0_u8; 0x2000];
     bytes[32..40].copy_from_slice(&64_u64.to_le_bytes());
