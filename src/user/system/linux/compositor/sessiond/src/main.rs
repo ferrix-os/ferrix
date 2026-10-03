@@ -44,7 +44,9 @@ use crate::authd::{Authd, Heard};
 use crate::relay::{Act, Relay};
 
 mod authd;
+mod gate;
 mod relay;
+mod scope;
 
 /// How often a seat channel that went is asked for again.
 const ASK_AGAIN: Duration = Duration::from_secs(5);
@@ -247,26 +249,48 @@ fn run(args: &[String]) -> Result<i32, String> {
     let (ours, theirs) = UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
     let (lock_ours, lock_theirs) =
         UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
-    let child = start(&account, &program, &runtime, theirs, lock_theirs)?;
+    let (child, scope) = start(&account, &program, &runtime, theirs, lock_theirs)?;
     say(&format!(
-        "seat0's session for {} (uid {}): {}, pid {}",
+        "seat0's session for {} (uid {}): {}, pid {}, in user-{}.slice/{scope}",
         account.name,
         account.uid,
         program.join(" "),
-        child.id()
+        child.id(),
+        account.uid
     ));
-    serve(ours, lock_ours, authd, account.uid, child)
+    let mut child = child;
+    // Whatever way `serve` ends -- the compositor gone, or a failure of
+    // sessiond's own -- the compositor is killed and the session's scope is
+    // stopped before sessiond exits: once the compositor is in the scope, the
+    // init's stop of this unit no longer reaches it (the certification
+    // consultant's Q1).
+    let served = serve(ours, lock_ours, authd, account.uid, &mut child);
+    if served.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    scope::end(account.uid, &scope)?;
+    served
 }
 
 /// Start the compositor as `account`, with `theirs` as its descriptor 3 and
-/// `lock` as its descriptor 4.
+/// `lock` as its descriptor 4, in its session's scope: the child and the
+/// scope's unit.
+///
+/// The compositor is in `session-<n>.scope` before it execs, so nothing it
+/// starts can be outside it (the certification consultant's E1). Between
+/// fork and exec the child writes its pid down one pipe and waits on
+/// another; a thread here asks the init for the scope with that pid and
+/// writes `y`, or `n` when the init refused, and an `n`, or nothing, stops
+/// the exec. A scope the init refuses is not a session (§6.4): none is
+/// started, so the session's end may rely on the scope.
 fn start(
     account: &Account,
     program: &[String],
     runtime: &str,
     theirs: UnixStream,
     lock: UnixStream,
-) -> Result<std::process::Child, String> {
+) -> Result<(std::process::Child, String), String> {
     let (first, rest) = program.split_first().ok_or_else(|| USAGE.to_owned())?;
     let channel = OwnedFd::from(theirs);
     let lock = OwnedFd::from(lock);
@@ -286,21 +310,47 @@ fn start(
             compositor_seat::CHANNEL_FD.to_string(),
         )
         .env(LOCK_FD_VARIABLE, LOCK_FD.to_string());
+    let (told, tell) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
+    let (heard, hear) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
+    let gates = (tell.as_raw_fd(), heard.as_raw_fd());
+    let uid = account.uid;
+    let asker = std::thread::spawn(move || gate::ask_for_scope(&told, &hear, uid));
     #[expect(
         unsafe_code,
-        reason = "AUDIT: pre_exec runs between fork and exec; the closure makes only async-signal-safe calls (fcntl, dup2, close, setgroups, setgid, setuid, getuid)"
+        reason = "AUDIT: pre_exec runs between fork and exec; the closure makes only async-signal-safe calls (getpid, write, read, fcntl, dup2, close, setgroups, setgid, setuid, getuid)"
     )]
     // SAFETY: the closure allocates nothing and calls only the system calls
     // the reason names, each on values captured before the fork.
     unsafe {
-        let _ = command.pre_exec(move || become_account(raws, &ids));
+        let _ = command.pre_exec(move || {
+            gate::wait_for_scope(gates)?;
+            become_account(raws, &ids)
+        });
     }
-    let child = command
-        .spawn()
-        .map_err(|error| format!("starting {first}: {error}"))?;
+    let spawned = command.spawn();
+    // The child's copies are its own now: with these gone, a child that died
+    // before it wrote is an end of file to the thread, not a wait for ever.
+    drop(tell);
+    drop(heard);
     drop(channel);
     drop(lock);
-    Ok(child)
+    let scope = asker
+        .join()
+        .unwrap_or_else(|_| Err("the scope's thread panicked".to_owned()));
+    match (spawned, scope) {
+        (Ok(child), Ok(scope)) => Ok((child, scope)),
+        (Ok(mut child), Err(why)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(format!(
+                "no session scope: {why}; the session was not started"
+            ))
+        }
+        (Err(_), Err(why)) => Err(format!(
+            "no session scope: {why}; the session was not started"
+        )),
+        (Err(error), Ok(_)) => Err(format!("starting {first}: {error}")),
+    }
 }
 
 /// In the child, before `exec`: the device channel at descriptor 3 and the
@@ -349,7 +399,7 @@ fn serve(
     lock: UnixStream,
     mut authd: Option<Authd>,
     uid: u32,
-    mut child: std::process::Child,
+    child: &mut std::process::Child,
 ) -> Result<i32, String> {
     let mut connection = Some(Connection::new(ours).map_err(|error| format!("{error}"))?);
     lock.set_nonblocking(true)

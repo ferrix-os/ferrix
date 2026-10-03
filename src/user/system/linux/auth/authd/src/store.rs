@@ -123,6 +123,12 @@ impl Tally {
     }
 }
 
+/// The store's directories: `auth`'s alone. A program of anyone else's
+/// cannot enter them, whatever a record's own mode.
+const DIRECTORY_MODE: u32 = 0o700;
+/// A record's: `auth`'s alone, the second wall behind the first.
+const RECORD_MODE: u32 = 0o600;
+
 /// The store, over its paths.
 #[derive(Debug, Clone)]
 pub(crate) struct Store {
@@ -146,7 +152,7 @@ impl Store {
             self.paths.store().join("state"),
         ] {
             fs::create_dir_all(&dir)?;
-            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(DIRECTORY_MODE))?;
         }
         if let Some(log_dir) = self.paths.audit().parent() {
             fs::create_dir_all(log_dir)?;
@@ -231,7 +237,7 @@ fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .mode(RECORD_MODE)
         .open(&fresh)?;
     file.write_all(bytes)?;
     file.sync_all()?;

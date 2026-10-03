@@ -460,6 +460,41 @@ fn exec_word(word: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+/// The compositor unit's restart: a session's compositor is never started
+/// again, since a client that killed it would get a fresh, unlocked desktop
+/// (`docs/AUTH.md` §6.4); the session ends, and the seat is the console's
+/// login. A desktop that is root's keeps its restart, since every client
+/// there is root already.
+const fn restart_line(session: bool) -> &'static str {
+    if session {
+        "# Not restarted: the session ends with its compositor (docs/AUTH.md §6.4).\n"
+    } else {
+        "Restart=on-failure\n"
+    }
+}
+
+/// The console's getty on a desktop's image: on a session's, with
+/// `--login`, so the seat a session that ended goes back to is a login
+/// (`docs/AUTH.md` §6.4; `authd` and `/bin/login` come with the desktop's
+/// authentication); masked on a root desktop's that wants no shell.
+fn console_getty(session: bool, shell: bool) -> Vec<File> {
+    if session {
+        vec![File {
+            path: "etc/ferrix/units/getty@.service.d/login.conf".to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(crate::auth::LOGIN_DROP_IN.as_bytes().to_vec()),
+        }]
+    } else if shell {
+        Vec::new()
+    } else {
+        vec![File {
+            path: "etc/ferrix/units/getty@.service".to_owned(),
+            mode: 0o777,
+            content: Content::Link("/dev/null".to_owned()),
+        }]
+    }
+}
+
 /// What a desktop image carries so that init is pid 1 and the compositor a
 /// service of `graphical.target` (landing L10): init and its units, the
 /// compositor at `/bin/hyprix` with `hyprix.service` running it with
@@ -508,6 +543,7 @@ pub(crate) fn desktop_files(
          # no User= is not given; the clients find ~/.config through it.\n\
          Environment=HOME=/\n"
     };
+    let restart = restart_line(session_user.is_some());
     let unit = format!(
         "# The compositor, a service of graphical.target (docs/INIT.md, L10).\n\
          [Unit]\n\
@@ -517,7 +553,7 @@ pub(crate) fn desktop_files(
          ExecStart={}\n\
          {home}\
          {}\
-         Restart=on-failure\n\
+         {restart}\
          StandardOutput=console\n\
          StandardError=console\n",
         command.join(" "),
@@ -554,9 +590,7 @@ pub(crate) fn desktop_files(
         "etc/ferrix/units/default.target",
         "/lib/ferrix/units/graphical.target",
     ));
-    if !shell {
-        files.push(link("etc/ferrix/units/getty@.service", "/dev/null"));
-    }
+    files.extend(console_getty(session_user.is_some(), shell));
     if let Some(pulsed) = pulsed {
         files.push(File {
             path: "bin/pulsed".to_owned(),

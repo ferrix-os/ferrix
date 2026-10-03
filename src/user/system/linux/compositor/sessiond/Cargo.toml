@@ -23,6 +23,8 @@ compositor-wire = { path = "../wire" }
 ferrix-auth-proto = { path = "../../../../../lib/proto/auth-proto" }
 ferrix-native = { path = "../../../../../lib/proto/native" }
 ferrix-native-abi = { path = "../../../../../lib/proto/native-abi" }
+# The session's scope, through the init's control socket (docs/INIT.md §5.6).
+ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
 
 [lints]
 workspace = true

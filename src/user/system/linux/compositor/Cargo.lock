@@ -322,6 +322,7 @@ dependencies = [
  "ferrix-auth-proto",
  "ferrix-native",
  "ferrix-native-abi",
+ "ferrix-svc-proto",
  "libc",
 ]
 

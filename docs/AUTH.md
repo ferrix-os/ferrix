@@ -148,7 +148,7 @@ leaves the desktop running as root.
 |---|---|---|---|
 | **TA.WALKUP** A person at a *locked* screen, with the keyboard, the pointer and a USB port | In | The lock takes the keyboard (hyprix, stage 18). Only `authd`'s verdict opens it. The throttle (§3.5) makes guessing slow. A USB keyboard that types guesses gets the same throttle. | Same, and the compositor unlocks only on `authd`'s grant for the lock that is up (§3.7). Crashing the locker leaves the screen locked, and a new locker, started by a `bindl` key, may take over; it too needs the password. |
 | **TA.WALKUP'** The same person at an *unlocked*, unattended screen | Keep access later | `passwd` asks for the old password first, so they cannot change it. They can do anything else root can: phase 1 does not defend this. | `passwd` and becoming root both ask for a password. They can run anything as the user, and that is out of scope (§2.3). |
-| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **It can kill hyprix, and until `login` lands (P2.3) that restarts into a fresh, unlocked desktop**; §6.4's answer, the session ending at `login`, is P2.7's. **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). |
+| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **Killing hyprix ends the session at the console's login and nothing of the user's starts it again (§6.4, P2.7)**. What it can keep: a program of its own moved into a scope of the user's outlives the session, with the user's files and network and no device, lock channel or later session's socket; closing that is the customer's decision (§6.4). **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). |
 | **TA.NET** A network attacker, once ssh or a network login exists | A shell | `sshdt` stays key-only (`tools/common/xtask/src/ssh.rs:29-31`). `authd` listens on no network socket. | Password or keyboard-interactive ssh goes through `authd` (phase 3), with the same throttle and audit. Until then it stays off. |
 | **TA.ROOT** A Linux-ABI program running as root | Everything | Out of reach by design. Root reads any file and can replace `authd`. What still holds: the hashes are Argon2id, so a stolen store costs a lot of work per guess (§5.1). | Same. Phase 2 makes root rarer: no desktop client runs as root. |
 | **TA.OFFLINE** Someone with a copy of the disk (`build/root.img`, the DK1's SD card) | Passwords, which people reuse | Argon2id with a per-user salt. Nothing else: there is no disk encryption. | Same. |
@@ -449,10 +449,8 @@ make `authd` grant nothing; each must fail the boot. Host tests cover every
 rule above in `hyprix/src/state/grant_tests.rs`, `sessiond/src/relay.rs`,
 `authd/src/tests.rs` and `compositor_seat::lock`.
 
-**Not closed by this** (P2.3, P2.7): `hyprix.service` restarts on failure,
-and a same-uid program can kill hyprix, so killing it brings back a *fresh,
-unlocked* desktop. §6.4's answer -- the session ends with its compositor and
-the seat goes back to `login` -- needs `login` (P2.3) first.
+**Closed since, by P2.7** (§6.4): killing hyprix no longer brings back a
+fresh, unlocked desktop; the session ends at the console's login.
 
 ### 3.8 Secrets in memory
 
@@ -937,6 +935,68 @@ restart into the same session. **The session ends with its compositor**:
 `sessiond` stops the scope (`cgroup.kill`) and the seat goes back to login.
 This is what GNOME does on Wayland, and it is the only safe answer.
 
+**Built 2026-10-03 (P2.7; the certification consultant's OK IF, ledger line
+306).**
+
+* A session's `hyprix.service` has no `Restart=` (a root desktop's keeps
+  `Restart=on-failure`, since every client there is root).
+* `sessiond` puts the compositor in `user-<uid>.slice/session-<n>.scope`
+  **before it execs** (E1): between fork and exec the child writes its pid
+  down a pipe and waits; a thread of `sessiond`'s asks the init for the
+  scope and answers, and anything but yes stops the exec, so nothing the
+  compositor starts is ever outside the scope. `n` is `login`'s count, so
+  a boot's sessions are numbered once. **A scope the init refuses is not a
+  session**: none is started, so the session's end may rely on the scope
+  (F6 for this path; host-tested in `sessiond/src/gate.rs` and `scope.rs`).
+* When the compositor exits, `sessiond` asks the init to stop the scope,
+  which signals and then writes `cgroup.kill`: every program of the session
+  ends. Every way `sessiond` ends after the scope was made goes through
+  this, a failure of its own included, with the compositor killed first
+  (Q1). Should the init not stop the scope, `sessiond`, root, writes the
+  scope's own `cgroup.kill`; should that fail too, it exits non-zero and
+  says that the session's processes may live on (Q2). Then `sessiond` exits, and the init stops `hyprix.service` the same
+  way: a service is stopped when its cgroup is empty, not when its main
+  process exits, and a stop kills by `KillMode=` (control-group by
+  default) and then writes `cgroup.kill` (`src/lib/init/svc/src/manager/service.rs`).
+* The console's getty runs `--login` on a session's image, so the seat a
+  session that ended goes back to is a login.
+* **Nothing of the user's starts it again** (E2): `svc start` and `svc
+  restart` of a system unit are root's alone ("only root may change the
+  system"); a user may make scopes under `user-<uid>.slice` and nothing
+  else; init starts a unit for a user's process only by socket or
+  directory activation, and `hyprix.service` has neither.
+* **No device outlives the session** (E5), from the code: `sessiond` opens
+  each card, render node and `event*` node `O_CLOEXEC` (`seat/src/lib.rs`)
+  and keeps no copy; hyprix holds them close-on-exec, so no program it
+  starts inherits one; and the protocol server sends a client only the
+  keymap's memfd and the clipboard's pipes, never a device. The devices
+  close with hyprix, so a lingering program (below) cannot read the next
+  login's keystrokes.
+
+**What it costs** (E7): on a session's desktop -- `run-compositor
+--everything` -- a compositor that crashes no longer comes back: the
+session ends at the console's login, where the driver-stall recovery once
+relied on `Restart=`. To have the desktop again: reboot, or root runs `svc
+start hyprix.service`. A greeter, or a session started from a console
+login, is §6.5's later.
+
+**What it leaves** (E6): a program of the user's may move itself into a
+scope of its own under `user-<uid>.slice` before the session ends, and so
+outlive it. It keeps the user's files and network and nothing of the seat:
+no device, no lock channel, and no Wayland socket of a later session unless
+root starts one for that user. Stopping `user-<uid>.slice` when the user's
+last session ends would close it (systemd-logind's `KillUserProcesses=`);
+that is the customer's decision, filed in `docs/BACKLOG.md`.
+
+**Tested by** `cargo xtask test-compositor --boot session-end`, the desktop
+as `ferrix` with a compromised client of the session: a lock it is refused
+while hyprlock holds the screen unlocks nothing; `authd`'s store is
+`Permission denied` on ferrix's real record; it `kill -9`s hyprix, and the
+session ends -- its heartbeat stops, no second session starts, the unit is
+not active again -- and a process of ferrix's that had moved into a scope
+of its own is refused `svc start` and `svc restart`; the console is a
+login.
+
 ### 6.5 Now, and later
 
 | Now (phase 2) | Later |
@@ -1013,7 +1073,7 @@ phase 1. hyprlock does not change when phase 2 moves the session to
 | P2.4 | `sessiond`: seat0, device descriptors by `SCM_RIGHTS`, starts hyprix as the account in its scope, ends the session with its compositor. **Built 2026-10-03 for `--everything`** (§6.1), all but the scope: the session stays in `hyprix.service`'s cgroup; `test-compositor --boot everything-desktop` runs it as uid 1000 | session (new) | L10, P0 | `test-compositor` as uid 1000 | 10 |
 | P2.5 | hyprix: devices from `sessiond`, the seat channel and grants (§3.7), a new locker taking over a dead lock, `misc:lock_grace`. **Built 2026-10-03**: the devices, then the grants, the takeover and `lock_grace` (§3.7; the consultant's OK IF, ledger line 299); `test-compositor --boot hyprlock-session` | compositor | P2.4, P1.3 | `test-compositor`, `test-hyprlock` | 6 |
 | P2.6 | `su`, set-uid root, the wheel rule | auth | P1 | `test-vfs` (it already becomes `ferrix` with `su`) | 3 |
-| P2.7 | Adversary controls in the gates. A client that calls `unlock_and_destroy` with no grant leaves the screen locked. So does a client at a dead locker's place, and one holding a lock it was refused, each sending `unlock_and_destroy`; putting back the old place-only check makes that boot fail (the consultant's condition, ledger line 296; host tests in `hyprix/src/state/tests.rs` already). A client that kills hyprix lands at `login`, not on a desktop. A uid-1000 program cannot read `/var/lib/ferrix/auth`. Each has a sabotage that must make it fail. | auth, compositor | P2.4, P2.5 | `test-compositor`, `test-auth` | 4 |
+| P2.7 | Adversary controls in the gates. A client that calls `unlock_and_destroy` with no grant leaves the screen locked. So does a client at a dead locker's place, and one holding a lock it was refused, each sending `unlock_and_destroy`; putting back the old place-only check makes that boot fail (the consultant's condition, ledger line 296; host tests in `hyprix/src/state/tests.rs` already). A client that kills hyprix lands at `login`, not on a desktop. A uid-1000 program cannot read `/var/lib/ferrix/auth`. Each has a sabotage that must make it fail. **Built 2026-10-03** (§6.4; `--boot session-end` and `--boot hyprlock-session`) | auth, compositor | P2.4, P2.5 | `test-compositor`, `test-auth` | 4 |
 
 ### Phase 3: versatility (about 32 points sized, plus unsized items)
 

@@ -371,46 +371,19 @@ const SESSION_STEPS: [Step; 6] = [
 /// compositor's lock channel, and killing hyprlock to take its lock over and
 /// unlock at once leaves the screen locked.
 pub(super) fn test_hyprlock_session(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
-    let Some(busybox) = crate::busybox::installed_program(arch) else {
-        println!("  {arch}: no busybox on this machine for the boot's keys; skipped");
+    let password = Step {
+        what: "the password, to the hyprlock that took the lock over",
+        keys: &SESSION_PASSWORD,
+        until: "hyprix: the session is unlocked",
+        wanted: &["result=granted", "seat-epoch=4"],
+        unwanted: &[],
+    };
+    let mut steps: Vec<&Step> = SESSION_STEPS.iter().collect();
+    // The last step's password, typed once its lock is up.
+    steps.push(&password);
+    let Some(said) = session_boot(arch, programs, args, SESSION_CONFIG, ATTACK, &steps)? else {
         return Ok(());
     };
-    let mut ports = hyprlock_files(arch, Some(("ferrix", HYPRLOCK_PASSWORD)))?;
-    ports.push(crate::ports::File {
-        path: "etc/attack.sh".to_owned(),
-        mode: 0o755,
-        content: crate::ports::Content::Bytes(ATTACK.as_bytes().to_vec()),
-    });
-    let lock = build(arch, "compositor-lock", "lock")?;
-    ports.push(crate::ports::File {
-        path: "bin/lock".to_owned(),
-        mode: 0o755,
-        content: crate::ports::Content::Bytes(
-            std::fs::read(&lock)
-                .map_err(|error| Error::new(format!("reading {}: {error}", lock.display())))?,
-        ),
-    });
-    let carried = Carried {
-        busybox: Some(busybox),
-        ports,
-        ..Carried::none()
-    };
-    let session = Args {
-        session_user: Some(crate::session::USER.to_owned()),
-        ..args.clone()
-    };
-    let (image, kernel) = judged_image(arch, programs, SESSION_CONFIG, carried, None, &session)?;
-    let port = free_port()?;
-    let mut qemu_args = args.clone();
-    qemu_args.display = true;
-    qemu_args.qmp_port = Some(port);
-    let mut said = Vec::new();
-    let hook = |watching: &mut Watching<'_>| -> Result<()> {
-        watching.stop_when_done();
-        said = drive_session(arch, port, watching)?;
-        Ok(())
-    };
-    let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
     judge_still_running(arch, &said)?;
     for wanted in [
         "authd: offering ferrix.auth.seat",
@@ -432,8 +405,66 @@ pub(super) fn test_hyprlock_session(arch: Arch, programs: &Programs, args: &Args
     Ok(())
 }
 
-/// Press each step's keys and wait for its line: the transcript.
-fn drive_session(arch: Arch, port: u16, watching: &mut Watching<'_>) -> Result<Vec<String>> {
+/// A desktop as `ferrix` from `config`, with `script` at `/etc/attack.sh`,
+/// `/bin/lock` and `ferrix`'s password seeded, driven through `steps`: the
+/// transcript, or `None` where the machine has no busybox for the keys.
+fn session_boot(
+    arch: Arch,
+    programs: &Programs,
+    args: &Args,
+    config: &str,
+    script: &str,
+    steps: &[&Step],
+) -> Result<Option<Vec<String>>> {
+    let Some(busybox) = crate::busybox::installed_program(arch) else {
+        println!("  {arch}: no busybox on this machine for the boot's keys; skipped");
+        return Ok(None);
+    };
+    let mut ports = hyprlock_files(arch, Some(("ferrix", HYPRLOCK_PASSWORD)))?;
+    ports.push(crate::ports::File {
+        path: "etc/attack.sh".to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(script.as_bytes().to_vec()),
+    });
+    let lock = build(arch, "compositor-lock", "lock")?;
+    ports.push(crate::ports::File {
+        path: "bin/lock".to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(
+            std::fs::read(&lock)
+                .map_err(|error| Error::new(format!("reading {}: {error}", lock.display())))?,
+        ),
+    });
+    let carried = Carried {
+        busybox: Some(busybox),
+        ports,
+        ..Carried::none()
+    };
+    let session = Args {
+        session_user: Some(crate::session::USER.to_owned()),
+        ..args.clone()
+    };
+    let (image, kernel) = judged_image(arch, programs, config, carried, None, &session)?;
+    let port = free_port()?;
+    let mut qemu_args = args.clone();
+    qemu_args.display = true;
+    qemu_args.qmp_port = Some(port);
+    let mut said = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        watching.stop_when_done();
+        said = drive_session(arch, port, watching, steps)?;
+        Ok(())
+    };
+    let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
+    Ok(Some(said))
+}
+
+fn drive_session(
+    arch: Arch,
+    port: u16,
+    watching: &mut Watching<'_>,
+    steps: &[&Step],
+) -> Result<Vec<String>> {
     let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
     let up = watching.read_more(Instant::now() + SETTLE, |lines| {
         lines.iter().any(|line| line.contains(MARKER))
@@ -450,16 +481,6 @@ fn drive_session(arch: Arch, port: u16, watching: &mut Watching<'_>) -> Result<V
             .iter()
             .any(|line| line.contains("authd can grant the session's locks"))
     })?;
-    let mut steps: Vec<&Step> = SESSION_STEPS.iter().collect();
-    // The last step's password, typed once its lock is up.
-    let password = Step {
-        what: "the password, to the hyprlock that took the lock over",
-        keys: &SESSION_PASSWORD,
-        until: "hyprix: the session is unlocked",
-        wanted: &["result=granted", "seat-epoch=4"],
-        unwanted: &[],
-    };
-    steps.push(&password);
     for step in steps {
         // Only what comes after this step's keys counts for it: the same
         // line said by an earlier step is not this one's.
@@ -510,4 +531,164 @@ fn drive_session(arch: Arch, port: u16, watching: &mut Watching<'_>) -> Result<V
         .chain(watching.after())
         .cloned()
         .collect())
+}
+
+/// P2.7's boot's configuration: hyprlock on a `bindl`, and the
+/// compromised client started beside the windows.
+const END_CONFIG: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor --boot session-end`.
+input:kb_layout = de
+input:kb_variant = nodeadkeys
+exec-once = /bin/pattern checkerboard one
+exec-once = /bin/pattern gradient two --after one
+exec-once = /bin/sh /etc/attack.sh
+bindl = , L, exec, /bin/hyprlock -c /etc/hypr/hyprlock.conf
+";
+
+/// The compromised client of P2.7 (`docs/AUTH.md` §6.4), a program of
+/// ferrix's as any could be: a heartbeat in the session, a process that
+/// moves itself into a scope of its own to outlive the session, a lock it
+/// is refused while hyprlock holds the screen and an unlock of it, a read
+/// of `authd`'s store, and then `kill -9` of the compositor.
+const END_SCRIPT: &str = "\
+#!/bin/sh
+exec 2>&1
+named() {
+\tfor dir in /proc/[0-9]*; do
+\t\t[ \"$(cat $dir/comm 2>/dev/null)\" = \"$1\" ] && echo ${dir#/proc/}
+\tdone
+}
+( while :; do echo heartbeat; sleep 1; done ) &
+compositor=$(named hyprix)
+# Out of the session's scope, into one of ferrix's own, as a user may: it
+# outlives the session, and then asks the init for the session back.
+sh -c 'svc scope --unit ferrix-linger.scope --slice user-1000.slice $$ >/dev/null 2>&1
+echo \"linger-scope: $?\"
+while [ -d /proc/$1 ]; do sleep 1; done
+sleep 4
+out=$(svc start hyprix.service 2>&1)
+echo \"linger-svc-start: $? $out\"
+out=$(svc restart hyprix.service 2>&1)
+echo \"linger-svc-restart: $? $out\"
+seen=no
+for dir in /proc/[0-9]*; do [ \"$(cat $dir/comm 2>/dev/null)\" = login ] && seen=yes; done
+echo \"console-login: $seen\"' linger \"$compositor\" &
+while [ -z \"$(named hyprlock)\" ]; do sleep 1; done
+sleep 3
+/bin/lock 0
+echo refused-lock-done
+out=$(cat /var/lib/ferrix/auth/users/ferrix 2>&1)
+echo \"store-probe: $? $out\"
+sleep 1
+kill -9 $compositor
+echo hyprix-killed
+";
+
+/// P2.7's steps.
+const END_STEPS: [Step; 6] = [
+    Step {
+        what: "L: hyprlock locks",
+        keys: &[&["l"]],
+        until: "hyprlock: locked",
+        wanted: &[],
+        unwanted: &[],
+    },
+    Step {
+        what: "a program of ferrix's asked for a lock while hyprlock held it, was refused, and its \
+               unlock let nothing go",
+        keys: &[],
+        until: "refused-lock-done",
+        wanted: &["a second program asked to lock the session and was refused"],
+        unwanted: &["hyprix: the session is unlocked"],
+    },
+    Step {
+        what: "it could not read authd's store: the record is there, and not ferrix's to read",
+        keys: &[],
+        until: "store-probe: ",
+        // On the probe's own line: cat's refusal of that very path.
+        wanted: &["can't open '/var/lib/ferrix/auth/users/ferrix': Permission denied"],
+        unwanted: &["store-probe: 0", "No such file"],
+    },
+    Step {
+        what: "it killed the compositor, and the session ended: every process of it stopped",
+        keys: &[],
+        until: "the session's processes were stopped",
+        wanted: &["hyprix-killed", "the session ended"],
+        unwanted: &["hyprix: the session is unlocked"],
+    },
+    Step {
+        what: "a process of ferrix's that had left the session asked the init for it back with \
+               svc start and svc restart, and was refused both",
+        keys: &[],
+        until: "linger-svc-restart: ",
+        wanted: &[
+            "linger-svc-start: ",
+            "Permission denied: only root may change the system",
+        ],
+        unwanted: &["linger-svc-start: 0", "linger-svc-restart: 0"],
+    },
+    Step {
+        what: "the console is a login, the seat the session went back to",
+        keys: &[],
+        until: "console-login: ",
+        wanted: &["console-login: yes"],
+        unwanted: &[],
+    },
+];
+
+/// P2.7's boot (`docs/AUTH.md` §6.4): a compromised client of the session
+/// as ferrix kills the compositor, and lands at the console's login, not on
+/// a fresh desktop. The certification consultant's E2 to E4.
+pub(super) fn test_session_end(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let steps: Vec<&Step> = END_STEPS.iter().collect();
+    let Some(said) = session_boot(arch, programs, args, END_CONFIG, END_SCRIPT, &steps)? else {
+        return Ok(());
+    };
+    let Some(end) = said
+        .iter()
+        .position(|line| line.contains("the session's processes were stopped"))
+    else {
+        return Err(Error::new(format!("{arch}: the session never ended")));
+    };
+    let after = said.get(end..).unwrap_or_default();
+    // Said at the start, before any key: the lingering process left the
+    // session's scope, so what it does after the end is the residual's.
+    if !said.iter().any(|line| line.contains("linger-scope: 0")) {
+        return Err(Error::new(format!(
+            "{arch}: the lingering process could not make a scope of its own"
+        )));
+    }
+    let sessions = said
+        .iter()
+        .filter(|line| line.contains("sessiond: seat0's session for ferrix"))
+        .count();
+    if sessions != 1 {
+        return Err(Error::new(format!(
+            "{arch}: the session started {sessions} times: a killed compositor came back"
+        )));
+    }
+    // The most direct sign of a compositor that came back is said first;
+    // a restarted session's own programs would trip the heartbeat too.
+    if let Some(line) = after
+        .iter()
+        .find(|line| line.contains("hyprix.service: active"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the compositor's unit was started again: {}",
+            line.trim()
+        )));
+    }
+    // E4: the end shown, not only said.
+    if let Some(line) = after.iter().find(|line| line.contains("heartbeat")) {
+        return Err(Error::new(format!(
+            "{arch}: a program of the session outlived its end: {}",
+            line.trim()
+        )));
+    }
+    println!(
+        "  {arch}: as ferrix, a refused lock unlocked nothing, the store stayed closed, and \
+         killing the compositor ended the session at the console's login, no process of it left \
+         and nothing of ferrix's able to start it again"
+    );
+    Ok(())
 }

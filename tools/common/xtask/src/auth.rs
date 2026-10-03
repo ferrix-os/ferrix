@@ -271,8 +271,8 @@ pub(crate) fn with_seeds(arch: Arch, args: &Args) -> Result<Vec<File>> {
     Ok(files)
 }
 
-/// `run --login`'s drop-in for every getty.
-const LOGIN_DROP_IN: &str = "# Carried by `cargo xtask run --login` (docs/AUTH.md §6.2).\n\
+/// `run --login`'s drop-in for every getty, and a session desktop's.
+pub(crate) const LOGIN_DROP_IN: &str = "# Carried by `cargo xtask run --login` (docs/AUTH.md §6.2).\n\
                              [Service]\n\
                              ExecStart=\n\
                              ExecStart=/sbin/getty --login %i\n";
