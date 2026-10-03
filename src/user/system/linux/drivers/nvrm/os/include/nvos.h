@@ -105,10 +105,20 @@ struct nvos_request {
     NvU32 egid;
     NvU32 cmd;
     NvU64 arg;
+    NvU32 pages;        /* an mmap's length in pages */
+    NvU32 reserved;
 };
 #define NVOS_REQUEST_OPEN    1
 #define NVOS_REQUEST_IOCTL   2
 #define NVOS_REQUEST_RELEASE 3
+#define NVOS_REQUEST_MMAP    4
+/* ferrix_chardevctl::message's MAP_* reply kinds. */
+#define NVOS_MAP_VMO               1
+#define NVOS_MAP_APERTURE          2
+#define NVOS_MAP_WRITE_COMBINING   (1 << 8)
+int nvos_chardev_reply_map(NvU64 id, NvU64 value, NvU64 offset, NvU64 kind);
+/* pages.rs: the VMO an allocation is, for mapping it into a client. */
+NV_STATUS nvos_pages_vmo(const struct nvos_pages *pages, NvU32 *handle);
 NV_STATUS nvos_chardev_start(const NvU16 *minors, NvU32 count);
 NV_STATUS nvos_chardev_next(struct nvos_request *out);
 int nvos_chardev_reply(NvU64 id, int status, NvS64 value);

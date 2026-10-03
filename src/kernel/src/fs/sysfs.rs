@@ -42,8 +42,9 @@
 //!
 //! # What is left out
 //!
-//! `/sys/kernel`, `/sys/firmware`, `/sys/power` and `/sys/module`, which
-//! Ferrix has nothing true to put in; a PCI function's `resource`, `config`
+//! `/sys/kernel`, `/sys/firmware`, `/sys/power`, and `/sys/module` but for
+//! `nvidia/initstate` while `nvrm` serves its nodes, which Ferrix has nothing
+//! true to put in; a PCI function's `resource`, `config`
 //! and `irq`, which enumeration does not keep; a processor's `topology`,
 //! which firmware's tables do not say reliably enough to print; and uevents
 //! themselves -- the `uevent` files say what an event would carry, and no
@@ -260,6 +261,11 @@ enum Dir {
     Fs,
     /// `/sys/fs/cgroup`: an empty directory for cgroup2 to be mounted on.
     FsCgroup,
+    /// `/sys/module`: the one module Ferrix has something true to say of.
+    Module,
+    /// `/sys/module/nvidia`, while a driver serves NVIDIA's nodes through
+    /// the chardev core (`docs/NVIDIA.md` §4.4).
+    ModuleNvidia,
 }
 
 impl Dir {
@@ -390,6 +396,7 @@ enum Attr {
     KernelMax,
     Bind,
     Unbind,
+    Initstate,
 }
 
 impl Attr {
@@ -462,6 +469,7 @@ impl Attr {
             Attr::KernelMax => b"kernel_max",
             Attr::Bind => b"bind",
             Attr::Unbind => b"unbind",
+            Attr::Initstate => b"initstate",
         }
     }
 
@@ -744,6 +752,11 @@ fn char_node(slot: usize) -> Option<(devfs::CharNode, Class)> {
     Some((node, class))
 }
 
+/// `Some` while a driver serves NVIDIA's nodes through the chardev core.
+fn nvidia_served() -> Option<()> {
+    crate::interfaces::chardev::published(ferrix_chardevctl::node::CONTROL_MINOR).map(|_| ())
+}
+
 /// The absolute path of `dir`, if what it shows is still there.
 fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
     Some(match dir {
@@ -825,6 +838,11 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
             path(&[b"devices", b"virtual", class.name(), node.name])
         }
         Dir::Fs => path(&[b"fs"]),
+        Dir::Module => path(&[b"module"]),
+        Dir::ModuleNvidia => {
+            nvidia_served()?;
+            path(&[b"module", b"nvidia"])
+        }
         Dir::FsCgroup => path(&[b"fs", b"cgroup"]),
     })
 }
@@ -907,6 +925,7 @@ fn index_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             list.dir(b"dev", Dir::Dev);
             list.dir(b"devices", Dir::Devices);
             list.dir(b"fs", Dir::Fs);
+            list.dir(b"module", Dir::Module);
         }
         Dir::Block => {
             for disk in devfs::disks() {
@@ -965,6 +984,17 @@ fn index_entries(list: &mut Listing, dir: Dir) -> Result<()> {
         }
         Dir::DevChar => dev_char_links(list),
         Dir::Fs => list.dir(b"cgroup", Dir::FsCgroup),
+        Dir::Module => {
+            if nvidia_served().is_some() {
+                list.dir(b"nvidia", Dir::ModuleNvidia);
+            }
+        }
+        Dir::ModuleNvidia => {
+            if nvidia_served().is_none() {
+                return Err(Errno::ENOENT);
+            }
+            list.file(dir, Attr::Initstate);
+        }
         Dir::FsCgroup => {}
         _ => {}
     }
@@ -1407,6 +1437,12 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
     match dir {
         Dir::Device(index) => render_device(&mut out, index, attr)?,
         Dir::Cpus => render_cpus(&mut out, attr),
+        // NVIDIA's userspace asks whether the module is up before it opens
+        // `/dev/nvidiactl`: `nvrm` is, once it serves the nodes.
+        Dir::ModuleNvidia => {
+            nvidia_served().ok_or(Errno::ENOENT)?;
+            out.extend_from_slice(b"live\n");
+        }
         Dir::Cpu(cpu) => attr::flag(&mut out, cpus_online().contains(&cpu)),
         Dir::ClassOf(Class::Drm) => out.extend_from_slice(drm_text::VERSION),
         Dir::Card(index) => {

@@ -351,6 +351,12 @@ echo "nvidia-gate: /dev/nvidiactl and /dev/nvidia0 are there"
 echo "nvidia-gate: nvidia-smi exited $?"
 /data/usr/bin/nvidia-smi -L
 echo "nvidia-gate: nvidia-smi -L exited $?"
+if [ -e /bin/preload.so ]; then
+  LD_PRELOAD=/bin/preload.so /data/usr/bin/vulkaninfo --summary
+else
+  /data/usr/bin/vulkaninfo --summary
+fi
+echo "nvidia-gate: vulkaninfo exited $?"
 exit 16
 "#;
 
@@ -457,11 +463,35 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         bytes: nvrm_bytes,
     });
     let mut files = rustc::files(chrome::LINKS);
+    // The Vulkan loader's ICD manifests; glvnd's EGL vendor and NVIDIA's EGL
+    // platform manifests, which NVIDIA's Vulkan driver reads through libEGL
+    // when no display is set; and NVIDIA's application profiles.
+    files.extend(rustc::files(&[
+        ("usr/share/vulkan", "/data/usr/share/vulkan"),
+        ("usr/share/glvnd", "/data/usr/share/glvnd"),
+        ("usr/share/egl", "/data/usr/share/egl"),
+        ("usr/share/nvidia", "/data/usr/share/nvidia"),
+    ]));
     files.push(ports::File {
         path: "bin/busybox".to_owned(),
         mode: 0o755,
         content: ports::Content::Bytes(busybox),
     });
+    // A bring-up aid: `FERRIX_RUN_NVIDIA_PRELOAD` names a shared library
+    // the script preloads into vulkaninfo, such as a tracer of its calls.
+    if let Some(preload) = std::env::var_os("FERRIX_RUN_NVIDIA_PRELOAD") {
+        let bytes = std::fs::read(&preload).map_err(|error| {
+            Error::new(format!(
+                "reading {}: {error}",
+                Path::new(&preload).display()
+            ))
+        })?;
+        files.push(ports::File {
+            path: "bin/preload.so".to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(bytes),
+        });
+    }
     let archive = initramfs::build(None, &natives, Some(&shell_bytes), &files)?;
     // The boot's self-checks are `test-boot`'s evidence, not this domain's;
     // two vCPUs on a loaded host make the timing ones flake here.

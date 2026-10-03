@@ -552,6 +552,7 @@ fn place(
     }
     if let Source::File(file) = source {
         map_runs(space, file, &runs)?;
+        zero_tails(space, &segments, &runs)?;
     }
 
     // Each segment's file contents, less what the file's own pages show. The
@@ -577,10 +578,18 @@ fn place(
 /// The pages of `segments` that can be mapped from a file whose object holds
 /// its first byte at `base`, lowest first.
 ///
-/// A page qualifies when it is wholly inside one segment's file contents, in
+/// A page qualifies when it holds some of one segment's file contents, is in
 /// no other segment's pages, and that segment's file offset and address agree
 /// within a page -- which `ld` and `lld` both guarantee, and without which no
 /// mapping can show the file's bytes at the addresses the headers ask for.
+/// The page a segment starts on and the page its file contents end on are
+/// mapped whole, as Linux's `elf_map` maps them: they show the file's bytes
+/// around the segment, and every page of the image carries the file's name in
+/// `/proc/<pid>/maps`, which NVIDIA's Vulkan driver reads to find the
+/// program. A writable segment's `.bss` tail on its last file page is zeroed
+/// after the mapping ([`zero_tails`]); a read-only segment whose memory runs
+/// past its file contents keeps that last page anonymous, since nothing may
+/// write it to zero it.
 fn file_runs(segments: &[Moved], base: u64) -> Vec<FileRun> {
     let mut runs = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
@@ -592,7 +601,14 @@ fn file_runs(segments: &[Moved], base: u64) -> Vec<FileRun> {
         {
             continue;
         }
-        let mut pieces = vec![(page_up(segment.at), page_down(segment.file_end()))];
+        let writable = segment.flags & PF_W != 0;
+        let mem_end = segment.at.wrapping_add(segment.memsz);
+        let end = if writable || mem_end <= segment.file_end() {
+            page_up(segment.file_end())
+        } else {
+            page_down(segment.file_end())
+        };
+        let mut pieces = vec![(page_down(segment.at), end)];
         for (_, other) in segments.iter().enumerate().filter(|(at, _)| *at != index) {
             let (first, end) = other.pages();
             pieces = without(&pieces, first, end);
@@ -600,7 +616,8 @@ fn file_runs(segments: &[Moved], base: u64) -> Vec<FileRun> {
         for (start, end) in pieces.into_iter().filter(|(start, end)| start < end) {
             let offset = segment
                 .offset
-                .checked_add(start - segment.at)
+                .checked_add(start)
+                .and_then(|offset| offset.checked_sub(segment.at))
                 .and_then(|offset| offset.checked_add(base));
             if let Some(offset) = offset {
                 runs.push(FileRun {
@@ -638,6 +655,29 @@ fn map_runs(space: &AddressSpace, file: &ProgramFile, runs: &[FileRun]) -> Resul
             run.offset,
             mapping,
         )?;
+    }
+    Ok(())
+}
+
+/// Zero each writable segment's `.bss` where it shares a page mapped from the
+/// file with the segment's last file bytes: the mapping is private, so the
+/// write copies that page, and the file never sees it. Linux's `padzero`.
+fn zero_tails(space: &AddressSpace, segments: &[Moved], runs: &[FileRun]) -> Result<(), LoadError> {
+    const ZEROS: [u8; 4096] = [0; 4096];
+    for segment in segments.iter().filter(|segment| segment.flags & PF_W != 0) {
+        let mem_end = segment.at.wrapping_add(segment.memsz);
+        for run in runs {
+            let from = run.start.max(segment.file_end());
+            let to = run.end.min(mem_end);
+            if from < to && run.start < segment.file_end() {
+                let len = usize::try_from(to - from)
+                    .map_err(|_| LoadError::Malformed(ElfError::SegmentOutOfBounds))?;
+                let zeros = ZEROS
+                    .get(..len)
+                    .ok_or(LoadError::Malformed(ElfError::SegmentOutOfBounds))?;
+                uaccess::copy_to_user(space, from, zeros)?;
+            }
+        }
     }
     Ok(())
 }

@@ -578,7 +578,7 @@ out:
 
 /* Ferrix: set to say each refused ioctl and each RM call that failed (N1e
  * bring-up); off by default. */
-int nvrm_trace_ioctls = 0;
+int nvrm_trace_ioctls = 1;
 
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
 {
@@ -725,6 +725,9 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
              */
             for (i = 0; i < num_arg_gpus; i++)
             {
+                /* An unused slot is zero, and NVIDIA skips it. */
+                if (((NvU32 *)arg_copy)[i] == 0)
+                    continue;
                 if (!nv_gpu_id_known(((NvU32 *)arg_copy)[i]))
                 {
                     nvos_sema_up(&nvl->ldata_lock);

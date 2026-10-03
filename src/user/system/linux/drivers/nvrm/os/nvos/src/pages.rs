@@ -279,3 +279,27 @@ pub unsafe extern "C" fn nvos_pages_free(pages: *mut Pages) {
     unsafe { libc::free(pages.cast()) };
     release(allocation);
 }
+
+/// The handle of the VMO allocation `pages` is, for the chardev core to map
+/// into a client (`docs/NVIDIA.md` §4.4): `NV_OK`, or
+/// `NV_ERR_NOT_SUPPORTED` for anonymous memory, which no client may map.
+///
+/// # Safety
+///
+/// `pages` is one [`nvos_pages_alloc`] made and not yet freed; `handle` is
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_pages_vmo(pages: *const Pages, handle: *mut u32) -> NvStatus {
+    // SAFETY: the caller vouches for both.
+    let Some(pages) = (unsafe { pages.as_ref() }) else {
+        return status::INVALID_ARGUMENT;
+    };
+    match &pages.pinned {
+        Some((vmo, _)) => {
+            // SAFETY: the caller vouches for `handle`.
+            unsafe { handle.write(vmo.as_owned().raw().0) };
+            status::OK
+        }
+        None => status::NOT_SUPPORTED,
+    }
+}

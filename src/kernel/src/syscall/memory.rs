@@ -167,6 +167,18 @@ pub(crate) fn sys_mmap(process: &Process, request: &MmapRequest) -> Result<usize
         return Err(Errno::EOVERFLOW);
     }
 
+    // A node a ring-3 driver serves through the chardev core: its driver is
+    // asked first, before the map is locked, so the driver's copies into
+    // this program never wait on the lock (`docs/NVIDIA.md` §4.4, M5).
+    if flags & MAP_ANONYMOUS == 0 {
+        let offset = (page_offset as u64)
+            .checked_mul(PAGE_SIZE)
+            .ok_or(Errno::EOVERFLOW)?;
+        if let Some(mapped) = chardev_mapping(process, fd, len, prot, flags, offset)? {
+            return map_chardev(process, mapped, addr, len, flags, vma);
+        }
+    }
+
     // From here the call looks at the map and changes it, perhaps twice.
     let _layout = process.space().layout();
     if flags & MAP_ANONYMOUS == 0 {
@@ -247,6 +259,78 @@ fn taken(process: &Process, addr: u64, len: u64) -> bool {
         }
         false
     })
+}
+
+/// What the driver of the chardev node `descriptor` names answered an mmap
+/// with, or `None` for any other file. The file's own access rules first,
+/// as for any file.
+fn chardev_mapping(
+    process: &Process,
+    descriptor: i64,
+    len: u64,
+    prot: u32,
+    flags: u32,
+    offset: u64,
+) -> Result<Option<crate::interfaces::chardev::file::Mapped>, Errno> {
+    let Ok(file) = fd::file(process, fd::arg(descriptor as u64)) else {
+        return Ok(None);
+    };
+    let Some(chardev) = crate::interfaces::chardev::file::of(file.io()) else {
+        return Ok(None);
+    };
+    if !file.readable() || (prot & PROT_WRITE != 0 && !file.writable()) {
+        return Err(Errno::EACCES);
+    }
+    crate::interfaces::chardev::file::mmap(&chardev, len, prot, flags, offset).map(Some)
+}
+
+/// Map what a chardev node's driver answered: its VMO, shared; or a range of
+/// its device's memory apertures through `map_window`'s memory-type hold,
+/// never executable, its region keeping the device's claim (M1–M3).
+fn map_chardev(
+    process: &Process,
+    mapped: crate::interfaces::chardev::file::Mapped,
+    addr: u64,
+    len: u64,
+    flags: u32,
+    vma: VmaFlags,
+) -> Result<usize, Errno> {
+    use crate::interfaces::chardev::MapReply;
+    let vma = VmaFlags {
+        execute: false,
+        shared: true,
+        ..vma
+    };
+    let _layout = process.space().layout();
+    let at = place(process, addr, len, flags)?;
+    let mapped_at = match mapped.reply {
+        MapReply::Vmo { vmo, offset } => {
+            let fixed = match at {
+                FilePlace::Fixed(at) => Some(at),
+                FilePlace::Anywhere(_) => None,
+            };
+            process
+                .space()
+                .map_object(fixed, len, vmo, offset, vma)
+                .map_err(refused)?
+        }
+        MapReply::Aperture { phys, combining } => {
+            let keeper: Arc<dyn Any + Send + Sync> = Arc::new(mapped.keeper.ok_or(Errno::EIO)?);
+            let pages = WindowPages {
+                physical: phys,
+                whole: phys,
+                whole_len: len,
+            };
+            process
+                .space()
+                .map_window_typed(at, len, pages, vma, false, combining, keeper)
+                .map_err(|why| match why {
+                    SpaceError::OtherMemoryType => Errno::EIO,
+                    other => refused(other),
+                })?
+        }
+    };
+    Ok(usize_of(mapped_at))
 }
 
 /// `mmap` of the file `fd` names, from byte `offset`.
