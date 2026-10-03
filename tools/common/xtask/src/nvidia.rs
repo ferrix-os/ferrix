@@ -37,7 +37,8 @@ use crate::args::Args;
 use crate::native::{self, Built};
 use crate::nvrm::{self, CORE_IN_VOLUME};
 use crate::paths::Arch;
-use crate::{Error, Result, btrfs_disk, cargo, fat, shell, test_disk};
+use crate::{Error, Result, btrfs_disk, cargo, fat, test_disk};
+use crate::{chrome, initramfs, ports, rustc, zinc};
 
 /// The libvirt connection.
 const CONNECTION: &str = "qemu:///system";
@@ -65,13 +66,13 @@ const SERIAL: &str = "127.0.0.1:47060";
 /// Where the GSP firmware is, in the fetched tree and on the volume.
 const GSP_FIRMWARE: &str = "lib/firmware/nvidia/580.173.02/gsp_ga10x.bin";
 /// The seconds a boot may take when `--timeout` does not say.
-const TIMEOUT: u64 = 180;
+const TIMEOUT: u64 = 420;
 /// Guest RAM, in MiB.
 const MEMORY: u32 = 8192;
 
 /// The lines after which the boot has shown what it can.
 const DONE: &[&str] = &[
-    "nvrm: skeleton up on ",
+    "init     the shell exited with",
     "nvrm: stopped",
     "nvos: core refused: ",
     "FERRIX-PANIC",
@@ -331,6 +332,97 @@ fn capture(log: &Path, deadline: Instant) -> Result<Vec<String>> {
     }
 }
 
+/// Where the static musl busybox is (`tools/common/xtask` uses Alpine's for
+/// `test-shell --init`); the script runs its `sleep`, which zinc lacks.
+const BUSYBOX: &str = "~/.local/share/ferrix/busybox/x86_64/bin/busybox.static";
+
+/// What init runs: wait for `nvrm` to register `/dev/nvidiactl`, then run
+/// NVIDIA's own `nvidia-smi` from the volume, through glibc.
+const SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
+cd /tmp
+i=0
+while [ ! -e /dev/nvidiactl ]; do
+  i=$((i + 1))
+  if [ $i -gt 240 ]; then echo "nvidia-gate: no /dev/nvidiactl after 240 s"; exit 3; fi
+  /bin/busybox sleep 1
+done
+echo "nvidia-gate: /dev/nvidiactl and /dev/nvidia0 are there"
+/data/usr/bin/nvidia-smi
+echo "nvidia-gate: nvidia-smi exited $?"
+/data/usr/bin/nvidia-smi -L
+echo "nvidia-gate: nvidia-smi -L exited $?"
+exit 16
+"#;
+
+/// `$HOME`.
+fn home() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+/// The NVIDIA volume: the fetched release's whole tree, hard-linked into
+/// [`vm_dir`] (the same filesystem), with `nvrm`'s core beside it at
+/// [`CORE_IN_VOLUME`], made into a btrfs image.
+fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
+    let tree = dir.join("nvidia.tree");
+    if tree.exists() {
+        std::fs::remove_dir_all(&tree)
+            .map_err(|error| Error::new(format!("clearing {}: {error}", tree.display())))?;
+    }
+    let source = nvrm::fetched()?.join("tree");
+    let linked = Command::new("cp")
+        .arg("-al")
+        .arg(&source)
+        .arg(&tree)
+        .status()
+        .map_err(|error| Error::new(format!("running cp: {error}")))?;
+    if !linked.success() {
+        return Err(Error::new(format!(
+            "cp -al {} {}: {linked}",
+            source.display(),
+            tree.display()
+        )));
+    }
+    let to = tree.join(CORE_IN_VOLUME);
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| Error::new(format!("making {}: {error}", parent.display())))?;
+    }
+    let _ = std::fs::copy(core, &to).map_err(|error| {
+        Error::new(format!(
+            "copying {} to {}: {error}",
+            core.display(),
+            to.display()
+        ))
+    })?;
+    if !tree.join(GSP_FIRMWARE).is_file() {
+        return Err(Error::new(format!(
+            "the fetched tree has no {GSP_FIRMWARE}"
+        )));
+    }
+    let image = dir.join("nvidia.img");
+    let _ = std::fs::remove_file(&image);
+    let file = std::fs::File::create(&image)
+        .map_err(|error| Error::new(format!("creating {}: {error}", image.display())))?;
+    // The tree is about 1 GB; room for btrfs's own trees beside it.
+    file.set_len(1600 << 20)
+        .map_err(|error| Error::new(format!("sizing {}: {error}", image.display())))?;
+    drop(file);
+    let made = Command::new("mkfs.btrfs")
+        .arg("-q")
+        .arg("--rootdir")
+        .arg(&tree)
+        .arg(&image)
+        .status()
+        .map_err(|error| Error::new(format!("running mkfs.btrfs: {error}")))?;
+    if !made.success() {
+        return Err(Error::new(format!(
+            "mkfs.btrfs {}: {made}",
+            image.display()
+        )));
+    }
+    Ok(())
+}
+
 /// The command.
 pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     if args.arches()? != [Arch::X86_64] {
@@ -347,28 +439,36 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     let programs = nvrm::build()?;
     let nvrm_bytes = std::fs::read(programs.path("nvrm"))
         .map_err(|error| Error::new(format!("reading nvrm: {error}")))?;
-    let hold = programs.path("nvrm-hold");
+    let shell =
+        zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
+    let shell_bytes = std::fs::read(&shell)
+        .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
+    let busybox = std::fs::read(BUSYBOX.replace('~', &home())).map_err(|error| {
+        Error::new(format!(
+            "reading the static busybox at {BUSYBOX} ({error}): the script sleeps with it"
+        ))
+    })?;
     let loader = cargo::build_loader(arch, args.release)?;
-    let kernel = cargo::build_kernel_with_init(arch, args.release, &hold, shell::SCRIPT)?;
+    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
     let mut natives = native::build(arch, args.release)?;
     natives.push(Built {
         name: "nvrm",
         directory: native::DRIVERS,
         bytes: nvrm_bytes,
     });
-    let image = fat::write_image(arch, &loader, &kernel, &natives, None)?;
+    let mut files = rustc::files(chrome::LINKS);
+    files.push(ports::File {
+        path: "bin/busybox".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(busybox),
+    });
+    let archive = initramfs::build(None, &natives, Some(&shell_bytes), &files)?;
+    let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
     place(&image, &dir, "ferrix.img")?;
     place(&test_disk::ensure()?, &dir, "pattern.img")?;
     place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;
     place(&btrfs_disk::ensure_blank(arch)?, &dir, "btrfs-write.img")?;
-    let firmware = nvrm::fetched()?.join("tree").join(GSP_FIRMWARE);
-    nvrm::volume(
-        &dir.join("nvidia.img"),
-        &[
-            (CORE_IN_VOLUME, programs.path("nvrm-core")),
-            (GSP_FIRMWARE, firmware),
-        ],
-    )?;
+    whole_volume(&dir, &programs.path("nvrm-core"))?;
     println!(
         "  {}: image, fixture disks and the NVIDIA volume",
         dir.display()
