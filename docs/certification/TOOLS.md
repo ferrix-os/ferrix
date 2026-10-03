@@ -87,7 +87,7 @@ output is used to *satisfy* an objective rather than to find defects.
 | `clippy` | ten configurations; denies `unwrap`, `panic`, indexing | T2 |
 | `miri` | UB detection over 13 crates | T2 |
 | `cargo fuzz` | 30 targets with committed corpora | T2 |
-| `loom` 0.7.2 | permutation testing of the orderings two of the kernel's lock-free looks rest on: 8 models in `src/tests/loom` (`cargo xtask loom`, a step of `check`), its own workspace, with the crate set pinned in `src/tests/loom/Cargo.lock`. It checks the protocol restated in the models, not the kernel's code: each model's match to the kernel sites it names (`tests/models.rs`, *Kernel sites*) is by review | T2 |
+| `loom` 0.7.2 | permutation testing of the orderings the kernel's lock-free looks, and step 4's park protocol, rest on: 15 models in `src/tests/loom` (`cargo xtask loom`, a step of `check`), its own workspace, with the crate set pinned in `src/tests/loom/Cargo.lock`. It checks the protocol restated in the models, not the kernel's code: each model's match to the kernel sites it names (`tests/models.rs`, *Kernel sites*) is by review, and the park models (`tests/park.rs`) name the design's steps, to become kernel sites when the fast path lands | T2 |
 | `cargo deny` | RUSTSEC advisories, licences, bans | T2 |
 | QEMU 9.2.4 + `libdrcov.so` | executes the item; records coverage | **T2, and load-bearing** |
 
