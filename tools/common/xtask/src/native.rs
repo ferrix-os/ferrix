@@ -58,6 +58,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DIRECTORY,
     },
     Program {
+        package: "ferrix-ipc-equiv",
+        binary: "ipc-equiv",
+        directory: DIRECTORY,
+    },
+    Program {
         package: "ferrix-devmgr",
         binary: "devmgr",
         directory: DIRECTORY,
