@@ -390,11 +390,6 @@ NV_STATUS NV_API_CALL nv_acquire_fabric_mgmt_cap(int a0, int*a1)
     return NV_ERR_NOT_SUPPORTED;
 }
 
-NvBool NV_API_CALL nv_is_gpu_accessible(nv_state_t *a0)
-{
-    nvos_stub_called("nv_is_gpu_accessible", "not on Ferrix yet");
-    return NV_FALSE;
-}
 
 void NV_API_CALL os_pci_remove(void *a0)
 {

@@ -463,7 +463,15 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         content: ports::Content::Bytes(busybox),
     });
     let archive = initramfs::build(None, &natives, Some(&shell_bytes), &files)?;
-    let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
+    // The boot's self-checks are `test-boot`'s evidence, not this domain's;
+    // two vCPUs on a loaded host make the timing ones flake here.
+    let image = fat::write_image_with(
+        arch,
+        &loader,
+        &kernel,
+        &archive,
+        Some("ferrix.checks=skip\n"),
+    )?;
     place(&image, &dir, "ferrix.img")?;
     place(&test_disk::ensure()?, &dir, "pattern.img")?;
     place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;

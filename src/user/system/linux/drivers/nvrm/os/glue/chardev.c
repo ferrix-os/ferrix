@@ -89,6 +89,11 @@ static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length)
     return nvos_chardev_copy_out(*(NvU64 *)context, to, from, length) == 0 ? 0 : -EFAULT;
 }
 
+static NvS64 bridge_fd(void *context, int fd)
+{
+    return nvos_chardev_file(*(NvU64 *)context, fd);
+}
+
 /* One ioctl's worker. */
 struct worker {
     struct nvos_request request;
@@ -108,6 +113,7 @@ static void serve_ioctl(void *argument)
     client.copy_in = bridge_in;
     client.copy_out = bridge_out;
     client.context = &work->request.id;
+    client.resolve_fd = bridge_fd;
 
     if (!nvos_client_enter(&client))
     {
@@ -143,6 +149,9 @@ static void handle(const struct nvos_request *request)
                 (void)nvos_chardev_reply(request->id, -ENODEV, 0);
                 return;
             }
+            /* RM names files by fd (nv_get_file_private): the kernel's
+             * identity for it, which chardev_file resolves descriptors to. */
+            nvlfp->fd = (NvS32)request->file;
             remember(request->file, nvlfp, entry);
             (void)nvos_chardev_reply(request->id, 0, 0);
             return;

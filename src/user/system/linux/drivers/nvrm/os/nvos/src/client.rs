@@ -40,6 +40,10 @@ pub struct Client {
     pub copy_out: Option<extern "C" fn(*mut c_void, u64, *const c_void, u32) -> i32>,
     /// What the two copies are given first: the request, for the bridge.
     pub context: *mut c_void,
+    /// The file identity the client's descriptor `fd` names, or a negative
+    /// errno (the bridge's `chardev_file`); `None` takes descriptors as
+    /// identities, as `nvrm-link-test` hands them out.
+    pub resolve_fd: Option<extern "C" fn(*mut c_void, i32) -> i64>,
 }
 
 /// The most threads serving a client at once.
@@ -71,6 +75,20 @@ fn current() -> Option<&'static Client> {
     // SAFETY: `nvos_client_enter`'s caller keeps the client alive until it
     // calls `nvos_client_leave` on this same thread.
     (!client.is_null()).then(|| unsafe { &*client })
+}
+
+/// The identity the calling thread's client's descriptor `fd` names, for
+/// `nv_get_file_private`: through its `resolve_fd`, or `fd` itself. A
+/// negative errno when the client's descriptor names no file of nvrm's.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_client_resolve_fd(fd: i32) -> i64 {
+    match current() {
+        Some(client) => match client.resolve_fd {
+            Some(resolve) => resolve(client.context, fd),
+            None => i64::from(fd),
+        },
+        None => i64::from(fd),
+    }
 }
 
 /// Say the calling thread now serves `client`, until

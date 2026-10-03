@@ -85,6 +85,18 @@ impl ChardevFile {
     }
 }
 
+impl ChardevFile {
+    /// The control serving it.
+    pub(crate) fn control(&self) -> &Arc<Control> {
+        &self.control
+    }
+
+    /// Its identity on its control.
+    pub(crate) fn identity(&self) -> u64 {
+        self.file
+    }
+}
+
 impl Drop for ChardevFile {
     fn drop(&mut self) {
         super::queue_release(&self.control, self.file, self.minor);

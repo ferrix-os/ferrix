@@ -114,6 +114,7 @@ NV_STATUS nvos_chardev_next(struct nvos_request *out);
 int nvos_chardev_reply(NvU64 id, int status, NvS64 value);
 int nvos_chardev_copy_in(NvU64 id, void *to, NvU64 from, NvU32 length);
 int nvos_chardev_copy_out(NvU64 id, NvU64 to, const void *from, NvU32 length);
+NvS64 nvos_chardev_file(NvU64 id, int fd);
 void nvos_isr_enter_leave(NvBool entering);
 
 /* client.rs: the client the calling thread serves a request for. */
@@ -125,9 +126,11 @@ typedef struct nvos_client {
     int (*copy_in)(void *context, void *to, NvU64 from, NvU32 length);
     int (*copy_out)(void *context, NvU64 to, const void *from, NvU32 length);
     void *context;
+    NvS64 (*resolve_fd)(void *context, int fd);
 } nvos_client_t;
 NvBool nvos_client_enter(const nvos_client_t *);
 void nvos_client_leave(void);
+NvS64 nvos_client_resolve_fd(int fd);
 
 /* os.rs and log.rs. */
 void *nvos_read_whole_file(const char *path, NvU64 *size);

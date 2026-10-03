@@ -144,6 +144,8 @@ pub const CHARDEV_REPLY: usize = 0x105B;
 pub const CHARDEV_COPY_IN: usize = 0x105C;
 /// [`NativeCall::ChardevCopyOut`].
 pub const CHARDEV_COPY_OUT: usize = 0x105D;
+/// [`NativeCall::ChardevFile`].
+pub const CHARDEV_FILE: usize = 0x105E;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -506,10 +508,16 @@ pub enum NativeCall {
     /// `(control, request, client address, buffer, length)`. The other way.
     /// Answered by the load ring.
     ChardevCopyOut,
+    /// `(control, request, descriptor)` → file. The identity, on this
+    /// control, of the file the waiting program's `descriptor` names:
+    /// NVIDIA's `fget` for `NV_ESC_REGISTER_FD`. `BAD_HANDLE` for a
+    /// descriptor that is not one of this control's files. Only while the
+    /// request is outstanding. Answered by the load ring.
+    ChardevFile,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 58] = [
+pub const ALL: [NativeCall; 59] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -568,6 +576,7 @@ pub const ALL: [NativeCall; 58] = [
     NativeCall::ChardevReply,
     NativeCall::ChardevCopyIn,
     NativeCall::ChardevCopyOut,
+    NativeCall::ChardevFile,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -641,6 +650,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_REPLY => NativeCall::ChardevReply,
         CHARDEV_COPY_IN => NativeCall::ChardevCopyIn,
         CHARDEV_COPY_OUT => NativeCall::ChardevCopyOut,
+        CHARDEV_FILE => NativeCall::ChardevFile,
         _ => return None,
     };
     Some(call)
@@ -708,5 +718,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevReply => CHARDEV_REPLY,
         NativeCall::ChardevCopyIn => CHARDEV_COPY_IN,
         NativeCall::ChardevCopyOut => CHARDEV_COPY_OUT,
+        NativeCall::ChardevFile => CHARDEV_FILE,
     }
 }

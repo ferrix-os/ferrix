@@ -192,6 +192,7 @@ pub(crate) fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevReply, reply)?;
     native::serve(NativeCall::ChardevCopyIn, copy_in)?;
     native::serve(NativeCall::ChardevCopyOut, copy_out)?;
+    native::serve(NativeCall::ChardevFile, file_of)?;
     native::register_server(&SERVER)
 }
 
@@ -689,6 +690,27 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     } else {
         Err(status::INVALID_ARGS)
     }
+}
+
+/// `chardev_file(control, request, descriptor)`: the identity of the file
+/// the waiting program's descriptor names, if it is one of this control's.
+fn file_of(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
+    let [handle, id, descriptor, ..] = *registers;
+    let control = control_of(caller, handle)?;
+    let request = outstanding(&control, id)?;
+    {
+        let inner = request.inner.lock();
+        if !inner.alive || inner.answer.is_some() {
+            return Err(status::BAD_STATE);
+        }
+    }
+    let file = crate::syscall::fd::file(&request.client, crate::syscall::fd::arg(descriptor))
+        .map_err(|_| status::BAD_HANDLE)?;
+    let opened = file::of(file.io()).ok_or(status::BAD_HANDLE)?;
+    if !Arc::ptr_eq(opened.control(), &control) {
+        return Err(status::BAD_HANDLE);
+    }
+    usize::try_from(opened.identity()).map_err(|_| status::BAD_HANDLE)
 }
 
 /// Which way a copy goes.

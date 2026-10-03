@@ -220,6 +220,20 @@ pub extern "C" fn nvos_chardev_reply(id: u64, status: i32, value: i64) -> i32 {
     }
 }
 
+/// The identity of the file the waiting program's descriptor `fd` names,
+/// for request `id`, if it is one of nvrm's; otherwise a negative errno.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_file(id: u64, fd: i32) -> i64 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_FILE,
+        [control, id as usize, fd as isize as usize, 0, 0, 0],
+    ) {
+        Ok(file) => i64::try_from(file).unwrap_or(-9),
+        Err(errno) => i64::from(errno),
+    }
+}
+
 /// Copy `length` bytes from the waiting program's `from` into nvrm's `to`,
 /// for request `id`. 0, or a negative errno.
 ///
