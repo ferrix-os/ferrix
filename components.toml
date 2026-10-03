@@ -12,7 +12,7 @@
 [ferrousli]
 path = "src/user/system/linux/ferrousli"
 repo = "https://github.com/ferrix-os/ferrousli"
-commit = "a8fc95e65c1f1262892a795f5e67c9dcae8ead20"
+commit = "ba6b96d80a3b3c09647228dcfd3b70f3007fb50a"
 
 # The shell.
 [zinc]
@@ -37,4 +37,4 @@ commit = "a344755b408b07de8593a564e9d5b923ec04ad7d"
 [apps]
 path = "src/user/apps"
 repo = "https://github.com/ferrix-os/apps"
-commit = "c5b482df537cd4c2392e217422f559acbf9e5c34"
+commit = "1c2c7e0ee1b9f350f0014fb2c4b1481b90f5ab7c"

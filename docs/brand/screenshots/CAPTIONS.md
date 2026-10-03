@@ -31,9 +31,6 @@ Two images do not come from that boot: `website.png` and `steam-yserver.png`, be
 - **btop.png**: btop, built against ferrousli, monitoring a live Ferrix system after two
   minutes of Chrome loading pages: the CPU and eth0 history, Chrome's processes, the
   compositor, the user-space drivers, memory and disks. x86_64, KVM.
-- **foot.png**: foot, the Wayland terminal, built against ferrousli, running zinc in the
-  git repository with ferrofetch's summary of the machine (Ferrix 0.1.0, zinc in foot,
-  1920x1080, four cores). x86_64, KVM.
 - **vkgears.png**: vkgears, built against ferrousli, drawing its gears with Vulkan
   through virtio-gpu's Venus on the host's GPU. x86_64, KVM.
 - **website.png**: https://ferrix-os.github.io/, Ferrix's website, as headless Chrome on
@@ -92,6 +89,10 @@ moved with `hyprctl` over ssh, which acts on the focused window.
   `df -h / /data`, `git status --short --branch`,
   `curl -sI https://rust-lang.org/ | head -3`
 - Every capture: `move 1919 1079 shot <file>.png`
-- foot and vkgears: in the same boot, after the shots above. How each was started
-  was not written down before the session that took them ended; foot shows zinc in
-  `/src/hello` after `ferrofetch` and `git --no-pager log --oneline`.
+- vkgears: in the same boot, after the shots above. How it was started was not
+  written down before the session that took it ended.
+
+A `foot.png` was in this set until it turned out, the same day, to show hyprix's own
+terminal: desktops linked `/bin/foot` to `/bin/term` over the foot app until main
+2f067e40f, so starting foot started term. It is gone; each app's own screenshot is in
+its folder in ferrix-os/apps.

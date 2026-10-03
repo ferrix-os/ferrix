@@ -47,7 +47,7 @@ this tree at the commits [`components.toml`](components.toml) names.
 <table>
   <tr>
     <td width="50%" valign="top">
-      <a href="https://github.com/ferrix-os/ferrousli"><img src="docs/brand/screenshots/foot.png" alt="foot running zinc and ferrofetch on Ferrix"></a>
+      <a href="https://github.com/ferrix-os/ferrousli"><img src="docs/brand/screenshots/btop.png" alt="btop, built against ferrousli, on Ferrix"></a>
       <br><b><a href="https://github.com/ferrix-os/ferrousli">ferrix-os/ferrousli</a></b><br>
       The C library, written in Rust, that Linux programs on Ferrix are built against,
       and the toolkit they are ported onto it with.
