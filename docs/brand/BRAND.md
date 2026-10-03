@@ -18,8 +18,8 @@ Both are drawn once, in `src/mark.svgfrag` and `src/word.svgfrag`; every SVG
 and PNG below is written from them by
 `python3 tools/common/gen/gen-brand-images.py`. The SVG files are grey and
 rust on dark backgrounds, and ink and the deeper rust on light ones
-(`prefers-color-scheme`). ferrofetch draws the mark in ASCII
-(`src/user/apps/ferrofetch/src/logo.rs`).
+(`prefers-color-scheme`). ferrofetch, in the apps repository, draws the
+mark in ASCII.
 
 | File | Use |
 |---|---|
