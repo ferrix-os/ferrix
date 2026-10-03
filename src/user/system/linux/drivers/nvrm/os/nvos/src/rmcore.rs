@@ -1,7 +1,7 @@
 //! Loading RM's core, `nvrm-core`, from the NVIDIA volume
 //! (`docs/NVIDIA.md` §4.1, "The core").
 //!
-//! RM's core is 12 MB of code and read-only data, more than the kernel
+//! RM's core is 13 MB of code and read-only data, more than the kernel
 //! reads into a driver's image (`docs/DEVMGR.md` §5), so nvrm is started
 //! without it and reads it at run time. The core was linked on the host
 //! alone, at [`BASE`], against nvrm's own addresses; its first bytes are an

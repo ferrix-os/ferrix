@@ -245,6 +245,7 @@ fn run(args: &Args) -> Result<()> {
     compositor(&root)?;
     userland(&root)?;
     adbd(&root)?;
+    nvos(&root)?;
     apps()?;
 
     if args.ferrousli {
@@ -781,6 +782,40 @@ fn adbd(root: &std::path::Path) -> Result<()> {
             in_adbd(&["clippy", "--all-targets", "--", "-D", "warnings"]),
             "cargo clippy (adbd)",
         )
+    })
+}
+
+/// ferrix-nvos's gates: `src/user/system/linux/drivers/nvrm/os/nvos/` is a
+/// workspace of its own, the OS layer nvrm links. Its host tests hold every
+/// refusal of the core loader (`rmcore`) and the `rdcr4` answer (`cpu`),
+/// which `test-nvrm-link` meets only in part on the machine (`docs/NVIDIA.md`
+/// §4.1, "The core"); none needs NVIDIA's fetch. Seconds.
+fn nvos(root: &std::path::Path) -> Result<()> {
+    let dir = root.join("src/user/system/linux/drivers/nvrm/os/nvos");
+    let in_nvos = |arguments: &[&str]| {
+        if cfg!(windows) {
+            return crate::wsl::cargo(&dir, arguments);
+        }
+        let mut command = Command::new(cargo_binary());
+        let _ = command.current_dir(&dir).args(arguments);
+        command
+    };
+    if cfg!(windows) {
+        step("nvos: WSL", || {
+            crate::wsl::require_toolchain("ferrix-nvos is built for the Linux ABI")
+        })?;
+    }
+    step("nvos: formatting", || {
+        cargo::run(in_nvos(&["fmt", "--check"]), "cargo fmt (nvos)")
+    })?;
+    step("nvos: clippy", || {
+        cargo::run(
+            in_nvos(&["clippy", "--all-targets", "--", "-D", "warnings"]),
+            "cargo clippy (nvos)",
+        )
+    })?;
+    step("nvos: tests", || {
+        cargo::run(in_nvos(&["test"]), "cargo test (nvos)")
     })
 }
 

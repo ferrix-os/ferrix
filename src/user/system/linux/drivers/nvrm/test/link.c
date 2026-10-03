@@ -6,6 +6,8 @@
  *
  *   nvrm-link-test CORE                 load CORE, then RM's no-GPU path
  *   nvrm-link-test --control-rwx        the maps check's negative control
+ *   nvrm-link-test --control-taken CORE CORE's base taken first: the
+ *                                       loader's EEXIST refusal
  *
  * The no-GPU path is what a Linux client's first calls reach: RM's
  * initialisation (nvrm_module_init: rm_init_rm, the control device's
@@ -26,6 +28,15 @@
 #include "core-calls.h"
 
 int strcmp(const char *, const char *);
+void *mmap(void *, unsigned long, int, int, int, long);
+
+/* sys/mman.h's, which this program's headers do not include. */
+#define PROT_READ 0x1
+#define MAP_PRIVATE 0x02
+#define MAP_ANONYMOUS 0x20
+#define MAP_FIXED_NOREPLACE 0x100000
+/* Where the core is linked (core/nvrm-core.ld; rmcore::BASE). */
+#define CORE_BASE 0x40000000UL
 
 /* From pin.c, core-calls.S and ferrix-nvos (os/nvos/src/rmcore.rs). */
 extern const unsigned char nvrm_core_sha256[32];
@@ -72,6 +83,7 @@ enum step {
 	STEP_ROOT = 7,
 	STEP_DEVICE = 8,
 	STEP_FREE = 9,
+	STEP_TAKE = 10,
 };
 
 /* This program as its own client: its "user" memory is its own. */
@@ -121,10 +133,24 @@ int main(int argc, char **argv)
 			  refused);
 		return refused == 0 ? STEP_CONTROL : refused;
 	}
-	if (argc != 2)
-		return stop(STEP_USAGE, "usage: nvrm-link-test CORE | --control-rwx");
+	const char *core = argv[1];
+	if (argc == 3 && strcmp(argv[1], "--control-taken") == 0) {
+		/* One page at the core's base before the load: the loader must
+		 * refuse with EEXIST rather than map over it or elsewhere. */
+		void *page = mmap((void *)CORE_BASE, 4096, PROT_READ,
+				  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+				  -1, 0);
+		if (page != (void *)CORE_BASE)
+			return stop(STEP_TAKE, "the core's base could not be taken first");
+		nv_printf(NV_DBG_ERRORS,
+			  "nvrm-link-test: control: a page mapped at the core's base\n");
+		core = argv[2];
+	} else if (argc != 2) {
+		return stop(STEP_USAGE, "usage: nvrm-link-test CORE | --control-rwx | "
+				  "--control-taken CORE");
+	}
 
-	int status = nvos_core_load(argv[1], &nvrm_core_sha256,
+	int status = nvos_core_load(core, &nvrm_core_sha256,
 				    nvrm_core_table, NVRM_CORE_EXPORTS,
 				    NVRM_CORE_DATA);
 	if (status != 0)

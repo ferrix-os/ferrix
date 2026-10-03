@@ -1,7 +1,7 @@
 //! RM's own functions that run a privileged instruction, answered in ring 3
 //! (`docs/NVIDIA.md` §4.1, "The core").
 //!
-//! RM's core was built for ring 0. Of its 12 MB, one function executes an
+//! RM's core was built for ring 0. Of its 13 MB, one function executes an
 //! instruction ring 3 may not: `osNv_rdcr4`, `mov %cr4, %rax`, which faults.
 //! It is defined inside `nv-kernel.o`, not imported, so the core's link
 //! binds it to [`nvos_rdcr4`] instead (`core/core-link.py`, `REPLACED`);

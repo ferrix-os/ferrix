@@ -23,6 +23,7 @@
 //! | rwx segment | the text segment made writable | write and execute |
 //! | bad magic | the export header's first byte | the magic |
 //! | rwx mapping | a page mapped rwx, `--control-rwx` | the maps check |
+//! | base taken | a page mapped at the base first, `--control-taken` | `MAP_FIXED_NOREPLACE` |
 //!
 //! Every case runs on the host first, where it is quick, and then on
 //! Ferrix: the programs and cores go on a btrfs volume, which the kernel
@@ -46,6 +47,8 @@ struct Case {
     name: &'static str,
     /// The program, by its name on the volume.
     program: &'static str,
+    /// A control's flag before the argument, or nothing.
+    control: &'static str,
     /// Its argument: a core's name on the volume, or `--control-rwx`.
     argument: &'static str,
     /// The status it must exit with.
@@ -58,6 +61,7 @@ struct Case {
 const CASES: &[Case] = &[
     Case {
         name: "good",
+        control: "",
         program: "nvrm-link-test",
         argument: "nvrm-link-test-core",
         status: 0,
@@ -65,6 +69,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "flipped",
+        control: "",
         program: "nvrm-link-test",
         argument: "flipped-core",
         status: 25,
@@ -72,6 +77,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "unpinned",
+        control: "",
         program: "nvrm-link-test.unpinned",
         argument: "nvrm-link-test-core",
         status: 20,
@@ -79,6 +85,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "other-build",
+        control: "",
         program: "pinned-other-build",
         argument: "other-build-core",
         status: 35,
@@ -86,6 +93,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "past-2gib",
+        control: "",
         program: "pinned-past-2gib",
         argument: "past-2gib-core",
         status: 30,
@@ -93,6 +101,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "rwx-segment",
+        control: "",
         program: "pinned-rwx-segment",
         argument: "rwx-segment-core",
         status: 29,
@@ -100,6 +109,7 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "bad-magic",
+        control: "",
         program: "pinned-bad-magic",
         argument: "bad-magic-core",
         status: 32,
@@ -107,10 +117,19 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "rwx-mapping",
+        control: "",
         program: "nvrm-link-test",
         argument: "--control-rwx",
         status: 41,
         says: "nvos: core refused: /proc/self/maps shows a writable and executable mapping",
+    },
+    Case {
+        name: "base-taken",
+        control: "--control-taken",
+        program: "nvrm-link-test",
+        argument: "nvrm-link-test-core",
+        status: 37,
+        says: "nvos: core refused: a segment's place is already mapped (EEXIST)",
     },
 ];
 
@@ -292,6 +311,7 @@ fn on_host(directory: &Path, files: &[(String, PathBuf)]) -> Result<()> {
             find(case.argument).display().to_string()
         };
         let ran = Command::new(find(case.program))
+            .args(std::iter::once(case.control).filter(|flag| !flag.is_empty()))
             .arg(argument)
             .output()
             .map_err(|error| Error::new(format!("running {}: {error}", case.program)))?;
@@ -317,10 +337,17 @@ fn script() -> String {
             format!("/data/{}", case.argument)
         };
         script.push_str(&format!(
-            "/data/{} {argument} > /tmp/case.log 2>&1\nstatus=$?\n\
+            "/data/{} {}{argument} > /tmp/case.log 2>&1\nstatus=$?\n\
              sed 's/^/nvrm-link {}: /' /tmp/case.log\n\
              echo \"nvrm-link {}: exit $status\"\n",
-            case.program, case.name, case.name
+            case.program,
+            if case.control.is_empty() {
+                String::new()
+            } else {
+                format!("{} ", case.control)
+            },
+            case.name,
+            case.name
         ));
     }
     script.push_str("exit 17\n");

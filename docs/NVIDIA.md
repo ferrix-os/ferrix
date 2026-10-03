@@ -463,9 +463,9 @@ small and load the core at run time (§10, N1c):
 * **Where the heap is.** `nvrm`'s `brk` heap starts above its image at
   4 MiB and grows upward. The personality's `mmap` searches top-down from
   the top of user space. Neither may reach the core's range,
-  [0x4000_0000, 2 GiB), before the core is mapped. The core is mapped early: before any thread starts and before
-  RM runs, when `nvrm` has made only a handful of small allocations and
-  one file-sized buffer. If something is already in the core's range,
+  [0x4000_0000, 2 GiB), before the core is mapped. The core is mapped
+  early: before any thread starts and before RM runs, when `nvrm` has made
+  only a handful of small allocations and one file-sized buffer. If something is already in the core's range,
   `MAP_FIXED_NOREPLACE` turns that into a refusal, not an overlap.
 * **RM's one privileged instruction.** Across all of RM's code, only
   `osNv_rdcr4` (`mov %cr4,%rax`) faults in ring 3. A linker-script
@@ -1403,16 +1403,41 @@ and took the recommended answer for D2, D3 and D5.
   * **`cargo xtask test-nvrm-link`** (on demand, as it needs the fetch)
     runs `nvrm-link-test` on the host and on Ferrix under KVM. RM
     initialises, allocates a root client, and refuses `NV01_DEVICE_0` with
-    status 0x40, since there is no GPU, then exits 0. The seven negative
+    status 0x40, since there is no GPU, then exits 0. The eight negative
     controls each refuse with their own line and exit status: a flipped
     byte 25, unpinned 20, another build 35, a segment past 2 GiB 30, a W+X
-    segment 29, a bad magic 32, an rwx mapping 41.
+    segment 29, a bad magic 32, an rwx mapping 41, and the core's base
+    already mapped 37 (`MAP_FIXED_NOREPLACE`'s EEXIST, on Ferrix as on the
+    host).
   * **`cargo xtask test-nvrm`** now attaches a volume carrying the core.
     In the handed-over boot, `nvrm` waits for the volume after devmgr's
     REPORT, then prints `nvos: core loaded: sha256 be83e087…, 13445824
     bytes, base 0x40000000, 17 exports, build-id …`. It passes all three
     boots under KVM and TCG, with transcripts re-recorded. A host test
     checks that a `nvos: core refused:` line fails the hand-over.
+  * **The code review: OK IF** (ledger line 291). Conditions 1-9 of line
+    289 were found met, and four more were set and are met in this branch:
+    * C1: `core-link.py`'s privileged scan also refuses the UMIP
+      instructions (Ferrix sets CR4.UMIP), `clac`/`stac`,
+      `monitor`/`mwait`, `xsaves`/`xrstors`, `sysexit`, and the VMX and
+      SVM instructions by name. It was shown firing on scratch objects with
+      `sgdt (%rax)` and `mov %cr0,%rax`.
+    * C2: the pin's same-layout check refuses when readelf or nm fails or
+      prints nothing.
+    * C3: `cargo xtask check` runs ferrix-nvos's host tests, its formatting
+      and its clippy (step `nvos`).
+    * C4: this entry.
+
+    The consultant ruled that:
+    * the `osNv_rdcr4` binding is sound: three PLT32 calls, all against the
+      symbol;
+    * a count computed per build replaces the design's estimate of 161;
+    * the negative controls belong in `test-nvrm-link` itself, judged by
+      their own line and status on the host and on Ferrix, in place of
+      `gate.sh control`. A PASSED row of that gate on the landing hash is
+      their evidence.
+
+    The eighth control, base taken, was its advisory A1.
   * **Left for N1d**: the real `nvidia.img` must carry
     `usr/lib/ferrix/nvrm-core`, which xtask writes because it depends on
     `nvrm`'s build. After that comes the first boot on the 3060 and GSP

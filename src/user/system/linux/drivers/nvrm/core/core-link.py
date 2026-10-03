@@ -44,11 +44,18 @@ DATA = ["pNVRM_ID"]
 # linker script's assignment overrides the object's definition, so every
 # call in the core reaches nvrm's; RM's own copy stays, never called.
 REPLACED = {"osNv_rdcr4": "nvos_rdcr4"}
-# The instructions ring 3 may not execute, as objdump spells them.
+# The instructions ring 3 may not execute, as objdump spells them. Ferrix
+# sets CR4.UMIP (src/kernel/src/arch/x86_64/cpu.rs), so the descriptor-table
+# stores fault too. The VMX and SVM instructions are named one by one: a
+# `vm` prefix would also take AVX's vmovaps and vmulps.
 PRIVILEGED = re.compile(
     r"^\s*[0-9a-f]+:\t(mov\s+%(cr|db|dr)\d|mov\s+\S+,%(cr|db|dr)\d|rdmsr|wrmsr|"
-    r"wbinvd|invd|cli|sti|hlt|in\s|out\s|ins[bwl]|outs[bwl]|lgdt|lidt|lldt|ltr|"
-    r"clts|invlpg|invpcid|xsetbv|swapgs|sysret|iretq?|lmsw|rdpmc)\b")
+    r"wrmsrns|wbinvd|invd|cli|sti|hlt|in\s|out\s|ins[bwl]|outs[bwl]|lgdt|lidt|"
+    r"lldt|ltr|sgdt|sidt|sldt|smsw|str|clts|invlpg|invlpga|invpcid|invept|"
+    r"invvpid|xsetbv|xsaves(64)?|xrstors(64)?|swapgs|sysret|sysexit|iretq?|"
+    r"lmsw|rdpmc|clac|stac|monitor|mwait|encls|pconfig|vmcall|vmlaunch|"
+    r"vmresume|vmxon|vmxoff|vmread|vmwrite|vmptrld|vmptrst|vmclear|vmfunc|"
+    r"vmrun|vmload|vmsave|vmmcall)\b")
 
 
 def refuse(why):
@@ -276,11 +283,17 @@ def check_size(path, limit):
 
 
 def layout(path):
-    sections = subprocess.run(["readelf", "-SW", path], capture_output=True,
-                              text=True).stdout
-    symbols = subprocess.run(["nm", "-n", path], capture_output=True,
-                             text=True).stdout
-    return sections, symbols
+    """`path`'s section headers and symbol table, as readelf and nm print
+    them; a tool that fails or prints nothing is a refusal, so that two
+    failed runs never compare equal."""
+    listed = []
+    for command in (["readelf", "-SW", path], ["nm", "-n", path]):
+        run = subprocess.run(command, capture_output=True, text=True)
+        if run.returncode != 0 or not run.stdout.strip():
+            refuse(f"{' '.join(command)} failed (exit {run.returncode}): "
+                   f"{run.stderr.strip() or 'no output'}")
+        listed.append(run.stdout)
+    return listed[0], listed[1]
 
 
 def same_layout(before, after):

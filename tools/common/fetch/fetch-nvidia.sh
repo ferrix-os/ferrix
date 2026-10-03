@@ -32,13 +32,13 @@
 #                                  the ICD, layer and platform manifests
 #       lib/firmware/nvidia/580.173.02/gsp_{ga10x,tu10x}.bin
 #                                  the GSP firmware, where nvrm reads it
+#       usr/share/doc/nvidia-driver/LICENSE
+#     The 32-bit libraries, the X driver, nvidia-settings and its GTK
+#     libraries, the installer and the Windows DLLs are left out.
 #     It does not carry usr/lib/ferrix/nvrm-core, RM's core nvrm loads
 #     (docs/NVIDIA.md §4.1, "The core"): the core is pinned to one nvrm
 #     build, so xtask writes it into the volume beside nvrm's own build
 #     and remakes the image when it is stale (run-nvidia, N1d).
-#       usr/share/doc/nvidia-driver/LICENSE
-#     The 32-bit libraries, the X driver, nvidia-settings and its GTK
-#     libraries, the installer and the Windows DLLs are left out.
 #     nvidia.version beside the image says what it was made from;
 #     it is made again when that changes, or this script does.
 #
