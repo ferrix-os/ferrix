@@ -731,7 +731,7 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     whole_volume(&dir, &programs.path("nvrm-core"))?;
     let machine = Machine {
         memory: MEMORY,
-        vcpus: 4,
+        vcpus: 8,
         devices: "    <interface type='network'>\n\
                   \x20     <source network='default'/>\n\
                   \x20     <model type='virtio-non-transitional'/>\n\
