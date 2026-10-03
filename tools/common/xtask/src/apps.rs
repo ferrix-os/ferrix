@@ -689,13 +689,26 @@ fn build(app: &App, arch: Arch, release: bool) -> Result<Option<Built>> {
                     )));
                 }
             } else {
-                let mut command = Command::new("bash");
-                let _ = command
-                    .current_dir(&app.dir)
-                    .arg("build.sh")
-                    .arg(arch.name())
-                    .arg(&out);
-                cargo::run(command, &format!("{name}'s build.sh"))?;
+                // Recorded like the ports it builds on, so that stage 20's
+                // plan carries it and a replay never makes it here: the
+                // source archives it fetches are in the ports' `src`.
+                let ports = ports::root()?;
+                let mut build =
+                    crate::builds::Build::bash(format!("{name}'s build.sh for {arch}"), &app.dir)
+                        .args([
+                            std::ffi::OsStr::new("build.sh"),
+                            std::ffi::OsStr::new(arch.name()),
+                        ])
+                        .args([out.as_os_str()])
+                        .env("FERRIX_PORTS", &ports)
+                        .reads_dir(ports.join("src"))
+                        .output(&out);
+                if let Some(dir) =
+                    std::env::var_os("CARGO_TARGET_DIR").filter(|dir| !dir.is_empty())
+                {
+                    build = build.env("CARGO_TARGET_DIR", Path::new(&dir).join("ferrousli"));
+                }
+                build.run()?;
             }
             out
         }

@@ -155,7 +155,7 @@ pub(crate) fn read_entry(
 
 /// The directory the ports are installed under: on Windows, WSL's home's,
 /// where the scripts that build them run, and the btop app's libcxx with them.
-fn root() -> Result<PathBuf> {
+pub(crate) fn root() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("FERRIX_PORTS") {
         return Ok(PathBuf::from(dir));
     }
