@@ -672,6 +672,40 @@ static int kms_card_start(struct kms_head *lit)
     return 0;
 }
 
+/*
+ * A GPU none of whose displays was connected at start: look again every
+ * two seconds, for a monitor switched on or plugged in later -- a TV in
+ * standby drops its hot-plug line -- and offer it as the card once one is
+ * lit.
+ */
+static void kms_watch(void *argument)
+{
+    struct kms_head *lit = argument;
+    struct NvKmsKapiDeviceResourcesInfo *res = calloc(1, sizeof(*res));
+    struct NvKmsKapiDynamicDisplayParams *dyn = calloc(1, sizeof(*dyn));
+    NvKmsKapiDisplay displays[NVKMS_KAPI_MAX_CONNECTORS * 4];
+    NvU32 count = NV_ARRAY_ELEMENTS(displays);
+    int status = -ENODEV;
+
+    if (res == NULL || dyn == NULL || !kapi.getDeviceResourcesInfo(lit->device, res) ||
+        !kapi.getDisplays(lit->device, &count, displays))
+    {
+        kms_say("cannot watch for a display\n");
+        goto out;
+    }
+    kms_say("watching for a display to be connected\n");
+    while (status == -ENODEV)
+    {
+        nvkms_usleep(2000000);
+        status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
+    }
+    if (status == 0 && kms_card.lit == NULL)
+        (void)kms_card_start(lit);
+out:
+    free(res);
+    free(dyn);
+}
+
 int nvrm_kms_show(void)
 {
     NvU32 i;
@@ -693,6 +727,8 @@ int nvrm_kms_show(void)
         /* The first lit head becomes the card; one is all the core needs. */
         if (shown == 0 && kms_card.lit == NULL)
             status = kms_card_start(&kms_lit[i]);
+        else if (shown == -ENODEV && kms_lit[i].device != NULL && i == 0)
+            (void)nvos_thread_spawn(kms_watch, &kms_lit[i]);
     }
     return status;
 }
