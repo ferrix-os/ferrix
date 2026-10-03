@@ -40,7 +40,13 @@ function draw(t) {
   g.clearColor(.04, .05, .07, 1); g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
   g.drawArrays(g.TRIANGLES, 0, 36);
   frames++;
-  if (t - since > 1000) { document.getElementById("f").textContent = Math.round(frames * 1000 / (t - since)) + " frames a second"; frames = 0; since = t; }
+  if (t - since > 1000) {
+    const rate = Math.round(frames * 1000 / (t - since));
+    document.getElementById("f").textContent = rate + " frames a second";
+    // For the serial log: Chrome's console reaches stderr.
+    console.log("webgl-fps " + rate);
+    frames = 0; since = t;
+  }
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);

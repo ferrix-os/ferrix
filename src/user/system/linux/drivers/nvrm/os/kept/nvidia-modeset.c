@@ -65,7 +65,7 @@ static const enum NvKmsDebugForceColorSpace debug_force_color_space =
 static const NvBool enable_overlay_layers = NV_TRUE;
 static const NvBool conceal_vrr_caps = NV_FALSE;
 static const int fail_alloc_core_channel_method = -1;
-static const int debug = 1;
+static const int debug = 0;
 
 NvBool nvkms_test_fail_alloc_core_channel(
     enum FailAllocCoreChannelMethod method

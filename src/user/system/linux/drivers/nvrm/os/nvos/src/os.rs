@@ -9,6 +9,7 @@
 
 use core::ffi::{c_char, c_int, c_void};
 use core::ptr;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::libc;
 use crate::log::{c_str, say};
@@ -651,11 +652,34 @@ pub extern "C" fn os_get_cpu_count() -> u32 {
         .max(1)
 }
 
-/// `os_get_cpu_number`.
-#[unsafe(no_mangle)]
-pub extern "C" fn os_get_cpu_number() -> u32 {
+/// The interrupt thread's id once it has run, and the processor it says it
+/// is on: see [`os_get_cpu_number`].
+static ISR_TID: AtomicU32 = AtomicU32::new(0);
+static ISR_CPU: AtomicU32 = AtomicU32::new(0);
+
+/// The calling thread is nvrm's interrupt thread (`device.rs`), from now on.
+pub(crate) fn isr_thread_is_this() {
+    ISR_CPU.store(current_cpu(), Ordering::Relaxed);
+    ISR_TID.store(crate::futex::tid(), Ordering::Release);
+}
+
+fn current_cpu() -> u32 {
     // SAFETY: `sched_getcpu` takes nothing.
     u32::try_from(unsafe { libc::sched_getcpu() }).unwrap_or(0)
+}
+
+/// `os_get_cpu_number`. RM takes an interrupt to stay on the processor it
+/// entered on, as a Linux interrupt does, and checks that it left on the
+/// same one (`threadStateFreeISRLockless`); nvrm's interrupt thread can be
+/// moved between them. So it says one processor for its whole life, the one
+/// it first ran on, and every other thread the one it is on.
+#[unsafe(no_mangle)]
+pub extern "C" fn os_get_cpu_number() -> u32 {
+    let isr = ISR_TID.load(Ordering::Acquire);
+    if isr != 0 && isr == crate::futex::tid() {
+        return ISR_CPU.load(Ordering::Relaxed);
+    }
+    current_cpu()
 }
 
 /// `os_get_current_thread`: the thread id, or 0 in the interrupt handler,
