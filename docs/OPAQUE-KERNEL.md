@@ -2559,6 +2559,37 @@ the requirement ids reserved. After that, the code comes back to the
 consultant with the logs of every case and control in part 6, and of the
 `loom` model.
 
+#### Where step 4 stands (2026-10-03, session B)
+
+Groundwork that needs neither 2a nor session A's files, built on branch
+`step4-prep`; no fast-path code yet.
+- **`ferrix.fastpath`** (part 6's boot switch, `src/kernel/src/fastpath.rs`,
+  in the item ring beside `checks.rs`). Read once with `ferrix.checks`, from
+  the loader's command line then the device tree's `bootargs`; `on` only for
+  `ferrix.fastpath=on`, off otherwise, the certified default (the customer,
+  2026-10-02). Stage 9 prints `fastpath ipc fast path for channel_write_read:
+  off (by default)` and says the call takes the general path, since no fast
+  path exists. L.x86_64.150.
+- **The `loom` model of the park protocol** (condition 9,
+  `src/tests/loom/tests/park.rs`): a park against a fast commit and a
+  general writer, against a close and a commit, and against a kill; and the
+  send half's last look (T13) against a kill. Each asserts part 6's
+  refinement (nothing lost) and liveness (nothing stranded). Three
+  model-only controls, each failing as it must: a general writer that
+  leaves the record, the park without its fence, and T13 read outside the
+  run-queue lock. Bound 3, under a second; 15 models with 2c's and 2e's.
+- **`ipc-equiv`** (part 6, `src/user/system/native/ipc-equiv`), a native
+  program pair, and **`cargo xtask test-ipc-equiv`**, which boots it with the
+  switch off and, on x86-64, on, and requires the two transcripts to be the
+  same. Built and passing on the general path: cases 1, 2, 3, 5 (before and
+  during), 6 (a waiter killed, a peer ending during a trip), 8 (the port), 12
+  (the refusals) and 16. Owed, and printed as owed in the transcript: 4, 5c
+  and 6c (native programs have no threads), 7 (no signals), 9 and 10 (no
+  affinity call), 11 and 14 (kernel checks: the probe and the T13 hook), 13
+  (the barrier counters are the kernel's) and 15 (needs 3a). Those that are
+  the kernel's come as stage-9 cases with the fast path; the rest need a
+  native thread, signal or affinity call first.
+
 ### 9.8 Steps 2 and 3: the designs (draft for the consultant)
 
 **Reviewed (2026-10-02): OK IF.** 2d is OK to build; 2a, 2b, 2c, 2e, 2f and
