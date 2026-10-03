@@ -141,7 +141,8 @@ fn starts(line: &str, want: &str) -> bool {
 }
 
 /// `test-sem`, and `test-threads`, `test-shm` and `test-procfs`, the other
-/// musl programs booted as init, and `test-uvm` and `test-nvrm`, booted the
+/// musl programs booted as init, and `test-uvm`, `test-nvrm` and
+/// `test-nvrm-link`, booted the
 /// same way, which share its arm of `main`'s dispatch.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     match command {
@@ -150,6 +151,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-procfs" => crate::procfs::test_procfs(args),
         "test-uvm" => crate::uvm::test_uvm(args),
         "test-nvrm" => crate::nvrm::test_nvrm(args),
+        "test-nvrm-link" => crate::nvrm_link::test_nvrm_link(args),
         _ => crate::threads::test_threads(args),
     }
 }

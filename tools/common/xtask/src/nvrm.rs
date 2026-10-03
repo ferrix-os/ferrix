@@ -46,7 +46,7 @@ use crate::{Error, Result, cargo, fat, qemu, shell};
 const TIMEOUT: u64 = 300;
 
 /// How long after the kernel's devmgr report `nvrm` has to say it is up.
-const UP_PATIENCE: Duration = Duration::from_secs(60);
+const UP_PATIENCE: Duration = Duration::from_secs(120);
 
 /// How long a refused boot is read on after the report, for a line that
 /// must not come.
@@ -62,12 +62,20 @@ const HANDED: &str = "(interrupts isolated); handing it to nvrm";
 /// The prefix of every line `nvrm` prints.
 const NVRM: &str = "nvrm: ";
 
+/// ferrix-nvos's line when it refuses nvrm's core.
+const REFUSED: &str = "nvos: core refused: ";
+
+/// The prefix of the lines ferrix-nvos prints in nvrm, its core's load
+/// among them; [`STEPS`] holds both kinds in one order.
+const NVOS: &str = "nvos: ";
+
 /// `nvrm`'s lines, in order, each by what it starts with after
 /// [`NVRM`].
 const STEPS: &[&str] = &[
     "started on ",
     "device_isolation ",
     "pin budget ",
+    "core loaded: ",
     "aperture 0: ",
     "configuration window: vendor 1b36 device 0005",
     "BAR0 mapped, ",
@@ -98,10 +106,53 @@ const HANDED_MEMORY: u32 = 4096;
 /// The guest RAM of the boot whose budget is too small, in MiB.
 const SMALL_MEMORY: u32 = 512;
 
-/// Build `nvrm` and `nvrm-hold` with the Makefile, and return the two
-/// programs. `nvrm` is held to the shape the kernel's loader takes from a
-/// native image, since devmgr starts it as one.
-pub(crate) fn build() -> Result<(Vec<u8>, PathBuf)> {
+/// NVIDIA's release, as `tools/common/fetch/fetch-nvidia.sh` writes it.
+const RELEASE: &str = "580.173.02";
+
+/// Where `fetch-nvidia.sh` wrote the release: `$FERRIX_NVIDIA/580.173.02`,
+/// by default under `~/.local/share/ferrix/nvidia`. Refused without RM's
+/// core in it.
+fn fetched() -> Result<PathBuf> {
+    let root = match std::env::var_os("FERRIX_NVIDIA") {
+        Some(root) => PathBuf::from(root),
+        None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+            .join(".local")
+            .join("share")
+            .join("ferrix")
+            .join("nvidia"),
+    };
+    let release = root.join(RELEASE);
+    let core = release.join("objects").join("nv-kernel.o");
+    if !core.is_file() {
+        return Err(Error::new(format!(
+            "no NVIDIA {RELEASE} objects at {} (no {}): tools/common/fetch/fetch-nvidia.sh \
+             fetches and builds them, or set FERRIX_NVIDIA",
+            release.display(),
+            core.display()
+        )));
+    }
+    Ok(release)
+}
+
+/// What nvrm's Makefile built, in one directory: `nvrm` and `nvrm-core`,
+/// `nvrm-link-test`, its core and its unpinned link, and `nvrm-hold`.
+pub(crate) struct Programs {
+    /// The directory.
+    pub(crate) out: PathBuf,
+}
+
+impl Programs {
+    /// The file `name` the Makefile made.
+    pub(crate) fn path(&self, name: &str) -> PathBuf {
+        self.out.join(name)
+    }
+}
+
+/// Build `nvrm`, its core, `nvrm-link-test` and `nvrm-hold` with the
+/// Makefile, against NVIDIA's fetched release. `nvrm` is held to the shape
+/// the kernel's loader takes from a native image, since devmgr starts it as
+/// one.
+pub(crate) fn build() -> Result<Programs> {
     let source = paths::workspace_root()
         .join("src")
         .join("user")
@@ -109,15 +160,22 @@ pub(crate) fn build() -> Result<(Vec<u8>, PathBuf)> {
         .join("linux")
         .join("drivers")
         .join("nvrm");
+    let release = fetched()?;
     let out = paths::target_dir().join("nvrm");
     let ferrousli = paths::target_dir().join("ferrousli");
-    println!("  building nvrm against ferrousli");
+    let jobs = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
+    println!(
+        "  building nvrm and its core against ferrousli (NVIDIA from {})",
+        release.display()
+    );
     let ran = Command::new("make")
         .arg("-s")
         .arg("-C")
         .arg(&source)
+        .arg(format!("-j{jobs}"))
         .arg(format!("OUT={}", out.display()))
         .arg(format!("FERROUSLI_TARGET={}", ferrousli.display()))
+        .arg(format!("NVIDIA={}", release.display()))
         .status()
         .map_err(|error| Error::new(format!("running make in {}: {error}", source.display())))?;
     if !ran.success() {
@@ -126,7 +184,8 @@ pub(crate) fn build() -> Result<(Vec<u8>, PathBuf)> {
             source.display()
         )));
     }
-    let program = out.join("nvrm");
+    let programs = Programs { out };
+    let program = programs.path("nvrm");
     let bytes = std::fs::read(&program)
         .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
     native::verify(Arch::X86_64, &bytes).map_err(|why| {
@@ -134,7 +193,61 @@ pub(crate) fn build() -> Result<(Vec<u8>, PathBuf)> {
             "nvrm is not a program the kernel can start as a driver: {why}"
         ))
     })?;
-    Ok((bytes, out.join("nvrm-hold")))
+    Ok(programs)
+}
+
+/// Where nvrm reads its core on the NVIDIA volume, which Ferrix mounts at
+/// `/data` (`src/main.c`, `CORE_PATH`).
+pub(crate) const CORE_IN_VOLUME: &str = "usr/lib/ferrix/nvrm-core";
+
+/// Make `image`, a btrfs volume holding `files` -- each a path in the
+/// volume and the file to copy there -- with `mkfs.btrfs --rootdir` from a
+/// tree beside it. The kernel mounts a volume with no `ferrix-root` label
+/// at `/data`.
+pub(crate) fn volume(image: &Path, files: &[(&str, PathBuf)]) -> Result<()> {
+    let tree = image.with_extension("tree");
+    if tree.exists() {
+        std::fs::remove_dir_all(&tree)
+            .map_err(|error| Error::new(format!("clearing {}: {error}", tree.display())))?;
+    }
+    let mut bytes = 0_u64;
+    for (inside, from) in files {
+        let to = tree.join(inside);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| Error::new(format!("making {}: {error}", parent.display())))?;
+        }
+        bytes += std::fs::copy(from, &to).map_err(|error| {
+            Error::new(format!(
+                "copying {} to {}: {error}",
+                from.display(),
+                to.display()
+            ))
+        })?;
+    }
+    // Room for btrfs's own trees beside the files; mkfs.btrfs wants 114 MiB.
+    let size = (bytes.div_ceil(1 << 20) + 64).max(128);
+    let _ = std::fs::remove_file(image);
+    let file = std::fs::File::create(image)
+        .map_err(|error| Error::new(format!("creating {}: {error}", image.display())))?;
+    file.set_len(size << 20)
+        .map_err(|error| Error::new(format!("sizing {}: {error}", image.display())))?;
+    drop(file);
+    let made = Command::new("mkfs.btrfs")
+        .arg("-q")
+        .arg("--rootdir")
+        .arg(&tree)
+        .arg(image)
+        .status()
+        .map_err(|error| Error::new(format!("running mkfs.btrfs: {error}")))?;
+    if !made.success() {
+        let _ = std::fs::remove_file(image);
+        return Err(Error::new(format!(
+            "mkfs.btrfs {}: {made}",
+            image.display()
+        )));
+    }
+    Ok(())
 }
 
 /// The driver images `nvrm` goes in as: `nvrm` for NVIDIA's devices and
@@ -189,7 +302,15 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
     }
     let arch = Arch::X86_64;
     let log = paths::build_dir(arch).join("serial.log");
-    let (nvrm, hold) = build()?;
+    let programs = build()?;
+    let nvrm = std::fs::read(programs.path("nvrm"))
+        .map_err(|error| Error::new(format!("reading nvrm: {error}")))?;
+    let hold = programs.path("nvrm-hold");
+    let volume_image = paths::build_dir(arch).join("nvrm-volume.img");
+    volume(
+        &volume_image,
+        &[(CORE_IN_VOLUME, programs.path("nvrm-core"))],
+    )?;
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &hold, shell::SCRIPT)?;
     let mut natives = native::build(arch, args.release)?;
@@ -202,6 +323,7 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
         }
         args.memory = boot.memory;
         args.unisolated_interrupts = boot.unisolated;
+        args.data_image = Some(volume_image.clone());
         let lines = run(arch, &image, &kernel, &args, boot)?;
         let why = if boot.handed {
             judge_handed(&lines)
@@ -238,9 +360,9 @@ fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Res
         if boot.handed {
             let deadline = Instant::now() + UP_PATIENCE;
             let _ = at.read_more(deadline, |lines| {
-                lines
-                    .iter()
-                    .any(|line| line.contains(UP) || line.contains("nvrm: stopped"))
+                lines.iter().any(|line| {
+                    line.contains(UP) || line.contains("nvrm: stopped") || line.contains(REFUSED)
+                })
             })?;
         } else {
             at.read_what_was_said(QUIET)?;
@@ -308,12 +430,20 @@ fn judge_handed(lines: &[String]) -> Option<String> {
             "devmgr set {set} MiB, not the half of a 4 GiB machine's ceiling it must"
         ));
     }
-    if let Some(stopped) = lines.iter().find(|line| line.contains("nvrm: stopped")) {
+    if let Some(stopped) = lines
+        .iter()
+        .find(|line| line.contains("nvrm: stopped") || line.contains(REFUSED))
+    {
         return Some(format!("nvrm stopped: `{stopped}`"));
     }
     let said: Vec<&str> = lines
         .iter()
-        .filter_map(|line| line.find(NVRM).and_then(|at| line.get(at + NVRM.len()..)))
+        .filter_map(|line| {
+            [NVRM, NVOS].iter().find_map(|prefix| {
+                line.find(prefix)
+                    .and_then(|at| line.get(at + prefix.len()..))
+            })
+        })
         .collect();
     let mut next = said.iter();
     for step in STEPS {
@@ -331,6 +461,12 @@ fn judge_handed(lines: &[String]) -> Option<String> {
     if place_after(started, "started on ") != Some(place.as_str()) {
         return Some(format!(
             "nvrm started on another device than {place}: `{started}`"
+        ));
+    }
+    if !line("core loaded: ").contains(", base 0x40000000, ") {
+        return Some(format!(
+            "nvrm's core is not at its base: `{}`",
+            line("core loaded: ")
         ));
     }
     if !line("device_isolation ").contains("interrupts isolated (bit 1)") {
