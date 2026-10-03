@@ -219,7 +219,7 @@ COMMANDS:
     test-kaslr    Boot the image twice and require the loader to have put the kernel somewhere new
     test-shell    Boot with a static busybox built in and require its script's output; again with it
                   started from a file by ferrix.init=; under busybox, require reboot(2) to commit /data
-    test-apps     Boot once with every app (src/user/apps, ferrousli/apps) that has [[smoke]] checks, and require each
+    test-apps     Boot once with every app in src/user/apps that has [[smoke]] checks, and require each
                   check's line
     test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat
                   service, and to refuse a changed package, a missing dependency and a needed removal
@@ -329,7 +329,7 @@ COMMANDS:
     busybox       Build busybox against ferrousli (x86_64) for --init ferrousli
     uutils        Build uutils/coreutils against ferrousli (x86_64), the utilities replacing busybox's
     ports         Build the libraries ported onto ferrousli that apps build against (x86_64: libcxx, zlib; Arm: zlib); the ported programs are apps
-    apps          List the apps in src/user/apps and ferrousli/apps, each checked against its app.toml (docs/APPS.md)
+    apps          List the apps in src/user/apps, each checked against its app.toml (docs/APPS.md)
     check-apps    check's steps for the apps alone: each app's formatting, clippy, tests and folder
     build-apps    Build every app's package, or --app's, for --arch: scripts too, which run and
                   run-compositor never start, and take the last of

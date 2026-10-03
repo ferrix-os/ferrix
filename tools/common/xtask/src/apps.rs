@@ -1,6 +1,6 @@
-//! Apps: optional programs, each a folder of its own under `src/user/apps/`,
-//! or, for a program ported onto ferrousli and built with its ports, under
-//! ferrousli's `apps/` (`docs/APPS.md`).
+//! Apps: optional programs, each a folder of its own under `src/user/apps/`
+//! (`docs/APPS.md`), which is the ferrix-os/apps repository checked out there
+//! (`components.toml`).
 //!
 //! Nothing here names an app. Every folder in [`PLACES`] is one, described by
 //! its `app.toml`, which `ferrix-pkg` reads; this module builds each into a
@@ -26,13 +26,12 @@ use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, shell, zinc};
 
-/// Where a new app goes, from the workspace's root.
+/// Where apps are, and where a new app goes, from the workspace's root: the
+/// ferrix-os/apps repository's checkout (`components.toml`).
 pub(crate) const PLACE: &str = "src/user/apps";
 
-/// Where apps are, from the workspace's root: [`PLACE`], and the programs
-/// ported onto ferrousli, which live in its repository beside the ports
-/// they build with (`components.toml`).
-pub(crate) const PLACES: &[&str] = &[PLACE, "src/user/system/linux/ferrousli/apps"];
+/// Every place apps are found, for a message and for [`discover`].
+pub(crate) const PLACES: &[&str] = &[PLACE];
 
 /// [`PLACES`], for a message.
 fn places() -> String {
@@ -136,7 +135,13 @@ fn discover_in(place: &Path, entries: fs::ReadDir) -> Result<Vec<App>> {
         let dir = entry
             .map_err(|error| Error::new(format!("{}: {error}", place.display())))?
             .path();
-        if !dir.is_dir() {
+        // A hidden folder is the checkout's own -- `.git`, `.github` -- not an
+        // app: the place is a repository of its own (`components.toml`).
+        let hidden = dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with('.'));
+        if !dir.is_dir() || hidden {
             continue;
         }
         let path = dir.join(MANIFEST);
@@ -755,8 +760,8 @@ fn cargo_in(app: &App, arguments: &[&str]) -> Command {
     command
 }
 
-/// Rule 1: nothing outside `app`'s folder names it -- in this tree, or in
-/// the component's repository an app ported onto ferrousli lives in.
+/// Rule 1: nothing outside `app`'s folder names it -- in this tree, and in
+/// the repository the app lives in when that is a component of its own.
 pub(crate) fn stays_in_its_folder(app: &App) -> Result<()> {
     let root = paths::workspace_root();
     let relative = |base: &Path| {
@@ -771,7 +776,8 @@ pub(crate) fn stays_in_its_folder(app: &App) -> Result<()> {
                 ))
             })
     };
-    names_only_itself(&root, &relative(&root)?)?;
+    let in_tree = relative(&root)?;
+    names_only_itself(&root, &[in_tree.as_str()], &in_tree)?;
     let toplevel = Command::new("git")
         .current_dir(&app.dir)
         .args(["rev-parse", "--show-toplevel"])
@@ -781,7 +787,12 @@ pub(crate) fn stays_in_its_folder(app: &App) -> Result<()> {
     if toplevel.as_os_str().is_empty() || same_dir(&toplevel, &root) {
         return Ok(());
     }
-    names_only_itself(&toplevel, &relative(&toplevel)?)
+    // In the component's own repository the folder's path is its bare name,
+    // `curl` or `git`, which ordinary words match; what names the folder
+    // there is the tree's path to it, or a sibling's `../<name>/`.
+    let folder = relative(&toplevel)?;
+    let sibling = format!("../{folder}/");
+    names_only_itself(&toplevel, &[in_tree.as_str(), sibling.as_str()], &folder)
 }
 
 /// Whether two paths are one directory, however each is spelled.
@@ -792,11 +803,17 @@ fn same_dir(one: &Path, other: &Path) -> bool {
     }
 }
 
-/// `git grep` in `repository` for `folder` outside `folder`.
-fn names_only_itself(repository: &Path, folder: &str) -> Result<()> {
-    let output = Command::new("git")
+/// `git grep` in `repository` for any of `needles`, outside `folder`.
+fn names_only_itself(repository: &Path, needles: &[&str], folder: &str) -> Result<()> {
+    let mut grep = Command::new("git");
+    let _ = grep
         .current_dir(repository)
-        .args(["grep", "--untracked", "-l", "-F", folder, "--", "."])
+        .args(["grep", "--untracked", "-l", "-F"]);
+    for needle in needles {
+        let _ = grep.args(["-e", needle]);
+    }
+    let output = grep
+        .args(["--", "."])
         .arg(format!(":(exclude){folder}"))
         .output()
         .map_err(|error| Error::new(format!("could not run git grep: {error}")))?;

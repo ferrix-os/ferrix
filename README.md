@@ -50,7 +50,7 @@ this tree at the commits [`components.toml`](components.toml) names.
       <a href="https://github.com/ferrix-os/ferrousli"><img src="docs/brand/screenshots/foot.png" alt="foot running zinc and ferrofetch on Ferrix"></a>
       <br><b><a href="https://github.com/ferrix-os/ferrousli">ferrix-os/ferrousli</a></b><br>
       The C library, written in Rust, that Linux programs on Ferrix are built against,
-      and the programs ported onto it: foot, btop, curl, git, vkgears and more.
+      and the toolkit they are ported onto it with.
     </td>
     <td width="50%" valign="top">
       <a href="https://github.com/ferrix-os/zinc"><img src="docs/brand/screenshots/terminal-omz.png" alt="zinc running oh-my-zsh on Ferrix"></a>
@@ -79,10 +79,10 @@ this tree at the commits [`components.toml`](components.toml) names.
       packaging and the monitor.
     </td>
     <td width="50%" valign="top">
-      <a href="https://github.com/ferrix-os/ferrousli/tree/main/apps"><img src="docs/brand/screenshots/vkgears.png" alt="vkgears drawing Vulkan gears on Ferrix"></a>
-      <br><b><a href="https://github.com/ferrix-os/ferrousli/tree/main/apps">ferrousli's apps</a></b><br>
-      vkgears, drawing with Vulkan through Venus: one of the programs ported onto
-      ferrousli.
+      <a href="https://github.com/ferrix-os/apps"><img src="docs/brand/screenshots/vkgears.png" alt="vkgears drawing Vulkan gears on Ferrix"></a>
+      <br><b><a href="https://github.com/ferrix-os/apps">ferrix-os/apps</a></b><br>
+      Every program a person starts: Ferrix's own, like badapple and ferrofetch,
+      and those ported onto ferrousli, like foot, btop, curl, git and vkgears.
     </td>
   </tr>
 </table>

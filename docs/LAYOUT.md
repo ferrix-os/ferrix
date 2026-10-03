@@ -142,16 +142,15 @@ directory:
 | `src/user/system/linux/pkg/` | `/bin/pkg`, the package manager: lists, installs and removes the apps' packages (`docs/APPS.md` §7). |
 | `src/user/system/linux/zinc/` | The zsh-compatible shell. Its own repository, ferrix-os/zinc, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/media/` | The resampler and the playback through `/dev/snd` that the sound server and the `badapple` app share (`docs/MEDIA.md`), and the PulseAudio-protocol server and its client (`docs/AUDIO.md`, U2). ferrix-90's since 2026-09-27. Bad Apple!!'s player and its video format are the `badapple` app since 2026-10-01. |
-| `src/user/system/linux/ferrousli/` | The C library written in Rust, its dynamic linker, and the toolkit programs are ported against it with (`tools/ports/`), with the libraries they link; the ported programs themselves are apps, in its `apps/` (`src/user/apps/` below). Its own repository, ferrix-os/ferrousli, checked out here at its pin (`components.toml`). |
+| `src/user/system/linux/ferrousli/` | The C library written in Rust, its dynamic linker, and the toolkit programs are ported against it with (`tools/ports/`), with the libraries they link; the ported programs themselves are apps (`src/user/apps/` below). Its own repository, ferrix-os/ferrousli, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/drivers/nvrm/` | NVIDIA's driver host (`docs/NVIDIA.md`). `src/` is `nvrm` itself, so far N1b's skeleton: a static ferrousli program, in C, that devmgr starts as its `Gpu` kind's driver, with a native entry (`src/start.c`) that builds the stack ferrousli starts from, and the native calls it makes (`src/native.h`). `test/hold.c` is the init `cargo xtask test-nvrm` boots beside it. `uvm-kpi/` is the Linux-compatible headers and runtime, in C, that NVIDIA's `nvidia-uvm` is built against from a fetched tree, and `uvm-selftest`, which runs UVM's own tests on it with no GPU (§11.3, C0a). Both are C and a Makefile, not a cargo workspace; `cargo xtask test-nvrm` and `test-uvm` build them against ferrousli and boot them on Ferrix. |
 
 ## `src/user/apps/`
 
 Optional programs, native or Linux, one folder each: its `app.toml`, a
-cargo workspace of its own and its README. The programs ported onto
-ferrousli, and statd, are apps the same way in `src/user/system/linux/ferrousli/apps/`,
-beside the ports they build with. xtask finds every folder in both and
-builds, gates, packages and installs it by what its `app.toml` says, so an
+cargo workspace of its own and its README. The directory is the ferrix-os/apps
+repository, checked out here at its pin (`components.toml`). xtask finds every
+folder here and builds, gates, packages and installs it by what its `app.toml` says, so an
 app is added by adding its folder and nothing else. No file outside a folder
 names it, which `cargo xtask check` holds to, and this table has no row per
 app: `cargo xtask apps` lists them. `docs/APPS.md` is the design.

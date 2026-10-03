@@ -96,13 +96,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
         .iter()
         .any(|dir| path.starts_with(&format!("{dir}/")));
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
-    if under("src/user/system/linux/ferrousli/apps/") {
-        // The programs ported onto ferrousli are apps like any other, and
-        // live in its repository only because they build with its ports:
-        // the widest row, as for an app in src/user/apps.
-        rows.add(IMAGE_ROW);
-        reason(rows, "an app: the widest row");
-    } else if under("src/user/system/linux/ferrousli/") {
+    if under("src/user/system/linux/ferrousli/") {
         rows.add(&[
             "check --ferrousli",
             "busybox",
@@ -483,12 +477,6 @@ mod tests {
         let rows = rows_of(&["src/user/apps/no-such-app/build.sh"]);
         assert_eq!(rows.commands, IMAGE_ROW);
         assert!(rows.reasons[0].contains("no row of the table"));
-    }
-
-    #[test]
-    fn an_app_ported_onto_ferrousli_gets_the_widest_row_not_the_libcs() {
-        let rows = rows_of(&["src/user/system/linux/ferrousli/apps/no-such-app/build.sh"]);
-        assert_eq!(rows.commands, IMAGE_ROW);
     }
 
     #[test]

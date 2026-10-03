@@ -68,9 +68,10 @@ there. And judge a gate by its exit status and its output — never through
 
 ## Components live in repositories of their own
 
-ferrousli (with the programs ported onto it, in its `apps/`), zinc, the Pixel 7
-tools and the website are repositories of their own in the ferrix-os
-organization since 2026-10-03. `components.toml` names each one, the path it is
+ferrousli, zinc, the apps (`src/user/apps`: every program a person starts,
+Ferrix's own and those ported onto ferrousli), the Pixel 7 tools and the
+website are repositories of their own in the ferrix-os organization since
+2026-10-03. `components.toml` names each one, the path it is
 checked out at -- the path it had in this tree -- and the commit this tree is
 gated with. Every `cargo xtask` command clones a missing component and moves a
 clean checkout that is behind its pin, so a new worktree needs no extra step;

@@ -7,12 +7,12 @@
 # and `cargo xtask pin-components` records a pushed commit here. See
 # tools/common/xtask/src/components.rs.
 
-# The C library Linux programs are built against, and the programs ported
-# onto it (its apps/).
+# The C library Linux programs are built against, and the toolkit programs
+# are ported onto it with (tools/ports).
 [ferrousli]
 path = "src/user/system/linux/ferrousli"
 repo = "https://github.com/ferrix-os/ferrousli"
-commit = "9723d03f337d5f203970958f38cf2a41f0124e0b"
+commit = "a8fc95e65c1f1262892a795f5e67c9dcae8ead20"
 
 # The shell.
 [zinc]
@@ -30,4 +30,11 @@ commit = "d080ac0db235dae562c0973e1593c7b0eb68c283"
 [website]
 path = "docs/website"
 repo = "https://github.com/ferrix-os/ferrix-os.github.io"
-commit = "a538260068fcf14552d53e6d2ed69b4cd95f0b7f"
+commit = "a344755b408b07de8593a564e9d5b923ec04ad7d"
+
+# Every program a person starts: Ferrix's own and those ported onto
+# ferrousli, one folder an app (docs/APPS.md).
+[apps]
+path = "src/user/apps"
+repo = "https://github.com/ferrix-os/apps"
+commit = "97aeab09033e403752ac7265b7f2c832f6ea9b8b"
