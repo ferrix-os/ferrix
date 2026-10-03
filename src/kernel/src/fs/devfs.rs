@@ -753,6 +753,29 @@ fn block_ino(serial: u64) -> u64 {
     BLOCK_INO_BASE.saturating_add(serial)
 }
 
+/// What opening `/dev/tty` gives, as Linux's `tty_open_current_tty`: the
+/// console when it is the controlling terminal of the caller's session,
+/// else the pty slave that is, else `ENXIO`. The console is decided under
+/// the terminal's lock and the pty under its pair's, the locks that guard
+/// each session field, never both at once.
+fn controlling_terminal() -> Result<Arc<dyn Inode>> {
+    terminal_of_session(crate::syscall::process::current().map_or(0, |process| process.sid()))
+}
+
+/// [`controlling_terminal`] for `session`: the rule itself, which the boot's
+/// self-check asks directly, since a check runs on no process's task.
+pub(crate) fn terminal_of_session(session: u32) -> Result<Arc<dyn Inode>> {
+    if session == 0 {
+        return Err(Errno::ENXIO);
+    }
+    let console = fs::terminal::with(|terminal| (terminal.session == session).then(console_inode));
+    if let Some(console) = console {
+        return Ok(console);
+    }
+    let slave: Arc<dyn Inode> = pty::open_slave_of_session(session)?;
+    Ok(slave)
+}
+
 impl Inode for Node {
     fn metadata(&self) -> Metadata {
         let directory = Metadata {
@@ -990,10 +1013,15 @@ impl Inode for Node {
             let file: Arc<dyn Inode> = pty::open_master()?;
             return Ok(Some(file));
         }
-        Ok(self
+        // `/dev/tty`: the caller's controlling terminal, not the console to
+        // anyone (`docs/AUTH.md` §1).
+        if self
             .device()
-            .filter(|device| device.behaviour == Behaviour::Console)
-            .map(|_| console_inode()))
+            .is_some_and(|device| device.behaviour == Behaviour::Console)
+        {
+            return controlling_terminal().map(Some);
+        }
+        Ok(None)
     }
 
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {

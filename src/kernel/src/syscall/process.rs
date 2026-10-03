@@ -1060,6 +1060,13 @@ impl Process {
         if self.released.swap(true, Ordering::AcqRel) {
             return;
         }
+        // A session's leader ending lets go of the session's terminal, the
+        // console's or a pty's, as Linux's `disassociate_ctty`: otherwise a
+        // later leader given the same pid would find it its own.
+        if self.pid() == self.sid() {
+            fs::terminal::forget_session(self.sid());
+            fs::pty::forget_session(self.sid());
+        }
         // The heap record and the signal tables go now. Taken under the lock
         // and dropped after it.
         let state = self.state.lock().take();

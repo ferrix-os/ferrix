@@ -810,6 +810,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_a_raw_read_waits_for_vmin()?;
     check_a_pseudoterminal_slave_reads_as_vmin_and_vtime_say()?;
     check_the_console_answers_as_a_terminal(&process)?;
+    check_a_dead_leaders_terminals_are_let_go()?;
     check_a_signal_disposition_reads_back_as_it_was_set(&process)?;
     check_the_blocked_mask_follows_how(&process)?;
     check_kill_finds_its_targets_and_refuses_what_it_should(&process)?;
@@ -2645,8 +2646,6 @@ fn check_a_pseudoterminal_slave_reads_as_vmin_and_vtime_say() -> Result<(), &'st
 const TTY_TERMIOS: u64 = 0;
 /// See [`TTY_TERMIOS`].
 const TTY_INT: u64 = 64;
-/// See [`TTY_TERMIOS`].
-const TTY_PATH: u64 = 128;
 
 /// The console answers the terminal requests an interactive shell makes:
 /// settings that read back as they were set, a size, and job control for a
@@ -2677,32 +2676,87 @@ fn check_the_console_answers_as_a_terminal(process: &Process) -> Result<(), &'st
     outcome
 }
 
-/// See [`check_the_console_answers_as_a_terminal`]: the same questions through
-/// `/dev/tty`, a devfs node of its own that opens the console -- which is the
-/// descriptor busybox's shell asks for the foreground group on, and which was
-/// once refused because `fstat` names a different inode than the console.
-fn terminal_answers_through_dev_tty(process: &Process, page: u64) -> Result<(), &'static str> {
-    use ferrix_linux_abi::types::TIOCGPGRP;
+/// See [`check_the_console_answers_as_a_terminal`]: `/dev/tty` is the
+/// caller's controlling terminal (`docs/AUTH.md` §1), asked of the rule
+/// devfs opens it by, since a check runs on no process's task: the console
+/// for the session it is the terminal of, the same object a console
+/// descriptor is -- so busybox's shell asks its job-control questions of the
+/// console through it -- and `ENXIO` once the session has let it go.
+fn terminal_answers_through_dev_tty(process: &Process, _page: u64) -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::TIOCSCTTY;
 
-    uaccess::copy_to_user(process.space(), page + TTY_PATH, b"/dev/tty\0")
-        .map_err(|_| "could not stage /dev/tty")?;
-    let tty = fd::sys_openat(process, AT_FDCWD, page + TTY_PATH, O_RDWR, 0)
-        .map_err(|_| "/dev/tty did not open")?;
-    let tty = i32::try_from(tty).map_err(|_| "an impossible descriptor")?;
-    let outcome = answers(
-        fd::sys_ioctl(process, tty, TCGETS, page + TTY_TERMIOS),
+    // The job-control check let the console go; this session takes it again.
+    answers(
+        fd::sys_ioctl(process, 0, TIOCSCTTY, 0),
         0,
-        "TCGETS through /dev/tty was refused",
-    )
-    .and_then(|()| {
-        answers(
-            fd::sys_ioctl(process, tty, TIOCGPGRP, page + TTY_INT),
-            0,
-            "TIOCGPGRP through /dev/tty was refused to a session leader",
-        )
+        "TIOCSCTTY was refused for the free console",
+    )?;
+    let opened = crate::fs::devfs::terminal_of_session(process.sid())
+        .map_err(|_| "/dev/tty did not open for the session the console is the terminal of")?;
+    if !Arc::ptr_eq(&opened, &crate::fs::console::console_inode()) {
+        return Err("/dev/tty for the console's session is not the console");
+    }
+    crate::fs::terminal::with(|terminal| {
+        terminal.session = 0;
+        terminal.foreground = 0;
     });
-    let _ = fd::sys_close(process, tty);
-    outcome
+    match crate::fs::devfs::terminal_of_session(process.sid()) {
+        Err(Errno::ENXIO) => Ok(()),
+        Ok(_) => Err("/dev/tty opened for a session with no controlling terminal"),
+        Err(_) => Err("/dev/tty with no controlling terminal was refused with other than ENXIO"),
+    }
+}
+
+/// A session's leader ending lets go of its terminals, the console's and a
+/// pty's (`docs/AUTH.md` §1, the certification consultant's D1): a later
+/// leader given the same pid must not find them its own. The negative
+/// control is `Process::release` without its `forget_session` calls.
+fn check_a_dead_leaders_terminals_are_let_go() -> Result<(), &'static str> {
+    use crate::fs::{pty, terminal};
+
+    let leader = process::new_for_check().map_err(|_| "could not make a session leader")?;
+    let _ = crate::syscall::family::sys_setsid(&leader);
+    let sid = leader.sid();
+    if sid == 0 || sid != leader.pid() {
+        return Err("a check's process could not lead a session");
+    }
+    let saved = terminal::with(|terminal| (terminal.session, terminal.foreground));
+    terminal::with(|terminal| {
+        terminal.session = sid;
+        terminal.foreground = sid;
+    });
+    let master = pty::open_master().map_err(|_| "no pseudoterminal for the check")?;
+    // As `unlockpt` leaves it: a locked pair's slave opens for nobody.
+    pty::set_locked(&master.pty, false);
+    master.pty.set_session(sid, sid);
+    terminal::with(|terminal| {
+        terminal.session = 0;
+        terminal.foreground = 0;
+    });
+    // While the leader lives, its session's `/dev/tty` is its pty.
+    let pty_while_alive = crate::fs::devfs::terminal_of_session(sid).is_ok();
+    terminal::with(|terminal| {
+        terminal.session = sid;
+        terminal.foreground = sid;
+    });
+    process::kill(&leader, 0);
+    let console_let_go = terminal::with(|terminal| terminal.session != sid);
+    let pty_let_go = master.pty.session() != sid;
+    terminal::with(|terminal| {
+        terminal.session = saved.0;
+        terminal.foreground = saved.1;
+    });
+    drop(master);
+    if !pty_while_alive {
+        return Err("/dev/tty was not the pty that is a living session's terminal");
+    }
+    if !console_let_go {
+        return Err("the console still named a session whose leader had ended");
+    }
+    if !pty_let_go {
+        return Err("a pty still named a session whose leader had ended");
+    }
+    Ok(())
 }
 
 /// See [`check_the_console_answers_as_a_terminal`].

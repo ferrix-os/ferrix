@@ -895,7 +895,7 @@ fn after_stage_one(at: &mut Watching<'_>, failures: &mut Vec<String>, sshd: bool
     audit_read_back(at, failures)?;
     login(at, failures)?;
     su(at, failures)?;
-    dev_tty_probe(at)?;
+    dev_tty(at, failures)?;
     if sshd {
         sshd_activated(at, failures)?;
     }
@@ -1193,25 +1193,24 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// What `/dev/tty` gives a uid-1000 process with no controlling terminal,
-/// recorded and not judged (`docs/BACKLOG.md`; the certification
-/// consultant's V2): today the console, open, written to and read from,
-/// where Linux gives `ENXIO`. The line it prints is the exposure's record
-/// until the fix, whose own boot check will require `ENXIO`.
-fn dev_tty_probe(at: &mut Watching<'_>) -> Result<()> {
-    let probe = "su ferrix -c 'setsid sh -c \"exec 3<>/dev/tty || { echo probe-tty-open-refused; exit; }; \
-                 echo probe-tty-opened; echo probe-tty-written-by-ferrix >&3; timeout 2 cat <&3 >/dev/null; \
-                 echo probe-tty-read-status \\$?\"' </dev/null\n";
-    let before = at.after().len();
-    at.type_in(probe.as_bytes())?;
+/// The `/dev/tty` stage (`docs/AUTH.md` §1; the certification consultant's
+/// D4): it is the caller's controlling terminal. With none -- a uid-1000
+/// process in a session of its own -- it is refused, and nothing reaches the
+/// console; from root's shell on the console it opens. Which terminal it is
+/// for a pty's session is the kernel's self-check's to show.
+fn dev_tty(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     // The markers are also in the echo of what was typed: only a line that
-    // begins with one is the probe's. And the probe's read holds the console
-    // for its 2 s, so nothing is typed until it has said it is done.
+    // begins with one is the probe's.
     let said_by_probe = |lines: &[String], marker: &str| {
         lines
             .iter()
             .any(|line| line.trim_start().starts_with(marker))
     };
+    let probe = "su ferrix -c 'setsid sh -c \"exec 3<>/dev/tty || { echo probe-tty-open-refused; exit; }; \
+                 echo probe-tty-opened; echo probe-tty-written-by-ferrix >&3; timeout 2 cat <&3 >/dev/null; \
+                 echo probe-tty-read-status \\$?\"' </dev/null\n";
+    let before = at.after().len();
+    at.type_in(probe.as_bytes())?;
     let deadline = Instant::now() + PATIENCE;
     let _ = at.read_more(deadline, |lines| {
         let lines = lines.get(before..).unwrap_or_default();
@@ -1219,34 +1218,30 @@ fn dev_tty_probe(at: &mut Watching<'_>) -> Result<()> {
             || said_by_probe(lines, "probe-tty-open-refused")
     })?;
     let said = since(at, before).to_vec();
-    let opened = said_by_probe(&said, "probe-tty-opened");
-    let refused = said_by_probe(&said, "probe-tty-open-refused");
-    let wrote = said_by_probe(&said, "probe-tty-written-by-ferrix");
-    let read = said.iter().find_map(|line| {
-        line.trim_start()
-            .strip_prefix("probe-tty-read-status ")
-            .map(|rest| rest.trim().to_owned())
-    });
-    let open = if opened {
-        "opened /dev/tty"
-    } else if refused {
-        "was refused /dev/tty"
+    if said_by_probe(&said, "probe-tty-open-refused")
+        && !said_by_probe(&said, "probe-tty-opened")
+        && !said_by_probe(&said, "probe-tty-written-by-ferrix")
+    {
+        println!("  /dev/tty: refused to a uid-1000 process with no controlling terminal");
     } else {
-        "said nothing of the open"
-    };
-    let written = if wrote {
-        "wrote to the console"
-    } else {
-        "nothing reached the console"
-    };
-    let reading = read.map_or_else(
-        || "no read was tried".to_owned(),
-        |status| format!("a read of the console held it for its 2 s (status {status})"),
-    );
-    println!(
-        "  /dev/tty probe (recorded, not judged): uid 1000 with no controlling terminal {open}, \
-         {written}, {reading}"
-    );
+        failures.push("/dev/tty opened for a uid-1000 process with no controlling terminal".into());
+    }
+    // Root's shell on the console: the console is its session's terminal,
+    // so `/dev/tty` opens. Which object it is -- the console, or a pty for a
+    // session whose terminal is one -- the kernel's self-check asks of the
+    // rule itself: `stat` here would follow `/proc/self/fd`'s plain link
+    // back to the node, and this image has no program that makes a pty its
+    // controlling terminal (busybox has no `script` here).
+    match ask(
+        at,
+        "exec 3<>/dev/tty && { m=devtty; echo \"$m-console-opened\"; exec 3<&-; }\n",
+        "devtty-console-opened",
+    )? {
+        Some(_) => {
+            println!("  /dev/tty: opens for root's shell, whose session's terminal is the console");
+        }
+        None => failures.push("/dev/tty did not open for the shell on the console".into()),
+    }
     Ok(())
 }
 

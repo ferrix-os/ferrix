@@ -133,6 +133,48 @@ impl core::fmt::Debug for Pty {
 /// Every pair that exists, by number.
 static PAIRS: SpinLock<BTreeMap<u32, Arc<Pty>>> = SpinLock::new(BTreeMap::new());
 
+/// The slave that is the controlling terminal of `session`, opened, for
+/// `/dev/tty` (`devfs`): `ENXIO` when none is, and none for session 0.
+///
+/// The pairs are copied out from under `PAIRS`' lock -- at most
+/// [`MAX_PAIRS`] of them -- so it and a pair's own lock are never held
+/// together. The pair found is the pair opened: its session is checked
+/// again under its own lock as its slave is counted open, so a pair freed
+/// and its number given to another in between is never the one returned.
+pub(crate) fn open_slave_of_session(session: u32) -> VfsResult<Arc<SlaveFile>> {
+    if session == 0 {
+        return Err(Errno::ENXIO);
+    }
+    let pairs: Vec<Arc<Pty>> = PAIRS.lock().values().cloned().collect();
+    for pty in pairs {
+        let mut state = pty.state.lock();
+        if state.session != session || !state.master || state.locked {
+            continue;
+        }
+        state.slaves = state.slaves.saturating_add(1);
+        drop(state);
+        return Ok(Arc::new(SlaveFile { pty }));
+    }
+    Err(Errno::ENXIO)
+}
+
+/// A session whose leader has ended is no pty's to hold: as Linux's
+/// `disassociate_ctty`, so a later session given the same number by a
+/// reused pid finds no terminal of the dead one's (`docs/AUTH.md` §1).
+pub(crate) fn forget_session(session: u32) {
+    if session == 0 {
+        return;
+    }
+    let pairs: Vec<Arc<Pty>> = PAIRS.lock().values().cloned().collect();
+    for pty in pairs {
+        let mut state = pty.state.lock();
+        if state.session == session {
+            state.session = 0;
+            state.foreground = 0;
+        }
+    }
+}
+
 /// How many pairs have ever been made, for the boot report.
 static MADE: AtomicU32 = AtomicU32::new(0);
 

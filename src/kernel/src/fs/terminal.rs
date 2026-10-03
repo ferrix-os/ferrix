@@ -710,6 +710,21 @@ pub(crate) fn with<R>(change: impl FnOnce(&mut Terminal) -> R) -> R {
     change(&mut TERMINAL.lock())
 }
 
+/// A session whose leader has ended no longer holds the console, as Linux's
+/// `disassociate_ctty`: a later session given the same number by a reused
+/// pid finds the console free, not its (`docs/AUTH.md` §1).
+pub(crate) fn forget_session(session: u32) {
+    if session == 0 {
+        return;
+    }
+    with(|terminal| {
+        if terminal.session == session {
+            terminal.session = 0;
+            terminal.foreground = 0;
+        }
+    });
+}
+
 /// Take whatever has been typed into the line discipline, echo it, and raise
 /// any signal it asked for.
 pub(crate) fn pump() {
