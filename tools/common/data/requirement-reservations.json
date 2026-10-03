@@ -31,13 +31,6 @@
       "branch": "nvidia-c3k",
       "date": "2026-10-02",
       "purpose": "NVIDIA C3-K, the kernel's fault windows (docs/NVIDIA.md §11.4, the consultant's OK IF of 2026-10-02): window regions, forwarded faults and their wait, kernel copies that never wait, refused partial operations, the mapping count and UNMAPPED, break-before-make entries, revoke, server death, insert checks and holds, answers only from the server handle; a server-inserted frame unreachable before its hold goes, and a client waiting on a server only by its own mapping"
-    },
-    {
-      "ids": ["L.x86_64.150-151"],
-      "owner": "step2b",
-      "branch": "step4-prep",
-      "date": "2026-10-03",
-      "purpose": "OPAQUE-KERNEL.md §9.7 part 6, step 4's groundwork (session B): ferrix.fastpath, the boot switch read once and printed at stage 9, off by default in the certified configuration (the customer, 2026-10-02)"
     }
   ]
 }
