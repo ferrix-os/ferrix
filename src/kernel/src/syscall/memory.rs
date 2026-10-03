@@ -238,9 +238,14 @@ fn taken(process: &Process, addr: u64, len: u64) -> bool {
     let Some(end) = addr.checked_add(len) else {
         return false;
     };
-    process
-        .space()
-        .with_regions(|regions| regions.any(|region| region.start < end && addr < region.end))
+    process.space().with_regions(|regions| {
+        for region in regions {
+            if region.start < end && addr < region.end {
+                return true;
+            }
+        }
+        false
+    })
 }
 
 /// `mmap` of the file `fd` names, from byte `offset`.
