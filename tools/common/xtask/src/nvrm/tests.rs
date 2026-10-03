@@ -6,38 +6,44 @@ use ferrix_native_abi::types;
 
 use super::{TOO_SMALL, UNISOLATED, judge_handed, judge_refused, place_after, report};
 
-// Recorded from the gate's first passing run (2026-10-03, x86-64, KVM, the
-// patched ferrix-cfi QEMU): devmgr's lines, nvrm's and the kernel's report,
-// as `run` returns them.
+// Recorded 2026-10-03 with nvrm loading its core from the volume
+// (x86-64, KVM, the patched ferrix-cfi QEMU): devmgr's lines, nvrm's and
+// nvos's, and the kernel's report, as `run` returns them. nvrm waits for the
+// volume, which mounts after devmgr's report, so the report comes before the
+// core is loaded.
 const HANDED_KVM: &str = "\
-  7.52 | devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
-  7.52 | devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
-  7.53 | nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
-  7.53 | nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
-  7.53 | nvrm: pin budget 124928 pages (488 MiB), isolated-interrupts mark 1\n\
-  7.53 | nvrm: aperture 0: BAR 0, 0x81414000, 4 KiB\n\
-  7.53 | nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
-  7.53 | nvrm: configuration window: vendor 1b36 device 0005\n\
-  7.53 | nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
-  7.53 |   devmgr   13 devices, 12 drivers, 4 started, 0 failed\n\
-  7.53 | nvrm: a thread ran and was joined\n\
-  7.53 | nvrm: skeleton up on 00:04.0; idle\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
+nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
+nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
+nvrm: pin budget 124928 pages (488 MiB), isolated-interrupts mark 1\n\
+nvrm: waiting up to 60 s for the NVIDIA volume (/data/usr/lib/ferrix/nvrm-core)\n\
+  devmgr   14 devices, 12 drivers, 5 started, 0 failed\n\
+nvos: core loaded: sha256 be83e087cb7787b7..., 13445824 bytes, base 0x40000000, 17 exports, build-id cfe4ba34e3a74eba6216b6bb82cfa0bd754aba81\n\
+nvrm: aperture 0: BAR 0, 0x81415000, 4 KiB\n\
+nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
+nvrm: configuration window: vendor 1b36 device 0005\n\
+nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
+nvrm: a thread ran and was joined\n\
+nvrm: skeleton up on 00:04.0; idle\n\
 ";
 
-// The same boot under TCG, where nvrm was up before devmgr reported.
+// The same boot under TCG.
 const HANDED_TCG: &str = "\
- 11.30 | devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
- 11.30 | devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
- 11.34 | nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
- 11.35 | nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
- 11.35 | nvrm: pin budget 124928 pages (488 MiB), isolated-interrupts mark 1\n\
- 11.35 | nvrm: aperture 0: BAR 0, 0x81414000, 4 KiB\n\
- 11.35 | nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
- 11.35 | nvrm: configuration window: vendor 1b36 device 0005\n\
- 11.36 | nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
- 11.38 | nvrm: a thread ran and was joined\n\
- 11.38 | nvrm: skeleton up on 00:04.0; idle\n\
- 11.53 |   devmgr   13 devices, 12 drivers, 4 started, 0 failed\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
+nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
+nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
+nvrm: pin budget 124928 pages (488 MiB), isolated-interrupts mark 1\n\
+nvrm: waiting up to 60 s for the NVIDIA volume (/data/usr/lib/ferrix/nvrm-core)\n\
+  devmgr   14 devices, 12 drivers, 5 started, 0 failed\n\
+nvos: core loaded: sha256 be83e087cb7787b7..., 13445824 bytes, base 0x40000000, 17 exports, build-id cfe4ba34e3a74eba6216b6bb82cfa0bd754aba81\n\
+nvrm: aperture 0: BAR 0, 0x81415000, 4 KiB\n\
+nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
+nvrm: configuration window: vendor 1b36 device 0005\n\
+nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
+nvrm: a thread ran and was joined\n\
+nvrm: skeleton up on 00:04.0; idle\n\
 ";
 
 // The default 512 MiB machine, KVM.
@@ -116,13 +122,30 @@ fn a_hand_over_missing_a_step_or_out_of_order_fails() {
     let run = HANDED_KVM.replace("started on 00:04.0", "started on 00:05.0");
     assert!(judge_handed(&lines(&run)).is_some());
     let run =
-        format!("{HANDED_KVM}  7.60 | nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
+        format!("{HANDED_KVM}nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
     assert!(judge_handed(&lines(&run)).is_some());
 }
 
 #[test]
+fn a_core_refused_or_not_at_its_base_fails_the_hand_over() {
+    let run = format!("{HANDED_KVM}nvos: core refused: the core's sha256 is not nvrm's pin\n");
+    let why = judge_handed(&lines(&run)).unwrap();
+    assert!(why.contains("core refused"), "{why}");
+    let loaded = lines(HANDED_KVM)
+        .into_iter()
+        .find(|line| line.starts_with("nvos: core loaded: "))
+        .unwrap();
+    let run = HANDED_KVM.replace(&format!("{loaded}\n"), "");
+    let why = judge_handed(&lines(&run)).unwrap();
+    assert!(why.contains("core loaded"), "{why}");
+    let run = HANDED_KVM.replace("base 0x40000000", "base 0x50000000");
+    let why = judge_handed(&lines(&run)).unwrap();
+    assert!(why.contains("not at its base"), "{why}");
+}
+
+#[test]
 fn the_report_and_places_are_read() {
-    assert_eq!(report(&lines(HANDED_KVM)), Some((4, 0)));
+    assert_eq!(report(&lines(HANDED_KVM)), Some((5, 0)));
     assert_eq!(report(&lines(UNISOLATED_KVM)), Some((3, 1)));
     assert_eq!(
         place_after("devmgr   gpu 01:00.0: pin", "devmgr   gpu "),

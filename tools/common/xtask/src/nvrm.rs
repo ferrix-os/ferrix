@@ -355,8 +355,7 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
 /// `nvrm` is up, or for a quiet while when it must not come. Every line,
 /// those after the report included.
 fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Result<Vec<String>> {
-    let mut after = Vec::new();
-    let mut lines = qemu::watch_then(arch, image, kernel, args, REPORTED, |at| {
+    qemu::watch_then(arch, image, kernel, args, REPORTED, |at| {
         if boot.handed {
             let deadline = Instant::now() + UP_PATIENCE;
             let _ = at.read_more(deadline, |lines| {
@@ -367,12 +366,9 @@ fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Res
         } else {
             at.read_what_was_said(QUIET)?;
         }
-        after = at.after().to_vec();
         at.stop_when_done();
         Ok(())
-    })?;
-    lines.extend(after);
-    Ok(lines)
+    })
 }
 
 /// The kernel's devmgr report: how many started and how many failed.
