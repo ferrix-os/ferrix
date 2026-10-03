@@ -859,7 +859,7 @@
     },
     "checks.rs": {
       "ring": "item",
-      "reached": "54-55, 58, 60, 77"
+      "reached": "54-55, 58, 60, 84"
     },
     "console/log_check.rs": {
       "ring": "core",

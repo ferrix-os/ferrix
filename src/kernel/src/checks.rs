@@ -74,6 +74,13 @@ pub(crate) fn init(view: &BootView<'_>) {
     // The way out's check that no poster forgot its bit runs with the rest
     // (`sched::work::audit`); the core keeps its own copy of the answer.
     crate::sched::work::set_auditing(run());
+    // The boot's other configuration item read here, at the same point and
+    // the same way: whether `channel_write_read` may take the fast path.
+    // Stage 9 says which; a boot that skips stage 9's checks says it now.
+    crate::fastpath::init(view);
+    if !run() {
+        crate::fastpath::report();
+    }
 }
 
 /// Whether the self-checks run on this boot: true unless [`init`] read
