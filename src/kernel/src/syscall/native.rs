@@ -2254,9 +2254,9 @@ fn vmo_pin(
     length: u64,
     options: u64,
 ) -> Result<usize, Errno> {
-    use ferrix_native_abi::types::{PIN_COHERENT, PIN_READ_ONLY};
+    use ferrix_native_abi::types::{PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY};
     let page = PAGE_SIZE;
-    if options & !(PIN_READ_ONLY | PIN_COHERENT) != 0
+    if options & !(PIN_READ_ONLY | PIN_COHERENT | PIN_CONTIGUOUS) != 0
         || length == 0
         || !offset.is_multiple_of(page)
         || !length.is_multiple_of(page)
@@ -2278,21 +2278,114 @@ fn vmo_pin(
     if past_caches && (offset != 0 || length != vmo.len_bytes()) {
         return Err(status::INVALID_ARGS);
     }
-    let held = vmo.hold(offset / page, length / page).map_err(vmo_error)?;
-    if past_caches {
-        if !vmo.make_coherent() {
-            return Err(status::BAD_STATE);
-        }
-        for frame in held.frames() {
-            arch::flush_for_device(crate::mm::direct_map(*frame * page), page);
-        }
+    let (first, pages) = (offset / page, length / page);
+    if options & PIN_CONTIGUOUS != 0 {
+        return contiguous_pin(process, &node, &vmo, (first, pages), read_only, past_caches);
     }
-    let flags = if read_only {
+    let held = vmo.hold(first, pages).map_err(vmo_error)?;
+    if past_caches {
+        coherent_for_device(&vmo, &held)?;
+    }
+    let pin = pin_through(&node, held, dma_flags(read_only), process.exit_record())?;
+    insert_new(process, Object::Pin(pin), Rights::PIN)
+}
+
+/// A pin's IOMMU flags: read-only for the device, or read and write.
+fn dma_flags(read_only: bool) -> ferrix_paging::MapFlags {
+    if read_only {
         ferrix_paging::MapFlags::DMA_READ_ONLY
     } else {
         ferrix_paging::MapFlags::DMA
+    }
+}
+
+/// `PIN_COHERENT` on a device that does not snoop the caches: every mapping
+/// of `vmo` bypasses them from now on, and what `held` holds is written back
+/// for the device to read.
+fn coherent_for_device(vmo: &Vmo, held: &crate::user::vmo::Held) -> Result<(), Errno> {
+    if !vmo.make_coherent() {
+        return Err(status::BAD_STATE);
+    }
+    for frame in held.frames() {
+        arch::flush_for_device(crate::mm::direct_map(*frame * PAGE_SIZE), PAGE_SIZE);
+    }
+    Ok(())
+}
+
+/// The status a refused contiguous run travels as.
+fn run_status(why: crate::user::vmo::RunError) -> Errno {
+    use crate::user::vmo::RunError;
+    match why {
+        RunError::NotAnonymous => status::WRONG_TYPE,
+        RunError::TooLong | RunError::OutOfRange => status::INVALID_ARGS,
+        RunError::Committed => status::BAD_STATE,
+        RunError::OutOfMemory => status::NO_MEMORY,
+    }
+}
+
+/// `count` more pages of live pins fit `node`'s budget, as far as can be
+/// told before any frame is taken; `Pin::new` reserves them atomically after.
+fn budget_allows(node: &DeviceNode, count: usize) -> Result<(), Errno> {
+    if let Some(domain) = node.domain_made() {
+        let now = object::pin::counts(&domain);
+        if now.live.saturating_add(count) > now.budget {
+            return Err(status::LIMIT_REACHED);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `held` is `count` frames from `block` on, one after another.
+fn is_one_run(held: &crate::user::vmo::Held, block: u64, count: usize) -> bool {
+    held.frames().len() == count
+        && held
+            .frames()
+            .iter()
+            .zip(block..)
+            .all(|(&frame, expected)| frame == expected)
+}
+
+/// `vmo_pin` with `PIN_CONTIGUOUS`: fill the uncommitted `range` with one
+/// run of charged frames, hold it, check what is held is one run, and pin
+/// it. Arguments, rights and isolation were checked by the caller; the
+/// budget is checked here before any frame is taken, and every refusal after
+/// the run went in gives back exactly the frames it put there, so the VMO's
+/// committed pages and the job's charge end as they began
+/// (`docs/NVIDIA.md` §4.3; consultant ledger 293, D1-D3).
+fn contiguous_pin(
+    process: &Process,
+    node: &DeviceNode,
+    vmo: &Arc<Vmo>,
+    (first, pages): (u64, u64),
+    read_only: bool,
+    past_caches: bool,
+) -> Result<usize, Errno> {
+    let count = usize::try_from(pages).map_err(|_| status::INVALID_ARGS)?;
+    budget_allows(node, count)?;
+    let block = vmo.commit_run(first, pages).map_err(run_status)?;
+    let give_back = |why: Errno| {
+        vmo.give_back_run(first, block, pages);
+        why
     };
-    let pin = pin_through(&node, held, flags, process.exit_record())?;
+    let held = vmo
+        .hold(first, pages)
+        .map_err(|why| give_back(vmo_error(why)))?;
+    // What the requirement rests on: the frames held, not how they were had.
+    let checked = if is_one_run(&held, block, count) {
+        if past_caches {
+            coherent_for_device(vmo, &held)
+        } else {
+            Ok(())
+        }
+    } else {
+        Err(status::BAD_STATE)
+    };
+    if let Err(why) = checked {
+        drop(held);
+        return Err(give_back(why));
+    }
+    let pin =
+        pin_through(node, held, dma_flags(read_only), process.exit_record()).map_err(give_back)?;
     insert_new(process, Object::Pin(pin), Rights::PIN)
 }
 

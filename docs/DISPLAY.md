@@ -63,6 +63,14 @@ driver sizes its backing lists for.
   guest backing, so the driver can neither write nor see the pixels.
   `vmo_pin` already allows exactly this: `READ` on the VMO, `MANAGE` on the
   device.
+* **One driver kind copies (displayctl v8).** A display engine that reads
+  only its own memory -- NVIDIA's, whose scan-out is in the GPU's VRAM --
+  cannot be given the card's pages. Its driver, `nvrm` (`docs/NVIDIA.md`
+  §4.5), copies each flushed rectangle into VRAM with the processor, so it
+  must see the pixels. Its HELLO sets the `copies` flag, and the core then
+  hands it the card VMO with `READ | MAP | TRANSFER`, still never `WRITE`;
+  it maps the card read-only. A driver without the flag gets exactly the
+  rights above. The boot log says which: `display  card0 copies frames`.
 * **No copy in the guest.** The compositor writes pages that are the device's
   backing. virtio-gpu 2D does copy on the host side (`TRANSFER_TO_HOST_2D`),
   which is QEMU's business.

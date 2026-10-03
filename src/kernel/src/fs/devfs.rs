@@ -1413,6 +1413,64 @@ fn node(index: usize, made: Timespec) -> Arc<dyn Inode> {
     })
 }
 
+/// A node of devfs's appeared (`created`) or went: `IN_CREATE` or
+/// `IN_DELETE` on its directory for anyone watching it with inotify, as
+/// Linux's devtmpfs tells udev. `path` is under `/dev`, `dri/card0` say.
+/// A subdirectory that came with its first node, or went with its last, is
+/// told to `/dev` the same way, so a watch there sees `dri` arrive before
+/// it can watch `dri` itself. init's `.device` units are ordered on these
+/// (`docs/INIT.md` §4.2).
+///
+/// Called with no lock held, and never from interrupt context: the walk to
+/// the directory may sleep, and devfs's lookups read the driver cores'
+/// lists. A core announces a node after it is in its list and its going
+/// after it has left it, so a watcher that looks on the event finds what
+/// the event says. Only the first namespace's `/dev` is told (`fs::namespace`).
+pub(crate) fn announce(path: &[u8], created: bool) {
+    if !fs::inotify::watching() {
+        return;
+    }
+    let (dir, name) = match path.iter().rposition(|&byte| byte == b'/') {
+        Some(at) => (
+            path.get(..at).unwrap_or_default(),
+            path.get(at + 1..).unwrap_or_default(),
+        ),
+        None => (&b""[..], path),
+    };
+    let namespace = fs::namespace();
+    let context = namespace.context();
+    let mask = if created {
+        fs::inotify::IN_CREATE
+    } else {
+        fs::inotify::IN_DELETE
+    };
+    let mut at = Vec::with_capacity(5 + dir.len());
+    at.extend_from_slice(b"/dev");
+    if !dir.is_empty() {
+        at.push(b'/');
+        at.extend_from_slice(dir);
+    }
+    let subdirectory = namespace.resolve(&context, None, &at, true);
+    // The subdirectory's own coming, before its entry's, and its going, after.
+    let tell_dir = |mask| {
+        if let (false, Ok(root)) = (
+            dir.is_empty(),
+            namespace.resolve(&context, None, b"/dev", true),
+        ) {
+            fs::inotify::dir_event(&root, dir, mask, 0, true);
+        }
+    };
+    if created {
+        tell_dir(fs::inotify::IN_CREATE);
+    }
+    if let Ok(directory) = &subdirectory {
+        fs::inotify::dir_event(directory, name, mask, 0, false);
+    }
+    if !created && (dir.is_empty() || subdirectory.is_err()) {
+        tell_dir(fs::inotify::IN_DELETE);
+    }
+}
+
 /// What reads and writes of the character device numbered `rdev` go to: the
 /// devfs node with that number, opened as an open of it in `/dev` would be.
 ///

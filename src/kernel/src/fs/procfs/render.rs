@@ -1545,3 +1545,71 @@ pub(super) fn net_arp(_: &Kernel) -> Result<Vec<u8>> {
     procfs_net::arp(&mut out, &rows);
     Ok(out)
 }
+
+/// Whether a driver serves NVIDIA's nodes through the chardev core.
+fn nvidia_served() -> Result<()> {
+    if crate::interfaces::chardev::published(ferrix_chardevctl::node::CONTROL_MINOR).is_some() {
+        Ok(())
+    } else {
+        Err(Errno::ENOENT)
+    }
+}
+
+/// `/proc/driver/nvidia/params`: NVIDIA's module parameters as `nvrm` runs
+/// RM, in NVIDIA's format. `ModifyDeviceFiles: 0` tells NVIDIA's userspace
+/// that the device files are made for it, so it never runs
+/// `nvidia-modprobe`; the nodes are the chardev core's, mode 0666, root's.
+pub(super) fn nvidia_params(_: &Kernel) -> Result<Vec<u8>> {
+    nvidia_served()?;
+    let mut out = Vec::new();
+    out.extend_from_slice(
+        b"ResmanDebugLevel: 4294967295\n\
+RmLogonRC: 1\n\
+ModifyDeviceFiles: 0\n\
+DeviceFileUID: 0\n\
+DeviceFileGID: 0\n\
+DeviceFileMode: 438\n\
+InitializeSystemMemoryAllocations: 1\n\
+UsePageAttributeTable: 4294967295\n\
+EnableMSI: 1\n\
+EnablePCIeGen3: 0\n\
+MemoryPoolSize: 0\n\
+KMallocHeapMaxSize: 0\n\
+VMallocHeapMaxSize: 0\n\
+IgnoreMMIOCheck: 0\n\
+EnableStreamMemOPs: 0\n\
+EnableUserNUMAManagement: 1\n\
+NvLinkDisable: 0\n\
+RmProfilingAdminOnly: 1\n\
+PreserveVideoMemoryAllocations: 0\n\
+EnableS0ixPowerManagement: 0\n\
+DynamicPowerManagement: 3\n\
+RegisterPCIDriver: 1\n\
+EnablePCIERelaxedOrderingMode: 0\n\
+EnableResizableBar: 0\n\
+EnableGpuFirmware: 18\n\
+EnableGpuFirmwareLogs: 2\n\
+EnableDbgBreakpoint: 0\n\
+OpenRmEnableUnsupportedGpus: 1\n\
+DmaRemapPeerMmio: 1\n\
+RegistryDwords: \"\"\n\
+RegistryDwordsPerDevice: \"\"\n\
+RmMsg: \"\"\n\
+GpuBlacklist: \"\"\n\
+TemporaryFilePath: \"\"\n\
+ExcludedGpus: \"\"\n",
+    );
+    Ok(out)
+}
+
+/// `/proc/driver/nvidia/version`: the release `nvrm` runs, in NVIDIA's
+/// format.
+pub(super) fn nvidia_version(_: &Kernel) -> Result<Vec<u8>> {
+    nvidia_served()?;
+    let mut out = Vec::new();
+    out.extend_from_slice(
+        b"NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  580.173.02  Release Build  (ferrix nvrm)\n\
+GCC version:  (Ferrix: nvrm runs RM in ring 3)\n",
+    );
+    Ok(out)
+}

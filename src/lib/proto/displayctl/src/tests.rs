@@ -37,6 +37,7 @@ fn hello() -> Hello {
         capset_bytes: 0,
         cursor: true,
         timings: Timings::NONE,
+        copies: false,
     }
 }
 
@@ -317,10 +318,10 @@ fn fields_lie_where_the_specification_puts_them() {
     let bytes = plain.as_bytes();
     // 16 of header and fields, 16 scanouts of 12, 12 for what the card said
     // about 3D, 4 for whether it has a cursor plane, and 4 + 16 x 24 for
-    // the timings a card that runs only some lists, and 16 x 4 for each
-    // scanout's refresh.
-    assert_eq!(bytes.len(), 676);
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 7, "VERSION");
+    // the timings a card that runs only some lists, 16 x 4 for each
+    // scanout's refresh, and 4 for the flags.
+    assert_eq!(bytes.len(), 680);
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 8, "VERSION");
     assert_eq!(u32_at(bytes, 612), 74_998, "scanout 0's refresh");
     assert!(bytes[616..].iter().all(|&byte| byte == 0));
     assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 1);
@@ -1108,4 +1109,56 @@ fn a_cursor_the_device_cannot_show_is_refused() {
         }),
         Err(Refusal::Protocol)
     );
+}
+
+#[test]
+fn a_hello_says_whether_its_driver_copies() {
+    let copying = Hello {
+        copies: true,
+        ..hdmi_hello()
+    };
+    assert_eq!(copying.validate(&Hello::HANDLE_RIGHTS), Ok(()));
+    let encoded = Message::Hello(copying).encode();
+    let bytes = encoded.as_bytes();
+    assert_eq!(bytes.len(), HELLO_BYTES);
+    assert_eq!(
+        u32_at(bytes, 676),
+        HELLO_COPIES,
+        "the flag follows the refreshes"
+    );
+    assert_eq!(Message::decode(bytes), Ok(Message::Hello(copying)));
+
+    let plain = Message::Hello(hdmi_hello()).encode();
+    assert_eq!(
+        u32_at(plain.as_bytes(), 676),
+        0,
+        "a driver that does not copy"
+    );
+}
+
+#[test]
+fn a_reserved_hello_flag_is_malformed() {
+    let encoded = Message::Hello(hello()).encode();
+    for bit in 1..32 {
+        let mut bent = encoded.as_bytes().to_vec();
+        bent[676..680].copy_from_slice(&(1_u32 << bit).to_le_bytes());
+        assert_eq!(
+            Message::decode(&bent),
+            Err(MessageError::Field),
+            "flag bit {bit}"
+        );
+    }
+}
+
+#[test]
+fn only_a_copying_driver_is_handed_a_card_it_can_map() {
+    assert_eq!(Ready::handle_rights(false), Ready::HANDLE_RIGHTS);
+    assert_eq!(Ready::card_rights(false), CARD_VMO_RIGHTS);
+    assert_eq!(Ready::handle_rights(true), Ready::COPY_HANDLE_RIGHTS);
+    assert_eq!(Ready::card_rights(true), CARD_VMO_COPY_RIGHTS);
+    for rights in [CARD_VMO_RIGHTS, CARD_VMO_COPY_RIGHTS] {
+        assert_eq!(rights.0 & Rights::WRITE.0, 0, "never WRITE");
+    }
+    assert_eq!(CARD_VMO_RIGHTS.0 & Rights::MAP.0, 0);
+    assert_ne!(CARD_VMO_COPY_RIGHTS.0 & Rights::MAP.0, 0);
 }

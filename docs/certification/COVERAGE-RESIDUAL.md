@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 678 | 401 | 146 | **131** |
-| aarch64 | debug | 675 | 336 | 162 | **177** |
-| armv7a | debug | 1035 | 440 | 361 | **234** |
+| x86_64 | debug | 674 | 401 | 142 | **131** |
+| aarch64 | debug | 671 | 336 | 158 | **177** |
+| armv7a | debug | 1031 | 440 | 357 | **234** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,7 +16,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**678** unreached statements, debug profile.
+**674** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -24,7 +24,7 @@ The statements in the certified item that the measured suite did not reach, on e
 | Reached only when the kernel is stopping | 141 | 21% |
 | Reached only when something has already failed | 73 | 11% |
 | Run, and credited to another line | 9 | 1% |
-| Hardware the measured machine does not have | 146 | 22% |
+| Hardware the measured machine does not have | 142 | 21% |
 | Needs a test | 131 | 19% |
 
 ### x86_64: Unreachable on the measured architecture — 178 statements
@@ -106,7 +106,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 146 statements
+### x86_64: Hardware the measured machine does not have — 142 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -119,7 +119,6 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 6 | `core` | `discovery/fdt.rs` |
 | 5 | `core` | `iommu.rs` |
 | 5 | `core` | `iommu/vtd.rs` |
-| 5 | `item` | `syscall/native.rs` |
 | 4 | `core` | `arch/x86_64/console.rs` |
 | 3 | `item` | `init.rs` |
 | 3 | `item` | `main.rs` |
@@ -131,6 +130,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `discovery/acpi.rs` |
 | 1 | `item` | `discovery/devmgr.rs` |
 | 1 | `core` | `object/pin.rs` |
+| 1 | `item` | `syscall/native.rs` |
 
 ### x86_64: Needs a test — 131 statements
 
@@ -162,7 +162,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 303 statements
+### x86_64: argued line by line — 299 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -300,14 +300,14 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `main.rs` | 1486-1487 | Unreachable on the measured architecture | The device tree's model, printed only when the loader handed over a device tree. x86-64's loader hands over ACPI's RSDP and never a device tree, so no x86-64 run reaches it; the Arm boots do. |
 | `main.rs` | 1548 | Hardware the measured machine does not have | The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there. |
 | `mm.rs` | 330 | Reached only when something has already failed | The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it. |
-| `mm.rs` | 391 | Run, and credited to another line | Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates. |
-| `mm.rs` | 512 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 518 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 521 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 1185 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
-| `mm.rs` | 1735-1737 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
-| `mm.rs` | 1753-1756 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1766-1772 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 440 | Run, and credited to another line | Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates. |
+| `mm.rs` | 561 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 567 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 570 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 1234 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
+| `mm.rs` | 1784-1786 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
+| `mm.rs` | 1802-1805 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1815-1821 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
 | `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 561 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
@@ -361,8 +361,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `syscall/native.rs` | 1792 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 1798-1799 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 2279 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2283-2284 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2286-2287 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 137 | Reached only when the kernel is stopping | The stop when the architecture cannot read a system call trap's registers. On x86-64 only `int $0x80` classifies as one, and its gate is not open to ring 3. |
 | `trap.rs` | 140, 145-146 | Reached only when the kernel is stopping | An invalid opcode or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the stage 3 fault check, through the arm above these. |
@@ -378,9 +376,9 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `user/space.rs` | 1197 | Reached only when something has already failed | A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing. |
 | `user/space.rs` | 2369 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
 | `user/space.rs` | 2373-2374 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
-| `user/space.rs` | 2767 | Reached only when something has already failed | `map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
-| `user/space.rs` | 2971 | Reached only when something has already failed | `map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
-| `user/vmo.rs` | 1473 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
+| `user/space.rs` | 2796 | Reached only when something has already failed | `map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
+| `user/space.rs` | 3000 | Reached only when something has already failed | `map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
+| `user/vmo.rs` | 1563 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
 | `vmap.rs` | 391 | Reached only when something has already failed | A span given back from the middle of a merged region, which splits it, when the arena's region list is full and the heap has nothing to grow it with. The split reserves with the standard library's `try_reserve` (libs/vma `remove_quietly`), which the failure injection deliberately does not fail -- with room in the list it allocates nothing -- so reaching it needs the list at its capacity at the moment the heap is out of pages; the span then stays reserved, address space lost rather than memory, and is counted. |
 | `vmap.rs` | 393 | Reached only when something has already failed | The arena's map refusing to give back a span for a reason other than memory: `OutOfRange`, a span outside the arena's window. Every span came from `reserve`, which found it inside the window, so none is. The closing rows are the error arms' return. |
 | `vmap.rs` | 490 | Reached only when something has already failed | `map_device`'s window could not be mapped after its span was reserved: the kernel's tables refused, for a table they could not have or a block in the way. Device windows are mapped once each at bring-up, when memory is plentiful, into an arena no block mapping covers. |
@@ -391,7 +389,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**675** unreached statements, debug profile.
+**671** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -399,7 +397,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | Reached only when the kernel is stopping | 124 | 18% |
 | Reached only when something has already failed | 81 | 12% |
 | Run, and credited to another line | 10 | 1% |
-| Hardware the measured machine does not have | 162 | 24% |
+| Hardware the measured machine does not have | 158 | 24% |
 | Needs a test | 177 | 26% |
 
 ### aarch64: Unreachable on the measured architecture — 121 statements
@@ -479,7 +477,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### aarch64: Hardware the measured machine does not have — 162 statements
+### aarch64: Hardware the measured machine does not have — 158 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -490,7 +488,6 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 25 | `core` | `arch/aarch64/console.rs` |
 | 6 | `core` | `arch/aarch64/gic/gicv3_its.rs` |
 | 5 | `core` | `iommu.rs` |
-| 5 | `item` | `syscall/native.rs` |
 | 4 | `core` | `console/output.rs` |
 | 3 | `core` | `arch/aarch64/smp.rs` |
 | 3 | `core` | `arch/aarch64/speculation.rs` |
@@ -505,6 +502,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `item` | `discovery/devmgr.rs` |
 | 1 | `core` | `iommu/smmuv3.rs` |
+| 1 | `item` | `syscall/native.rs` |
 
 ### aarch64: Needs a test — 177 statements
 
@@ -534,7 +532,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 295 statements
+### aarch64: argued line by line — 291 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -686,17 +684,17 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `main.rs` | 1460 | Hardware the measured machine does not have | Reached only on a machine with RAM above the highest address the direct map covers; every QEMU machine the suite boots has less RAM than the direct map spans, so nothing is unreachable to report. |
 | `main.rs` | 1548 | Hardware the measured machine does not have | The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there. |
 | `mm.rs` | 330 | Reached only when something has already failed | The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it. |
-| `mm.rs` | 391 | Run, and credited to another line | Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates. |
-| `mm.rs` | 512 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 518 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 521 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 1185 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
-| `mm.rs` | 1735-1737 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
-| `mm.rs` | 1753-1756 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1766 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1768 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1770 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1772 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 440 | Run, and credited to another line | Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates. |
+| `mm.rs` | 561 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 567 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 570 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 1234 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
+| `mm.rs` | 1784-1786 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
+| `mm.rs` | 1802-1805 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1815 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1817 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1819 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1821 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
 | `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 561 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
@@ -742,8 +740,6 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `syscall/native.rs` | 1792 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 1798-1799 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 2279 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2283-2284 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2286-2287 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 137 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/aarch64/trap.rs) refuses only an `svc` taken from EL1, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 140, 145-146 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/aarch64/trap/check.rs), through the arm above these. |
@@ -758,7 +754,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `user/space.rs` | 1197 | Reached only when something has already failed | A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing. |
 | `user/space.rs` | 2369 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
 | `user/space.rs` | 2373-2374 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
-| `user/vmo.rs` | 1473 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
+| `user/vmo.rs` | 1563 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
 | `vmap.rs` | 391 | Reached only when something has already failed | A span given back from the middle of a merged region, which splits it, when the arena's region list is full and the heap has nothing to grow it with. The split reserves with the standard library's `try_reserve` (libs/vma `remove_quietly`), which the failure injection deliberately does not fail -- with room in the list it allocates nothing -- so reaching it needs the list at its capacity at the moment the heap is out of pages; the span then stays reserved, address space lost rather than memory, and is counted. |
 | `vmap.rs` | 393 | Reached only when something has already failed | The arena's map refusing to give back a span for a reason other than memory: `OutOfRange`, a span outside the arena's window. Every span came from `reserve`, which found it inside the window, so none is. The closing rows are the error arms' return. |
 | `vmap.rs` | 395 | Reached only when something has already failed | The arena's map refusing to give back a span for a reason other than memory: `OutOfRange`, a span outside the arena's window. Every span came from `reserve`, which found it inside the window, so none is. The closing rows are the error arms' return. |
@@ -770,7 +766,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**1035** unreached statements, debug profile.
+**1031** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -778,7 +774,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | Reached only when the kernel is stopping | 179 | 17% |
 | Reached only when something has already failed | 68 | 7% |
 | Run, and credited to another line | 19 | 2% |
-| Hardware the measured machine does not have | 361 | 35% |
+| Hardware the measured machine does not have | 357 | 35% |
 | Needs a test | 234 | 23% |
 
 ### armv7a: Unreachable on the measured architecture — 174 statements
@@ -857,7 +853,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `mm.rs` |
 
-### armv7a: Hardware the measured machine does not have — 361 statements
+### armv7a: Hardware the measured machine does not have — 357 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -870,7 +866,6 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 42 | `core` | `console/screen.rs` |
 | 15 | `core` | `discovery/acpi.rs` |
 | 8 | `item` | `main.rs` |
-| 5 | `item` | `syscall/native.rs` |
 | 4 | `core` | `arch/armv7a/smp.rs` |
 | 4 | `core` | `console/output.rs` |
 | 3 | `core` | `arch/arm_common/pl011.rs` |
@@ -881,6 +876,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `arch/armv7a/switch.rs` |
 | 1 | `item` | `discovery/devmgr.rs` |
 | 1 | `core` | `discovery/fdt.rs` |
+| 1 | `item` | `syscall/native.rs` |
 
 ### armv7a: Needs a test — 234 statements
 
@@ -915,7 +911,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `irq.rs` |
 | 5 | | *and 5 more files* |
 
-### armv7a: argued line by line — 386 statements
+### armv7a: argued line by line — 382 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -1115,17 +1111,17 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `main.rs` | 1609 | Hardware the measured machine does not have | Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none. |
 | `main.rs` | 1612 | Hardware the measured machine does not have | Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none. |
 | `mm.rs` | 330 | Reached only when something has already failed | The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it. |
-| `mm.rs` | 479, 481, 483, 489, 492 | Unreachable on the measured architecture | `disown_frame`'s only caller is `object::pin`'s quarantine. ARMv7-A's kernel programs no IOMMU unit, by design: `bring_up_smmu` reads only the IORT, which ARMv7-A's firmware does not provide, and the SMMUv3 its `virt` describes is left alone, since U-Boot keeps its virtio devices from offering the platform's translation. Every device domain there is untranslated, and a pin's quarantine exists only for a translated domain (`Pin::map`, `Pin::drop`): the quarantine and its release are x86-64's and AArch64's code, compiled into ARMv7-A's kernel and never asked there. The pin budget's checks (`check_budget`) return at their first line on ARMv7-A, as they say they do with no translated domain. |
-| `mm.rs` | 512 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 518 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 521 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 1064 | Hardware the measured machine does not have | The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them. |
-| `mm.rs` | 1117 | Hardware the measured machine does not have | The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them. |
-| `mm.rs` | 1185 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
-| `mm.rs` | 1278 | Reached only when something has already failed | The return of a piece the kernel's tables refused to unmap. `unmap_range` refuses only a range that is not page aligned or that would cut a block mapping in half, and the arena maps every stack and buffer page by page at page-aligned addresses, so no piece is refused; the row on this build is that error's way out of the function. |
-| `mm.rs` | 1735-1737 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
-| `mm.rs` | 1753-1756 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
-| `mm.rs` | 1766-1772 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 528, 530, 532, 538, 541 | Unreachable on the measured architecture | `disown_frame`'s only caller is `object::pin`'s quarantine. ARMv7-A's kernel programs no IOMMU unit, by design: `bring_up_smmu` reads only the IORT, which ARMv7-A's firmware does not provide, and the SMMUv3 its `virt` describes is left alone, since U-Boot keeps its virtio devices from offering the platform's translation. Every device domain there is untranslated, and a pin's quarantine exists only for a translated domain (`Pin::map`, `Pin::drop`): the quarantine and its release are x86-64's and AArch64's code, compiled into ARMv7-A's kernel and never asked there. The pin budget's checks (`check_budget`) return at their first line on ARMv7-A, as they say they do with no translated domain. |
+| `mm.rs` | 561 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 567 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 570 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
+| `mm.rs` | 1113 | Hardware the measured machine does not have | The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them. |
+| `mm.rs` | 1166 | Hardware the measured machine does not have | The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them. |
+| `mm.rs` | 1234 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
+| `mm.rs` | 1327 | Reached only when something has already failed | The return of a piece the kernel's tables refused to unmap. `unmap_range` refuses only a range that is not page aligned or that would cut a block mapping in half, and the arena maps every stack and buffer page by page at page-aligned addresses, so no piece is refused; the row on this build is that error's way out of the function. |
+| `mm.rs` | 1784-1786 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
+| `mm.rs` | 1802-1805 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
+| `mm.rs` | 1815-1821 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
 | `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 561 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
@@ -1172,8 +1168,6 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `syscall/native.rs` | 1792 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 1799 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 2279 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2283-2284 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
-| `syscall/native.rs` | 2286-2287 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 137 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/armv7a/trap.rs) refuses only an `svc` taken from SVC mode, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 140, 145-146 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/armv7a/trap/check.rs), through the arm above these. |
@@ -1189,9 +1183,9 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `user/space.rs` | 1196-1197 | Reached only when something has already failed | A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing. |
 | `user/space.rs` | 2369 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
 | `user/space.rs` | 2373-2374 | Reached only when something has already failed | The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing. |
-| `user/space.rs` | 2767 | Reached only when something has already failed | `map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
-| `user/space.rs` | 2971 | Reached only when something has already failed | `map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
-| `user/vmo.rs` | 1473 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
+| `user/space.rs` | 2796 | Reached only when something has already failed | `map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
+| `user/space.rs` | 3000 | Reached only when something has already failed | `map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract. |
+| `user/vmo.rs` | 1563 | Reached only when something has already failed | A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches. |
 | `vmap.rs` | 391 | Reached only when something has already failed | A span given back from the middle of a merged region, which splits it, when the arena's region list is full and the heap has nothing to grow it with. The split reserves with the standard library's `try_reserve` (libs/vma `remove_quietly`), which the failure injection deliberately does not fail -- with room in the list it allocates nothing -- so reaching it needs the list at its capacity at the moment the heap is out of pages; the span then stays reserved, address space lost rather than memory, and is counted. |
 | `vmap.rs` | 393 | Reached only when something has already failed | The arena's map refusing to give back a span for a reason other than memory: `OutOfRange`, a span outside the arena's window. Every span came from `reserve`, which found it inside the window, so none is. The closing rows are the error arms' return. |
 | `vmap.rs` | 490 | Reached only when something has already failed | `map_device`'s window could not be mapped after its span was reserved: the kernel's tables refused, for a table they could not have or a block in the way. Device windows are mapped once each at bring-up, when memory is plentiful, into an arena no block mapping covers. |

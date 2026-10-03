@@ -71,6 +71,11 @@ fn chrome_libc_files(arch: Arch, volume: &Path, args: &Args) -> Result<Vec<crate
 /// `--interpreter glibc` asks for the volume's own, the customer's choice of
 /// 2026-09-26. An `--interpreter` or `--library` of another is kept.
 pub(super) fn chrome_libc(args: &mut Args) {
+    // `--nvidia`: NVIDIA's libraries are glibc's, so Chrome on the 3060 runs
+    // on the volume's glibc, as `--interpreter glibc` asks.
+    if args.nvidia {
+        args.interpreter = Some(GLIBC.to_owned());
+    }
     if args.interpreter.as_deref() == Some(GLIBC) {
         args.interpreter = None;
         args.libraries.clear();

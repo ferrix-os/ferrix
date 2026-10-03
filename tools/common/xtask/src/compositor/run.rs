@@ -328,6 +328,10 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     // self-checks skipped, which only the `desktop` boot of the judged ones
     // is.
     let (image, _) = build_desktop_image(arch, &programs, &config, carried, args, &defaults)?;
+    // On the 3060's own monitor: libvirt's domain, not a QEMU window.
+    if args.nvidia {
+        return crate::nvidia::run_desktop(&image, args);
+    }
     // The host's GPU behind the card where it can be had: `window::watched_gl`
     // says when, and why it is the default for a desktop somebody watches.
     let args = crate::window::watched_gl(arch, args)?;

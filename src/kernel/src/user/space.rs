@@ -2631,9 +2631,38 @@ impl AddressSpace {
         cached: bool,
         keeper: Arc<dyn Any + Send + Sync>,
     ) -> Result<u64, SpaceError> {
+        self.map_window_typed(
+            place,
+            len,
+            pages,
+            flags,
+            MemoryType::of(cached, false),
+            keeper,
+        )
+    }
+
+    /// [`AddressSpace::map_window`] with the memory type `memory`, which may
+    /// be write-combining: a prefetchable aperture a chardev node's driver
+    /// answered an mmap with (`docs/NVIDIA.md` §4.4). The type is held over
+    /// the window as for any window, so a page some other mapping holds with
+    /// another type is refused, never changed, and the mapping records the
+    /// same type it holds.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_window`].
+    pub(crate) fn map_window_typed(
+        &self,
+        place: FilePlace,
+        len: u64,
+        pages: WindowPages,
+        flags: VmaFlags,
+        memory: MemoryType,
+        keeper: Arc<dyn Any + Send + Sync>,
+    ) -> Result<u64, SpaceError> {
         pages.check(len, flags)?;
         let physical = pages.physical;
-        let held = hold_type(pages.whole, pages.whole_len, MemoryType::of(cached, false))?;
+        let held = hold_type(pages.whole, pages.whole_len, memory)?;
         let keeper: Arc<dyn Any + Send + Sync> =
             fallible::try_arc(WindowKept { keeper, held }).map_err(|_| SpaceError::OutOfMemory)?;
         let mut inner = self.inner.lock();
@@ -2666,8 +2695,8 @@ impl AddressSpace {
                 Backing::Device {
                     physical,
                     id,
-                    cached,
-                    combining: false,
+                    cached: matches!(memory, MemoryType::Cached),
+                    combining: matches!(memory, MemoryType::Combining),
                 },
             )
             .map_err(map_error)?;

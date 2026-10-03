@@ -127,17 +127,15 @@ fn anonymous(bytes: usize, out: &mut [u64]) -> Result<Pages, NvStatus> {
     })
 }
 
-/// The most attempts at a contiguous allocation before it is refused.
-const CONTIGUOUS_ATTEMPTS: usize = 32;
+/// The longest contiguous pin the kernel makes: one buddy block, 4 MiB at
+/// 4 KiB pages (`PIN_CONTIGUOUS`).
+const CONTIGUOUS_MAX: usize = 1024 * PAGE;
 
 /// A VMO pinned into the device's domain and mapped.
 ///
-/// A contiguous request of more than one page is retried until the pins
-/// follow each other: each miss stays allocated until the request is
-/// answered, so the next attempt is given frames the misses do not hold,
-/// and a fresh block from the frame allocator splits into ascending pages.
-/// This is interim: the kernel's contiguous pin replaces it (docs/NVIDIA.md
-/// §4.3, N1d).
+/// A contiguous request is one `PIN_CONTIGUOUS` pin, which the kernel fills
+/// with one run of fresh frames or refuses (docs/NVIDIA.md §4.3); the run is
+/// still checked, as RM is about to hand its first address to the GPU.
 fn pinned(
     device: &ferrix_native::device::Device<Kernel>,
     bytes: usize,
@@ -145,68 +143,57 @@ fn pinned(
     out: &mut [u64],
 ) -> Result<Pages, NvStatus> {
     let count = bytes / PAGE;
-    let mut misses: [Option<(Vmo<Kernel>, Pin<Kernel>)>; CONTIGUOUS_ATTEMPTS] =
-        core::array::from_fn(|_| None);
-    for attempt in 0..CONTIGUOUS_ATTEMPTS {
-        let (vmo, pin) = pin_once(device, bytes)?;
-        let found = if contiguous {
-            first_address(&pin, count)
-        } else {
-            all_addresses(&pin, count, out)
-        };
-        match found {
-            Some(base) => {
-                if let (true, Some(slot)) = (contiguous, out.first_mut()) {
-                    *slot = base;
-                }
-                if attempt > 0 {
-                    say!(
-                        "a contiguous allocation of {count} pages took {} attempts",
-                        attempt + 1
-                    );
-                }
-                let address = vmo
-                    .map(None, bytes, Protection::ReadWrite, 0)
-                    .map_err(|why| {
-                        say!("vmo_map of {bytes} bytes refused: {why:?}");
-                        status::NO_MEMORY
-                    })?;
-                return Ok(Pages {
-                    pinned: Some((vmo, pin)),
-                    address,
-                    bytes,
-                });
-            }
-            None if contiguous => {
-                if let Some(slot) = misses.get_mut(attempt) {
-                    *slot = Some((vmo, pin));
-                }
-            }
-            None => return Err(status::NO_MEMORY),
-        }
+    if contiguous && bytes > CONTIGUOUS_MAX {
+        say!(
+            "a contiguous allocation of {count} pages was refused: longer than the kernel's \
+             contiguous pin (docs/NVIDIA.md §4.3)"
+        );
+        return Err(status::NO_MEMORY);
     }
-    say!(
-        "a contiguous allocation of {count} pages was refused: the pins were not contiguous \
-         in {CONTIGUOUS_ATTEMPTS} attempts (docs/NVIDIA.md §4.3)"
-    );
-    Err(status::NO_MEMORY)
+    let access = if contiguous {
+        PinAccess::Contiguous
+    } else {
+        PinAccess::ReadWrite
+    };
+    let (vmo, pin) = pin_once(device, bytes, access)?;
+    let found = if contiguous {
+        first_address(&pin, count)
+    } else {
+        all_addresses(&pin, count, out)
+    };
+    let Some(base) = found else {
+        return Err(status::NO_MEMORY);
+    };
+    if let (true, Some(slot)) = (contiguous, out.first_mut()) {
+        *slot = base;
+    }
+    let address = vmo
+        .map(None, bytes, Protection::ReadWrite, 0)
+        .map_err(|why| {
+            say!("vmo_map of {bytes} bytes refused: {why:?}");
+            status::NO_MEMORY
+        })?;
+    Ok(Pages {
+        pinned: Some((vmo, pin)),
+        address,
+        bytes,
+    })
 }
 
 /// One VMO of `bytes`, pinned into the device's domain.
 fn pin_once(
     device: &ferrix_native::device::Device<Kernel>,
     bytes: usize,
+    access: PinAccess,
 ) -> Result<(Vmo<Kernel>, Pin<Kernel>), NvStatus> {
     let vmo = vmo::create(Kernel, bytes).map_err(|why| {
         say!("vmo_create of {bytes} bytes refused: {why:?}");
         status::NO_MEMORY
     })?;
-    let pin = device
-        .pin(&vmo, 0, bytes, PinAccess::ReadWrite)
-        .map_err(|why| {
-            say!("vmo_pin of {bytes} bytes refused: {why:?} (the pin budget, N0f?)");
-            status::NO_MEMORY
-        })?;
+    let pin = device.pin(&vmo, 0, bytes, access).map_err(|why| {
+        say!("vmo_pin of {bytes} bytes refused: {why:?} (the pin budget, N0f?)");
+        status::NO_MEMORY
+    })?;
     Ok((vmo, pin))
 }
 
@@ -278,4 +265,28 @@ pub unsafe extern "C" fn nvos_pages_free(pages: *mut Pages) {
     // SAFETY: read just now; the block is used no more.
     unsafe { libc::free(pages.cast()) };
     release(allocation);
+}
+
+/// The handle of the VMO allocation `pages` is, for the chardev core to map
+/// into a client (`docs/NVIDIA.md` §4.4): `NV_OK`, or
+/// `NV_ERR_NOT_SUPPORTED` for anonymous memory, which no client may map.
+///
+/// # Safety
+///
+/// `pages` is one [`nvos_pages_alloc`] made and not yet freed; `handle` is
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_pages_vmo(pages: *const Pages, handle: *mut u32) -> NvStatus {
+    // SAFETY: the caller vouches for both.
+    let Some(pages) = (unsafe { pages.as_ref() }) else {
+        return status::INVALID_ARGUMENT;
+    };
+    match &pages.pinned {
+        Some((vmo, _)) => {
+            // SAFETY: the caller vouches for `handle`.
+            unsafe { handle.write(vmo.as_owned().raw().0) };
+            status::OK
+        }
+        None => status::NOT_SUPPORTED,
+    }
 }

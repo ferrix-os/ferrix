@@ -506,7 +506,12 @@ pub(super) fn build_parts(
 ) -> Result<(PathBuf, PathBuf, Vec<u8>)> {
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel = crate::cargo::build_kernel(arch, args.release)?;
-    let natives = crate::native::build(arch, args.release)?;
+    let mut natives = crate::native::build(arch, args.release)?;
+    // `--nvidia`: the RTX 3060's driver, which devmgr starts for the card
+    // and which drives its monitor (`crate::nvidia`).
+    if args.nvidia {
+        natives.push(crate::nvidia::nvrm_native()?);
+    }
     let read = |path: &Path| -> Result<Vec<u8>> {
         std::fs::read(path)
             .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
