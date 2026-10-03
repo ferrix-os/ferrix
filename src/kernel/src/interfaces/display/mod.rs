@@ -31,8 +31,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use ferrix_blkring::identity::Location;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_displayctl::message::{
-    Attach, AttachObject, CARD_VMO_RIGHTS, FORMAT, Hello, MAX_BUFFER_PAGES, MAX_BYTES,
-    MAX_SCANOUTS, Message, Ready, Rect, Refusal, ScanoutMode, Status, Timing, Timings,
+    Attach, AttachObject, FORMAT, Hello, MAX_BUFFER_PAGES, MAX_BYTES, MAX_SCANOUTS, Message, Ready,
+    Rect, Refusal, ScanoutMode, Status, Timing, Timings,
 };
 use ferrix_displayctl::session::{Event, RequestError, Session};
 use ferrix_linux_abi::errno::Errno;
@@ -1162,7 +1162,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     .as_bytes()
     .to_vec();
     let handed = vec![
-        (Object::Vmo(vmo), CARD_VMO_RIGHTS),
+        // A driver that copies with its processor maps the card read-only;
+        // every other only pins it (`docs/DISPLAY.md` §2.1). Never WRITE.
+        (Object::Vmo(vmo), Ready::card_rights(hello.copies)),
         (Object::Port(core_port), Rights::WRITE),
     ];
     if start
@@ -1219,6 +1221,13 @@ fn announce(card: &Card, hello: &Hello) {
             alloc::string::String::from("is a scanout: no 3D")
         }
     );
+    if hello.copies {
+        // The one driver kind that may map the card, said where a reader
+        // of the boot log looks for what a card is.
+        crate::console::println!(
+            "  display  card{index} copies frames: its driver maps the card read-only"
+        );
+    }
     for (scanout, mode) in card.modes().iter().enumerate() {
         crate::console::println!(
             "  display  card{index} scanout {scanout}: {}x{}{}",

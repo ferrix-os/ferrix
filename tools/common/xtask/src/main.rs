@@ -366,6 +366,8 @@ OPTIONS:
                                          directories and fonts beside it
     --chrome                             run-compositor: Chrome on the desktop, from the volume
                                          tools/common/fetch/fetch-chrome.sh makes; SUPER+B opens another
+    --nvidia                             run-compositor: the --chrome desktop on the RTX 3060's own
+                                         monitor (libvirt, as run-nvidia), Chrome on NVIDIA's Vulkan
     --everything                         run-compositor: all of it at once -- --gl, --release,
                                          --clipboard, --chrome, and rustc and cargo in the shell,
                                          from one volume made of the rustc and Chrome ones, with

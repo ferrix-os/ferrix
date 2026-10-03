@@ -25,6 +25,7 @@ pub mod chardev;
 pub mod client;
 pub mod cpu;
 pub mod device;
+pub mod display;
 mod futex;
 mod libc;
 pub mod log;

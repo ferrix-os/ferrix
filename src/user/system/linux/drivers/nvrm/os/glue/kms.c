@@ -7,9 +7,9 @@
  * engine, says what each connector has attached -- the monitor's EDID name
  * and its preferred mode -- and on the first connected display sets that
  * mode with a pitch-linear X8R8G8B8 surface in video memory, filled with a
- * test pattern through a kernel mapping. The surface stays on screen; what
- * replaces it (a client's frames) is later work. Every step says how far
- * it got, as nvrm's start does.
+ * test pattern through a kernel mapping. That head is then offered to the
+ * kernel's display core as a card (N6), whose frames are copied onto the
+ * same surface. Every step says how far it got, as nvrm's start does.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -490,6 +490,188 @@ out:
     return status;
 }
 
+/* ------------------------------------------------------------------------
+ * The card (N6): nvrm as the kernel display core's driver for the head lit
+ * above. Each FLUSH copies the flushed rectangle of the buffer it names
+ * from the card VMO, which nvos maps read-only, into the VRAM surface the
+ * head scans out, and is answered at once: the copy is the flip. Only the
+ * running mode is offered, so the compositor never asks for another.
+ * ---------------------------------------------------------------------- */
+
+#define KMS_BUFFERS 64
+
+struct kms_buffer {
+    NvU32 id;
+    NvU64 offset;
+    NvU32 width, height, stride;
+};
+
+struct kms_card {
+    struct kms_head *lit;
+    const NvU8 *card;
+    NvU64 card_bytes;
+    struct kms_buffer buffers[KMS_BUFFERS];
+    NvU32 shown;
+    NvU64 flushes;
+};
+
+static struct kms_card kms_card;
+
+static struct kms_buffer *kms_buffer(struct kms_card *card, NvU32 id)
+{
+    NvU32 i;
+
+    for (i = 0; id != 0 && i < KMS_BUFFERS; i++)
+        if (card->buffers[i].id == id)
+            return &card->buffers[i];
+    return NULL;
+}
+
+/*
+ * Copy a rectangle of `buffer` to the same place on the surface, clipped
+ * to both. The card side was checked against the mapping by nvos's ATTACH
+ * validation: offset + stride x height lies inside it.
+ */
+static void kms_copy(struct kms_card *card, const struct kms_buffer *buffer, NvS32 x, NvS32 y,
+                     NvU32 w, NvU32 h)
+{
+    struct kms_head *lit = card->lit;
+    NvU32 width = lit->mode.timings.hVisible;
+    NvU32 height = lit->mode.timings.vVisible;
+    NvU32 left, top, right, bottom, row;
+
+    if (buffer->width < width)
+        width = buffer->width;
+    if (buffer->height < height)
+        height = buffer->height;
+    left = x < 0 ? 0 : (NvU32)x;
+    top = y < 0 ? 0 : (NvU32)y;
+    right = (NvU64)left + w > width ? width : left + w;
+    bottom = (NvU64)top + h > height ? height : top + h;
+    if (left >= right || top >= bottom)
+        return;
+
+    for (row = top; row < bottom; row++)
+    {
+        const NvU8 *from = card->card + buffer->offset + (NvU64)row * buffer->stride + left * 4;
+        NvU8 *to = (NvU8 *)lit->mapped + (NvU64)row * lit->pitch + left * 4;
+        memcpy(to, from, (size_t)(right - left) * 4);
+    }
+}
+
+static void kms_serve(void *argument)
+{
+    struct kms_card *card = argument;
+    struct nvos_display_event event;
+    NvU32 i;
+
+    for (;;)
+    {
+        if (nvos_display_next(&event) != NV_OK)
+            break;
+        switch (event.kind)
+        {
+        case NVOS_DISPLAY_ATTACH:
+            for (i = 0; i < KMS_BUFFERS && card->buffers[i].id != 0; i++)
+                ;
+            if (i == KMS_BUFFERS || event.buffer == 0)
+            {
+                nvos_display_attached(event.buffer, NVOS_DISPLAY_INVALID);
+                break;
+            }
+            card->buffers[i].id = event.buffer;
+            card->buffers[i].offset = event.offset;
+            card->buffers[i].width = event.width;
+            card->buffers[i].height = event.height;
+            card->buffers[i].stride = event.stride;
+            nvos_display_attached(event.buffer, NVOS_DISPLAY_OK);
+            break;
+        case NVOS_DISPLAY_SCANOUT:
+            /* Shown from the next flush; buffer 0 leaves the last frame up. */
+            card->shown = kms_buffer(card, event.buffer) != NULL ? event.buffer : 0;
+            if (card->shown != 0)
+                kms_copy(card, kms_buffer(card, card->shown), 0, 0, 0xffffffffu, 0xffffffffu);
+            break;
+        case NVOS_DISPLAY_FLUSH:
+        {
+            const struct kms_buffer *buffer = kms_buffer(card, event.buffer);
+            if (buffer != NULL)
+            {
+                card->shown = event.buffer;
+                kms_copy(card, buffer, event.x, event.y, event.w, event.h);
+            }
+            if (++card->flushes == 1)
+                kms_say("the first frame is on the screen\n");
+            nvos_display_flipped(event.sequence,
+                                 buffer != NULL ? NVOS_DISPLAY_OK : NVOS_DISPLAY_INVALID);
+            break;
+        }
+        case NVOS_DISPLAY_DETACH:
+        {
+            struct kms_buffer *buffer = kms_buffer(card, event.buffer);
+            if (card->shown == event.buffer)
+                card->shown = 0;
+            if (buffer != NULL)
+                memset(buffer, 0, sizeof(*buffer));
+            nvos_display_detached(event.buffer,
+                                  buffer != NULL ? NVOS_DISPLAY_OK : NVOS_DISPLAY_INVALID);
+            break;
+        }
+        case NVOS_DISPLAY_STOP:
+            nvos_display_stopped();
+            kms_say("the display core stopped the card\n");
+            return;
+        case NVOS_DISPLAY_CLOSED:
+            kms_say("the display core closed the card\n");
+            return;
+        default:
+            /* CURSOR and MOVE: never sent to a card without a cursor plane. */
+            break;
+        }
+    }
+}
+
+/* Offer the lit head to the display core and serve it on a thread. */
+static int kms_card_start(struct kms_head *lit)
+{
+    struct nvos_display_hello hello;
+    const struct NvKmsKapiDisplayModeTimings *t = &lit->mode.timings;
+    NV_STATUS status;
+
+    memset(&hello, 0, sizeof(hello));
+    hello.width = t->hVisible;
+    hello.height = t->vVisible;
+    hello.refresh_mhz = t->refreshRate;
+    hello.count = 1;
+    hello.timings[0].clock_khz = t->pixelClockHz / 1000;
+    hello.timings[0].hdisplay = (NvU16)t->hVisible;
+    hello.timings[0].hsync_start = (NvU16)t->hSyncStart;
+    hello.timings[0].hsync_end = (NvU16)t->hSyncEnd;
+    hello.timings[0].htotal = (NvU16)t->hTotal;
+    hello.timings[0].vdisplay = (NvU16)t->vVisible;
+    hello.timings[0].vsync_start = (NvU16)t->vSyncStart;
+    hello.timings[0].vsync_end = (NvU16)t->vSyncEnd;
+    hello.timings[0].vtotal = (NvU16)t->vTotal;
+    hello.timings[0].flags = (t->flags.hSyncPos ? 1u : 0u) | (t->flags.vSyncPos ? 2u : 0u);
+
+    status = nvos_display_start(&hello);
+    if (status != NV_OK)
+    {
+        kms_say("the display core did not take the card (0x%x)\n", status);
+        return -EIO;
+    }
+    kms_card.lit = lit;
+    kms_card.card = nvos_display_card(&kms_card.card_bytes);
+    if (!nvos_thread_spawn(kms_serve, &kms_card))
+    {
+        kms_say("no thread to serve the card\n");
+        return -ENOMEM;
+    }
+    kms_say("serving the card: %ux%u, frames copied to head %u\n", hello.width, hello.height,
+            lit->head);
+    return 0;
+}
+
 int nvrm_kms_show(void)
 {
     NvU32 i;
@@ -508,6 +690,9 @@ int nvrm_kms_show(void)
         int shown = kms_show_gpu(i);
         if (shown == 0 || status != 0)
             status = shown;
+        /* The first lit head becomes the card; one is all the core needs. */
+        if (shown == 0 && kms_card.lit == NULL)
+            status = kms_card_start(&kms_lit[i]);
     }
     return status;
 }

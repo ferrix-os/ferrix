@@ -2655,7 +2655,11 @@ impl AddressSpace {
     ) -> Result<u64, SpaceError> {
         pages.check(len, flags)?;
         let physical = pages.physical;
-        let held = hold_type(pages.whole, pages.whole_len, MemoryType::of(cached, combining))?;
+        let held = hold_type(
+            pages.whole,
+            pages.whole_len,
+            MemoryType::of(cached, combining),
+        )?;
         let keeper: Arc<dyn Any + Send + Sync> =
             fallible::try_arc(WindowKept { keeper, held }).map_err(|_| SpaceError::OutOfMemory)?;
         let mut inner = self.inner.lock();

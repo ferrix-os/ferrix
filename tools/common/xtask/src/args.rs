@@ -142,6 +142,11 @@ pub(crate) struct Args {
     /// of the two (`crate::everything`). The network and the hypervisor a
     /// watched boot has already.
     pub(crate) everything: bool,
+    /// `--nvidia`: `run-compositor --chrome`'s desktop on the RTX 3060's
+    /// own monitor, in the libvirt domain `run-nvidia` boots (`crate::nvidia`):
+    /// nvrm drives the card through NVKMS, and Chrome renders on NVIDIA's
+    /// Vulkan, on the volume's glibc. Sets `--chrome`.
+    pub(crate) nvidia: bool,
     /// `--session`: `flash --compositor`'s desktop runs as the user
     /// `ferrix` through `sessiond`, as `run-compositor --everything`'s does
     /// (`crate::session`): `--config`'s dotfiles seed the home disk once,
@@ -456,6 +461,13 @@ const ROOT_FLAGS: [&str; 5] = [
 impl Args {
     /// `--everything`: the flags it stands for, set as if each were given,
     /// but for `--gl` beside a `--no-gl`, before or after it.
+    /// `--chrome`, and `--nvidia`, which is the `--chrome` desktop on the
+    /// 3060's monitor.
+    fn browser(&mut self, flag: &str) {
+        self.chrome = true;
+        self.nvidia |= flag == "--nvidia";
+    }
+
     fn everything(&mut self) {
         self.everything = true;
         self.chrome = true;
@@ -649,7 +661,7 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" => args.chrome = true,
+                "--chrome" | "--nvidia" => args.browser(&item),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;

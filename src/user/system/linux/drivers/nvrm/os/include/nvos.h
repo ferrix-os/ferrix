@@ -127,6 +127,46 @@ int nvos_chardev_copy_out(NvU64 id, NvU64 to, const void *from, NvU32 length);
 NvS64 nvos_chardev_file(NvU64 id, int fd);
 void nvos_isr_enter_leave(NvBool entering);
 
+/* display.rs: nvrm's end of the kernel's display core (N6). */
+struct nvos_display_timing {
+    NvU32 clock_khz;
+    NvU16 hdisplay, hsync_start, hsync_end, htotal;
+    NvU16 vdisplay, vsync_start, vsync_end, vtotal;
+    NvU32 flags;        /* bit 0 hsync positive, bit 1 vsync positive */
+};
+struct nvos_display_hello {
+    NvU32 width, height, refresh_mhz;
+    NvU32 count;        /* timings set, the running one first */
+    struct nvos_display_timing timings[16];
+};
+struct nvos_display_event {
+    NvU32 kind;         /* NVOS_DISPLAY_* */
+    NvU32 buffer;
+    NvU64 offset, length;   /* ATTACH: the range in the card VMO */
+    NvU32 width, height, stride, reserved;
+    NvU64 sequence;     /* FLUSH and CURSOR */
+    NvS32 x, y;         /* SCANOUT and FLUSH: the rectangle */
+    NvU32 w, h;
+};
+#define NVOS_DISPLAY_ATTACH   1
+#define NVOS_DISPLAY_SCANOUT  2
+#define NVOS_DISPLAY_FLUSH    3
+#define NVOS_DISPLAY_DETACH   4
+#define NVOS_DISPLAY_CURSOR   5
+#define NVOS_DISPLAY_MOVE     6
+#define NVOS_DISPLAY_STOP     7
+#define NVOS_DISPLAY_CLOSED   8
+/* ferrix_displayctl::message::Status. */
+#define NVOS_DISPLAY_OK       0
+#define NVOS_DISPLAY_INVALID  4
+NV_STATUS nvos_display_start(const struct nvos_display_hello *hello);
+const NvU8 *nvos_display_card(NvU64 *bytes);
+NV_STATUS nvos_display_next(struct nvos_display_event *out);
+void nvos_display_attached(NvU32 buffer, NvU32 status);
+void nvos_display_flipped(NvU64 sequence, NvU32 status);
+void nvos_display_detached(NvU32 buffer, NvU32 status);
+void nvos_display_stopped(void);
+
 /* client.rs: the client the calling thread serves a request for. */
 typedef struct nvos_client {
     NvU32 pid;

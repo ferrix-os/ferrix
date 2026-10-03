@@ -69,7 +69,6 @@ use crate::claim::{Claims, StillServed};
 use crate::device::DeviceNode;
 use crate::hooks::Full;
 use crate::object::Object;
-use crate::user::vmo::Vmo;
 use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
 use crate::object::process::Host;
 use crate::sched;
@@ -79,6 +78,7 @@ use crate::syscall::native;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::timer;
+use crate::user::vmo::Vmo;
 
 pub(crate) mod file;
 
@@ -822,7 +822,11 @@ fn map_reply(
                 let Object::Vmo(vmo) = object else {
                     return None;
                 };
-                let needed = if write { Rights::READ.0 | Rights::WRITE.0 } else { Rights::READ.0 };
+                let needed = if write {
+                    Rights::READ.0 | Rights::WRITE.0
+                } else {
+                    Rights::READ.0
+                };
                 rights.contains(Rights(needed)).then(|| Arc::clone(vmo))
             })?;
             (a4.checked_add(len)? <= vmo.len_bytes()).then_some(MapReply::Vmo { vmo, offset: a4 })
@@ -837,9 +841,11 @@ fn map_reply(
                 let aperture_end = info.phys.checked_add(info.len)?;
                 (info.phys <= value && end <= aperture_end).then_some(info)
             })?;
-            let prefetchable =
-                inside.flags & ferrix_native_abi::types::APERTURE_PREFETCHABLE != 0;
-            (!combining || prefetchable).then_some(MapReply::Aperture { phys: value, combining })
+            let prefetchable = inside.flags & ferrix_native_abi::types::APERTURE_PREFETCHABLE != 0;
+            (!combining || prefetchable).then_some(MapReply::Aperture {
+                phys: value,
+                combining,
+            })
         }
         _ => None,
     }

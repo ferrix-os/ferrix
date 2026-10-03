@@ -162,7 +162,24 @@ fn guard() -> Result<()> {
 /// split interrupt controller, the 3060's function 0 behind a root port,
 /// the image on SATA, the three fixture disks and the volume on virtio
 /// through the IOMMU, serial over TCP.
-fn domain_xml(dir: &Path) -> String {
+/// What a boot asks of the domain beyond the card and the disks.
+struct Machine {
+    /// Guest RAM, in MiB.
+    memory: u32,
+    /// Virtual processors.
+    vcpus: u32,
+    /// Devices added as they are, such as a network interface.
+    devices: String,
+}
+
+/// `run-nvidia`'s machine: the card, the disks and the serial port alone.
+const GATE_MACHINE: Machine = Machine {
+    memory: MEMORY,
+    vcpus: 2,
+    devices: String::new(),
+};
+
+fn domain_xml(dir: &Path, machine: &Machine) -> String {
     let file = |name: &str| dir.join(name).display().to_string();
     let virtio = |name: &str, slot: u32, readonly: bool| {
         format!(
@@ -182,8 +199,8 @@ fn domain_xml(dir: &Path) -> String {
   <name>{DOMAIN}</name>
   <uuid>{UUID}</uuid>
   <description>Ferrix on the RTX 3060 (cargo xtask run-nvidia). Shares the card with {shared}: start only when those are shut off.</description>
-  <memory unit='MiB'>{MEMORY}</memory>
-  <vcpu>2</vcpu>
+  <memory unit='MiB'>{memory}</memory>
+  <vcpu>{vcpus}</vcpu>
   <os>
     <type arch='x86_64' machine='q35'>hvm</type>
     <loader readonly='yes' type='pflash' format='raw'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>
@@ -216,7 +233,7 @@ fn domain_xml(dir: &Path) -> String {
     </iommu>
     <video><model type='none'/></video>
     <memballoon model='none'/>
-    <hostdev mode='subsystem' type='pci' managed='no'>
+{devices}    <hostdev mode='subsystem' type='pci' managed='no'>
       <source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source>
       <rom bar='off'/>
     </hostdev>
@@ -228,6 +245,9 @@ fn domain_xml(dir: &Path) -> String {
 </domain>
 ",
         shared = SHARED.join(", "),
+        memory = machine.memory,
+        vcpus = machine.vcpus,
+        devices = machine.devices,
         image = file("ferrix.img"),
         vda = virtio("pattern.img", 8, true),
         vdb = virtio("btrfs.img", 9, true),
@@ -600,7 +620,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     );
 
     let xml = dir.join(format!("{DOMAIN}.run.xml"));
-    std::fs::write(&xml, domain_xml(&dir))
+    std::fs::write(&xml, domain_xml(&dir, &GATE_MACHINE))
         .map_err(|error| Error::new(format!("writing {}: {error}", xml.display())))?;
     let _ = virsh(&["define", &xml.display().to_string()])?;
     guard()?;
@@ -636,4 +656,101 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         ))),
         None => Ok(()),
     }
+}
+
+/// `nvrm`, as devmgr starts it, for an image built elsewhere:
+/// `run-compositor --nvidia`'s desktop.
+///
+/// # Errors
+///
+/// As [`nvrm::build`].
+pub(crate) fn nvrm_native() -> Result<Built> {
+    let programs = nvrm::build()?;
+    let bytes = std::fs::read(programs.path("nvrm"))
+        .map_err(|error| Error::new(format!("reading nvrm: {error}")))?;
+    Ok(Built {
+        name: "nvrm",
+        directory: native::DRIVERS,
+        bytes,
+    })
+}
+
+/// The links NVIDIA's userspace finds its data through, from the volume at
+/// `/data`: the Vulkan loader's ICD manifests; glvnd's EGL vendor and
+/// NVIDIA's EGL platform manifests, which NVIDIA's Vulkan driver reads
+/// through libEGL; and NVIDIA's application profiles.
+pub(crate) fn data_links() -> Vec<ports::File> {
+    rustc::files(&[
+        ("usr/share/vulkan", "/data/usr/share/vulkan"),
+        ("usr/share/glvnd", "/data/usr/share/glvnd"),
+        ("usr/share/egl", "/data/usr/share/egl"),
+        ("usr/share/nvidia", "/data/usr/share/nvidia"),
+    ])
+}
+
+/// How long `run-compositor --nvidia` keeps the desktop up when `--timeout`
+/// does not say: an hour.
+const DESKTOP_TIMEOUT: u64 = 3600;
+
+/// `run-compositor --nvidia`: the desktop `image` (hyprix, Chrome, nvrm) in
+/// the 3060's domain, on the card's own monitor. The disks are
+/// `run-nvidia`'s: the fixtures the kernel's early stages expect, then the
+/// NVIDIA volume, which carries Chrome's tree too, at `/data`. The root is
+/// the initramfs, as a desktop without `--persistent` has it. libvirt's
+/// default network gives Chrome somewhere to browse. The serial console
+/// is followed until `--timeout`, an hour by default, or a panic, and the
+/// domain destroyed after.
+///
+/// # Errors
+///
+/// The guard's, a volume or disk that cannot be made, or libvirt refusing.
+pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
+    guard()?;
+    let dir = vm_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| Error::new(format!("making {}: {error}", dir.display())))?;
+    let programs = nvrm::build()?;
+    place(image, &dir, "ferrix.img")?;
+    place(&test_disk::ensure()?, &dir, "pattern.img")?;
+    place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;
+    place(
+        &btrfs_disk::ensure_blank(Arch::X86_64)?,
+        &dir,
+        "btrfs-write.img",
+    )?;
+    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    let machine = Machine {
+        memory: MEMORY,
+        vcpus: 4,
+        devices: "    <interface type='network'>\n\
+                  \x20     <source network='default'/>\n\
+                  \x20     <model type='virtio-non-transitional'/>\n\
+                  \x20     <driver iommu='on'/>\n\
+                  \x20   </interface>\n"
+            .to_owned(),
+    };
+    let xml = dir.join(format!("{DOMAIN}.desktop.xml"));
+    std::fs::write(&xml, domain_xml(&dir, &machine))
+        .map_err(|error| Error::new(format!("writing {}: {error}", xml.display())))?;
+    let _ = virsh(&["define", &xml.display().to_string()])?;
+    guard()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let log = dir.join(format!("desktop-{stamp}.log"));
+    let timeout = if args.timeout_given {
+        args.timeout
+    } else {
+        DESKTOP_TIMEOUT
+    };
+    let _ = virsh(&["start", DOMAIN])?;
+    let running = Running;
+    println!(
+        "  {DOMAIN}: the desktop is starting on the 3060's monitor; serial in {} for {timeout} s",
+        log.display()
+    );
+    // A desktop has no end line: the timeout, or the port closing, is the end.
+    let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
+    drop(running);
+    Ok(())
 }
