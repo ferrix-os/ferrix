@@ -359,6 +359,10 @@ fi
 echo "nvidia-gate: vulkaninfo exited $?"
 /bin/vk-offscreen
 echo "nvidia-gate: vk-offscreen exited $?"
+if [ -x /data/chrome/chrome-headless-shell ]; then
+  /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
+  echo "nvidia-gate: chrome exited $?"
+fi
 exit 16
 "#;
 
@@ -414,6 +418,33 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             tree.display()
         )));
     }
+    // Chrome's tree beside it, when fetch-chrome.sh has made it: the two are
+    // Debian-shaped and pin the same glibc, so they merge, and Chrome's GPU
+    // process finds NVIDIA's ICD where its Vulkan loader looks (N4).
+    if let Ok(chrome) = chrome::volume() {
+        let chrome_tree = chrome.with_file_name("tree");
+        if chrome_tree.is_dir() {
+            let merged = Command::new("cp")
+                .arg("-a")
+                .arg("--link")
+                .arg("--remove-destination")
+                .arg(format!("{}/.", chrome_tree.display()))
+                .arg(&tree)
+                .status()
+                .map_err(|error| Error::new(format!("running cp: {error}")))?;
+            if !merged.success() {
+                return Err(Error::new(format!(
+                    "merging {} into {}: {merged}",
+                    chrome_tree.display(),
+                    tree.display()
+                )));
+            }
+            println!(
+                "  volume: Chrome's tree merged from {}",
+                chrome_tree.display()
+            );
+        }
+    }
     let to = tree.join(CORE_IN_VOLUME);
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)
@@ -431,12 +462,14 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             "the fetched tree has no {GSP_FIRMWARE}"
         )));
     }
+    let bytes = tree_bytes(&tree);
     let image = dir.join("nvidia.img");
     let _ = std::fs::remove_file(&image);
     let file = std::fs::File::create(&image)
         .map_err(|error| Error::new(format!("creating {}: {error}", image.display())))?;
-    // The tree is about 1 GB; room for btrfs's own trees beside it.
-    file.set_len(1600 << 20)
+    // Room for btrfs's own trees beside the files, and for what programs
+    // write to /data while they run.
+    file.set_len(bytes + bytes / 4 + (512 << 20))
         .map_err(|error| Error::new(format!("sizing {}: {error}", image.display())))?;
     drop(file);
     let made = Command::new("mkfs.btrfs")
@@ -453,6 +486,68 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// The bytes of the regular files under `tree`, each hard link once.
+fn tree_bytes(tree: &Path) -> u64 {
+    let ran = Command::new("du").arg("-sb").arg(tree).output();
+    ran.ok()
+        .and_then(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(4 << 30)
+}
+
+/// What the initramfs carries beside the drivers and zinc: the links that
+/// put the volume's libraries and manifests where glibc, the Vulkan loader
+/// and libEGL look, `vk-offscreen`, the static busybox the script sleeps
+/// with, and an optional preload.
+fn initramfs_files(dir: &Path) -> Result<Vec<ports::File>> {
+    let busybox = std::fs::read(BUSYBOX.replace('~', &home())).map_err(|error| {
+        Error::new(format!(
+            "reading the static busybox at {BUSYBOX} ({error}): the script sleeps with it"
+        ))
+    })?;
+    let mut files = rustc::files(chrome::LINKS);
+    // The Vulkan loader's ICD manifests; glvnd's EGL vendor and NVIDIA's EGL
+    // platform manifests, which NVIDIA's Vulkan driver reads through libEGL
+    // when no display is set; and NVIDIA's application profiles.
+    files.extend(rustc::files(&[
+        ("usr/share/vulkan", "/data/usr/share/vulkan"),
+        ("usr/share/glvnd", "/data/usr/share/glvnd"),
+        ("usr/share/egl", "/data/usr/share/egl"),
+        ("usr/share/nvidia", "/data/usr/share/nvidia"),
+    ]));
+    files.push(ports::File {
+        path: "bin/vk-offscreen".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(vk_offscreen(dir)?),
+    });
+    files.push(ports::File {
+        path: "bin/busybox".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(busybox),
+    });
+    // A bring-up aid: `FERRIX_RUN_NVIDIA_PRELOAD` names a shared library
+    // the script preloads into vulkaninfo, such as a tracer of its calls.
+    if let Some(preload) = std::env::var_os("FERRIX_RUN_NVIDIA_PRELOAD") {
+        let bytes = std::fs::read(&preload).map_err(|error| {
+            Error::new(format!(
+                "reading {}: {error}",
+                Path::new(&preload).display()
+            ))
+        })?;
+        files.push(ports::File {
+            path: "bin/preload.so".to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(bytes),
+        });
+    }
+    Ok(files)
 }
 
 /// The command.
@@ -475,11 +570,6 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
     let shell_bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
-    let busybox = std::fs::read(BUSYBOX.replace('~', &home())).map_err(|error| {
-        Error::new(format!(
-            "reading the static busybox at {BUSYBOX} ({error}): the script sleeps with it"
-        ))
-    })?;
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
     let mut natives = native::build(arch, args.release)?;
@@ -488,41 +578,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         directory: native::DRIVERS,
         bytes: nvrm_bytes,
     });
-    let mut files = rustc::files(chrome::LINKS);
-    // The Vulkan loader's ICD manifests; glvnd's EGL vendor and NVIDIA's EGL
-    // platform manifests, which NVIDIA's Vulkan driver reads through libEGL
-    // when no display is set; and NVIDIA's application profiles.
-    files.extend(rustc::files(&[
-        ("usr/share/vulkan", "/data/usr/share/vulkan"),
-        ("usr/share/glvnd", "/data/usr/share/glvnd"),
-        ("usr/share/egl", "/data/usr/share/egl"),
-        ("usr/share/nvidia", "/data/usr/share/nvidia"),
-    ]));
-    files.push(ports::File {
-        path: "bin/vk-offscreen".to_owned(),
-        mode: 0o755,
-        content: ports::Content::Bytes(vk_offscreen(&dir)?),
-    });
-    files.push(ports::File {
-        path: "bin/busybox".to_owned(),
-        mode: 0o755,
-        content: ports::Content::Bytes(busybox),
-    });
-    // A bring-up aid: `FERRIX_RUN_NVIDIA_PRELOAD` names a shared library
-    // the script preloads into vulkaninfo, such as a tracer of its calls.
-    if let Some(preload) = std::env::var_os("FERRIX_RUN_NVIDIA_PRELOAD") {
-        let bytes = std::fs::read(&preload).map_err(|error| {
-            Error::new(format!(
-                "reading {}: {error}",
-                Path::new(&preload).display()
-            ))
-        })?;
-        files.push(ports::File {
-            path: "bin/preload.so".to_owned(),
-            mode: 0o755,
-            content: ports::Content::Bytes(bytes),
-        });
-    }
+    let files = initramfs_files(&dir)?;
     let archive = initramfs::build(None, &natives, Some(&shell_bytes), &files)?;
     // The boot's self-checks are `test-boot`'s evidence, not this domain's;
     // two vCPUs on a loaded host make the timing ones flake here.
