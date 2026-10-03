@@ -60,8 +60,9 @@ enum step {
 	STEP_VOLUME = 12,
 };
 
-/* Where the NVIDIA volume, mounted at /data, carries RM's core
- * (tools/common/fetch/fetch-nvidia.sh), and how long nvrm waits for it. */
+/* Where the NVIDIA volume, mounted at /data, carries RM's core (written
+ * there by xtask beside the nvrm it was linked for, not by
+ * fetch-nvidia.sh), and how long nvrm waits for it. */
 #define CORE_PATH "/data/usr/lib/ferrix/nvrm-core"
 #define VOLUME_PATIENCE_MS 60000
 #define VOLUME_POLL_MS 250
