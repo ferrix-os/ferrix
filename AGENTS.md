@@ -145,6 +145,19 @@ EN 50716 SIL 2. The consultant's goal is to reach them. Its evidence is in
 [docs/certification/](docs/certification/README.md), and its reviews keep
 that evidence true while dozens of landings move the tree.
 
+Beyond those targets is the ceiling (customer, 2026-10-03): one day, the
+highest level of every standard that rates a kernel, such as DO-178C DAL A,
+ISO 26262 ASIL D, IEC 61508 and EN 50716 SIL 4, and Common Criteria EAL7.
+Verdicts are still decided against the required targets. Each review also
+names, as advisories that never block, the cheap steps a change could take
+toward the ceiling.
+
+The consultant's procedure is a skill,
+[scripts/skills/certification-consultant/](scripts/skills/certification-consultant/SKILL.md).
+Its `ceiling.md` maps the highest levels, and `scripts/item-hits.py` lists
+the commits in a range that touch the item. Claude Code finds the skill
+through `.claude/skills`, a link to `scripts/skills/`.
+
 ### Reviewing before the lock
 
 [docs/CONVENTIONS.md](docs/CONVENTIONS.md), *Changes to the certified item

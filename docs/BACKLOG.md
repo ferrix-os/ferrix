@@ -777,6 +777,14 @@ neither.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-03 (customer)** **Certification aims at the ceiling: one day,
+  the highest level of every standard that rates a kernel.** That means
+  DO-178C DAL A, ISO 26262 ASIL D, IEC 61508 and EN 50716 SIL 4, Common
+  Criteria EAL7, with IEC 62304 Class C already the highest. The 2026-10-01
+  targets stay the required ones. The certification consultant decides
+  verdicts against those targets, and adds advisories that never block,
+  steering each change toward the ceiling
+  (`scripts/skills/certification-consultant/ceiling.md`).
 * **2026-10-03 (customer)** **The `--everything` desktop runs as the user
   `ferrix`, and the machine keeps the users' files apart from the system.**
   The session is started the way `docs/AUTH.md` §6 plans it, not as an

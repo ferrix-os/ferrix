@@ -174,10 +174,16 @@ that exercise the system from outside any one crate.
 | `assets/fonts/` | Inter, Liberation and Noto Sans CJK, with their licences, and `fonts.conf`. xtask puts them into the image under `/usr/share/ferrix/fonts`. |
 | `assets/start/` | The page Chrome opens on a desktop. xtask fills in the boot's keys and facts and puts it under `/usr/share/ferrix/start`. |
 
+## `scripts/`
+
+| Path | What |
+|---|---|
+| `scripts/skills/` | Agent skills: one directory per role, each with its `SKILL.md` and the helpers it runs (`AGENTS.md`). `.claude/skills` links here, so Claude Code finds them in every checkout. |
+
 ## `tools/`
 
-Everything that runs on the host. A script is a tool; there is no separate
-`scripts/`.
+Everything that runs on the host. A script is a tool; `scripts/` holds only
+the agent skills.
 
 | Path | What |
 |---|---|
