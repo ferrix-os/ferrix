@@ -110,7 +110,11 @@ pub extern "C" fn nvos_client_leave() {
 
 /// `os_memcpy_from_user`: from the client's `from` to nvrm's `to`.
 #[unsafe(no_mangle)]
-pub extern "C" fn os_memcpy_from_user(to: *mut c_void, from: *const c_void, length: u32) -> NvStatus {
+pub extern "C" fn os_memcpy_from_user(
+    to: *mut c_void,
+    from: *const c_void,
+    length: u32,
+) -> NvStatus {
     let Some(copy) = current().and_then(|client| client.copy_in.map(|copy| (client, copy))) else {
         say!("os_memcpy_from_user of {length} bytes with no client on this thread: refused");
         return status::INVALID_ADDRESS;
@@ -162,7 +166,13 @@ pub unsafe extern "C" fn os_get_current_process_name(buffer: *mut c_char, length
     };
     // SAFETY: the caller vouches for the room.
     let out = unsafe { core::slice::from_raw_parts_mut(buffer, room) };
-    let own: [c_char; 5] = [b'n' as c_char, b'v' as c_char, b'r' as c_char, b'm' as c_char, 0];
+    let own: [c_char; 5] = [
+        b'n' as c_char,
+        b'v' as c_char,
+        b'r' as c_char,
+        b'm' as c_char,
+        0,
+    ];
     let name: &[c_char] = match current() {
         Some(client) => &client.name,
         None => &own,
@@ -259,8 +269,10 @@ pub unsafe extern "C" fn os_find_ns_pid(info: *mut c_void, pid: *mut u32) -> NvS
     if info.is_null() || pid.is_null() {
         return status::INVALID_ARGUMENT;
     }
-    // SAFETY: the caller vouches for both.
-    unsafe { pid.write(info.cast::<u32>().read()) };
+    // SAFETY: the caller vouches for `info`: one os_get_pid_info made.
+    let value = unsafe { info.cast::<u32>().read() };
+    // SAFETY: the caller vouches that `pid` is writable.
+    unsafe { pid.write(value) };
     status::OK
 }
 

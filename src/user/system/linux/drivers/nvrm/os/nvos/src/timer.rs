@@ -145,10 +145,12 @@ pub extern "C" fn nvos_timer_create(
         return timer;
     }
     TIMERS.lock.lock();
+    // SAFETY: under the lock.
+    let head = unsafe { *TIMERS.head.get() };
     // SAFETY: a fresh, aligned block, linked in under the lock.
     unsafe {
         timer.write(Timer {
-            next: UnsafeCell::new(*TIMERS.head.get()),
+            next: UnsafeCell::new(head),
             callback,
             argument,
             deadline: UnsafeCell::new(0),
@@ -170,8 +172,10 @@ pub extern "C" fn nvos_timer_create(
 pub unsafe extern "C" fn nvos_timer_start(timer: *mut Timer, nanoseconds: u64) {
     let deadline = time::monotonic().saturating_add(nanoseconds).max(1);
     TIMERS.lock.lock();
-    // SAFETY: the caller vouches for the timer; under the lock.
-    unsafe { *(*timer).deadline.get() = deadline };
+    // SAFETY: the caller vouches for the timer.
+    let slot = unsafe { &(*timer).deadline }.get();
+    // SAFETY: under the lock.
+    unsafe { *slot = deadline };
     TIMERS.lock.unlock();
     TIMERS.changed.signal();
 }
@@ -185,8 +189,10 @@ pub unsafe extern "C" fn nvos_timer_start(timer: *mut Timer, nanoseconds: u64) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nvos_timer_cancel(timer: *mut Timer) -> bool {
     TIMERS.lock.lock();
-    // SAFETY: the caller vouches for the timer; under the lock.
-    let armed = unsafe { core::mem::replace(&mut *(*timer).deadline.get(), 0) } != 0;
+    // SAFETY: the caller vouches for the timer.
+    let slot = unsafe { &(*timer).deadline }.get();
+    // SAFETY: under the lock.
+    let armed = unsafe { core::mem::replace(&mut *slot, 0) } != 0;
     TIMERS.lock.unlock();
     if TIMERS.tid.load(Ordering::Acquire) != futex::tid() {
         loop {
@@ -220,7 +226,11 @@ pub unsafe extern "C" fn nvos_timer_destroy(timer: *mut Timer) {
         let at = unsafe { *link };
         if at == timer {
             // SAFETY: as above.
-            unsafe { *link = *(*at).next.get() };
+            let next = unsafe { &(*at).next }.get();
+            // SAFETY: as above.
+            let next = unsafe { *next };
+            // SAFETY: as above.
+            unsafe { *link = next };
             break;
         }
         // SAFETY: as above.
@@ -248,17 +258,16 @@ mod tests {
         let other = nvos_timer_create(fire, ptr::null_mut());
         assert!(!timer.is_null() && !other.is_null());
         // SAFETY: both were made above and are destroyed below.
-        unsafe {
-            nvos_timer_start(timer, 5_000_000);
-            nvos_timer_start(other, 50_000_000);
-            assert!(nvos_timer_cancel(other));
-        }
+        unsafe { nvos_timer_start(timer, 5_000_000) };
+        // SAFETY: as above.
+        unsafe { nvos_timer_start(other, 50_000_000) };
+        // SAFETY: as above.
+        assert!(unsafe { nvos_timer_cancel(other) });
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert_eq!(FIRED.load(Ordering::SeqCst), 1);
         // SAFETY: as above.
-        unsafe {
-            nvos_timer_destroy(timer);
-            nvos_timer_destroy(other);
-        }
+        unsafe { nvos_timer_destroy(timer) };
+        // SAFETY: as above.
+        unsafe { nvos_timer_destroy(other) };
     }
 }

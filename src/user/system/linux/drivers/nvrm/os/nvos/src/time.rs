@@ -47,8 +47,9 @@ pub(crate) fn delay(nanoseconds: u64) {
     let until = timespec(monotonic().saturating_add(nanoseconds));
     // TIMER_ABSTIME, so that a signal's early return just sleeps again.
     // SAFETY: `until` is a live `Timespec`; no remainder is asked for.
-    while unsafe { libc::clock_nanosleep(CLOCK_MONOTONIC, 1, &raw const until, core::ptr::null_mut()) }
-        != 0
+    while unsafe {
+        libc::clock_nanosleep(CLOCK_MONOTONIC, 1, &raw const until, core::ptr::null_mut())
+    } != 0
     {}
 }
 

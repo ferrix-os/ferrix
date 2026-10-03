@@ -155,7 +155,9 @@ fn pinned(
         // SAFETY: `out` is `count` live, aligned `u64`s; an array of
         // `[u8; 8]` of the same count covers the same bytes, with weaker
         // alignment.
-        let raw = unsafe { core::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<DeviceAddress>(), count) };
+        let raw = unsafe {
+            core::slice::from_raw_parts_mut(out.as_mut_ptr().cast::<DeviceAddress>(), count)
+        };
         pin.addresses(raw)
     };
     let found = found.map_err(|why| {

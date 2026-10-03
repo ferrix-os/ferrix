@@ -22,9 +22,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use ferrix_native::device::{Device, Interrupt, IoMapping};
 use ferrix_native::port::{self, Port};
 use ferrix_native::{Deadline, Handle, IoMappingSpec, OwnedHandle};
-use ferrix_native_abi::types::{
-    APERTURE_PREFETCHABLE, ApertureInfo, DeviceInfo, PACKET_INTERRUPT,
-};
+use ferrix_native_abi::types::{APERTURE_PREFETCHABLE, ApertureInfo, DeviceInfo, PACKET_INTERRUPT};
 
 use crate::futex::Kernel;
 use crate::log::say;
@@ -185,7 +183,8 @@ pub unsafe extern "C" fn os_pci_init_handle(
         return ptr::null_mut();
     };
     let info = &attached.info;
-    let location = (domain << 16) | (u32::from(bus) << 8) | (u32::from(slot) << 3) | u32::from(function & 7);
+    let location =
+        (domain << 16) | (u32::from(bus) << 8) | (u32::from(slot) << 3) | u32::from(function & 7);
     if location != info.location {
         return ptr::null_mut();
     }
@@ -243,7 +242,11 @@ macro_rules! pci_read {
         ///
         /// `value` is writable.
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn $name(handle: *mut c_void, offset: u32, value: *mut $ty) -> NvStatus {
+        pub unsafe extern "C" fn $name(
+            handle: *mut c_void,
+            offset: u32,
+            value: *mut $ty,
+        ) -> NvStatus {
             let (read, status) = match config_read(handle, offset, $width) {
                 Ok(read) => (read as $ty, status::OK),
                 Err(status) => (<$ty>::MAX, status),
@@ -331,9 +334,11 @@ fn map(start: u64, size: u64, combining: bool) -> Result<usize, &'static str> {
 fn find_or_map(phys: u64, len: u64, combining: bool) -> Result<Mapping, &'static str> {
     // SAFETY: under `STATE.lock`.
     let mappings = unsafe { &mut *STATE.mappings.get() };
-    if let Some(found) = mappings.iter().flatten().find(|m| {
-        m.combining == combining && phys >= m.phys && phys + len <= m.phys + m.len
-    }) {
+    if let Some(found) = mappings
+        .iter()
+        .flatten()
+        .find(|m| m.combining == combining && phys >= m.phys && phys + len <= m.phys + m.len)
+    {
         return Ok(*found);
     }
     let slot = mappings

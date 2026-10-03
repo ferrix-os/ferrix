@@ -32,8 +32,18 @@ pub(crate) const O_EXCL: c_int = 0o200;
 /// `O_CLOEXEC`.
 pub(crate) const O_CLOEXEC: c_int = 0o2000000;
 
+/// `PROT_READ`.
+pub(crate) const PROT_READ: c_int = 1;
+/// `PROT_WRITE`.
+pub(crate) const PROT_WRITE: c_int = 2;
+/// `PROT_EXEC`.
+pub(crate) const PROT_EXEC: c_int = 4;
 /// `PROT_READ | PROT_WRITE`.
 pub(crate) const PROT_READ_WRITE: c_int = 3;
+/// `MAP_FIXED_NOREPLACE`: at the address given, or not at all.
+pub(crate) const MAP_FIXED_NOREPLACE: c_int = 0x10_0000;
+/// `EEXIST`.
+pub(crate) const EEXIST: c_int = 17;
 /// `MAP_PRIVATE | MAP_ANONYMOUS`.
 pub(crate) const MAP_PRIVATE_ANONYMOUS: c_int = 0x22;
 /// `MAP_FAILED`.
@@ -77,6 +87,8 @@ unsafe extern "C" {
         offset: i64,
     ) -> *mut c_void;
     pub(crate) fn munmap(address: *mut c_void, length: usize) -> c_int;
+    pub(crate) fn mprotect(address: *mut c_void, length: usize, protection: c_int) -> c_int;
+    pub(crate) fn read(fd: c_int, buffer: *mut c_void, length: usize) -> isize;
     pub(crate) fn pthread_create(
         thread: *mut u64,
         attributes: *const c_void,

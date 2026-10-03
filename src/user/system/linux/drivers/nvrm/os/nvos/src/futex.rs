@@ -56,7 +56,9 @@ unsafe fn call6(number: usize, a: [usize; 6]) -> usize {
 /// Sleep while `word` holds `expected`, for at most `timeout` if given.
 /// Returns early on a wake, a signal, or a changed word, so callers loop.
 pub(crate) fn wait(word: &AtomicU32, expected: u32, timeout: Option<Timespec>) {
-    let timespec = timeout.as_ref().map_or(core::ptr::null(), |t| t as *const Timespec);
+    let timespec = timeout
+        .as_ref()
+        .map_or(core::ptr::null(), |t| t as *const Timespec);
     // SAFETY: the word is a live `AtomicU32` the kernel only reads, and the
     // timeout, when given, is a `Timespec` on this frame.
     let _ = unsafe {
@@ -80,7 +82,14 @@ pub(crate) fn wake(word: &AtomicU32, count: u32) {
     let _ = unsafe {
         call6(
             SYS_FUTEX,
-            [word.as_ptr() as usize, FUTEX_WAKE_PRIVATE, count as usize, 0, 0, 0],
+            [
+                word.as_ptr() as usize,
+                FUTEX_WAKE_PRIVATE,
+                count as usize,
+                0,
+                0,
+                0,
+            ],
         )
     };
 }

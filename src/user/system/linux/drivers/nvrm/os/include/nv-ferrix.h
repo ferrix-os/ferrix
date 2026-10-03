@@ -51,9 +51,6 @@ int snprintf(char *, size_t, const char *, ...);
 
 #define simple_strtoul(s, e, b) os_strtoul((s), (e), (b))
 
-#define NV_MAX(a, b)            ((a) > (b) ? (a) : (b))
-#define NV_MIN(a, b)            ((a) < (b) ? (a) : (b))
-
 #define container_of(p, type, member) \
     ((type *)((char *)(p) - offsetof(type, member)))
 
@@ -223,6 +220,10 @@ void nvrm_close(nv_linux_file_private_t *nvlfp);
 #define EBUSY   16
 #define EINVAL  22
 #define EACCES  13
+
+/* The level of nv.c's memory accounting lines: nv-linux.h's without
+ * NV_MEM_LOGGER, so they print only when every info line does. */
+#define NV_DBG_MEMINFO  NV_DBG_INFO
 
 /* A line for this layer's own messages. */
 #define nvrm_say(...)   nv_printf(NV_DBG_ERRORS, "nvrm: " __VA_ARGS__)

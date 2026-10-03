@@ -72,6 +72,12 @@ const STARTING: u32 = 1;
 /// Its thread runs.
 const RUNNING: u32 = 2;
 
+impl Default for WorkQueue {
+    fn default() -> WorkQueue {
+        WorkQueue::new()
+    }
+}
+
 impl WorkQueue {
     /// A queue whose thread has not started.
     pub const fn new() -> WorkQueue {
@@ -343,7 +349,10 @@ mod tests {
         }
         QUEUE.flush();
         assert_eq!(RAN.load(Ordering::SeqCst), 4);
-        let order: Vec<usize> = ORDER.iter().map(|slot| slot.load(Ordering::SeqCst)).collect();
+        let order: Vec<usize> = ORDER
+            .iter()
+            .map(|slot| slot.load(Ordering::SeqCst))
+            .collect();
         assert_eq!(order, [1, 2, 3, 4]);
     }
 }

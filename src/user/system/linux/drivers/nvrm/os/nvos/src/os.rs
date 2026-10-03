@@ -101,7 +101,11 @@ pub unsafe extern "C" fn os_free_mem(address: *mut c_void) {
 ///
 /// Both ranges are valid for `length` bytes and do not overlap.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn os_mem_copy(to: *mut c_void, from: *const c_void, length: u32) -> *mut c_void {
+pub unsafe extern "C" fn os_mem_copy(
+    to: *mut c_void,
+    from: *const c_void,
+    length: u32,
+) -> *mut c_void {
     // SAFETY: the caller vouches for both ranges.
     unsafe { ptr::copy_nonoverlapping(from.cast::<u8>(), to.cast::<u8>(), length as usize) };
     to
@@ -178,8 +182,10 @@ pub unsafe extern "C" fn os_string_length(text: *const c_char) -> u32 {
 /// Both are strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn os_string_compare(a: *const c_char, b: *const c_char) -> i32 {
-    // SAFETY: the caller vouches for both.
-    let (a, b) = unsafe { (bytes(a), bytes(b)) };
+    // SAFETY: the caller vouches that `a` is a string.
+    let a = unsafe { bytes(a) };
+    // SAFETY: the caller vouches that `b` is a string.
+    let b = unsafe { bytes(b) };
     match a.cmp(b) {
         core::cmp::Ordering::Less => -1,
         core::cmp::Ordering::Equal => 0,
@@ -200,7 +206,7 @@ pub unsafe extern "C" fn os_strtoul(text: *const c_char, end: *mut *mut c_char, 
     let (value, used) = strtoul(digits, base);
     if !end.is_null() {
         // SAFETY: the caller vouches for it; `used` is within the string.
-        unsafe { end.write(text.cast_mut().add(used)) };
+        unsafe { end.write(text.cast_mut().wrapping_add(used)) };
     }
     value
 }
@@ -216,7 +222,10 @@ fn strtoul(text: &[u8], base: u32) -> (u32, usize) {
         base => (base, 0),
     };
     let mut value: u32 = 0;
-    while let Some(digit) = text.get(at).and_then(|&byte| char::from(byte).to_digit(base)) {
+    while let Some(digit) = text
+        .get(at)
+        .and_then(|&byte| char::from(byte).to_digit(base))
+    {
         value = value.wrapping_mul(base).wrapping_add(digit);
         at += 1;
     }
@@ -637,7 +646,9 @@ pub unsafe extern "C" fn os_wake_up(queue: *mut c_void) {
 #[unsafe(no_mangle)]
 pub extern "C" fn os_get_cpu_count() -> u32 {
     // SAFETY: `get_nprocs` takes nothing.
-    u32::try_from(unsafe { libc::get_nprocs() }).unwrap_or(1).max(1)
+    u32::try_from(unsafe { libc::get_nprocs() })
+        .unwrap_or(1)
+        .max(1)
 }
 
 /// `os_get_cpu_number`.
@@ -704,7 +715,7 @@ pub unsafe extern "C" fn os_get_random_bytes(buffer: *mut u8, count: u16) -> NvS
     let count = usize::from(count);
     while done < count {
         // SAFETY: the caller vouches for the room; `done` is within it.
-        let got = unsafe { libc::getrandom(buffer.add(done).cast(), count - done, 0) };
+        let got = unsafe { libc::getrandom(buffer.wrapping_add(done).cast(), count - done, 0) };
         match usize::try_from(got) {
             Ok(got) if got > 0 => done += got,
             _ => return status::NOT_READY,
@@ -985,7 +996,10 @@ pub unsafe extern "C" fn os_open_temporary_file(file: *mut *mut c_void) -> NvSta
         let tag = time::monotonic() ^ (attempt << 48);
         for (index, slot) in path.iter_mut().skip(10).take(16).enumerate() {
             let nibble = (tag >> (index * 4)) & 0xf;
-            *slot = b"0123456789abcdef".get(nibble as usize).copied().unwrap_or(b'0');
+            *slot = b"0123456789abcdef"
+                .get(nibble as usize)
+                .copied()
+                .unwrap_or(b'0');
         }
         // SAFETY: `path` is NUL-terminated.
         let fd = unsafe {
@@ -1025,7 +1039,12 @@ pub extern "C" fn os_close_file(file: *mut c_void) {
 ///
 /// `buffer` holds `size` bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn os_write_file(file: *mut c_void, buffer: *const u8, size: u64, offset: u64) -> NvStatus {
+pub unsafe extern "C" fn os_write_file(
+    file: *mut c_void,
+    buffer: *const u8,
+    size: u64,
+    offset: u64,
+) -> NvStatus {
     let (Ok(size), Ok(offset)) = (usize::try_from(size), i64::try_from(offset)) else {
         return status::INVALID_ARGUMENT;
     };
@@ -1033,7 +1052,12 @@ pub unsafe extern "C" fn os_write_file(file: *mut c_void, buffer: *const u8, siz
     while done < size {
         // SAFETY: the caller vouches for the buffer; `done` is within it.
         let wrote = unsafe {
-            libc::pwrite(fd_of(file), buffer.add(done).cast(), size - done, offset + done as i64)
+            libc::pwrite(
+                fd_of(file),
+                buffer.wrapping_add(done).cast(),
+                size - done,
+                offset + done as i64,
+            )
         };
         match usize::try_from(wrote) {
             Ok(wrote) if wrote > 0 => done += wrote,
@@ -1049,7 +1073,12 @@ pub unsafe extern "C" fn os_write_file(file: *mut c_void, buffer: *const u8, siz
 ///
 /// `buffer` has room for `size` bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn os_read_file(file: *mut c_void, buffer: *mut u8, size: u64, offset: u64) -> NvStatus {
+pub unsafe extern "C" fn os_read_file(
+    file: *mut c_void,
+    buffer: *mut u8,
+    size: u64,
+    offset: u64,
+) -> NvStatus {
     let (Ok(size), Ok(offset)) = (usize::try_from(size), i64::try_from(offset)) else {
         return status::INVALID_ARGUMENT;
     };
@@ -1057,7 +1086,12 @@ pub unsafe extern "C" fn os_read_file(file: *mut c_void, buffer: *mut u8, size: 
     while done < size {
         // SAFETY: the caller vouches for the room; `done` is within it.
         let read = unsafe {
-            libc::pread(fd_of(file), buffer.add(done).cast(), size - done, offset + done as i64)
+            libc::pread(
+                fd_of(file),
+                buffer.wrapping_add(done).cast(),
+                size - done,
+                offset + done as i64,
+            )
         };
         match usize::try_from(read) {
             Ok(read) if read > 0 => done += read,
@@ -1095,7 +1129,14 @@ pub unsafe extern "C" fn nvos_read_whole_file(path: *const c_char, size: *mut u6
     let mut done = 0_usize;
     while !block.is_null() && done < length {
         // SAFETY: `block` has room for `length`; `done` is within it.
-        let read = unsafe { libc::pread(fd, block.cast::<u8>().add(done).cast(), length - done, done as i64) };
+        let read = unsafe {
+            libc::pread(
+                fd,
+                block.cast::<u8>().wrapping_add(done).cast(),
+                length - done,
+                done as i64,
+            )
+        };
         match usize::try_from(read) {
             Ok(read) if read > 0 => done += read,
             _ => break,

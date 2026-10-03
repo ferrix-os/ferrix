@@ -28,6 +28,8 @@ mod libc;
 pub mod log;
 pub mod os;
 pub mod pages;
+pub mod rmcore;
+pub mod sha256;
 pub mod status;
 pub mod sync;
 mod thread;
