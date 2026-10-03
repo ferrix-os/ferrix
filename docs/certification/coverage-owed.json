@@ -26,6 +26,16 @@
   "what": "Absent hardware under the coverage run: x86_64 coverage is measured under TCG, which offers no ERAPS. arch/x86_64/speculation.rs switch_barrier_in_domain's `return false` and Plan::for_processor's and eraps_empties_on_switch's true outcome are reached on the reference host's KVM boot (test-boot --arch x86_64 --accel kvm, gate tag po7-ipcM-eraps3-kvm, whose defences line names ERAPS) and by control c2. Measure them under KVM or argue them as absent-hardware rows."
  },
     {
+      "landing": "OPAQUE-KERNEL.md §9.7, step 4's groundwork: ferrix.fastpath (branch step4-prep)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from 527201573, no anchor dropped.",
+      "what": "Measure and test or argue the new lines on every architecture: fastpath.rs whole (init and its four readings, on, report and its three wordings), checks::init's call of it and its report on a boot that skips the checks, and stages_check::check_native_objects' report. A boot with ferrix.fastpath=on and one with a value not understood reach the arms test-boot does not."
+    },
+    {
       "landing": "OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f)",
       "architectures": [
         "x86_64",
