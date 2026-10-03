@@ -725,6 +725,9 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
              */
             for (i = 0; i < num_arg_gpus; i++)
             {
+                /* An unused slot is zero, and NVIDIA skips it. */
+                if (((NvU32 *)arg_copy)[i] == 0)
+                    continue;
                 if (!nv_gpu_id_known(((NvU32 *)arg_copy)[i]))
                 {
                     nvos_sema_up(&nvl->ldata_lock);
@@ -833,7 +836,10 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
     if (nvrm_trace_ioctls && arg_copy != NULL)
     {
         const NvU32 *words = arg_copy;
-        NvU32 rm_status = (arg_size >= 32) ? words[7] : 0;
+        /* NVOS33 (RM_MAP_MEMORY, 0x4E; with its fd, 56 bytes) keeps its
+         * status at byte 40; NVOS21/NVOS54 at byte 28. */
+        NvU32 rm_status = (arg_cmd == 0x4E && arg_size >= 44) ? words[10]
+                        : (arg_size >= 32) ? words[7] : 0;
         if (status != 0 || rm_status != 0)
             nvrm_say("ioctl esc 0x%x size %zu on %s: rc %d, words 0x%x 0x%x 0x%x 0x%x, status 0x%x\n",
                      arg_cmd, arg_size, (nv->flags & NV_FLAG_CONTROL) ? "ctl" : "gpu",
@@ -1408,6 +1414,8 @@ int NV_API_CALL nv_get_event(
  * core; until then the identities are the pseudo-descriptors nvrm_open_ctl
  * handed out, which is what nvrm-link-test passes.
  */
+extern int nvrm_trace_ioctls;
+
 nv_file_private_t* NV_API_CALL nv_get_file_private(
     NvS32 fd,
     NvBool ctl,
@@ -1421,7 +1429,12 @@ nv_file_private_t* NV_API_CALL nv_get_file_private(
     NvS64 identity = nvos_client_resolve_fd(fd);
 
     if (identity < 0)
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: descriptor %d resolves to nothing (%lld)\n",
+                     fd, (long long)identity);
         return NULL;
+    }
     fd = (NvS32)identity;
 
     nvos_mutex_lock(&nv_open_files_lock);
@@ -1433,10 +1446,21 @@ nv_file_private_t* NV_API_CALL nv_get_file_private(
     nvos_mutex_unlock(&nv_open_files_lock);
 
     if (nvlfp == NULL)
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: no open file %d\n", fd);
         return NULL;
+    }
 
-    if (ctl != !!NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)))
+    /* RM passes NV_IS_CTL_DEVICE's flag bit itself, not 0 or 1. */
+    if (!!ctl != !!NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)))
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: file %d is %s, asked for %s\n", fd,
+                     NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)) ? "ctl" : "gpu",
+                     ctl ? "ctl" : "gpu");
         return NULL;
+    }
 
     *os_private = nvlfp;
 
@@ -1809,4 +1833,72 @@ NV_STATUS NV_API_CALL nv_log_error(
     nv_printf(NV_DBG_ERRORS, "NVRM: GPU " NV_PCI_DEV_FMT ": Xid %u: %s\n",
               NV_PCI_DEV_FMT_ARGS(nv), error_number, text);
     return NV_OK;
+}
+
+/* ------------------------------------------------------------------------
+ * For nvidia-modeset (os/kept/nv-modeset-interface.c). NVIDIA's
+ * nvidia_dev_get and nvidia_dev_put, less nv_open_device's start: nvrm
+ * starts each GPU at probe, so NVKMS's open only counts a reference, as
+ * nvrm_open_gpu does for a file. And a walk of the probed GPUs, which
+ * Linux's nvidia_modeset_enumerate_gpus makes over nv_linux_devices
+ * itself.
+ * ---------------------------------------------------------------------- */
+
+static nv_linux_state_t *nv_find_gpu_id(NvU32 gpu_id)
+{
+    nv_linux_state_t *nvl;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+        if (NV_STATE_PTR(nvl)->gpu_id == gpu_id)
+            break;
+    UNLOCK_NV_LINUX_DEVICES();
+    return nvl;
+}
+
+int nvidia_dev_get(NvU32 gpu_id, nvidia_stack_t *sp)
+{
+    nv_linux_state_t *nvl = nv_find_gpu_id(gpu_id);
+
+    if (nvl == NULL || !(NV_STATE_PTR(nvl)->flags & NV_FLAG_OPEN))
+        return -ENODEV;
+
+    nvos_sema_down(&nvl->ldata_lock);
+    atomic64_inc(&nvl->usage_count);
+    nvos_sema_up(&nvl->ldata_lock);
+    return 0;
+}
+
+void nvidia_dev_put(NvU32 gpu_id, nvidia_stack_t *sp)
+{
+    nv_linux_state_t *nvl = nv_find_gpu_id(gpu_id);
+
+    if (nvl == NULL)
+        return;
+
+    nvos_sema_down(&nvl->ldata_lock);
+    (void)atomic64_dec_and_test(&nvl->usage_count);
+    nvos_sema_up(&nvl->ldata_lock);
+}
+
+NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, NvU32, void *),
+                            void *argument)
+{
+    nv_linux_state_t *nvl;
+    NvU32 count = 0;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+    {
+        if (count >= limit)
+        {
+            nv_printf(NV_DBG_WARNINGS, "NVRM: More than %d GPUs found.", limit);
+            count = 0;
+            break;
+        }
+        each(nvl, count, argument);
+        count++;
+    }
+    UNLOCK_NV_LINUX_DEVICES();
+    return count;
 }

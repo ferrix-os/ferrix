@@ -88,6 +88,30 @@ contents=(
 debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 LIBC_DEB="pool/main/g/glibc/libc6_2.41-12+deb13u4_amd64.deb 967aa62605721081c3eb2a17650611a792aa802d76a6511d1840242623d204c9"
 
+# Debian 13's Vulkan loader and vulkaninfo/vkcube, and the libraries they
+# load, for N2's offscreen Vulkan (docs/NVIDIA.md §7): NVIDIA's ICD is in the
+# .run, the loader is not.
+EXTRA_DEBS=(
+    "pool/main/v/vulkan-loader/libvulkan1_1.4.309.0-1_amd64.deb f47da79cd140264fe21cceb08bc87a71bc7fec05819e4a421f3f518d21101a37"
+    "pool/main/v/vulkan-tools/vulkan-tools_1.4.304.0+dfsg1-1_amd64.deb 742d1cd78c333a94b8214e21ba455d47884dc32f110016ffe6998cf88f2a2f94"
+    "pool/main/g/gcc-14/libstdc++6_14.2.0-19_amd64.deb ab1fa05837aa7a92aae748fd07a18a35f7d18bb4a71c4724fe2bbf0e32089de0"
+    "pool/main/g/gcc-14/libgcc-s1_14.2.0-19_amd64.deb 3c71917b490d1a17aed43196a2787a256ecf060526cdb20216a74bedc061b150"
+    "pool/main/w/wayland/libwayland-client0_1.23.1-3_amd64.deb d1607e1db1a7c5378a2e5c6ae7b20f64dc6acf134f953d84a7f5204b74339f33"
+    "pool/main/libf/libffi/libffi8_3.4.8-2_amd64.deb 0ebdc340de33333639c3c63874cd4b15ac2e83dfa1ef3053b7eefaf4919f4f68"
+    "pool/main/libx/libx11/libx11-6_1.8.12-1_amd64.deb b5a3fd3bf8c8fd0364bfb9bea00dcba7fc301229bd02dded084632d31f5b0fb3"
+    "pool/main/libx/libxcb/libxcb1_1.17.0-2+b1_amd64.deb 5c222a72d11b866447da31693254f738430726e3e065a384e82687b2fd2f978b"
+    "pool/main/libx/libxau/libxau6_1.0.11-1_amd64.deb 689a9f0e0ba3e2c65431f864871e303ee904de69dd28abfc462663fae030227f"
+    "pool/main/libx/libxdmcp/libxdmcp6_1.1.5-1_amd64.deb 0740dc760916b2008b45417a42a8fd7dd5de370fb57d31373f15034cda8acf0b"
+    "pool/main/libb/libbsd/libbsd0_0.12.2-2_amd64.deb e5a85986fa6bec3307ab1bc860736b478b331882bc45e17675a7bdf88eecb43a"
+    "pool/main/libm/libmd/libmd0_1.1.0-2+b1_amd64.deb 7244ec3839b61fac0c1884fe08aaa040f26e8f1f35f1f5d3482eacefd30d1b44"
+    # What NVIDIA's own libraries load: libGLX_nvidia libXext, the
+    # allocator libdrm, the Wayland EGL platform libwayland-server.
+    "pool/main/libx/libxext/libxext6_1.3.4-1+b3_amd64.deb fc618ec40465e5ce48622606299cb47833efc3fb235ba15543b81f850722f443"
+    "pool/main/libd/libdrm/libdrm2_2.4.124-2_amd64.deb fe2276901c7cd7b8079de63072d37fe1cbeb4eb001a3bc1f1d662ad89aa0890e"
+    "pool/main/libd/libdrm/libdrm-common_2.4.124-2_all.deb 9a8a6c65c165e9964f106fb4ac710959b5d33e0790227e3ab6b27c4742d1254a"
+    "pool/main/w/wayland/libwayland-server0_1.23.1-3_amd64.deb 2967212bd582e0dffca443fdc44f4c660e7368d41f7ee3a7f6314e0c3abfe9ea"
+)
+
 # §2.2's figures for the two objects, from the feasibility pass.
 expected=(
     "nv-kernel.o 12169725 13372 406"
@@ -171,17 +195,29 @@ done
 read -r libc_path libc_sha256 <<< "$LIBC_DEB"
 libc_deb=$out/downloads/${libc_path##*/}
 fetch "$debian/$libc_path" "$libc_deb" "$libc_sha256"
+extra_debs=()
+extra_sums=""
+for entry in "${EXTRA_DEBS[@]}"; do
+    read -r deb_path deb_sha256 <<< "$entry"
+    deb=$out/downloads/${deb_path##*/}
+    fetch "$debian/$deb_path" "$deb" "$deb_sha256"
+    extra_debs+=("$deb")
+    extra_sums="$extra_sums $deb_sha256"
+done
 
 # 4. The volume, made again when what it is made from, or this script, has
 # changed.
 image=$out/nvidia.img
-stamp="$VERSION run=$RUN_SHA256 libc=$libc_sha256 script=$(sha256sum < "$0" | cut -d' ' -f1)"
+stamp="$VERSION run=$RUN_SHA256 libc=$libc_sha256 extra=$(echo "$extra_sums" | sha256sum | cut -d' ' -f1) script=$(sha256sum < "$0" | cut -d' ' -f1)"
 if [ ! -f "$image" ] || [ "$(cat "$out/nvidia.version" 2> /dev/null)" != "$stamp" ]; then
     tree=$out/tree
     rm -rf "$tree" "$image" "$out/nvidia.version"
     lib=$tree/usr/lib/x86_64-linux-gnu
     mkdir -p "$lib" "$tree/usr/lib64" "$tree/usr/bin"
     dpkg-deb -x "$libc_deb" "$tree"
+    for deb in "${extra_debs[@]}"; do
+        dpkg-deb -x "$deb" "$tree"
+    done
 
     # The x86-64 libraries and the links NVIDIA's installer would make, from
     # the .run's manifest: `file mode TYPE NATIVE [dir/] [target] MODULE:m`.

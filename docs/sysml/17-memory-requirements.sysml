@@ -129,7 +129,7 @@ package FerrixMemoryRequirements {
                 pages in, and with both spaces dropped every job's memory reads 0.";
             attribute :>> parent = ("H.QUOTA.2", "H.QUOTA.4");
             attribute :>> unit = ("mm::allocate_user_frame", "mm::release_frame",
-                "mm::deallocate_frames");
+                "mm::deallocate_frames", "mm::allocate_user_run");
         }
         requirement <'L.mm.9'> userTablesAreChargedToTheirJob : ItemLowLevel {
             attribute :>> statement = "A page table map_in makes for a user mapping
@@ -1067,7 +1067,8 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::vmo::Vmo::hold", "user::vmo::Pages::unshared",
                 "user::vmo::Pages::exclusive", "user::vmo::Pages::count_held",
                 "user::vmo::Retired::with_room", "user::vmo::Vmo::retire",
-                "user::vmo::Held::frames");
+                "user::vmo::Held::frames", "user::vmo::Vmo::commit_run",
+                "user::vmo::Pages::insert_run");
         }
         requirement <'L.user.22'> aHeldPageKeepsItsFrame : ItemLowLevel {
             attribute :>> statement = "While a page is held, Vmo::decommit_range and
@@ -1083,7 +1084,8 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::vmo::Vmo::decommit_range",
                 "user::vmo::Vmo::decommit_from", "user::vmo::Vmo::take_range",
                 "user::vmo::Pages::take_into", "user::vmo::Vmo::replace",
-                "user::vmo::Vmo::take_page", "user::vmo::Vmo::write_page");
+                "user::vmo::Vmo::take_page", "user::vmo::Vmo::write_page",
+                "user::vmo::Vmo::give_back_run", "user::vmo::Pages::take_ours");
         }
         requirement <'L.user.23'> aHeldPageStaysMappedEverywhere : ItemLowLevel {
             attribute :>> statement = "While a page is held, Vmo::decommit_range and
@@ -1665,6 +1667,7 @@ package FerrixMemoryRequirements {
                 half's last page NotUserRange: 3 refusals of 3.";
             attribute :>> parent = ("H.MEM.2", "H.MEM.18");
             attribute :>> unit = ("user::space::AddressSpace::map_window",
+                "user::space::AddressSpace::map_window_typed",
                 "user::space::check_device_range");
         }
         requirement <'L.user.67'> aWindowKeepsItsKeeperWhileMapped : ItemLowLevel {

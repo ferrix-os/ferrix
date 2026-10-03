@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use crate::kind::{
-    Config, Input, KillMode, Listen, OomPolicy, Output, Restart, Service, ServiceType,
+    Config, Device, Input, KillMode, Listen, OomPolicy, Output, Restart, Service, ServiceType,
 };
 use crate::limits::{Controller, CpuWeight, Limits, Memory, Tasks};
 use crate::source::{Entry, Layer, LoadError, Source, Unit};
@@ -403,4 +403,28 @@ fn a_target_has_only_unit_and_install() {
     assert!(matches!(unit.config, Config::Target));
     assert!(unit.unit.allow_isolate);
     assert!(unit.warnings.is_empty());
+}
+
+#[test]
+fn a_device_needs_no_file_and_its_name_is_its_node() {
+    let source = Source::new();
+    let card = source.load("dev-dri-card0.device").unwrap();
+    assert_eq!(
+        card.config,
+        Config::Device(Device {
+            path: String::from("/dev/dri/card0")
+        })
+    );
+    assert!(
+        crate::kind::of(card.name.unit_type())
+            .implied(&card, &|_| true)
+            .is_empty(),
+        "no default dependencies"
+    );
+    assert!(matches!(
+        source.load("sys-fs-cgroup.device"),
+        Err(LoadError::Refused(_))
+    ));
+    let described = load("dev-sda.device", "[Unit]\nDescription=The disk\n").unwrap();
+    assert_eq!(described.unit.description.as_deref(), Some("The disk"));
 }

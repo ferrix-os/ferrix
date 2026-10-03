@@ -103,6 +103,7 @@ impl Manager {
             UnitType::Mount => self.mount_start(unit),
             UnitType::Scope => self.scope_start(id, unit),
             UnitType::Slice => self.slice_start(unit),
+            UnitType::Device => self.device_start(unit),
             UnitType::Target | UnitType::Builtin => {
                 self.set_state(unit, ActiveState::Active, Sub::Active);
             }
@@ -132,6 +133,7 @@ impl Manager {
             UnitType::Scope => self.scope_stop(unit),
             UnitType::Slice => self.slice_stop(unit),
             UnitType::Socket => self.socket_stop(unit),
+            UnitType::Device => self.device_stop(unit),
             UnitType::Target | UnitType::Builtin => {
                 self.set_state(unit, ActiveState::Inactive, Sub::Dead);
             }

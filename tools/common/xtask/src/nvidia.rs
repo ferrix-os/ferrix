@@ -162,7 +162,24 @@ fn guard() -> Result<()> {
 /// split interrupt controller, the 3060's function 0 behind a root port,
 /// the image on SATA, the three fixture disks and the volume on virtio
 /// through the IOMMU, serial over TCP.
-fn domain_xml(dir: &Path) -> String {
+/// What a boot asks of the domain beyond the card and the disks.
+struct Machine {
+    /// Guest RAM, in MiB.
+    memory: u32,
+    /// Virtual processors.
+    vcpus: u32,
+    /// Devices added as they are, such as a network interface.
+    devices: String,
+}
+
+/// `run-nvidia`'s machine: the card, the disks and the serial port alone.
+const GATE_MACHINE: Machine = Machine {
+    memory: MEMORY,
+    vcpus: 2,
+    devices: String::new(),
+};
+
+fn domain_xml(dir: &Path, machine: &Machine) -> String {
     let file = |name: &str| dir.join(name).display().to_string();
     let virtio = |name: &str, slot: u32, readonly: bool| {
         format!(
@@ -182,8 +199,8 @@ fn domain_xml(dir: &Path) -> String {
   <name>{DOMAIN}</name>
   <uuid>{UUID}</uuid>
   <description>Ferrix on the RTX 3060 (cargo xtask run-nvidia). Shares the card with {shared}: start only when those are shut off.</description>
-  <memory unit='MiB'>{MEMORY}</memory>
-  <vcpu>2</vcpu>
+  <memory unit='MiB'>{memory}</memory>
+  <vcpu>{vcpus}</vcpu>
   <os>
     <type arch='x86_64' machine='q35'>hvm</type>
     <loader readonly='yes' type='pflash' format='raw'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>
@@ -216,7 +233,7 @@ fn domain_xml(dir: &Path) -> String {
     </iommu>
     <video><model type='none'/></video>
     <memballoon model='none'/>
-    <hostdev mode='subsystem' type='pci' managed='no'>
+{devices}    <hostdev mode='subsystem' type='pci' managed='no'>
       <source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source>
       <rom bar='off'/>
     </hostdev>
@@ -228,6 +245,9 @@ fn domain_xml(dir: &Path) -> String {
 </domain>
 ",
         shared = SHARED.join(", "),
+        memory = machine.memory,
+        vcpus = machine.vcpus,
+        devices = machine.devices,
         image = file("ferrix.img"),
         vda = virtio("pattern.img", 8, true),
         vdb = virtio("btrfs.img", 9, true),
@@ -351,8 +371,44 @@ echo "nvidia-gate: /dev/nvidiactl and /dev/nvidia0 are there"
 echo "nvidia-gate: nvidia-smi exited $?"
 /data/usr/bin/nvidia-smi -L
 echo "nvidia-gate: nvidia-smi -L exited $?"
+if [ -e /bin/preload.so ]; then
+  LD_PRELOAD=/bin/preload.so /data/usr/bin/vulkaninfo --summary
+else
+  /data/usr/bin/vulkaninfo --summary
+fi
+echo "nvidia-gate: vulkaninfo exited $?"
+/bin/vk-offscreen
+echo "nvidia-gate: vk-offscreen exited $?"
+if [ -x /data/chrome/chrome-headless-shell ]; then
+  /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
+  echo "nvidia-gate: chrome exited $?"
+fi
 exit 16
 "#;
+
+/// `vk-offscreen` (`nvrm/test/vk-offscreen.c`): a clear on the GPU read
+/// back, N2's smallest proof of work. Built with the host's compiler against
+/// its Vulkan headers and loader, and run on Ferrix with Debian's loader and
+/// NVIDIA's ICD from the volume; it asks for nothing newer than glibc 2.34.
+fn vk_offscreen(dir: &Path) -> Result<Vec<u8>> {
+    let source = crate::paths::workspace_root()
+        .join("src/user/system/linux/drivers/nvrm/test/vk-offscreen.c");
+    let out = dir.join("vk-offscreen");
+    let built = Command::new("cc")
+        .args(["-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+        .arg(&out)
+        .arg(&source)
+        .arg("-lvulkan")
+        .status()
+        .map_err(|error| Error::new(format!("running cc: {error}")))?;
+    if !built.success() {
+        return Err(Error::new(format!(
+            "building {} failed ({built}); it needs the host's Vulkan headers and libvulkan",
+            source.display()
+        )));
+    }
+    std::fs::read(&out).map_err(|error| Error::new(format!("reading {}: {error}", out.display())))
+}
 
 /// `$HOME`.
 fn home() -> String {
@@ -382,6 +438,33 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             tree.display()
         )));
     }
+    // Chrome's tree beside it, when fetch-chrome.sh has made it: the two are
+    // Debian-shaped and pin the same glibc, so they merge, and Chrome's GPU
+    // process finds NVIDIA's ICD where its Vulkan loader looks (N4).
+    if let Ok(chrome) = chrome::volume() {
+        let chrome_tree = chrome.with_file_name("tree");
+        if chrome_tree.is_dir() {
+            let merged = Command::new("cp")
+                .arg("-a")
+                .arg("--link")
+                .arg("--remove-destination")
+                .arg(format!("{}/.", chrome_tree.display()))
+                .arg(&tree)
+                .status()
+                .map_err(|error| Error::new(format!("running cp: {error}")))?;
+            if !merged.success() {
+                return Err(Error::new(format!(
+                    "merging {} into {}: {merged}",
+                    chrome_tree.display(),
+                    tree.display()
+                )));
+            }
+            println!(
+                "  volume: Chrome's tree merged from {}",
+                chrome_tree.display()
+            );
+        }
+    }
     let to = tree.join(CORE_IN_VOLUME);
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)
@@ -399,12 +482,14 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             "the fetched tree has no {GSP_FIRMWARE}"
         )));
     }
+    let bytes = tree_bytes(&tree);
     let image = dir.join("nvidia.img");
     let _ = std::fs::remove_file(&image);
     let file = std::fs::File::create(&image)
         .map_err(|error| Error::new(format!("creating {}: {error}", image.display())))?;
-    // The tree is about 1 GB; room for btrfs's own trees beside it.
-    file.set_len(1600 << 20)
+    // Room for btrfs's own trees beside the files, and for what programs
+    // write to /data while they run.
+    file.set_len(bytes + bytes / 4 + (512 << 20))
         .map_err(|error| Error::new(format!("sizing {}: {error}", image.display())))?;
     drop(file);
     let made = Command::new("mkfs.btrfs")
@@ -421,6 +506,68 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// The bytes of the regular files under `tree`, each hard link once.
+fn tree_bytes(tree: &Path) -> u64 {
+    let ran = Command::new("du").arg("-sb").arg(tree).output();
+    ran.ok()
+        .and_then(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(4 << 30)
+}
+
+/// What the initramfs carries beside the drivers and zinc: the links that
+/// put the volume's libraries and manifests where glibc, the Vulkan loader
+/// and libEGL look, `vk-offscreen`, the static busybox the script sleeps
+/// with, and an optional preload.
+fn initramfs_files(dir: &Path) -> Result<Vec<ports::File>> {
+    let busybox = std::fs::read(BUSYBOX.replace('~', &home())).map_err(|error| {
+        Error::new(format!(
+            "reading the static busybox at {BUSYBOX} ({error}): the script sleeps with it"
+        ))
+    })?;
+    let mut files = rustc::files(chrome::LINKS);
+    // The Vulkan loader's ICD manifests; glvnd's EGL vendor and NVIDIA's EGL
+    // platform manifests, which NVIDIA's Vulkan driver reads through libEGL
+    // when no display is set; and NVIDIA's application profiles.
+    files.extend(rustc::files(&[
+        ("usr/share/vulkan", "/data/usr/share/vulkan"),
+        ("usr/share/glvnd", "/data/usr/share/glvnd"),
+        ("usr/share/egl", "/data/usr/share/egl"),
+        ("usr/share/nvidia", "/data/usr/share/nvidia"),
+    ]));
+    files.push(ports::File {
+        path: "bin/vk-offscreen".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(vk_offscreen(dir)?),
+    });
+    files.push(ports::File {
+        path: "bin/busybox".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(busybox),
+    });
+    // A bring-up aid: `FERRIX_RUN_NVIDIA_PRELOAD` names a shared library
+    // the script preloads into vulkaninfo, such as a tracer of its calls.
+    if let Some(preload) = std::env::var_os("FERRIX_RUN_NVIDIA_PRELOAD") {
+        let bytes = std::fs::read(&preload).map_err(|error| {
+            Error::new(format!(
+                "reading {}: {error}",
+                Path::new(&preload).display()
+            ))
+        })?;
+        files.push(ports::File {
+            path: "bin/preload.so".to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(bytes),
+        });
+    }
+    Ok(files)
 }
 
 /// The command.
@@ -443,11 +590,6 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
     let shell_bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
-    let busybox = std::fs::read(BUSYBOX.replace('~', &home())).map_err(|error| {
-        Error::new(format!(
-            "reading the static busybox at {BUSYBOX} ({error}): the script sleeps with it"
-        ))
-    })?;
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
     let mut natives = native::build(arch, args.release)?;
@@ -456,12 +598,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         directory: native::DRIVERS,
         bytes: nvrm_bytes,
     });
-    let mut files = rustc::files(chrome::LINKS);
-    files.push(ports::File {
-        path: "bin/busybox".to_owned(),
-        mode: 0o755,
-        content: ports::Content::Bytes(busybox),
-    });
+    let files = initramfs_files(&dir)?;
     let archive = initramfs::build(None, &natives, Some(&shell_bytes), &files)?;
     // The boot's self-checks are `test-boot`'s evidence, not this domain's;
     // two vCPUs on a loaded host make the timing ones flake here.
@@ -483,7 +620,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     );
 
     let xml = dir.join(format!("{DOMAIN}.run.xml"));
-    std::fs::write(&xml, domain_xml(&dir))
+    std::fs::write(&xml, domain_xml(&dir, &GATE_MACHINE))
         .map_err(|error| Error::new(format!("writing {}: {error}", xml.display())))?;
     let _ = virsh(&["define", &xml.display().to_string()])?;
     guard()?;
@@ -519,4 +656,111 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         ))),
         None => Ok(()),
     }
+}
+
+/// `nvrm`, as devmgr starts it, for an image built elsewhere:
+/// `run-compositor --nvidia`'s desktop.
+///
+/// # Errors
+///
+/// As [`nvrm::build`].
+pub(crate) fn nvrm_native() -> Result<Built> {
+    let programs = nvrm::build()?;
+    let bytes = std::fs::read(programs.path("nvrm"))
+        .map_err(|error| Error::new(format!("reading nvrm: {error}")))?;
+    Ok(Built {
+        name: "nvrm",
+        directory: native::DRIVERS,
+        bytes,
+    })
+}
+
+/// The links NVIDIA's userspace finds its data through, from the volume at
+/// `/data`: the Vulkan loader's ICD manifests; glvnd's EGL vendor and
+/// NVIDIA's EGL platform manifests, which NVIDIA's Vulkan driver reads
+/// through libEGL; and NVIDIA's application profiles.
+pub(crate) fn data_links() -> Vec<ports::File> {
+    let mut files = rustc::files(&[
+        ("usr/share/vulkan", "/data/usr/share/vulkan"),
+        ("usr/share/glvnd", "/data/usr/share/glvnd"),
+        ("usr/share/egl", "/data/usr/share/egl"),
+        ("usr/share/nvidia", "/data/usr/share/nvidia"),
+    ]);
+    files.push(ports::File {
+        path: WEBGL_PAGE.trim_start_matches("file:///").to_owned(),
+        mode: 0o644,
+        content: ports::Content::Bytes(include_bytes!("nvidia/webgl.html").to_vec()),
+    });
+    files
+}
+
+/// The page `run-compositor --nvidia`'s Chrome opens: which GPU renders
+/// WebGL, said large, over a cube spun on it, with its frame rate.
+pub(crate) const WEBGL_PAGE: &str = "file:///etc/ferrix/nvidia-webgl.html";
+
+/// How long `run-compositor --nvidia` keeps the desktop up when `--timeout`
+/// does not say: an hour.
+const DESKTOP_TIMEOUT: u64 = 3600;
+
+/// `run-compositor --nvidia`: the desktop `image` (hyprix, Chrome, nvrm) in
+/// the 3060's domain, on the card's own monitor. The disks are
+/// `run-nvidia`'s: the fixtures the kernel's early stages expect, then the
+/// NVIDIA volume, which carries Chrome's tree too, at `/data`. The root is
+/// the initramfs, as a desktop without `--persistent` has it. libvirt's
+/// default network gives Chrome somewhere to browse. The serial console
+/// is followed until `--timeout`, an hour by default, or a panic, and the
+/// domain destroyed after.
+///
+/// # Errors
+///
+/// The guard's, a volume or disk that cannot be made, or libvirt refusing.
+pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
+    guard()?;
+    let dir = vm_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| Error::new(format!("making {}: {error}", dir.display())))?;
+    let programs = nvrm::build()?;
+    place(image, &dir, "ferrix.img")?;
+    place(&test_disk::ensure()?, &dir, "pattern.img")?;
+    place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;
+    place(
+        &btrfs_disk::ensure_blank(Arch::X86_64)?,
+        &dir,
+        "btrfs-write.img",
+    )?;
+    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    let machine = Machine {
+        memory: MEMORY,
+        vcpus: 8,
+        devices: "    <interface type='network'>\n\
+                  \x20     <source network='default'/>\n\
+                  \x20     <model type='virtio-non-transitional'/>\n\
+                  \x20     <driver iommu='on'/>\n\
+                  \x20   </interface>\n"
+            .to_owned(),
+    };
+    let xml = dir.join(format!("{DOMAIN}.desktop.xml"));
+    std::fs::write(&xml, domain_xml(&dir, &machine))
+        .map_err(|error| Error::new(format!("writing {}: {error}", xml.display())))?;
+    let _ = virsh(&["define", &xml.display().to_string()])?;
+    guard()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let log = dir.join(format!("desktop-{stamp}.log"));
+    let timeout = if args.timeout_given {
+        args.timeout
+    } else {
+        DESKTOP_TIMEOUT
+    };
+    let _ = virsh(&["start", DOMAIN])?;
+    let running = Running;
+    println!(
+        "  {DOMAIN}: the desktop is starting on the 3060's monitor; serial in {} for {timeout} s",
+        log.display()
+    );
+    // A desktop has no end line: the timeout, or the port closing, is the end.
+    let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
+    drop(running);
+    Ok(())
 }

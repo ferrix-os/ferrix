@@ -201,6 +201,25 @@ pub(crate) fn wait(epoll: BorrowedFd<'_>, timeout: i32) -> io::Result<Vec<(u32, 
     }
 }
 
+/// A new inotify instance, non-blocking, for device units' nodes.
+pub(crate) fn inotify() -> io::Result<OwnedFd> {
+    // SAFETY: no pointers.
+    owned(unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) })
+}
+
+/// `inotify_add_watch(2)`: watch `path` for `mask`; its watch descriptor.
+pub(crate) fn inotify_add(fd: RawFd, path: &CStr, mask: u32) -> io::Result<i32> {
+    // SAFETY: `path` is NUL-terminated.
+    check(unsafe { libc::inotify_add_watch(fd, path.as_ptr(), mask) })
+}
+
+/// `inotify_rm_watch(2)`. A watch the kernel has dropped already only
+/// fails, which is ignored.
+pub(crate) fn inotify_rm(fd: RawFd, wd: i32) {
+    // SAFETY: no pointers.
+    let _ = unsafe { libc::inotify_rm_watch(fd, wd) };
+}
+
 /// Reap one child that has ended, if any has.
 pub(crate) fn reap() -> io::Result<Option<(u32, Exit)>> {
     let mut status: libc::c_int = 0;

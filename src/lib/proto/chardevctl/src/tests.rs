@@ -61,6 +61,7 @@ fn messages_round_trip() {
         egid: 100,
         cmd: 0xc020_462b,
         arg: 0x7fff_0000_1000,
+        pages: 0,
     };
     for message in [
         Message::Hello(hello(&[255, 0])),
@@ -95,6 +96,7 @@ fn malformed_bytes_are_refused() {
         egid: 0,
         cmd: 0,
         arg: 0,
+        pages: 0,
     })
     .encode();
     let mut request = [0_u8; crate::message::REQUEST_BYTES];

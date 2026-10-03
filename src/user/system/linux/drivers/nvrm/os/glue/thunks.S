@@ -1,5 +1,5 @@
 /*
- * The retpoline thunks nv-kernel.o calls: it is built with
+ * The retpoline thunks nv-kernel.o and nv-modeset-kernel.o call: both are built with
  * -mindirect-branch=thunk-extern, as Linux's kernel is, and Linux supplies
  * __x86_indirect_thunk_<reg>. nvrm is a user process, where the kernel's
  * own mitigations stand between processes; each thunk is the plain
@@ -20,6 +20,7 @@ __x86_indirect_thunk_\reg:
 	THUNK rcx
 	THUNK rdx
 	THUNK rsi
+	THUNK rbp
 	THUNK r8
 	THUNK r9
 	THUNK r10

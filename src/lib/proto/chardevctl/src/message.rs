@@ -39,7 +39,23 @@ pub enum Op {
     Ioctl,
     /// The last close of a file. Answered by nobody.
     Release,
+    /// An mmap of a file: `arg` the file offset, `cmd` the protection and
+    /// flags (`PROT_*` and `MAP_*` << 8), `pages` its length in pages.
+    /// Answered with one of the [`MAP_VMO`] or [`MAP_APERTURE`] kinds.
+    Mmap,
 }
+
+/// A reply's kind for an [`Op::Mmap`]: the reply's value is a VMO handle in
+/// the driver's table and its fifth register the byte offset in it.
+pub const MAP_VMO: u64 = 1;
+/// A reply's kind for an [`Op::Mmap`]: the reply's value is the physical
+/// address of a range wholly inside one of the device's memory apertures.
+pub const MAP_APERTURE: u64 = 2;
+/// With [`MAP_APERTURE`]: write-combining rather than uncached, which only a
+/// prefetchable aperture may be.
+pub const MAP_WRITE_COMBINING: u64 = 1 << 8;
+/// The bits of a reply's sixth register that name the kind.
+pub const MAP_KIND: u64 = 0xff;
 
 impl Op {
     const fn code(self) -> u8 {
@@ -47,6 +63,7 @@ impl Op {
             Op::Open => 1,
             Op::Ioctl => 2,
             Op::Release => 3,
+            Op::Mmap => 4,
         }
     }
 
@@ -55,6 +72,7 @@ impl Op {
             1 => Some(Op::Open),
             2 => Some(Op::Ioctl),
             3 => Some(Op::Release),
+            4 => Some(Op::Mmap),
             _ => None,
         }
     }
@@ -93,8 +111,10 @@ pub struct Request {
     pub egid: u32,
     /// The ioctl's command, or zero.
     pub cmd: u32,
-    /// The ioctl's argument, raw, or zero.
+    /// The ioctl's argument, raw, or zero; an mmap's file offset.
     pub arg: u64,
+    /// An mmap's length in pages, or zero.
+    pub pages: u32,
 }
 
 /// A message on the control channel.
@@ -220,7 +240,7 @@ impl Message {
                 out.put(&request.id.to_le_bytes());
                 out.put(&request.file.to_le_bytes());
                 out.put(&request.cmd.to_le_bytes());
-                out.put(&0_u32.to_le_bytes());
+                out.put(&request.pages.to_le_bytes());
                 out.put(&request.arg.to_le_bytes());
             }
         }
@@ -285,7 +305,8 @@ impl Message {
                 let id = read.u64()?;
                 let file = read.u64()?;
                 let cmd = read.u32()?;
-                if read.u32()? != 0 {
+                let pages = read.u32()?;
+                if pages != 0 && op != Op::Mmap {
                     return Err(Malformed);
                 }
                 let arg = read.u64()?;
@@ -299,6 +320,7 @@ impl Message {
                     egid,
                     cmd,
                     arg,
+                    pages,
                 })
             }
             _ => return Err(Malformed),

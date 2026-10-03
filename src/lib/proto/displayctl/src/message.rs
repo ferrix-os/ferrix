@@ -6,7 +6,7 @@
 //! [`Ready::HANDLE_RIGHTS`] say what they must be.
 //!
 //! ```text
-//! HELLO     driver -> core, 676 bytes, handles [driver port]
+//! HELLO     driver -> core, 680 bytes, handles [driver port]
 //!   8 version u16   10 scanouts u16   12 location u32
 //!   16 scanout 0: width u32, height u32, enabled u32   ... 16 of them, 12 bytes each
 //!   208 virgl u16   210 capsets u16   212 capset u32   216 capset_bytes u32
@@ -16,6 +16,7 @@
 //!       vdisplay vsync_start vsync_end vtotal u16 each, flags u32 (bit 0
 //!       hsync positive, bit 1 vsync positive)   ... 16 of them, 24 bytes each
 //!   612 scanout 0's refresh_mhz u32   ... 16 of them, 4 bytes each
+//!   676 flags u32: bit 0 the driver copies pixels with its processor
 //! READY     core -> driver, 24 bytes, handles [card VMO, core port]
 //!   8 card u32   12 reserved   16 card_bytes u64
 //! REFUSED   core -> driver, 12 bytes: 8 reason u32
@@ -71,6 +72,15 @@
 //! a disabled scanout's is 0, as its size may be, and none is above
 //! [`MAX_REFRESH_MHZ`].
 //!
+//! HELLO's flags (version 8) follow the refreshes, so every earlier offset
+//! is still where it was. Bit 0 says the driver shows a buffer by copying
+//! it with the processor into memory its device scans out from -- NVIDIA's
+//! driver, whose display engine reads its own video memory -- rather than
+//! by giving the device the pages. Such a driver is handed the card VMO
+//! with `MAP` in place of `TRANSFER` ([`CARD_VMO_COPY_RIGHTS`]), to map it
+//! read-only, and only when the kernel finds the device's driver is the
+//! one kind that may: the others never are. Every other bit is reserved.
+//!
 //! HELLO's timings are for a card that runs only the modes it can make a
 //! clock for -- a board's HDMI output, not a virtio-gpu, which shows any
 //! size and lists none. The first is the mode the scanout runs now and has
@@ -84,8 +94,8 @@ use ferrix_linux_abi::drm::FORMAT_XRGB8888;
 use ferrix_native_abi::rights::Rights;
 
 /// The protocol version this crate speaks. 5 added HELLO's timings, 6 MODES,
-/// 7 each scanout's refresh.
-pub const VERSION: u16 = 7;
+/// 7 each scanout's refresh, 8 HELLO's flags.
+pub const VERSION: u16 = 8;
 
 /// HELLO's type.
 pub const HELLO: u32 = 1;
@@ -141,8 +151,12 @@ const TIMINGS_AT: usize = 16 + MAX_SCANOUTS * SCANOUT_BYTES + 16;
 pub const REFRESH_BYTES: usize = 4;
 /// Where HELLO's refreshes lie: after its timings.
 const HELLO_REFRESH_AT: usize = TIMINGS_AT + 4 + MAX_TIMINGS * TIMING_BYTES;
+/// Where HELLO's flags lie: after its refreshes.
+const HELLO_FLAGS_AT: usize = HELLO_REFRESH_AT + MAX_SCANOUTS * REFRESH_BYTES;
+/// HELLO's flag for a driver that copies pixels with its processor.
+pub const HELLO_COPIES: u32 = 1;
 /// Bytes of HELLO.
-pub const HELLO_BYTES: usize = HELLO_REFRESH_AT + MAX_SCANOUTS * REFRESH_BYTES;
+pub const HELLO_BYTES: usize = HELLO_FLAGS_AT + 4;
 /// Where MODES's refreshes lie: after its scanouts.
 const MODES_REFRESH_AT: usize = HEADER_BYTES + MAX_SCANOUTS * SCANOUT_BYTES;
 /// Bytes of MODES.
@@ -177,6 +191,13 @@ pub const PORT_RIGHTS: Rights = Rights(Rights::WRITE.0 | Rights::TRANSFER.0);
 /// Exactly the rights the driver holds the card VMO with: it may read and pin
 /// it and was handed it, and may neither write, map nor copy it.
 pub const CARD_VMO_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::TRANSFER.0);
+
+/// Exactly the rights a driver whose HELLO says it copies holds the card VMO
+/// with: `READ` and `MAP`, so that it can map the buffers read-only and copy
+/// from them. Never `WRITE`: it still cannot change a pixel. Nor `TRANSFER`:
+/// it maps the card once and closes the handle, and has nobody to pass it
+/// to.
+pub const CARD_VMO_COPY_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::MAP.0);
 
 /// One scanout as HELLO describes it: its preferred mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -355,6 +376,9 @@ pub struct Hello {
     /// The modes scanout 0 can run, for a card that runs only some: none
     /// for a virtio-gpu, which shows any size.
     pub timings: Timings,
+    /// Whether the driver shows a buffer by copying it with the processor,
+    /// and so is handed the card VMO it can map ([`HELLO_COPIES`]).
+    pub copies: bool,
 }
 
 /// Why the core refuses a driver.
@@ -386,6 +410,11 @@ pub enum Refusal {
     /// sets on a card that was not granted `VIRTIO_GPU_F_VIRGL`, or a
     /// capability set named where there are none.
     Capsets = 9,
+    /// HELLO says the driver copies, and the kernel does not find it one of
+    /// the drivers that may: a device whose driver also serves its device
+    /// files through the chardev core, which only NVIDIA's does. Decided by
+    /// the core.
+    Copies = 10,
 }
 
 impl Refusal {
@@ -402,6 +431,7 @@ impl Refusal {
             7 => Self::Protocol,
             8 => Self::Framebuffer,
             9 => Self::Capsets,
+            10 => Self::Copies,
             _ => return None,
         })
     }
@@ -419,6 +449,7 @@ impl fmt::Display for Refusal {
             Self::Protocol => "the driver broke the protocol",
             Self::Framebuffer => "the firmware framebuffer is in memory the kernel reclaims",
             Self::Capsets => "HELLO's capability sets do not match what it says about 3D",
+            Self::Copies => "HELLO says the driver copies, and this device's driver may not",
         })
     }
 }
@@ -522,6 +553,29 @@ pub struct Ready {
 impl Ready {
     /// READY's handles, in order: the card VMO and the core's port.
     pub const HANDLE_RIGHTS: [Rights; 2] = [CARD_VMO_RIGHTS, Rights::WRITE];
+    /// READY's handles for a driver whose HELLO said it copies.
+    pub const COPY_HANDLE_RIGHTS: [Rights; 2] = [CARD_VMO_COPY_RIGHTS, Rights::WRITE];
+
+    /// The handles' rights READY carries to a driver whose HELLO said
+    /// `copies`.
+    #[must_use]
+    pub const fn handle_rights(copies: bool) -> [Rights; 2] {
+        if copies {
+            Self::COPY_HANDLE_RIGHTS
+        } else {
+            Self::HANDLE_RIGHTS
+        }
+    }
+
+    /// The card VMO's rights alone, as [`Self::handle_rights`] has them.
+    #[must_use]
+    pub const fn card_rights(copies: bool) -> Rights {
+        if copies {
+            CARD_VMO_COPY_RIGHTS
+        } else {
+            CARD_VMO_RIGHTS
+        }
+    }
 }
 
 /// ATTACH: make a range of the card VMO a buffer the device can show.
@@ -1099,6 +1153,11 @@ fn put_hello(bytes: &mut [u8], hello: &Hello) {
         put32(bytes, at + 20, flags);
     }
     put_refreshes(bytes, HELLO_REFRESH_AT, &hello.modes);
+    put32(
+        bytes,
+        HELLO_FLAGS_AT,
+        if hello.copies { HELLO_COPIES } else { 0 },
+    );
 }
 
 /// HELLO's timing at `index`: `None` for flags other than the two sync
@@ -1152,6 +1211,13 @@ fn decode_hello(bytes: &[u8]) -> Option<Message> {
             _ => return None,
         },
         timings,
+        // Every bit but the one is reserved, and a reserved bit set is a
+        // malformed HELLO.
+        copies: match get32(bytes, HELLO_FLAGS_AT)? {
+            0 => false,
+            HELLO_COPIES => true,
+            _ => return None,
+        },
     }))
 }
 
