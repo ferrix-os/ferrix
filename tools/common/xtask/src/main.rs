@@ -15,6 +15,7 @@
 //! cargo xtask test-uvm  [--arch x86_64] [--timeout SECONDS]
 //! cargo xtask test-nvrm [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
 //! cargo xtask test-nvrm-link [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
+//! cargo xtask run-nvidia [--timeout SECONDS]
 //! cargo xtask test-rustc [--accel kvm] [--memory M] [--timeout SECONDS]
 //! cargo xtask test-selfhost [--accel kvm] [--release] [--smp N] [--memory M] [--timeout SECONDS] [--plan DIR]
 //! cargo xtask builds-execute --plan DIR
@@ -109,6 +110,7 @@ mod keyboard;
 mod native;
 mod net;
 mod noise;
+mod nvidia;
 mod nvrm;
 mod nvrm_link;
 mod omz;
@@ -265,6 +267,9 @@ COMMANDS:
                   Build nvrm-link-test and its core from fetch-nvidia.sh's objects, run RM's no-GPU path (init,
                   root client, NV01_DEVICE_0 refused) on the host and on Ferrix from a volume, and each control
                   the core's loader must refuse (x86_64)
+    run-nvidia    Boot Ferrix on the RTX 3060 in libvirt's ferrix-3060 domain (the patched QEMU as root, the sharing
+                  domains shut off), nvrm as its driver with its core and the GSP firmware on the NVIDIA volume;
+                  print the serial port until nvrm is up or stops, then destroy the domain (x86_64)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
     test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it
     test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
@@ -613,6 +618,7 @@ fn run() -> Result<()> {
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
         "test-yserver" | "test-xwindow" => yserver::run(command, &args),
+        "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
         "test-steam-store" | "test-steam-game" => compositor::test_steam_store(command, &args),

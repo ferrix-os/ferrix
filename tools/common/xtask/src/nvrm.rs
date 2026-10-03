@@ -112,7 +112,7 @@ const RELEASE: &str = "580.173.02";
 /// Where `fetch-nvidia.sh` wrote the release: `$FERRIX_NVIDIA/580.173.02`,
 /// by default under `~/.local/share/ferrix/nvidia`. Refused without RM's
 /// core in it.
-fn fetched() -> Result<PathBuf> {
+pub(crate) fn fetched() -> Result<PathBuf> {
     let root = match std::env::var_os("FERRIX_NVIDIA") {
         Some(root) => PathBuf::from(root),
         None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
