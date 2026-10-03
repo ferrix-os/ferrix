@@ -720,7 +720,10 @@ fn the_cache_is_bounded() {
 /// lookup that fills it allocates nothing for it, so a frame window around
 /// lookups does not see the queue's buffer double (`Shared::cache`). The
 /// default limit as the kernel uses it, filled twice over.
+/// Twice the default cache's 4096 misses: past half an hour alone under Miri,
+/// so left to the native run.
 #[test]
+#[cfg_attr(miri, ignore)]
 fn the_cache_never_grows_its_queue() {
     let ns = Namespace::new(tmpfs(1), Arc::new(SpinParker));
     let made = ns.cache_capacity();
