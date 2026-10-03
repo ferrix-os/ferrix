@@ -94,6 +94,7 @@ members = [
     "src/user/system/native/channel-echo",
     "src/user/system/native/pong",
     "src/user/system/native/ipc-bench",
+    "src/user/system/native/ipc-equiv",
     "src/user/system/native/drivers/block/virtio-blk",
     "src/user/system/native/drivers/net/virtio-net",
     "src/user/system/native/drivers/display/virtio-gpu",

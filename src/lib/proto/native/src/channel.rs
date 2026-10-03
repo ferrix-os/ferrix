@@ -132,6 +132,27 @@ impl<S: Syscall> Channel<S> {
         Ok(Words { len, words: back })
     }
 
+    /// `channel_write_read` with a count and words as given, unchecked: what
+    /// a program that must send a count [`Channel::write_read`] refuses -- 25,
+    /// say -- calls, to see the kernel refuse it (`ipc-equiv`'s case 12).
+    ///
+    /// # Errors
+    ///
+    /// As [`Channel::write_read`], the kernel's answer to whatever was sent.
+    pub fn write_read_unchecked(&self, count: usize, words: [usize; 3]) -> Result<Words, Error> {
+        let [w0, w1, w2] = words;
+        let (value, back) = Call::new(nr::CHANNEL_WRITE_READ)
+            .value(register(self.handle()))
+            .value(count)
+            .value(w0)
+            .value(w1)
+            .value(w2)
+            .make_words(self.syscall())
+            .ok_or(Error::Unsupported)?;
+        let len = decode(value)?;
+        Ok(Words { len, words: back })
+    }
+
     /// `channel_write` of bytes alone.
     ///
     /// # Errors
