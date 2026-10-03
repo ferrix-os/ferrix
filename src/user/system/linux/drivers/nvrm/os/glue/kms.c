@@ -513,6 +513,7 @@ struct kms_card {
     struct kms_buffer buffers[KMS_BUFFERS];
     NvU32 shown;
     NvU64 flushes;
+    NvU64 copy_usec;
 };
 
 static struct kms_card kms_card;
@@ -525,6 +526,21 @@ static struct kms_buffer *kms_buffer(struct kms_card *card, NvU32 id)
         if (card->buffers[i].id == id)
             return &card->buffers[i];
     return NULL;
+}
+
+/*
+ * One row into the surface. The surface is video memory mapped
+ * write-combining through BAR1, where the C library's byte-at-a-time copy
+ * costs a frame most of its budget; x86-64's string move writes it in whole
+ * lines.
+ */
+static void kms_copy_row(NvU8 *to, const NvU8 *from, size_t bytes)
+{
+#if defined(__x86_64__)
+    __asm__ volatile("rep movsb" : "+D"(to), "+S"(from), "+c"(bytes) : : "memory");
+#else
+    memcpy(to, from, bytes);
+#endif
 }
 
 /*
@@ -555,7 +571,7 @@ static void kms_copy(struct kms_card *card, const struct kms_buffer *buffer, NvS
     {
         const NvU8 *from = card->card + buffer->offset + (NvU64)row * buffer->stride + left * 4;
         NvU8 *to = (NvU8 *)lit->mapped + (NvU64)row * lit->pitch + left * 4;
-        memcpy(to, from, (size_t)(right - left) * 4);
+        kms_copy_row(to, from, (size_t)(right - left) * 4);
     }
 }
 
@@ -595,13 +611,22 @@ static void kms_serve(void *argument)
         case NVOS_DISPLAY_FLUSH:
         {
             const struct kms_buffer *buffer = kms_buffer(card, event.buffer);
+            NvU64 began = nvkms_get_usec();
             if (buffer != NULL)
             {
                 card->shown = event.buffer;
                 kms_copy(card, buffer, event.x, event.y, event.w, event.h);
             }
+            card->copy_usec += nvkms_get_usec() - began;
             if (++card->flushes == 1)
                 kms_say("the first frame is on the screen\n");
+            /* What a frame's copy costs, every 300 flushes. */
+            if (card->flushes % 300 == 0)
+            {
+                kms_say("300 flushes, a copy %llu us on average\n",
+                        (unsigned long long)(card->copy_usec / 300));
+                card->copy_usec = 0;
+            }
             nvos_display_flipped(event.sequence,
                                  buffer != NULL ? NVOS_DISPLAY_OK : NVOS_DISPLAY_INVALID);
             break;
