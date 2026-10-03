@@ -23,18 +23,22 @@ progress as finished.
 
 ## Logo and images
 
-- [Logo mark (SVG)](logo.svg): the vector mark on a transparent background.
+- [Logo mark (SVG)](logo.svg): the FX mark, the short version, on a transparent background.
+- [Full logo (SVG)](logo-full.svg): the mark with "Ferrix" under it.
 - [Dark banner](../brand/banner-dark.png) and [light banner](../brand/banner-light.png): README headers.
 - [Social preview](../brand/social-preview.png): a wide image for shared links.
 - [Screenshots](../brand/screenshots/CAPTIONS.md): real captures, with notes on how they were made.
 - [Favicon](../brand/favicon.svg): the mark on a dark tile, for small icons.
 
-Use the SVG mark with the word “Ferrix” set beside it. Keep its proportions,
-leave some space around it, and use it on a background where the grey outline
-remains visible. The mark is the existing Ferrix logo; it is not a substitute
-for the project's name in running text. The source asset also lives at
-[`docs/brand/logo-mark.svg`](../brand/logo-mark.svg); the two SVG files
-should remain identical.
+Use the full logo where the name does not already appear beside it, and the
+mark where it does or where space is small. Keep the proportions and leave
+some space around them. The SVGs switch from grey to ink on light
+backgrounds by themselves. The logo is not a substitute for the project's
+name in running text. The source assets also live at
+[`docs/brand/logo-mark.svg`](../brand/logo-mark.svg) and
+[`docs/brand/logo-full.svg`](../brand/logo-full.svg);
+`tools/common/gen/gen-brand-images.py` writes both copies, so they stay
+identical.
 
 ## Visual identity
 

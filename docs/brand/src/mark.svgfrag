@@ -1,14 +1,2 @@
-<defs><radialGradient id="g" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#f26b1d" stop-opacity=".55"/><stop offset="1" stop-color="#f26b1d" stop-opacity="0"/></radialGradient></defs>
-  <path d="M64.0,14.0 L107.3,39.0 L64.0,64.0 L20.7,39.0 Z" fill="#9aa4b2" fill-opacity=".10"/>
-  <path d="M64.0,64.0 L107.3,39.0 L107.3,89.0 L64.0,114.0 Z" fill="#9aa4b2" fill-opacity=".04"/>
-  <path d="M64.0,14.0 L107.3,39.0 L107.3,89.0 L64.0,114.0 L20.7,89.0 L20.7,39.0 Z" fill="none" stroke="#9aa4b2" stroke-width="5" stroke-linejoin="round"/>
-  <path d="M20.7,39.0 L64.0,64.0 L107.3,39.0 M64.0,64.0 L64.0,114.0" fill="none" stroke="#9aa4b2" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="64.0" cy="14.0" r="7" fill="#c9d1db"/>
-  <circle cx="107.3" cy="39.0" r="7" fill="#c9d1db"/>
-  <circle cx="107.3" cy="89.0" r="7" fill="#c9d1db"/>
-  <circle cx="64.0" cy="114.0" r="7" fill="#c9d1db"/>
-  <circle cx="20.7" cy="89.0" r="7" fill="#c9d1db"/>
-  <circle cx="20.7" cy="39.0" r="7" fill="#c9d1db"/>
-  <circle cx="64" cy="64" r="30" fill="url(#g)"/>
-  <circle cx="64" cy="64" r="12.5" fill="#f26b1d"/>
-  <circle cx="64" cy="64" r="12.5" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2"/>
+<path class="grey" d="M0,0H460L370,98H103V173H300L573,498H434L242,271H103V498H0ZM127.5,414L238,296L295,364L172,498H127.5Z"/>
+<path class="rust" d="M492,0H613L385,246L328,177Z"/>

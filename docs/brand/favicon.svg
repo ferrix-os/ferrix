@@ -1,15 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect width="128" height="128" rx="28" fill="#111418"/>
-  <g transform="translate(8 8) scale(.875)"><path d="M64.0,14.0 L107.3,39.0 L64.0,64.0 L20.7,39.0 Z" fill="#aeb8c6" fill-opacity=".10"/>
-  <path d="M64.0,64.0 L107.3,39.0 L107.3,89.0 L64.0,114.0 Z" fill="#aeb8c6" fill-opacity=".04"/>
-  <path d="M64.0,14.0 L107.3,39.0 L107.3,89.0 L64.0,114.0 L20.7,89.0 L20.7,39.0 Z" fill="none" stroke="#aeb8c6" stroke-width="5" stroke-linejoin="round"/>
-  <path d="M20.7,39.0 L64.0,64.0 L107.3,39.0 M64.0,64.0 L64.0,114.0" fill="none" stroke="#aeb8c6" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="64.0" cy="14.0" r="7" fill="#dde3ea"/>
-  <circle cx="107.3" cy="39.0" r="7" fill="#dde3ea"/>
-  <circle cx="107.3" cy="89.0" r="7" fill="#dde3ea"/>
-  <circle cx="64.0" cy="114.0" r="7" fill="#dde3ea"/>
-  <circle cx="20.7" cy="89.0" r="7" fill="#dde3ea"/>
-  <circle cx="20.7" cy="39.0" r="7" fill="#dde3ea"/>
-  <circle cx="64" cy="64" r="12.5" fill="#ff7a2b"/>
-  <circle cx="64" cy="64" r="12.5" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2"/></g>
+<style>.grey { fill: #cbcdd1; } .rust { fill: #ff7a2b; }</style>
+<rect width="128" height="128" rx="28" fill="#111418"/>
+<g transform="translate(14 23.38) scale(0.16313)">
+<path class="grey" d="M0,0H460L370,98H103V173H300L573,498H434L242,271H103V498H0ZM127.5,414L238,296L295,364L172,498H127.5Z"/>
+<path class="rust" d="M492,0H613L385,246L328,177Z"/>
+</g>
 </svg>

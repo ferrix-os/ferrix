@@ -29,7 +29,7 @@
   --muted: #9aa4b2;
   --rust: #ff7a2b;
   --rust-soft: rgba(255, 122, 43, .12);
-  --vertex: #c9d1db;
+  --mark: #cbcdd1;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -42,7 +42,7 @@
     --muted: #5b6470;
     --rust: #c64a06;
     --rust-soft: rgba(198, 74, 6, .08);
-    --vertex: #5b6470;
+    --mark: #2a2e35;
     color-scheme: light;
   }
 }
@@ -174,11 +174,9 @@ footer b { color: var(--text); font-weight: 600; }
 <main>
   <header>
     <div class="brand">
-      <svg viewBox="0 0 128 128" aria-hidden="true">
-        <path d="M64,14 L107.3,39 L64,64 L20.7,39 Z" fill="var(--muted)" fill-opacity=".10"/>
-        <path d="M64,14 L107.3,39 L107.3,89 L64,114 L20.7,89 L20.7,39 Z M20.7,39 L64,64 L107.3,39 M64,64 L64,114" fill="none" stroke="var(--muted)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
-        <g fill="var(--vertex)"><circle cx="64" cy="14" r="7"/><circle cx="107.3" cy="39" r="7"/><circle cx="107.3" cy="89" r="7"/><circle cx="64" cy="114" r="7"/><circle cx="20.7" cy="89" r="7"/><circle cx="20.7" cy="39" r="7"/></g>
-        <circle cx="64" cy="64" r="12.5" fill="var(--rust)"/>
+      <svg viewBox="-20 -77.5 653 653" aria-hidden="true">
+        <path fill="var(--mark)" d="M0,0H460L370,98H103V173H300L573,498H434L242,271H103V498H0ZM127.5,414L238,296L295,364L172,498H127.5Z"/>
+        <path fill="var(--rust)" d="M492,0H613L385,246L328,177Z"/>
       </svg>
       <div><b>Ferrix</b><span>an experimental Rust OS</span></div>
     </div>

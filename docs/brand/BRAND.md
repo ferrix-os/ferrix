@@ -3,23 +3,35 @@
 The shareable logo, colours and reusable copy are collected in the
 [press and brand kit](../marketing/README.md).
 
-## The mark
+## The logo
 
-`logo-mark.svg` is a cube of iron's crystal lattice (body-centred cubic,
-*ferrum*) drawn in isometric view, with a molten core. It stands for a hard
-structure with something running hot inside, and it stays legible down to a
-16 px favicon.
+The logo comes in two versions:
+
+- **The mark** (`logo-mark.svg`) is the short version: an F whose leg runs out
+  into an X, with a rust slash for the X's other stroke and a small chip under
+  the middle bar. It reads as "FX" and stays legible down to a 16 px favicon.
+- **The full logo** (`logo-full.svg`) is the mark with the word "Ferrix" set
+  under it, the dot of the i in rust. Use it where the name is not already
+  next to it.
+
+Both are drawn once, in `src/mark.svgfrag` and `src/word.svgfrag`; every SVG
+and PNG below is written from them by
+`python3 tools/common/gen/gen-brand-images.py`. The SVG files are grey and
+rust on dark backgrounds, and ink and the deeper rust on light ones
+(`prefers-color-scheme`). ferrofetch draws the mark in ASCII
+(`src/user/apps/ferrofetch/src/logo.rs`).
 
 | File | Use |
 |---|---|
 | `logo-mark.svg`, `logo-mark-512.png` | the mark on a transparent background |
+| `logo-full.svg` | the mark with the word under it |
 | `favicon.svg`, `favicon-32.png`, `apple-touch-icon.png`, `icon-512.png` | the mark on a dark rounded tile, for icons |
 | `banner-dark.png`, `banner-light.png` | the README header, chosen by the reader's theme |
 | `social-preview.png` | 1280×640: GitHub's social preview, and the website's `og:image` |
 | `screenshots/` | real captures of Ferrix, each described in `screenshots/CAPTIONS.md` |
 
-The PNGs are rendered from HTML by `python3 tools/common/gen/gen-brand-images.py`
-with the tree's own fonts. Change the copy there, not in an image editor.
+Change the copy and the logo in the generator's sources, not in an image
+editor. Its banners and social preview are drawn with the tree's own fonts.
 
 ## Colour
 
@@ -30,7 +42,8 @@ with the tree's own fonts. Change the copy there, not in an image editor.
 | line | `#262c35` | `#e1dbd2` | borders |
 | text | `#eef1f5` | `#16181c` | body |
 | muted | `#9aa4b2` | `#5b6470` | secondary text |
-| rust | `#ff7a2b` | `#c64a06` | the accent: links, the core, code |
+| mark | `#cbcdd1` | `#2a2e35` | the logo's grey |
+| rust | `#ff7a2b` | `#c64a06` | the accent: links, the logo's slash, code |
 | ember | `#ffb547` | `#a85f00` | success lines in terminal captures |
 
 Use one accent. Rust orange marks what matters on the screen, so everything
