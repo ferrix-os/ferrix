@@ -118,6 +118,28 @@ run seat cargo xtask test-seat --arch x86_64 --timeout 600
 run pty cargo xtask test-pty --arch x86_64 --timeout 600
 run btrfs cargo xtask test-btrfs --arch all --timeout 600
 run powerfail cargo xtask test-powerfail --arch all --seeds 8 --timeout 600
+# The gates added since the matrix was first run (2026-09-24), each as its
+# own landings run it, with its own timeout.
+run init cargo xtask test-init --arch all
+run auth cargo xtask test-auth --arch all
+run procfs cargo xtask test-procfs --arch all
+run kaslr cargo xtask test-kaslr --arch x86_64
+run adb cargo xtask test-adb --init "$musl"
+run audio cargo xtask test-audio --arch x86_64
+run pkg cargo xtask test-pkg --arch x86_64
+run apps cargo xtask test-apps
+run install cargo xtask test-install
+run bwrap cargo xtask test-bwrap
+run clipboard cargo xtask test-clipboard
+run badapple cargo xtask test-badapple
+run vkgears cargo xtask test-vkgears
+run yserver cargo xtask test-yserver
+run xwindow cargo xtask test-xwindow
+run chrome cargo xtask test-chrome
+run claude-code cargo xtask test-claude-code
+run steamcmd cargo xtask test-steamcmd
+run steam-store cargo xtask test-steam-store
+run steam-window cargo xtask test-steam-window
 run rustc-kvm cargo xtask test-rustc --accel kvm
 run rustc-tcg cargo xtask test-rustc --release
 run selfhost cargo xtask test-selfhost --accel kvm
