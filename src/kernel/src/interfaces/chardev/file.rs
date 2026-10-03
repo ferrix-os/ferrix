@@ -2,9 +2,9 @@
 //!
 //! Opening sends OPEN and waits for the driver's answer; each ioctl sends
 //! IOCTL with the command and argument as the program passed them; the last
-//! close queues RELEASE in the slot the open reserved. Nothing else is
-//! forwarded: read and write answer `EINVAL`, poll is never ready, and
-//! mmap finds no pages and answers `ENODEV` (`docs/NVIDIA.md` §4.4, N11).
+//! close queues RELEASE in the slot the open reserved; an mmap sends MMAP
+//! ([`mmap`]). Nothing else is forwarded: read and write answer `EINVAL`,
+//! and poll is never ready (`docs/NVIDIA.md` §4.4, N11).
 
 use alloc::sync::Arc;
 use core::any::Any;
@@ -16,7 +16,7 @@ use ferrix_vfs::{Errno, FileType, Inode, Metadata, Readiness, Result as VfsResul
 
 use crate::syscall::process::{self, Process};
 
-use super::Control;
+use super::{Answer, ApertureKeeper, Control, MapReply};
 
 /// Where the nodes' inode numbers start, beside devfs's own.
 pub(crate) const INO_BASE: u64 = 1 << 43;
@@ -63,7 +63,18 @@ impl ChardevFile {
         let client = process::current().ok_or(Errno::ENXIO)?;
         super::hold_release(&control)?;
         let file = super::next_file(&control);
-        if let Err(errno) = super::call(&control, &client, Op::Open, file, minor, 0, 0) {
+        if let Err(errno) = super::call(
+            &control,
+            &client,
+            super::Ask {
+                op: Op::Open,
+                file,
+                minor,
+                cmd: 0,
+                arg: 0,
+                pages: 0,
+            },
+        ) {
             // A refused open leaves nothing at the driver; an abandoned one
             // may have opened it before the program gave up. Either way its
             // release follows the open, in the slot held for it, and the
@@ -170,13 +181,81 @@ pub(crate) fn ioctl(file: &ChardevFile, request: u32, arg: u64) -> Result<usize,
         return Err(Errno::ENODEV);
     }
     let client: Arc<Process> = process::current().ok_or(Errno::ENODEV)?;
-    super::call(
+    match super::call(
         &file.control,
         &client,
-        Op::Ioctl,
-        file.file,
-        file.minor,
-        request,
-        arg,
-    )
+        super::Ask {
+            op: Op::Ioctl,
+            file: file.file,
+            minor: file.minor,
+            cmd: request,
+            arg,
+            pages: 0,
+        },
+    )? {
+        Answer::Value(value) => Ok(value),
+        Answer::Map(_) => Err(Errno::EIO),
+    }
+}
+
+/// What an mmap of a chardev file is to map, and, for an aperture, the
+/// keeper its region holds.
+pub(crate) struct Mapped {
+    /// The driver's checked answer.
+    pub(crate) reply: MapReply,
+    /// For an aperture: holds the device's claim while the region lives.
+    pub(crate) keeper: Option<ApertureKeeper>,
+}
+
+/// `mmap` of an open chardev file: MMAP to its driver, refused first when
+/// private, executable or empty (M4), and its answer once it is in. The
+/// caller maps it, taking the program's address-space lock only now, so the
+/// driver's copies into the same program never wait on it (M5).
+///
+/// # Errors
+///
+/// `EINVAL` for a private or empty mapping, `EPERM` for an executable one,
+/// what the driver answered, `EIO` for an answer that is not a mapping, and
+/// `ENODEV` once the driver is gone.
+pub(crate) fn mmap(
+    file: &ChardevFile,
+    len: u64,
+    prot: u32,
+    flags: u32,
+    offset: u64,
+) -> Result<Mapped, Errno> {
+    const PROT_EXEC: u32 = 4;
+    const MAP_SHARED: u32 = 1;
+    if flags & MAP_SHARED == 0 || len == 0 {
+        return Err(Errno::EINVAL);
+    }
+    if prot & PROT_EXEC != 0 {
+        return Err(Errno::EPERM);
+    }
+    let pages = u32::try_from(len.div_ceil(4096)).map_err(|_| Errno::EINVAL)?;
+    if file.control.is_gone() {
+        return Err(Errno::ENODEV);
+    }
+    let client: Arc<Process> = process::current().ok_or(Errno::ENODEV)?;
+    let cmd = (prot & 0xff) | ((flags & 0xff_ffff) << 8);
+    let answer = super::call(
+        &file.control,
+        &client,
+        super::Ask {
+            op: Op::Mmap,
+            file: file.file,
+            minor: file.minor,
+            cmd,
+            arg: offset,
+            pages,
+        },
+    )?;
+    let Answer::Map(reply) = answer else {
+        return Err(Errno::EIO);
+    };
+    let keeper = match reply {
+        MapReply::Aperture { .. } => Some(super::aperture_keeper(&file.control)?),
+        MapReply::Vmo { .. } => None,
+    };
+    Ok(Mapped { reply, keeper })
 }

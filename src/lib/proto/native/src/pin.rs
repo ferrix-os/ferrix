@@ -7,7 +7,7 @@
 //! not contiguous to the device, so there is one address per page.
 
 use ferrix_native_abi::nr;
-use ferrix_native_abi::types::{PIN_COHERENT, PIN_READ_ONLY};
+use ferrix_native_abi::types::{PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY};
 
 use crate::call::{Call, Syscall};
 use crate::device::Device;
@@ -35,6 +35,11 @@ pub enum PinAccess {
     /// VMO, which must not be mapped until the pin is made; on a device that
     /// does not snoop the caches, its mappings then bypass them.
     Coherent,
+    /// Read and write, and one run of ascending addresses: `PIN_CONTIGUOUS`,
+    /// for memory a device takes as one block. The range must be
+    /// uncommitted, in an anonymous VMO, and at most one buddy block long;
+    /// the kernel fills it, and refuses rather than pin anything else.
+    Contiguous,
 }
 
 impl PinAccess {
@@ -45,6 +50,7 @@ impl PinAccess {
             PinAccess::ReadWrite => 0,
             PinAccess::ReadOnly => PIN_READ_ONLY as usize,
             PinAccess::Coherent => PIN_COHERENT as usize,
+            PinAccess::Contiguous => PIN_CONTIGUOUS as usize,
         }
     }
 }

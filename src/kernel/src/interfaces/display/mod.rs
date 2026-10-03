@@ -31,8 +31,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use ferrix_blkring::identity::Location;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_displayctl::message::{
-    Attach, AttachObject, CARD_VMO_RIGHTS, FORMAT, Hello, MAX_BUFFER_PAGES, MAX_BYTES,
-    MAX_SCANOUTS, Message, Ready, Rect, Refusal, ScanoutMode, Status, Timing, Timings,
+    Attach, AttachObject, FORMAT, Hello, MAX_BUFFER_PAGES, MAX_BYTES, MAX_SCANOUTS, Message, Ready,
+    Rect, Refusal, ScanoutMode, Status, Timing, Timings,
 };
 use ferrix_displayctl::session::{Event, RequestError, Session};
 use ferrix_linux_abi::errno::Errno;
@@ -1024,6 +1024,7 @@ fn run(id: usize) {
         serve(&card);
         CARDS.lock().retain(|held| !Arc::ptr_eq(held, &card));
         NUMBERS.give_back(card.index);
+        crate::fs::devfs::announce(alloc::format!("dri/card{}", card.index).as_bytes(), false);
         crate::console::println!("  display  card{} is gone", card.index);
     }
     CLAIMS.release(&start.device);
@@ -1085,6 +1086,12 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     }
     if RECLAIMABLE_FRAMEBUFFER.load(Ordering::Relaxed) {
         return Err(Refusal::Framebuffer);
+    }
+    // A card the driver can map is the kernel's to give, not the driver's to
+    // claim: only one whose device files the chardev core already serves for
+    // this device, which is NVIDIA's (`docs/DISPLAY.md` §2.1).
+    if hello.copies && !crate::interfaces::chardev::publishes_for(&start.device) {
+        return Err(Refusal::Copies);
     }
     // The driver reset the device before it sent HELLO, so what a dead one's
     // pins kept from the allocator can go back (`object::pin`'s quarantine),
@@ -1162,7 +1169,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     .as_bytes()
     .to_vec();
     let handed = vec![
-        (Object::Vmo(vmo), CARD_VMO_RIGHTS),
+        // A driver that copies with its processor maps the card read-only;
+        // every other only pins it (`docs/DISPLAY.md` §2.1). Never WRITE.
+        (Object::Vmo(vmo), Ready::card_rights(hello.copies)),
         (Object::Port(core_port), Rights::WRITE),
     ];
     if start
@@ -1179,6 +1188,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
         return Err(Refusal::Malformed);
     }
     drop(state);
+    crate::fs::devfs::announce(alloc::format!("dri/card{index}").as_bytes(), true);
 
     // The driver owns what is on the screen now, and the boot console, if it
     // was drawing on the firmware's framebuffer, stops.
@@ -1219,6 +1229,13 @@ fn announce(card: &Card, hello: &Hello) {
             alloc::string::String::from("is a scanout: no 3D")
         }
     );
+    if hello.copies {
+        // The one driver kind that may map the card, said where a reader
+        // of the boot log looks for what a card is.
+        crate::console::println!(
+            "  display  card{index} copies frames: its driver maps the card read-only"
+        );
+    }
     for (scanout, mode) in card.modes().iter().enumerate() {
         crate::console::println!(
             "  display  card{index} scanout {scanout}: {}x{}{}",

@@ -361,8 +361,19 @@ static NET: [Entry<Kernel>; 7] = [
     file(b"udp6", render::net_udp6),
 ];
 
+/// `/proc/driver`: what drivers say of themselves, as Linux's do.
+static DRIVER: [Entry<Kernel>; 1] = [reporting_directory(b"nvidia", &DRIVER_NVIDIA)];
+
+/// `/proc/driver/nvidia`: what NVIDIA's userspace reads before it opens
+/// `/dev/nvidiactl` (`docs/NVIDIA.md` §4.4), while a driver serves major
+/// 195 through the chardev core; `ENOENT` otherwise.
+static DRIVER_NVIDIA: [Entry<Kernel>; 2] = [
+    file(b"params", render::nvidia_params),
+    file(b"version", render::nvidia_version),
+];
+
 /// `/proc`, less the process directories that follow these in a listing.
-pub(crate) static TOP: [Entry<Kernel>; 15] = [
+pub(crate) static TOP: [Entry<Kernel>; 16] = [
     Entry {
         name: b"self",
         permissions: 0o777,
@@ -370,6 +381,7 @@ pub(crate) static TOP: [Entry<Kernel>; 15] = [
     },
     file(b"cmdline", render::cmdline_file),
     file(b"cpuinfo", render::cpuinfo),
+    reporting_directory(b"driver", &DRIVER),
     file(b"ferrix-seam", render::seam),
     file(b"filesystems", render::filesystems),
     file(b"loadavg", render::loadavg),

@@ -147,6 +147,11 @@ pub(crate) struct Args {
     /// carries `authd` for it. A person's account with no password chooses
     /// one at the console the first time (§5.4).
     pub(crate) login: bool,
+    /// `--nvidia`: `run-compositor --chrome`'s desktop on the RTX 3060's
+    /// own monitor, in the libvirt domain `run-nvidia` boots (`crate::nvidia`):
+    /// nvrm drives the card through NVKMS, and Chrome renders on NVIDIA's
+    /// Vulkan, on the volume's glibc. Sets `--chrome`.
+    pub(crate) nvidia: bool,
     /// `--session`: `flash --compositor`'s desktop runs as the user
     /// `ferrix` through `sessiond`, as `run-compositor --everything`'s does
     /// (`crate::session`): `--config`'s dotfiles seed the home disk once,
@@ -664,11 +669,16 @@ impl Args {
 
     /// Parse an iterator of arguments, `cargo xtask` and the command name
     /// having already been stripped by the caller.
-    /// A flag that only turns something on: `--chrome`, `--login`.
+    /// A flag that only turns something on: `--chrome`, `--login`, and
+    /// `--nvidia`, which is the `--chrome` desktop on the 3060's monitor.
     fn switch(&mut self, flag: &str) {
         match flag {
             "--chrome" => self.chrome = true,
             "--login" => self.login = true,
+            "--nvidia" => {
+                self.nvidia = true;
+                self.chrome = true;
+            }
             _ => {}
         }
     }
@@ -703,7 +713,7 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" | "--login" => args.switch(&item),
+                "--chrome" | "--login" | "--nvidia" => args.switch(&item),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;

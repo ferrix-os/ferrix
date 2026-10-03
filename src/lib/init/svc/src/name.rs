@@ -9,6 +9,8 @@
 //! Slices name their place in the tree: `user-1000.slice` is a child of
 //! `user.slice`, which is a child of the root, `-.slice`. Mount units name
 //! the path they mount, escaped: `/sys/fs/cgroup` is `sys-fs-cgroup.mount`.
+//! Device units name a node under `/dev` the same way: `/dev/dri/card0` is
+//! `dev-dri-card0.device` ([`UnitName::device_path`]).
 
 use alloc::borrow::ToOwned;
 use alloc::format;
@@ -36,11 +38,13 @@ pub enum UnitType {
     Socket,
     /// Something the kernel provides, always active (§7.2).
     Builtin,
+    /// A node under `/dev`, active while it exists.
+    Device,
 }
 
 impl UnitType {
     /// Every type, in suffix order.
-    pub const ALL: [UnitType; 7] = [
+    pub const ALL: [UnitType; 8] = [
         UnitType::Service,
         UnitType::Slice,
         UnitType::Scope,
@@ -48,6 +52,7 @@ impl UnitType {
         UnitType::Mount,
         UnitType::Socket,
         UnitType::Builtin,
+        UnitType::Device,
     ];
 
     /// The suffix, without its dot.
@@ -60,6 +65,7 @@ impl UnitType {
             UnitType::Mount => "mount",
             UnitType::Socket => "socket",
             UnitType::Builtin => "builtin",
+            UnitType::Device => "device",
         }
     }
 
@@ -84,7 +90,8 @@ pub enum NameError {
     Prefix,
     /// A slice name with a leading, trailing or doubled `-`.
     Slice,
-    /// A path that cannot be a mount point's: relative, or with `..`.
+    /// A path that cannot be a mount point's: relative, or with `..`; or a
+    /// device unit's name that is not a node under `/dev`.
     Path,
     /// A template asked for where an instance or a plain name was needed,
     /// or the other way round.
@@ -262,6 +269,31 @@ impl UnitName {
     pub fn for_path(path: &str, kind: UnitType) -> Result<UnitName, NameError> {
         let escaped = escape_path(path)?;
         UnitName::parse(&format!("{escaped}.{}", kind.suffix()))
+    }
+
+    /// The node a device unit names: `dev-dri-card0.device` is
+    /// `/dev/dri/card0`, and `dev-disk-by\x2dlabel-root.device` is
+    /// `/dev/disk/by-label/root`. The name is the whole contract, so it must
+    /// be the one [`UnitName::for_path`] makes of the path.
+    ///
+    /// # Errors
+    ///
+    /// [`NameError::Path`] for a name that is not a device unit's, that does
+    /// not unescape to a path below `/dev`, or that is not that path's own
+    /// escaping (`dev--dri.device`, `dev-a@b.device`).
+    pub fn device_path(&self) -> Result<String, NameError> {
+        if self.kind != UnitType::Device {
+            return Err(NameError::Path);
+        }
+        let path = format!("/{}", unescape(self.stem()));
+        let parts = path_components(&path)?;
+        if parts.len() < 2 || parts.first() != Some(&"dev") {
+            return Err(NameError::Path);
+        }
+        if UnitName::for_path(&path, UnitType::Device).as_ref() != Ok(self) {
+            return Err(NameError::Path);
+        }
+        Ok(path)
     }
 }
 

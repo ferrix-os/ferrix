@@ -36,7 +36,7 @@ pub struct Request {
     pub id: u64,
     /// The file's identity.
     pub file: u64,
-    /// 1 open, 2 ioctl, 3 release.
+    /// 1 open, 2 ioctl, 3 release, 4 mmap.
     pub op: u32,
     /// The node's minor.
     pub minor: u32,
@@ -48,8 +48,12 @@ pub struct Request {
     pub egid: u32,
     /// The ioctl's command.
     pub cmd: u32,
-    /// The ioctl's argument, raw.
+    /// The ioctl's argument, raw; an mmap's file offset.
     pub arg: u64,
+    /// An mmap's length in pages.
+    pub pages: u32,
+    /// Unused.
+    pub reserved: u32,
 }
 
 /// The control channel, borrowed for one call: nvrm holds it for its life.
@@ -173,6 +177,7 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                     Op::Open => 1,
                     Op::Ioctl => 2,
                     Op::Release => 3,
+                    Op::Mmap => 4,
                 };
                 // SAFETY: the caller vouches for `out`.
                 unsafe {
@@ -186,6 +191,8 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                         egid: request.egid,
                         cmd: request.cmd,
                         arg: request.arg,
+                        pages: request.pages,
+                        reserved: 0,
                     });
                 }
                 return status::OK;
@@ -238,6 +245,28 @@ pub extern "C" fn nvos_chardev_file(id: u64, fd: i32) -> i64 {
     ) {
         Ok(file) => i64::try_from(file).unwrap_or(-9),
         Err(errno) => i64::from(errno),
+    }
+}
+
+/// Answer mmap request `id`: `value` a VMO handle with `offset` its byte
+/// offset, or a physical address, by `kind` (`ferrix_chardevctl::message`'s
+/// `MAP_*`). 0, or a negative errno.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_reply_map(id: u64, value: u64, offset: u64, kind: u64) -> i32 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_REPLY,
+        [
+            control,
+            id as usize,
+            0,
+            value as usize,
+            offset as usize,
+            kind as usize,
+        ],
+    ) {
+        Ok(_) => 0,
+        Err(errno) => errno,
     }
 }
 

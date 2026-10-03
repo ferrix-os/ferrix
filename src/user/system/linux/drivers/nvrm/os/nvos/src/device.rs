@@ -481,6 +481,7 @@ extern "C" fn isr_thread(isr: *mut c_void) {
     let isr = unsafe { isr_block.cast::<Isr>().read() };
     // SAFETY: read just now; the block is used no more.
     unsafe { crate::libc::free(isr_block) };
+    crate::os::isr_thread_is_this();
     loop {
         match isr.port.wait(Deadline::Never) {
             Ok(packet) if packet.kind == PACKET_INTERRUPT => {

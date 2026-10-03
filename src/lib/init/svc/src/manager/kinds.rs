@@ -1,13 +1,21 @@
-//! The kinds besides services: slices, scopes and mounts. Targets and
-//! builtins have no state machine of their own; [`ops`](super::ops) moves
-//! them between up and down directly.
+//! The kinds besides services: slices, scopes, mounts and devices. Targets
+//! and builtins have no state machine of their own; [`ops`](super::ops)
+//! moves them between up and down directly.
+//!
+//! A device is up while its node exists. Its start asks the backend to
+//! watch for the node ([`Action::WatchDevice`]) and waits, with no timeout,
+//! until [`Event::Device`](crate::event::Event::Device) says it is there:
+//! the backend answers every watch at once, so a node that is there already
+//! starts it in the same step. A node that goes while the device is up
+//! takes it down as nobody asked, which stops what is `BindsTo=` it
+//! ([`ops`](super::ops)); `Requires=` alone, as under systemd, does not.
 
 use alloc::format;
 use alloc::vec::Vec;
 
 use super::{Manager, OpId, Sub};
 use crate::event::{Action, ActiveState, Errno, MountSpec, OpResult, UnitId, Whom};
-use crate::kind::{Config, KillMode};
+use crate::kind::{Config, Device, KillMode};
 use crate::name::UnitType;
 use crate::value::Span;
 
@@ -237,6 +245,48 @@ impl Manager {
                 self.log(Some(unit), line);
                 self.set_state(unit, ActiveState::Failed, Sub::Failed);
             }
+        }
+    }
+
+    /// A device's start: watch for its node, and wait for it.
+    pub(super) fn device_start(&mut self, unit: UnitId) {
+        let path = match self
+            .slot(unit)
+            .and_then(|s| s.loaded.as_ref().ok())
+            .map(|u| &u.config)
+        {
+            Some(Config::Device(Device { path })) => path.clone(),
+            _ => return,
+        };
+        self.set_state(unit, ActiveState::Activating, Sub::Waiting);
+        self.emit(Action::WatchDevice { unit, path });
+    }
+
+    /// A device's stop: stop watching its node. The node is the kernel's
+    /// and stays.
+    pub(super) fn device_stop(&mut self, unit: UnitId) {
+        if matches!(
+            self.slot(unit).map(|s| s.sub),
+            Some(Sub::Waiting | Sub::Plugged)
+        ) {
+            self.emit(Action::UnwatchDevice { unit });
+        }
+        self.set_state(unit, ActiveState::Inactive, Sub::Dead);
+    }
+
+    /// The backend says whether a watched device's node exists.
+    pub(super) fn device(&mut self, unit: UnitId, present: bool) {
+        match (self.slot(unit).map(|s| s.sub), present) {
+            (Some(Sub::Waiting), true) => {
+                self.set_state(unit, ActiveState::Active, Sub::Plugged);
+            }
+            (Some(Sub::Plugged), false) => {
+                let line = format!("{}: the node went away", self.display(unit));
+                self.log(Some(unit), line);
+                self.emit(Action::UnwatchDevice { unit });
+                self.set_state(unit, ActiveState::Inactive, Sub::Dead);
+            }
+            _ => {}
         }
     }
 }

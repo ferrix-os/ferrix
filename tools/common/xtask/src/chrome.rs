@@ -414,6 +414,29 @@ pub(crate) fn window_command_for(arch: Arch, page: &str) -> String {
 /// `/dev/shm`: `run-compositor --persistent`'s, on the volume it keeps
 /// (`crate::persistent::CHROME_PROFILE`).
 pub(crate) fn window_command_with_profile(arch: Arch, page: &str, profile: &str) -> String {
+    window_command_on(arch, page, profile, false)
+}
+
+/// What [`window_command_with_profile`] puts where `--disable-gpu` is on a
+/// desktop whose GPU is NVIDIA's (`run-compositor --nvidia`): ANGLE on
+/// NVIDIA's Vulkan for WebGL and rasterization. The compositor takes only
+/// `wl_shm` (`docs/NVIDIA.md` §4.6), so Chrome's frames are composited in
+/// software and handed over in shared memory; what the GPU draws is read
+/// back into them.
+/// Not Chrome's own Vulkan compositor (`--enable-features=Vulkan`), which
+/// Chrome refuses beside `--ozone-platform=wayland`.
+pub(crate) const NVIDIA_GPU_FLAGS: &str = "--use-angle=vulkan \
+     --enable-features=DefaultANGLEVulkan --ignore-gpu-blocklist \
+     --enable-gpu-rasterization --disable-gpu-compositing";
+
+/// [`window_command_with_profile`], with Chrome's GPU process on NVIDIA's
+/// Vulkan when `nvidia` ([`NVIDIA_GPU_FLAGS`]) and in software otherwise.
+pub(crate) fn window_command_on(arch: Arch, page: &str, profile: &str, nvidia: bool) -> String {
+    let gpu = if nvidia {
+        NVIDIA_GPU_FLAGS
+    } else {
+        "--disable-gpu"
+    };
     let (program, agent) = if arch == Arch::AArch64 {
         ("/data/usr/lib/chromium/chromium", String::new())
     } else {
@@ -424,7 +447,7 @@ pub(crate) fn window_command_with_profile(arch: Arch, page: &str, profile: &str)
     };
     format!(
         "{program} --no-sandbox --ozone-platform=wayland \
-         --user-data-dir={profile} --no-first-run --disable-gpu --disable-crash-reporter \
+         --user-data-dir={profile} --no-first-run {gpu} --disable-crash-reporter \
          --disable-breakpad --enable-logging=stderr --disable-infobars \
          --alsa-output-device=default --audio-buffer-size=960 \
          --autoplay-policy=no-user-gesture-required{agent} {page}"
@@ -437,8 +460,8 @@ pub(crate) fn window_command_with_profile(arch: Arch, page: &str, profile: &str)
 /// the desktop's own window command with `profile`, the one its Chrome was
 /// started with, so a running Chrome is handed the address and opens it as
 /// a tab rather than a second browser starting on the same profile.
-pub(crate) fn opener(arch: Arch, profile: &str) -> crate::ports::File {
-    let command = window_command_with_profile(arch, r#""$@""#, profile);
+pub(crate) fn opener(arch: Arch, profile: &str, nvidia: bool) -> crate::ports::File {
+    let command = window_command_on(arch, r#""$@""#, profile, nvidia);
     crate::ports::File {
         path: "bin/xdg-open".to_owned(),
         mode: 0o755,
@@ -756,7 +779,7 @@ mod tests {
     /// the profile it is given: run here with `printf` for Chrome.
     #[test]
     fn the_opener_hands_chrome_the_address_whole() {
-        let file = opener(Arch::X86_64, "/data/home/chrome");
+        let file = opener(Arch::X86_64, "/data/home/chrome", false);
         assert_eq!((file.path.as_str(), file.mode), ("bin/xdg-open", 0o755));
         let crate::ports::Content::Bytes(bytes) = file.content else {
             panic!("the opener is a script");

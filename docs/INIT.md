@@ -254,6 +254,7 @@ pub trait Kind {
 | `.mount` | 1 | A mount point, which init mounts and unmounts |
 | `.socket` | 2 | A listening socket init holds; the service starts on the first connection |
 | `.builtin` | 1 | Something the kernel provides, always active (§7.2) |
+| `.device` | 2 (2026-10-03) | A node under `/dev`, active while it exists; needs no file |
 | `.timer` | later | Starts a unit on a schedule |
 | `.path` | later | Starts a unit when a path changes (needs `inotify`, in the kernel since 2026-09-27) |
 
@@ -295,6 +296,24 @@ shutdown.target / poweroff.target / reboot.target
 
 `default.target` is a link to one of them, and `ferrix.target=` on the kernel
 command line overrides it, as `systemd.unit=` does.
+
+**Devices.** A unit can wait for a device node: `hyprix.service` says
+`Requires=dev-dri-card0.device` and `After=dev-dri-card0.device`, and does
+not start until `/dev/dri/card0` exists, however long a driver takes to
+publish it. A device unit needs no file; its name is the node's path,
+escaped as for mounts (`-` is `/`, `\x2d` a literal `-`), and a name that is
+not a node below `/dev` refuses the unit. Its start asks the backend to
+watch for the node (`Action::WatchDevice`) and waits, `activating
+(waiting)`, with no timeout, since operations have none here; the backend
+answers each watch at once with `Event::Device { present }`, so a node that
+is there already starts the unit in the same step, `active (plugged)`. A
+node that goes away while the unit is up takes it down as nobody asked:
+`BindsTo=` dependents stop, and `Requires=` dependents, as under systemd, do
+not. Stopping the unit drops the watch (`Action::UnwatchDevice`). As under
+systemd, a device has no default dependencies. The Linux-ABI init watches
+with inotify on the node's directory, or on the nearest one above it while
+the directory does not exist yet (`/dev/dri` before the first card), and
+`stat`s the node after arming and at every event.
 
 ### 4.4 Services
 
@@ -959,6 +978,7 @@ Init waits in one `epoll_wait`. Its descriptors are:
 * the control socket, and each connected `svc` client;
 * each `Type=notify` service's readiness pipe;
 * each `.socket` unit's listening socket;
+* one inotify instance, for the nodes `.device` units wait for (§4.3);
 * **the port**, through K4's `port_fd`: a descriptor that is readable while
   the port has packets. On the port, init watches every native service's
   process for `TERMINATED`, and every bootstrap channel for READABLE and
@@ -1732,6 +1752,19 @@ it to use. Linux services' own OFFERs are kept but no gate offers one yet.
   their own.
 * **`test-jobs`** types its session at the getty's shell, and ends it with
   `exit`, after which init must give the console a new session.
+
+**`.device` units (2026-10-03).** §4.3's devices: `UnitType::Device` and
+`UnitName::device_path` in `name`, `Config::Device` in `kind`, the
+`waiting`/`plugged` state machine in `manager/kinds.rs`, and
+`Action::WatchDevice`, `Action::UnwatchDevice` and `Event::Device` in
+`event`, with host tests for the name round trip, a service waiting on a
+missing node, a node present at start, a node going away under a
+`BindsTo=` dependent, and stop. Init watches with inotify
+(`src/user/system/linux/init/init/src/devices.rs`), falling back to a
+`stat` once a second when the kernel refuses inotify. It is for
+`hyprix.service`, which started before nvrm published `/dev/dri/card0`
+about 40 s into a boot and hit its start limit; devfs's inotify events are
+the kernel's half.
 
 **L13a, as built (5 points, 2026-10-04).** §4.5 is the design. What is on
 branch `l13-init`:

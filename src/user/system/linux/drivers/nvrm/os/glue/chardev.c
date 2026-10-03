@@ -10,6 +10,11 @@
  *  - IOCTL runs on a thread of its own, since RM may sleep, as the client
  *    the request names: its copy_in and copy_out are the bridge's, so RM's
  *    os_memcpy_*_user reach the program waiting in the call;
+ *  - MMAP maps what NV_ESC_RM_MAP_MEMORY left on the file, as NVIDIA's
+ *    nvidia_mmap_helper decides it: a GPU file's range of the card's BARs,
+ *    uncached for registers and USERD and as RM asked for the framebuffer;
+ *    the control file's system memory, the VMO the allocation is. The
+ *    kernel checks the answer against the device and the VMO's rights;
  *  - RELEASE closes the file. The kernel sends one for a file it may never
  *    have heard back about, so an unknown file is no error.
  *
@@ -127,6 +132,75 @@ static void serve_ioctl(void *argument)
     free(work);
 }
 
+#ifndef ENXIO
+#define ENXIO   6
+#endif
+#ifndef ERANGE
+#define ERANGE  34
+#endif
+
+/* An MMAP: what the file's mapping context names, as nvidia_mmap_helper
+ * reads it. */
+static void serve_mmap(const struct nvos_request *request)
+{
+    nv_linux_file_private_t *nvlfp = find(request->file);
+    const nv_alloc_mapping_context_t *context;
+    nv_state_t *nv;
+    NvU64 length = (NvU64)request->pages << PAGE_SHIFT;
+
+    if (nvlfp == NULL)
+    {
+        (void)nvos_chardev_reply(request->id, -EBADF, 0);
+        return;
+    }
+    context = &nvlfp->mmap_context;
+    nv = NV_STATE_PTR(nvlfp->nvptr);
+    if (!context->valid || request->arg != 0)
+    {
+        nvrm_say("mmap: no valid mapping context on the file\n");
+        (void)nvos_chardev_reply(request->id, -EINVAL, 0);
+        return;
+    }
+    if (!NV_IS_CTL_DEVICE(nv))
+    {
+        NvU64 kind = NVOS_MAP_APERTURE;
+
+        if (context->memArea.numRanges != 1 ||
+            context->memArea.pRanges[0].size != length)
+        {
+            nvrm_say("mmap: %llu ranges, or not %llu bytes\n",
+                     (unsigned long long)context->memArea.numRanges,
+                     (unsigned long long)length);
+            (void)nvos_chardev_reply(request->id, -ENXIO, 0);
+            return;
+        }
+        if (IS_FB_OFFSET(nv, context->access_start, context->access_size) &&
+            !IS_UD_OFFSET(nv, context->access_start, context->access_size) &&
+            context->caching == NV_MEMORY_WRITECOMBINED)
+            kind |= NVOS_MAP_WRITE_COMBINING;
+        (void)nvos_chardev_reply_map(request->id, context->memArea.pRanges[0].start, 0, kind);
+        return;
+    }
+    else
+    {
+        nv_alloc_t *at = context->alloc;
+        NvU32 vmo = 0;
+
+        if (at == NULL || context->page_index + request->pages > at->num_pages)
+        {
+            (void)nvos_chardev_reply(request->id, -ERANGE, 0);
+            return;
+        }
+        if (nvos_pages_vmo(at->pages, &vmo) != NV_OK)
+        {
+            (void)nvos_chardev_reply(request->id, -ENXIO, 0);
+            return;
+        }
+        (void)nvos_chardev_reply_map(request->id, vmo, context->page_index << PAGE_SHIFT,
+                                     NVOS_MAP_VMO);
+    }
+}
+
 static void handle(const struct nvos_request *request)
 {
     nv_linux_file_private_t *nvlfp;
@@ -178,6 +252,10 @@ static void handle(const struct nvos_request *request)
             }
             return;
 
+        case NVOS_REQUEST_MMAP:
+            serve_mmap(request);
+            return;
+
         case NVOS_REQUEST_RELEASE:
             entry = forget(request->file);
             if (entry != NULL)
@@ -192,12 +270,15 @@ static void handle(const struct nvos_request *request)
     }
 }
 
-int nvrm_chardev_serve(const NvU16 *minors, NvU32 count)
+int nvrm_chardev_publish(const NvU16 *minors, NvU32 count)
+{
+    return nvos_chardev_start(minors, count) == NV_OK ? 0 : -1;
+}
+
+int nvrm_chardev_serve(void)
 {
     struct nvos_request request;
 
-    if (nvos_chardev_start(minors, count) != NV_OK)
-        return -1;
     for (;;)
     {
         if (nvos_chardev_next(&request) != NV_OK)

@@ -1508,3 +1508,150 @@ fn fail_mode_refuses_to_replace_a_queued_operation_and_replace_mode_cancels_it()
     });
     assert!(rig.spawns(&ready).is_empty(), "a no longer starts");
 }
+
+/// What `actions` ask of device watches, by unit name: `watch /dev/…` or
+/// `unwatch`.
+fn device_actions(rig: &Rig, actions: &[Action]) -> Vec<(String, String)> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::WatchDevice { unit, path } => {
+                Some((rig.name(*unit), alloc::format!("watch {path}")))
+            }
+            Action::UnwatchDevice { unit } => Some((rig.name(*unit), String::from("unwatch"))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The backend's answer about a device's node.
+fn device(rig: &mut Rig, name: &str, present: bool) -> Vec<Action> {
+    let unit = rig.id(name);
+    rig.step(Event::Device { unit, present })
+}
+
+const CARD: &str = "dev-dri-card0.device";
+
+const HYPRIX: (&str, &str) = (
+    "hyprix.service",
+    "[Unit]\nRequires=dev-dri-card0.device\nAfter=dev-dri-card0.device\n\
+     [Service]\nExecStart=/bin/hyprix\n",
+);
+
+#[test]
+fn a_service_after_a_device_waits_for_its_node_without_a_timeout() {
+    let mut rig = Rig::new(&[HYPRIX]);
+    let started = rig.request(Request::start("hyprix.service"));
+    assert!(rig.spawns(&started).is_empty(), "not before the node");
+    assert_eq!(
+        device_actions(&rig, &started),
+        owned(&[(CARD, "watch /dev/dri/card0")])
+    );
+    assert_eq!(rig.state(CARD), ActiveState::Activating);
+    assert_eq!(rig.sub(CARD), "waiting");
+    // The backend's first answer: not there yet.
+    let absent = device(&mut rig, CARD, false);
+    assert!(rig.spawns(&absent).is_empty());
+    assert_eq!(rig.manager.deadline(), None, "a device waits for ever");
+    let _ = rig.at(600_000);
+    assert_eq!(rig.state(CARD), ActiveState::Activating);
+    assert_eq!(rig.state("hyprix.service"), ActiveState::Inactive);
+    // nvrm publishes the node.
+    let plugged = device(&mut rig, CARD, true);
+    assert_eq!(rig.spawns(&plugged), ["hyprix.service"]);
+    assert_eq!(rig.state(CARD), ActiveState::Active);
+    assert_eq!(rig.sub(CARD), "plugged");
+    let _ = rig.spawned("hyprix.service");
+    assert_eq!(rig.state("hyprix.service"), ActiveState::Active);
+}
+
+#[test]
+fn a_device_already_there_starts_its_dependent_in_the_same_turn() {
+    let mut rig = Rig::new(&[HYPRIX]);
+    let started = rig.request(Request::start("hyprix.service"));
+    assert_eq!(
+        device_actions(&rig, &started),
+        owned(&[(CARD, "watch /dev/dri/card0")])
+    );
+    // The backend stats the node as it arms the watch, and answers at once.
+    let answered = device(&mut rig, CARD, true);
+    assert_eq!(rig.spawns(&answered), ["hyprix.service"]);
+    let (_, up) = rig.spawned("hyprix.service");
+    assert!(
+        matches!(Rig::replies(&up).as_slice(), [Reply::Done(OpResult::Done)]),
+        "{up:?}"
+    );
+    // A second start finds the device up and watches nothing more.
+    let again = rig.request(Request::start(CARD));
+    assert!(device_actions(&rig, &again).is_empty());
+}
+
+#[test]
+fn a_device_that_goes_away_stops_what_binds_to_it_and_not_what_requires_it() {
+    let mut rig = Rig::new(&[
+        HYPRIX,
+        (
+            "bound.service",
+            "[Unit]\nBindsTo=dev-dri-card0.device\nAfter=dev-dri-card0.device\n\
+             [Service]\nExecStart=/bin/bound\n",
+        ),
+    ]);
+    let _ = rig.request(Request::start("hyprix.service"));
+    let _ = rig.request(Request::start("bound.service"));
+    let both = device(&mut rig, CARD, true);
+    assert_eq!(
+        sorted(rig.spawns(&both)),
+        ["bound.service", "hyprix.service"]
+    );
+    let _ = rig.spawned("hyprix.service");
+    let _ = rig.spawned("bound.service");
+    let gone = device(&mut rig, CARD, false);
+    assert_eq!(device_actions(&rig, &gone), owned(&[(CARD, "unwatch")]));
+    assert_eq!(rig.state(CARD), ActiveState::Inactive);
+    assert_eq!(rig.sub(CARD), "dead");
+    assert_eq!(
+        rig.kills(&gone),
+        owned(&[("bound.service", "TERM>group")]),
+        "BindsTo= stops; Requires= alone does not, as under systemd"
+    );
+    assert_eq!(rig.state("hyprix.service"), ActiveState::Active);
+    // A late answer for a watch that is gone changes nothing.
+    let late = device(&mut rig, CARD, true);
+    assert!(late.is_empty(), "{late:?}");
+    assert_eq!(rig.state(CARD), ActiveState::Inactive);
+}
+
+#[test]
+fn stopping_a_device_unwatches_it_and_stops_what_requires_it() {
+    let mut rig = Rig::new(&[HYPRIX]);
+    let _ = rig.request(Request::start("hyprix.service"));
+    let stopped = rig.request(Request::stop(CARD));
+    assert_eq!(device_actions(&rig, &stopped), owned(&[(CARD, "unwatch")]));
+    assert_eq!(rig.state(CARD), ActiveState::Inactive);
+    assert!(rig.spawns(&stopped).is_empty());
+    assert_eq!(rig.state("hyprix.service"), ActiveState::Inactive);
+    let late = device(&mut rig, CARD, true);
+    assert!(rig.spawns(&late).is_empty(), "the watch is gone");
+    assert_eq!(rig.state(CARD), ActiveState::Inactive);
+    // Up, then stopped: unwatched again; a stopped one has nothing to drop.
+    let _ = rig.request(Request::start(CARD));
+    let _ = device(&mut rig, CARD, true);
+    let down = rig.request(Request::stop(CARD));
+    assert_eq!(device_actions(&rig, &down), owned(&[(CARD, "unwatch")]));
+    let again = rig.request(Request::stop(CARD));
+    assert!(device_actions(&rig, &again).is_empty());
+}
+
+#[test]
+fn a_device_name_that_is_no_node_refuses_what_requires_it() {
+    let mut rig = Rig::new(&[(
+        "odd.service",
+        "[Unit]\nRequires=sys-fs-cgroup.device\n[Service]\nExecStart=/bin/odd\n",
+    )]);
+    let refused = rig.request(Request::start("odd.service"));
+    assert!(
+        matches!(Rig::replies(&refused).as_slice(), [Reply::Refused(why)] if why.contains("sys-fs-cgroup.device")),
+        "{refused:?}"
+    );
+    assert!(device_actions(&rig, &refused).is_empty());
+}

@@ -46,8 +46,8 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 
 use super::{
-    CONTROLS, Control, DRIVER_RIGHTS, MAX_OUTSTANDING, Request, STARTING, abandon, admit,
-    await_answer, copy_done, published,
+    Answer, Ask, CONTROLS, Control, DRIVER_RIGHTS, MAX_OUTSTANDING, Request, STARTING, abandon,
+    admit, await_answer, copy_done, published,
 };
 use crate::device::{self, DeviceNode};
 use crate::object::check::{SCRATCH, Side, device_handle, reg};
@@ -78,6 +78,15 @@ const PONG: [u8; 8] = *b"<chardev";
 /// The ioctl's command and the driver's answer.
 const COMMAND: u32 = 0xC0DE_0001;
 const VALUE: u64 = 7;
+/// The program's ioctl, on file 1 of minor 0, its argument the buffer.
+const IOCTL: Ask = Ask {
+    op: Op::Ioctl,
+    file: 1,
+    minor: 0,
+    cmd: COMMAND,
+    arg: BUFFER,
+    pages: 0,
+};
 
 /// How long the check waits for the control's task.
 const PATIENCE_NANOS: u64 = 10_000_000_000;
@@ -239,8 +248,7 @@ fn round_trip(
     report: &mut Report,
 ) -> Result<(), &'static str> {
     program.put(BUFFER, &PING)?;
-    let request = admit(core, &program.process, Op::Ioctl, 1, 0, COMMAND, BUFFER)
-        .map_err(|_| "an ioctl was not taken in")?;
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
     start(Job::Await(
         Arc::clone(core),
         Arc::clone(&request),
@@ -291,8 +299,7 @@ fn abandoned(
     program: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let request = admit(core, &program.process, Op::Ioctl, 1, 0, COMMAND, BUFFER)
-        .map_err(|_| "an ioctl was not taken in")?;
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
     in_flight(&request);
     start(Job::Abandon(Arc::clone(core), Arc::clone(&request)))?;
     still_waiting("an abandoned request's call returned while a copy for it was in flight")?;
@@ -315,8 +322,7 @@ fn answered_drains(
     program: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let request = admit(core, &program.process, Op::Ioctl, 1, 0, COMMAND, BUFFER)
-        .map_err(|_| "an ioctl was not taken in")?;
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
     in_flight(&request);
     start(Job::Await(
         Arc::clone(core),
@@ -393,7 +399,7 @@ fn fill(core: &Arc<Control>, program: &Side) -> Result<Vec<Arc<Request>>, &'stat
         .try_reserve_exact(MAX_OUTSTANDING + 1)
         .map_err(|_| "no memory for the check's requests")?;
     loop {
-        match admit(core, &program.process, Op::Ioctl, 1, 0, COMMAND, BUFFER) {
+        match admit(core, &program.process, IOCTL) {
             Ok(request) => taken.push(request),
             Err(Errno::EBUSY) => return Ok(taken),
             Err(_) => return Err("a request was refused other than EBUSY"),
@@ -413,8 +419,7 @@ fn death(
     program: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let request = admit(core, &program.process, Op::Ioctl, 1, 0, COMMAND, BUFFER)
-        .map_err(|_| "an ioctl was not taken in")?;
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
     start(Job::Await(
         Arc::clone(core),
         request,
@@ -609,7 +614,13 @@ fn start(job: Job) -> Result<(), &'static str> {
 fn helper(_: usize) {
     let job = JOB.lock().take();
     let outcome = match job {
-        Some(Job::Await(control, request, client)) => await_answer(&control, &request, &client),
+        // An ioctl is answered with a value; a mapping would be wrong, and
+        // fails the check's comparison as EIO.
+        Some(Job::Await(control, request, client)) => await_answer(&control, &request, &client)
+            .and_then(|answer| match answer {
+                Answer::Value(value) => Ok(value),
+                Answer::Map(_) => Err(Errno::EIO),
+            }),
         Some(Job::Abandon(control, request)) => {
             abandon(&control, &request);
             Ok(0)
