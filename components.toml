@@ -12,13 +12,13 @@
 [ferrousli]
 path = "src/user/system/linux/ferrousli"
 repo = "https://github.com/ferrix-os/ferrousli"
-commit = "36e3bd1e14e0865f1304ec71c1d1012a85abafb2"
+commit = "9723d03f337d5f203970958f38cf2a41f0124e0b"
 
 # The shell.
 [zinc]
 path = "src/user/system/linux/zinc"
 repo = "https://github.com/ferrix-os/zinc"
-commit = "ad78205e6631505b2fbc5d821c88ff78ae577c4c"
+commit = "a7eb7a99c34d983dff189d131c0d514fb2666645"
 
 # The Pixel 7's desktop build, release packaging, monitor and Android app.
 [pixel7]

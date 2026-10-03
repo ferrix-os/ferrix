@@ -37,6 +37,56 @@ are unfinished, so it is not ready to be your everyday OS.
 
 *Captured on x86-64 under KVM. [How the screenshots were made](docs/brand/screenshots/CAPTIONS.md).*
 
+## The repositories
+
+Ferrix lives in the [ferrix-os](https://github.com/ferrix-os) organization. This
+repository holds the kernel, its libraries, the system's programs and the build;
+the parts below have repositories of their own, which `cargo xtask` checks out into
+this tree at the commits [`components.toml`](components.toml) names.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/ferrousli"><img src="docs/brand/screenshots/foot.png" alt="foot running zinc and ferrofetch on Ferrix"></a>
+      <br><b><a href="https://github.com/ferrix-os/ferrousli">ferrix-os/ferrousli</a></b><br>
+      The C library, written in Rust, that Linux programs on Ferrix are built against,
+      and the programs ported onto it: foot, btop, curl, git, vkgears and more.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/zinc"><img src="docs/brand/screenshots/terminal-omz.png" alt="zinc running oh-my-zsh on Ferrix"></a>
+      <br><b><a href="https://github.com/ferrix-os/zinc">ferrix-os/zinc</a></b><br>
+      The zsh-compatible shell, written in Rust, with oh-my-zsh running in it.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/yserver"><img src="docs/brand/screenshots/steam-yserver.png" alt="Steam's store on Ferrix through yserver"></a>
+      <br><b><a href="https://github.com/ferrix-os/yserver">ferrix-os/yserver</a></b><br>
+      The X server, in Rust, that Steam and other X11 programs draw through, on
+      Ferrix's rootless Wayland backend.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/ferrix-os.github.io"><img src="docs/brand/screenshots/website.png" alt="Ferrix's website"></a>
+      <br><b><a href="https://github.com/ferrix-os/ferrix-os.github.io">ferrix-os/ferrix-os.github.io</a></b><br>
+      The website, at <a href="https://ferrix-os.github.io/">ferrix-os.github.io</a>.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/pixel7"><img src="https://raw.githubusercontent.com/ferrix-os/pixel7/main/monitor/icons/icon.png" alt="The Pixel 7 tools' icon" width="128"></a>
+      <br><b><a href="https://github.com/ferrix-os/pixel7">ferrix-os/pixel7</a></b><br>
+      Ferrix on the Pixel 7: the Android launcher app, the desktop build, release
+      packaging and the monitor.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/ferrix-os/ferrousli/tree/main/apps"><img src="docs/brand/screenshots/vkgears.png" alt="vkgears drawing Vulkan gears on Ferrix"></a>
+      <br><b><a href="https://github.com/ferrix-os/ferrousli/tree/main/apps">ferrousli's apps</a></b><br>
+      vkgears, drawing with Vulkan through Venus: one of the programs ported onto
+      ferrousli.
+    </td>
+  </tr>
+</table>
+
 ## What works
 
 - **Linux programs:** Chrome, `rustc`, `git`, `curl`, Valve's `steamcmd` and
