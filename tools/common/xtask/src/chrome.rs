@@ -423,8 +423,10 @@ pub(crate) fn window_command_with_profile(arch: Arch, page: &str, profile: &str)
 /// `wl_shm` (`docs/NVIDIA.md` §4.6), so Chrome's frames are composited in
 /// software and handed over in shared memory; what the GPU draws is read
 /// back into them.
+/// Not Chrome's own Vulkan compositor (`--enable-features=Vulkan`), which
+/// Chrome refuses beside `--ozone-platform=wayland`.
 pub(crate) const NVIDIA_GPU_FLAGS: &str = "--use-angle=vulkan \
-     --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist \
+     --enable-features=DefaultANGLEVulkan --ignore-gpu-blocklist \
      --enable-gpu-rasterization --disable-gpu-compositing";
 
 /// [`window_command_with_profile`], with Chrome's GPU process on NVIDIA's

@@ -468,6 +468,11 @@ fn exec_word(word: &str) -> String {
 /// `graphical.target` too, started before the compositor, and every client
 /// the compositor starts is told where it listens (`docs/AUDIO.md`, U2d).
 ///
+/// The compositor's unit requires and is ordered after `dev-dri-card0.device`
+/// (`docs/INIT.md` §4.3): the screen it opens is published when its driver's
+/// card is up, which for nvrm is half a minute into boot, once the GPU's
+/// firmware runs.
+///
 /// # Errors
 ///
 /// When init cannot be built for `arch`.
@@ -508,8 +513,6 @@ pub(crate) fn desktop_files(
         "# The compositor, a service of graphical.target (docs/INIT.md, L10).\n\
          [Unit]\n\
          Description=The compositor\n\
-         # The screen it opens, which a driver publishes when its card is up:\n\
-         # nvrm's half a minute into boot, once the GPU's firmware runs.\n\
          Requires=dev-dri-card0.device\n\
          After=dev-dri-card0.device\n\
          \n\

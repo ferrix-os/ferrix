@@ -74,6 +74,15 @@ pub const PIN_READ_ONLY: u64 = 1;
 /// mapping of the VMO from then on bypasses the caches.
 pub const PIN_COHERENT: u64 = 2;
 
+/// `vmo_pin`'s option: the pages must be one run of ascending addresses, as
+/// NVIDIA's resource manager asks of some system memory it gives the GPU
+/// (`docs/NVIDIA.md` §4.3). The range must be wholly uncommitted, in an
+/// anonymous VMO, and at most one buddy block long (4 MiB at 4 KiB pages);
+/// the kernel fills it with one run of fresh zeroed frames, charged to the
+/// caller's job, and refuses with `BAD_STATE`, nothing changed, when what it
+/// holds is not one run. Combines with `PIN_READ_ONLY` and `PIN_COHERENT`.
+pub const PIN_CONTIGUOUS: u64 = 4;
+
 /// `device_clock`'s option: set the rate, rather than only say what it
 /// would be.
 pub const CLOCK_SET: u64 = 1;

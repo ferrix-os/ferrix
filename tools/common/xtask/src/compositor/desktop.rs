@@ -391,7 +391,11 @@ pub(super) fn with_chrome(config: String, args: &Args, arch: Arch) -> String {
         crate::chrome::WINDOW_HOME,
         crate::chrome::window_command_on(
             arch,
-            crate::start_page::URL,
+            if args.nvidia {
+                crate::nvidia::WEBGL_PAGE
+            } else {
+                crate::start_page::URL
+            },
             chrome_profile(args),
             args.nvidia
         )

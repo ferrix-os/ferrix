@@ -680,13 +680,23 @@ pub(crate) fn nvrm_native() -> Result<Built> {
 /// NVIDIA's EGL platform manifests, which NVIDIA's Vulkan driver reads
 /// through libEGL; and NVIDIA's application profiles.
 pub(crate) fn data_links() -> Vec<ports::File> {
-    rustc::files(&[
+    let mut files = rustc::files(&[
         ("usr/share/vulkan", "/data/usr/share/vulkan"),
         ("usr/share/glvnd", "/data/usr/share/glvnd"),
         ("usr/share/egl", "/data/usr/share/egl"),
         ("usr/share/nvidia", "/data/usr/share/nvidia"),
-    ])
+    ]);
+    files.push(ports::File {
+        path: WEBGL_PAGE.trim_start_matches("file:///").to_owned(),
+        mode: 0o644,
+        content: ports::Content::Bytes(include_bytes!("nvidia/webgl.html").to_vec()),
+    });
+    files
 }
+
+/// The page `run-compositor --nvidia`'s Chrome opens: which GPU renders
+/// WebGL, said large, over a cube spun on it, with its frame rate.
+pub(crate) const WEBGL_PAGE: &str = "file:///etc/ferrix/nvidia-webgl.html";
 
 /// How long `run-compositor --nvidia` keeps the desktop up when `--timeout`
 /// does not say: an hour.

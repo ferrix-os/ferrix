@@ -99,6 +99,21 @@ pub(crate) enum VmoError {
     OutOfMemory,
 }
 
+/// Why [`Vmo::commit_run`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunError {
+    /// A file's object: its absent pages are the file's.
+    NotAnonymous,
+    /// No pages, or more than one buddy block of them.
+    TooLong,
+    /// Past the object's end.
+    OutOfRange,
+    /// A page of the range is committed.
+    Committed,
+    /// The job is at its memory limit, or no block is free.
+    OutOfMemory,
+}
+
 impl fmt::Display for VmoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -999,6 +1014,81 @@ impl Vmo {
         given
     }
 
+    /// Commit `pages` pages from `first` with one run of fresh, zeroed
+    /// frames, each charged to the running task's job: what a contiguous pin
+    /// (`PIN_CONTIGUOUS`, `docs/NVIDIA.md` §4.3) holds. Every page of the
+    /// range must be absent, and they all go in under the pages lock at
+    /// once, or none does, so nobody can map one of them before the run is
+    /// whole. The run's first frame; [`Vmo::give_back_run`] undoes it.
+    ///
+    /// Must not be called holding a spin lock.
+    ///
+    /// # Errors
+    ///
+    /// [`RunError::NotAnonymous`] for a file's object, whose absent pages are
+    /// the file's and not zeros; [`RunError::TooLong`] for none or more than
+    /// one buddy block (`1 << MAX_ORDER` pages); [`RunError::OutOfRange`] past
+    /// the object's end; [`RunError::Committed`] when a page of the range is
+    /// committed, before or while the run is made; and
+    /// [`RunError::OutOfMemory`] when the job is at its limit or there is no
+    /// free block. Nothing is committed or charged then.
+    pub(crate) fn commit_run(&self, first: u64, pages: u64) -> Result<Frame, RunError> {
+        if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
+            return Err(RunError::NotAnonymous);
+        }
+        if pages == 0 || pages > 1 << ferrix_frame::MAX_ORDER {
+            return Err(RunError::TooLong);
+        }
+        let end = first
+            .checked_add(pages)
+            .filter(|&end| end <= self.len_pages())
+            .ok_or(RunError::OutOfRange)?;
+        if self.pages.lock().frames.range(first..end).next().is_some() {
+            return Err(RunError::Committed);
+        }
+        let order = (0..=ferrix_frame::MAX_ORDER)
+            .find(|&order| 1u64 << order >= pages)
+            .ok_or(RunError::TooLong)?;
+        let block = mm::allocate_user_run(order).ok_or(RunError::OutOfMemory)?;
+        // The block's frames past the range go back at once.
+        for frame in block + pages..block + (1u64 << order) {
+            let _ = mm::release_frame(frame);
+        }
+        for frame in block..block + pages {
+            mm::zero_frame(frame);
+        }
+        let inserted = self.pages.lock().insert_run(first, block, pages);
+        if inserted.is_err() {
+            for frame in block..block + pages {
+                let _ = mm::release_frame(frame);
+            }
+        }
+        inserted
+    }
+
+    /// Undo [`Vmo::commit_run`] of `pages` frames from `block` at `first`:
+    /// take out each page that still holds the frame the run put there, and
+    /// is not held, forget it in every space that maps it, and release it,
+    /// which takes its charge back. A page anything else filled since stays.
+    /// Needs no memory: [`CHUNK`] pages at a time on the stack.
+    ///
+    /// Must not be called holding a spin lock.
+    pub(crate) fn give_back_run(&self, first: u64, block: Frame, pages: u64) {
+        let mut page = 0;
+        while page < pages {
+            let mut chunk = [(0, 0); CHUNK];
+            let (taken, next) = self
+                .pages
+                .lock()
+                .take_ours(first, block, (page, pages), &mut chunk);
+            page = next;
+            let frames = chunk.get(..taken).unwrap_or(&[]);
+            let mut runs = [(0, 0); RUNS];
+            let count = runs_of(frames, &mut runs);
+            self.retire_runs(frames, true, runs.get(..count).unwrap_or(&[]), None, false);
+        }
+    }
+
     /// Whether any page of `first..first + pages` is held in place for a
     /// device: what [`Vmo::decommit_range`] skipped, and a range that must not
     /// be handed to anyone else.
@@ -1571,6 +1661,56 @@ impl Pages {
     /// this list, lowest first, into `out` until it is full: how many were
     /// taken, and the page to go on from if any are left. Allocates nothing:
     /// a map's `remove` never does.
+    /// [`Vmo::commit_run`]'s insert, under the lock: every page of
+    /// `first..first + pages` absent, then each given its frame of the run
+    /// from `block`, or none of them if one cannot be recorded.
+    fn insert_run(&mut self, first: u64, block: Frame, pages: u64) -> Result<Frame, RunError> {
+        let end = first.saturating_add(pages);
+        if self.frames.range(first..end).next().is_some() {
+            return Err(RunError::Committed);
+        }
+        let done = (0..pages)
+            .take_while(|&page| {
+                crate::fallible::insert(&mut self.frames, first + page, block + page).is_ok()
+            })
+            .count() as u64;
+        if done == pages {
+            return Ok(block);
+        }
+        // Under the same lock nobody has seen them: out again.
+        for page in 0..done {
+            let _ = self.frames.remove(&(first + page));
+        }
+        Err(RunError::OutOfMemory)
+    }
+
+    /// [`Vmo::give_back_run`]'s take, under the lock: from page `from` of the
+    /// run's `pages`, each page that still holds the run's frame and is not
+    /// held, into `out` until it is full. How many were taken, and the page
+    /// to go on from.
+    fn take_ours(
+        &mut self,
+        first: u64,
+        block: Frame,
+        (from, pages): (u64, u64),
+        out: &mut [(u64, Frame)],
+    ) -> (usize, u64) {
+        let mut taken = 0;
+        let mut page = from;
+        while page < pages && taken < out.len() {
+            let index = first + page;
+            let ours = self.frames.get(&index) == Some(&(block + page))
+                && !self.held.contains_key(&index);
+            let frame = if ours { self.frames.remove(&index) } else { None };
+            if let (Some(frame), Some(slot)) = (frame, out.get_mut(taken)) {
+                *slot = (index, frame);
+                taken += 1;
+            }
+            page += 1;
+        }
+        (taken, page)
+    }
+
     fn take_into(
         &mut self,
         first: u64,
