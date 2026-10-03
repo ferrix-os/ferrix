@@ -228,6 +228,20 @@ int nvrm_chardev_serve(const NvU16 *minors, NvU32 count);
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *arg);
 void nvrm_close(nv_linux_file_private_t *nvlfp);
 
+/* os/kept/nv.c, for nvidia-modeset: a reference on a started GPU by RM's
+ * id, and a walk of the probed GPUs under the device list's lock. */
+int nvidia_dev_get(NvU32 gpu_id, nvidia_stack_t *sp);
+void nvidia_dev_put(NvU32 gpu_id, nvidia_stack_t *sp);
+NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, NvU32, void *),
+                            void *argument);
+
+/* os/kept/nvidia-modeset.c: NVKMS, linked into nvrm's core beside RM
+ * (docs/NVIDIA.md §4.6): load it once the GPUs have started; 0 or a
+ * negative errno. */
+int nvrm_kms_init(void);
+/* os/glue/kms.c: light the displays on every GPU with a test pattern. */
+int nvrm_kms_show(void);
+
 /* The ioctl encoding of Linux's asm-generic/ioctl.h, which RM's numbers use. */
 #define _IOC_NRBITS     8
 #define _IOC_TYPEBITS   8
@@ -244,10 +258,12 @@ void nvrm_close(nv_linux_file_private_t *nvlfp);
 #define _IOWR(type, nr, size)   _IOC(3U, (type), (nr), sizeof(size))
 
 /* errno values the dispatcher returns, as Linux's. */
+#define EPERM   1
 #define EIO     5
 #define ENOMEM  12
 #define EFAULT  14
 #define EBUSY   16
+#define ENODEV  19
 #define EINVAL  22
 #define EACCES  13
 

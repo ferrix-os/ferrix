@@ -92,6 +92,8 @@ extern uint32_t nvrm_bootstrap;
 extern uint32_t nvos_device_attach(uint32_t handle);
 extern int nvrm_module_init(void);
 extern int nvrm_gpu_start(void);
+extern int nvrm_kms_init(void);
+extern int nvrm_kms_show(void);
 extern int nvrm_chardev_serve(const uint16_t *minors, uint32_t count);
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
@@ -312,6 +314,15 @@ int main(void)
 			return status;
 		}
 		say("GPU started on %s", place);
+
+		/* N3: NVKMS, and a test pattern on whatever display is
+		 * connected. A GPU without one, or a failure here, still
+		 * serves its device files. */
+		int kms = nvrm_kms_init();
+		if (kms != 0)
+			say("NVKMS did not load (%d)", kms);
+		else
+			say("NVKMS loaded; display test %d", nvrm_kms_show());
 
 		/* N1e: /dev/nvidiactl and /dev/nvidia0, through the kernel's
 		 * chardev core; this serves them for nvrm's life. */

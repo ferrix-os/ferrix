@@ -1834,3 +1834,71 @@ NV_STATUS NV_API_CALL nv_log_error(
               NV_PCI_DEV_FMT_ARGS(nv), error_number, text);
     return NV_OK;
 }
+
+/* ------------------------------------------------------------------------
+ * For nvidia-modeset (os/kept/nv-modeset-interface.c). NVIDIA's
+ * nvidia_dev_get and nvidia_dev_put, less nv_open_device's start: nvrm
+ * starts each GPU at probe, so NVKMS's open only counts a reference, as
+ * nvrm_open_gpu does for a file. And a walk of the probed GPUs, which
+ * Linux's nvidia_modeset_enumerate_gpus makes over nv_linux_devices
+ * itself.
+ * ---------------------------------------------------------------------- */
+
+static nv_linux_state_t *nv_find_gpu_id(NvU32 gpu_id)
+{
+    nv_linux_state_t *nvl;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+        if (NV_STATE_PTR(nvl)->gpu_id == gpu_id)
+            break;
+    UNLOCK_NV_LINUX_DEVICES();
+    return nvl;
+}
+
+int nvidia_dev_get(NvU32 gpu_id, nvidia_stack_t *sp)
+{
+    nv_linux_state_t *nvl = nv_find_gpu_id(gpu_id);
+
+    if (nvl == NULL || !(NV_STATE_PTR(nvl)->flags & NV_FLAG_OPEN))
+        return -ENODEV;
+
+    nvos_sema_down(&nvl->ldata_lock);
+    atomic64_inc(&nvl->usage_count);
+    nvos_sema_up(&nvl->ldata_lock);
+    return 0;
+}
+
+void nvidia_dev_put(NvU32 gpu_id, nvidia_stack_t *sp)
+{
+    nv_linux_state_t *nvl = nv_find_gpu_id(gpu_id);
+
+    if (nvl == NULL)
+        return;
+
+    nvos_sema_down(&nvl->ldata_lock);
+    (void)atomic64_dec_and_test(&nvl->usage_count);
+    nvos_sema_up(&nvl->ldata_lock);
+}
+
+NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, NvU32, void *),
+                            void *argument)
+{
+    nv_linux_state_t *nvl;
+    NvU32 count = 0;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+    {
+        if (count >= limit)
+        {
+            nv_printf(NV_DBG_WARNINGS, "NVRM: More than %d GPUs found.", limit);
+            count = 0;
+            break;
+        }
+        each(nvl, count, argument);
+        count++;
+    }
+    UNLOCK_NV_LINUX_DEVICES();
+    return count;
+}
