@@ -1177,6 +1177,21 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("arch::x86_64::syscall::early",
                 "arch::x86_64::syscall::ferrix_syscall_entry");
         }
+        requirement <'L.x86_64.150'> theFastPathSwitchIsReadOnce : ItemLowLevel {
+            attribute :>> statement = "fastpath::init shall read ferrix.fastpath once,
+                before the first program, from the loader's command line and then the
+                device tree's bootargs; on shall be true only for ferrix.fastpath=on,
+                off for off, for no option and for any other value, which is reported
+                as ignored; and stage 9 shall print which path channel_write_read
+                takes and how the option was read.";
+            attribute :>> criterion = "Booted with ferrix.fastpath=off and with
+                ferrix.fastpath=on, x86-64's stage-9 line says off and on as asked,
+                and ipc-equiv's transcripts on the two boots are the same line for
+                line (`cargo xtask test-ipc-equiv`); test-boot, which passes no
+                option, says off by default.";
+            attribute :>> parent = "H.BOOT.2";
+            attribute :>> unit = ("fastpath::init", "fastpath::on", "fastpath::report");
+        }
     }
 
     package CompatEntry {
