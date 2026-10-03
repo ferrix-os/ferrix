@@ -682,6 +682,11 @@ pub(crate) fn sys_ioctl(
     if let Some(control) = crate::interfaces::audio::pcm::control_of(file.io()) {
         return crate::interfaces::audio::pcm::control_ioctl(process, &control, request, arg);
     }
+    // A node a ring-3 driver serves through the chardev core
+    // (`docs/NVIDIA.md` §4.4): forwarded to it undecoded.
+    if let Some(chardev) = crate::interfaces::chardev::file::of(file.io()) {
+        return crate::interfaces::chardev::file::ioctl(&chardev, request, arg);
+    }
     // An open disk (`docs/INSTALLER.md` §5.1): its geometry and a flush.
     if let Some(disk) = fs::disk_file::of(file.io()) {
         return fs::disk_file::ioctl(process, &disk, request, arg);

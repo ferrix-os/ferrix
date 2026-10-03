@@ -30,6 +30,8 @@ doctest = false
 # with the instruction.
 ferrix-native = { path = "../../../../../../../lib/proto/native" }
 ferrix-native-abi = { path = "../../../../../../../lib/proto/native-abi" }
+# The chardev core's control protocol: HELLO and REQUEST (N1e).
+ferrix-chardevctl = { path = "../../../../../../../lib/proto/chardevctl" }
 
 # ---------------------------------------------------------------------------
 # Lints

@@ -17,6 +17,7 @@ members = [
     "src/lib/proto/renderctl",
     "src/lib/proto/inputctl",
     "src/lib/proto/sndctl",
+    "src/lib/proto/chardevctl",
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
     "src/lib/proto/audit",
@@ -132,6 +133,7 @@ ferrix-displayctl = { path = "src/lib/proto/displayctl" }
 ferrix-renderctl = { path = "src/lib/proto/renderctl" }
 ferrix-inputctl = { path = "src/lib/proto/inputctl" }
 ferrix-sndctl = { path = "src/lib/proto/sndctl" }
+ferrix-chardevctl = { path = "src/lib/proto/chardevctl" }
 ferrix-adb = { path = "src/lib/proto/adb" }
 ferrix-vdagent = { path = "src/lib/drivers/console/vdagent" }
 ferrix-logctl = { path = "src/lib/proto/logctl" }

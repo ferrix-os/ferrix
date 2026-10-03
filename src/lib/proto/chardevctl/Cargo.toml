@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-chardevctl"
+description = "The control protocol between the kernel's chardev core and a ring-3 driver whose device files it forwards undecoded (NVIDIA's nvrm)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

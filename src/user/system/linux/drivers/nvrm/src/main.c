@@ -64,6 +64,7 @@ enum step {
 	STEP_VOLUME = 12,
 	STEP_ATTACH = 13,
 	STEP_RM = 14,
+	STEP_CHARDEV = 15,
 };
 
 /* Where the NVIDIA volume, mounted at /data, carries RM's core (written
@@ -91,6 +92,7 @@ extern uint32_t nvrm_bootstrap;
 extern uint32_t nvos_device_attach(uint32_t handle);
 extern int nvrm_module_init(void);
 extern int nvrm_gpu_start(void);
+extern int nvrm_chardev_serve(const uint16_t *minors, uint32_t count);
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
 static char place[16];
@@ -310,6 +312,13 @@ int main(void)
 			return status;
 		}
 		say("GPU started on %s", place);
+
+		/* N1e: /dev/nvidiactl and /dev/nvidia0, through the kernel's
+		 * chardev core; this serves them for nvrm's life. */
+		static const uint16_t minors[] = { 255, 0 };
+		int served = nvrm_chardev_serve(minors, 2);
+		return stop(STEP_CHARDEV, "the device files' control failed",
+			    served);
 	}
 
 	say("skeleton up on %s; idle", place);

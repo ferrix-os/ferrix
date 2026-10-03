@@ -30,7 +30,7 @@ const FUTEX_WAKE_PRIVATE: usize = 129;
 ///
 /// The call must be one whose pointer arguments name memory valid for what
 /// the call does with it.
-unsafe fn call6(number: usize, a: [usize; 6]) -> usize {
+pub(crate) unsafe fn call6(number: usize, a: [usize; 6]) -> usize {
     let mut result = number;
     // SAFETY: the caller vouches for the call; the instruction clobbers RCX
     // and R11, and Ferrix's native calls may also write RSI, RDX and R10

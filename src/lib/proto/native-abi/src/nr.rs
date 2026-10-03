@@ -136,6 +136,14 @@ pub const DEVICE_SET_LIMIT: usize = 0x1057;
 pub const DEVICE_GET_LIMIT: usize = 0x1058;
 /// [`NativeCall::DeviceIsolation`].
 pub const DEVICE_ISOLATION: usize = 0x1059;
+/// [`NativeCall::ChardevControlCreate`].
+pub const CHARDEV_CONTROL_CREATE: usize = 0x105A;
+/// [`NativeCall::ChardevReply`].
+pub const CHARDEV_REPLY: usize = 0x105B;
+/// [`NativeCall::ChardevCopyIn`].
+pub const CHARDEV_COPY_IN: usize = 0x105C;
+/// [`NativeCall::ChardevCopyOut`].
+pub const CHARDEV_COPY_OUT: usize = 0x105D;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -478,10 +486,30 @@ pub enum NativeCall {
     /// only the vectors minted for it (`H.DMA.9`). Any device handle will
     /// do.
     DeviceIsolation,
+    /// `(device)` → channel. The device's chardev control channel, one per
+    /// device, for a driver whose device files the kernel forwards
+    /// undecoded (`docs/NVIDIA.md` §4.4): HELLO on it lists the minors of
+    /// major 195 it serves, and REQUESTs come back. The driver's end has no
+    /// `TRANSFER` or `DUPLICATE`. Needs `MANAGE` on a device whose
+    /// interrupts are isolated. Answered by the load ring.
+    ChardevControlCreate,
+    /// `(control, request, status, value)`. Answer an outstanding request:
+    /// `status` zero or a negative errno, `value` an ioctl's return.
+    /// `BAD_STATE` for a request that is not outstanding on this control.
+    /// Answered by the load ring.
+    ChardevReply,
+    /// `(control, request, client address, buffer, length)`. Copy from the
+    /// memory of the program waiting in the request into the caller's
+    /// buffer. Only while the request is outstanding. Answered by the load
+    /// ring.
+    ChardevCopyIn,
+    /// `(control, request, client address, buffer, length)`. The other way.
+    /// Answered by the load ring.
+    ChardevCopyOut,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 54] = [
+pub const ALL: [NativeCall; 58] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -536,6 +564,10 @@ pub const ALL: [NativeCall; 54] = [
     NativeCall::DeviceSetLimit,
     NativeCall::DeviceGetLimit,
     NativeCall::DeviceIsolation,
+    NativeCall::ChardevControlCreate,
+    NativeCall::ChardevReply,
+    NativeCall::ChardevCopyIn,
+    NativeCall::ChardevCopyOut,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -605,6 +637,10 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         DEVICE_SET_LIMIT => NativeCall::DeviceSetLimit,
         DEVICE_GET_LIMIT => NativeCall::DeviceGetLimit,
         DEVICE_ISOLATION => NativeCall::DeviceIsolation,
+        CHARDEV_CONTROL_CREATE => NativeCall::ChardevControlCreate,
+        CHARDEV_REPLY => NativeCall::ChardevReply,
+        CHARDEV_COPY_IN => NativeCall::ChardevCopyIn,
+        CHARDEV_COPY_OUT => NativeCall::ChardevCopyOut,
         _ => return None,
     };
     Some(call)
@@ -668,5 +704,9 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::DeviceSetLimit => DEVICE_SET_LIMIT,
         NativeCall::DeviceGetLimit => DEVICE_GET_LIMIT,
         NativeCall::DeviceIsolation => DEVICE_ISOLATION,
+        NativeCall::ChardevControlCreate => CHARDEV_CONTROL_CREATE,
+        NativeCall::ChardevReply => CHARDEV_REPLY,
+        NativeCall::ChardevCopyIn => CHARDEV_COPY_IN,
+        NativeCall::ChardevCopyOut => CHARDEV_COPY_OUT,
     }
 }

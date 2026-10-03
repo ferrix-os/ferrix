@@ -85,8 +85,10 @@ static void nvrm_gpu_isr(void *argument)
     NvU32 need_bottom_half = 0;
     NvU32 faults = 0;
 
+    nvos_isr_enter_leave(NV_TRUE);
     rm_gpu_handle_mmu_faults(nvl->sp_isr, nv, &faults);
     (void)rm_isr(nvl->sp_isr, nv, &need_bottom_half);
+    nvos_isr_enter_leave(NV_FALSE);
     if (need_bottom_half || faults != 0)
         rm_isr_bh(nvl->sp_bh, nv);
 }

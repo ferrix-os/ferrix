@@ -21,6 +21,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
+pub mod chardev;
 pub mod client;
 pub mod cpu;
 pub mod device;

@@ -323,6 +323,70 @@ void nvrm_module_exit(void)
     nv_module_sp = NULL;
 }
 
+/* Whether a probed GPU has RM's id `gpu_id`. */
+static NvBool nv_gpu_id_known(NvU32 gpu_id)
+{
+    nv_linux_state_t *nvl;
+    NvBool found = NV_FALSE;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+    {
+        if (NV_STATE_PTR(nvl)->gpu_id == gpu_id)
+        {
+            found = NV_TRUE;
+            break;
+        }
+    }
+    UNLOCK_NV_LINUX_DEVICES();
+    return found;
+}
+
+/*
+ * The GPU's device file, /dev/nvidia<minor>. NVIDIA's nvidia_open, less the
+ * open-completion wait and nv_open_device's start: nvrm starts each GPU at
+ * probe (os/kept/nv-pci.c), so an open only finds it and takes a reference.
+ * NULL for a minor no GPU has.
+ */
+nv_linux_file_private_t *nvrm_open_gpu(NvU32 minor)
+{
+    nv_linux_state_t *nvl;
+    nv_linux_file_private_t *nvlfp;
+
+    LOCK_NV_LINUX_DEVICES();
+    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
+        if (nvl->minor_num == minor)
+            break;
+    UNLOCK_NV_LINUX_DEVICES();
+    if (nvl == NULL || !(NV_STATE_PTR(nvl)->flags & NV_FLAG_OPEN))
+        return NULL;
+
+    nvlfp = nv_alloc_file_private();
+    if (nvlfp == NULL)
+        return NULL;
+    if (nv_kmem_cache_alloc_stack(&nvlfp->sp) != 0)
+    {
+        nv_free_file_private(nvlfp);
+        return NULL;
+    }
+
+    nvos_sema_down(&nvl->ldata_lock);
+    nvlfp->nvptr = nvl;
+    atomic64_inc(&nvl->usage_count);
+    nvos_sema_up(&nvl->ldata_lock);
+
+    nvlfp->open_rc = 0;
+    nvlfp->adapter_status = NV_OK;
+
+    nvos_mutex_lock(&nv_open_files_lock);
+    nvlfp->fd = nv_next_fd++;
+    nvlfp->next_open = nv_open_files;
+    nv_open_files = nvlfp;
+    nvos_mutex_unlock(&nv_open_files_lock);
+
+    return nvlfp;
+}
+
 /* ------------------------------------------------------------------------
  * The control device. NVIDIA's nvidia_ctl_open and nvidia_ctl_close, with
  * the struct file replaced by the file identity nvrm hands out.
@@ -400,7 +464,9 @@ void nvrm_close(nv_linux_file_private_t *nvlfp)
     nv_forget_open_file(nvlfp);
 
     nvos_sema_down(&nvl->ldata_lock);
-    if (atomic64_dec_and_test(&nvl->usage_count))
+    /* A GPU stays started (and NV_FLAG_OPEN) for nvrm's life; the control
+     * device is open while any file of it is. */
+    if (atomic64_dec_and_test(&nvl->usage_count) && (nv->flags & NV_FLAG_CONTROL))
     {
         nv->flags &= ~NV_FLAG_OPEN;
     }
@@ -648,13 +714,14 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
             }
 
             /*
-             * Ferrix: nvidia_dev_get() opens the GPU, which comes at N1d.
-             * Until then any GPU id but 0 is refused, as Linux refuses an
-             * id no probed GPU has.
+             * Ferrix: NVIDIA's nvidia_dev_get() looks each id up and opens
+             * its GPU. nvrm's GPUs are started at probe (os/kept/nv-pci.c),
+             * as a persistence-mode GPU is on Linux, so the lookup is all
+             * that is left: an id no probed GPU has is refused.
              */
             for (i = 0; i < num_arg_gpus; i++)
             {
-                if (((NvU32 *)arg_copy)[i] != 0)
+                if (!nv_gpu_id_known(((NvU32 *)arg_copy)[i]))
                 {
                     nvos_sema_up(&nvl->ldata_lock);
                     status = -EINVAL;

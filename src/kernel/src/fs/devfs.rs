@@ -694,6 +694,9 @@ enum Place {
     SoundControl(u32),
     /// `/dev/snd/pcmC<N>D0p`.
     SoundPcm(u32),
+    /// A node of major 195 a ring-3 driver serves through the chardev core,
+    /// by its minor (`docs/NVIDIA.md` §4.4).
+    Chardev(u16),
     /// `/dev/pts`, the directory a pseudoterminal's slave is in.
     Pts,
     /// `/dev/pts/<N>`.
@@ -731,6 +734,7 @@ impl Node {
             | Place::Snd
             | Place::SoundControl(_)
             | Place::SoundPcm(_)
+            | Place::Chardev(_)
             | Place::Pts
             | Place::Slave(_)
             | Place::Shm
@@ -811,6 +815,12 @@ impl Inode for Node {
                 ..directory
             },
             (Place::Link(index), _) => link_metadata(index, directory),
+            (Place::Chardev(minor), _) => Metadata {
+                atime: self.made,
+                mtime: self.made,
+                ctime: self.made,
+                ..crate::interfaces::chardev::file::metadata(minor)
+            },
             (Place::Slave(number), _) => Metadata {
                 atime: self.made,
                 mtime: self.made,
@@ -958,6 +968,12 @@ impl Inode for Node {
             let file: Arc<dyn Inode> = crate::interfaces::audio::pcm::ControlFile::open(card)?;
             return Ok(Some(file));
         }
+        // Every open of a chardev node is a file of its own, which its
+        // driver is told of and agrees to (`docs/NVIDIA.md` §4.4).
+        if let Place::Chardev(minor) = self.place {
+            let file: Arc<dyn Inode> = crate::interfaces::chardev::file::ChardevFile::open(minor)?;
+            return Ok(Some(file));
+        }
         // A slave is one object a pair, shared by every open of it, as a
         // terminal is: two programs with the same terminal open read from
         // one queue.
@@ -987,6 +1003,7 @@ impl Inode for Node {
         | Place::Event(_)
         | Place::SoundControl(_)
         | Place::SoundPcm(_)
+        | Place::Chardev(_)
         | Place::Slave(_) = self.place
         {
             return Err(Errno::ENXIO);
@@ -1016,6 +1033,7 @@ impl Inode for Node {
         | Place::Event(_)
         | Place::SoundControl(_)
         | Place::SoundPcm(_)
+        | Place::Chardev(_)
         | Place::Slave(_) = self.place
         {
             return Err(Errno::ENXIO);
@@ -1121,6 +1139,14 @@ impl Inode for Node {
         if let Some(index) = LINKS.iter().position(|(link, _)| *link == name) {
             return Ok(Arc::new(Node {
                 place: Place::Link(index),
+                made: self.made,
+            }));
+        }
+        if let Some(minor) = ferrix_chardevctl::node::minor_of(name)
+            && crate::interfaces::chardev::published(minor).is_some()
+        {
+            return Ok(Arc::new(Node {
+                place: Place::Chardev(minor),
                 made: self.made,
             }));
         }
@@ -1239,8 +1265,8 @@ impl Inode for Node {
                 return Ok(());
             }
         }
-        if emit_snd(cursor, emit) {
-            emit_links(cursor, emit);
+        if emit_snd(cursor, emit) && emit_links(cursor, emit) {
+            emit_chardevs(cursor, emit);
         }
         Ok(())
     }
@@ -1511,8 +1537,9 @@ fn link_metadata(index: usize, directory: Metadata) -> Metadata {
     }
 }
 
-/// The root's entries for [`LINKS`], from `cursor` on, last in a listing.
-fn emit_links(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) {
+/// The root's entries for [`LINKS`], from `cursor` on; whether the listing
+/// may go on.
+fn emit_links(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> bool {
     let first = usize::try_from(cursor.saturating_sub(LINK_CURSOR)).unwrap_or(usize::MAX);
     for (index, (name, _)) in LINKS.iter().enumerate().skip(first) {
         let entry = DirEntry {
@@ -1520,6 +1547,34 @@ fn emit_links(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) {
             kind: FileType::Symlink,
             name,
             next: LINK_CURSOR.saturating_add(index as u64 + 1),
+        };
+        if !emit(entry) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The root's cursor for the chardev nodes, after the links: one past it
+/// for each minor.
+const CHARDEV_CURSOR: u64 = (1 << 48) + 16;
+
+/// The root's entries for the published chardev nodes, by minor, last in a
+/// listing (`docs/NVIDIA.md` §4.4).
+fn emit_chardevs(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) {
+    for minor in crate::interfaces::chardev::published_minors() {
+        let at = CHARDEV_CURSOR.saturating_add(u64::from(minor));
+        if at < cursor {
+            continue;
+        }
+        let Some(name) = ferrix_chardevctl::node::name(minor) else {
+            continue;
+        };
+        let entry = DirEntry {
+            ino: crate::interfaces::chardev::file::INO_BASE.saturating_add(u64::from(minor)),
+            kind: FileType::CharDevice,
+            name: name.as_bytes(),
+            next: at.saturating_add(1),
         };
         if !emit(entry) {
             return;

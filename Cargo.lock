@@ -141,6 +141,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-chardevctl"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-cpio"
 version = "0.1.0"
 
@@ -295,6 +299,7 @@ dependencies = [
  "ferrix-btrfs-vfs",
  "ferrix-btrfs-write",
  "ferrix-cgroupfs",
+ "ferrix-chardevctl",
  "ferrix-crng",
  "ferrix-description",
  "ferrix-devmgr-proto",

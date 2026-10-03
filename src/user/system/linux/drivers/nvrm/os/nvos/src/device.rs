@@ -101,6 +101,16 @@ fn device() -> Option<ManuallyDrop<Device<Kernel>>> {
     })
 }
 
+/// The attached device's location word, 0 before attach.
+pub(crate) fn location() -> u32 {
+    attached().map_or(0, |attached| attached.info.location)
+}
+
+/// The attached device's handle, 0 before attach.
+pub(crate) fn handle() -> u32 {
+    STATE.handle.load(Ordering::Acquire)
+}
+
 /// What attach learned, once attached.
 fn attached() -> Option<&'static Attached> {
     if STATE.handle.load(Ordering::Acquire) == 0 {

@@ -71,7 +71,7 @@ use console::{println, println_unlogged};
 use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, pci, tree};
 use early::EarlyMemory;
-use interfaces::{audio, block_ring, display, input, logctl, net_ring, render};
+use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
 
 /// What the boot test waits for. Changing it means changing
@@ -1268,6 +1268,7 @@ fn register_load(view: &BootView<'_>) {
         .and_then(|()| render::install())
         .and_then(|()| input::install())
         .and_then(|()| audio::install())
+        .and_then(|()| chardev::install())
         .and_then(|()| logctl::install());
     if let Err(hooks::Full) = registered {
         fatal!(

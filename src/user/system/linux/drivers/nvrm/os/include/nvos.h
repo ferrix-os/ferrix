@@ -90,6 +90,30 @@ struct nvos_device_desc {
     NvU64 len[NVOS_APERTURES];
 };
 NV_STATUS nvos_device_describe(struct nvos_device_desc *out);
+
+/* thread.rs: a detached thread, for the chardev dispatcher's workers. */
+NvBool nvos_thread_spawn(void (*run)(void *), void *argument);
+
+/* chardev.rs: the request bridge to the kernel's chardev core (N1e). */
+struct nvos_request {
+    NvU64 id;
+    NvU64 file;
+    NvU32 op;           /* 1 open, 2 ioctl, 3 release */
+    NvU32 minor;
+    NvU32 pid;
+    NvU32 euid;
+    NvU32 egid;
+    NvU32 cmd;
+    NvU64 arg;
+};
+#define NVOS_REQUEST_OPEN    1
+#define NVOS_REQUEST_IOCTL   2
+#define NVOS_REQUEST_RELEASE 3
+NV_STATUS nvos_chardev_start(const NvU16 *minors, NvU32 count);
+NV_STATUS nvos_chardev_next(struct nvos_request *out);
+int nvos_chardev_reply(NvU64 id, int status, NvS64 value);
+int nvos_chardev_copy_in(NvU64 id, void *to, NvU64 from, NvU32 length);
+int nvos_chardev_copy_out(NvU64 id, NvU64 to, const void *from, NvU32 length);
 void nvos_isr_enter_leave(NvBool entering);
 
 /* client.rs: the client the calling thread serves a request for. */

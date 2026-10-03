@@ -23,6 +23,7 @@
 
 pub(crate) mod audio;
 pub(crate) mod block_ring;
+pub(crate) mod chardev;
 pub(crate) mod display;
 pub(crate) mod input;
 pub(crate) mod logctl;

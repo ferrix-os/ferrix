@@ -105,3 +105,11 @@ pub extern "C" fn nvos_isr_enter_leave(entering: bool) {
     }
     IN_ISR.store(entering, Ordering::Release);
 }
+
+/// Start a detached thread running `run(argument)`, for the kept C: the
+/// chardev dispatcher's ioctl workers (`glue/chardev.c`). Whether it
+/// started.
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn nvos_thread_spawn(run: extern "C" fn(*mut c_void), argument: *mut c_void) -> bool {
+    spawn(run, argument)
+}

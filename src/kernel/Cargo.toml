@@ -35,6 +35,7 @@ ferrix-displayctl.workspace = true
 ferrix-renderctl.workspace = true
 ferrix-inputctl.workspace = true
 ferrix-sndctl.workspace = true
+ferrix-chardevctl.workspace = true
 ferrix-logctl.workspace = true
 ferrix-audit.workspace = true
 ferrix-netwire.workspace = true
