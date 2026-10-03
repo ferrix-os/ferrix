@@ -53,8 +53,8 @@ fn elf(segments: &[Seg]) -> Vec<u8> {
     file
 }
 
-/// The export header: two exports, a function in text and data in
-/// read-only data.
+/// The export header: two exports, data in read-only data and a function
+/// in text, in that order.
 fn header(magic: u64, version: u32, count: u32, id: &[u8; 20], entries: &[u64]) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&magic.to_le_bytes());
@@ -73,7 +73,7 @@ const DATA: u64 = BASE + 0x2000;
 
 /// A good core's segments: the header and read-only data, text, data.
 fn good() -> Vec<Seg> {
-    let mut rodata = header(MAGIC, VERSION, 2, &ID, &[TEXT, BASE + 0x100]);
+    let mut rodata = header(MAGIC, VERSION, 2, &ID, &[BASE + 0x100, TEXT]);
     rodata.resize(0x200, 0);
     vec![
         Seg {
@@ -240,7 +240,7 @@ fn a_core_linked_against_another_nvrm() {
 #[test]
 fn an_export_outside_its_segment() {
     // The function in data, the data in text, and an address in no segment.
-    for entries in [[DATA, BASE + 0x100], [TEXT, TEXT + 4], [TEXT, END + 0x100]] {
+    for entries in [[BASE + 0x100, DATA], [TEXT + 4, TEXT], [END + 0x100, TEXT]] {
         let mut segments = good();
         let replaced = header(MAGIC, VERSION, 2, &ID, &entries);
         segments[0].bytes[..replaced.len()].copy_from_slice(&replaced);

@@ -228,6 +228,15 @@ void nvrm_close(nv_linux_file_private_t *nvlfp);
 /* A line for this layer's own messages. */
 #define nvrm_say(...)   nv_printf(NV_DBG_ERRORS, "nvrm: " __VA_ARGS__)
 
+/* RM's own data, which nvrm reads through the table nvos_core_load fills
+ * from the core's export header (docs/NVIDIA.md §4.1, "The core"). Data
+ * comes first in the table, in core/core-link.py's DATA order, so these
+ * indices are fixed; a function of the core is called by its own name,
+ * through a generated stub. */
+extern unsigned long long nvrm_core_table[];
+#define NVRM_CORE_DATA_pNVRM_ID 0
+#define pNVRM_ID (*(const char *const *)nvrm_core_table[NVRM_CORE_DATA_pNVRM_ID])
+
 /* A stub that fails loudly (glue/stubs.c): one line naming it, each time. */
 void nvos_stub_called(const char *name, const char *why);
 

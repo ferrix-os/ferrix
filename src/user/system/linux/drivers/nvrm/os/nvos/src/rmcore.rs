@@ -296,7 +296,8 @@ fn program_header(file: &[u8], at: u64) -> Option<(u32, u32, u64, u64, u64, u64)
 }
 
 /// Check `file`, the whole core, against nvrm's `pin` and `build_id`, for
-/// `exports` entries of which the first `functions` are code. Nothing is
+/// `exports` entries of which the first `data` are data and the rest code
+/// (`core/core-link.py` puts data first). Nothing is
 /// mapped or changed.
 ///
 /// # Errors
@@ -308,7 +309,7 @@ pub fn check(
     pin: &[u8; 32],
     build_id: &[u8],
     exports: u32,
-    functions: u32,
+    data: u32,
 ) -> Result<Plan, Refusal> {
     if pin.iter().all(|&byte| byte == 0) {
         return Err(Refusal::Unpinned);
@@ -320,7 +321,7 @@ pub fn check(
         return Err(Refusal::Hash);
     }
     let plan = segments(file)?;
-    exports_check(file, plan, build_id, exports, functions)
+    exports_check(file, plan, build_id, exports, data)
 }
 
 /// The ELF header and the program headers.
@@ -399,7 +400,7 @@ fn exports_check(
     mut plan: Plan,
     build_id: &[u8],
     exports: u32,
-    functions: u32,
+    data: u32,
 ) -> Result<Plan, Refusal> {
     let first = *plan.segments().first().ok_or(Refusal::Shape)?;
     if first.address != BASE || first.flags & (PF_W | PF_X) != 0 {
@@ -427,7 +428,7 @@ fn exports_check(
     for index in 0..exports {
         let address = le::<8>(file, at + HEADER_BYTES as u64 + 8 * u64::from(index))
             .ok_or(Refusal::Export)?;
-        let code = index < functions;
+        let code = index >= data;
         let placed = plan
             .segments()
             .iter()
@@ -714,7 +715,7 @@ fn load(
     pin: &[u8; 32],
     table: *mut u64,
     exports: u32,
-    functions: u32,
+    data: u32,
 ) -> Result<(), Refusal> {
     if pin.iter().all(|&byte| byte == 0) {
         return Err(Refusal::Unpinned);
@@ -731,7 +732,7 @@ fn load(
     let (buffer, size) = read?;
     // SAFETY: `read_whole` filled `size` bytes at `buffer`, unmapped below.
     let file = unsafe { core::slice::from_raw_parts(buffer, size) };
-    let checked = check(file, pin, build_id, exports, functions);
+    let checked = check(file, pin, build_id, exports, data);
     // SAFETY: the plan is checked, and the caller gives `table`.
     let mapped = checked.and_then(|plan| unsafe { map(file, &plan, table) }.map(|()| plan));
     // SAFETY: the buffer `read_whole` mapped, `size` bytes, no longer used.
@@ -790,7 +791,7 @@ impl fmt::Display for Hex<'_> {
     }
 }
 
-/// `nvos_core_load(path, pin, table, exports, functions)`: load RM's core
+/// `nvos_core_load(path, pin, table, exports, data)`: load RM's core
 /// for nvrm's call table (`src/main.c`). Answers 0, or the refusal's exit
 /// status after its line.
 ///
@@ -804,11 +805,11 @@ pub unsafe extern "C" fn nvos_core_load(
     pin: *const [u8; 32],
     table: *mut u64,
     exports: u32,
-    functions: u32,
+    data: u32,
 ) -> c_int {
     // SAFETY: the caller's contract.
     let pin = unsafe { &*pin };
-    match load(path, pin, table, exports, functions) {
+    match load(path, pin, table, exports, data) {
         Ok(()) => 0,
         Err(refusal) => {
             log::say_line(format_args!("core refused: {refusal}"));

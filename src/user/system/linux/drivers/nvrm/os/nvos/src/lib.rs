@@ -22,6 +22,7 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod client;
+pub mod cpu;
 pub mod device;
 mod futex;
 mod libc;

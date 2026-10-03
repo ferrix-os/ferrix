@@ -16,6 +16,12 @@
  *     and the line that verifies F-57's closure on the ferrix-3060 domain
  *     at N1's first boot;
  *  4. prints its pin budget (device_get_limit);
+ *  4a. loads RM's core from the NVIDIA volume (docs/NVIDIA.md §4.1, "The
+ *     core"): it waits, a bounded while, for the file to appear, since the
+ *     volume is mounted after devmgr reports, and nothing waits on nvrm;
+ *     then nvos_core_load checks and maps it, or refuses with its line.
+ *     device_isolation is printed before, so F-57's first-boot record is
+ *     had even when the load fails;
  *  5. lists the apertures whole (device_aperture) and reads the vendor and
  *     device back through the configuration window;
  *  6. maps BAR0 and reads its first register: NV_PMC_BOOT_0, the chip's
@@ -33,6 +39,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "core-calls.h"
 #include "native.h"
 
 /* NVIDIA's PCI vendor. */
@@ -50,7 +57,24 @@ enum step {
 	STEP_CONFIG = 9,
 	STEP_BAR0 = 10,
 	STEP_THREAD = 11,
+	STEP_VOLUME = 12,
 };
+
+/* Where the NVIDIA volume, mounted at /data, carries RM's core
+ * (tools/common/fetch/fetch-nvidia.sh), and how long nvrm waits for it. */
+#define CORE_PATH "/data/usr/lib/ferrix/nvrm-core"
+#define VOLUME_PATIENCE_MS 60000
+#define VOLUME_POLL_MS 250
+
+/* From pin.c, and the call table core-calls.S jumps through. */
+extern const unsigned char nvrm_core_sha256[32];
+extern unsigned long long nvrm_core_table[];
+
+/* From ferrix-nvos (os/nvos/src/rmcore.rs): 0, or the refusal's status
+ * after its line. */
+extern int nvos_core_load(const char *path, const unsigned char (*pin)[32],
+			  unsigned long long *table, uint32_t exports,
+			  uint32_t data);
 
 /* From start.c. */
 extern uint32_t nvrm_bootstrap;
@@ -152,9 +176,30 @@ static int bar0(uint32_t device, const struct nv_device_info *info)
 	return stop(STEP_BAR0, "the device has no BAR0 aperture", 0);
 }
 
+/* Wait for the core's file, a bounded while, then load it. */
+static int load_core(void)
+{
+	int waited = 0;
+	while (access(CORE_PATH, R_OK) != 0) {
+		if (waited == 0)
+			say("waiting up to %d s for the NVIDIA volume (%s)",
+			    VOLUME_PATIENCE_MS / 1000, CORE_PATH);
+		if (waited >= VOLUME_PATIENCE_MS) {
+			say("stopped: no NVIDIA volume within %d s: %s is "
+			    "missing", VOLUME_PATIENCE_MS / 1000, CORE_PATH);
+			return STEP_VOLUME;
+		}
+		usleep(VOLUME_POLL_MS * 1000);
+		waited += VOLUME_POLL_MS;
+	}
+	return nvos_core_load(CORE_PATH, &nvrm_core_sha256, nvrm_core_table,
+			      NVRM_CORE_EXPORTS, NVRM_CORE_DATA);
+}
+
 int main(void)
 {
 	uint32_t device = 0;
+	int status;
 	long result = receive(&device);
 	if (nv_failed(result))
 		return stop(STEP_BOOTSTRAP, "no START on the bootstrap channel",
@@ -197,6 +242,10 @@ int main(void)
 	say("pin budget %ld pages (%ld MiB), isolated-interrupts mark %ld",
 	    budget, budget / 256, marked);
 
+	status = load_core();
+	if (status != 0)
+		return status;
+
 	for (uint32_t index = 0; index < info.apertures; index++) {
 		struct nv_aperture_info aperture;
 		memset(&aperture, 0, sizeof aperture);
@@ -221,7 +270,7 @@ int main(void)
 	say("configuration window: vendor %04x device %04x",
 	    identity & 0xffff, identity >> 16);
 
-	int status = bar0(device, &info);
+	status = bar0(device, &info);
 	if (status != 0)
 		return status;
 
