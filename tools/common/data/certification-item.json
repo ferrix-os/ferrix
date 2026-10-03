@@ -410,6 +410,7 @@
       "interfaces::audio",
       "interfaces::block_ring",
       "interfaces::block_ring::driver_check",
+      "interfaces::chardev",
       "interfaces::display",
       "interfaces::input",
       "interfaces::logctl",

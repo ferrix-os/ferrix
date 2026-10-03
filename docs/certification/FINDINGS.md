@@ -639,7 +639,11 @@ forged, since a delivered INIT would stop a processor.
 the closure covers it, and N1's hand-over is fail-closed: `devmgr` marks the
 GPU, and the kernel refuses its vectors and pins unless `device_isolation`'s
 bit 1 holds in that guest. The domain's isolation is verified at N1's first
-boot by that bit.
+boot by that bit. **Verified 2026-10-03**: the first boot of the RTX 3060 in
+`ferrix-3060` (`cargo xtask run-nvidia`, the patched QEMU at
+`/usr/local/lib/ferrix/qemu`) printed `nvrm: device_isolation 0x3:
+interrupts isolated (bit 1), DMA translated` for the card at guest
+`02:00.0`, behind a root port, in a translated VT-d domain.
 
 *Where it stays open:* a machine without VT-d interrupt remapping, or with
 a unit that does not block compatibility format, or a PCI function behind
