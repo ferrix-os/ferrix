@@ -254,6 +254,16 @@ its bootstrap handle and an empty stack, so `nvrm`'s entry
 reads, and calls it as `crt1.o` would. From `main` on it is an ordinary
 ferrousli program that also makes native calls.
 
+**RM's core is not in `nvrm`'s image.** The core is 13 MB, too large for
+the kernel's read of a driver's image (§5). So `nvrm` reads it at run time
+from the NVIDIA volume, at `/data/usr/lib/ferrix/nvrm-core`, and never
+from the initramfs (`docs/NVIDIA.md` §4.1, "The core"). It reads the file
+with `read(2)` into anonymous memory of its own, so nothing maps the file.
+The volume is mounted after REPORT, so `nvrm` waits for the file, at most
+60 s. devmgr does not wait on `nvrm`, and its REPORT counts the GPU as
+started once `nvrm` is. The sha256 pin that `nvrm` checks the core against
+protects the product. It is not an argument for the certified item.
+
 `cargo xtask test-nvrm` (x86-64, KVM and TCG) boots the three outcomes
 QEMU can show: handed over at 4 GiB, refused for a budget too small at
 512 MiB, and refused for interrupts not isolated on a VT-d unit with
@@ -385,6 +395,19 @@ remap a running driver from the new root, and a driver started after the
 pivot must still get its image from the initramfs copy the kernel keeps.
 `devmgr` is the one process that starts drivers, so it is where that rule
 lives when the pivot exists.
+
+**`nvrm` is the one exception to "every image from the initramfs."** Its
+own image comes from the initramfs like every driver's. But RM's core
+(§3.2) is read from the NVIDIA volume after `nvrm` has started. The rule
+still holds in substance:
+
+* `nvrm` serves no disk. It is never a disk's driver, and the volume is
+  served by the disk's own driver.
+* The core is copied with `read(2)` into anonymous memory. No page of it is
+  filled from the file afterwards, so `nvrm` takes no fault through any
+  disk.
+
+A driver that serves a disk must never load code this way.
 
 ## 6. What this settles for stage 10's exit
 

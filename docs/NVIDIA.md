@@ -412,6 +412,84 @@ driver, which keeps its job, its process handle, its death watch and the
 image-as-memory rule (`docs/DEVMGR.md` §5), and `nvrm`'s own entry builds
 the stack ferrousli expects.
 
+**The core.** RM's core, `nv-kernel.o`, is 13 MB linked. That is more than
+the kernel reads into a driver's image, which is one heap block of 4 MiB
+(`docs/DEVMGR.md` §5). The customer chose on 2026-10-03 to keep `nvrm`
+small and load the core at run time (§10, N1c):
+
+* **Two links.** `nvrm` is linked first: static, not PIE, at 4 MiB, with a
+  build-id and a zeroed 32-byte `.nvrm_core_sha256` section. Then
+  `nvrm-core` is linked on the host from `nv-kernel.o` alone at
+  0x4000_0000 (`core/nvrm-core.ld`). `core/core-link.py` binds each of its
+  imports, code and data, to `nvrm`'s address for it. Both images lie in
+  the low 2 GiB, so RM's 32-bit relocations reach.
+* **The export header.** The core's first bytes are the magic `NVRMCORE`,
+  version 1, a count, `nvrm`'s build-id, and the addresses of what `nvrm`
+  uses in the core: its data first, then its functions. The count is what
+  `nvrm`'s objects import, computed per build, 17 today. Finally the core's
+  sha256 is written into `nvrm` with `objcopy --update-section`.
+* **Where it comes from.** The core is read from the NVIDIA volume at
+  `/data/usr/lib/ferrix/nvrm-core`, and never from the initramfs. `read(2)`
+  copies it into anonymous memory of `nvrm`'s own, so nothing maps the file
+  and no page of it is filled from the disk afterwards. The disk's own
+  driver serves the volume. `nvrm` is never a disk's driver.
+* **The wait.** The volume is mounted after devmgr's REPORT, so `nvrm`
+  waits for the file: polling every 250 ms, for at most 60 s. It then
+  stops with its own line (`nvrm: stopped: no NVIDIA volume within 60 s`,
+  exit 12). Neither the boot nor devmgr's REPORT waits on `nvrm`.
+  `device_isolation` is printed before the wait, so F-57's first-boot
+  record is had even when the core never loads.
+* **The checks** (`os/nvos/src/rmcore.rs`, each refusal its own
+  `nvos: core refused: …` line, then exit with no fallback):
+  * the pin is not all zero, and the file's sha256 is the pin;
+  * the file is an x86-64 `ET_EXEC` with only `PT_LOAD` and `PT_GNU_STACK`
+    headers;
+  * every segment is page-aligned, does not overlap another, lies in
+    [0x4000_0000, 2 GiB), and is not both writable and executable;
+  * the header's magic, version and count match, its build-id is `nvrm`'s
+    own, and every export lies in the right segment;
+  * each segment is mapped with `MAP_FIXED_NOREPLACE`, and `EEXIST` is a
+    refusal, never a retry elsewhere.
+
+  On success `nvrm` writes one line: `nvos: core loaded: sha256 …, N
+  bytes, base 0x40000000, N exports, build-id …`.
+* **W^X is `nvrm`'s own discipline.** The kernel does not refuse a mapping
+  that is both writable and executable; Linux does not either, and
+  Chrome's JIT relies on that. Only the ELF loader refuses a W+X image. So
+  after its `mprotect`s, and before the first call into RM, `nvrm` reads
+  `/proc/self/maps` back. It refuses if anything in the core's range is
+  writable and executable, if text is not `r-x`, or if read-only data is
+  not `r--`.
+* **Where the heap is.** `nvrm`'s `brk` heap starts above its image at
+  4 MiB and grows upward. The personality's `mmap` searches top-down from
+  the top of user space. Neither may reach the core's range,
+  [0x4000_0000, 2 GiB), before the core is mapped. The core is mapped early: before any thread starts and before
+  RM runs, when `nvrm` has made only a handful of small allocations and
+  one file-sized buffer. If something is already in the core's range,
+  `MAP_FIXED_NOREPLACE` turns that into a refusal, not an overlap.
+* **RM's one privileged instruction.** Across all of RM's code, only
+  `osNv_rdcr4` (`mov %cr4,%rax`) faults in ring 3. A linker-script
+  assignment overrides the object's own definition, so its three call
+  sites reach `nvrm`'s `nvos_rdcr4` (`os/nvos/src/cpu.rs`). That function
+  returns OSFXSR, and OSXSAVE as CPUID.1:ECX bit 27 reports it, which are
+  the bits RM reads. `core-link.py` scans `nv-kernel.o` and refuses the
+  build on any other privileged instruction.
+* **The build refuses** with named lines:
+  * an `nvrm` at or over the driver read limit, less half a mebibyte
+    (3670016 bytes), so that FX-1006's misleading "not in the image" is
+    never the symptom (its row in `docs/BACKLOG.md`);
+  * an unresolved symbol or a relocation overflow in the core link;
+  * any section header or symbol of `nvrm` that moved across the
+    `objcopy`;
+  * a core program header other than `PT_LOAD` and `PT_GNU_STACK`, or a
+    W+X `PT_LOAD`.
+
+The hash pin protects the product: it makes sure `nvrm` runs the core it
+was built with. It is **not** an argument for the certified item, and is
+never to be cited as one. The item's arguments about `nvrm` (§12.1's
+window, §12.2's pin budget, §12.3's isolation mark) already bound a
+compromised `nvrm` running any code at all.
+
 ### 4.2 The OS layer
 
 The ≈ 260 functions of §2.2 come in four groups. The estimates are lines of
@@ -665,6 +743,18 @@ either GL or Vulkan through yserver, as above.
 * `check-item-boundary.py` already enforces the rings. A new line in it
   refuses any path under `src/kernel` that names `nvidia` or includes a
   header from the fetched tree.
+* RM's core is loaded at run time from the NVIDIA volume (§4.1, "The
+  core"), not from the initramfs. That changes nothing in the item.
+  * W^X for the core is `nvrm`'s own discipline, checked against
+    `/proc/self/maps`. The kernel's `mmap` and `mprotect` refuse no W+X
+    mapping, and asking them to would be an item change.
+  * `nvrm`'s wait for the volume is bounded (60 s). It does not hold up
+    devmgr's REPORT, since the volume mounts after REPORT.
+  * `nvrm`'s heap and `mmap` area stay out of [0x4000_0000, 2 GiB) until
+    the core is mapped, and the core is mapped before any thread starts.
+  * The `osNv_rdcr4` binding replaces RM's one privileged instruction.
+  * The sha256 pin is product integrity. It is never an argument for the
+    item.
 
 **What enters the item** is only the platform work of N0: MSI, DMAR
 bridge scopes, the PAT, the configuration window, the pin budget and
@@ -1294,6 +1384,39 @@ and took the recommended answer for D2, D3 and D5.
     timers on ferrousli (one thread ran here), `interrupt_create` and
     `vmo_pin` under the mark, and `nvrm` in `run-nvidia`'s image for the
     `ferrix-3060` domain, where its first boot shows bit 1 for real.
+
+* **2026-10-03 — N1c: RM runs in `nvrm`, its core loaded from the NVIDIA
+  volume** (branch `nvidia-n1c`). This is outside the certified item:
+  `nvrm`, its OS layer, xtask and docs only, with no kernel file changed.
+  * **FX-1006 traced.** The kernel reads a driver's image into one heap
+    block, and the largest block is 4 MiB (`MAX_ORDER` 10). Any failure of
+    that read is reported as "not in the image." The customer chose option
+    (b): `nvrm` stays 1.5 MB, and it loads RM's 13 MB core at run time
+    (§4.1, "The core"). The consultant gave OK IF with nine conditions
+    (ledger line 289), all addressed in this branch. Its BACKLOG row
+    records FX-1006's misleading cause. Fixing `panic/catalog.rs` would be
+    an item change, so it is not done here.
+  * **The OS layer** (`os/nvos`, Rust, host-tested) and the kept MIT C are
+    linked into `nvrm`. `glue/stubs.c` holds the 70 imports nothing else
+    defines, each a loud stub. The `nv_dma_*` and `nv_acpi_*` stubs are
+    N1d's to make real.
+  * **`cargo xtask test-nvrm-link`** (on demand, as it needs the fetch)
+    runs `nvrm-link-test` on the host and on Ferrix under KVM. RM
+    initialises, allocates a root client, and refuses `NV01_DEVICE_0` with
+    status 0x40, since there is no GPU, then exits 0. The seven negative
+    controls each refuse with their own line and exit status: a flipped
+    byte 25, unpinned 20, another build 35, a segment past 2 GiB 30, a W+X
+    segment 29, a bad magic 32, an rwx mapping 41.
+  * **`cargo xtask test-nvrm`** now attaches a volume carrying the core.
+    In the handed-over boot, `nvrm` waits for the volume after devmgr's
+    REPORT, then prints `nvos: core loaded: sha256 be83e087…, 13445824
+    bytes, base 0x40000000, 17 exports, build-id …`. It passes all three
+    boots under KVM and TCG, with transcripts re-recorded. A host test
+    checks that a `nvos: core refused:` line fails the hand-over.
+  * **Left for N1d**: the real `nvidia.img` must carry
+    `usr/lib/ferrix/nvrm-core`, which xtask writes because it depends on
+    `nvrm`'s build. After that comes the first boot on the 3060 and GSP
+    boot.
 
 ## 11. CUDA (N5)
 
