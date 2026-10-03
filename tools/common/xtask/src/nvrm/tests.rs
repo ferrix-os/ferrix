@@ -121,8 +121,7 @@ fn a_hand_over_missing_a_step_or_out_of_order_fails() {
     assert!(why.contains("a thread ran"), "{why}");
     let run = HANDED_KVM.replace("started on 00:04.0", "started on 00:05.0");
     assert!(judge_handed(&lines(&run)).is_some());
-    let run =
-        format!("{HANDED_KVM}nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
+    let run = format!("{HANDED_KVM}nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
     assert!(judge_handed(&lines(&run)).is_some());
 }
 
