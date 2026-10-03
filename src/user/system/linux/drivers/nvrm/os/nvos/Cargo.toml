@@ -1,0 +1,76 @@
+[package]
+name = "ferrix-nvos"
+description = "The OS layer NVIDIA's resource manager runs on inside nvrm: memory, locks, waits, threads, timers, time and the device (docs/NVIDIA.md §4.2)"
+version = "0.1.0"
+edition = "2024"
+# Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+# A workspace of its own, as every program under src/user/system/linux/ is
+# (docs/LAYOUT.md): it builds for the Linux ABI, not for the kernel's
+# targets. `os/Makefile` builds it and links it, with NVIDIA's kept C and
+# Ferrix's C glue, into nvrm and nvrm-link-test.
+[workspace]
+
+[lib]
+# nvrm is a C program against ferrousli. This crate is a second Rust static
+# library beside ferrousli's, which works only because the release profile
+# below is fat LTO with one codegen unit: everything but the `extern "C"`
+# functions is internalized, so ferrousli's copy of `core` and its panic
+# handler never meet this one's. `cargo test` builds the crate as a test
+# harness with std, on the host.
+crate-type = ["staticlib"]
+doctest = false
+
+[dependencies]
+# The native calls for the device: the configuration window, apertures, pins
+# and interrupts. Written against a trait, which `sys::Kernel` implements
+# with the instruction.
+ferrix-native = { path = "../../../../../../../lib/proto/native" }
+ferrix-native-abi = { path = "../../../../../../../lib/proto/native-abi" }
+
+# ---------------------------------------------------------------------------
+# Lints
+#
+# ferrousli's discipline, trimmed to what an OS layer under C meets: nearly
+# every function takes a pointer from NVIDIA's C, so `unsafe` cannot be
+# denied, and every block must say why it is sound, about one operation. A
+# panic has nowhere to go -- the frames above it are RM's -- so the ways of
+# reaching one are denied too.
+# ---------------------------------------------------------------------------
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "deny"
+unused_results = "deny"
+missing_debug_implementations = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+debug = true
+overflow-checks = true
