@@ -75,7 +75,10 @@ pub fn minor_of(text: &[u8]) -> Option<u16> {
         b"nvidia-modeset" => Some(MODESET_MINOR),
         _ => {
             let digits = text.strip_prefix(b"nvidia")?;
-            if digits.is_empty() || digits.len() > 3 || (digits.len() > 1 && digits.first() == Some(&b'0')) {
+            if digits.is_empty()
+                || digits.len() > 3
+                || (digits.len() > 1 && digits.first() == Some(&b'0'))
+            {
                 return None;
             }
             let mut minor: u16 = 0;

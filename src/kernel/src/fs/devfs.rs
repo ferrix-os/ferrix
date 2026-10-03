@@ -1142,13 +1142,8 @@ impl Inode for Node {
                 made: self.made,
             }));
         }
-        if let Some(minor) = ferrix_chardevctl::node::minor_of(name)
-            && crate::interfaces::chardev::published(minor).is_some()
-        {
-            return Ok(Arc::new(Node {
-                place: Place::Chardev(minor),
-                made: self.made,
-            }));
+        if let Some(node) = chardev_node(name, self.made) {
+            return Ok(node);
         }
         if let Some(index) = DEVICES.iter().position(|device| device.name == name) {
             return Ok(node(index, self.made));
@@ -1553,6 +1548,17 @@ fn emit_links(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> bool {
         }
     }
     true
+}
+
+/// The chardev node `name` is in `/dev`, if a driver serves it
+/// (`docs/NVIDIA.md` §4.4).
+fn chardev_node(name: &[u8], made: Timespec) -> Option<Arc<dyn Inode>> {
+    let minor = ferrix_chardevctl::node::minor_of(name)?;
+    let _served = crate::interfaces::chardev::published(minor)?;
+    Some(Arc::new(Node {
+        place: Place::Chardev(minor),
+        made,
+    }))
 }
 
 /// The root's cursor for the chardev nodes, after the links: one past it

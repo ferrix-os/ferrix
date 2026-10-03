@@ -108,6 +108,11 @@ struct Buffer {
     count: u64,
 }
 
+/// The buffer at `at` of `count` elements, from two registers.
+const fn buffer(at: u64, count: u64) -> Buffer {
+    Buffer { at, count }
+}
+
 /// The call a native number names, or `None` for one outside the range or in
 /// a gap.
 ///
@@ -415,47 +420,19 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::ChannelWrite => channel_write(
             process,
             handle(a[0]),
-            Buffer {
-                at: a[1],
-                count: a[2],
-            },
-            Buffer {
-                at: a[3],
-                count: a[4],
-            },
+            buffer(a[1], a[2]),
+            buffer(a[3], a[4]),
         ),
         NativeCall::ChannelRead => channel_read(
             process,
             handle(a[0]),
-            Buffer {
-                at: a[1],
-                count: a[2],
-            },
-            Buffer {
-                at: a[3],
-                count: a[4],
-            },
+            buffer(a[1], a[2]),
+            buffer(a[3], a[4]),
             a[5],
         ),
         NativeCall::VmoCreate => vmo_create(process, a[0]),
-        NativeCall::VmoRead => vmo_read(
-            process,
-            handle(a[0]),
-            Buffer {
-                at: a[1],
-                count: a[2],
-            },
-            a[3],
-        ),
-        NativeCall::VmoWrite => vmo_write(
-            process,
-            handle(a[0]),
-            Buffer {
-                at: a[1],
-                count: a[2],
-            },
-            a[3],
-        ),
+        NativeCall::VmoRead => vmo_read(process, handle(a[0]), buffer(a[1], a[2]), a[3]),
+        NativeCall::VmoWrite => vmo_write(process, handle(a[0]), buffer(a[1], a[2]), a[3]),
         NativeCall::VmoGetSize => vmo_get_size(process, handle(a[0]), a[1]),
         NativeCall::ObjectWaitOne => object_wait_one(caller, handle(a[0]), a[1], a[2], a[3]),
         // A program makes this call through `dispatch_write_read`, which

@@ -1296,70 +1296,70 @@
     },
     {
       "file": "main.rs",
-      "lines": "1295",
+      "lines": "1296",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1365",
+      "lines": "1366",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1372",
+      "lines": "1373",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1397",
+      "lines": "1398",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1470",
+      "lines": "1471",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1547",
+      "lines": "1548",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1555-1556",
+      "lines": "1556-1557",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1605",
+      "lines": "1606",
       "category": "absent-hardware",
       "match": "if memory.map_framebuffer(at, framebuffer.phys, len).is_err(",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1608",
+      "lines": "1609",
       "category": "absent-hardware",
       "match": "if memory.translate(at) != Some(framebuffer.phys) {",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1611",
+      "lines": "1612",
       "category": "absent-hardware",
       "match": "panic::screen::install(&framebuffer, at, len);",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
@@ -1681,84 +1681,84 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "289",
+      "lines": "299",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "522",
+      "lines": "510",
       "category": "credited-elsewhere",
       "match": "TableError::AccessDenied => status::ACCESS_DENIED,",
       "why": "Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "523",
+      "lines": "511",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1053-1054",
+      "lines": "1041-1042",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1725",
+      "lines": "1713",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1791",
+      "lines": "1779",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1794",
+      "lines": "1782",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1804",
+      "lines": "1792",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1811",
+      "lines": "1799",
       "category": "defensive",
       "match": "object::dispose([object]);",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2291",
+      "lines": "2279",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2295-2296",
+      "lines": "2283-2284",
       "category": "absent-hardware",
       "match": "if !vmo.make_coherent() {",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2298-2299",
+      "lines": "2286-2287",
       "category": "absent-hardware",
       "match": "for frame in held.frames() {",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."

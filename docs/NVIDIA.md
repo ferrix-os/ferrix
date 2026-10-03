@@ -765,10 +765,11 @@ certification consultant reviews each one before landing, as usual.
 `request_copy_*` and `request_pin` widen what a driver can do. A driver can
 now read and write a client's memory and pin it, but only for a request
 that client made to that driver's own device file, and only while the
-client waits. They are new findings to be argued in
-`docs/certification/FINDINGS.md`: the threat is a compromised `nvrm`
-reading a client of its own. Linux has the same exposure, because the RM
-there runs in ring 0.
+client waits. This is a designed exposure with a stated bound, not a defect,
+so it is argued in `docs/certification/VULNERABILITY-ANALYSIS.md` (V-10, and
+V-11 for the 0666 nodes' parser surface), not in FINDINGS: the threat is a
+compromised `nvrm` reading a client of its own. Linux has the same
+exposure, because the RM there runs in ring 0.
 
 **Tests.** The GPU is shared and is not in CI, so the gates are xtask
 commands run on nazuna:
@@ -1497,8 +1498,16 @@ and took the recommended answer for D2, D3 and D5.
   * **`nvidia-smi` from the volume exits 0** and lists "NVIDIA GeForce RTX
     3060", 12288 MiB, driver 580.173.02, CUDA 13.0; `nvidia-smi -L` gives
     its UUID. This is N1's exit.
-  * **Owed** before N2 lands (BACKLOG): ledger 294's N10 and N12 to N15,
-    ledger 293's D1–D10, and a `test-nvidia-smi` gate.
+  * **Landed ahead of its conditions**, as N0 did, at the customer's word
+    (the consultant's verdict, ledger 297): the item gains only the five
+    call numbers and their `SERVED` rows, and the core does nothing on any
+    image but `run-nvidia`'s. A reply arriving while a copy is in flight
+    was found in that review and fixed before landing: the program's call
+    returns only once no copy for it is running (L1). **Owed** before N2
+    lands, or before `nvrm` goes into any other image (BACKLOG): ledger
+    294's N10, N12, N13 (plus a control for L1) and N15's remainder, N5's
+    switch when fault windows land, ledger 293's D1–D10, and a
+    `test-nvidia-smi` gate.
 
 ## 11. CUDA (N5)
 

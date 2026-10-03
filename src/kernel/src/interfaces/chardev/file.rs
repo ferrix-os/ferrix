@@ -170,5 +170,13 @@ pub(crate) fn ioctl(file: &ChardevFile, request: u32, arg: u64) -> Result<usize,
         return Err(Errno::ENODEV);
     }
     let client: Arc<Process> = process::current().ok_or(Errno::ENODEV)?;
-    super::call(&file.control, &client, Op::Ioctl, file.file, file.minor, request, arg)
+    super::call(
+        &file.control,
+        &client,
+        Op::Ioctl,
+        file.file,
+        file.minor,
+        request,
+        arg,
+    )
 }

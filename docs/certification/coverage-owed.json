@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "NVIDIA.md N1e, the chardev core's native calls (branch nvidia-n1d; the consultant's ledger 297, condition L2)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from bc508107e, no anchor dropped.",
+      "what": "Measure and test or argue the new lines on every architecture: syscall/native.rs's five SERVED rows, the five chardev calls in answer()'s served arm and ChardevControlCreate in the audit arm, the buffer() constructor answer() now uses, and main.rs's register_load calling chardev::install."
+    },
+    {
       "landing": "NVIDIA.md N1c, MAP_FIXED_NOREPLACE over a mapped page answers EEXIST (branch nvidia-n1c; the consultant's OK IF of 2026-10-03, ledger 292, condition K3)",
       "architectures": [
         "x86_64",

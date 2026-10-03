@@ -198,7 +198,12 @@ impl Message {
         match *self {
             Message::Hello(hello) => {
                 let count = hello.count.min(MAX_NODES);
-                out.put(&[KIND_HELLO, hello.version, u8::try_from(count).unwrap_or(0), 0]);
+                out.put(&[
+                    KIND_HELLO,
+                    hello.version,
+                    u8::try_from(count).unwrap_or(0),
+                    0,
+                ]);
                 out.put(&hello.location.to_le_bytes());
                 for minor in hello.minors.iter().take(count) {
                     out.put(&minor.to_le_bytes());

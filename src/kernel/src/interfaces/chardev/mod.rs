@@ -92,8 +92,7 @@ const HELLO_PATIENCE_NANOS: u64 = 10_000_000_000;
 const RECHECK_NANOS: u64 = 50_000_000;
 
 /// The driver end's rights: no `TRANSFER`, no `DUPLICATE` (N2).
-pub(crate) const DRIVER_RIGHTS: Rights =
-    Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::WAIT.0);
+pub(crate) const DRIVER_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::WAIT.0);
 
 /// The highest errno a reply may name.
 const MAX_ERRNO: i64 = 4095;
@@ -339,7 +338,8 @@ fn take_up(control: &Arc<Control>) -> Option<Publication> {
         Ok(Message::Hello(hello)) if !handed => session::judge(&hello, control.location),
         _ => Err(Refusal::Protocol),
     };
-    let published = judged.and_then(|publication| publish(control, &publication).map(|()| publication));
+    let published =
+        judged.and_then(|publication| publish(control, &publication).map(|()| publication));
     match published {
         Ok(publication) => {
             let count = u8::try_from(publication.count).unwrap_or(0);
@@ -551,8 +551,8 @@ pub(crate) fn call(
     cmd: u32,
     arg: u64,
 ) -> Result<usize, Errno> {
-    let (euid, egid) =
-        client.with_credentials(|credentials| (credentials.user.effective, credentials.group.effective));
+    let (euid, egid) = client
+        .with_credentials(|credentials| (credentials.user.effective, credentials.group.effective));
     let request = {
         let mut state = control.state.lock();
         if control.is_gone() {
@@ -587,7 +587,9 @@ pub(crate) fn call(
         // NOALLOC: both reserved for MAX_OUTSTANDING when the control was
         // made, and the table holds fewer.
         state.requests.push(Arc::clone(&request));
-        state.outgoing.push_back(Outgoing::Request(Arc::clone(&request)));
+        state
+            .outgoing
+            .push_back(Outgoing::Request(Arc::clone(&request)));
         request
     };
     control.work.wake_all();
@@ -595,11 +597,24 @@ pub(crate) fn call(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
     );
-    if let Some(answer) = request.inner.lock().answer {
+    let answered = request.inner.lock().answer;
+    if let Some(answer) = answered {
+        // A reply from one driver thread may come while another is still
+        // copying for the request: the program's call returns only once no
+        // copy can touch its memory (N4; the consultant's L1, ledger 297).
+        drain(&request);
         return answer;
     }
     abandon(control, &request);
     Err(Errno::EINTR)
+}
+
+/// Wait until no copy for `request` is in flight. Each copy re-checks the
+/// request between chunks of 4 KiB, so this waits out one chunk at most.
+fn drain(request: &Request) {
+    let _ = request
+        .waiters
+        .wait_until_deadline(|| request.inner.lock().copying == 0, u64::MAX);
 }
 
 /// The program gave up on `request`: dead from here, out of the table, and
@@ -615,11 +630,7 @@ fn abandon(control: &Control, request: &Arc<Request>) {
             let _ = state.requests.remove(at);
         }
     }
-    // The drain: a copy in flight re-checks `alive` before its next chunk,
-    // so this waits out one chunk at most.
-    let _ = request
-        .waiters
-        .wait_until_deadline(|| request.inner.lock().copying == 0, u64::MAX);
+    drain(request);
 }
 
 // ---------------------------------------------------------------------------
@@ -680,7 +691,7 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
             Op::Open | Op::Release => Ok(0),
             Op::Ioctl => usize::try_from(value)
                 .ok()
-                .filter(|value| *value <= i32::MAX as usize)
+                .filter(|value| i32::try_from(*value).is_ok())
                 .ok_or(Errno::EIO),
         }
     };
@@ -751,7 +762,9 @@ fn copy(caller: &dyn Host, registers: &[u64; 6], way: Way) -> Result<usize, Errn
     let drained = {
         let mut inner = request.inner.lock();
         inner.copying = inner.copying.saturating_sub(1);
-        inner.copying == 0 && !inner.alive
+        // The program waits for this on either way out of its call: its
+        // request answered, or abandoned (N4).
+        inner.copying == 0 && (!inner.alive || inner.answer.is_some())
     };
     if drained {
         request.waiters.wake_all();
