@@ -576,8 +576,9 @@ out:
     return rc;
 }
 
-/* Ferrix: say refused ioctls while the device files are brought up (N1e). */
-int nvrm_trace_ioctls = 1;
+/* Ferrix: set to say each refused ioctl and each RM call that failed (N1e
+ * bring-up); off by default. */
+int nvrm_trace_ioctls = 0;
 
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
 {
