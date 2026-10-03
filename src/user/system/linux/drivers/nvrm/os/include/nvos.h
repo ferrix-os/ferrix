@@ -112,6 +112,8 @@ struct nvos_request {
 #define NVOS_REQUEST_IOCTL   2
 #define NVOS_REQUEST_RELEASE 3
 #define NVOS_REQUEST_MMAP    4
+/* The last descriptor of a dmabuf went: `arg` its cookie; not answered. */
+#define NVOS_REQUEST_DMABUF_RELEASE 5
 /* ferrix_chardevctl::message's MAP_* reply kinds. */
 #define NVOS_MAP_VMO               1
 #define NVOS_MAP_APERTURE          2
@@ -125,6 +127,11 @@ int nvos_chardev_reply(NvU64 id, int status, NvS64 value);
 int nvos_chardev_copy_in(NvU64 id, void *to, NvU64 from, NvU32 length);
 int nvos_chardev_copy_out(NvU64 id, NvU64 to, const void *from, NvU32 length);
 NvS64 nvos_chardev_file(NvU64 id, int fd);
+/* N3b: a dmabuf of a whole VMO into request `id`'s program, and back. */
+#define NVOS_DMABUF_WRITABLE 1
+#define NVOS_DMABUF_CLOEXEC  2
+NvS64 nvos_chardev_dmabuf_install(NvU64 id, NvU32 vmo, NvU64 cookie, NvU32 flags);
+int nvos_chardev_dmabuf_resolve(NvU64 id, int fd, NvU64 *cookie);
 void nvos_isr_enter_leave(NvBool entering);
 
 /* display.rs: nvrm's end of the kernel's display core (N6). */

@@ -419,15 +419,16 @@ pub(crate) fn window_command_with_profile(arch: Arch, page: &str, profile: &str)
 
 /// What [`window_command_with_profile`] puts where `--disable-gpu` is on a
 /// desktop whose GPU is NVIDIA's (`run-compositor --nvidia`): ANGLE on
-/// NVIDIA's Vulkan for WebGL and rasterization. The compositor takes only
-/// `wl_shm` (`docs/NVIDIA.md` §4.6), so Chrome's frames are composited in
-/// software and handed over in shared memory; what the GPU draws is read
-/// back into them.
-/// Not Chrome's own Vulkan compositor (`--enable-features=Vulkan`), which
-/// Chrome refuses beside `--ozone-platform=wayland`.
+/// NVIDIA's Vulkan for WebGL and rasterization, and GPU compositing, whose
+/// frames are LINEAR buffers NVIDIA's GBM backend allocates in system memory
+/// and hands the compositor as dmabufs (`zwp_linux_dmabuf_v1`, N3b,
+/// `docs/NVIDIA.md` §4.6). libgbm finds `gbm/nvidia-drm_gbm.so` on its own
+/// path, `/usr/lib/x86_64-linux-gnu`, which is the volume's. Not Chrome's own
+/// Vulkan compositor (`--enable-features=Vulkan`), which Chrome refuses beside
+/// `--ozone-platform=wayland`.
 pub(crate) const NVIDIA_GPU_FLAGS: &str = "--use-angle=vulkan \
      --enable-features=DefaultANGLEVulkan --ignore-gpu-blocklist \
-     --enable-gpu-rasterization --disable-gpu-compositing";
+     --enable-gpu-rasterization";
 
 /// [`window_command_with_profile`], with Chrome's GPU process on NVIDIA's
 /// Vulkan when `nvidia` ([`NVIDIA_GPU_FLAGS`]) and in software otherwise.

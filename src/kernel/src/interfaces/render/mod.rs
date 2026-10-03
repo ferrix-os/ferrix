@@ -598,6 +598,55 @@ pub(crate) fn renderer(index: u32) -> Option<Arc<Renderer>> {
         .map(Arc::clone)
 }
 
+/// Render node numbers lent to the chardev core, whose driver decodes its
+/// node's ioctls itself (`docs/NVIDIA.md` §4.4, N3b), each with the device
+/// node it is served from, by its index in `device::devices()`.
+static LENT: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
+
+/// A render node number for a node another core serves for the device at
+/// `device`, taken from the same numbers as this core's renderers, so two
+/// `renderD<N>` never collide whichever driver started first (the
+/// consultant's B8, ledger 316). `None` when there was no memory to hold it.
+pub(crate) fn lend_number(device: usize) -> Option<u32> {
+    let index = NUMBERS.take()?;
+    if crate::fallible::try_push(&mut LENT.lock(), (index, device)).is_err() {
+        NUMBERS.give_back(index);
+        return None;
+    }
+    Some(index)
+}
+
+/// Give back a number [`lend_number`] lent.
+pub(crate) fn return_number(index: u32) {
+    LENT.lock().retain(|(held, _)| *held != index);
+    NUMBERS.give_back(index);
+}
+
+/// The numbers of every render node, this core's and the lent, lowest
+/// first: what `/dev/dri` and sysfs list.
+pub(crate) fn node_indices() -> Vec<u32> {
+    let mut indices = renderer_indices();
+    let lent = LENT.lock();
+    if indices.try_reserve(lent.len()).is_ok() {
+        indices.extend(lent.iter().map(|(index, _)| *index));
+    }
+    drop(lent);
+    indices.sort_unstable();
+    indices
+}
+
+/// The device node `renderD<index>` is served from, by its index in
+/// `device::devices()`, whichever core serves it.
+pub(crate) fn node_device(index: u32) -> Option<usize> {
+    if let Some(renderer) = renderer(index) {
+        return Some(renderer.node);
+    }
+    LENT.lock()
+        .iter()
+        .find(|(held, _)| *held == index)
+        .map(|(_, device)| *device)
+}
+
 /// One renderer's task.
 ///
 /// The proof runs before the renderer is published, so nothing can open the

@@ -320,8 +320,10 @@ int main(void)
 		 * chardev core: published first, since the display core
 		 * hands a card it can map only to a driver that serves its
 		 * device's files (docs/DISPLAY.md §2.1). */
-		static const uint16_t minors[] = { 255, 0 };
-		if (nvrm_chardev_publish(minors, 2) != 0)
+		/* And nvidia-drm's render node (N3b), on the core's
+		 * RENDER_MINOR: /dev/dri/renderD<N>, numbered by the kernel. */
+		static const uint16_t minors[] = { 255, 0, 0x1000 };
+		if (nvrm_chardev_publish(minors, 3) != 0)
 			return stop(STEP_CHARDEV, "the device files were not published", -1);
 
 		/* N3/N6: NVKMS, a test pattern on whatever display is

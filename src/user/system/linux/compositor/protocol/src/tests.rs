@@ -15,12 +15,12 @@ use crate::{
     GLOBALS, alpha_modifier, background_effect, capture_source, commit_timing, content_type, core,
     cursor_shape, data_control, ext_data_control, ext_workspace, fifo, focus_grab, foreign_list,
     foreign_toplevel, fractional_scale, gamma_control, global_shortcuts, hotkey, hyprland_surface,
-    idle_inhibit, idle_notify, image_copy, input_method, kde_decoration, layer_shell, lock_notify,
-    output_management, output_power, pointer_constraints, pointer_gestures, pointer_warp,
-    presentation, primary_selection, relative_pointer, screencopy, security_context, session_lock,
-    shortcuts_inhibit, single_pixel, system_bell, tearing_control, text_input, toplevel_export,
-    toplevel_icon, toplevel_mapping, toplevel_tag, viewporter, virtual_keyboard, virtual_pointer,
-    xdg_activation, xdg_decoration, xdg_dialog, xdg_output, xdg_shell,
+    idle_inhibit, idle_notify, image_copy, input_method, kde_decoration, layer_shell, linux_dmabuf,
+    lock_notify, output_management, output_power, pointer_constraints, pointer_gestures,
+    pointer_warp, presentation, primary_selection, relative_pointer, screencopy, security_context,
+    session_lock, shortcuts_inhibit, single_pixel, system_bell, tearing_control, text_input,
+    toplevel_export, toplevel_icon, toplevel_mapping, toplevel_tag, viewporter, virtual_keyboard,
+    virtual_pointer, xdg_activation, xdg_decoration, xdg_dialog, xdg_output, xdg_shell,
 };
 
 /// The probe's output: one line per message, and one more per unnamed
@@ -176,6 +176,9 @@ fn tables() -> Vec<&'static Interface> {
         &image_copy::EXT_IMAGE_COPY_CAPTURE_SESSION_V1,
         &image_copy::EXT_IMAGE_COPY_CAPTURE_FRAME_V1,
         &image_copy::EXT_IMAGE_COPY_CAPTURE_CURSOR_SESSION_V1,
+        &linux_dmabuf::ZWP_LINUX_DMABUF_V1,
+        &linux_dmabuf::ZWP_LINUX_BUFFER_PARAMS_V1,
+        &linux_dmabuf::ZWP_LINUX_DMABUF_FEEDBACK_V1,
     ]
 }
 

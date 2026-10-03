@@ -178,6 +178,7 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                     Op::Ioctl => 2,
                     Op::Release => 3,
                     Op::Mmap => 4,
+                    Op::DmabufRelease => 5,
                 };
                 // SAFETY: the caller vouches for `out`.
                 unsafe {
@@ -245,6 +246,63 @@ pub extern "C" fn nvos_chardev_file(id: u64, fd: i32) -> i64 {
     ) {
         Ok(file) => i64::try_from(file).unwrap_or(-9),
         Err(errno) => i64::from(errno),
+    }
+}
+
+/// A dmabuf of the whole VMO `vmo` (a handle in nvrm's table), named by
+/// `cookie`, as a new descriptor in the program request `id` is for:
+/// nvidia-drm's PRIME_HANDLE_TO_FD (N3b, `docs/NVIDIA.md` §4.4). `flags` are
+/// `DMABUF_WRITABLE` and `DMABUF_CLOEXEC`. The descriptor number, or a
+/// negative errno. A cookie still live gives a new descriptor of the same
+/// dmabuf; the kernel says when the last one goes (`DmabufRelease`).
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_dmabuf_install(id: u64, vmo: u32, cookie: u64, flags: u32) -> i64 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_DMABUF_INSTALL,
+        [
+            control,
+            id as usize,
+            vmo as usize,
+            cookie as usize,
+            flags as usize,
+            0,
+        ],
+    ) {
+        Ok(fd) => i64::try_from(fd).unwrap_or(-9),
+        Err(errno) => i64::from(errno),
+    }
+}
+
+/// The cookie of the dmabuf the waiting program's descriptor `fd` names,
+/// for request `id`, into `cookie`: nvidia-drm's PRIME_FD_TO_HANDLE. 0 only
+/// for one this control made; otherwise a negative errno.
+///
+/// # Safety
+///
+/// `cookie` is writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_chardev_dmabuf_resolve(id: u64, fd: i32, cookie: *mut u64) -> i32 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    let mut found = 0_u64;
+    let result = native(
+        nr::CHARDEV_DMABUF_RESOLVE,
+        [
+            control,
+            id as usize,
+            fd as isize as usize,
+            core::ptr::from_mut(&mut found) as usize,
+            0,
+            0,
+        ],
+    );
+    match result {
+        Ok(_) => {
+            // SAFETY: the caller vouches for `cookie`.
+            unsafe { cookie.write(found) };
+            0
+        }
+        Err(errno) => errno,
     }
 }
 
