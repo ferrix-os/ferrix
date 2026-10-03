@@ -222,8 +222,25 @@ fn place(process: &Process, addr: u64, len: u64, flags: u32) -> Result<FilePlace
         // makes that true; an unmap of a range holding nothing is not an
         // error here, because the program asked for the result, not the steps.
         let _ = process.space().unmap(addr, len);
+    } else if taken(process, addr, len) {
+        // MAP_FIXED_NOREPLACE over anything already mapped is `EEXIST`, as
+        // on Linux, and not the `EINVAL` the map's own overlap refusal reads
+        // as: a loader tells "that place is taken" from a bad request by it.
+        // The caller holds the layout lock, so nothing is mapped in between.
+        return Err(Errno::EEXIST);
     }
     Ok(FilePlace::Fixed(addr))
+}
+
+/// Whether anything is mapped in `[addr, addr + len)`. A range that wraps is
+/// not called taken: the map refuses it on its own, as a malformed range.
+fn taken(process: &Process, addr: u64, len: u64) -> bool {
+    let Some(end) = addr.checked_add(len) else {
+        return false;
+    };
+    process
+        .space()
+        .with_regions(|regions| regions.any(|region| region.start < end && addr < region.end))
 }
 
 /// `mmap` of the file `fd` names, from byte `offset`.

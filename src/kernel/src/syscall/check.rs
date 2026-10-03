@@ -788,6 +788,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_memory_and_time_answer_as_linux_does(&process)?;
     check_fixed_mapping_lands_where_asked(&process)?;
     check_nothing_is_mapped_near_page_zero(&process)?;
+    check_noreplace_refuses_a_taken_place(&process)?;
     check_copy_crosses_a_page_boundary(&process)?;
     check_a_user_pointer_into_the_kernel_is_refused(&process)?;
     check_an_unmapped_address_is_efault_not_a_kernel_fault(&process)?;
@@ -1053,6 +1054,56 @@ fn check_the_cpu_time_clocks(process: &Process) -> Result<(), &'static str> {
         Ok(())
     })();
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
+}
+
+/// `MAP_FIXED_NOREPLACE` over a page already mapped, or over part of one, is
+/// `EEXIST`, as on Linux, and leaves the page as it was; beside it, on free
+/// pages, the same request is taken.
+///
+/// Verifies: L.user.50
+fn check_noreplace_refuses_a_taken_place(process: &Process) -> Result<(), &'static str> {
+    let request = |addr: u64, len: u64, flags: u32| MmapRequest {
+        addr,
+        len,
+        prot: PROT_READ | PROT_WRITE,
+        flags: MAP_ANONYMOUS | MAP_PRIVATE | flags,
+        fd: -1,
+        offset: 0,
+        unit: OffsetUnit::Bytes,
+    };
+    let at = memory::sys_mmap(process, &request(0, 3 * PAGE_SIZE, 0))
+        .map_err(|_| "no room for the NOREPLACE check's pages")?;
+    let at = u64::try_from(at).map_err(|_| "mmap returned an impossible address")?;
+    // The middle page alone mapped, its neighbours free.
+    let _ = memory::sys_munmap(process, at, 3 * PAGE_SIZE);
+    let middle = at + PAGE_SIZE;
+    let outcome = (|| {
+        let _ = memory::sys_mmap(process, &request(middle, PAGE_SIZE, MAP_FIXED))
+            .map_err(|_| "the NOREPLACE check's page could not be mapped")?;
+        uaccess::copy_to_user(process.space(), middle, &[0x5a])
+            .map_err(|_| "could not write the NOREPLACE check's page")?;
+        for (addr, len) in [(middle, PAGE_SIZE), (at, 2 * PAGE_SIZE)] {
+            if memory::sys_mmap(process, &request(addr, len, MAP_FIXED_NOREPLACE))
+                != Err(Errno::EEXIST)
+            {
+                return Err("MAP_FIXED_NOREPLACE over a mapped page was not refused with EEXIST");
+            }
+        }
+        let mut kept = [0_u8; 1];
+        uaccess::copy_from_user(process.space(), middle, &mut kept)
+            .map_err(|_| "a refused MAP_FIXED_NOREPLACE unmapped the page")?;
+        if kept != [0x5a] {
+            return Err("a refused MAP_FIXED_NOREPLACE changed the page it was refused for");
+        }
+        let beside = memory::sys_mmap(process, &request(at, PAGE_SIZE, MAP_FIXED_NOREPLACE))
+            .map_err(|_| "MAP_FIXED_NOREPLACE on a free page was refused")?;
+        if u64::try_from(beside).unwrap_or(0) != at {
+            return Err("MAP_FIXED_NOREPLACE on a free page landed elsewhere");
+        }
+        Ok(())
+    })();
+    let _ = memory::sys_munmap(process, at, 3 * PAGE_SIZE);
     outcome
 }
 
