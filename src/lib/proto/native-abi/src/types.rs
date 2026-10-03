@@ -339,3 +339,25 @@ pub struct IoMappingSpec {
     /// The length in bytes.
     pub len: u64,
 }
+
+/// `chardev_dmabuf_install`'s flags: the descriptor is open for reading and
+/// writing, so a program may map it writable. Needs `WRITE` on the VMO;
+/// without it the descriptor is read-only.
+pub const DMABUF_WRITABLE: u64 = 1 << 0;
+/// `chardev_dmabuf_install`'s flags: the descriptor is close-on-exec.
+pub const DMABUF_CLOEXEC: u64 = 1 << 1;
+/// `chardev_dmabuf_install`'s flags: set [`DMABUF_MADE`] in the answer when
+/// the call made the dmabuf rather than finding one alive for the cookie.
+///
+/// What lets a driver count dmabuf objects per cookie, one up for each made
+/// and one down for each `DMABUF_RELEASE`. Without it a driver cannot tell
+/// a dmabuf found alive from one made just after the last went, whose
+/// RELEASE may still be on its way: the release of the old one would then
+/// read as the release of the new.
+pub const DMABUF_TELL_MADE: u64 = 1 << 2;
+/// Every flag `chardev_dmabuf_install` knows; any other is `INVALID_ARGS`.
+pub const DMABUF_FLAGS: u64 = DMABUF_WRITABLE | DMABUF_CLOEXEC | DMABUF_TELL_MADE;
+/// In `chardev_dmabuf_install`'s answer, with [`DMABUF_TELL_MADE`]: this call
+/// made the dmabuf. Above every descriptor number, which is at most
+/// `i32::MAX`.
+pub const DMABUF_MADE: usize = 1 << 31;

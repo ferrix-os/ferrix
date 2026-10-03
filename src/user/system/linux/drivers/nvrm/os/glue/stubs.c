@@ -251,12 +251,6 @@ void NV_API_CALL nv_dma_release_sgt(struct sg_table *a0, struct drm_gem_object *
 
 
 
-NV_STATUS NV_API_CALL nv_get_phys_pages(void *a0, void *a1, NvU32 *a2)
-{
-    nvos_stub_called("nv_get_phys_pages", "DMA mapping comes with N1d");
-    return NV_ERR_NOT_SUPPORTED;
-}
-
 
 NV_STATUS NV_API_CALL nv_register_sgt(nv_state_t *a0, NvU64 *a1, NvU64 a2, NvU32 a3, void **a4, struct sg_table *a5, void *a6, NvBool a7)
 {

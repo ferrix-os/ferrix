@@ -35,16 +35,20 @@
 struct chardev_file {
     NvU64 file;
     nv_linux_file_private_t *nvlfp;
+    /* An open of the render node (os/glue/drm.c) in place of nvlfp. */
+    void *drm;
     struct chardev_file *next;
 };
 
 static struct chardev_file *files;
 static nvos_mutex_t files_lock;
 
-static void remember(NvU64 file, nv_linux_file_private_t *nvlfp, struct chardev_file *entry)
+static void remember(NvU64 file, nv_linux_file_private_t *nvlfp, void *drm,
+                     struct chardev_file *entry)
 {
     entry->file = file;
     entry->nvlfp = nvlfp;
+    entry->drm = drm;
     nvos_mutex_lock(&files_lock);
     entry->next = files;
     files = entry;
@@ -61,6 +65,23 @@ static nv_linux_file_private_t *find(NvU64 file)
         if (entry->file == file)
         {
             found = entry->nvlfp;
+            break;
+        }
+    nvos_mutex_unlock(&files_lock);
+    return found;
+}
+
+/* The render node's open `file` is, or NULL for another file. */
+static void *find_drm(NvU64 file)
+{
+    struct chardev_file *entry;
+    void *found = NULL;
+
+    nvos_mutex_lock(&files_lock);
+    for (entry = files; entry != NULL; entry = entry->next)
+        if (entry->file == file)
+        {
+            found = entry->drm;
             break;
         }
     nvos_mutex_unlock(&files_lock);
@@ -103,6 +124,7 @@ static NvS64 bridge_fd(void *context, int fd)
 struct worker {
     struct nvos_request request;
     nv_linux_file_private_t *nvlfp;
+    void *drm;
 };
 
 static void serve_ioctl(void *argument)
@@ -126,7 +148,10 @@ static void serve_ioctl(void *argument)
         free(work);
         return;
     }
-    rc = nvrm_ioctl(work->nvlfp, work->request.cmd, (void *)(NvUPtr)work->request.arg);
+    if (work->drm != NULL)
+        rc = nvrm_drm_ioctl(work->drm, work->request.id, work->request.cmd, work->request.arg);
+    else
+        rc = nvrm_ioctl(work->nvlfp, work->request.cmd, (void *)(NvUPtr)work->request.arg);
     nvos_client_leave();
     (void)nvos_chardev_reply(work->request.id, rc < 0 ? rc : 0, rc > 0 ? rc : 0);
     free(work);
@@ -206,6 +231,7 @@ static void handle(const struct nvos_request *request)
     nv_linux_file_private_t *nvlfp;
     struct chardev_file *entry;
     struct worker *work;
+    void *drm;
 
     switch (request->op)
     {
@@ -214,6 +240,19 @@ static void handle(const struct nvos_request *request)
             if (entry == NULL)
             {
                 (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                return;
+            }
+            if (request->minor == NVRM_RENDER_MINOR)
+            {
+                drm = nvrm_drm_open();
+                if (drm == NULL)
+                {
+                    free(entry);
+                    (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                    return;
+                }
+                remember(request->file, NULL, drm, entry);
+                (void)nvos_chardev_reply(request->id, 0, 0);
                 return;
             }
             nvlfp = (request->minor == 255) ? nvrm_open_ctl() : nvrm_open_gpu(request->minor);
@@ -226,13 +265,14 @@ static void handle(const struct nvos_request *request)
             /* RM names files by fd (nv_get_file_private): the kernel's
              * identity for it, which chardev_file resolves descriptors to. */
             nvlfp->fd = (NvS32)request->file;
-            remember(request->file, nvlfp, entry);
+            remember(request->file, nvlfp, NULL, entry);
             (void)nvos_chardev_reply(request->id, 0, 0);
             return;
 
         case NVOS_REQUEST_IOCTL:
             nvlfp = find(request->file);
-            if (nvlfp == NULL)
+            drm = find_drm(request->file);
+            if (nvlfp == NULL && drm == NULL)
             {
                 (void)nvos_chardev_reply(request->id, -EBADF, 0);
                 return;
@@ -245,6 +285,7 @@ static void handle(const struct nvos_request *request)
             }
             work->request = *request;
             work->nvlfp = nvlfp;
+            work->drm = drm;
             if (!nvos_thread_spawn(serve_ioctl, work))
             {
                 free(work);
@@ -253,16 +294,27 @@ static void handle(const struct nvos_request *request)
             return;
 
         case NVOS_REQUEST_MMAP:
-            serve_mmap(request);
+            drm = find_drm(request->file);
+            if (drm != NULL)
+                nvrm_drm_mmap(drm, request);
+            else
+                serve_mmap(request);
             return;
 
         case NVOS_REQUEST_RELEASE:
             entry = forget(request->file);
             if (entry != NULL)
             {
-                nvrm_close(entry->nvlfp);
+                if (entry->drm != NULL)
+                    nvrm_drm_close(entry->drm);
+                else
+                    nvrm_close(entry->nvlfp);
                 free(entry);
             }
+            return;
+
+        case NVOS_REQUEST_DMABUF_RELEASE:
+            nvrm_drm_released(request->arg);
             return;
 
         default:

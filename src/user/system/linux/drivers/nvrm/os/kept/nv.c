@@ -880,6 +880,71 @@ done_early:
  * take their caching at mmap (N1e).
  * ---------------------------------------------------------------------- */
 
+/*
+ * Ferrix: every live allocation nv_alloc_pages made, for nvrm_alloc_at. A
+ * GEM object of nvidia-drm's (os/glue/drm.c) knows its pages only by the
+ * addresses NVKMS reports, and its CPU mapping needs the VMO they are.
+ */
+static nv_alloc_t *nv_live_allocs;
+static nvos_mutex_t nv_live_allocs_lock;
+
+nv_alloc_t *nvrm_alloc_at(NvU64 phys)
+{
+    nv_alloc_t *at;
+
+    nvos_mutex_lock(&nv_live_allocs_lock);
+    for (at = nv_live_allocs; at != NULL; at = at->live_next)
+        if (at->num_pages > 0 && at->page_table[0].phys_addr == phys)
+            break;
+    nvos_mutex_unlock(&nv_live_allocs_lock);
+    return at;
+}
+
+static void nv_live_forget(nv_alloc_t *gone)
+{
+    nv_alloc_t **link;
+
+    nvos_mutex_lock(&nv_live_allocs_lock);
+    for (link = &nv_live_allocs; *link != NULL; link = &(*link)->live_next)
+    {
+        if (*link == gone)
+        {
+            *link = gone->live_next;
+            break;
+        }
+    }
+    nvos_mutex_unlock(&nv_live_allocs_lock);
+}
+
+/*
+ * NVIDIA's nv_get_phys_pages, which NVKMS's getMemoryPages reaches through
+ * RM: Linux writes each page's struct page; Ferrix has none, and writes
+ * each page's address, which is what nvrm_alloc_at finds an allocation by
+ * (os/glue/drm.c).
+ */
+NV_STATUS NV_API_CALL nv_get_phys_pages(
+    void *pAllocPrivate,
+    void *pPages,
+    NvU32 *pNumPages
+)
+{
+    nv_alloc_t *at = pAllocPrivate;
+    NvU64 *pages = pPages;
+    NvU32 page_count;
+    NvU32 i;
+
+    page_count = NV_MIN(*pNumPages, at->num_pages);
+
+    for (i = 0; i < page_count; i++)
+    {
+        pages[i] = at->page_table[i].phys_addr;
+    }
+
+    *pNumPages = page_count;
+
+    return NV_OK;
+}
+
 NV_STATUS NV_API_CALL nv_alloc_pages(
     nv_state_t *nv,
     NvU32       page_count,
@@ -985,6 +1050,11 @@ NV_STATUS NV_API_CALL nv_alloc_pages(
     *priv_data = at;
     atomic64_inc(&at->usage_count);
 
+    nvos_mutex_lock(&nv_live_allocs_lock);
+    at->live_next = nv_live_allocs;
+    nv_live_allocs = at;
+    nvos_mutex_unlock(&nv_live_allocs_lock);
+
     return NV_OK;
 }
 
@@ -1008,6 +1078,8 @@ NV_STATUS NV_API_CALL nv_free_pages(
      */
     if (!atomic64_dec_and_test(&at->usage_count))
         return NV_OK;
+
+    nv_live_forget(at);
 
     if (!at->flags.guest && at->pages != NULL)
         nvos_pages_free(at->pages);

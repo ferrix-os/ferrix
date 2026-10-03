@@ -118,6 +118,7 @@ typedef struct nv_alloc_s {
     void *user_pages;
     struct nvos_pages *pages;     /* ferrix-nvos's allocation, or NULL */
     nvidia_pte_t *page_table;
+    struct nv_alloc_s *live_next; /* nv.c's list of live allocations */
 } nv_alloc_t;
 
 /* ------------------------------------------------------------------------
@@ -232,6 +233,9 @@ void nvrm_close(nv_linux_file_private_t *nvlfp);
 
 /* os/kept/nv.c, for nvidia-modeset: a reference on a started GPU by RM's
  * id, and a walk of the probed GPUs under the device list's lock. */
+/* os/kept/nv.c: the live system-memory allocation whose first page is at
+ * `phys`, for os/glue/drm.c to map a GEM object's pages; NULL if none. */
+nv_alloc_t *nvrm_alloc_at(NvU64 phys);
 int nvidia_dev_get(NvU32 gpu_id, nvidia_stack_t *sp);
 void nvidia_dev_put(NvU32 gpu_id, nvidia_stack_t *sp);
 NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, NvU32, void *),
@@ -243,6 +247,15 @@ NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, 
 int nvrm_kms_init(void);
 /* os/glue/kms.c: light the displays on every GPU with a test pattern. */
 int nvrm_kms_show(void);
+
+/* os/glue/drm.c: nvidia-drm's render node (N3b), served on the chardev
+ * core's RENDER_MINOR beside /dev/nvidiactl. */
+#define NVRM_RENDER_MINOR 0x1000
+void *nvrm_drm_open(void);
+void nvrm_drm_close(void *file);
+int nvrm_drm_ioctl(void *file, NvU64 request, NvU32 cmd, NvU64 arg);
+void nvrm_drm_mmap(void *file, const struct nvos_request *request);
+void nvrm_drm_released(NvU64 cookie);
 
 /* The ioctl encoding of Linux's asm-generic/ioctl.h, which RM's numbers use. */
 #define _IOC_NRBITS     8
