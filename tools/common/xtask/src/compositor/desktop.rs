@@ -71,10 +71,16 @@ pub(super) fn laid_out(size: (u32, u32), config: &str) -> (u32, u32) {
     if turned { (size.1, size.0) } else { size }
 }
 
-/// [`DESKTOP_CLIENTS`] built for `arch`, each at `/bin/<binary>`, and
-/// `/bin/foot` linked to `/bin/term`: a real config's `$terminal = foot`
-/// gets term, which runs the shell when started with no program, as foot does.
-pub(super) fn desktop_programs(arch: Arch) -> Result<Vec<crate::ports::File>> {
+/// [`DESKTOP_CLIENTS`] built for `arch`, each at `/bin/<binary>`, and,
+/// unless `carried` has a `/bin/foot` already, `/bin/foot` linked to
+/// `/bin/term`: a real config's `$terminal = foot` gets term, which runs the
+/// shell when started with no program, as foot does. With the foot app
+/// installed it is foot itself; the link laid over it made foot unreachable
+/// on every desktop until 2026-10-03.
+pub(super) fn desktop_programs(
+    arch: Arch,
+    carried: &[crate::ports::File],
+) -> Result<Vec<crate::ports::File>> {
     let mut files = Vec::new();
     for (package, binary) in DESKTOP_CLIENTS {
         let program = build(arch, package, binary)?;
@@ -86,11 +92,13 @@ pub(super) fn desktop_programs(arch: Arch) -> Result<Vec<crate::ports::File>> {
             content: crate::ports::Content::Bytes(bytes),
         });
     }
-    files.push(crate::ports::File {
-        path: "bin/foot".to_owned(),
-        mode: 0o777,
-        content: crate::ports::Content::Link("/bin/term".to_owned()),
-    });
+    if !carried.iter().any(|file| file.path == "bin/foot") {
+        files.push(crate::ports::File {
+            path: "bin/foot".to_owned(),
+            mode: 0o777,
+            content: crate::ports::Content::Link("/bin/term".to_owned()),
+        });
+    }
     Ok(files)
 }
 
@@ -140,7 +148,8 @@ pub(super) fn desktop(
 ) -> Result<(String, Carried)> {
     let config = with_network(with_layout(config, args), args);
     let mut carried = Carried::wanted(arch, args)?;
-    carried.ports.extend(desktop_programs(arch)?);
+    let programs = desktop_programs(arch, &carried.ports)?;
+    carried.ports.extend(programs);
     carried.ports.extend(desktop_auth(arch, args)?);
     // The user's dotfiles and the fonts they name, from beside a real
     // `hyprland.conf`: `crate::dotfiles` says which and where.

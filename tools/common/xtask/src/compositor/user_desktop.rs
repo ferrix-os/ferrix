@@ -292,7 +292,8 @@ fn everything_desktop_setup(arch: Arch) -> Result<Option<(String, Carried, Strin
         return Ok(None);
     };
     let mut ports = crate::dotfiles::carried(Path::new(conf_path))?;
-    ports.extend(desktop_programs(arch)?);
+    let programs = desktop_programs(arch, &ports)?;
+    ports.extend(programs);
     // authd, as run-compositor carries it, and with no seed: the user's
     // SUPER L must find hyprlock refusing to lock (`docs/AUTH.md` P1.5).
     ports.extend(desktop_auth(arch, &Args::default())?);
