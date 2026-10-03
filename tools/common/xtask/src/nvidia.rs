@@ -357,8 +357,34 @@ else
   /data/usr/bin/vulkaninfo --summary
 fi
 echo "nvidia-gate: vulkaninfo exited $?"
+/bin/vk-offscreen
+echo "nvidia-gate: vk-offscreen exited $?"
 exit 16
 "#;
+
+/// `vk-offscreen` (`nvrm/test/vk-offscreen.c`): a clear on the GPU read
+/// back, N2's smallest proof of work. Built with the host's compiler against
+/// its Vulkan headers and loader, and run on Ferrix with Debian's loader and
+/// NVIDIA's ICD from the volume; it asks for nothing newer than glibc 2.34.
+fn vk_offscreen(dir: &Path) -> Result<Vec<u8>> {
+    let source = crate::paths::workspace_root()
+        .join("src/user/system/linux/drivers/nvrm/test/vk-offscreen.c");
+    let out = dir.join("vk-offscreen");
+    let built = Command::new("cc")
+        .args(["-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+        .arg(&out)
+        .arg(&source)
+        .arg("-lvulkan")
+        .status()
+        .map_err(|error| Error::new(format!("running cc: {error}")))?;
+    if !built.success() {
+        return Err(Error::new(format!(
+            "building {} failed ({built}); it needs the host's Vulkan headers and libvulkan",
+            source.display()
+        )));
+    }
+    std::fs::read(&out).map_err(|error| Error::new(format!("reading {}: {error}", out.display())))
+}
 
 /// `$HOME`.
 fn home() -> String {
@@ -472,6 +498,11 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
         ("usr/share/egl", "/data/usr/share/egl"),
         ("usr/share/nvidia", "/data/usr/share/nvidia"),
     ]));
+    files.push(ports::File {
+        path: "bin/vk-offscreen".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(vk_offscreen(&dir)?),
+    });
     files.push(ports::File {
         path: "bin/busybox".to_owned(),
         mode: 0o755,
