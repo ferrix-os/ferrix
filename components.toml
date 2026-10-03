@@ -37,4 +37,4 @@ commit = "a344755b408b07de8593a564e9d5b923ec04ad7d"
 [apps]
 path = "src/user/apps"
 repo = "https://github.com/ferrix-os/apps"
-commit = "1c2c7e0ee1b9f350f0014fb2c4b1481b90f5ab7c"
+commit = "da1dd1008267cd79f442c2318154f0d6324046b9"
