@@ -22,6 +22,7 @@ mod device;
 mod discovery;
 mod early;
 mod fallible;
+mod fastpath;
 mod fs;
 mod hooks;
 mod init;

@@ -176,6 +176,7 @@
       ],
       "members": [
         "checks.rs",
+        "fastpath.rs",
         "discovery/devmgr.rs",
         "discovery/mod.rs",
         "discovery/pci.rs",

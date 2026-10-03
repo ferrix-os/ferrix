@@ -283,6 +283,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-ipc-equiv"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-kernel"
 version = "0.1.0"
 dependencies = [

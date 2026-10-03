@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "OPAQUE-KERNEL.md §9.7, step 4's groundwork: ferrix.fastpath (branch step4-prep)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from 527201573, no anchor dropped.",
+      "what": "Measure and test or argue the new lines on every architecture: fastpath.rs whole (init and its four readings, on, report and its three wordings), checks::init's call of it and its report on a boot that skips the checks, and stages_check::check_native_objects' report. A boot with ferrix.fastpath=on and one with a value not understood reach the arms test-boot does not."
+    },
+    {
       "landing": "OPAQUE-KERNEL.md §9.8 step 2e, the channel's wait from one state word (branch step2e)",
       "architectures": [
         "x86_64",

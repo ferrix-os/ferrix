@@ -233,6 +233,9 @@ COMMANDS:
                   service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean
     bench-ipc     Boot --init's shell and time a channel round trip between two native processes
                   (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds
+    test-ipc-equiv
+                  Boot /sbin/ipc-equiv with ferrix.fastpath=off, and on x86-64 again with on, and
+                  require channel_write_read's cases to answer the same (docs/OPAQUE-KERNEL.md §9.7)
     bench-seam    Boot a stock Linux kernel on the same QEMU machine and time a 4 KiB O_DIRECT read of the pattern disk at depths 1 and 32: the in-kernel reference for the seam boot line (tools/common/fetch/fetch-linux-reference.sh first)
     test-auth     Boot init with authd, type at the shell its getty gives, and require each refusal of
                   docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
@@ -583,6 +586,7 @@ fn run() -> Result<()> {
         "test-auth" => auth::test_auth(&args),
         "test-restart" => restart::test_restart(&args),
         "bench-seam" | "bench-ipc" => bench(command, &args),
+        "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "test-install" => installer::test_install(&args),
         "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
