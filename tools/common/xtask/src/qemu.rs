@@ -2091,6 +2091,20 @@ pub(crate) fn arm_cpu(arch: Arch) -> String {
 }
 
 /// Assemble the QEMU command line for `arch`.
+/// QEMU's command, on the host processors `pin` names (`--pin`) unless it is
+/// `none`: by `taskset`, which then runs QEMU in its own place, so the child
+/// is still QEMU's own pid.
+fn pinned(binary: &Path, pin: Option<&str>) -> Command {
+    match pin.filter(|&cpus| cpus != "none") {
+        Some(cpus) => {
+            let mut taskset = Command::new("taskset");
+            let _ = taskset.args(["-c", cpus]).arg(binary);
+            taskset
+        }
+        None => Command::new(binary),
+    }
+}
+
 fn qemu_command(
     arch: Arch,
     image: &Path,
@@ -2122,7 +2136,7 @@ fn qemu_command(
     // the guest was emulated without anybody having to guess.
     println!("  qemu: {arch} under {accelerator}, {processors} processors");
 
-    let mut command = Command::new(&binary);
+    let mut command = pinned(&binary, args.pin.as_deref());
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);

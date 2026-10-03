@@ -31,7 +31,7 @@ use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_rt::linux::{self, numbers};
 use ferrix_rt::native::channel::{self, Channel, ReadError};
 use ferrix_rt::native::job::{Job, for_cgroup};
-use ferrix_rt::native::pending::create_process;
+use ferrix_rt::native::pending::{Protection, create_process};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::native::{Deadline, Error, Handle, Object, OwnedHandle, Signals};
 use ferrix_rt::{Bootstrap, Kernel};
@@ -429,95 +429,85 @@ impl Clock {
     }
 }
 
-/// Sub-buckets per power of two.
-const STEPS: u32 = 8;
-/// Buckets: every power of two a `u64` has, [`STEPS`] apiece.
-const BUCKETS: usize = 64 * STEPS as usize;
-
-/// Durations in ticks, kept to an eighth of a power of two.
+/// Durations in ticks, every one kept, sorted when a line is made: the
+/// percentiles are the samples themselves, not a histogram's buckets, which
+/// read up to an eighth low and moved the trip's p50 in steps of about
+/// 233 ns (`docs/OPAQUE-KERNEL.md` §9.5 step 0).
+///
+/// The samples live in a VMO mapped for them, since a native program has no
+/// heap and [`ROUNDS`] of them are too many for its stack.
 struct Histogram {
-    /// How many fell in each bucket.
-    counts: [u32; BUCKETS],
+    /// The samples, the first `total` of them filled.
+    samples: &'static mut [u64],
     /// How many in all.
-    total: u32,
-    /// The shortest, exactly.
-    least: u64,
+    total: usize,
     /// Their sum, for the mean.
     sum: u64,
 }
 
+/// Room for one run's samples, page-rounded.
+const SAMPLE_BYTES: usize = (ROUNDS as usize * size_of::<u64>()).next_multiple_of(4096);
+
 impl Histogram {
-    /// Nothing counted.
+    /// Nothing counted, in fresh memory of its own.
     fn new() -> Histogram {
+        let samples = vmo::create(Kernel, SAMPLE_BYTES)
+            .and_then(|room| room.map(None, SAMPLE_BYTES, Protection::ReadWrite, 0))
+            .map_or(&mut [][..], |at| {
+                // SAFETY: `vmo_map` answered `SAMPLE_BYTES` of fresh, zeroed,
+                // writable memory at `at`, page-aligned, which nothing else
+                // in this process names and which stays mapped when the VMO's
+                // handle goes; `u64` is valid for any bytes.
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        core::ptr::with_exposed_provenance_mut::<u64>(at),
+                        SAMPLE_BYTES / size_of::<u64>(),
+                    )
+                }
+            });
         Histogram {
-            counts: [0; BUCKETS],
+            samples,
             total: 0,
-            least: u64::MAX,
             sum: 0,
         }
     }
 
-    /// The bucket `ticks` falls in.
-    fn bucket(ticks: u64) -> usize {
-        if ticks < u64::from(STEPS) {
-            return ticks as usize;
-        }
-        let power = 63 - ticks.leading_zeros();
-        let step = (ticks >> (power - STEPS.trailing_zeros())) & u64::from(STEPS - 1);
-        (power * STEPS) as usize + step as usize
-    }
-
-    /// The least duration bucket `index` holds.
-    fn floor(index: usize) -> u64 {
-        let steps = STEPS as usize;
-        if index < steps {
-            return index as u64;
-        }
-        let power = (index / steps) as u32;
-        let step = (index % steps) as u64;
-        (1_u64 << power) | (step << (power - STEPS.trailing_zeros()))
-    }
-
     /// Count one.
     fn add(&mut self, ticks: u64) {
-        if let Some(count) = self.counts.get_mut(Histogram::bucket(ticks)) {
-            *count = count.saturating_add(1);
+        if let Some(slot) = self.samples.get_mut(self.total) {
+            *slot = ticks;
+            self.total += 1;
+            self.sum = self.sum.saturating_add(ticks);
         }
-        self.total = self.total.saturating_add(1);
-        self.least = self.least.min(ticks);
-        self.sum = self.sum.saturating_add(ticks);
-    }
-
-    /// The duration below which `per_mille` of them fell.
-    fn at(&self, per_mille: u32) -> u64 {
-        let wanted = u64::from(self.total) * u64::from(per_mille) / 1000;
-        let mut seen = 0_u64;
-        for (index, count) in self.counts.iter().enumerate() {
-            seen += u64::from(*count);
-            if seen > wanted {
-                return Histogram::floor(index);
-            }
-        }
-        0
     }
 
     /// One line on standard output: see [`Histogram::line`].
-    fn print(&self, what: &str, scale: u64) {
+    fn print(&mut self, what: &str, scale: u64) {
         let line = self.line(what, scale);
         let _ = linux::write(1, line.bytes.get(..line.len).unwrap_or_default());
     }
 
-    /// One line, in nanoseconds, `scale` being nanoseconds per thousand ticks.
-    fn line(&self, what: &str, scale: u64) -> Line {
+    /// One line, in nanoseconds, `scale` being nanoseconds per thousand
+    /// ticks: the least, the samples at the 50th, 90th and 99th percentiles
+    /// of the sorted run, and the mean.
+    fn line(&mut self, what: &str, scale: u64) -> Line {
         let ns = |ticks: u64| ticks.saturating_mul(scale) / 1000;
-        let mean = self.sum / u64::from(self.total.max(1));
+        let sorted = self.samples.get_mut(..self.total).unwrap_or_default();
+        sorted.sort_unstable();
+        let at = |per_mille: usize| {
+            sorted
+                .get(sorted.len() * per_mille / 1000)
+                .copied()
+                .unwrap_or(0)
+        };
+        let mean = self.sum / (self.total.max(1) as u64);
         format_line(format_args!(
             "ipc-bench {what} n={} min={} p50={} p90={} p99={} mean={}",
             self.total,
-            ns(self.least),
-            ns(self.at(500)),
-            ns(self.at(900)),
-            ns(self.at(990)),
+            ns(at(0)),
+            ns(at(500)),
+            ns(at(900)),
+            ns(at(990)),
             ns(mean),
         ))
     }

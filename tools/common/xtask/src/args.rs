@@ -203,6 +203,21 @@ pub(crate) struct Args {
     /// `--to`, the mounted boot partition `flash` writes to. `None` means
     /// "find the only one".
     pub(crate) to: Option<String>,
+    /// `--alternate`, a git ref `bench-ipc` builds in a tree of its own and
+    /// times turn about with this one.
+    pub(crate) alternate: Option<String>,
+    /// `--rounds`, how many turns `bench-ipc --alternate` and its
+    /// `--against-*` runs take. `None` is three.
+    pub(crate) rounds: Option<u32>,
+    /// `--against-sel4`: `bench-ipc` alternates with the seL4 image in
+    /// `~/.local/share/ferrix/sel4`.
+    pub(crate) against_sel4: bool,
+    /// `--against-redox`: `bench-ipc` alternates with the Redox image in
+    /// `~/.local/share/ferrix/redox-bench`.
+    pub(crate) against_redox: bool,
+    /// `--pin`, the host processors (`taskset -c`'s list) QEMU runs on.
+    /// `bench-ipc` pins to 11 unless given another, or `none`.
+    pub(crate) pin: Option<String>,
     /// `--stage`, a directory `flash` writes the card's files into instead of
     /// a card: for a board on another machine than the build, whose card is
     /// then given the directory's contents by hand.
@@ -530,8 +545,16 @@ impl Args {
 
     /// `--accel`, `--since` and `--moved`: each one word, kept as given.
     fn named(&mut self, flag: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
+        if matches!(
+            flag,
+            "--alternate" | "--rounds" | "--pin" | "--against-sel4" | "--against-redox"
+        ) {
+            return self.bench(flag, items);
+        }
         let given = Some(value(items, flag)?);
         match flag {
+            "--to" => self.to = given,
+            "--stage" => self.stage = given,
             "--accel" => self.accel = given,
             "--since" => self.since = given,
             _ => self.moved = given,
@@ -709,9 +732,9 @@ impl Args {
                 "--arch" => args.arch = Some(value(&mut items, "--arch")?),
                 "--smp" | "--memory" | "--timeout" => args.machine(&item, &mut items)?,
                 "--seeds" | "--jobs" => args.counts(&item, &mut items)?,
-                "--accel" | "--since" | "--moved" => args.named(&item, &mut items)?,
-                "--to" => args.to = Some(value(&mut items, "--to")?),
-                "--stage" => args.stage = Some(value(&mut items, "--stage")?),
+                "--accel" | "--since" | "--moved" | "--alternate" | "--rounds" | "--pin"
+                | "--against-sel4" | "--against-redox" => args.named(&item, &mut items)?,
+                "--to" | "--stage" => args.named(&item, &mut items)?,
                 "--port" => args.port = Some(value(&mut items, "--port")?),
                 "--init" => args.init = Some(value(&mut items, "--init")?),
                 "--init-path" => args.init_path = Some(init_path(&mut items)?),
@@ -845,6 +868,21 @@ fn number<T: std::str::FromStr>(items: &mut impl Iterator<Item = String>, key: &
     let raw = value(items, key)?;
     raw.parse()
         .map_err(|_| Error::new(format!("{key} wants a number, got `{raw}`")))
+}
+
+impl Args {
+    /// `bench-ipc`'s own flags: `--alternate`, `--rounds`, `--against-sel4`,
+    /// `--against-redox` and `--pin`.
+    fn bench(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
+        match key {
+            "--alternate" => self.alternate = Some(value(items, key)?),
+            "--rounds" => self.rounds = Some(count(items, key)?),
+            "--against-sel4" => self.against_sel4 = true,
+            "--against-redox" => self.against_redox = true,
+            _ => self.pin = Some(value(items, key)?),
+        }
+        Ok(())
+    }
 }
 
 /// Take a count following a `--key`, which may not be none: a video of no

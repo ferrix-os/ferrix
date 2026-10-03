@@ -149,10 +149,23 @@ pub(crate) fn trap_words(number: usize, args: [usize; 6]) -> (usize, [usize; 3])
 
 /// The processor's time-stamp counter, which ring 3 may read: the TSC, the
 /// counter the kernel's clock counts when it is not the HPET.
+///
+/// Fenced on both sides with `lfence`, so that the read is neither made
+/// before the work before it has finished nor overtaken by the work after
+/// it: `rdtsc` alone is not serializing, and a timed span read without the
+/// fences comes out short by however much the processor overlapped
+/// (`bench-ipc`, `docs/OPAQUE-KERNEL.md` §9.5 step 0). `rdtscp` would order
+/// the read after earlier work too, but the gate's CPU model does not offer
+/// it.
 pub(crate) fn counter() -> Option<u64> {
-    // SAFETY: `rdtsc` reads a counter into edx:eax and has no other effect;
-    // nothing clears CR4.TSD, so it does not fault in ring 3.
-    Some(unsafe { core::arch::x86_64::_rdtsc() })
+    let (low, high): (u32, u32);
+    // SAFETY: `lfence` and `rdtsc` touch no memory and no flags; `rdtsc`
+    // writes edx:eax, and nothing clears CR4.TSD, so it does not fault in
+    // ring 3.
+    unsafe {
+        asm!("lfence; rdtsc; lfence", out("eax") low, out("edx") high, options(nomem, nostack, preserves_flags));
+    }
+    Some(u64::from(high) << 32 | u64::from(low))
 }
 
 /// Complete every access before this before any after it: x86-64's devices

@@ -510,6 +510,11 @@ OPTIONS:
     --reset                              test-boot: ferrix.onexit=reset in CMDLINE.TXT, and require a reset;
                                          build, run: put that CMDLINE.TXT in the image
     --to <MOUNT>                         flash: the card's mounted boot partition
+    --alternate <REF>                    bench-ipc: build REF in a tree of its own and time the two
+                                         turn about, --rounds times (3)
+    --against-sel4, --against-redox      bench-ipc: alternate with the seL4 or Redox image
+    --pin <CPUS>                         QEMU on these host processors (taskset -c); bench-ipc
+                                         pins to 11 by default, `none` for no pin
     --stage <DIR>                        flash: write the card's files into DIR instead, to copy by hand
     --compositor                         flash, deploy: the desktop run-compositor boots, not the self-checks
     --port <DEVICE>                      watch-serial: e.g. /dev/ttyACM0
