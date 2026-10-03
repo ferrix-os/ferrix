@@ -836,7 +836,10 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
     if (nvrm_trace_ioctls && arg_copy != NULL)
     {
         const NvU32 *words = arg_copy;
-        NvU32 rm_status = (arg_size >= 32) ? words[7] : 0;
+        /* NVOS33 (RM_MAP_MEMORY, 0x4E; with its fd, 56 bytes) keeps its
+         * status at byte 40; NVOS21/NVOS54 at byte 28. */
+        NvU32 rm_status = (arg_cmd == 0x4E && arg_size >= 44) ? words[10]
+                        : (arg_size >= 32) ? words[7] : 0;
         if (status != 0 || rm_status != 0)
             nvrm_say("ioctl esc 0x%x size %zu on %s: rc %d, words 0x%x 0x%x 0x%x 0x%x, status 0x%x\n",
                      arg_cmd, arg_size, (nv->flags & NV_FLAG_CONTROL) ? "ctl" : "gpu",
@@ -1411,6 +1414,8 @@ int NV_API_CALL nv_get_event(
  * core; until then the identities are the pseudo-descriptors nvrm_open_ctl
  * handed out, which is what nvrm-link-test passes.
  */
+extern int nvrm_trace_ioctls;
+
 nv_file_private_t* NV_API_CALL nv_get_file_private(
     NvS32 fd,
     NvBool ctl,
@@ -1424,7 +1429,12 @@ nv_file_private_t* NV_API_CALL nv_get_file_private(
     NvS64 identity = nvos_client_resolve_fd(fd);
 
     if (identity < 0)
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: descriptor %d resolves to nothing (%lld)\n",
+                     fd, (long long)identity);
         return NULL;
+    }
     fd = (NvS32)identity;
 
     nvos_mutex_lock(&nv_open_files_lock);
@@ -1436,10 +1446,21 @@ nv_file_private_t* NV_API_CALL nv_get_file_private(
     nvos_mutex_unlock(&nv_open_files_lock);
 
     if (nvlfp == NULL)
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: no open file %d\n", fd);
         return NULL;
+    }
 
-    if (ctl != !!NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)))
+    /* RM passes NV_IS_CTL_DEVICE's flag bit itself, not 0 or 1. */
+    if (!!ctl != !!NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)))
+    {
+        if (nvrm_trace_ioctls)
+            nvrm_say("nv_get_file_private: file %d is %s, asked for %s\n", fd,
+                     NV_IS_CTL_DEVICE(NV_STATE_PTR(nvlfp->nvptr)) ? "ctl" : "gpu",
+                     ctl ? "ctl" : "gpu");
         return NULL;
+    }
 
     *os_private = nvlfp;
 
