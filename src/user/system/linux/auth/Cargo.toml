@@ -7,7 +7,7 @@
 # src/lib/crypto/argon2, and the policy files' syntax in src/lib/init/svc.
 [workspace]
 resolver = "3"
-members = ["authctl", "authd", "client", "login", "passwd"]
+members = ["account", "authctl", "authd", "client", "login", "passwd", "su"]
 
 [workspace.package]
 version = "0.1.0"

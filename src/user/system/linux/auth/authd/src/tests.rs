@@ -32,7 +32,11 @@ impl Machine {
             "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/home/ferrix:/bin/sh\nother:x:1001:1001::/:/bin/sh\nauth:x:90:90::/:/sbin/nologin\n",
         );
         let services = root.join("lib/ferrix/auth/services");
-        for service in ["hyprlock", "passwd", "login"] {
+        write(
+            &root.join("etc/group"),
+            "root:x:0:\nwheel:x:10:ferrix\nferrix:x:1000:\nother:x:1001:\n",
+        );
+        for service in ["hyprlock", "passwd", "login", "su"] {
             let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../services")
                 .join(service);
@@ -707,4 +711,39 @@ fn only_a_first_password_service_and_only_root_get_the_offer() {
         m.verdict(FERRIX, "hyprlock", "", &[]).reply,
         Reply::Unavailable("no password is set for ferrix".to_owned())
     );
+}
+
+/// `su`'s conversation (decision 5): the caller's own password, for a member
+/// of wheel, asked of the person -- `su` connects with their uid.
+#[test]
+fn su_takes_a_wheel_members_own_password() {
+    let mut m = Machine::new("su");
+    m.set("ferrix", 1000, "mine");
+    m.set("other", 1001, "theirs");
+    assert_eq!(
+        m.verdict(FERRIX, "su", "", &["mine"]),
+        accepted("ferrix", 1000)
+    );
+    assert!(matches!(
+        m.verdict(FERRIX, "su", "", &["guess"]).reply,
+        Reply::Failed { .. }
+    ));
+    // Not in wheel: refused before any prompt.
+    let outs = m.converse(OTHER, "su", "", &[]);
+    assert_eq!(
+        outs.last().map(|out| out.reply.clone()),
+        Some(Reply::Unavailable("other is not in wheel".to_owned()))
+    );
+    assert!(
+        !outs
+            .iter()
+            .any(|out| matches!(out.reply, Reply::Prompt { .. })),
+        "a non-member was asked for a password"
+    );
+    assert!(m.audit().contains("why=not-in-group"));
+    // Only the caller's own account: naming another is refused.
+    assert!(matches!(
+        m.verdict(OTHER, "su", "ferrix", &[]).reply,
+        Reply::Unavailable(_)
+    ));
 }

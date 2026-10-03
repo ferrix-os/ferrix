@@ -71,6 +71,27 @@ pub(crate) fn by_uid(path: &Path, uid: u32) -> Option<Account> {
     all(path).into_iter().find(|account| account.uid == uid)
 }
 
+/// Whether `account` is in the group named `group` in the file at `path`:
+/// its primary group, or one whose line names it. A missing file or group
+/// is no membership (`docs/AUTH.md` §4.2, `TargetGroup=`).
+pub(crate) fn in_group(path: &Path, account: &Account, group: &str) -> bool {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    member(&text, account, group)
+}
+
+/// [`in_group`] on the file's text.
+fn member(text: &str, account: &Account, group: &str) -> bool {
+    text.lines().any(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        let [name, _, gid, members] = fields.as_slice() else {
+            return false;
+        };
+        *name == group
+            && (gid.parse::<u32>().is_ok_and(|gid| gid == account.gid)
+                || members.split(',').any(|member| member == account.name))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +116,21 @@ mod tests {
         ] {
             assert_eq!(parse(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_group_counts_its_listed_members_and_its_primary_ones() {
+        let ferrix = parse("ferrix:x:1000:1000::/home/ferrix:/bin/zsh").unwrap();
+        let wheel_by_gid = parse("admin:x:1002:10::/:/bin/sh").unwrap();
+        let plain = parse("plain:x:1001:1001::/:/bin/sh").unwrap();
+        let group = "root:x:0:\nwheel:x:10:root,ferrix\nferrix:x:1000:\n";
+        assert!(member(group, &ferrix, "wheel"));
+        assert!(member(group, &wheel_by_gid, "wheel"));
+        assert!(!member(group, &plain, "wheel"));
+        assert!(!member(group, &ferrix, "audio"));
+        assert!(!member("", &ferrix, "wheel"));
+        // A name that only contains the account's is not it.
+        assert!(!member("wheel:x:10:ferrix2,xferrix\n", &ferrix, "wheel"));
     }
 
     #[test]

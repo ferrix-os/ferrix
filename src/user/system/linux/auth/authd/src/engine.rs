@@ -420,6 +420,19 @@ impl Engine {
                 return over(why);
             }
         };
+        // `TargetGroup=` (`su`'s `wheel`): an account outside it is refused
+        // before any password is asked, so a non-member gets no more of an
+        // oracle from it than from any service of its own account.
+        if let Some(group) = &policy.target_group {
+            let member = target
+                .account
+                .as_ref()
+                .is_some_and(|account| accounts::in_group(&self.paths.group(), account, group));
+            if !member {
+                self.log(peer, service, &target.name, "unavailable", "not-in-group");
+                return over(format!("{} is not in {group}", target.name));
+            }
+        }
         if let Some(wait) = self.throttled(&target, now_ms) {
             self.log(peer, service, &target.name, "throttled", "");
             return (Step::Over, Out::now(wait));

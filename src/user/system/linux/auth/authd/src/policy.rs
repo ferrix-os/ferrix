@@ -60,6 +60,9 @@ pub(crate) struct Policy {
     /// `FirstPassword=local`: an account with no credential may choose one
     /// here, from the console alone (`docs/AUTH.md` §5.4).
     pub(crate) first_password_local: bool,
+    /// `TargetGroup=`: the account must be in this group before anything is
+    /// asked of it (`su`'s `wheel`, decision 5).
+    pub(crate) target_group: Option<String>,
 }
 
 /// Read `service`'s policy from `layers`, lowest first. Warnings about keys
@@ -118,6 +121,7 @@ fn interpret(service: &str, document: &Document, warn: &mut dyn FnMut(String)) -
         fail_delay: Duration::from_secs(2),
         grant_seat: false,
         first_password_local: false,
+        target_group: None,
     };
     let known = [
         "Description",
@@ -185,6 +189,17 @@ fn interpret(service: &str, document: &Document, warn: &mut dyn FnMut(String)) -
         None | Some("" | "no") => {}
         Some("local") => policy.first_password_local = true,
         Some(other) => bad(warn, "FirstPassword", other),
+    }
+    match last(document, "TargetGroup") {
+        None | Some("") => {}
+        Some(group)
+            if group
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) =>
+        {
+            policy.target_group = Some(group.to_owned());
+        }
+        Some(other) => bad(warn, "TargetGroup", other),
     }
     policy
 }

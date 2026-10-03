@@ -2,10 +2,10 @@
 //! then its gid, then its uid, each checked, and then every id read back.
 //! A mismatch is an error, and `login` execs nothing after one.
 
-use crate::account::Account;
+use crate::Account;
 
 /// Drop root for `account`.
-pub(crate) fn drop_to(account: &Account) -> Result<(), String> {
+pub fn drop_to(account: &Account) -> Result<(), String> {
     let check = |what: &str, result: libc::c_int| {
         if result == 0 {
             Ok(())

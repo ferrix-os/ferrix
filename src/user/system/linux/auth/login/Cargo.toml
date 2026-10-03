@@ -12,6 +12,7 @@ publish.workspace = true
 # read-backs are the C library std already links.
 libc = "0.2.189"
 ferrix-auth-client = { path = "../client" }
+ferrix-auth-account = { path = "../account" }
 # The init's control socket, for the session's scope (docs/INIT.md §5.6).
 ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
 

@@ -1,0 +1,17 @@
+[package]
+name = "su"
+description = "/bin/su: a member of wheel becomes root with their own password, through authd (docs/AUTH.md §4.2, decision 5)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Declarations only: getuid, setresuid and the like.
+libc = "0.2.189"
+ferrix-auth-account = { path = "../account" }
+ferrix-auth-client = { path = "../client" }
+
+[lints]
+workspace = true

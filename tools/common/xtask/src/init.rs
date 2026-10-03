@@ -324,10 +324,11 @@ const WANTED: [&str; 13] = [
 /// Who the test's user is: root, and `ferrix`, whom `su` becomes to be
 /// refused what only root may do.
 const PASSWD: &str = "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/:/bin/sh\n\
+                      plain:x:1001:1001:plain:/:/bin/sh\n\
                       auth:x:90:90:authd:/var/lib/ferrix/auth:/sbin/nologin\n";
 
 /// Their groups.
-const GROUP: &str = "root:x:0:\nferrix:x:1000:\nauth:x:90:\n";
+const GROUP: &str = "root:x:0:\nferrix:x:1000:\nplain:x:1001:\nauth:x:90:\nwheel:x:10:ferrix\n";
 
 /// The three programs of `src/user/system/linux/init/` for one architecture.
 #[derive(Debug)]
@@ -661,7 +662,9 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
     });
     // `cat` and `setsid` for the `login` stage: `/proc/self/*` read back, and
     // a `login` with no controlling terminal.
-    for applet in ["su", "nc", "mkdir", "cat", "setsid"] {
+    // `stat` for the `su` stage: `/bin/su`'s mode as the image has it.
+    // `timeout` for the `/dev/tty` probe's read.
+    for applet in ["su", "nc", "mkdir", "cat", "setsid", "stat", "timeout"] {
         files.push(File {
             path: format!("bin/{applet}"),
             mode: 0o777,
@@ -891,6 +894,8 @@ fn after_stage_one(at: &mut Watching<'_>, failures: &mut Vec<String>, sshd: bool
     devmgr_by_init(at, failures)?;
     audit_read_back(at, failures)?;
     login(at, failures)?;
+    su(at, failures)?;
+    dev_tty_probe(at)?;
     if sshd {
         sshd_activated(at, failures)?;
     }
@@ -1079,6 +1084,210 @@ fn log_in(
         );
     }
     Ok(good)
+}
+
+/// `plain`'s first password, chosen at the console by the `su` stage.
+const PLAIN_PASSWORD: &str = "plain chose this";
+
+/// What `/proc/self/status` says of a process whose ids are all root's.
+const ROOT_IDS: &str = "Uid:\t0\t0\t0\t0";
+
+/// The `su` stage (`docs/AUTH.md` P2.6, decision 5), after `login`: in
+/// ferrix's own session, `/bin/su` is set-uid root in the image (U6); with
+/// ferrix's password the shell `su` starts is root's in every id; a wrong
+/// one is refused; ferrix may not become another user; with no
+/// controlling terminal `su` asks nothing (U5); and `plain`, not in wheel,
+/// is refused before any prompt.
+fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    at.redact(PLAIN_PASSWORD);
+    if !enter(at, failures, "ferrix", &[FIRST_PASSWORD])? {
+        return Ok(());
+    }
+    match ask(
+        at,
+        "m=su; echo \"$m-mode $(stat -c '%a %u' /bin/su)\"\n",
+        "su-mode ",
+    )? {
+        Some(line) if line.trim() == "su-mode 4755 0" => {
+            println!("  su: /bin/su is set-uid root in the image (4755, uid 0)");
+        }
+        Some(line) => failures.push(format!("/bin/su is not 4755 root's: `{}`", line.trim())),
+        None => failures.push("/bin/su's mode was never read".into()),
+    }
+    // The right password: root in every id.
+    let before = at.after().len();
+    at.type_in(b"su -c 'cat /proc/self/status; m=su; echo \"$m-root\"'\n")?;
+    thread::sleep(Duration::from_secs(2));
+    at.type_in(format!("{FIRST_PASSWORD}\n").as_bytes())?;
+    let _ = wait_for(at, before, "su-root")?;
+    let said = at.after().get(before..).unwrap_or_default().to_vec();
+    if has(&said, ROOT_IDS) && has(&said, "su-root") {
+        println!("  su: ferrix, in wheel, became root with ferrix's own password");
+    } else {
+        failures.push(format!(
+            "su with ferrix's password did not give root in every id (`{ROOT_IDS}`)"
+        ));
+    }
+    // A wrong one.
+    let before = at.after().len();
+    at.type_in(b"su -c 'm=su; echo \"$m-wrong-root\"'; m=su; echo \"$m-wrong\"\n")?;
+    thread::sleep(Duration::from_secs(2));
+    at.type_in(b"not the password\n")?;
+    let _ = wait_for(at, before, "su-wrong")?;
+    let said = at.after().get(before..).unwrap_or_default().to_vec();
+    if has(&said, "su: Authentication failure") && !has(&said, "su-wrong-root") {
+        println!("  su: a wrong password was refused");
+    } else {
+        failures
+            .push("su took a wrong password, or did not say `su: Authentication failure`".into());
+    }
+    // Another user, not root: refused before any prompt.
+    // Statuses are not looked at, only what `su` says: the shell's `$?`
+    // after it is not to be relied on here.
+    let before = at.after().len();
+    match ask(
+        at,
+        "su plain -c 'm=su; echo \"$m-other-plain\"'; m=su; echo \"$m-other\"\n",
+        "su-other",
+    )? {
+        Some(_)
+            if has(since(at, before), "only root may become another user")
+                && !has(since(at, before), "su-other-plain") =>
+        {
+            println!("  su: ferrix may not become plain");
+        }
+        _ => failures.push("su let ferrix become another user than root".into()),
+    }
+    // No controlling terminal: refused before connecting (U5).
+    let before = at.after().len();
+    at.type_in(b"setsid su -c 'm=su; echo \"$m-notty-root\"' </dev/null\n")?;
+    let _ = wait_for(at, before, "su: no terminal to ask the password on")?;
+    let said = at.after().get(before..).unwrap_or_default().to_vec();
+    if has(&said, "su: no terminal to ask the password on") && !has(&said, "su-notty-root") {
+        println!("  su: with no controlling terminal, su asked nothing and gave nothing");
+    } else {
+        failures.push("su with no controlling terminal was not refused before asking".into());
+    }
+    let _ = ask(at, "exit\nm=su; echo \"$m-back\"\n", "su-back")?;
+    // `plain`, not in wheel: its first password at the console, then `su`.
+    if !enter(at, failures, "plain", &[PLAIN_PASSWORD, PLAIN_PASSWORD])? {
+        return Ok(());
+    }
+    let before = at.after().len();
+    match ask(
+        at,
+        "su -c 'm=su; echo \"$m-plain-root\"'; m=su; echo \"$m-plain\"\n",
+        "su-plain",
+    )? {
+        Some(_)
+            if has(since(at, before), "su: plain is not in wheel")
+                && !has(since(at, before), "su-plain-root") =>
+        {
+            println!("  su: plain, not in wheel, was refused before any password was asked");
+        }
+        _ => failures.push(
+            "su did not refuse plain, who is not in wheel, with `plain is not in wheel`".into(),
+        ),
+    }
+    let _ = ask(at, "exit\nm=su; echo \"$m-back\"\n", "su-back")?;
+    Ok(())
+}
+
+/// What `/dev/tty` gives a uid-1000 process with no controlling terminal,
+/// recorded and not judged (`docs/BACKLOG.md`; the certification
+/// consultant's V2): today the console, open, written to and read from,
+/// where Linux gives `ENXIO`. The line it prints is the exposure's record
+/// until the fix, whose own boot check will require `ENXIO`.
+fn dev_tty_probe(at: &mut Watching<'_>) -> Result<()> {
+    let probe = "su ferrix -c 'setsid sh -c \"exec 3<>/dev/tty || { echo probe-tty-open-refused; exit; }; \
+                 echo probe-tty-opened; echo probe-tty-written-by-ferrix >&3; timeout 2 cat <&3 >/dev/null; \
+                 echo probe-tty-read-status \\$?\"' </dev/null\n";
+    let before = at.after().len();
+    at.type_in(probe.as_bytes())?;
+    // The markers are also in the echo of what was typed: only a line that
+    // begins with one is the probe's. And the probe's read holds the console
+    // for its 2 s, so nothing is typed until it has said it is done.
+    let said_by_probe = |lines: &[String], marker: &str| {
+        lines
+            .iter()
+            .any(|line| line.trim_start().starts_with(marker))
+    };
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        let lines = lines.get(before..).unwrap_or_default();
+        said_by_probe(lines, "probe-tty-read-status")
+            || said_by_probe(lines, "probe-tty-open-refused")
+    })?;
+    let said = since(at, before).to_vec();
+    let opened = said_by_probe(&said, "probe-tty-opened");
+    let refused = said_by_probe(&said, "probe-tty-open-refused");
+    let wrote = said_by_probe(&said, "probe-tty-written-by-ferrix");
+    let read = said.iter().find_map(|line| {
+        line.trim_start()
+            .strip_prefix("probe-tty-read-status ")
+            .map(|rest| rest.trim().to_owned())
+    });
+    let open = if opened {
+        "opened /dev/tty"
+    } else if refused {
+        "was refused /dev/tty"
+    } else {
+        "said nothing of the open"
+    };
+    let written = if wrote {
+        "wrote to the console"
+    } else {
+        "nothing reached the console"
+    };
+    let reading = read.map_or_else(
+        || "no read was tried".to_owned(),
+        |status| format!("a read of the console held it for its 2 s (status {status})"),
+    );
+    println!(
+        "  /dev/tty probe (recorded, not judged): uid 1000 with no controlling terminal {open}, \
+         {written}, {reading}"
+    );
+    Ok(())
+}
+
+/// `login NAME` at the console with `answers` typed blind: whether its
+/// shell started.
+fn enter(
+    at: &mut Watching<'_>,
+    failures: &mut Vec<String>,
+    name: &str,
+    answers: &[&str],
+) -> Result<bool> {
+    let before = at.after().len();
+    at.type_in(format!("login {name}\n").as_bytes())?;
+    for answer in answers {
+        thread::sleep(Duration::from_secs(2));
+        at.type_in(format!("{answer}\n").as_bytes())?;
+    }
+    let wanted = format!("login: {name} in user-");
+    if wait_for(at, before, &wanted)? {
+        Ok(true)
+    } else {
+        failures.push(format!("`login {name}` did not log {name} in"));
+        Ok(false)
+    }
+}
+
+/// The lines from `before` on.
+fn since<'a>(at: &'a Watching<'_>, before: usize) -> &'a [String] {
+    at.after().get(before..).unwrap_or_default()
+}
+
+/// Wait for a line holding `text` among those from `before` on.
+fn wait_for(at: &mut Watching<'_>, before: usize, text: &str) -> Result<bool> {
+    let deadline = Instant::now() + PATIENCE;
+    at.read_more(deadline, |lines| {
+        lines
+            .get(before..)
+            .unwrap_or_default()
+            .iter()
+            .any(|line| line.contains(text))
+    })
 }
 
 /// `svc audit` and what it prints, one record a line.

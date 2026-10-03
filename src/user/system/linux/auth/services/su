@@ -1,0 +1,11 @@
+# Become root (docs/AUTH.md §4.2, decision 5): a member of wheel, with their
+# own password. /bin/su is set-uid root and connects with the person's own
+# uid as its effective one, so SO_PEERCRED says who is asking; the ACCEPTED
+# grants nothing by itself, and only the set-uid program acts on it.
+[Service]
+Description=Become root
+Account=caller
+Callers=any
+Methods=password
+TargetGroup=wheel
+FailDelaySec=2

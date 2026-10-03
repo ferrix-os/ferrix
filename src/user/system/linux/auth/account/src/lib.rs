@@ -1,20 +1,30 @@
-//! The account `authd` accepted, as `/etc/passwd` and `/etc/group` say it.
+//! An account as `/etc/passwd` and `/etc/group` say it, and becoming it
+//! (`docs/AUTH.md` §6.2): what `/bin/login` and `/bin/su` share.
+
+mod privileges;
+
+pub use privileges::drop_to;
 
 /// What `login` needs of an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Account {
-    pub(crate) name: String,
-    pub(crate) uid: u32,
-    pub(crate) gid: u32,
-    pub(crate) home: String,
-    pub(crate) shell: String,
+pub struct Account {
+    /// The login name.
+    pub name: String,
+    /// The uid.
+    pub uid: u32,
+    /// The primary gid.
+    pub gid: u32,
+    /// The home directory.
+    pub home: String,
+    /// The login shell.
+    pub shell: String,
     /// Its supplementary groups: its own gid, and every group naming it.
-    pub(crate) groups: Vec<u32>,
+    pub groups: Vec<u32>,
 }
 
 impl Account {
     /// Whether its shell lets it log in: not empty, `nologin` or `false`.
-    pub(crate) fn may_log_in(&self) -> bool {
+    pub fn may_log_in(&self) -> bool {
         let base = self.shell.rsplit('/').next().unwrap_or_default();
         self.shell.starts_with('/') && !matches!(base, "" | "nologin" | "false")
     }
@@ -22,7 +32,7 @@ impl Account {
 
 /// Whether `name` could be an account's: POSIX's portable characters, not
 /// starting with `-`, at most 32 bytes.
-pub(crate) fn is_a_name(name: &str) -> bool {
+pub fn is_a_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 32
         && !name.starts_with('-')
@@ -33,7 +43,7 @@ pub(crate) fn is_a_name(name: &str) -> bool {
 
 /// Whether getty's `TERM` is one to keep: a plain name, as terminfo's are,
 /// at most 64 bytes (the certification consultant's F7).
-pub(crate) fn is_a_term(term: &str) -> bool {
+pub fn is_a_term(term: &str) -> bool {
     !term.is_empty()
         && term.len() <= 64
         && term
@@ -42,14 +52,27 @@ pub(crate) fn is_a_term(term: &str) -> bool {
 }
 
 /// `name`'s account, from the two files.
-pub(crate) fn find(name: &str, passwd: &str, group: &str) -> Option<Account> {
+pub fn find(name: &str, passwd: &str, group: &str) -> Option<Account> {
     let passwd = std::fs::read_to_string(passwd).ok()?;
     let group = std::fs::read_to_string(group).unwrap_or_default();
     parse(name, &passwd, &group)
 }
 
+/// The name of the first account whose uid is `uid`, as `getpwuid`
+/// answers, in `/etc/passwd`'s text.
+#[must_use]
+pub fn name_of(uid: u32, passwd: &str) -> Option<String> {
+    passwd.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        let [user, _, id, _, _, _, _] = fields.as_slice() else {
+            return None;
+        };
+        (id.parse::<u32>().ok() == Some(uid)).then(|| (*user).to_owned())
+    })
+}
+
 /// `name`'s account in the files' text.
-pub(crate) fn parse(name: &str, passwd: &str, group: &str) -> Option<Account> {
+pub fn parse(name: &str, passwd: &str, group: &str) -> Option<Account> {
     let (uid, gid, home, shell) = passwd.lines().find_map(|line| {
         let fields: Vec<&str> = line.split(':').collect();
         let [user, _, uid, gid, _, home, shell] = fields.as_slice() else {

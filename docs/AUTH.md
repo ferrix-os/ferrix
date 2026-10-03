@@ -97,6 +97,7 @@ Each fact below was read from the tree at `1a8bea54`.
 | getty | `setsid`, takes the terminal, then execs `$SHELL` as a login shell. "There is no `login` yet." | `src/user/system/linux/init/getty/src/main.rs:7-11`, `:78-84`; `src/user/system/linux/init/units/getty@.service` |
 | init | Reads `User=` from `/etc/passwd`. Its control socket is `0666`, and `SO_PEERCRED` decides who may change state. A user may make a scope only under their own `user-<uid>.slice`. | `src/user/system/linux/init/init/src/spawn.rs:446-487`; `src/user/system/linux/init/init/src/control.rs:5-6`, `:67`; `docs/INIT.md` §10 |
 | The desktop | hyprix is linked into the kernel as its init, so it and every client run as uid 0. Moving it under init is `docs/INIT.md` L10, not started. | `tools/common/xtask/src/compositor.rs:1237-1239`; `docs/INIT.md:810`, `:887` |
+| `/dev/tty` | Mode `0666`, and the console to whoever opens it, whatever their controlling terminal or none (`docs/BACKLOG.md`, load ring). A uid-1000 program can write to the console and read what is typed there, so it can show a fake prompt and race the console's `login` for a password. `test-init`'s probe records it at every boot until the fix. `su` reads only a terminal on its standard input. | `src/kernel/src/fs/devfs.rs` (`tty`, 5:0, `Behaviour::Console`) |
 | The lock | `ext-session-lock-v1`. Any client may take the lock. Only the client that holds it may unlock, on the lock object it was given. **Until 2026-10-03 that was not so**: hyprix held the lock by the holder's place in its list and kept that place when the holder died, and the server passed `unlock_and_destroy` on any lock object, so a client that came to sit at a dead locker's place could take a refused lock of its own and unlock the session with it. Fixed by the lock-holder commit of that day (the certification consultant's OK IF, ledger line 296): a lock whose holder went is held by nobody, and a refused lock unlocks nothing. A lock whose client died stays locked, and **a second client is refused even then**, so a crashed locker needs a reboot. | `src/user/system/linux/compositor/server/src/client/lock.rs:29-46`, `:113-121`, `:176-186`; `src/user/system/linux/compositor/hyprix/src/state.rs:3429-3447` (`Lock::held_by`, `Lock::renumber`), `lock_changed` |
 | hyprlock | Authentication through `auth::Backend` (`ready`, `begin`, `respond`). On every desktop its backend is `Service`, `authd`'s client; it refuses to lock an account with no credential and unlocks only on `authd`'s ACCEPTED (P1.5, landed 2026-10-03, the certification consultant's OK IF of ledger line 295). `SIGUSR1` does not unlock. | `src/user/system/linux/compositor/hyprlock/src/auth.rs`; `docs/DESKTOP-CLIENTS.md` §5.2 |
 | ferrousli | `getspnam_r` reads `/etc/tcb/<name>/shadow` or `/etc/shadow`, as musl does. `crypt` does DES, MD5, `$5$` and `$6$`. Blowfish gives `"*"`. There is no yescrypt and no Argon2. | `src/user/system/linux/ferrousli/src/shadow.rs:1-12`; `src/user/system/linux/ferrousli/src/crypt.rs:1-27` |
@@ -148,7 +149,7 @@ leaves the desktop running as root.
 |---|---|---|---|
 | **TA.WALKUP** A person at a *locked* screen, with the keyboard, the pointer and a USB port | In | The lock takes the keyboard (hyprix, stage 18). Only `authd`'s verdict opens it. The throttle (§3.5) makes guessing slow. A USB keyboard that types guesses gets the same throttle. | Same, and the compositor unlocks only on `authd`'s grant for the lock that is up (§3.7). Crashing the locker leaves the screen locked, and a new locker, started by a `bindl` key, may take over; it too needs the password. |
 | **TA.WALKUP'** The same person at an *unlocked*, unattended screen | Keep access later | `passwd` asks for the old password first, so they cannot change it. They can do anything else root can: phase 1 does not defend this. | `passwd` and becoming root both ask for a password. They can run anything as the user, and that is out of scope (§2.3). |
-| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **Killing hyprix ends the session at the console's login and nothing of the user's starts it again (§6.4, P2.7)**. What it can keep: a program of its own moved into a scope of the user's outlives the session, with the user's files and network and no device, lock channel or later session's socket; closing that is the customer's decision (§6.4). **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). |
+| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **Killing hyprix ends the session at the console's login and nothing of the user's starts it again (§6.4, P2.7)**. What it can keep: a program of its own moved into a scope of the user's outlives the session, with the user's files and network and no device, lock channel or later session's socket; closing that is the customer's decision (§6.4). **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). **Since P2.6 that password is also root's** on an image where the user is in `wheel`, as `ferrix` is on `--everything` (decision 5): a phished password, or a guess at the throttle's rate, now reaches root through `su`. **Until `/dev/tty` is the caller's own terminal** (§1, `docs/BACKLOG.md`), any program of the user's can also write to the console and read from it, so it can show a fake prompt there and race the console's `login` for what is typed. |
 | **TA.NET** A network attacker, once ssh or a network login exists | A shell | `sshdt` stays key-only (`tools/common/xtask/src/ssh.rs:29-31`). `authd` listens on no network socket. | Password or keyboard-interactive ssh goes through `authd` (phase 3), with the same throttle and audit. Until then it stays off. |
 | **TA.ROOT** A Linux-ABI program running as root | Everything | Out of reach by design. Root reads any file and can replace `authd`. What still holds: the hashes are Argon2id, so a stolen store costs a lot of work per guess (§5.1). | Same. Phase 2 makes root rarer: no desktop client runs as root. |
 | **TA.OFFLINE** Someone with a copy of the disk (`build/root.img`, the DK1's SD card) | Passwords, which people reuse | Argon2id with a per-user salt. Nothing else: there is no disk encryption. | Same. |
@@ -529,13 +530,14 @@ Callers=root          # getty's login is root; nobody else may name an account
 Methods=password
 FirstPassword=local   # an account with no credential may set one here, on a local console only (§5.4)
 
-# /lib/ferrix/auth/services/su
+# /lib/ferrix/auth/services/su  (as built, P2.6)
 [Service]
 Description=Become root
 Account=caller        # authenticate the person asking, not the target (decision 5)
-Callers=root          # su is set-uid root
+Callers=any           # su connects with the person's own uid; see below
 Methods=password
-TargetGroup=wheel     # the caller must be in wheel to become root
+TargetGroup=wheel     # the caller must be in wheel; asked before any password
+FailDelaySec=2
 
 # /lib/ferrix/auth/services/passwd
 [Service]
@@ -912,8 +914,41 @@ as root unless something gives it the devices.
    §3.7 (P2.5).
 4. **Kernel prerequisites**: P0 (native processes take their creator's
    credentials) before any non-root desktop, and K-B (dumpable) with it.
-5. **`su`** (P2.6): Ferrix's own, set-uid root, running the `su`
-   conversation (§4.2) and then the target shell.
+5. **`su`** (P2.6, **built 2026-10-03**; the certification consultant's OK
+   IF, ledger line 309): Ferrix's own, `/bin/su`, set-uid root (mode 4755,
+   in busybox's place on every image with `authd`). Run by root it asks
+   nothing, as every `su`. Run by anyone else, the target must be root, and
+   the person shows their *own* password (decision 5):
+   * **The kernel says who asks.** `su` sets its effective uid back to the
+     person's for the `connect` alone and takes root back from its saved
+     uid at once: `SO_PEERCRED` is fixed at connect, so `authd` sees the
+     person's uid, not root's. That is why the policy reads `Callers=any`
+     where the first sketch said `Callers=root`: with `su` set-uid, root as
+     the caller would have meant authenticating root, who has no password.
+     An ACCEPTED of the `su` service grants nothing by itself -- it is the
+     person's own password, which any `Account=caller` service already
+     checks -- and only the set-uid program acts on it.
+   * **`TargetGroup=wheel`**, checked by `authd` at BEGIN from
+     `/etc/group` (primary group or listed): a non-member is refused before
+     any password is asked, audited `not-in-group`.
+   * `su` talks only to the compiled-in socket and only to a listener whose
+     uid is 0 or 90 (U1), clears its environment before anything reads it
+     (U2), and keeps root only on an ACCEPTED for the caller's own uid and
+     account (U3); every id and group is then read back, with `login`'s
+     shared code (`src/user/system/linux/auth/account`).
+   * **While its euid is the person's** (U4) -- the `connect`, nothing
+     else -- its `/proc/<pid>` entries are theirs, and Ferrix ignores
+     `PR_SET_DUMPABLE` (§1). Nothing there exposes a secret: no secret has
+     been typed yet; and in any case Ferrix has no `/proc/<pid>/mem`, no
+     `process_vm_readv` and no `ptrace`, its `fd` entries are plain links,
+     and a socket refuses to be reopened.
+   * **The password comes from standard input when that is a terminal, and
+     from nowhere else** (U5): with none, `su` refuses before connecting, so
+     a password is never piped into it. It does not open `/dev/tty`, which on
+     Ferrix is the console whatever the caller's controlling terminal is
+     (`docs/BACKLOG.md`): a `su` in a pty would otherwise ask on the wrong
+     screen.
+   `test-init --arch all`'s `su` stage shows each of these.
 
 ### 6.3 Seats, and who may lock and unlock
 
@@ -1072,7 +1107,7 @@ phase 1. hyprlock does not change when phase 2 moves the session to
 | P2.3 | `login`, and getty execs it. First password on a local console. `test-init` gains a stage: log in as `ferrix`, a wrong password refused, `id` says 1000, the session's scope is `user-1000.slice/session-1.scope`. **Built 2026-10-03** (§6.2; `getty --login` is per image) | auth, init | P1 | `test-init --arch all` | 5 |
 | P2.4 | `sessiond`: seat0, device descriptors by `SCM_RIGHTS`, starts hyprix as the account in its scope, ends the session with its compositor. **Built 2026-10-03 for `--everything`** (§6.1), all but the scope: the session stays in `hyprix.service`'s cgroup; `test-compositor --boot everything-desktop` runs it as uid 1000 | session (new) | L10, P0 | `test-compositor` as uid 1000 | 10 |
 | P2.5 | hyprix: devices from `sessiond`, the seat channel and grants (§3.7), a new locker taking over a dead lock, `misc:lock_grace`. **Built 2026-10-03**: the devices, then the grants, the takeover and `lock_grace` (§3.7; the consultant's OK IF, ledger line 299); `test-compositor --boot hyprlock-session` | compositor | P2.4, P1.3 | `test-compositor`, `test-hyprlock` | 6 |
-| P2.6 | `su`, set-uid root, the wheel rule | auth | P1 | `test-vfs` (it already becomes `ferrix` with `su`) | 3 |
+| P2.6 | `su`, set-uid root, the wheel rule. **Built 2026-10-03** (§6.2): the gate is `test-init`'s `su` stage, since `test-vfs` boots no `authd` | auth | P1 | `test-init --arch all` | 3 |
 | P2.7 | Adversary controls in the gates. A client that calls `unlock_and_destroy` with no grant leaves the screen locked. So does a client at a dead locker's place, and one holding a lock it was refused, each sending `unlock_and_destroy`; putting back the old place-only check makes that boot fail (the consultant's condition, ledger line 296; host tests in `hyprix/src/state/tests.rs` already). A client that kills hyprix lands at `login`, not on a desktop. A uid-1000 program cannot read `/var/lib/ferrix/auth`. Each has a sabotage that must make it fail. **Built 2026-10-03** (§6.4; `--boot session-end` and `--boot hyprlock-session`) | auth, compositor | P2.4, P2.5 | `test-compositor`, `test-auth` | 4 |
 
 ### Phase 3: versatility (about 32 points sized, plus unsized items)
@@ -1241,6 +1276,7 @@ it was put to the customer.
 | P1.2 `src/lib/proto/auth-proto` | on `main` with this section: the records of §3.3, `Secret`, the `auth_proto` fuzz target |
 | P1.3 `authd`, P1.4 `passwd` and `authctl` | on `main` with this row (`src/user/system/linux/auth/`): 28 host tests, one of them over a real socket, and `test-auth` on all three architectures |
 | P1.6 `cargo xtask test-auth` | on `main` with this row (`tools/common/xtask/src/auth.rs`): passes on x86-64, AArch64 and ARMv7-A, and each of `--sabotage accept-any`, `tell-unknown`, `let-anyone-name` and `no-throttle` fails on its own line |
+| P2.6 `su` | 2026-10-03: `/bin/su` set-uid root; `authd`'s `su` service, `Callers=any` with `TargetGroup=wheel` enforced at BEGIN; `ferrix` in `wheel` (gid 10) wherever `authd` is carried (§6.2; the consultant's OK IF, ledger line 309). `test-init --arch all`'s `su` stage |
 | P2.3 `login` | 2026-10-03: `/bin/login`, `getty --login`, `FirstPassword=local` decided by `authd` from the caller's `tty_nr` (1281, the console's) for a person's account only (§5.4, §6.2; the consultant's OK IF, ledger line 303). `test-init --arch all`'s `login` stage: no first password with no controlling terminal, the first password at the console, every id 1000 in `user-1000.slice/session-1.scope`, a wrong password refused, `session-2.scope` |
 | P2.5 the seat's grant | 2026-10-03: `authd` offers `ferrix.auth.seat`, `sessiond` arms each lock and relays its grant on descriptor 4, hyprix lets a session's lock go only on it, a dead lock may be taken over, `misc:lock_grace` capped (§3.7, ledger line 299). `--boot hyprlock-session` and three negative controls. Not closed: killing hyprix restarts a fresh desktop until `login` (P2.3, P2.7) |
 | hyprix's lock holder | 2026-10-03: only the holder unlocks, on its own lock object, and nobody once it has died (§1's lock row; the consultant's OK IF, ledger line 296); seven host tests, and negative controls in `~/.local/share/ferrix/logs/lock-orphan/` |

@@ -90,8 +90,9 @@ pub(crate) const UID: u32 = 90;
 /// Its `/etc/passwd` line.
 pub(crate) const PASSWD_LINE: &str = "auth:x:90:90:authd:/var/lib/ferrix/auth:/sbin/nologin\n";
 
-/// Its `/etc/group` line.
-pub(crate) const GROUP_LINE: &str = "auth:x:90:\n";
+/// Its `/etc/group` line, and `wheel` with `ferrix` in it: who may become
+/// root with `su` and their own password (decision 5).
+pub(crate) const GROUP_LINE: &str = "auth:x:90:\nwheel:x:10:ferrix\n";
 
 /// The shipped policies and units, beside this module in the tree.
 const SERVICES: &str = "src/user/system/linux/auth/services";
@@ -123,6 +124,7 @@ pub(crate) struct Built {
     passwd: PathBuf,
     authctl: PathBuf,
     login: PathBuf,
+    su: PathBuf,
 }
 
 /// Build `src/user/system/linux/auth/` for `arch`, sabotaged as `sabotage` when one is
@@ -155,6 +157,7 @@ pub(crate) fn built(arch: Arch, sabotage: Option<&str>) -> Result<Option<Built>>
         passwd: release.join("passwd"),
         authctl: release.join("authctl"),
         login: release.join("login"),
+        su: release.join("su"),
     };
     let mut build = crate::builds::Build::cargo(
         format!("cargo build (auth) --target {target}"),
@@ -171,6 +174,7 @@ pub(crate) fn built(arch: Arch, sabotage: Option<&str>) -> Result<Option<Built>>
         .output(&built.passwd)
         .output(&built.authctl)
         .output(&built.login)
+        .output(&built.su)
         .run()?;
     Ok(Some(built))
 }
@@ -217,6 +221,9 @@ pub(crate) fn carried(arch: Arch, sabotage: Option<&str>) -> Result<Vec<File>> {
         file("bin/authctl".to_owned(), 0o755, read(&built.authctl)?),
         // Ferrix's own, in busybox's place (`docs/AUTH.md` §6.2).
         file("bin/login".to_owned(), 0o755, read(&built.login)?),
+        // Set-uid root (`docs/AUTH.md` §4.2): a member of wheel becomes root
+        // with their own password. In busybox's place.
+        file("bin/su".to_owned(), 0o4755, read(&built.su)?),
     ];
     for (name, bytes) in shipped(SERVICES)? {
         files.push(file(

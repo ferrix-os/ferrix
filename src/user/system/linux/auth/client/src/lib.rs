@@ -111,6 +111,38 @@ impl Connection {
         Ok(Connection { fd })
     }
 
+    /// The uid of whoever listens at the other end, as `SO_PEERCRED` recorded
+    /// it when the socket was set to listen: the init's (0) for a socket it
+    /// activates, or `authd`'s own. A set-uid program checks it before it
+    /// sends a byte, so a server a user started cannot answer it.
+    ///
+    /// # Errors
+    ///
+    /// The socket's error.
+    pub fn peer_uid(&self) -> io::Result<u32> {
+        let mut credentials = libc::ucred {
+            pid: 0,
+            uid: u32::MAX,
+            gid: u32::MAX,
+        };
+        let mut len = socklen::<libc::ucred>();
+        // SAFETY: `credentials` is valid for writes of `len` bytes, its own
+        // size, and `len` for a write of its own.
+        let status = unsafe {
+            libc::getsockopt(
+                self.fd.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&raw mut credentials).cast(),
+                &raw mut len,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(credentials.uid)
+    }
+
     /// A connection over `fd`, already connected: for `authd`'s own tests.
     #[must_use]
     pub fn from_fd(fd: OwnedFd) -> Connection {
@@ -256,6 +288,9 @@ pub fn converse(
 pub struct Terminal {
     /// Whether standard input's end has been reached.
     ended: bool,
+    /// Whether only the controlling terminal may answer: a set-uid program's
+    /// secret is never read from a pipe.
+    tty_only: bool,
 }
 
 impl Terminal {
@@ -263,6 +298,19 @@ impl Terminal {
     #[must_use]
     pub fn new() -> Terminal {
         Terminal::default()
+    }
+
+    /// The person at the terminal that is this program's standard input, and
+    /// nowhere else: a secret is never read from a pipe or a file, and with
+    /// no terminal the answer is none. `/dev/tty` is not opened: on Ferrix it
+    /// is the console whatever the caller's controlling terminal, so a
+    /// program in a pty would ask on the wrong screen.
+    #[must_use]
+    pub fn tty_only() -> Terminal {
+        Terminal {
+            ended: false,
+            tty_only: true,
+        }
     }
 }
 
@@ -274,18 +322,29 @@ impl Person for Terminal {
         drop(err);
         // The terminal only when standard input is one: a secret piped in
         // by a script is read from the pipe, not waited for on the console.
-        let tty = is_terminal(libc::STDIN_FILENO)
-            .then(|| {
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open("/dev/tty")
-                    .ok()
-            })
-            .flatten();
+        let tty = if self.tty_only {
+            is_terminal(libc::STDIN_FILENO)
+                .then(|| {
+                    std::os::fd::AsFd::as_fd(&io::stdin())
+                        .try_clone_to_owned()
+                        .ok()
+                        .map(std::fs::File::from)
+                })
+                .flatten()
+        } else {
+            is_terminal(libc::STDIN_FILENO)
+                .then(|| {
+                    std::fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/tty")
+                        .ok()
+                })
+                .flatten()
+        };
         let answer = match tty {
             Some(file) => read_from_terminal(&file, visible),
-            None if self.ended => None,
+            None if self.ended || self.tty_only => None,
             None => {
                 let answer = read_line(&mut io::stdin().lock());
                 self.ended = answer.is_none();

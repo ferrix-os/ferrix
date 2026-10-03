@@ -28,6 +28,13 @@ name = "ferrix-argon2"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-auth-account"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "ferrix-auth-client"
 version = "0.1.0"
 dependencies = [
@@ -83,6 +90,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "login"
 version = "0.1.0"
 dependencies = [
+ "ferrix-auth-account",
  "ferrix-auth-client",
  "ferrix-svc-proto",
  "libc",
@@ -94,4 +102,13 @@ version = "0.1.0"
 dependencies = [
  "ferrix-auth-client",
  "ferrix-auth-proto",
+]
+
+[[package]]
+name = "su"
+version = "0.1.0"
+dependencies = [
+ "ferrix-auth-account",
+ "ferrix-auth-client",
+ "libc",
 ]

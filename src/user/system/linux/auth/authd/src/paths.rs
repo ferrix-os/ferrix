@@ -19,6 +19,11 @@ impl Paths {
         self.root.join(relative)
     }
 
+    /// `/etc/group`: who is in which group (`TargetGroup=`).
+    pub(crate) fn group(&self) -> PathBuf {
+        self.at("etc/group")
+    }
+
     /// `/etc/passwd`: who the accounts are.
     pub(crate) fn passwd(&self) -> PathBuf {
         self.at("etc/passwd")

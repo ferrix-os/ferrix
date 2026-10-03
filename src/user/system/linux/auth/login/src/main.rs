@@ -17,8 +17,6 @@
 //! an environment of its own. Three wrong passwords end it, and getty's
 //! restart brings the prompt back.
 
-mod account;
-mod privileges;
 mod session;
 
 use std::io::{BufRead as _, Write as _};
@@ -26,6 +24,7 @@ use std::os::unix::process::CommandExt as _;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
+use ferrix_auth_account as account;
 use ferrix_auth_client::{Connection, Terminal, Verdict, converse};
 
 /// How many passwords one run of `login` takes.
@@ -113,7 +112,7 @@ fn start(name: &str, uid: u32) -> ExitCode {
             "login: no session scope for {name}: {why}; logging in without one"
         )),
     }
-    if let Err(why) = privileges::drop_to(&account) {
+    if let Err(why) = account::drop_to(&account) {
         say(&format!("login: becoming {name} failed: {why}"));
         return ExitCode::FAILURE;
     }
