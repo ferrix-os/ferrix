@@ -694,10 +694,13 @@ static void kms_watch(void *argument)
         goto out;
     }
     kms_say("watching for a display to be connected\n");
-    while (status == -ENODEV)
+    for (NvU32 looks = 1; status == -ENODEV; looks++)
     {
         nvkms_usleep(2000000);
         status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
+        /* A line a minute, so a wait is told from a hang. */
+        if (status == -ENODEV && looks % 30 == 0)
+            kms_say("still no display connected after %u s\n", looks * 2);
     }
     if (status == 0 && kms_card.lit == NULL)
         (void)kms_card_start(lit);
