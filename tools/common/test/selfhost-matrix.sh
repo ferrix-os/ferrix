@@ -82,6 +82,9 @@ debian=$data/busybox/debian
 run ports cargo xtask ports
 run busybox cargo xtask busybox
 run uutils cargo xtask uutils
+# Every app's package, which test-foot, test-init (sshdt) and test-vkgears
+# boot: the matrix's home starts with none.
+run build-apps cargo xtask build-apps --arch all
 run build-release cargo xtask build --arch all --release
 run boot-x86_64 cargo xtask test-boot --arch x86_64 --timeout 600
 run boot-aarch64 cargo xtask test-boot --arch aarch64 --timeout 600
