@@ -38,6 +38,13 @@
       "branch": "step2a",
       "date": "2026-10-02",
       "purpose": "OPAQUE-KERNEL.md §9.8 step 2a (the consultant's OK IF of 2026-10-02): the running task by borrow, and current() without the run queue's lock. 2b wrote L.sched.20-23."
+    },
+    {
+      "ids": ["L.x86_64.150-151"],
+      "owner": "step2b",
+      "branch": "step4-prep",
+      "date": "2026-10-03",
+      "purpose": "OPAQUE-KERNEL.md §9.7 part 6, step 4's groundwork (session B): ferrix.fastpath, the boot switch read once and printed at stage 9, off by default in the certified configuration (the customer, 2026-10-02)"
     }
   ]
 }
