@@ -14,11 +14,14 @@
 //! | `.mount` | `[Mount]` | yes | [`Mount`] |
 //! | `.socket` | `[Socket]` | yes | [`Socket`], version 2 |
 //! | `.builtin` | none | no | |
+//! | `.device` | none | no | [`Device`] |
 //!
 //! Slices and scopes need no file because the manager makes them: a slice
 //! for every level of a `Slice=` path, a scope when a program asks. A
 //! builtin needs none because its name is the contract (§7.2): `net.builtin`
-//! is active whether or not anything describes it.
+//! is active whether or not anything describes it. A device needs none for
+//! the same reason: `dev-dri-card0.device` is `/dev/dri/card0`, active while
+//! the node exists, so that a service can be `Requires=` and `After=` it.
 
 mod mount;
 mod sandbox;
@@ -162,6 +165,8 @@ pub enum Config {
     Socket(Socket),
     /// A builtin, which has no settings of its own.
     Builtin,
+    /// A device node.
+    Device(Device),
 }
 
 /// The kind a type is implemented by.
@@ -174,6 +179,7 @@ pub fn of(unit_type: UnitType) -> &'static dyn Kind {
         UnitType::Mount => &mount::MountKind,
         UnitType::Socket => &socket::SocketKind,
         UnitType::Builtin => &Plain(UnitType::Builtin),
+        UnitType::Device => &DeviceKind,
     }
 }
 
@@ -217,6 +223,46 @@ impl Kind for Plain {
             stopped_at_shutdown(&mut edges);
         }
         edges
+    }
+}
+
+/// A device unit's settings, which its name gives: the node it waits for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Device {
+    /// The node, absolute and below `/dev`: [`UnitName::device_path`].
+    pub path: String,
+}
+
+/// The device kind.
+struct DeviceKind;
+
+impl Kind for DeviceKind {
+    fn unit_type(&self) -> UnitType {
+        UnitType::Device
+    }
+
+    fn section(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn needs_file(&self) -> bool {
+        false
+    }
+
+    /// The node, from the name; a name that is no node's refuses the unit.
+    fn parse(&self, name: &UnitName, _: &Section, _: &mut Warnings) -> Result<Config, UnitError> {
+        match name.device_path() {
+            Ok(path) => Ok(Config::Device(Device { path })),
+            Err(_) => Err(UnitError::new(
+                "a device unit's name must be a node below /dev, escaped as systemd-escape --path does",
+            )),
+        }
+    }
+
+    /// None: as under systemd, a device has no default dependencies, and
+    /// nothing stops it at shutdown.
+    fn implied(&self, _: &Unit, _: &dyn Fn(&UnitName) -> bool) -> Edges {
+        Edges::new()
     }
 }
 

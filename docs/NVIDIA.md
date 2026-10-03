@@ -669,6 +669,41 @@ same forwarding core. That is enough for:
 Without N6, the card drives no monitor, and Ferrix's screen stays
 virtio-gpu, seen over VNC or SPICE.
 
+**As built (N6a, 2026-10-03; landed 2026-10-04 ahead of its conditions, the certification consultant's ledger 318, with the owed rows in `docs/BACKLOG.md`).**
+
+* **NVKMS in the core.** `nv-modeset-kernel.o` is linked with
+  `nv-kernel.o` into one object, `rm-kms.o` (its `nvstatusToString` made
+  local), which is the core nvrm loads from the volume: 15 MB, under the
+  loader's 64 MiB. Its OS layer is NVIDIA's `nvidia-modeset-linux.c`, kept
+  as `os/kept/nvidia-modeset.c`: ferrix-nvos's semaphores, timers and work
+  queue, kernel-space (KAPI) clients only, no suspend. The RM side is
+  `os/kept/nv-modeset-interface.c`.
+* **First light.** `os/glue/kms.c` is nvrm's KAPI client, as nvidia-drm is
+  on Linux: it takes ownership of the display engine, reads each
+  connector's EDID, and on the first connected display sets the preferred
+  mode with a pitch-linear `XRGB8888` surface in VRAM, mapped through BAR1.
+  On the customer's LG TV on the 3060's HDMI port, 1920x1080 at 60 Hz
+  showed the test pattern (log `~/.local/share/ferrix/nvidia/
+  n3-first-modeset.log`). A display not connected at start is looked for
+  every two seconds; RM reporting every connector empty, by every method,
+  with every EDID read failing, has meant the monitor was not reaching the
+  card (asleep, or on another input).
+* **The card.** nvrm then serves that head as a card of the kernel's
+  display core (`docs/DISPLAY.md`), a third driver beside virtio-gpu and the
+  STM32 LTDC, through ferrix-nvos's `display.rs`. Its HELLO offers the one
+  running mode and sets displayctl v8's `copies` flag; each FLUSH copies
+  the flushed rectangle from the card VMO, mapped read-only, into the VRAM
+  surface, and is answered at once. No cursor plane yet: the compositor
+  draws the pointer. Double buffering with a flip at vertical blanking, the
+  mode list and a cursor are next.
+* **The desktop.** `cargo xtask run-compositor --nvidia` builds the
+  `--chrome` desktop with nvrm in it and boots it in the libvirt domain
+  `run-nvidia` uses, with libvirt's default network. Chrome runs on the
+  volume's glibc with ANGLE on NVIDIA's Vulkan (`chrome::NVIDIA_GPU_FLAGS`)
+  and software compositing, since hyprix takes `wl_shm` only (§4.6).
+  hyprix is ordered after the card by init's `.device` units:
+  `Requires=` and `After=dev-dri-card0.device` (`docs/INIT.md`).
+
 ### 4.6 How frames reach hyprix, yserver, Chrome and Steam
 
 The card renders. The problem is getting its pixels to a compositor that
@@ -1538,6 +1573,27 @@ and took the recommended answer for D2, D3 and D5.
     fake driver through the HELLO rules, a round trip with copies, the
     copies refused, the drains (N4, L1), the 257th request and the queue's
     bound, and driver death, with nine gate controls that each fired.
+* **2026-10-03 — N2 to N6: Chrome renders on the 3060, on its own
+  monitor.**
+  * `vulkaninfo` names the RTX 3060 (Vulkan 1.4.312), `vk-offscreen`
+    clears an image on it and reads it back, and headless Chrome's WebGL
+    renderer is "ANGLE (NVIDIA, Vulkan 1.4.312 (NVIDIA GeForce RTX 3060))"
+    (`~/.local/share/ferrix/nvidia/n4-first-chrome-webgl.log`).
+  * NVKMS lit the customer's LG TV on the 3060's HDMI port, 1920x1080 at
+    60 Hz, with a test pattern (`n3-first-modeset.log`), and `nvrm` serves
+    it as the display core's card (§4.5).
+  * `cargo xtask run-compositor --nvidia`: hyprix on that monitor, and
+    Chrome drawing WebGL on the 3060; the customer read the renderer line
+    off the TV. 44-48 fps, Chrome's frames read back and composited in
+    software (`n6-first-chrome-on-3060-monitor.log`, sha256 09d79b54…).
+    `PIN_CONTIGUOUS` is what let Chrome's `vkCreateDevice` succeed under the
+    desktop's memory load.
+  * **Landed 2026-10-04 ahead of its conditions** (the consultant's verdict,
+    ledger 318, L1–L6). **Owed** (BACKLOG, O1–O6): ledger 293's D7, D8 and
+    D10 and the display core's uncharged path; ledger 310's E1–E6, devfs
+    D2–D5, C3, C4, C10 and K1–K7; ledgers 294 and 300's rows; F-61.
+  * N3b, dmabufs and Chrome's GPU compositing for 60 fps, is next (branch
+    `nvidia-n2`, design OK IF, ledger 316).
 
 ## 11. CUDA (N5)
 

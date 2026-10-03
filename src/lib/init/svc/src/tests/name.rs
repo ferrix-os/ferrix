@@ -109,3 +109,34 @@ fn specifiers_expand_from_the_name() {
     assert_eq!(expand("%H", &unit), Err(SpecifierError::Unknown('H')));
     assert_eq!(expand("50%", &unit), Err(SpecifierError::Dangling));
 }
+
+#[test]
+fn device_names_map_to_nodes_below_dev() {
+    let card = UnitName::for_path("/dev/dri/card0", UnitType::Device).unwrap();
+    assert_eq!(card, name("dev-dri-card0.device"));
+    assert_eq!(card.device_path().unwrap(), "/dev/dri/card0");
+    let label = UnitName::for_path("/dev/disk/by-label/root", UnitType::Device).unwrap();
+    assert_eq!(label.as_str(), "dev-disk-by\\x2dlabel-root.device");
+    assert_eq!(label.device_path().unwrap(), "/dev/disk/by-label/root");
+    for refused in [
+        "sys-fs-cgroup.device",
+        "dev.device",
+        "-.device",
+        "dev--dri.device",
+        "dev-dri-.device",
+        "dev-a@b.device",
+        "dev-\\x2e\\x2e-sda.device",
+        "dev-\\x2fsda.device",
+    ] {
+        assert_eq!(
+            name(refused).device_path(),
+            Err(NameError::Path),
+            "{refused}"
+        );
+    }
+    assert_eq!(
+        name("dev-sda.mount").device_path(),
+        Err(NameError::Path),
+        "not a device unit"
+    );
+}

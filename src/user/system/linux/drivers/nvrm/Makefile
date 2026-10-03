@@ -6,7 +6,8 @@
 #   make OUT=<dir> [CC=gcc] [FERROUSLI_TARGET=<dir>] [NVIDIA=<dir>]
 #
 # NVIDIA is what tools/common/fetch/fetch-nvidia.sh wrote: the sources in
-# src/ and RM's core, nv-kernel.o, in objects/. The order is fixed by what
+# src/ and RM's core, nv-kernel.o, with NVKMS's, nv-modeset-kernel.o, in
+# objects/; the two are linked into one object, rm-kms.o, first. The order is fixed by what
 # each step needs from the one before:
 #
 #  1. nvrm's objects: its entry and main (src/), NVIDIA's kept C and the
@@ -14,7 +15,7 @@
 #  2. core-calls.S, nvrm's stubs for every function of the core its
 #     objects call, each a jump through a table core.c fills at load;
 #  3. nvrm.unpinned, linked with a build-id and a zeroed .nvrm_core_sha256;
-#  4. nvrm-core: nv-kernel.o at 0x4000_0000 (core/nvrm-core.ld), its
+#  4. nvrm-core: rm-kms.o at 0x4000_0000 (core/nvrm-core.ld), its
 #     imports bound to nvrm.unpinned's addresses and an export header
 #     carrying nvrm's build-id, refused if it has more than the segments
 #     the loader takes;
@@ -34,7 +35,9 @@ LD     ?= ld
 NVRM   := $(CURDIR)
 NVIDIA ?= $(HOME)/.local/share/ferrix/nvidia/580.173.02
 NVSRC  := $(NVIDIA)/src
-CORE   := $(NVIDIA)/objects/nv-kernel.o
+RM_OBJ := $(NVIDIA)/objects/nv-kernel.o
+KMS_OBJ := $(NVIDIA)/objects/nv-modeset-kernel.o
+CORE   := $(OUT)/rm-kms.o
 LINK   := python3 $(NVRM)/core/core-link.py
 
 FERROUSLI        := $(abspath $(NVRM)/../../ferrousli)
@@ -62,6 +65,7 @@ START_CFLAGS := $(filter-out -fstack-protector-strong,$(CFLAGS)) -fno-stack-prot
 OS_CFLAGS := -std=gnu11 -O2 -g -ffreestanding -nostdinc \
 	-isystem $(shell $(CC) -print-file-name=include) \
 	-I$(NVRM)/os/include -I$(NVSRC)/kernel-open/common/inc -I$(NVSRC)/kernel-open/nvidia \
+	-idirafter $(NVSRC)/kernel-open/nvidia-modeset \
 	-U__linux__ -U__gnu_linux__ -Ulinux -U__linux \
 	-DNVRM -DNV_VERSION_STRING=\"580.173.02\" -DNV_KERNEL_INTERFACE_LAYER -DNV_UNIX \
 	-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Werror \
@@ -81,8 +85,17 @@ $(FERROUSLI_LIB): FORCE
 $(NVOS_LIB): FORCE
 	cd $(NVRM)/os/nvos && cargo build --release --target-dir $(OUT)/nvos
 
-$(CORE):
-	@echo "nvrm: $(CORE) is missing; run tools/common/fetch/fetch-nvidia.sh" >&2; exit 1
+$(RM_OBJ) $(KMS_OBJ):
+	@echo "nvrm: $@ is missing; run tools/common/fetch/fetch-nvidia.sh" >&2; exit 1
+
+# The core is RM and NVKMS, NVIDIA's display driver, linked as one object
+# (docs/NVIDIA.md §4.6): NVKMS calls RM directly, as nvidia-modeset.ko
+# calls nvidia.ko on Linux. Both carry nvstatusToString; NVKMS's copy is
+# made local so that RM's is the one the core exports.
+$(CORE): $(RM_OBJ) $(KMS_OBJ)
+	@mkdir -p $(OUT)
+	objcopy --localize-symbol=nvstatusToString $(KMS_OBJ) $(OUT)/kms-local.o
+	$(LD) -r -o $@ $(RM_OBJ) $(OUT)/kms-local.o
 
 $(OUT)/start.o: $(NVRM)/src/start.c
 	@mkdir -p $(OUT)
@@ -110,6 +123,10 @@ $(OUT)/hold.o: $(NVRM)/test/hold.c
 $(OUT)/os/%.o: $(NVRM)/os/%.c $(wildcard $(NVRM)/os/include/*.h)
 	@mkdir -p $(dir $@)
 	$(CC) $(OS_CFLAGS) -c $< -o $@
+
+# The display bring-up asks RM directly too, with the SDK's class and
+# control headers, searched last as for the link test.
+$(OUT)/os/glue/kms.o: OS_CFLAGS += -idirafter $(NVSRC)/src/common/sdk/nvidia/inc
 
 $(OUT)/os/glue/thunks.o: $(NVRM)/os/glue/thunks.S
 	@mkdir -p $(dir $@)

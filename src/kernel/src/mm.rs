@@ -379,6 +379,55 @@ pub(crate) fn allocate_user_frame() -> Option<Frame> {
     frame
 }
 
+/// Take `2^order` frames lying back to back as single frames of a program's
+/// memory, each charged to the running task's job as [`allocate_user_frame`]
+/// charges one and given back on its own with [`release_frame`]: a pin that
+/// must be one run (`PIN_CONTIGUOUS`, `docs/NVIDIA.md` §4.3). The job is
+/// charged for the whole run before a frame is taken, so a job at its limit
+/// is refused with nothing taken; `None` then, or with no block free, and
+/// nothing is charged.
+pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
+    let owner = crate::sched::running_group();
+    let count = 1u64 << order;
+    let uncharge = |charged: u64| {
+        for _ in 0..charged {
+            crate::object::quota::uncharge_frame(owner);
+        }
+    };
+    let charged = (0..count)
+        .take_while(|_| crate::object::quota::charge_frame(owner).is_ok())
+        .count() as u64;
+    if charged < count {
+        uncharge(charged);
+        return None;
+    }
+    let Some(block) = allocate_frames(order) else {
+        uncharge(count);
+        return None;
+    };
+    if !split_frames(block, order) {
+        deallocate_frames(block, order);
+        uncharge(count);
+        return None;
+    }
+    // Each frame owned by the job, so that releasing it takes its charge
+    // back. One that cannot be (a fresh single frame always can) goes back
+    // with the rest, its charge by hand.
+    let owned = (block..block + count)
+        .take_while(|&frame| {
+            with_frames(|frames| frames.set_owner(frame, owner)).is_some_and(|set| set.is_ok())
+        })
+        .count() as u64;
+    if owned < count {
+        for frame in block..block + count {
+            let _ = release_frame(frame);
+        }
+        uncharge(count - owned);
+        return None;
+    }
+    Some(block)
+}
+
 /// Take `blocks` blocks of `2^MAX_ORDER` frames lying back to back, for
 /// memory that has to be one run longer than a block: the first frame, each
 /// block given back or split on its own as one from [`allocate_frames`]

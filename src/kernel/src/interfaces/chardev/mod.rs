@@ -40,8 +40,13 @@
 //! * When the driver goes, its nodes go: every open file answers `ENODEV`
 //!   for good, and every waiter wakes with `ENODEV` (N9).
 //!
-//! mmap is not forwarded and answers `ENODEV`; poll is never ready; read
-//! and write answer `EINVAL`, as NVIDIA's nodes do (N11).
+//! An mmap is forwarded as a request too (N2; the consultant's ledger 300):
+//! the driver answers with a VMO of its own or a range of its device's own
+//! memory apertures, and the kernel maps that into the program once the
+//! answer is in, never before ([`MapReply`]). An aperture mapping holds the
+//! control's claim on the device, so no new driver serves it while a dead
+//! one's mapping lives. Poll is never ready; read and write answer `EINVAL`,
+//! as NVIDIA's nodes do (N11).
 
 use alloc::collections::VecDeque;
 use alloc::sync::{Arc, Weak};
@@ -73,6 +78,7 @@ use crate::syscall::native;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::timer;
+use crate::user::vmo::Vmo;
 
 pub(crate) mod check;
 pub(crate) mod file;
@@ -102,6 +108,16 @@ const MAX_ERRNO: i64 = 4095;
 static CLAIMS: Claims = Claims::new();
 /// Controls between creation and their task taking them.
 static STARTING: SpinLock<Vec<Arc<Control>>> = SpinLock::new(Vec::new());
+/// Whether `device`'s driver serves published device files through this
+/// core: what lets the display core hand the same driver a card it can map
+/// (displayctl's `copies`, `docs/DISPLAY.md` §2.1).
+pub(crate) fn publishes_for(device: &Arc<DeviceNode>) -> bool {
+    PUBLISHED
+        .lock()
+        .iter()
+        .any(|(_, control)| Arc::ptr_eq(&control.device, device))
+}
+
 /// Every live control, for the native calls to find by their endpoint.
 static CONTROLS: SpinLock<Vec<Arc<Control>>> = SpinLock::new(Vec::new());
 /// The published nodes: each minor of major 195 and the control serving it.
@@ -123,6 +139,35 @@ pub(crate) struct Control {
     work: WaitQueue,
     /// Set once the driver is gone.
     gone: AtomicBool,
+    /// Aperture mappings that hold the device's claim, and whether the
+    /// claim has gone back: it goes back when the driver is gone and the
+    /// last such mapping with it.
+    apertures: SpinLock<Apertures>,
+}
+
+/// [`Control::apertures`].
+#[derive(Debug, Default)]
+struct Apertures {
+    mapped: usize,
+    released: bool,
+}
+
+/// What a request is answered with.
+#[derive(Clone, Debug)]
+pub(crate) enum Answer {
+    /// An open's, a release's, or an ioctl's value.
+    Value(usize),
+    /// An mmap's: what to map, checked against the device and the rights.
+    Map(MapReply),
+}
+
+/// What a driver answered an mmap with, checked (M1–M3).
+#[derive(Clone, Debug)]
+pub(crate) enum MapReply {
+    /// Pages of a VMO the driver holds, from byte `offset`.
+    Vmo { vmo: Arc<Vmo>, offset: u64 },
+    /// A range wholly inside one of the device's memory apertures.
+    Aperture { phys: u64, combining: bool },
 }
 
 /// What the control's lock guards.
@@ -160,12 +205,12 @@ pub(crate) struct Request {
 }
 
 /// A request's state.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Inner {
     /// Cleared when the program abandons the request.
     alive: bool,
-    /// The answer, once given: an errno or a value.
-    answer: Option<Result<usize, Errno>>,
+    /// The answer, once given: an errno or what was answered.
+    answer: Option<Result<Answer, Errno>>,
     /// Copies in flight.
     copying: u32,
 }
@@ -285,6 +330,7 @@ fn make_control(
         }),
         work: WaitQueue::new(),
         gone: AtomicBool::new(false),
+        apertures: SpinLock::new(Apertures::default()),
     })
     .ok()
 }
@@ -314,7 +360,53 @@ fn run(id: usize) {
     }
     finish(&control);
     CONTROLS.lock().retain(|held| !Arc::ptr_eq(held, &control));
-    CLAIMS.release(&control.device);
+    release_claim_if_unmapped(&control);
+}
+
+/// Give the device's claim back, once, if no aperture mapping holds it.
+fn release_claim_if_unmapped(control: &Control) {
+    let release = {
+        let mut apertures = control.apertures.lock();
+        let release = apertures.mapped == 0 && !apertures.released;
+        if release {
+            apertures.released = true;
+        }
+        release
+    };
+    if release {
+        CLAIMS.release(&control.device);
+    }
+}
+
+/// What an aperture mapping keeps: the control, whose claim on the device
+/// stays held while it lives (the consultant's ruling, ledger 300).
+pub(crate) struct ApertureKeeper {
+    control: Arc<Control>,
+}
+
+impl Drop for ApertureKeeper {
+    fn drop(&mut self) {
+        {
+            let mut apertures = self.control.apertures.lock();
+            apertures.mapped = apertures.mapped.saturating_sub(1);
+        }
+        if self.control.is_gone() {
+            release_claim_if_unmapped(&self.control);
+        }
+    }
+}
+
+/// A keeper for one more aperture mapping of `control`, or `ENODEV` once
+/// its claim has gone back.
+pub(crate) fn aperture_keeper(control: &Arc<Control>) -> Result<ApertureKeeper, Errno> {
+    let mut apertures = control.apertures.lock();
+    if apertures.released || control.is_gone() {
+        return Err(Errno::ENODEV);
+    }
+    apertures.mapped = apertures.mapped.saturating_add(1);
+    Ok(ApertureKeeper {
+        control: Arc::clone(control),
+    })
 }
 
 /// The first message, or `None` at the deadline or a closed channel.
@@ -455,6 +547,7 @@ fn serve(control: &Arc<Control>) {
                     egid: 0,
                     cmd: 0,
                     arg: 0,
+                    pages: 0,
                 },
             };
             if let Outgoing::Release { .. } = next {
@@ -497,7 +590,7 @@ fn finish(control: &Arc<Control>) {
 }
 
 /// Answer `request`, once, and wake its program.
-fn answer(request: &Request, outcome: Result<usize, Errno>) {
+fn answer(request: &Request, outcome: Result<Answer, Errno>) {
     {
         let mut inner = request.inner.lock();
         if inner.answer.is_none() {
@@ -570,7 +663,24 @@ pub(crate) fn next_file(control: &Control) -> u64 {
     file
 }
 
-/// Send `op` on `file` of `control` for `client` and wait for the answer.
+/// What one request asks of a file: the REQUEST's own fields.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Ask {
+    /// The operation.
+    pub(crate) op: Op,
+    /// The file's identity.
+    pub(crate) file: u64,
+    /// Its node's minor.
+    pub(crate) minor: u16,
+    /// An ioctl's command; an mmap's protection and flags.
+    pub(crate) cmd: u32,
+    /// An ioctl's argument; an mmap's offset.
+    pub(crate) arg: u64,
+    /// An mmap's length in pages.
+    pub(crate) pages: u32,
+}
+
+/// Send `ask` on `control` for `client` and wait for the answer.
 ///
 /// # Errors
 ///
@@ -580,27 +690,23 @@ pub(crate) fn next_file(control: &Control) -> u64 {
 pub(crate) fn call(
     control: &Arc<Control>,
     client: &Arc<Process>,
-    op: Op,
-    file: u64,
-    minor: u16,
-    cmd: u32,
-    arg: u64,
-) -> Result<usize, Errno> {
-    let request = admit(control, client, op, file, minor, cmd, arg)?;
+    ask: Ask,
+) -> Result<Answer, Errno> {
+    let request = admit(control, client, ask)?;
     await_answer(control, &request, client)
 }
 
 /// Take a request in: in the table and queued for the task, or `EBUSY`
 /// with [`MAX_OUTSTANDING`] outstanding or queued (F-63).
-fn admit(
-    control: &Arc<Control>,
-    client: &Arc<Process>,
-    op: Op,
-    file: u64,
-    minor: u16,
-    cmd: u32,
-    arg: u64,
-) -> Result<Arc<Request>, Errno> {
+fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<Request>, Errno> {
+    let Ask {
+        op,
+        file,
+        minor,
+        cmd,
+        arg,
+        pages,
+    } = ask;
     let (euid, egid) = client
         .with_credentials(|credentials| (credentials.user.effective, credentials.group.effective));
     let request = {
@@ -624,6 +730,7 @@ fn admit(
                 egid,
                 cmd,
                 arg,
+                pages,
             },
             client: Arc::clone(client),
             inner: SpinLock::new(Inner {
@@ -654,12 +761,12 @@ fn await_answer(
     control: &Control,
     request: &Arc<Request>,
     client: &Process,
-) -> Result<usize, Errno> {
+) -> Result<Answer, Errno> {
     let _ = request.waiters.wait_until_deadline(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
     );
-    let answered = request.inner.lock().answer;
+    let answered = request.inner.lock().answer.clone();
     if let Some(answer) = answered {
         // A reply from one driver thread may come while another is still
         // copying for the request: the program's call returns only once no
@@ -740,7 +847,7 @@ fn outstanding(control: &Control, id: u64) -> Result<Arc<Request>, Errno> {
 
 /// `chardev_reply(control, request, status, value)` (N7).
 fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
-    let [handle, id, status_word, value, ..] = *registers;
+    let [handle, id, status_word, value, a4, a5] = *registers;
     let control = control_of(caller, handle)?;
     let request = {
         let mut state = control.state.lock();
@@ -760,18 +867,81 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     } else {
         match request.wire.op {
             // The kernel makes the descriptor; the driver's value is ignored.
-            Op::Open | Op::Release => Ok(0),
+            Op::Open | Op::Release => Ok(Answer::Value(0)),
             Op::Ioctl => usize::try_from(value)
                 .ok()
                 .filter(|value| i32::try_from(*value).is_ok())
+                .map(Answer::Value)
+                .ok_or(Errno::EIO),
+            Op::Mmap => map_reply(caller, &control, &request, value as u64, a4, a5)
+                .map(Answer::Map)
                 .ok_or(Errno::EIO),
         }
     };
+    let accepted = outcome.is_ok() || status < 0;
     answer(&request, outcome);
-    if well_formed {
+    if well_formed && accepted {
         Ok(0)
     } else {
         Err(status::INVALID_ARGS)
+    }
+}
+
+/// Check an mmap's answer: `value` a VMO handle with `a4` its byte offset,
+/// or a physical address, by `a5`'s kind (M1–M3).
+fn map_reply(
+    caller: &dyn Host,
+    control: &Control,
+    request: &Request,
+    value: u64,
+    a4: u64,
+    a5: u64,
+) -> Option<MapReply> {
+    use ferrix_chardevctl::message::{MAP_APERTURE, MAP_KIND, MAP_VMO, MAP_WRITE_COMBINING};
+    const PAGE: u64 = 4096;
+    const PROT_WRITE: u32 = 2;
+    let len = u64::from(request.wire.pages).checked_mul(PAGE)?;
+    let write = request.wire.cmd & PROT_WRITE != 0;
+    let combining = a5 & MAP_WRITE_COMBINING != 0;
+    if a5 & !(MAP_KIND | MAP_WRITE_COMBINING) != 0 {
+        return None;
+    }
+    match a5 & MAP_KIND {
+        MAP_VMO if !combining => {
+            if !a4.is_multiple_of(PAGE) {
+                return None;
+            }
+            let vmo = caller.core().with_handles(|table| {
+                let (object, rights) = table.get(Handle::from_register(value)).ok()?;
+                let Object::Vmo(vmo) = object else {
+                    return None;
+                };
+                let needed = if write {
+                    Rights::READ.0 | Rights::WRITE.0
+                } else {
+                    Rights::READ.0
+                };
+                rights.contains(Rights(needed)).then(|| Arc::clone(vmo))
+            })?;
+            (a4.checked_add(len)? <= vmo.len_bytes()).then_some(MapReply::Vmo { vmo, offset: a4 })
+        }
+        MAP_APERTURE => {
+            let end = value.checked_add(len)?;
+            if !value.is_multiple_of(PAGE) || len == 0 {
+                return None;
+            }
+            let inside = (0..control.device.apertures().len()).find_map(|index| {
+                let info = control.device.aperture_info(index)?;
+                let aperture_end = info.phys.checked_add(info.len)?;
+                (info.phys <= value && end <= aperture_end).then_some(info)
+            })?;
+            let prefetchable = inside.flags & ferrix_native_abi::types::APERTURE_PREFETCHABLE != 0;
+            (!combining || prefetchable).then_some(MapReply::Aperture {
+                phys: value,
+                combining,
+            })
+        }
+        _ => None,
     }
 }
 

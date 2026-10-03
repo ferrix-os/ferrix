@@ -451,6 +451,8 @@ fn introduce(
         // frame (`Serving::cursor`).
         cursor,
         timings,
+        // The LTDC reads the pinned pages itself.
+        copies: false,
     };
     let share = port
         .as_owned()

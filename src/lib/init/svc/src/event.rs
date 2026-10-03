@@ -214,6 +214,15 @@ pub enum Event {
         /// The connection, which the backend holds.
         connection: Token,
     },
+    /// Whether a device unit's node exists: said once as soon as a
+    /// [`Action::WatchDevice`] is armed, then whenever that changes, until
+    /// [`Action::UnwatchDevice`].
+    Device {
+        /// The device unit.
+        unit: UnitId,
+        /// Whether the node is there.
+        present: bool,
+    },
 }
 
 /// What a control client can ask for.
@@ -554,6 +563,20 @@ pub enum Action {
     /// until asked again.
     Watch {
         /// The socket unit.
+        unit: UnitId,
+    },
+    /// Watch for a device unit's node to appear or go, and answer with
+    /// [`Event::Device`]: at once with whether it is there now, then at each
+    /// change. A directory on the way to it may not exist yet either.
+    WatchDevice {
+        /// The device unit.
+        unit: UnitId,
+        /// The node, absolute and below `/dev`.
+        path: String,
+    },
+    /// Stop watching a device unit's node.
+    UnwatchDevice {
+        /// The device unit.
         unit: UnitId,
     },
     /// Close a connection nothing took.

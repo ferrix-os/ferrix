@@ -186,9 +186,14 @@ pub(super) fn desktop(
         carried.ports.extend(links);
         carried.ports.extend(crate::chrome::window_files());
         carried.ports.push(crate::chrome::desktop_policy());
-        carried
-            .ports
-            .push(crate::chrome::opener(arch, chrome_profile(args)));
+        if args.nvidia {
+            carried.ports.extend(crate::nvidia::data_links());
+        }
+        carried.ports.push(crate::chrome::opener(
+            arch,
+            chrome_profile(args),
+            args.nvidia,
+        ));
         if args.everything {
             carry_everything(arch, args, &mut carried);
         }
@@ -197,9 +202,14 @@ pub(super) fn desktop(
     }
     // The applications fuzzel lists, and their icons: vkgears among them
     // where the port was built and the card will offer Venus.
-    let chrome = args
-        .chrome
-        .then(|| crate::chrome::window_command(crate::start_page::URL));
+    let chrome = args.chrome.then(|| {
+        crate::chrome::window_command_on(
+            Arch::X86_64,
+            crate::start_page::URL,
+            "/dev/shm/chrome",
+            args.nvidia,
+        )
+    });
     let vkgears = args.venus && carried.ports.iter().any(|file| file.path == VKGEARS_PATH);
     carried
         .ports
@@ -395,10 +405,15 @@ pub(super) fn with_chrome(config: String, args: &Args, arch: Arch) -> String {
     let command = format!(
         "{} {}",
         crate::chrome::WINDOW_HOME,
-        crate::chrome::window_command_with_profile(
+        crate::chrome::window_command_on(
             arch,
-            crate::start_page::URL,
-            chrome_profile(args)
+            if args.nvidia {
+                crate::nvidia::WEBGL_PAGE
+            } else {
+                crate::start_page::URL
+            },
+            chrome_profile(args),
+            args.nvidia
         )
     );
     format!(

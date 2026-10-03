@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WebGL on the RTX 3060</title>
+<style>
+body{margin:0;background:#0b0d12;color:#e8eaf0;font:20px system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh}
+#r{font-size:28px;font-weight:600;margin:16px;text-align:center}
+#f{opacity:.7}
+canvas{width:480px;height:480px}
+</style></head><body>
+<div id="r">asking WebGL...</div>
+<canvas id="c" width="960" height="960"></canvas>
+<div id="f"></div>
+<script>
+// Which GPU renders this page, and a cube spun on it: run-compositor --nvidia's
+// proof that Chrome draws on NVIDIA's driver (docs/NVIDIA.md §4.5).
+const c = document.getElementById("c");
+const g = c.getContext("webgl");
+const r = document.getElementById("r");
+if (!g) { r.textContent = "no WebGL"; throw 0; }
+const e = g.getExtension("WEBGL_debug_renderer_info");
+r.textContent = "WebGL renderer: " + (e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER));
+const vs = "attribute vec3 p;attribute vec3 k;uniform mat4 m;varying vec3 v;void main(){v=k;gl_Position=m*vec4(p,1.0);}";
+const fs = "precision mediump float;varying vec3 v;void main(){gl_FragColor=vec4(v,1.0);}";
+function sh(t, s) { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; }
+const pr = g.createProgram();
+g.attachShader(pr, sh(g.VERTEX_SHADER, vs)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, fs));
+g.linkProgram(pr); g.useProgram(pr);
+const P = [], K = [];
+const faces = [[0,1,2,3],[5,4,7,6],[4,0,3,7],[1,5,6,2],[3,2,6,7],[4,5,1,0]];
+const V = [[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1],[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1]];
+const C = [[.46,.73,0],[0,.6,.9],[.9,.3,.2],[.95,.75,.1],[.6,.3,.9],[.2,.8,.7]];
+faces.forEach((f, i) => [0,1,2,0,2,3].forEach(j => { P.push(...V[f[j]]); K.push(...C[i]); }));
+function buf(d, n) { const b = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, b); g.bufferData(g.ARRAY_BUFFER, new Float32Array(d), g.STATIC_DRAW); const l = g.getAttribLocation(pr, n); g.enableVertexAttribArray(l); g.vertexAttribPointer(l, 3, g.FLOAT, false, 0, 0); }
+buf(P, "p"); buf(K, "k");
+const m = g.getUniformLocation(pr, "m");
+g.enable(g.DEPTH_TEST);
+let frames = 0, since = performance.now();
+function draw(t) {
+  const a = t / 1000, ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(a * .7), sb = Math.sin(a * .7), s = .45;
+  g.uniformMatrix4fv(m, false, [s*ca, s*sa*sb, -s*sa*cb*.3, 0, 0, s*cb, s*sb*.3, 0, s*sa, -s*ca*sb, s*ca*cb*.3, 0, 0, 0, 0, 1]);
+  g.clearColor(.04, .05, .07, 1); g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
+  g.drawArrays(g.TRIANGLES, 0, 36);
+  frames++;
+  if (t - since > 1000) {
+    const rate = Math.round(frames * 1000 / (t - since));
+    document.getElementById("f").textContent = rate + " frames a second";
+    // For the serial log: Chrome's console reaches stderr.
+    console.log("webgl-fps " + rate);
+    frames = 0; since = t;
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script></body></html>

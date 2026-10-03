@@ -7,6 +7,14 @@ name = "ferrix-chardevctl"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-displayctl"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+]
+
+[[package]]
 name = "ferrix-linux-abi"
 version = "0.1.0"
 
@@ -30,6 +38,7 @@ name = "ferrix-nvos"
 version = "0.1.0"
 dependencies = [
  "ferrix-chardevctl",
+ "ferrix-displayctl",
  "ferrix-native",
  "ferrix-native-abi",
 ]

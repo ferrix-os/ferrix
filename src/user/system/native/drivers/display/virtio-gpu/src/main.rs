@@ -1539,6 +1539,8 @@ fn hello(driver: &mut Gpu, port: &Port<Kernel>, location: u32) -> Result<Hello, 
         cursor: true,
         // And shows any size it is handed a scanout of: no list.
         timings: Timings::NONE,
+        // The device reads the pinned pages itself.
+        copies: false,
     })
 }
 
