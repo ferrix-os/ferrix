@@ -60,7 +60,7 @@ fn newc(entries: &[(String, u32, Vec<u8>)]) -> Vec<u8> {
 fn record_of(name: &str, depends: &[&str], arch: &str, files: Vec<Installed>) -> Record {
     let depends: Vec<String> = depends.iter().map(|d| format!("\"{d}\"")).collect();
     let text = format!(
-        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test {name}\"\n\
+        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test {name}\"\nlicense = \"MIT\"\n\
          abi = \"linux\"\narches = [\"{arch}\"]\ndepends = [{}]\n\n\
          [[package.files]]\nfrom = \"x\"\nto = \"bin/x\"\nmode = \"755\"\n",
         depends.join(", ")

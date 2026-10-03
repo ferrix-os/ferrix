@@ -109,6 +109,8 @@ fn write_record(out: &mut String, record: &Record) -> fmt::Result {
     toml::write_string(out, package.version.as_str())?;
     out.write_str("\ndescription = ")?;
     toml::write_string(out, &package.description)?;
+    out.write_str("\nlicense = ")?;
+    toml::write_string(out, &package.license)?;
     out.write_str("\nabi = ")?;
     toml::write_string(out, package.abi.as_str())?;
     out.write_str("\narches = ")?;

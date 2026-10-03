@@ -89,6 +89,7 @@ const APP_TOML: &str = r#"# {name}, an app (docs/APPS.md).
 name = "{name}"
 version = "0.1.0"
 description = "What {name} is, in one line."
+license = "MIT"
 abi = "{abi}"
 arches = ["x86_64", "aarch64", "armv7a"]
 depends = []

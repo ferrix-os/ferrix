@@ -85,7 +85,7 @@ const PACKAGES: &str = "var/lib/pkg-test";
 fn made(name: &str, depends: &[&str], arch: Arch) -> Result<Vec<u8>> {
     let depends: Vec<String> = depends.iter().map(|name| format!("\"{name}\"")).collect();
     let text = format!(
-        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test-pkg's {name}\"\n\
+        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test-pkg's {name}\"\nlicense = \"MIT\"\n\
          abi = \"linux\"\narches = [\"{arch}\"]\ndepends = [{}]\n\n\
          [[package.files]]\nfrom = \"{name}\"\nto = \"bin/{name}\"\nmode = \"755\"\n",
         depends.join(", "),

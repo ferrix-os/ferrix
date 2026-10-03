@@ -49,6 +49,7 @@ neither: they are tests, and belong in `src/tests/`.
 name = "example"                # the folder's name
 version = "0.1.0"
 description = "One line: what it is."
+license = "MIT"                 # an SPDX expression: "MIT OR Apache-2.0"
 abi = "native"                  # native | linux
 arches = ["x86_64", "aarch64", "armv7a"]
 depends = []                    # "name", or "name >= 1.2"
@@ -84,7 +85,12 @@ expect = "example 0.1.0"        # a line of its output starts with this
 ```
 
 `[package]` is what travels: it goes into the built package and into the
-record on the installed system (§6). `[build]`, `[image]`, `[check]` and
+record on the installed system (§6). `license` is required: an SPDX expression
+for every file the package installs. For a ported program that is the
+program's own licence and that of what is linked into its static binary or
+shipped beside it, read from each upstream source's `COPYING` or `LICENSE`
+(curl's is `curl AND (Apache-2.0 OR GPL-2.0-or-later) AND MPL-2.0`: Mbed TLS
+and Mozilla's CA bundle with it). `[build]`, `[image]`, `[check]` and
 `[[smoke]]` stay in the tree; they are how the package is made and judged.
 
 The manifest is a small subset of TOML -- tables, arrays of tables, and

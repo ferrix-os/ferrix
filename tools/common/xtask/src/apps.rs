@@ -231,13 +231,15 @@ pub(crate) fn list() -> Result<()> {
             "opt-in"
         };
         println!(
-            "{:<16} {:<10} {:<6} {:<7} {}  {}",
+            "{:<16} {:<10} {:<6} {:<7} {}  {}\n{:<16} licence: {}",
             package.name,
             package.version,
             package.abi.as_str(),
             image,
             package.arches.join(","),
-            package.description
+            package.description,
+            "",
+            package.license
         );
     }
     println!("{} apps in {}", apps.len(), places());
@@ -440,6 +442,7 @@ pub(crate) fn package(
     if fresh != Fresh::Always && app.recipe.build == Build::Script {
         if out.is_file() {
             println!("  {name}: the package built last, {}", out.display());
+            restamp(app, arch, &out)?;
             return Ok(Some(out));
         }
         if fresh == Fresh::UnlessScript {
@@ -452,20 +455,7 @@ pub(crate) fn package(
     let Some(built) = build(app, arch, release)? else {
         return Ok(None);
     };
-    let mut package = app.recipe.package.clone();
-    package.arches = vec![arch.name().to_owned()];
-    let record = Record {
-        package,
-        files: built.iter().filter_map(recorded).collect(),
-    };
-    let mut entries = built;
-    entries.push(ports::File {
-        path: record::path(name),
-        mode: 0o644,
-        content: ports::Content::Bytes(record::render(&record).into_bytes()),
-    });
-    let archive = initramfs::package(&entries)?;
-    write(&out, &archive)?;
+    write(&out, &packed(app, arch, built)?)?;
     Ok(Some(out))
 }
 
@@ -477,6 +467,65 @@ fn recorded(entry: &ports::File) -> Option<Installed> {
         ports::Content::Link(target) => Some(Installed::link(&entry.path, target)),
         ports::Content::Directory => None,
     }
+}
+
+/// `built`, the files of `app`'s package for `arch`, with its record made
+/// from the `[package]` its `app.toml` has now, as a package archive.
+fn packed(app: &App, arch: Arch, built: Vec<ports::File>) -> Result<Vec<u8>> {
+    let mut package = app.recipe.package.clone();
+    package.arches = vec![arch.name().to_owned()];
+    let record = Record {
+        package,
+        files: built.iter().filter_map(recorded).collect(),
+    };
+    let mut entries = built;
+    entries.push(ports::File {
+        path: record::path(app.name()),
+        mode: 0o644,
+        content: ports::Content::Bytes(record::render(&record).into_bytes()),
+    });
+    initramfs::package(&entries)
+}
+
+/// Bring the record in a script app's last package to its `app.toml` as it
+/// is now: that package is taken without building again, so a change to
+/// `[package]` -- a licence, a description -- would otherwise never reach
+/// it, and a record a newer reader refuses would stop every image that
+/// installs it. The files are the package's own; only the record is made
+/// again, and only when it differs.
+fn restamp(app: &App, arch: Arch, out: &Path) -> Result<()> {
+    let bytes = read(out)?;
+    let mut wanted = app.recipe.package.clone();
+    wanted.arches = vec![arch.name().to_owned()];
+    if package_record(&bytes).is_ok_and(|record| record.package == wanted) {
+        return Ok(());
+    }
+    let record_path = record::path(app.name());
+    let mut files = Vec::new();
+    for entry in Archive::new(&bytes).entries() {
+        let entry = entry.map_err(|error| Error::new(format!("{}: {error:?}", out.display())))?;
+        if entry.name == record_path {
+            continue;
+        }
+        let content = match entry.file_type() {
+            FileType::Regular => ports::Content::Bytes(entry.data.to_vec()),
+            FileType::Symlink => ports::Content::Link(
+                entry
+                    .symlink_target()
+                    .ok_or_else(|| Error::new(format!("{}: a link is not text", entry.name)))?
+                    .to_owned(),
+            ),
+            FileType::Directory => ports::Content::Directory,
+            _ => continue,
+        };
+        files.push(ports::File {
+            path: entry.name.to_owned(),
+            mode: entry.mode & 0o7777,
+            content,
+        });
+    }
+    println!("  {}: its record made again from app.toml", app.name());
+    write(out, &packed(app, arch, files)?)
 }
 
 /// `cargo xtask build-apps`: every app's package, or `--app`'s, built for
@@ -1043,7 +1092,7 @@ mod tests {
 
     fn app(name: &str, smoke: &str) -> App {
         let text = format!(
-            "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"\"\nabi = \"native\"\n\
+            "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"\"\nlicense = \"MIT\"\nabi = \"native\"\n\
              arches = [\"x86_64\"]\n\n[[package.files]]\nfrom = \"{name}\"\nto = \"bin/{name}\"\nmode = \"755\"\n{smoke}"
         );
         App {
@@ -1180,6 +1229,44 @@ mod tests {
             &entries,
         )
         .expect("an archive")
+    }
+
+    #[test]
+    fn a_reused_package_gets_the_record_its_manifest_has_now() {
+        // The package as an older xtask made it: a record with no licence,
+        // which today's reader refuses.
+        let mut package = app("a", "").recipe.package;
+        package.arches = vec!["x86_64".to_owned()];
+        let record = Record {
+            package,
+            files: vec![Installed::of("bin/a", 0o755, b"elf")],
+        };
+        let old = record::render(&record).replace("license = \"MIT\"\n", "");
+        let path = record::path("a");
+        let stale = crate::initramfs::plain(
+            &["bin", "lib", "lib/ferrix", "lib/ferrix/packages"],
+            &[("bin/a", 0o755, b"elf"), (&path, 0o644, old.as_bytes())],
+        )
+        .expect("an archive");
+        let dir = std::env::temp_dir().join(format!("xtask-restamp-{}", std::process::id()));
+        let out = dir.join("a.fxpkg");
+        super::write(&out, &stale).expect("written");
+        assert!(
+            super::package_record(&stale).is_err(),
+            "the stale record reads"
+        );
+
+        let app = app("a", "");
+        super::restamp(&app, crate::paths::Arch::X86_64, &out).expect("restamped");
+        let bytes = super::read(&out).expect("read back");
+        let record = super::package_record(&bytes).expect("the new record reads");
+        assert_eq!(record.package.license, "MIT");
+        assert_eq!(
+            install(&[bytes]).expect("installs").len(),
+            2,
+            "bin/a and the record"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

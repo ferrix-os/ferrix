@@ -20,6 +20,7 @@ const APP: &str = r#"
 name = "ferrofetch"            # the folder's name
 version = "0.1.0"
 description = "The mark, and a few lines about the machine."
+license = "MIT"
 abi = "native"
 arches = ["x86_64", "aarch64", "armv7a",]
 depends = ["zlib >= 1.3", "curl"]
@@ -88,6 +89,7 @@ fn the_optional_tables_have_their_defaults() {
 name = "a"
 version = "1"
 description = ""
+license = "MIT"
 abi = "linux"
 arches = ["x86_64"]
 
@@ -166,6 +168,41 @@ fn a_manifest_is_read_strictly() {
 }
 
 #[test]
+fn a_license_is_an_spdx_expression() {
+    for good in [
+        "MIT",
+        "GPL-2.0-only",
+        "MIT OR Apache-2.0",
+        "LGPL-2.1-or-later",
+        "GPL-2.0+",
+        "(MIT OR Apache-2.0) AND BSD-3-Clause",
+        "GPL-2.0-only WITH Linux-syscall-note",
+    ] {
+        let text = APP.replacen("license = \"MIT\"", &format!("license = \"{good}\""), 1);
+        let recipe = manifest::recipe(&text).unwrap_or_else(|error| panic!("{good}: {error}"));
+        assert_eq!(recipe.package.license, good);
+    }
+    for bad in [
+        "",
+        "MIT OR",
+        "OR MIT",
+        "(MIT",
+        "MIT)",
+        "MIT Apache-2.0",
+        "M I T",
+        "9MIT",
+        "MIT/X11",
+    ] {
+        refused(
+            "license = \"MIT\"",
+            &format!("license = \"{bad}\""),
+            "not an SPDX expression",
+        );
+    }
+    refused("license = \"MIT\"\n", "", "has no `license`");
+}
+
+#[test]
 fn a_manifest_needs_a_package_and_a_file() {
     let error = manifest::recipe("[build]\nkind = \"cargo\"\n").expect_err("no package");
     assert!(error.0.contains("no [package]"), "{error}");
@@ -210,6 +247,7 @@ fn a_tree_is_taken_whole_and_has_no_mode() {
 name = "git"
 version = "2.51.0"
 description = "git"
+license = "MIT"
 abi = "linux"
 arches = ["x86_64"]
 
@@ -274,7 +312,7 @@ fn versions_compare_number_by_number() {
 /// A record of `name` at `version` owning `paths`, needing `depends`.
 fn package(name: &str, version: &str, depends: &[&str], paths: &[&str]) -> Record {
     let text = format!(
-        "[package]\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"\"\nabi = \"linux\"\n\
+        "[package]\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"\"\nlicense = \"MIT\"\nabi = \"linux\"\n\
          arches = [\"x86_64\"]\ndepends = [{}]\n{}",
         depends
             .iter()

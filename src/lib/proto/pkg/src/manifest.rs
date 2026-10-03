@@ -175,6 +175,10 @@ pub struct Package {
     pub version: Version,
     /// One line.
     pub description: String,
+    /// The licence the package's files are under, as an SPDX expression:
+    /// `MIT`, `GPL-2.0-only`, `MIT OR Apache-2.0`. For a ported program it
+    /// is the program's own, not the recipe's.
+    pub license: String,
     /// Its ABI.
     pub abi: Abi,
     /// The architectures it is built for.
@@ -328,12 +332,56 @@ fn known_tables(document: &Document) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether `text` reads as an SPDX licence expression: identifiers made of
+/// letters, digits, `.`, `-` and a trailing `+`, joined by `AND`, `OR` and
+/// `WITH`, in balanced brackets. The identifiers themselves are not checked
+/// against SPDX's list, which moves; the shape is what a reader needs.
+fn is_license(text: &str) -> bool {
+    let spaced = text.replace('(', " ( ").replace(')', " ) ");
+    let mut depth = 0_u32;
+    let mut want_term = true;
+    for word in spaced.split_whitespace() {
+        match word {
+            "(" if want_term => depth += 1,
+            ")" if !want_term && depth > 0 => depth -= 1,
+            "AND" | "OR" | "WITH" if !want_term => want_term = true,
+            _ if want_term && is_license_id(word) => want_term = false,
+            _ => return false,
+        }
+    }
+    !want_term && depth == 0
+}
+
+/// One SPDX identifier: `MIT`, `GPL-2.0-or-later`, `LicenseRef-x`, `GPL-2.0+`.
+fn is_license_id(word: &str) -> bool {
+    let body = word.strip_suffix('+').unwrap_or(word);
+    body.starts_with(|c: char| c.is_ascii_alphabetic())
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
 /// `[package]`.
 pub(crate) fn read_package(table: &Table) -> Result<Package, Error> {
     known_keys(
         table,
-        &["name", "version", "description", "abi", "arches", "depends"],
+        &[
+            "name",
+            "version",
+            "description",
+            "license",
+            "abi",
+            "arches",
+            "depends",
+        ],
     )?;
+    let license = string(table, "license")?;
+    if !is_license(&license) {
+        return refuse(format!(
+            "[package] license: `{license}` is not an SPDX expression, such as `MIT` or \
+             `MIT OR Apache-2.0`"
+        ));
+    }
     let name = string(table, "name")?;
     if !is_name(&name) {
         return refuse(format!(
@@ -375,6 +423,7 @@ pub(crate) fn read_package(table: &Table) -> Result<Package, Error> {
         name,
         version,
         description: string(table, "description")?,
+        license,
         abi,
         arches,
         depends,
