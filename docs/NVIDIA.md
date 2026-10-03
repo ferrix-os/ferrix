@@ -1437,7 +1437,12 @@ and took the recommended answer for D2, D3 and D5.
       `gate.sh control`. A PASSED row of that gate on the landing hash is
       their evidence.
 
-    The eighth control, base taken, was its advisory A1.
+    The eighth control, base taken, was its advisory A1. It found Ferrix answering
+    `MAP_FIXED_NOREPLACE` over a mapped page with EINVAL, where Linux answers
+    EEXIST. `mmap` now answers EEXIST, checked by the kernel's
+    `check_noreplace_refuses_a_taken_place` and its control
+    `n1c-ctl-noreplace2`. The call was refused either way, so there is no
+    finding (ledger line 292).
   * **Left for N1d**: the real `nvidia.img` must carry
     `usr/lib/ferrix/nvrm-core`, which xtask writes because it depends on
     `nvrm`'s build. After that comes the first boot on the 3060 and GSP

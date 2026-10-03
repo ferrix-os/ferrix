@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "NVIDIA.md N1c, MAP_FIXED_NOREPLACE over a mapped page answers EEXIST (branch nvidia-n1c; the consultant's OK IF of 2026-10-03, ledger 292, condition K3)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from f0dad0f78, no anchor dropped.",
+      "what": "Measure and test or argue the new lines on every architecture: syscall/memory.rs's MAP_FIXED_NOREPLACE branch in place() and taken(), and syscall/check.rs's check_noreplace_refuses_a_taken_place."
+    },
+    {
       "landing": "OPAQUE-KERNEL.md §9.8 step 2e, the channel's wait from one state word (branch step2e)",
       "architectures": [
         "x86_64",

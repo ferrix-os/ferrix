@@ -239,9 +239,10 @@ fn taken(process: &Process, addr: u64, len: u64) -> bool {
         return false;
     };
     process.space().with_regions(|regions| {
+        // Lowest first: the first region not wholly below the range decides.
         for region in regions {
-            if region.start < end && addr < region.end {
-                return true;
+            if region.end > addr {
+                return region.start < end;
             }
         }
         false

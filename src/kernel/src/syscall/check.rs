@@ -1060,8 +1060,6 @@ fn check_the_cpu_time_clocks(process: &Process) -> Result<(), &'static str> {
 /// `MAP_FIXED_NOREPLACE` over a page already mapped, or over part of one, is
 /// `EEXIST`, as on Linux, and leaves the page as it was; beside it, on free
 /// pages, the same request is taken.
-///
-/// Verifies: L.user.50
 fn check_noreplace_refuses_a_taken_place(process: &Process) -> Result<(), &'static str> {
     let request = |addr: u64, len: u64, flags: u32| MmapRequest {
         addr,
