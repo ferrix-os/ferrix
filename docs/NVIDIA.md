@@ -648,6 +648,41 @@ same forwarding core. That is enough for:
 Without N6, the card drives no monitor, and Ferrix's screen stays
 virtio-gpu, seen over VNC or SPICE.
 
+**As built (N6a, 2026-10-03, branch `nvidia-n2`, unlanded).**
+
+* **NVKMS in the core.** `nv-modeset-kernel.o` is linked with
+  `nv-kernel.o` into one object, `rm-kms.o` (its `nvstatusToString` made
+  local), which is the core nvrm loads from the volume: 15 MB, under the
+  loader's 64 MiB. Its OS layer is NVIDIA's `nvidia-modeset-linux.c`, kept
+  as `os/kept/nvidia-modeset.c`: ferrix-nvos's semaphores, timers and work
+  queue, kernel-space (KAPI) clients only, no suspend. The RM side is
+  `os/kept/nv-modeset-interface.c`.
+* **First light.** `os/glue/kms.c` is nvrm's KAPI client, as nvidia-drm is
+  on Linux: it takes ownership of the display engine, reads each
+  connector's EDID, and on the first connected display sets the preferred
+  mode with a pitch-linear `XRGB8888` surface in VRAM, mapped through BAR1.
+  On the customer's LG TV on the 3060's HDMI port, 1920x1080 at 60 Hz
+  showed the test pattern (log `~/.local/share/ferrix/nvidia/
+  n3-first-modeset.log`). A display not connected at start is looked for
+  every two seconds; RM reporting every connector empty, by every method,
+  with every EDID read failing, has meant the monitor was not reaching the
+  card (asleep, or on another input).
+* **The card.** nvrm then serves that head as a card of the kernel's
+  display core (`docs/DISPLAY.md`), a third driver beside virtio-gpu and the
+  STM32 LTDC, through ferrix-nvos's `display.rs`. Its HELLO offers the one
+  running mode and sets displayctl v8's `copies` flag; each FLUSH copies
+  the flushed rectangle from the card VMO, mapped read-only, into the VRAM
+  surface, and is answered at once. No cursor plane yet: the compositor
+  draws the pointer. Double buffering with a flip at vertical blanking, the
+  mode list and a cursor are next.
+* **The desktop.** `cargo xtask run-compositor --nvidia` builds the
+  `--chrome` desktop with nvrm in it and boots it in the libvirt domain
+  `run-nvidia` uses, with libvirt's default network. Chrome runs on the
+  volume's glibc with ANGLE on NVIDIA's Vulkan (`chrome::NVIDIA_GPU_FLAGS`)
+  and software compositing, since hyprix takes `wl_shm` only (§4.6).
+  hyprix is ordered after the card by init's `.device` units:
+  `Requires=` and `After=dev-dri-card0.device` (`docs/INIT.md`).
+
 ### 4.6 How frames reach hyprix, yserver, Chrome and Steam
 
 The card renders. The problem is getting its pixels to a compositor that

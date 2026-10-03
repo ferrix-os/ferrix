@@ -508,6 +508,10 @@ pub(crate) fn desktop_files(
         "# The compositor, a service of graphical.target (docs/INIT.md, L10).\n\
          [Unit]\n\
          Description=The compositor\n\
+         # The screen it opens, which a driver publishes when its card is up:\n\
+         # nvrm's half a minute into boot, once the GPU's firmware runs.\n\
+         Requires=dev-dri-card0.device\n\
+         After=dev-dri-card0.device\n\
          \n\
          [Service]\n\
          ExecStart={}\n\

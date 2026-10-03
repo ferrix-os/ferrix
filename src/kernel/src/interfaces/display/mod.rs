@@ -1024,6 +1024,7 @@ fn run(id: usize) {
         serve(&card);
         CARDS.lock().retain(|held| !Arc::ptr_eq(held, &card));
         NUMBERS.give_back(card.index);
+        crate::fs::devfs::announce(alloc::format!("dri/card{}", card.index).as_bytes(), false);
         crate::console::println!("  display  card{} is gone", card.index);
     }
     CLAIMS.release(&start.device);
@@ -1181,6 +1182,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
         return Err(Refusal::Malformed);
     }
     drop(state);
+    crate::fs::devfs::announce(alloc::format!("dri/card{index}").as_bytes(), true);
 
     // The driver owns what is on the screen now, and the boot console, if it
     // was drawing on the firmware's framebuffer, stops.
