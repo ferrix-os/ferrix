@@ -205,10 +205,6 @@ NvU32 NV_API_CALL nv_tegra_get_rm_interface_type(NvU32 a0)
 
 /* DMA mapping of system memory and peers through the IOMMU (N1d). */
 
-void NV_API_CALL nv_dma_cache_invalidate(nv_dma_device_t *a0, void *a1)
-{
-    nvos_stub_called("nv_dma_cache_invalidate", "DMA mapping comes with N1d");
-}
 
 void* NV_API_CALL nv_dma_get_dev_pagemap(NvU64 a0)
 {
@@ -234,23 +230,8 @@ NV_STATUS NV_API_CALL nv_dma_import_sgt(nv_dma_device_t *a0, struct sg_table *a1
     return NV_ERR_NOT_SUPPORTED;
 }
 
-NV_STATUS NV_API_CALL nv_dma_map_alloc(nv_dma_device_t *a0, NvU64 a1, NvU64 *a2, NvBool a3, NvBool a4, void **a5)
-{
-    nvos_stub_called("nv_dma_map_alloc", "DMA mapping comes with N1d");
-    return NV_ERR_NOT_SUPPORTED;
-}
 
-NV_STATUS NV_API_CALL nv_dma_map_mmio(nv_dma_device_t *a0, NvU64 a1, NvU64 *a2)
-{
-    nvos_stub_called("nv_dma_map_mmio", "DMA mapping comes with N1d");
-    return NV_ERR_NOT_SUPPORTED;
-}
 
-NV_STATUS NV_API_CALL nv_dma_map_peer(nv_dma_device_t *a0, nv_dma_device_t *a1, NvU8 a2, NvU64 a3, NvU64 *a4)
-{
-    nvos_stub_called("nv_dma_map_peer", "DMA mapping comes with N1d");
-    return NV_ERR_NOT_SUPPORTED;
-}
 
 void NV_API_CALL nv_dma_put_dev_pagemap(void *a0)
 {
@@ -267,21 +248,8 @@ void NV_API_CALL nv_dma_release_sgt(struct sg_table *a0, struct drm_gem_object *
     nvos_stub_called("nv_dma_release_sgt", "DMA mapping comes with N1d");
 }
 
-NV_STATUS NV_API_CALL nv_dma_unmap_alloc(nv_dma_device_t *a0, NvU64 a1, NvU64 *a2, void **a3)
-{
-    nvos_stub_called("nv_dma_unmap_alloc", "DMA mapping comes with N1d");
-    return NV_ERR_NOT_SUPPORTED;
-}
 
-void NV_API_CALL nv_dma_unmap_mmio(nv_dma_device_t *a0, NvU64 a1, NvU64 a2)
-{
-    nvos_stub_called("nv_dma_unmap_mmio", "DMA mapping comes with N1d");
-}
 
-void NV_API_CALL nv_dma_unmap_peer(nv_dma_device_t *a0, NvU64 a1, NvU64 a2)
-{
-    nvos_stub_called("nv_dma_unmap_peer", "DMA mapping comes with N1d");
-}
 
 NV_STATUS NV_API_CALL nv_get_phys_pages(void *a0, void *a1, NvU32 *a2)
 {
@@ -289,11 +257,6 @@ NV_STATUS NV_API_CALL nv_get_phys_pages(void *a0, void *a1, NvU32 *a2)
     return NV_ERR_NOT_SUPPORTED;
 }
 
-NvBool NV_API_CALL nv_grdma_pci_topology_supported(nv_state_t *a0, nv_dma_device_t *a1)
-{
-    nvos_stub_called("nv_grdma_pci_topology_supported", "DMA mapping comes with N1d");
-    return NV_FALSE;
-}
 
 NV_STATUS NV_API_CALL nv_register_sgt(nv_state_t *a0, NvU64 *a1, NvU64 a2, NvU32 a3, void **a4, struct sg_table *a5, void *a6, NvBool a7)
 {

@@ -123,6 +123,17 @@ typedef struct nv_alloc_s {
 /* ------------------------------------------------------------------------
  * Per device: the control device, and each GPU at N1d.
  * ---------------------------------------------------------------------- */
+/* NVIDIA's nv-linux.h nv_dma_device: what RM's DMA calls are handed. Its
+ * device pointer names nothing here; the range is what RM set. */
+struct nv_dma_device {
+    struct {
+        NvU64 start;
+        NvU64 limit;
+    } addressable_range;
+
+    void *dev;
+};
+
 typedef struct nv_linux_state_s {
     nv_state_t nv_state;            /* first: RM's view */
 
@@ -145,6 +156,12 @@ typedef struct nv_linux_state_s {
 
     /* The device handle ferrix-nvos attached, for a GPU. */
     NvU32 device_handle;
+
+    /* For a GPU (os/kept/nv-pci.c): its DMA device, and RM's stacks for
+     * the interrupt thread's top and bottom halves. */
+    nv_dma_device_t dma_dev;
+    nvidia_stack_t *sp_isr;
+    nvidia_stack_t *sp_bh;
 } nv_linux_state_t;
 
 /* ------------------------------------------------------------------------
@@ -193,6 +210,14 @@ extern nv_linux_state_t nv_ctl_device;
  * calls at N1e, and what nvrm-link-test calls as a client would.
  * ---------------------------------------------------------------------- */
 int nvrm_module_init(void);
+
+/* os/kept/nv.c: a probed GPU joins the device list. */
+void nv_linux_add_device(nv_linux_state_t *nvl);
+NvBool nv_lock_init_locks(nvidia_stack_t *sp, nv_state_t *nv);
+
+/* os/kept/nv-pci.c: probe the attached GPU and start it, through
+ * rm_init_adapter; 0, or the step that failed. */
+int nvrm_gpu_start(void);
 void nvrm_module_exit(void);
 nv_linux_file_private_t *nvrm_open_ctl(void);
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *arg);

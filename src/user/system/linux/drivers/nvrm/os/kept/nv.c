@@ -185,6 +185,35 @@ nv_linux_state_t *find_pci(NvU32 domain, NvU8 bus, NvU8 slot, NvU8 function)
     return nvl;
 }
 
+/*
+ * Ferrix: NVIDIA's nv_linux_add_device_locked, for nv-pci.c's probe. The
+ * GPU gets the next minor number and joins the list find_pci walks.
+ */
+void nv_linux_add_device(nv_linux_state_t *nvl)
+{
+    nv_linux_state_t *last;
+    NvU32 minor = 0;
+
+    LOCK_NV_LINUX_DEVICES();
+    nvl->next = NULL;
+    if (nv_linux_devices == NULL)
+    {
+        nv_linux_devices = nvl;
+    }
+    else
+    {
+        for (last = nv_linux_devices; ; last = last->next)
+        {
+            minor++;
+            if (last->next == NULL)
+                break;
+        }
+        last->next = nvl;
+    }
+    nvl->minor_num = minor;
+    UNLOCK_NV_LINUX_DEVICES();
+}
+
 /* ------------------------------------------------------------------------
  * Module start and stop. NVIDIA's nvidia_init_module, nv_module_init and
  * nv_module_state_init, less what needs a GPU or Linux: procfs, the
@@ -783,12 +812,22 @@ NV_STATUS NV_API_CALL nv_alloc_pages(
         return NV_ERR_NO_MEMORY;
     }
 
-    status = nvos_pages_alloc(page_count, NV_FALSE, addresses, &mapped, &at->pages);
+    /*
+     * Ferrix: a contiguous request asks ferrix-nvos for one run, which
+     * writes its first address only; each page's follows from it. The check
+     * below still holds the run to it.
+     */
+    status = nvos_pages_alloc(page_count, contiguous, addresses, &mapped, &at->pages);
     if (status != NV_OK)
     {
         free(addresses);
         nvos_free_alloc(at);
         return status;
+    }
+    if (contiguous)
+    {
+        for (i = 1; i < page_count; i++)
+            addresses[i] = addresses[0] + ((NvU64)i << PAGE_SHIFT);
     }
 
     for (i = 0; i < page_count; i++)

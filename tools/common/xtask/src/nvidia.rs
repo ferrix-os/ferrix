@@ -9,6 +9,9 @@
 //! * the 3060's function 0, `0000:01:00.0`, must be bound to `vfio-pci` on
 //!   the host. Nothing here names the RTX 3090 (`03:00.0`), and the domain
 //!   is defined with the 3060's function 0 alone;
+//! * the card's option ROM is not run (`<rom bar='off'/>`): with a monitor
+//!   attached, OVMF's GOP would put a boot framebuffer in BAR1, which the
+//!   kernel keeps for its console and so withholds from `nvrm`;
 //! * the emulator must be the patched QEMU installed as root at
 //!   [`EMULATOR`], whose `--version` says `ferrix-cfi`, so that interrupt
 //!   remapping blocks compatibility-format messages (F-57).
@@ -214,6 +217,7 @@ fn domain_xml(dir: &Path) -> String {
     <memballoon model='none'/>
     <hostdev mode='subsystem' type='pci' managed='no'>
       <source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source>
+      <rom bar='off'/>
     </hostdev>
   </devices>
   <qemu:commandline>

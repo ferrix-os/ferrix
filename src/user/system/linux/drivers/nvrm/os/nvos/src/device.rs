@@ -159,6 +159,79 @@ pub extern "C" fn nvos_device_attach(handle: u32) -> NvStatus {
     status::OK
 }
 
+/// The attached device as nvrm's probe needs it (`struct nvos_device_desc`
+/// in `include/nvos.h`): where it is, what it is, and each aperture whole,
+/// by the BAR it came from.
+#[repr(C)]
+#[derive(Debug)]
+pub struct DeviceDesc {
+    /// The PCI address: segment in bits 31:16, bus in 15:8, devfn in 7:0.
+    pub location: u32,
+    /// The class code: base class in bits 23:16, subclass in 15:8.
+    pub class: u32,
+    /// The vendor identifier.
+    pub vendor: u16,
+    /// The device identifier.
+    pub device: u16,
+    /// Vectors `nvos_interrupt_start` can claim.
+    pub vectors: u32,
+    /// Apertures written below.
+    pub apertures: u32,
+    /// Each aperture's BAR.
+    pub bar: [u8; APERTURES],
+    /// Each aperture's flags (`APERTURE_*`).
+    pub flags: [u8; APERTURES],
+    /// Each aperture's physical address.
+    pub phys: [u64; APERTURES],
+    /// Each aperture's length in bytes.
+    pub len: [u64; APERTURES],
+}
+
+/// Describe the attached device into `out`: `NV_OK`, or
+/// `NV_ERR_INVALID_STATE` before `nvos_device_attach`.
+///
+/// # Safety
+///
+/// `out` is writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_device_describe(out: *mut DeviceDesc) -> NvStatus {
+    let Some(attached) = attached() else {
+        return status::INVALID_STATE;
+    };
+    let info = &attached.info;
+    let mut desc = DeviceDesc {
+        location: info.location,
+        class: info.class,
+        vendor: info.vendor_id,
+        device: info.device_id,
+        vectors: info.vectors,
+        apertures: 0,
+        bar: [0; APERTURES],
+        flags: [0; APERTURES],
+        phys: [0; APERTURES],
+        len: [0; APERTURES],
+    };
+    let mut count = 0;
+    for aperture in attached.apertures.iter().flatten() {
+        if let (Some(bar), Some(flags), Some(phys), Some(len)) = (
+            desc.bar.get_mut(count),
+            desc.flags.get_mut(count),
+            desc.phys.get_mut(count),
+            desc.len.get_mut(count),
+        ) {
+            *bar = aperture.bar;
+            *flags = aperture.flags;
+            *phys = aperture.phys;
+            *len = aperture.len;
+            count += 1;
+        }
+    }
+    desc.apertures = u32::try_from(count).unwrap_or(0);
+    // SAFETY: the caller vouches for `out`.
+    unsafe { out.write(desc) };
+    status::OK
+}
+
 /// The handle `os_pci_init_handle` returns for nvrm's own function: any
 /// non-null value RM hands back; this one is the device state's address.
 fn pci_handle() -> *mut c_void {

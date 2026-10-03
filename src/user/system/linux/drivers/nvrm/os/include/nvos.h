@@ -73,6 +73,23 @@ void nvos_pages_free(struct nvos_pages *);
 /* device.rs: the GPU, once nvrm attaches its handle. */
 NV_STATUS nvos_device_attach(NvU32 handle);
 NV_STATUS nvos_interrupt_start(NvU32 index, void (*handler)(void *), void *argument);
+
+/* The attached device, for nvrm's probe (device.rs's DeviceDesc). */
+#define NVOS_APERTURES 16
+#define NVOS_APERTURE_PREFETCHABLE 0x1
+struct nvos_device_desc {
+    NvU32 location;     /* segment 31:16, bus 15:8, devfn 7:0 */
+    NvU32 class_code;   /* base 23:16, subclass 15:8 */
+    NvU16 vendor;
+    NvU16 device;
+    NvU32 vectors;
+    NvU32 apertures;
+    NvU8 bar[NVOS_APERTURES];
+    NvU8 flags[NVOS_APERTURES];
+    NvU64 phys[NVOS_APERTURES];
+    NvU64 len[NVOS_APERTURES];
+};
+NV_STATUS nvos_device_describe(struct nvos_device_desc *out);
 void nvos_isr_enter_leave(NvBool entering);
 
 /* client.rs: the client the calling thread serves a request for. */

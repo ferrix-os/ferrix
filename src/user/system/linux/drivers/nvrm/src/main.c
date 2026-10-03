@@ -27,6 +27,10 @@
  *  6. maps BAR0 and reads its first register: NV_PMC_BOOT_0, the chip's
  *     boot identity, on an NVIDIA GPU; on the test device any register;
  *  7. runs a thread and joins it, since RM needs threads (§4.1);
+ *  7a. on an NVIDIA GPU (N1d): attaches the device to ferrix-nvos,
+ *     starts RM (nvrm_module_init) and probes and starts the GPU
+ *     (os/kept/nv-pci.c), through rm_init_adapter, which boots its GSP;
+ *     the test device has no RM to start and skips this;
  *  8. says it is up, and sleeps until it is killed.
  *
  * Every line goes to standard error, which is the console, in one write.
@@ -58,6 +62,8 @@ enum step {
 	STEP_BAR0 = 10,
 	STEP_THREAD = 11,
 	STEP_VOLUME = 12,
+	STEP_ATTACH = 13,
+	STEP_RM = 14,
 };
 
 /* Where the NVIDIA volume, mounted at /data, carries RM's core (written
@@ -79,6 +85,12 @@ extern int nvos_core_load(const char *path, const unsigned char (*pin)[32],
 
 /* From start.c. */
 extern uint32_t nvrm_bootstrap;
+
+/* ferrix-nvos (include/nvos.h) and the kept C (include/nv-ferrix.h), which
+ * this file, built against ferrousli's headers alone, declares itself. */
+extern uint32_t nvos_device_attach(uint32_t handle);
+extern int nvrm_module_init(void);
+extern int nvrm_gpu_start(void);
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
 static char place[16];
@@ -282,6 +294,23 @@ int main(void)
 	    pthread_join(thread, &joined) != 0 || !flag)
 		return stop(STEP_THREAD, "a thread did not run", 0);
 	say("a thread ran and was joined");
+
+	if (info.vendor_id == NVIDIA_VENDOR) {
+		uint32_t attached = nvos_device_attach(device);
+		if (attached != 0)
+			return stop(STEP_ATTACH, "nvos_device_attach refused",
+				    attached);
+		int rc = nvrm_module_init();
+		if (rc != 0)
+			return stop(STEP_RM, "RM did not initialise", rc);
+		say("RM initialised; probing the GPU");
+		status = nvrm_gpu_start();
+		if (status != 0) {
+			say("stopped: the GPU did not start (step %d)", status);
+			return status;
+		}
+		say("GPU started on %s", place);
+	}
 
 	say("skeleton up on %s; idle", place);
 	for (;;)
