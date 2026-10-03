@@ -107,6 +107,16 @@ const MAX_ERRNO: i64 = 4095;
 static CLAIMS: Claims = Claims::new();
 /// Controls between creation and their task taking them.
 static STARTING: SpinLock<Vec<Arc<Control>>> = SpinLock::new(Vec::new());
+/// Whether `device`'s driver serves published device files through this
+/// core: what lets the display core hand the same driver a card it can map
+/// (displayctl's `copies`, `docs/DISPLAY.md` §2.1).
+pub(crate) fn publishes_for(device: &Arc<DeviceNode>) -> bool {
+    PUBLISHED
+        .lock()
+        .iter()
+        .any(|(_, control)| Arc::ptr_eq(&control.device, device))
+}
+
 /// Every live control, for the native calls to find by their endpoint.
 static CONTROLS: SpinLock<Vec<Arc<Control>>> = SpinLock::new(Vec::new());
 /// The published nodes: each minor of major 195 and the control serving it.

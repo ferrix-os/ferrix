@@ -222,9 +222,11 @@ void nvrm_module_exit(void);
 nv_linux_file_private_t *nvrm_open_ctl(void);
 nv_linux_file_private_t *nvrm_open_gpu(NvU32 minor);
 
-/* os/glue/chardev.c: serve /dev/nvidiactl and the GPUs' files; returns
- * only when the kernel's control channel fails. */
-int nvrm_chardev_serve(const NvU16 *minors, NvU32 count);
+/* os/glue/chardev.c: publish /dev/nvidiactl and the GPUs' files, then
+ * serve them; serving returns only when the kernel's control channel
+ * fails. Requests that come between the two wait in the channel. */
+int nvrm_chardev_publish(const NvU16 *minors, NvU32 count);
+int nvrm_chardev_serve(void);
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *arg);
 void nvrm_close(nv_linux_file_private_t *nvlfp);
 

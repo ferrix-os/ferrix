@@ -3,8 +3,8 @@
 //! The manager is a pure state machine: [`Manager::step`] takes what
 //! happened and returns what to do. This program is everything around it
 //! (§9): it boots the machine far enough for the manager to run (§8.1), then
-//! waits in one `epoll_wait` for a signal, a child's exec report or a
-//! cgroup's `cgroup.events`, turns what it finds into events, and carries
+//! waits in one `epoll_wait` for a signal, a child's exec report, a
+//! cgroup's `cgroup.events` or a device node appearing, turns what it finds into events, and carries
 //! out the actions each step returns, until one of them is
 //! [`Action::Power`].
 //!
@@ -29,6 +29,7 @@ mod admin;
 mod audit;
 mod cgroup;
 mod control;
+mod devices;
 mod directory;
 mod logs;
 mod probe;
@@ -59,6 +60,7 @@ use ferrix_svc_proto::control::{Answer, Call, UnitStatus};
 
 use crate::cgroup::Groups;
 use crate::control::{Control, Heard};
+use crate::devices::Devices;
 use crate::directory::Directory;
 use crate::logs::Logs;
 use crate::probe::Machine;
@@ -117,6 +119,8 @@ mod token {
     pub(crate) const SOCKET: u64 = 8 << 32;
     /// The port, as `port_fd`'s descriptor (§6, §9).
     pub(crate) const PORT: u64 = 9 << 32;
+    /// The inotify instance device units' nodes are watched with.
+    pub(crate) const DEVICES: u64 = 10 << 32;
     /// The kind of `token`.
     pub(crate) fn kind(token: u64) -> u64 {
         token & !0xffff_ffff
@@ -164,6 +168,8 @@ struct Init {
     forking: BTreeMap<u32, UnitId>,
     /// The `.socket` units' sockets.
     sockets: Sockets,
+    /// The nodes `.device` units wait for.
+    devices: Devices,
     /// Bootstrap channels, native services and the directory (§6), unless
     /// the kernel has no native calls to make them with.
     directory: Option<Directory>,
@@ -253,6 +259,21 @@ impl Init {
             token::SIGNALS,
         )
         .map_err(|e| format!("watching the signalfd failed: {e}"))?;
+        let inotify = match sys::inotify() {
+            Ok(inotify) => Some(inotify),
+            Err(error) => {
+                say(&format!(
+                    "inotify_init1 failed: {error}; device nodes are looked at once a second"
+                ));
+                None
+            }
+        };
+        let devices = Devices::new(inotify);
+        if let Some(fd) = devices.fd()
+            && let Err(error) = sys::watch(epoll.as_fd(), fd, libc::EPOLLIN as u32, token::DEVICES)
+        {
+            say(&format!("watching inotify failed: {error}"));
+        }
         let terminal = std::env::var("TERM").unwrap_or_else(|_| "vt220".to_owned());
         let control = match Control::listen() {
             Ok(control) => {
@@ -322,6 +343,7 @@ impl Init {
             readiness: Readiness::default(),
             forking: BTreeMap::new(),
             sockets: Sockets::default(),
+            devices,
         };
         // `/` is settled already when the kernel started devmgr itself: the
         // audit record's reader starts now, and otherwise once it is.
@@ -354,7 +376,17 @@ impl Init {
                     .next_read()
                     .saturating_duration_since(std::time::Instant::now())
             });
-            let timeout = match manager.into_iter().chain(groups).chain(audit).min() {
+            let devices = self
+                .devices
+                .next_poll()
+                .map(|at| at.saturating_duration_since(std::time::Instant::now()));
+            let timeout = match manager
+                .into_iter()
+                .chain(groups)
+                .chain(audit)
+                .chain(devices)
+                .min()
+            {
                 None => -1,
                 Some(wait) => {
                     // Rounded up, so a timer is never looked at early.
@@ -389,9 +421,15 @@ impl Init {
                 token::NOTIFY => self.read_notify(token::number(token)),
                 token::PORT => self.drain_port(),
                 token::SOCKET => self.connected(UnitId(token::number(token))),
+                token::DEVICES => {
+                    let found = self.devices.changed();
+                    self.devices_found(found);
+                }
                 _ => {}
             }
         }
+        let polled = self.devices.poll();
+        self.devices_found(polled);
         loop {
             match sys::next_signal(self.signals.as_fd()) {
                 Ok(Some(signal))
@@ -618,6 +656,11 @@ impl Init {
                     }
                 }
             }
+            Action::WatchDevice { unit, path } => {
+                let found = self.devices.watch(unit, path);
+                self.devices_found(found);
+            }
+            Action::UnwatchDevice { unit } => self.devices.unwatch(unit),
             Action::Close { connection } => self.sockets.close(connection),
             Action::Route { to, name, end } => {
                 let manager = &self.manager;
@@ -1015,6 +1058,13 @@ impl Init {
             Some(connection) => self.queue.push_back(Event::Accepted { unit, connection }),
             // Gone before it was taken: listen on.
             None => self.perform(Action::Watch { unit }),
+        }
+    }
+
+    /// Tell the manager which device units' nodes came or went.
+    fn devices_found(&mut self, found: Vec<(UnitId, bool)>) {
+        for (unit, present) in found {
+            self.queue.push_back(Event::Device { unit, present });
         }
     }
 

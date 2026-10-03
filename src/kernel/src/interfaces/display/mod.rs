@@ -1087,6 +1087,12 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     if RECLAIMABLE_FRAMEBUFFER.load(Ordering::Relaxed) {
         return Err(Refusal::Framebuffer);
     }
+    // A card the driver can map is the kernel's to give, not the driver's to
+    // claim: only one whose device files the chardev core already serves for
+    // this device, which is NVIDIA's (`docs/DISPLAY.md` §2.1).
+    if hello.copies && !crate::interfaces::chardev::publishes_for(&start.device) {
+        return Err(Refusal::Copies);
+    }
     // The driver reset the device before it sent HELLO, so what a dead one's
     // pins kept from the allocator can go back (`object::pin`'s quarantine),
     // and the kernel's configuration is read back (`DeviceNode::verify_config`).

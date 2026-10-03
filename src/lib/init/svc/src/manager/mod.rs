@@ -10,7 +10,7 @@
 //! An operation runs as soon as no operation it is ordered after is still
 //! queued, so what is not ordered runs at once ([`ops`]). Each kind drives
 //! its units toward what the operation asks ([`service`] for services,
-//! [`kinds`] for the rest), and boot, shutdown and the directory are
+//! [`kinds`] for the rest, devices among them), and boot, shutdown and the directory are
 //! [`lifecycle`]'s.
 
 mod graph;
@@ -146,6 +146,10 @@ enum Sub {
     Mounting,
     /// Unmounting.
     Unmounting,
+    /// A device, waiting for its node to appear.
+    Waiting,
+    /// A device whose node is there.
+    Plugged,
 }
 
 impl Sub {
@@ -170,6 +174,8 @@ impl Sub {
             Sub::AutoRestart => "auto-restart",
             Sub::Mounting => "mounting",
             Sub::Unmounting => "unmounting",
+            Sub::Waiting => "waiting",
+            Sub::Plugged => "plugged",
         }
     }
 }
@@ -346,6 +352,7 @@ impl Manager {
             Event::Listening { unit, result } => self.listening(unit, result),
             Event::Incoming { unit } => self.incoming(unit),
             Event::Accepted { unit, connection } => self.accepted(unit, connection),
+            Event::Device { unit, present } => self.device(unit, present),
         }
         self.dispatch();
         core::mem::take(&mut self.out)

@@ -94,7 +94,8 @@ extern int nvrm_module_init(void);
 extern int nvrm_gpu_start(void);
 extern int nvrm_kms_init(void);
 extern int nvrm_kms_show(void);
-extern int nvrm_chardev_serve(const uint16_t *minors, uint32_t count);
+extern int nvrm_chardev_publish(const uint16_t *minors, uint32_t count);
+extern int nvrm_chardev_serve(void);
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
 static char place[16];
@@ -315,19 +316,25 @@ int main(void)
 		}
 		say("GPU started on %s", place);
 
-		/* N3: NVKMS, and a test pattern on whatever display is
-		 * connected. A GPU without one, or a failure here, still
-		 * serves its device files. */
+		/* N1e: /dev/nvidiactl and /dev/nvidia0, through the kernel's
+		 * chardev core: published first, since the display core
+		 * hands a card it can map only to a driver that serves its
+		 * device's files (docs/DISPLAY.md §2.1). */
+		static const uint16_t minors[] = { 255, 0 };
+		if (nvrm_chardev_publish(minors, 2) != 0)
+			return stop(STEP_CHARDEV, "the device files were not published", -1);
+
+		/* N3/N6: NVKMS, a test pattern on whatever display is
+		 * connected, and that display as a card. A GPU without one,
+		 * or a failure here, still serves its device files. */
 		int kms = nvrm_kms_init();
 		if (kms != 0)
 			say("NVKMS did not load (%d)", kms);
 		else
 			say("NVKMS loaded; display test %d", nvrm_kms_show());
 
-		/* N1e: /dev/nvidiactl and /dev/nvidia0, through the kernel's
-		 * chardev core; this serves them for nvrm's life. */
-		static const uint16_t minors[] = { 255, 0 };
-		int served = nvrm_chardev_serve(minors, 2);
+		/* The device files, for nvrm's life. */
+		int served = nvrm_chardev_serve();
 		return stop(STEP_CHARDEV, "the device files' control failed",
 			    served);
 	}

@@ -77,8 +77,9 @@
 //! it with the processor into memory its device scans out from -- NVIDIA's
 //! driver, whose display engine reads its own video memory -- rather than
 //! by giving the device the pages. Such a driver is handed the card VMO
-//! with `MAP` as well ([`CARD_VMO_COPY_RIGHTS`]), to map it read-only; the
-//! others are not. Every other bit is reserved.
+//! with `MAP` in place of `TRANSFER` ([`CARD_VMO_COPY_RIGHTS`]), to map it
+//! read-only, and only when the kernel finds the device's driver is the
+//! one kind that may: the others never are. Every other bit is reserved.
 //!
 //! HELLO's timings are for a card that runs only the modes it can make a
 //! clock for -- a board's HDMI output, not a virtio-gpu, which shows any
@@ -192,11 +193,11 @@ pub const PORT_RIGHTS: Rights = Rights(Rights::WRITE.0 | Rights::TRANSFER.0);
 pub const CARD_VMO_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::TRANSFER.0);
 
 /// Exactly the rights a driver whose HELLO says it copies holds the card VMO
-/// with: [`CARD_VMO_RIGHTS`] and `MAP`, so that it can map the buffers
-/// read-only and copy from them. Never `WRITE`: it still cannot change a
-/// pixel.
-pub const CARD_VMO_COPY_RIGHTS: Rights =
-    Rights(Rights::READ.0 | Rights::MAP.0 | Rights::TRANSFER.0);
+/// with: `READ` and `MAP`, so that it can map the buffers read-only and copy
+/// from them. Never `WRITE`: it still cannot change a pixel. Nor `TRANSFER`:
+/// it maps the card once and closes the handle, and has nobody to pass it
+/// to.
+pub const CARD_VMO_COPY_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::MAP.0);
 
 /// One scanout as HELLO describes it: its preferred mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -409,6 +410,11 @@ pub enum Refusal {
     /// sets on a card that was not granted `VIRTIO_GPU_F_VIRGL`, or a
     /// capability set named where there are none.
     Capsets = 9,
+    /// HELLO says the driver copies, and the kernel does not find it one of
+    /// the drivers that may: a device whose driver also serves its device
+    /// files through the chardev core, which only NVIDIA's does. Decided by
+    /// the core.
+    Copies = 10,
 }
 
 impl Refusal {
@@ -425,6 +431,7 @@ impl Refusal {
             7 => Self::Protocol,
             8 => Self::Framebuffer,
             9 => Self::Capsets,
+            10 => Self::Copies,
             _ => return None,
         })
     }
@@ -442,6 +449,7 @@ impl fmt::Display for Refusal {
             Self::Protocol => "the driver broke the protocol",
             Self::Framebuffer => "the firmware framebuffer is in memory the kernel reclaims",
             Self::Capsets => "HELLO's capability sets do not match what it says about 3D",
+            Self::Copies => "HELLO says the driver copies, and this device's driver may not",
         })
     }
 }

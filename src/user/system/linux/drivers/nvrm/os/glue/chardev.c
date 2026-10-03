@@ -270,12 +270,15 @@ static void handle(const struct nvos_request *request)
     }
 }
 
-int nvrm_chardev_serve(const NvU16 *minors, NvU32 count)
+int nvrm_chardev_publish(const NvU16 *minors, NvU32 count)
+{
+    return nvos_chardev_start(minors, count) == NV_OK ? 0 : -1;
+}
+
+int nvrm_chardev_serve(void)
 {
     struct nvos_request request;
 
-    if (nvos_chardev_start(minors, count) != NV_OK)
-        return -1;
     for (;;)
     {
         if (nvos_chardev_next(&request) != NV_OK)

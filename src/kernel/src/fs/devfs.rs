@@ -1385,12 +1385,6 @@ fn node(index: usize, made: Timespec) -> Arc<dyn Inode> {
     })
 }
 
-/// What reads and writes of the character device numbered `rdev` go to: the
-/// devfs node with that number, opened as an open of it in `/dev` would be.
-///
-/// # Errors
-///
-/// `ENXIO` for a number no device here has.
 /// A node of devfs's appeared (`created`) or went: `IN_CREATE` or
 /// `IN_DELETE` on its directory for anyone watching it with inotify, as
 /// Linux's devtmpfs tells udev. `path` is under `/dev`, `dri/card0` say.
@@ -1399,8 +1393,11 @@ fn node(index: usize, made: Timespec) -> Arc<dyn Inode> {
 /// it can watch `dri` itself. init's `.device` units are ordered on these
 /// (`docs/INIT.md` §4.2).
 ///
-/// Called with no lock of a driver core's held: the walk to the directory
-/// looks its entries up, and devfs's lookups read the cores' lists.
+/// Called with no lock held, and never from interrupt context: the walk to
+/// the directory may sleep, and devfs's lookups read the driver cores'
+/// lists. A core announces a node after it is in its list and its going
+/// after it has left it, so a watcher that looks on the event finds what
+/// the event says. Only the first namespace's `/dev` is told (`fs::namespace`).
 pub(crate) fn announce(path: &[u8], created: bool) {
     if !fs::inotify::watching() {
         return;
@@ -1440,6 +1437,12 @@ pub(crate) fn announce(path: &[u8], created: bool) {
     }
 }
 
+/// What reads and writes of the character device numbered `rdev` go to: the
+/// devfs node with that number, opened as an open of it in `/dev` would be.
+///
+/// # Errors
+///
+/// `ENXIO` for a number no device here has.
 pub(crate) fn open_char_device(rdev: u64) -> Result<Arc<dyn Inode>> {
     let index = DEVICES
         .iter()
