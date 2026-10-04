@@ -45,13 +45,6 @@
       "branch": "step4-prep",
       "date": "2026-10-03",
       "purpose": "OPAQUE-KERNEL.md §9.7 part 6, step 4's groundwork (session B): ferrix.fastpath, the boot switch read once and printed at stage 9, off by default in the certified configuration (the customer, 2026-10-02)"
-    },
-    {
-      "ids": ["L.init.1-4", "H.BOOT.15"],
-      "owner": "stage20",
-      "branch": "selfhost-matrix",
-      "date": "2026-10-04",
-      "purpose": "Pid 1's inputs in the initramfs, one kernel for every test (stage 20; the consultant's OK IF of 2026-10-04, ledger line 328, condition 5): init::run's order, the inputs and their absence, init's refusals, and no input entry unpacked; and their parent H.BOOT.15, how pid 1 is chosen (ledger line 332), after H.BOOT.10-14, which boot-21b's agreed list holds"
     }
   ]
 }

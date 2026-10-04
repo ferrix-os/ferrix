@@ -108,7 +108,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `init.rs` | `item` | 3 | 14 | 14 | 3 | 208, 352, 472 |
+| `init.rs` | `item` | 3 | 14 | 14 | 3 | 211, 355, 607 |
 
 ---
 
@@ -127,7 +127,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 296, 676, 1242 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 296, 677, 1243 |
 
 ---
 

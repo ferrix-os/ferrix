@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 123 | 72 | 51 |
-| Low (`L.*`) | 804 | 533 | 271 |
+| High (`H.*`) | 124 | 73 | 51 |
+| Low (`L.*`) | 807 | 536 | 271 |
 
-1645 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1654 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1647 |
+| Named by a low-level requirement | 1656 |
 | Accessors, covered by the requirement they serve | 856 |
 | Check code in a product file | 65 |
-| Named by none | 883 |
+| Named by none | 878 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -124,7 +124,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
 | O.CAPABILITY | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DEV.2`, `H.DEV.4` |
-| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
+| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
 | O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.STORE.7` |
@@ -279,6 +279,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.BOOT.7` | When init exits and ferrix.onexit=reset asks for it, the machine shall restart from firmware after the console has drained. | Under ferrix.onexit=reset the kernel says it is resetting and the loader's banner is printed again after it. | O.FAILSAFE | `tools/common/xtask/src/qemu.rs::reset_problem` | xtask gate | xtask gate | xtask gate |
 | `H.BOOT.8` | The serial console shall carry the kernel's lines out, and a person's typed bytes in to the program reading them, in order and without waiting unboundedly on the port. | test-boot reads every stage's line and FERRIX-BOOT-OK from the serial port, and test-jobs's 18 typed steps each have their answer after them. | O.FAILSAFE | *baselined* | — | — | — |
 | `H.BOOT.9` | The kernel log shall hold neither the KASLR slide nor any kernel virtual address the kernel prints: a panic's slide and backtrace, a fatal trap's registers, stage 2's placement of the image, the direct map and the page array, and the sweeps' failure lines shall go to the port and never into the log. | After a boot, and after a panic with a backtrace, the kernel log read whole holds 0 occurrences of the slide or of any image, direct-map or vmap address the serial log printed. | O.ISOLATE | *baselined* | — | — | — |
+| `H.BOOT.15` | Pid 1 shall be the program the boot names: the file ferrix.init= names, else the commands or the program the boot initramfs carries under .ferrix/init, else /sbin/init; an input that cannot be one shall be refused with a line saying which and why, and never replaced by a guess. | Each way of starting pid 1 boots as named (test-shell, test-vfs, test-init); malformed inputs are each refused and taken as absent (L.init.1 to L.init.3); and none is unpacked into a root, which SAFETY-MANUAL AoU-24 assumes of the unpacker. | O.FAILSAFE | `src/kernel/src/init/check.rs::check` | not built | not built | not built |
 
 ### Quotas (`H.QUOTA`)
 
@@ -1525,6 +1526,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.btrfs.115` | A read of the write path whose allocation is refused shall answer OutOfMemory and abort nothing. | With each allocation of reading a populated volume's whole fs tree from cold failed in turn, the read answers OutOfMemory, the transaction is not aborted, and the tree then reads whole. | H.STORE.7 | `ferrix_btrfs_write::tree::WriteVolume::range`, `ferrix_btrfs_write::tree::WriteVolume::next_item`, `ferrix_btrfs_write::volume::WriteVolume::load` | `src/lib/fs/btrfs-write/src/tests/oom.rs::reads_out_of_memory_change_nothing` | host test | host test | host test |
 | `L.btrfs.116` | Every ordered map the write path keeps shall have nodes no larger than the kernel heap's largest size class, so that the kernel's reserve can serve its inserts. | The node bound of each of the ten map and set types the write path keeps is at most ferrix_heap::LARGEST_CLASS. | H.STORE.7 | `ferrix_btrfs_write::fallible::insert`, `ferrix_btrfs_write::fallible::entry`, `ferrix_btrfs_write::fallible::insert_into_set` | `src/lib/fs/btrfs-write/src/tests/oom.rs::every_map_node_fits_the_kernels_reserve` | host test | host test | host test |
 
+### Inputs
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.init.1` | run shall start pid 1 from the file ferrix.init= names when it starts, else run the commands input, else start the program input with sh -c and the script input or sh -i, else start /sbin/init. | test-shell's boot starts its program input with `sh -c` and its script, test-vfs's runs its command list, and test-init's starts the file ferrix.init names. | H.BOOT.15 | `init::run`, `init::run_built_in`, `init::run_default`, `init::run_file`, `init::run_commands` | `tools/common/xtask/src/init.rs::test_init`, `tools/common/xtask/src/main.rs::test_shell`, `tools/common/xtask/src/main.rs::test_vfs` | xtask gate | xtask gate | xtask gate |
+| `L.init.2` | set_inputs shall take pid 1's program, script and commands only from the boot initramfs's regular entries .ferrix/init/program, .ferrix/init/script and .ferrix/init/commands, once, an input the archive does not carry being empty. | All three entries give all three inputs, none gives three empty ones, and a second set_inputs is refused and leaves the inputs as they were (the `inputs` line). | H.BOOT.15 | `init::set_inputs`, `init::inputs` | `src/kernel/src/init/check.rs::check` | not built | not built | not built |
+| `L.init.3` | judge shall refuse, with a line naming the entry and why, a second entry of an input's name, an input that is not a regular file or has more than one link, any other name under .ferrix, a script holding a NUL and a command list not ending in two NULs, and take that input as absent. | Each of seven malformed sets of entries is refused once and gives the inputs set_inputs says, the rest taken as given (the `inputs` line). | H.BOOT.15 | `init::judge`, `init::refuse` | `src/kernel/src/init/check.rs::check` | not built | not built | not built |
+
 ## Checks and what they verify
 
 | Check | Kind | Verifies |
@@ -1602,6 +1611,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/fs/mmap_check.rs::check_msync_and_maps` | kernel | L.user.98 |
 | `src/kernel/src/fs/mmap_check.rs::check_the_loader_mapping_pattern` | kernel | L.user.97 |
 | `src/kernel/src/fs/mmap_check.rs::check_the_mapping_is_the_file` | kernel | L.user.93 |
+| `src/kernel/src/init/check.rs::check` | kernel | L.init.2, L.init.3, H.BOOT.15 |
 | `src/kernel/src/interfaces/block_ring/check.rs::described` | kernel | L.device.10 |
 | `src/kernel/src/interfaces/block_ring/check.rs::refusals` | kernel | L.quiesce.1 |
 | `src/kernel/src/interfaces/block_ring/check.rs::round` | kernel | L.quiesce.2, H.DEV.2, H.DEV.4 |
@@ -2009,9 +2019,12 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/init.rs::checks_skipped` | gate | H.AUD.12 |
 | `tools/common/xtask/src/init.rs::devmgr_by_init` | gate | L.quiesce.4 |
 | `tools/common/xtask/src/init.rs::judge_audit_power` | gate | H.AUD.11 |
+| `tools/common/xtask/src/init.rs::test_init` | gate | L.init.1 |
 | `tools/common/xtask/src/init_file.rs::judge_k7_read` | gate | L.console.14 |
 | `tools/common/xtask/src/init_file.rs::test` | gate | L.x86_64.98, H.BOOT.6 |
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
+| `tools/common/xtask/src/main.rs::test_shell` | gate | L.init.1 |
+| `tools/common/xtask/src/main.rs::test_vfs` | gate | L.init.1 |
 | `tools/common/xtask/src/qemu.rs::cleaning_problem` | gate | L.iommu.56 |
 | `tools/common/xtask/src/qemu.rs::config_problem` | gate | L.device.24, L.device.25 |
 | `tools/common/xtask/src/qemu.rs::entropy_problem` | gate | L.x86_64.113 |
