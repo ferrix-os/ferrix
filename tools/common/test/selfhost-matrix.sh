@@ -21,7 +21,7 @@
 # That home links everything in ~/.local/share/ferrix but those three, whose
 # source archives alone are copied; Cargo and rustup keep their own homes.
 #
-# The summary is DIR/<mode>/summary, a row's log beside it. Judge a run by
+# The summary is DIR/<mode>-run/summary, a row's log beside it. Judge a run by
 # `grep "exit [1-9]"` in the summary, and by FERRIX-PANIC in the logs.
 set -u
 mode=${1:?record or replay}
@@ -71,7 +71,8 @@ export FERRIX_RUSTC_SYSROOT=${FERRIX_RUSTC_SYSROOT:-$real/rustc}
 export HOME=$home
 export FERRIX_BUILDS=$builds
 
-log=$dir/$mode
+# The logs of a run, never DIR/plan, which is the plan itself.
+log=$dir/$mode-run
 mkdir -p "$log"
 : > "$log/summary"
 echo "== $mode $(git log --oneline -1) $(date +%F' '%T)" >> "$log/summary"
