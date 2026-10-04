@@ -63,7 +63,9 @@ each has its worktree under `.claude/worktrees/tonight-<name>`. The
 
 In this order:
 
-1. **`tonight/stage13-s3-on-netns`** (8bf380332), **`tonight/np-land`**
+1. **LANDED: all four** on `main` as f55e8ab28 and the commits before it
+   (S3 248799bdd, NP 7e9a2806f, L13a 1e1f2543a, foot-shell f55e8ab28). What
+   follows is as written before they landed. **`tonight/stage13-s3-on-netns`** (8bf380332), **`tonight/np-land`**
    (3b04624ba), **`tonight/l13-init`** (c2e457f6d) and **`tonight/foot-shell`**
    (ec976b389): each passed everything it owes before the batch (check, its
    controls FIRED, its consultant: s3 OK IF ledger 347, np OK IF 346, l13 and

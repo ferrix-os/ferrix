@@ -169,13 +169,13 @@ Still to do, in order:
 
 * **CI's next run on `main`** shows whether the self-hosting job is green;
   the local `test-selfhost --accel kvm` passed on the fix.
-* **The landing's open conditions.** The 14 controls of
+* **The landing's conditions (met).** The 14 controls of
   `~/.local/share/ferrix/logs/linit-controls.md` again on the landing hash
   (5e2eca4b2 failed `cargo fmt --check`, fixed in 0eda22d00; `test-init`
   needs `sshdt` built in its gate slot) and the one-line report that the
   four boots' transcripts equal `main`'s apart from the `inputs` line and
-  the sizes; check the product owner's record for whether they were met
-  before the landing.
+  the sizes. Both were met before the landing: the consultant's ledger line
+  349 and the `os7c-late` transcripts.
 * **Plan mode made complete.** It stops a row at its first boot and misses
   23 of 153 distinct builds, the ones a test makes after a boot (negative
   variants, later boots' programs); those tests are to build every variant

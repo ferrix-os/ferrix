@@ -145,7 +145,7 @@ put on them. It is a sequence for reading the size of the work, not a plan:
 several of these would run side by side, and the order is the customer's to
 change.
 
-![Gantt: done work from 2026-09-13 to 10-04, ten streams in progress, and the sized remainder as one queue at 20 points a day ending 10-22, five idle rows hollow](../img/gantt.svg)
+![Gantt: done work from 2026-09-13 to 10-04, ten streams in progress, and the sized remainder as one queue at 20 points a day ending 10-22, five idle rows hollow, and each in-progress row's missing part to where its work ends in the queue](../img/gantt.svg)
 
 Both charts are drawn by `tools/common/gen/gen-roadmap-charts.py`, which holds their
 numbers; change them there when the table or the velocity count changes, and

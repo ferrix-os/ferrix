@@ -109,19 +109,23 @@ DONE = [
     ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
     ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
 ]
-# Each row: name, first day, and the remaining sized points after today (the
-# REMAINING entries it maps to), or None when the row has no size.
+# Each row: name, first day, and the REMAINING entries its unfinished work is
+# (by name), or None when the row has no size. The remainder is drawn to the
+# end of the last matching entry in the forecast queue, so the two agree.
 ACTIVE = [
-    ("Stage 19, the rest (16 left)", D(2026, 9, 17), 16),
+    ("Stage 19, the rest", D(2026, 9, 17),
+     ["Client pages as texture backing", "Second pass and xray"]),
     ("Stage 20, self-hosting", D(2026, 9, 22), None),
-    ("Stage 13: the controllers (S3 landed)", D(2026, 9, 23), 30),
-    ("Gears (50 of 71)", D(2026, 9, 24), 21),
+    ("Stage 13: the controllers (S3 landed)", D(2026, 9, 23),
+     ["Stage 13, the controllers' rest"]),
+    ("Gears (50 of 71)", D(2026, 9, 24), ["GC400, the rest"]),
     ("Certification findings", D(2026, 9, 25), None),
     ("Pixel 7: the USB driver", D(2026, 9, 26), None),
-    ("Steam: the game step", D(2026, 9, 30), 23),
-    ("NVIDIA N2 to N6, unlanded (64)", D(2026, 10, 3), 64),
-    ("Init L13b and L13c (5)", D(2026, 10, 4), 5),
-    ("Auth P2, the rest (6; P2.1 landed)", D(2026, 10, 4), 6),
+    ("Steam: the game step", D(2026, 9, 30),
+     ["Stage 22, bubblewrap's rest", "Stage 22, the rest (guess)"]),
+    ("NVIDIA N2 to N6, unlanded", D(2026, 10, 3), ["NVIDIA N2 to N4"]),
+    ("Init L13b and L13c", D(2026, 10, 4), ["Stage 15, init L13b and L13c"]),
+    ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest"]),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
@@ -304,9 +308,9 @@ def gantt():
              "the status table's order: the size of the work, not a plan; "
              "hollow rows have no session on them",
              fill=MUTED)
-    svg.text(24, 60, "In progress: solid is done, the dashed segment after today is "
-             "the row's remaining sized points at the same rate; a faded segment "
-             "to the right edge is unsized work, with no end date",
+    svg.text(24, 60, "In progress: solid is done; the light dashed bar is what is missing, "
+             "to where that work ends in the queue below (same rate); a dotted "
+             "bar to the edge is unsized work, with no estimate",
              fill=MUTED)
     x = lambda days: left + (right - left) * days / span
     bottom = h - 40
@@ -338,20 +342,23 @@ def gantt():
     for name, a, b in DONE:
         bar(name, day(a), day(b) + 1, DONE_C)
     section("In progress")
-    for name, a, pts in ACTIVE:
-        bar(name, day(a), day(queue_start), ACTIVE_C)
+    qd = day(queue_start)
+    sched = {r[0]: (f[1], f[2]) for r, f in zip(REMAINING, forecast)}
+    pts_of = {n: p for n, p, _ in REMAINING}
+    for name, a, items in ACTIVE:
+        bar(name, day(a), qd, ACTIVE_C)
         by = yy - row_h
-        if pts is None:
-            svg.rect(x(day(queue_start)), by + 4, x(span) - x(day(queue_start)),
-                     row_h - 8, "#ddf4ff", ACTIVE_C, "1 3")
-            svg.text(x(day(queue_start)) + 6, by + row_h / 2 + 4, "unsized",
+        if items is None:
+            svg.rect(x(qd), by + 4, x(span) - x(qd), row_h - 8, "#ddf4ff", ACTIVE_C, "1 3")
+            svg.text(x(qd) + 6, by + row_h / 2 + 4, "remaining unknown (unsized)",
                      fill=ACTIVE_C, size=11)
         else:
-            e = day(queue_start) + pts / FORECAST_RATE
-            svg.rect(x(day(queue_start)), by + 4, max(x(e) - x(day(queue_start)), 3),
-                     row_h - 8, FORECAST_C, ACTIVE_C, "3 2")
+            e = qd + max(sched[n][1] for n in items)
+            left_pts = sum(pts_of[n] for n in items)
+            svg.rect(x(qd), by + 4, max(x(e) - x(qd), 3), row_h - 8, "#b6e3ff",
+                     ACTIVE_C, "4 2")
             svg.text(x(e) + 6, by + row_h / 2 + 4,
-                     label(queue_start + timedelta(days=pts / FORECAST_RATE)),
+                     f"{left_pts} pts left, ~{label(start_day + timedelta(days=math.ceil(e)))}",
                      fill=ACTIVE_C, size=11)
     section(f"Forecast, {FORECAST_RATE} a day, one queue")
     q = day(queue_start)
