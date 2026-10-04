@@ -698,6 +698,41 @@ pub(crate) fn data_links() -> Vec<ports::File> {
 /// WebGL, said large, over a cube spun on it, with its frame rate.
 pub(crate) const WEBGL_PAGE: &str = "file:///etc/ferrix/nvidia-webgl.html";
 
+/// The host's keyboards and mice the desktop on the 3060's monitor is
+/// driven with: `FERRIX_NVIDIA_INPUT`, a colon-separated list of evdev
+/// devices (`/dev/input/by-id/...-event-kbd`, `...-event-mouse`), each
+/// grabbed for the guest alone while it runs. Devices kept for the 3060's
+/// monitor, not the host's own: a grabbed device types into the guest only.
+/// The guest gets a virtio keyboard and mouse, which the host's events
+/// reach; none without the variable.
+fn input_devices() -> String {
+    let Some(list) = std::env::var_os("FERRIX_NVIDIA_INPUT") else {
+        return String::new();
+    };
+    let mut xml = String::from(
+        "    <input type='keyboard' bus='virtio' model='virtio-non-transitional'>\n\
+         \x20     <driver iommu='on'/>\n\
+         \x20   </input>\n\
+         \x20   <input type='mouse' bus='virtio' model='virtio-non-transitional'>\n\
+         \x20     <driver iommu='on'/>\n\
+         \x20   </input>\n",
+    );
+    for device in std::env::split_paths(&list) {
+        if !device.exists() {
+            println!("  input: {} is not there; left out", device.display());
+            continue;
+        }
+        println!("  input: {} grabbed for the guest", device.display());
+        xml.push_str(&format!(
+            "    <input type='evdev'>\n\
+             \x20     <source dev='{}' grab='all' repeat='on'/>\n\
+             \x20   </input>\n",
+            device.display()
+        ));
+    }
+    xml
+}
+
 /// How long `run-compositor --nvidia` keeps the desktop up when `--timeout`
 /// does not say: an hour.
 const DESKTOP_TIMEOUT: u64 = 3600;
@@ -732,12 +767,14 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     let machine = Machine {
         memory: MEMORY,
         vcpus: 8,
-        devices: "    <interface type='network'>\n\
-                  \x20     <source network='default'/>\n\
-                  \x20     <model type='virtio-non-transitional'/>\n\
-                  \x20     <driver iommu='on'/>\n\
-                  \x20   </interface>\n"
-            .to_owned(),
+        devices: format!(
+            "    <interface type='network'>\n\
+             \x20     <source network='default'/>\n\
+             \x20     <model type='virtio-non-transitional'/>\n\
+             \x20     <driver iommu='on'/>\n\
+             \x20   </interface>\n{}",
+            input_devices()
+        ),
     };
     let xml = dir.join(format!("{DOMAIN}.desktop.xml"));
     std::fs::write(&xml, domain_xml(&dir, &machine))
