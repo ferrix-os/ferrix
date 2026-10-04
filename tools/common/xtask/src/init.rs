@@ -350,14 +350,70 @@ const TEST_UNITS: &[(&str, &str)] = &[
          ExecStart=:/bin/sh -c 'n=0; while read i rest; do [ \"$i\" = lo ] && n=1; done < /proc/net/route; echo \"$P-lo-route $n\"; while read i rest; do case $i in *:) echo \"$P-dev $i\";; esac; done < /proc/net/dev; echo ping | nc 127.0.0.1 7777; echo \"$P-net-done\"'\n",
     ),
     (
-        "filtered.service",
+        "sc-plain.service",
         "[Unit]\n\
-         Description=Asks for SystemCallFilter=, which waits for seccomp filters\n\
+         Description=The filter checks' script with no filter\n\
          \n\
          [Service]\n\
          Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=plain\n\
+         ExecStart=:/bin/sh -c 'mkdir /tmp/sc-$P; echo \"$P-mkdir $?\"; hostname l13; echo \"$P-hostname $?\"; while read k v; do case $k in NoNewPrivs:|Seccomp:) echo \"$P-$k $v\";; esac; done < /proc/self/status; echo \"$P-done\"'\n",
+    ),
+    (
+        "sc-kill.service",
+        "[Unit]\n\
+         Description=A deny-list that kills mkdir\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=kill\n\
+         SystemCallFilter=~mkdir mkdirat\n\
+         ExecStart=:/bin/sh -c 'mkdir /tmp/sc-$P; echo \"$P-mkdir $?\"; hostname l13; echo \"$P-hostname $?\"; while read k v; do case $k in NoNewPrivs:|Seccomp:) echo \"$P-$k $v\";; esac; done < /proc/self/status; echo \"$P-done\"'\n",
+    ),
+    (
+        "sc-eperm.service",
+        "[Unit]\n\
+         Description=A deny-list whose words answer EPERM\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=eperm\n\
+         SystemCallFilter=~mkdir:EPERM mkdirat:EPERM\n\
+         ExecStart=:/bin/sh -c 'mkdir /tmp/sc-$P; echo \"$P-mkdir $?\"; hostname l13; echo \"$P-hostname $?\"; while read k v; do case $k in NoNewPrivs:|Seccomp:) echo \"$P-$k $v\";; esac; done < /proc/self/status; echo \"$P-done\"'\n",
+    ),
+    (
+        "sc-errno.service",
+        "[Unit]\n\
+         Description=A deny-list answering SystemCallErrorNumber=\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=errno\n\
+         SystemCallFilter=~mkdir mkdirat\n\
+         SystemCallErrorNumber=EACCES\n\
+         ExecStart=:/bin/sh -c 'mkdir /tmp/sc-$P; echo \"$P-mkdir $?\"; hostname l13; echo \"$P-hostname $?\"; while read k v; do case $k in NoNewPrivs:|Seccomp:) echo \"$P-$k $v\";; esac; done < /proc/self/status; echo \"$P-done\"'\n",
+    ),
+    (
+        "sc-allow.service",
+        "[Unit]\n\
+         Description=An allow-list of @system-service, native ABI only\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=allow\n\
          SystemCallFilter=@system-service\n\
-         ExecStart=:/bin/sh -c 'echo filtered-ran'\n",
+         SystemCallArchitectures=native\n\
+         ExecStart=:/bin/sh -c 'mkdir /tmp/sc-$P; echo \"$P-mkdir $?\"; hostname l13; echo \"$P-hostname $?\"; while read k v; do case $k in NoNewPrivs:|Seccomp:) echo \"$P-$k $v\";; esac; done < /proc/self/status; echo \"$P-done\"'\n",
     ),
     (
         "getty@.service.d/test.conf",
@@ -733,7 +789,11 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
     // a `login` with no controlling terminal.
     // `stat` for the `su` stage: `/bin/su`'s mode as the image has it.
     // `timeout` for the `/dev/tty` probe's read.
-    for applet in ["su", "nc", "mkdir", "cat", "setsid", "stat", "timeout"] {
+    // `hostname` for the filter checks: `sethostname`, outside
+    // `@system-service`.
+    for applet in [
+        "su", "nc", "mkdir", "cat", "setsid", "stat", "timeout", "hostname",
+    ] {
         files.push(File {
             path: format!("bin/{applet}"),
             mode: 0o777,
@@ -1983,20 +2043,28 @@ fn sandboxing(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     failures.extend(judged);
 
     let before = at.after().len();
-    at.type_in(b"svc start filtered.service; m=l13; echo \"$m-refusals\"\n")?;
-    let _ = wait_for(at, before, "l13-refusals")?;
-    let _ = wait_for(at, before, "filtered.service: SystemCallFilter=")?;
-    let said = since(at, before).to_vec();
-    let reason = "SystemCallFilter= needs seccomp filters";
-    if !has(&said, &format!("init     filtered.service: {reason}")) {
-        failures.push(format!("filtered.service was not refused with `{reason}`"));
-    }
-    if said
+    let starts: Vec<String> = FILTERED
         .iter()
-        .any(|line| line.contains("filtered.service[") && line.contains("filtered-ran"))
-    {
-        failures.push("filtered.service ran without the key it asked for".into());
+        .map(|(unit, _)| format!("svc start {unit}"))
+        .collect();
+    at.type_in(format!("{}\n", starts.join("; ")).as_bytes())?;
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        FILTERED.iter().all(|(unit, prefix)| {
+            lines.get(before..).unwrap_or_default().iter().any(|line| {
+                line.contains(&format!("{unit}[")) && line.contains(&format!("{prefix}-done"))
+            })
+        })
+    })?;
+    let judged = judge_filters(since(at, before));
+    if judged.is_empty() {
+        println!(
+            "  sandboxing: SystemCallFilter= killed a denied mkdir, answered EPERM and \
+             SystemCallErrorNumber='s EACCES, and an allow-list of @system-service ran a \
+             shell and killed sethostname"
+        );
     }
+    failures.extend(judged);
     Ok(())
 }
 
@@ -2055,6 +2123,79 @@ fn judge_network(said: &[String]) -> Vec<String> {
             "netopen.service could not reach echo.socket, so nothing shows PrivateNetwork= \
              at work: {outside:?}"
         ));
+    }
+    wrong
+}
+
+/// The filter checks' units and the prefix each prints.
+const FILTERED: [(&str, &str); 5] = [
+    ("sc-plain.service", "plain"),
+    ("sc-kill.service", "kill"),
+    ("sc-eperm.service", "eperm"),
+    ("sc-errno.service", "errno"),
+    ("sc-allow.service", "allow"),
+];
+
+/// What the filter checks' units said, judged; one line per thing wrong.
+/// Each runs `mkdir` and `hostname` (`sethostname`, refused `EPERM` to uid
+/// 1000) as uid 1000 and prints their statuses, 159 being death by
+/// `SIGSYS`, and its `NoNewPrivs:` and `Seccomp:` lines. `sc-plain.service`
+/// has no filter and shows what each would be without one.
+fn judge_filters(said: &[String]) -> Vec<String> {
+    let lines_of = |unit: &str| -> Vec<String> {
+        said.iter()
+            .filter_map(|line| {
+                let (_, after) = line.split_once(&format!("{unit}["))?;
+                let (_, text) = after.split_once("]: ")?;
+                Some(text.trim().to_owned())
+            })
+            .collect()
+    };
+    // unit, prefix, mkdir, hostname, Seccomp, NoNewPrivs
+    let wanted: [[&str; 6]; 5] = [
+        ["sc-plain.service", "plain", "0", "1", "0", "0"],
+        ["sc-kill.service", "kill", "159", "1", "2", "1"],
+        ["sc-eperm.service", "eperm", "1", "1", "2", "1"],
+        ["sc-errno.service", "errno", "1", "1", "2", "1"],
+        ["sc-allow.service", "allow", "0", "159", "2", "1"],
+    ];
+    let mut wrong = Vec::new();
+    for [unit, prefix, mkdir, hostname, seccomp, nnp] in wanted {
+        let message = match prefix {
+            "eperm" => Some("Operation not permitted"),
+            "errno" => Some("Permission denied"),
+            _ => None,
+        };
+        let lines = lines_of(unit);
+        let expect = [
+            (format!("{prefix}-done"), "finished its checks"),
+            (
+                format!("{prefix}-mkdir {mkdir}"),
+                "had mkdir end as expected",
+            ),
+            (
+                format!("{prefix}-hostname {hostname}"),
+                "had hostname end as expected",
+            ),
+            (
+                format!("{prefix}-Seccomp: {seccomp}"),
+                "showed the expected Seccomp: mode",
+            ),
+            (
+                format!("{prefix}-NoNewPrivs: {nnp}"),
+                "showed the expected NoNewPrivs:",
+            ),
+        ];
+        for (text, what) in expect {
+            if !lines.contains(&text) {
+                wrong.push(format!("{unit} never {what} (`{text}`): {lines:?}"));
+            }
+        }
+        if let Some(message) = message
+            && !lines.iter().any(|line| line.contains(message))
+        {
+            wrong.push(format!("{unit}'s mkdir did not say `{message}`: {lines:?}"));
+        }
     }
     wrong
 }
@@ -2911,6 +3052,59 @@ mod tests {
         let reached = with("  netns.service[402]: echoed ping", "", "");
         assert_eq!(reached.len(), 1, "{reached:?}");
         assert!(reached[0].contains("reached the machine's echo.socket"));
+    }
+
+    /// What passing filter checks print (abridged to the judged lines).
+    fn filtered() -> Vec<String> {
+        let mut out = Vec::new();
+        for (unit, prefix, mkdir, hostname, seccomp, nnp) in [
+            ("sc-plain.service", "plain", "0", "1", "0", "0"),
+            ("sc-kill.service", "kill", "159", "1", "2", "1"),
+            ("sc-eperm.service", "eperm", "1", "1", "2", "1"),
+            ("sc-errno.service", "errno", "1", "1", "2", "1"),
+            ("sc-allow.service", "allow", "0", "159", "2", "1"),
+        ] {
+            for text in [
+                format!("{prefix}-mkdir {mkdir}"),
+                format!("{prefix}-hostname {hostname}"),
+                format!("{prefix}-NoNewPrivs: {nnp}"),
+                format!("{prefix}-Seccomp: {seccomp}"),
+                format!("{prefix}-done"),
+            ] {
+                out.push(format!("  {unit}[500]: {text}"));
+            }
+        }
+        out.push(
+            "  sc-eperm.service[501]: mkdir: can't create directory '/tmp/sc-eperm': \
+             Operation not permitted"
+                .to_owned(),
+        );
+        out.push(
+            "  sc-errno.service[502]: mkdir: can't create directory '/tmp/sc-errno': \
+             Permission denied"
+                .to_owned(),
+        );
+        out
+    }
+
+    #[test]
+    fn filters_that_hold_pass_and_each_one_off_fails_alone() {
+        assert_eq!(judge_filters(&filtered()), Vec::<String>::new());
+        let swap = |from: &str, to: &str| {
+            let changed: Vec<String> = filtered()
+                .iter()
+                .map(|line| line.replace(from, to))
+                .collect();
+            judge_filters(&changed)
+        };
+        let unkilled = swap("kill-mkdir 159", "kill-mkdir 0");
+        assert_eq!(unkilled.len(), 1, "{unkilled:?}");
+        assert!(unkilled[0].starts_with("sc-kill.service never had mkdir end"));
+        let open = swap("allow-hostname 159", "allow-hostname 1");
+        assert_eq!(open.len(), 1, "{open:?}");
+        let errno = swap("Permission denied", "Operation not permitted");
+        assert_eq!(errno.len(), 1, "{errno:?}");
+        assert!(errno[0].starts_with("sc-errno.service's mkdir did not say"));
     }
 
     #[test]
