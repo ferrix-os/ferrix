@@ -7,6 +7,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use super::sandbox::{self, Sandbox};
 use super::{Config, UnitError};
 use crate::Warnings;
 use crate::exec::{self, Command};
@@ -270,6 +271,8 @@ pub struct Service {
     pub offers: Vec<String>,
     /// `Uses=`: names in the directory it may open.
     pub uses: Vec<String>,
+    /// The sandboxing keys (§4.5).
+    pub sandbox: Sandbox,
 }
 
 impl Default for Service {
@@ -308,6 +311,7 @@ impl Default for Service {
             tty_vhangup: false,
             offers: Vec::new(),
             uses: Vec::new(),
+            sandbox: Sandbox::default(),
         }
     }
 }
@@ -554,26 +558,6 @@ const CONTEXT_KEYS: [(&str, Setter<Service>); 16] = [
     ("StartLimitInterval", |_, _, _| {}),
 ];
 
-/// The sandboxing keys, which wait for the rest of stage 13 (landing L13).
-const SANDBOX_KEYS: [&str; 16] = [
-    "PrivateTmp",
-    "ProtectSystem",
-    "ProtectHome",
-    "PrivateNetwork",
-    "PrivateDevices",
-    "PrivateUsers",
-    "SystemCallFilter",
-    "NoNewPrivileges",
-    "ProtectKernelTunables",
-    "ProtectKernelModules",
-    "ProtectControlGroups",
-    "RestrictNamespaces",
-    "CapabilityBoundingSet",
-    "AmbientCapabilities",
-    "ReadOnlyPaths",
-    "InaccessiblePaths",
-];
-
 /// `StandardInput=`.
 fn input(text: &str) -> Result<Input, ValueError> {
     if let Some(path) = text.strip_prefix("file:") {
@@ -665,14 +649,10 @@ pub(super) fn parse(
             setter(&mut service.limits, assignment, warnings);
         } else if let Some(setter) = keys::find(&KILL_KEYS, key) {
             setter(&mut service.kill, assignment, warnings);
-        } else if SANDBOX_KEYS.contains(&key) {
-            warnings.at(
-                assignment,
-                format!(
-                    "{key}= needs namespaces and seccomp, which stage 13 has not built \
-                     yet (landing L13); the service runs without it."
-                ),
-            );
+        } else if let Some(setter) = keys::find(&sandbox::KEYS, key) {
+            setter(&mut service.sandbox, assignment, warnings);
+        } else if sandbox::NOT_BUILT.contains(&key) {
+            sandbox::not_built(assignment, warnings);
         } else {
             keys::unknown(&section.name, assignment, warnings);
         }

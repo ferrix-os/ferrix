@@ -21,6 +21,7 @@
 //! is active whether or not anything describes it.
 
 mod mount;
+mod sandbox;
 mod service;
 mod socket;
 
@@ -31,6 +32,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub use mount::Mount;
+pub use sandbox::{FilterRule, GROUPS, ProtectSystem, Sandbox, SystemCallFilter};
 pub use service::{
     Input, Kill, KillMode, OomPolicy, Output, Restart, Service, ServiceType, WorkingDirectory,
 };
