@@ -164,6 +164,42 @@ branches (customer, 2026-10-04):
   `test-compositor`, ...) goes in `--gate FILE`, never dropped. The batch
   checks no less than the row each entry would have run alone.
 
+### Consulting on build and test time
+
+Test run time is a customer priority (2026-09-27, `docs/TEST-TIME.md`), and
+the product owner sees every gate the fleet runs. So it also consults on
+build and test time: whenever a plan, a gate list, a script or a batch
+builds or runs more than it needs to, it says so, names the cheaper way,
+and gives it to the session that owns the work. It never drops a check to
+get there: the row each change owes stays whole.
+
+What it looks for:
+
+* **The same build paid more than once.** Three tests on one commit that
+  each build the same kernel and image need one build. The PO tells the
+  session to build once and reuse that build for every run: run them in
+  one worktree and target dir one after another, or as one xtask call that
+  takes several tests, rather than in three fresh trees or three gate
+  slots that each build it again. Where xtask cannot yet reuse a build, the
+  fix is a row for the owner of `docs/TEST-TIME.md`, not a fourth rebuild.
+* **Cold where warm would do.** A new worktree's target dir builds from
+  nothing (`check` about 15 minutes cold against 3.5 warm). Gates go
+  through `gate.sh`'s warm slots; a long series of local builds reuses one
+  target dir per worktree.
+* **Runs in series that could share the slots.** Independent gates queued
+  one after another, an `--arch all` that runs the architectures in turn, or
+  a full row run once per branch where a batch would carry them all.
+* **Runs nobody needs.** A re-gate after `main` moved only in files the
+  change does not touch (the gate stands, `docs/CONVENTIONS.md`, splitting
+  rule 3), the same gate run twice on the same tree, or the image row run
+  for a change the table gives a narrower row (`cargo xtask gate-rows`).
+* **Time that is waiting, not running.** `pool-summary`'s `waited=` against
+  `ran=`: a long wait is fixed by fewer runs, not faster ones.
+
+Each saving it proposes names what it removes and the run it measured it
+on, the way `docs/TEST-TIME.md` records its cuts; one that changes a tool
+or a gate goes to that table's owner as a row.
+
 ### Records
 
 * Estimates are story points, never time (`docs/BACKLOG.md`, *Estimates*).
