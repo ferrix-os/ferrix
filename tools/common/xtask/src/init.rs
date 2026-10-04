@@ -1475,7 +1475,11 @@ fn wait_for(at: &mut Watching<'_>, before: usize, text: &str) -> Result<bool> {
 /// `svc audit` and what it prints, one record a line.
 fn audit_lines(at: &mut Watching<'_>) -> Result<Vec<String>> {
     let before = at.after().len();
-    at.type_in(b"svc audit; echo audit-done\n")?;
+    // The marker is built from a variable, as everywhere here: the typed
+    // line's echo can wrap so that a line of it reads `audit-done` alone,
+    // and the wait then ended before `svc audit` had printed anything
+    // (armv7a, l13init-init, 2026-10-04).
+    at.type_in(b"m=audit; svc audit; echo \"$m-done\"\n")?;
     let deadline = Instant::now() + PATIENCE;
     let _ = at.read_more(deadline, |lines| {
         lines
