@@ -158,8 +158,13 @@ its listening socket from init (`LISTEN_FDS`), and `test-init` on x86-64
 has the first connection to `sshd.socket` start `sshd.service` and be
 answered with its banner.
 
-**Still to do for the init:** **L13**, the sandboxing keys, is parked until
-stage 13's namespaces and seccomp exist.
+**Built for the init (2026-10-04, branch `l13-init`): L13a**, the sandboxing
+keys (`docs/INIT.md` §4.5). All five are read; `NoNewPrivileges=`,
+`PrivateTmp=` and `ProtectSystem=` are carried out in each service's own
+mount namespace, gated by `test-init`'s sandboxing stage. **Still to do:**
+L13b, `PrivateNetwork=`, once network namespaces land, and L13c,
+`SystemCallFilter=`, once seccomp's S3 does; until then a unit asking for
+either is refused with the reason.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with
