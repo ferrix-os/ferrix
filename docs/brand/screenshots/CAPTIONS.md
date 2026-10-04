@@ -35,7 +35,7 @@ Two images do not come from that boot: `website.png` and `steam-yserver.png`, be
   through virtio-gpu's Venus on the host's GPU. x86_64, KVM.
 - **website.png**: https://ferrix-os.github.io/, Ferrix's website, as headless Chrome on
   the host draws it at 1440x900 (`google-chrome --headless=new --window-size=1440,900
-  --screenshot`), 2026-10-03.
+  --screenshot`), 2026-10-04, after the site took the FX logo.
 - **steam-yserver.png**: Steam's store on Ferrix, its X11 client drawn through yserver
   (ferrix-os/yserver) and the rootless Wayland backend. Captured 2026-10-02 during the
   Steam performance work, on a test account, not from the boot above.
