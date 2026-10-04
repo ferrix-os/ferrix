@@ -15,7 +15,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "img"
 
-TODAY = date(2026, 9, 26)
+TODAY = date(2026, 10, 4)
 
 # Points landed per day (docs/BACKLOG.md, *Velocity*). 09-18 to 09-23 were
 # sized afterwards from `git log`; 09-23 is what is left of that backfill.
@@ -35,32 +35,52 @@ LANDED = [
     (date(2026, 9, 24), 126),
     (date(2026, 9, 25), 26),
     (date(2026, 9, 26), 278),
+    (date(2026, 9, 27), 240),
+    (date(2026, 9, 28), 44),
+    (date(2026, 9, 29), 62),
+    (date(2026, 9, 30), 102),
+    (date(2026, 10, 1), 94),
+    (date(2026, 10, 2), 150),
+    (date(2026, 10, 3), 153),
+    (date(2026, 10, 4), 55),
 ]
 BACKFILLED = {date(2026, 9, d) for d in range(18, 24)}
-AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 175}
+AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 175,
+              date(2026, 9, 27): 150, date(2026, 9, 28): 44, date(2026, 9, 29): 26,
+              date(2026, 9, 30): 83, date(2026, 10, 1): 94, date(2026, 10, 2): 128,
+              date(2026, 10, 3): 115, date(2026, 10, 4): 55}
 
-# The status table's sized, unfinished rows after 2026-09-26's landings.
+# The status table's sized, unfinished rows after 2026-10-04's landings.
+# The state says why a row is not moving: "unlanded" is built and waits on a
+# landing (controls, `check`, a batch), "idle" has had no session on it since
+# 2026-09-26 or longer, "added" came into scope after the 09-26 baseline.
 REMAINING = [
-    ("Client pages as texture backing", 8),
-    ("XWayland and the second pass", 48),
-    ("GC400, the rest", 21),
-    ("Stage 13, the controllers' rest", 30),
-    ("Stage 15, init L10 and auth", 35),
-    ("Desktop clients' foundation", 21),
-    ("Pixel 7, a desktop in its VM", 17),
-    ("Chrome on the DK1", 50),
-    ("Stage 14, real-time", 40),
-    ("dmabuf and virgl", 48),
-    ("Stage 22, Steam's sized part", 24),
-    ("Stage 22, the rest (guess)", 100),
+    ("Client pages as texture backing", 8, "idle"),
+    ("Second pass and xray", 8, ""),
+    ("GC400, the rest", 21, "idle"),
+    ("Stage 13, the controllers' rest", 30, "unlanded"),
+    ("Stage 15, auth's rest", 8, ""),
+    ("Stage 15, init L13", 10, "added, unlanded"),
+    ("Chrome on the DK1", 50, "idle"),
+    ("Stage 14, real-time", 40, "idle"),
+    ("dmabuf and virgl", 48, "idle"),
+    ("Stage 22, bubblewrap's rest", 5, ""),
+    ("Stage 22, the rest (guess)", 23, ""),
+    ("NVIDIA N2 to N4", 64, "added, unlanded"),
+    ("NVIDIA N5, CUDA", 52, "added"),
 ]
-SCOPE = sum(p for _, p in REMAINING)
-# The running average counts everything that landed; the second rate is only
-# what had an estimate before it started, 09-24 to 09-26, which is the rate
-# the sized scope above is burned at.
-RATES = [(92, "92 a day, the running average"),
-         (67, "67 a day, estimated work, 09-24 to 09-26")]
-FORECAST_RATE = 67
+SCOPE = sum(p for _, p, _ in REMAINING)
+
+# The rate the forecast uses is what came off a fixed scope, not what landed.
+# Of the 442 points sized on 09-26, 201 had left the table by 10-04: about
+# 158 by landings and 43 by a lower guess (stage 22's rest and Venus). 158
+# points in 8 days is about 20 a day. Over the same 8 days about 900 points
+# landed and 205 of them had an estimate first; the rest was work outside the
+# table, which takes nothing off it.
+BURN_RATE = 20
+RATES = [(BURN_RATE, f"{BURN_RATE} a day, what came off the 09-26 scope, 09-27 to 10-04"),
+         (56, "56 a day, if every estimated point came off it")]
+FORECAST_RATE = BURN_RATE
 
 D = date
 DONE = [
@@ -73,23 +93,33 @@ DONE = [
     ("Stage 16, rustc", D(2026, 9, 22), D(2026, 9, 22)),
     ("Cursor plane (13)", D(2026, 9, 23), D(2026, 9, 23)),
     ("sysfs, device queue, Chrome", D(2026, 9, 24), D(2026, 9, 24)),
-    ("Init L1 to L9 (61)", D(2026, 9, 24), D(2026, 9, 26)),
+    ("Init L1 to L11 (69)", D(2026, 9, 24), D(2026, 9, 26)),
     ("cgroups P1, M1, S1 (28)", D(2026, 9, 26), D(2026, 9, 26)),
-    ("Audio L1 to L7 (24)", D(2026, 9, 26), D(2026, 9, 26)),
+    ("Audio, alsa-lib, pulsed (45)", D(2026, 9, 26), D(2026, 9, 27)),
     ("Chrome: zygote, speed, ferrousli", D(2026, 9, 26), D(2026, 9, 26)),
+    ("i386 ABI I1 to I4 (42)", D(2026, 9, 27), D(2026, 9, 27)),
+    ("Installer MVP", D(2026, 9, 28), D(2026, 9, 28)),
+    ("yserver, the X server (36)", D(2026, 9, 28), D(2026, 9, 29)),
+    ("Mount namespaces N1 to N3 (19)", D(2026, 9, 28), D(2026, 9, 30)),
+    ("Claude Code on Ferrix", D(2026, 9, 29), D(2026, 10, 1)),
+    ("Speculation domain, round trip", D(2026, 10, 1), D(2026, 10, 3)),
+    ("btrfs in the certified item", D(2026, 10, 2), D(2026, 10, 2)),
+    ("NVIDIA N0 and N1 (60)", D(2026, 10, 2), D(2026, 10, 3)),
+    ("Authentication P1, P2 (desktop as a user)", D(2026, 9, 27), D(2026, 10, 4)),
+    ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
+    ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
 ]
 ACTIVE = [
-    ("Stage 19, the rest (56 left)", D(2026, 9, 17)),
+    ("Stage 19, the rest (16 left)", D(2026, 9, 17)),
     ("Stage 20, self-hosting", D(2026, 9, 22)),
-    ("Stage 13 cgroups (55 of 85)", D(2026, 9, 23)),
+    ("Stage 13: S3 and the controllers", D(2026, 9, 23)),
     ("Gears (50 of 71)", D(2026, 9, 24)),
-    ("Init L10, on a branch (6)", D(2026, 9, 26)),
-    ("Chrome on ferrousli, a window", D(2026, 9, 24)),
     ("Certification findings", D(2026, 9, 25)),
-    ("Audio: alsa-lib and a server", D(2026, 9, 26)),
-    ("i386 ABI, I1 on a branch", D(2026, 9, 26)),
-    ("Desktop clients", D(2026, 9, 26)),
-    ("Pixel 7: VM desktop, USB", D(2026, 9, 26)),
+    ("Pixel 7: the USB driver", D(2026, 9, 26)),
+    ("Steam: the game step", D(2026, 9, 30)),
+    ("NVIDIA N2 to N6, unlanded (64)", D(2026, 10, 3)),
+    ("Init L13, three branches (10)", D(2026, 10, 4)),
+    ("Auth P2.1, on np-land", D(2026, 10, 4)),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
@@ -172,17 +202,19 @@ def burndown():
     top, bottom = 60, 290
     svg.text(left, 28, f"Sized points remaining at the end of each day, from {label(TODAY)}",
              size=16, weight="bold")
-    svg.text(left, 46, f"{SCOPE} points in the status table's sized, unfinished rows; "
-             "unsized work (stages 20 and 21, the audio server, i386's I5) is outside it",
+    added = sum(p for _, p, s in REMAINING if "added" in s)
+    svg.text(left, 46, f"{SCOPE} points in the status table's sized, unfinished rows, "
+             f"{added} of them added since 09-26; unsized work is outside it, and "
+             "scope added later moves the date",
              size=12, fill=MUTED)
-    days = 10
-    ymax = 500
+    days = math.ceil(SCOPE / FORECAST_RATE) + 2
+    ymax = 400
     x = lambda i: left + (right - left) * i / (days - 1)
     y = lambda v: bottom - (bottom - top) * v / ymax
     for v in range(0, ymax + 1, 100):
         svg.line(left, y(v), right, y(v), GRID)
         svg.text(left - 8, y(v) + 4, str(v), anchor="end", fill=MUTED)
-    for i in range(days):
+    for i in range(0, days, 2):
         svg.text(x(i), bottom + 18, label(TODAY + timedelta(days=i)),
                  anchor="middle", fill=MUTED)
     svg.text(18, (top + bottom) / 2, "points", fill=MUTED,
@@ -197,8 +229,8 @@ def burndown():
         # A tick is the end of its day, so the work runs out during the day
         # after the last tick it has passed.
         end = TODAY + timedelta(days=math.ceil(SCOPE / rate))
-        svg.line(right - 290, ly, right - 266, ly, colour, width=2.5)
-        svg.text(right - 258, ly + 4, f"{name}: done {label(end)}")
+        svg.line(right - 420, ly, right - 396, ly, colour, width=2.5)
+        svg.text(right - 388, ly + 4, f"{name}: done {label(end)}")
 
     # Panel 2: what has landed, per day and in total.
     top, bottom = 390, 590
@@ -213,13 +245,13 @@ def burndown():
             '</pattern></defs>')
     n = len(LANDED)
     slot = (right - left) / n
-    bmax, cmax = 300, 1400
+    bmax, cmax = 300, 2400
     yb = lambda v: bottom - (bottom - top) * v / bmax
     yc = lambda v: bottom - (bottom - top) * v / cmax
     for v in range(0, bmax + 1, 50):
         svg.line(left, yb(v), right, yb(v), GRID)
         svg.text(left - 8, yb(v) + 4, str(v), anchor="end", fill=MUTED)
-    for v in range(0, cmax + 1, 200):
+    for v in range(0, cmax + 1, 400):
         svg.text(right + 8, yc(v) + 4, str(v), fill=LINE_C[1])
     svg.text(18, (top + bottom) / 2, "a day", fill=MUTED, anchor="middle")
     svg.text(w - 18, (top + bottom) / 2, "total", fill=LINE_C[1], anchor="middle")
@@ -232,8 +264,8 @@ def burndown():
             svg.rect(cx - slot * 0.32, yb(est), slot * 0.64, yb(0) - yb(est), ACTIVE_C)
         if after:
             svg.rect(cx - slot * 0.32, yb(p), slot * 0.64, yb(est) - yb(p), "url(#hatch)")
-        svg.text(cx, yb(p) - 5, str(p), anchor="middle", size=11)
-        svg.text(cx, bottom + 18, label(d), anchor="middle", fill=MUTED)
+        svg.text(cx, yb(p) - 5, str(p), anchor="middle", size=10)
+        svg.text(cx, bottom + 18, label(d), anchor="middle", fill=MUTED, size=9)
         total += p
         pts.append((cx, yc(total)))
     svg.polyline(pts, LINE_C[1], width=2.5)
@@ -247,9 +279,10 @@ def burndown():
 def gantt():
     # One queue at FORECAST_RATE, in the status table's order.
     forecast, t = [], 0.0
-    for name, pts in REMAINING:
+    for name, pts, state in REMAINING:
         d = pts / FORECAST_RATE
-        forecast.append((f"{name} ({pts})", t, t + d))
+        note = f", {state}" if state else ""
+        forecast.append((f"{name} ({pts}{note})", t, t + d, state))
         t += d
     start_day = date(2026, 9, 13)
     queue_start = TODAY + timedelta(days=1)
@@ -258,15 +291,16 @@ def gantt():
 
     rows = len(DONE) + len(ACTIVE) + len(forecast)
     row_h, sec_h = 22, 30
-    w = 980
-    left, right = 250, w - 60
+    w = 1040
+    left, right = 310, w - 60
     top = 70
     h = top + rows * row_h + 3 * sec_h + 50
     svg = Svg(w, h, "Ferrix Gantt")
     svg.text(24, 28, "Ferrix: done, in progress, and a forecast", size=16,
              weight="bold")
     svg.text(24, 46, f"The forecast is one queue at {FORECAST_RATE} points a day in "
-             "the status table's order: the size of the work, not a plan",
+             "the status table's order: the size of the work, not a plan; "
+             "hollow rows have no session on them",
              fill=MUTED)
     x = lambda days: left + (right - left) * days / span
     bottom = h - 40
@@ -302,8 +336,11 @@ def gantt():
         bar(name, day(a), day(queue_start), ACTIVE_C)
     section(f"Forecast, {FORECAST_RATE} a day, one queue")
     q = day(queue_start)
-    for name, a, b in forecast:
-        bar(name, q + a, q + b, FORECAST_C, ACTIVE_C, "3 2")
+    for name, a, b, state in forecast:
+        # An idle row has no session on it, so the queue does not reach it
+        # until someone is put on it; it is drawn hollow.
+        fill = "#ffffff" if "idle" in state else FORECAST_C
+        bar(name, q + a, q + b, fill, ACTIVE_C, "3 2")
     svg.text(x(q + t) + 6, yy - row_h / 2 + 4,
              label(queue_start + timedelta(days=t)), fill=ACTIVE_C, weight="bold")
     svg.write(OUT / "gantt.svg")

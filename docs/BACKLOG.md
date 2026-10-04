@@ -780,6 +780,30 @@ because the item has no points column of its own; and the evening of
 2026-09-26 noted above fell between the two counts and is counted in
 neither.
 
+### Update, 2026-10-04
+
+Counted from ae4c0d89a (the 2026-10-01 count) to 67efb9fb1, by the same rule,
+over the calendar days 2026-10-02 through 10-04. The twelve commits dated
+2026-10-01 that reached `main` after the last count (the channel round trip's
+first steps, network namespaces' first commits) are counted on the day the
+work landed, not the day it was written. Work that is done but not on `main`
+-- NVIDIA's N2 to N4 and N6, S3, L13, `np-land`, `selfhost-matrix` -- is not
+counted until it lands.
+
+| day | estimated before | sized afterwards | what |
+|---|---|---|---|
+| 2026-10-02 | 22 | ≈ 128 | estimated: NVIDIA's N0, the kernel prerequisites other than N0g (`docs/NVIDIA.md` §7, 28 with N0g); afterwards: the channel round trip's first steps (`channel_write_read`, the sync wake, `bench-ipc`, the timer's skip) ≈ 21, hyprix and yserver's frame pacing, refresh rates and the flush thread ≈ 21, btrfs in the certified item and its fallible allocation ≈ 20, btrfs's ENOSPC and mirror fixes ≈ 8, System V shared memory ≈ 8, UVM's self-tests on Ferrix (C0a) ≈ 8, F-58 and F-59 and their fixes ≈ 8, NVIDIA's feasibility, CUDA and N0d/f/g designs ≈ 13, the opaque kernel's §9.7 and §9.8 designs and the seL4 measurement ≈ 13, and smaller items ≈ 8 |
+| 2026-10-03 | 38 | ≈ 115 | estimated: N0g, 6, and N1, 32 (`nvrm` boots the RTX 3060's GSP, `nvidia-smi`); afterwards: the channel round trip's steps 2a to 2e ≈ 21, login on the console, `sessiond`, `/home` on its own disk, `pulsed`'s socket and the desktop as a user ≈ 16, ferrousli, zinc, the Pixel 7 tools, the website and the apps moving into repositories of their own ≈ 13, Ferrix building its AArch64 image on the Pixel 7 ≈ 13, the patched QEMU's interrupt-remapping block and its CI cache ≈ 8, F-60's fix ≈ 5, hyprix's window drag, damage and terminal fixes ≈ 13, Chrome's CJK fonts, `xdg-open` and a persistent profile ≈ 8, the brand's logo ≈ 3, and smaller items ≈ 15 |
+| 2026-10-04 | 0 | ≈ 55 | network namespaces (`CLONE_NEWNET`, veth pairs, a stack per namespace) ≈ 21, hypridle, hyprlock, waybar, fuzzel and term as apps ≈ 13, foot taking keys ≈ 5, `getty` revoking the console before every login ≈ 5, the product owner's and the gate pool's rules and the wind-down roadmap ≈ 8, and a gateway test fix and coverage carried ≈ 3 |
+
+So **≈ 150 on 2026-10-02, ≈ 153 on 2026-10-03 and ≈ 55 on 2026-10-04**, 60 of
+the 358 estimated before the work started. The running total is
+**≈ 2,099 points in 21 calendar days, ≈ 100 a day**, or ≈ 1,178 (≈ 56 a day)
+counting only what had an estimate. This count is softer than the one before
+it: 2026-10-04 is a half day, and nearly all of it is sized from commit
+messages. The roadmap's charts (`tools/common/gen/gen-roadmap-charts.py`) are
+redrawn from it.
+
 ---
 
 ## Decisions
