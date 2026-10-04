@@ -311,9 +311,7 @@ them). Check any new one against the phone before you rely on it.
 
 1. **A USB device driver**, so a native boot streams its console and
    `ferrix-statd`'s samples to the PC live, as a crosvm guest already does:
-   `docs/vendor/google/pixel7/USB-HANDOVER.md` is the brief. **Done
-   2026-09-26** (CDC-ACM "Ferrix console", 1209:0001; adb over the same port
-   2026-09-27; USB-HANDOVER §8). What is left of USB is U-1 to U-5 there.
+   `docs/vendor/google/pixel7/USB-HANDOVER.md` is the brief. Not started.
 
 Otherwise the phone boots all eight cores, seeded, with KASLR and the boot
 console, to `FERRIX-BOOT-OK`, and further work is new: a display driver of

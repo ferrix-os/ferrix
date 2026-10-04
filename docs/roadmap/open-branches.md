@@ -107,6 +107,14 @@ In this order:
    whether the gateway or the test is at fault, fix the gateway if it is
    (an xtask change: the image row on nazuna). Owner: open (the gateway's);
    the BACKLOG's *Red on `main`* has the row. Nobody works on it tonight.
+6. **Two small fixes held back from the sizing landing** (branch
+   `docs-sizing`, commit 39394d02b has both): `docs/certification/FINDINGS.md`'s
+   severity table counts 8 Moderate open findings where 7 are (F-57 closed
+   2026-10-03), which is certification evidence and lands with a
+   consultant's look; and `src/boot/vendor/google/pixel7/HANDOVER.md` l. 312
+   still says the USB driver is "Not started" though it landed 2026-09-26,
+   which is Markdown under `src/`, outside the docs-only rule. Land each with
+   its own row.
 
 Leftovers on nazuna, to delete by exact name: `~/target-os7c-land-n6`,
 `~/Documents/projects/os/ferrix/target-os7c-l13-init`,

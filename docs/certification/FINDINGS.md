@@ -26,7 +26,7 @@ met or met without evidence. *Minor* — a defect with no objective attached yet
 
 | | Blocking | Major | Moderate | Minor | Informational |
 |---|---:|---:|---:|---:|---:|
-| Open | 2 | 6 | 7 | 0 | 1 |
+| Open | 2 | 6 | 8 | 0 | 1 |
 
 Blocking: F-27 and F-28 — independent assessment and a quality management
 system. Both need an organisation; neither is a defect in the code.
