@@ -544,6 +544,23 @@ pub(super) fn check_init_calls() {
     );
 }
 
+/// Pid 1's inputs from the initramfs: each refused as `init::set_inputs`
+/// says, and taken once.
+pub(super) fn check_init_inputs() {
+    let report = match init::check() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::INIT_INPUTS,
+            "init's inputs self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  inputs   {} sets of entries under .ferrix/init judged, {} entries refused as each \
+         should be and taken as absent, a second set_inputs refused",
+        report.cases, report.refusals
+    );
+}
+
 pub(super) fn check_cgroupfs() {
     let checked = match fs::cgroupfs::check() {
         Ok(checked) => checked,

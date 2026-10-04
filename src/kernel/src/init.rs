@@ -412,7 +412,7 @@ pub(crate) fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
     if INPUTS.get().is_some() {
         return false;
     }
-    let inputs = judge(entries);
+    let inputs = judge(entries, &mut |name, why| refuse(name, why));
     let mut first = false;
     let _ = INPUTS.call_once(|| {
         first = true;
@@ -421,10 +421,17 @@ pub(crate) fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
     first
 }
 
-/// [`set_inputs`]'s judgement, printing a line for each refusal.
-fn judge(entries: impl Iterator<Item = InputEntry>) -> Inputs {
+/// An input's name, what was found for it, and whether it was refused.
+type Slot = (&'static [u8], Option<&'static [u8]>, bool);
+
+/// A case of [`check`]: the entries, the program, script and commands they
+/// should give, and how many of them should be refused.
+type Case<'a> = (&'a [InputEntry], &'a [u8], &'a [u8], &'a [u8], u32);
+
+/// [`set_inputs`]'s judgement, telling `refuse` of each entry refused and why.
+fn judge(entries: impl Iterator<Item = InputEntry>, refuse: &mut dyn FnMut(&[u8], &str)) -> Inputs {
     // Each input's name, what was found for it, and whether it was refused.
-    let mut slots: [(&[u8], Option<&'static [u8]>, bool); 3] = [
+    let mut slots: [Slot; 3] = [
         (PROGRAM_INPUT, None, false),
         (SCRIPT_INPUT, None, false),
         (COMMANDS_INPUT, None, false),
@@ -456,7 +463,10 @@ fn judge(entries: impl Iterator<Item = InputEntry>) -> Inputs {
     }
     let [program, script, commands] = slots.map(|(_, found, _)| found.unwrap_or_default());
     let script = if script.contains(&0) {
-        refuse(SCRIPT_INPUT, "holds a NUL, which cannot survive being an argument");
+        refuse(
+            SCRIPT_INPUT,
+            "holds a NUL, which cannot survive being an argument",
+        );
         b""
     } else {
         script
@@ -475,6 +485,146 @@ fn judge(entries: impl Iterator<Item = InputEntry>) -> Inputs {
         script,
         commands,
     }
+}
+
+/// What [`check`] found.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CheckReport {
+    /// Sets of entries judged.
+    pub(crate) cases: u32,
+    /// Entries refused across them, each as the case expected.
+    pub(crate) refusals: u32,
+}
+
+/// An entry for [`check`].
+const fn made_up(
+    name: &'static [u8],
+    regular: bool,
+    directory: bool,
+    links: u32,
+    data: &'static [u8],
+) -> InputEntry {
+    InputEntry {
+        name,
+        regular,
+        directory,
+        links,
+        data,
+    }
+}
+
+/// [`judge`] over `entries`, and how many it refused.
+fn judged(entries: &[InputEntry]) -> (Inputs, u32) {
+    let mut refused = 0_u32;
+    let inputs = judge(entries.iter().copied(), &mut |_, _| {
+        refused = refused.saturating_add(1);
+    });
+    (inputs, refused)
+}
+
+/// Judge sets of entries made up here, as an archive could carry them, and
+/// see that each input is taken or refused as `set_inputs` says, then that a
+/// second `set_inputs` changes nothing. Prints nothing of its own: a refusal
+/// here is counted, not said.
+///
+/// Verifies: L.init.2, L.init.3
+pub(crate) fn check() -> Result<CheckReport, &'static str> {
+    const DIRS: [InputEntry; 2] = [
+        made_up(b".ferrix", false, true, 2, b""),
+        made_up(b".ferrix/init", false, true, 2, b""),
+    ];
+    let program = made_up(PROGRAM_INPUT, true, false, 1, b"P");
+    let script = made_up(SCRIPT_INPUT, true, false, 1, b"S");
+    let commands = made_up(COMMANDS_INPUT, true, false, 1, b"a\0\0");
+    // (entries, program, script, commands, refusals) expected.
+    let cases: [Case<'_>; 9] = [
+        (
+            &[DIRS[0], DIRS[1], program, script, commands],
+            b"P",
+            b"S",
+            b"a\0\0",
+            0,
+        ),
+        (&[], b"", b"", b"", 0),
+        (
+            &[program, made_up(PROGRAM_INPUT, true, false, 1, b"Q")],
+            b"",
+            b"",
+            b"",
+            1,
+        ),
+        (
+            &[made_up(PROGRAM_INPUT, false, true, 2, b"")],
+            b"",
+            b"",
+            b"",
+            1,
+        ),
+        (
+            &[made_up(PROGRAM_INPUT, true, false, 2, b"P")],
+            b"",
+            b"",
+            b"",
+            1,
+        ),
+        (
+            &[
+                made_up(b".ferrix/init/other", true, false, 1, b"x"),
+                program,
+            ],
+            b"P",
+            b"",
+            b"",
+            1,
+        ),
+        (
+            &[made_up(b".ferrix/init", true, false, 1, b"x"), script],
+            b"",
+            b"S",
+            b"",
+            1,
+        ),
+        (
+            &[made_up(SCRIPT_INPUT, true, false, 1, b"a\0b")],
+            b"",
+            b"",
+            b"",
+            1,
+        ),
+        (
+            &[made_up(COMMANDS_INPUT, true, false, 1, b"a\0")],
+            b"",
+            b"",
+            b"",
+            1,
+        ),
+    ];
+    let mut refusals = 0_u32;
+    for (entries, program, script, commands, expected) in cases {
+        let (inputs, refused) = judged(entries);
+        if inputs.program != program || inputs.script != script || inputs.commands != commands {
+            return Err("a set of entries gave other inputs than set_inputs says");
+        }
+        if refused != expected {
+            return Err("a set of entries was refused other than set_inputs says");
+        }
+        refusals = refusals.saturating_add(refused);
+    }
+    let before = inputs();
+    if set_inputs(core::iter::once(program)) {
+        return Err("a second set_inputs was taken");
+    }
+    let after = inputs();
+    if !core::ptr::eq(before.program, after.program)
+        || !core::ptr::eq(before.script, after.script)
+        || !core::ptr::eq(before.commands, after.commands)
+    {
+        return Err("a second set_inputs changed pid 1's inputs");
+    }
+    Ok(CheckReport {
+        cases: 10,
+        refusals,
+    })
 }
 
 /// Say that the entry `name` is not taken as an input, and why.

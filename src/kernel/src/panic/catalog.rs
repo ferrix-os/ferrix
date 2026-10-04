@@ -2761,6 +2761,28 @@ pub(crate) static INIT_EXITED: Explanation = Explanation {
     see: "src/kernel/src/power.rs finish; src/kernel/src/init.rs run; docs/INIT.md §8.3",
 };
 
+/// For `check_init_inputs` in `stages_check.rs`, when `init::check` fails.
+pub(crate) static INIT_INPUTS: Explanation = Explanation {
+    code: "FX-1503",
+    title: "init took or refused an input other than set_inputs says",
+    meaning: "`init::check` judges sets of entries under `.ferrix/init/` made up as an \
+              initramfs could carry them, as `fs::init` hands the boot archive's to \
+              `init::set_inputs`: the program, the script and the commands are each taken \
+              when one regular file with one link carries them, and refused -- the input \
+              taken as absent -- for a second entry of the name, a directory, a second link, \
+              a script with a NUL and a command list that does not end in two NULs; any \
+              other name, and a file where the inputs' directory belongs, are refused and \
+              change nothing else. A second `set_inputs` must be refused and leave pid 1's \
+              inputs as they were.",
+    causes: &[
+        "`init::judge` lost a refusal, or refuses an entry it should take.",
+        "`init::set_inputs` took a second call, so what pid 1 runs could change after the \
+         boot archive was read.",
+    ],
+    see: "src/kernel/src/init.rs set_inputs; src/kernel/src/init.rs check; \
+          src/kernel/src/fs/mod.rs init; docs/certification/ITEM.md section 2",
+};
+
 /// For `check_init_calls` in `stages_check.rs`, when `syscall::init_calls_check::run`
 /// fails.
 pub(crate) static INIT_CALLS: Explanation = Explanation {
@@ -3059,6 +3081,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_SECCOMP,
     &INIT_EXITED,
     &INIT_CALLS,
+    &INIT_INPUTS,
     &UNHANDLED_PAGE_FAULT,
     &SYSTEM_CALL_TRAP,
     &ILLEGAL_INSTRUCTION,

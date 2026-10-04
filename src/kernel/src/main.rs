@@ -555,6 +555,7 @@ fn check_block_ring() {
         stages_check::check_services();
         stages_check::check_native_refusals();
         stages_check::check_init_calls();
+        stages_check::check_init_inputs();
     }
 }
 

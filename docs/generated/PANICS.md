@@ -113,6 +113,7 @@ Causes are listed most likely first.
 | [FX-1302](#fx-1302) | seccomp's filter was not asked first at every entry, or not as the entry's own |
 | [FX-1501](#fx-1501) | init exited, and ferrix.onexit=panic asked for a panic |
 | [FX-1502](#fx-1502) | a kernel call init needs did not do what docs/INIT.md §11 says |
+| [FX-1503](#fx-1503) | init took or refused an input other than set_inputs says |
 | [FX-9001](#fx-9001) | a page fault the kernel cannot resolve |
 | [FX-9002](#fx-9002) | a system call the trap path cannot carry out |
 | [FX-9003](#fx-9003) | the processor refused to execute an instruction |
@@ -2993,6 +2994,26 @@ src/kernel/src/syscall/native.rs; src/kernel/src/syscall/launch.rs;
 src/kernel/src/object/process.rs; src/lib/proto/native-abi/src/nr.rs;
 src/kernel/src/fs/portfd.rs; src/lib/proto/native-abi/src/bootstrap.rs;
 docs/INIT.md §6, §9, §11, §16.
+
+<a id="fx-1503"></a>
+
+## FX-1503 — init took or refused an input other than set_inputs says
+
+`init::check` judges sets of entries under `.ferrix/init/` made up as an
+initramfs could carry them, as `fs::init` hands the boot archive's to
+`init::set_inputs`: the program, the script and the commands are each taken when
+one regular file with one link carries them, and refused -- the input taken as
+absent -- for a second entry of the name, a directory, a second link, a script
+with a NUL and a command list that does not end in two NULs; any other name, and
+a file where the inputs' directory belongs, are refused and change nothing else.
+A second `set_inputs` must be refused and leave pid 1's inputs as they were.
+
+1. `init::judge` lost a refusal, or refuses an entry it should take.
+2. `init::set_inputs` took a second call, so what pid 1 runs could change after
+   the boot archive was read.
+
+See: src/kernel/src/init.rs set_inputs; src/kernel/src/init.rs check;
+src/kernel/src/fs/mod.rs init; docs/certification/ITEM.md section 2.
 
 <a id="fx-9001"></a>
 
