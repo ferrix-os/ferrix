@@ -2005,7 +2005,14 @@ fn pid_1s_inputs_are_read_from_the_archive_and_never_unpacked() {
     archive.entry(".", 0o040_700, 1, 2, (0, 0), b"");
     archive.entry("./.ferrix/", 0o040_755, 2, 2, (0, 0), b"");
     archive.entry(".ferrix/init", 0o040_755, 3, 2, (0, 0), b"");
-    archive.entry("./.ferrix/init/program", 0o100_755, 4, 1, (0, 0), b"\x7fELF");
+    archive.entry(
+        "./.ferrix/init/program",
+        0o100_755,
+        4,
+        1,
+        (0, 0),
+        b"\x7fELF",
+    );
     archive.entry(".ferrix/init/script", 0o100_644, 5, 1, (0, 0), b"echo hi");
     archive.entry("bin", 0o040_755, 6, 2, (0, 0), b"");
     archive.entry("bin/true", 0o100_755, 7, 1, (0, 0), b"t");
@@ -2020,7 +2027,10 @@ fn pid_1s_inputs_are_read_from_the_archive_and_never_unpacked() {
     assert_eq!(made.files, 2);
     assert_eq!(made.directories, 1);
     assert!(ns.resolve(&ctx, None, b"/.ferrix", true).is_err());
-    assert!(ns.resolve(&ctx, None, b"/.ferrix/init/program", true).is_err());
+    assert!(
+        ns.resolve(&ctx, None, b"/.ferrix/init/program", true)
+            .is_err()
+    );
     assert_eq!(read_file(&ns, &ctx, "/bin/true").unwrap(), b"t");
     assert_eq!(read_file(&ns, &ctx, "/.ferrixish").unwrap(), b"x");
 
