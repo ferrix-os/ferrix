@@ -552,12 +552,9 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
     NATIVE.store(native, core::sync::atomic::Ordering::Release);
     *FOUND.lock() = None;
     *ENDING.lock() = Some(ending);
-    let thread =
-        Arc::new(Thread::leader(&process).map_err(|_| "no memory for the scenario task's thread")?);
-    // Listed, as a started process lists its first thread: `threads()` counts it.
-    process.add_thread(&thread);
-    let task = sched::spawn_user("seccomp-check", scenario_task, thread, None, None)
-        .map_err(|_| "no task for the seccomp scenario")?;
+    // Its thread and task listed, as a started process lists its first: an
+    // end the core records posts to the tasks it lists (`sched::work`).
+    let task = crate::syscall::check::spawn_in(&process, "seccomp-check", scenario_task, None)?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let waited = process.wait_for_exit(deadline);
     let status = waited.ok_or("the seccomp scenario task never ended its process")?;
@@ -789,9 +786,14 @@ fn spawn_member(
     let thread = Thread::sibling(process, tid, creator).map_err(|_| "no memory for a thread")?;
     let thread = Arc::new(thread);
     process.add_thread(&thread);
-    let task = sched::spawn_user("seccomp-member", entry, thread, None, None)
+    let prepared = sched::prepare_user("seccomp-member", entry, thread, None, None)
         .map_err(|_| "no task for a thread of the check")?;
-    Ok(task)
+    // Listed before it runs, as `clone` lists a thread's task, so that an end
+    // the core records posts to it (`sched::work`).
+    crate::object::process::Host::core(&**process)
+        .list_task(prepared.task())
+        .map_err(|_| "no memory to list a thread of the check")?;
+    Ok(prepared.launch())
 }
 
 /// Whether the member that killed itself came back from its call.
