@@ -50,6 +50,7 @@ use core::fmt;
 
 pub mod event;
 pub mod exec;
+pub mod filter;
 pub mod ini;
 mod keys;
 pub mod kind;

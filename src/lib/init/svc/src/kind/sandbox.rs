@@ -11,8 +11,10 @@
 //! `SystemCallFilter=` is kept as the list of assignments' words in order,
 //! each marked as adding to or taking from the set, because systemd's rule
 //! for merging an allow-list with a later deny-list (§4.5) needs the system
-//! call groups expanded, and the groups' members are per ABI. The backend
-//! expands them when it builds the filter, against the kernel's tables.
+//! call groups expanded, and the groups' members are per ABI.
+//! [`crate::filter::compile`] expands them when it builds the filter. Names
+//! are checked here against the tables it uses, so an unknown call, group or
+//! errno warns when the unit loads, as systemd's do.
 
 use alloc::borrow::ToOwned;
 use alloc::format;
@@ -49,9 +51,18 @@ pub struct FilterRule {
     /// systemd's rule, from the assignment's `~` and the first
     /// assignment's.
     pub add: bool,
-    /// The action after a `:` (a deny-list's words only): an errno name
-    /// (`EPERM`), a number from 1 to 4095, or `kill`.
-    pub action: Option<String>,
+    /// The action after a `:` (a deny-list's words only).
+    pub action: Option<FilterAction>,
+}
+
+/// What a denied call gets: `SystemCallErrorNumber=`'s format, and a
+/// deny-list word's after its `:`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterAction {
+    /// `kill`: the process ends by `SIGSYS`.
+    Kill,
+    /// An errno, from 1 to 4095, by number or by name.
+    Errno(u32),
 }
 
 /// `SystemCallFilter=`, merged over its assignments.
@@ -80,6 +91,11 @@ pub struct Sandbox {
     pub private_network: bool,
     /// `SystemCallFilter=`; `None` when unset or reset.
     pub system_call_filter: Option<SystemCallFilter>,
+    /// `SystemCallErrorNumber=`; `None` (unset, empty or `kill`) kills.
+    pub system_call_error_number: Option<FilterAction>,
+    /// `SystemCallArchitectures=`: `native`, `x86-64`, `x86`, `arm64`,
+    /// `arm` and systemd's other names; `None` when unset or reset.
+    pub system_call_architectures: Option<Vec<String>>,
 }
 
 impl Sandbox {
@@ -88,48 +104,51 @@ impl Sandbox {
         *self == Sandbox::default()
     }
 
+    /// Whether the child installs a seccomp filter.
+    pub fn filters(&self) -> bool {
+        self.system_call_filter.is_some() || self.system_call_architectures.is_some()
+    }
+
     /// Whether the child needs a mount namespace of its own.
     pub fn needs_mount_namespace(&self) -> bool {
         self.private_tmp || self.protect_system != ProtectSystem::No
     }
 }
 
-/// systemd's system call groups (`systemd-analyze syscall-filter`, version
-/// 259), without the `@`.
-pub const GROUPS: [&str; 29] = [
-    "default",
-    "aio",
-    "basic-io",
-    "chown",
-    "clock",
-    "cpu-emulation",
-    "debug",
-    "file-system",
-    "io-event",
-    "ipc",
-    "keyring",
-    "memlock",
-    "module",
-    "mount",
-    "network-io",
-    "obsolete",
-    "pkey",
-    "privileged",
-    "process",
-    "raw-io",
-    "reboot",
-    "resources",
-    "sandbox",
-    "setuid",
-    "signal",
-    "swap",
-    "sync",
-    "system-service",
-    "timer",
+/// The architecture names systemd knows (`ConditionArchitecture=`'s, and
+/// `native`). Only those of Ferrix's ABIs change a filter here.
+const ARCHITECTURES: [&str; 27] = [
+    "native",
+    "x86",
+    "x86-64",
+    "x32",
+    "arm",
+    "arm-be",
+    "arm64",
+    "arm64-be",
+    "ia64",
+    "parisc",
+    "parisc64",
+    "ppc",
+    "ppc-le",
+    "ppc64",
+    "ppc64-le",
+    "s390",
+    "s390x",
+    "sh",
+    "sh64",
+    "sparc",
+    "sparc64",
+    "mips",
+    "mips-le",
+    "mips64",
+    "mips64-le",
+    "riscv64",
+    "loongarch64",
 ];
 
 /// The keys this module reads.
-pub(crate) const KEYS: [(&str, Setter<Sandbox>); 5] = [
+pub(crate) const KEYS: [(&str, Setter<Sandbox>); 7] = [
     ("NoNewPrivileges", |s, a, w| {
         s.no_new_privileges = keys::boolean(a, w).unwrap_or(s.no_new_privileges);
     }),
@@ -165,12 +184,36 @@ pub(crate) const KEYS: [(&str, Setter<Sandbox>); 5] = [
     ("SystemCallFilter", |s, a, w| {
         system_call_filter(&mut s.system_call_filter, a, w);
     }),
+    ("SystemCallErrorNumber", |s, a, w| {
+        let text = a.value.trim();
+        if text.is_empty() {
+            s.system_call_error_number = None;
+        } else if let Some(action) = action(text) {
+            s.system_call_error_number = (action != FilterAction::Kill).then_some(action);
+        } else {
+            keys::invalid(a, w, "not an errno, its number or kill");
+        }
+    }),
+    ("SystemCallArchitectures", |s, a, w| {
+        if a.value.trim().is_empty() {
+            s.system_call_architectures = None;
+            return;
+        }
+        let list = s.system_call_architectures.get_or_insert_with(Vec::new);
+        for word in a.value.split([' ', '\t']).filter(|word| !word.is_empty()) {
+            if !ARCHITECTURES.contains(&word) {
+                w.at(a, format!("Failed to parse architecture, ignoring: {word}"));
+            } else if !list.iter().any(|known| known == word) {
+                list.push(word.to_owned());
+            }
+        }
+    }),
 ];
 
 /// The sandboxing keys of systemd's that Ferrix has not built. They warn by
 /// name and the service runs without them, as §4.4 has it: a unit that
 /// loads on systemd loads here.
-pub(crate) const NOT_BUILT: [&str; 13] = [
+pub(crate) const NOT_BUILT: [&str; 11] = [
     "ProtectHome",
     "PrivateDevices",
     "PrivateUsers",
@@ -182,8 +225,6 @@ pub(crate) const NOT_BUILT: [&str; 13] = [
     "AmbientCapabilities",
     "ReadOnlyPaths",
     "InaccessiblePaths",
-    "SystemCallErrorNumber",
-    "SystemCallArchitectures",
 ];
 
 /// The warning for a key of [`NOT_BUILT`].
@@ -192,8 +233,8 @@ pub(crate) fn not_built(assignment: &Assignment, warnings: &mut Warnings) {
         assignment,
         format!(
             "{}= is not built (landing L13 built NoNewPrivileges=, PrivateTmp=, \
-             ProtectSystem=, PrivateNetwork= and SystemCallFilter=); the service runs \
-             without it.",
+             ProtectSystem=, PrivateNetwork=, SystemCallFilter=, SystemCallErrorNumber= and \
+             SystemCallArchitectures=); the service runs without it.",
             assignment.key
         ),
     );
@@ -239,25 +280,22 @@ fn system_call_filter(
             None => (word, None),
         };
         if let Some(group) = name.strip_prefix('@') {
-            if !GROUPS.contains(&group) {
+            if !crate::filter::is_group(group) {
                 warnings.at(
                     assignment,
                     format!("Unknown system call group, ignoring: {name}"),
                 );
                 continue;
             }
-        } else if name.is_empty()
-            || !name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        {
+        } else if !crate::filter::is_call(name) {
             warnings.at(
                 assignment,
                 format!("Failed to parse system call, ignoring: {name}"),
             );
             continue;
         }
-        if let Some(action) = action {
+        let mut parsed = None;
+        if let Some(action_text) = action {
             if !invert {
                 warnings.at(
                     assignment,
@@ -268,35 +306,34 @@ fn system_call_filter(
                 );
                 continue;
             }
-            if !is_action(action) {
+            let Some(known) = self::action(action_text) else {
                 warnings.at(
                     assignment,
                     format!("Failed to parse error number, ignoring: {word}"),
                 );
                 continue;
-            }
+            };
+            parsed = Some(known);
         }
         filter.rules.push(FilterRule {
             name: name.to_owned(),
             add,
-            action: action.map(str::to_owned),
+            action: parsed,
         });
     }
 }
 
 /// `SystemCallErrorNumber=`'s format: `kill`, a number from 1 to 4095, or
-/// an errno's name. The name is checked against the ABI's table when the
-/// filter is built.
-fn is_action(text: &str) -> bool {
+/// an errno's name.
+fn action(text: &str) -> Option<FilterAction> {
     if text == "kill" {
-        return true;
+        return Some(FilterAction::Kill);
     }
-    if let Ok(number) = text.parse::<u32>() {
-        return (1..=4095).contains(&number);
-    }
-    text.len() > 1
-        && text.starts_with('E')
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+    let number = match text.parse::<u32>() {
+        Ok(number) => number,
+        Err(_) => crate::filter::errno(text)?,
+    };
+    (1..=4095)
+        .contains(&number)
+        .then_some(FilterAction::Errno(number))
 }
