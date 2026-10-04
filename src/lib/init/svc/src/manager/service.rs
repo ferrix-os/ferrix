@@ -221,6 +221,11 @@ impl Manager {
             Role::Main => self.sockets_for(unit),
             Role::Control => alloc::vec::Vec::new(),
         };
+        let sandbox = if command.privilege == crate::exec::Privilege::Full {
+            crate::kind::Sandbox::default()
+        } else {
+            service.sandbox.clone()
+        };
         let spec = SpawnSpec {
             command,
             role,
@@ -240,6 +245,7 @@ impl Manager {
             sockets,
             connection,
             bootstrap: !service.uses.is_empty() || !service.offers.is_empty(),
+            sandbox,
         };
         self.emit(Action::Spawn {
             unit,

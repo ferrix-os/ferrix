@@ -6,5 +6,6 @@ mod kinds;
 mod manager;
 mod name;
 mod rig;
+mod sandbox;
 mod source;
 mod value;

@@ -14,7 +14,7 @@ use core::fmt;
 
 use crate::Mode;
 use crate::exec::Command;
-use crate::kind::{Input, Listen, Output, ServiceType, WorkingDirectory};
+use crate::kind::{Input, Listen, Output, Sandbox, ServiceType, WorkingDirectory};
 use crate::limits::Limits;
 use crate::restart::Ended;
 use crate::value::Signal;
@@ -428,6 +428,9 @@ pub struct SpawnSpec {
     /// Whether the unit uses or offers directory names, and so gets a
     /// bootstrap channel (§6).
     pub bootstrap: bool,
+    /// The sandboxing keys (§4.5), empty for a command with the `+` prefix,
+    /// which runs without them as under systemd.
+    pub sandbox: Sandbox,
 }
 
 /// Everything the backend needs to listen for one `.socket` unit.

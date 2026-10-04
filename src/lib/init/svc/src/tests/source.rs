@@ -382,7 +382,7 @@ fn unknown_sections_keys_and_specifiers_warn_and_load() {
         Layer::Image,
         "a.service",
         file(
-            "[Unit]\nFrobnicate=yes\nX-Mine=1\n[Service]\nExecStart=/a %H\nExecStart=/a\nPrivateTmp=yes\n[Timer]\nOnBoot=1\n[X-Vendor]\nA=1\n",
+            "[Unit]\nFrobnicate=yes\nX-Mine=1\n[Service]\nExecStart=/a %H\nExecStart=/a\nProtectHome=yes\n[Timer]\nOnBoot=1\n[X-Vendor]\nA=1\n",
         ),
     )]);
     let unit = source.load("a.service").unwrap();
@@ -403,7 +403,7 @@ fn unknown_sections_keys_and_specifiers_warn_and_load() {
     assert!(
         messages
             .iter()
-            .any(|m| m.starts_with("PrivateTmp= needs namespaces"))
+            .any(|m| m.starts_with("ProtectHome= is not built"))
     );
     assert_eq!(argv(&unit), ["/a"]);
 }
