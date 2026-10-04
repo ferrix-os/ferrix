@@ -9,20 +9,20 @@
 //! `PrivateTmp=`, and every place `ProtectSystem=` names remounted
 //! read-only. Then the child changes directory and user as before. Last,
 //! after init's go-ahead and just before `execve`, [`lock`]:
-//! `PR_SET_NO_NEW_PRIVS` for `NoNewPrivileges=`. A seccomp filter for
-//! `SystemCallFilter=` goes after it, as the very last step, when the
-//! kernel has filters (S3).
+//! `PR_SET_NO_NEW_PRIVS` for `NoNewPrivileges=`, and then [`confine`]: the
+//! seccomp filter of `SystemCallFilter=`, `SystemCallErrorNumber=` and
+//! `SystemCallArchitectures=`, compiled in the parent by
+//! `ferrix_svc::filter`, so that it sees nothing of init's but `execve`.
 //!
 //! Everything that needs a decision or an allocation is in [`plan`], in the
 //! parent, where a failure is the unit's `SpawnFailed` with a line saying
-//! why. That includes the key whose kernel half is not on `main` yet:
-//! `SystemCallFilter=` refuses to start the unit, with the reason, rather
-//! than run it without what it asked for.
+//! why.
 
 use std::ffi::CString;
 use std::fs;
 use std::io;
 
+use ferrix_svc::filter::{self, Abi};
 use ferrix_svc::kind::{ProtectSystem, Sandbox};
 
 use crate::spawn::Unprepared;
@@ -66,6 +66,8 @@ pub(crate) struct Plan {
     read_only: Vec<ReadOnly>,
     /// `PR_SET_NO_NEW_PRIVS`.
     no_new_privileges: bool,
+    /// The seccomp filter, as the kernel takes it.
+    filter: Vec<libc::sock_filter>,
 }
 
 impl Plan {
@@ -73,27 +75,46 @@ impl Plan {
     pub(crate) fn locks(&self) -> bool {
         self.no_new_privileges
     }
+
+    /// Whether [`confine`] has anything to do.
+    pub(crate) fn confines(&self) -> bool {
+        !self.filter.is_empty()
+    }
 }
 
 /// Work out `sandbox`, or refuse it. `None` when it asks for nothing.
-pub(crate) fn plan(sandbox: &Sandbox) -> Result<Option<Plan>, Unprepared> {
+pub(crate) fn plan(
+    sandbox: &Sandbox,
+    unprivileged: bool,
+    native_calls: bool,
+) -> Result<Option<Plan>, Unprepared> {
     if sandbox.is_empty() {
         return Ok(None);
     }
-    if sandbox.system_call_filter.is_some() {
-        return Err(Unprepared {
-            errno: libc::EOPNOTSUPP,
-            why: "SystemCallFilter= needs seccomp filters, which this kernel does not have \
-                  yet; refusing to start the unit without it"
-                .to_owned(),
-        });
-    }
+    let filter = filter::compile(sandbox, SERVED, native_calls)
+        .map_err(|why| Unprepared {
+            errno: libc::E2BIG,
+            why: format!("SystemCallFilter=: {why}"),
+        })?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|insn| libc::sock_filter {
+            code: insn.code,
+            jt: insn.jt,
+            jf: insn.jf,
+            k: insn.k,
+        })
+        .collect::<Vec<_>>();
     let mut plan = Plan {
         network: sandbox.private_network,
         // `PrivateNetwork=` implies a mount namespace, as systemd's
         // `PrivateMounts=` does for it.
         mount_namespace: sandbox.needs_mount_namespace() || sandbox.private_network,
-        no_new_privileges: sandbox.no_new_privileges,
+        // A filter needs no_new_privs or privilege to be installed, and a
+        // service with User= has given up its privilege by then: systemd
+        // implies NoNewPrivileges= there, and so does init.
+        no_new_privileges: sandbox.no_new_privileges || (!filter.is_empty() && unprivileged),
+        filter,
         ..Plan::default()
     };
     if sandbox.private_tmp {
@@ -256,6 +277,17 @@ fn read_only(
     out
 }
 
+/// The ABIs the kernel serves a program here through, the native one first
+/// (`docs/SECCOMP.md` §3.2): x86-64 also takes i386's `int $0x80`.
+#[cfg(target_arch = "x86_64")]
+const SERVED: &[Abi] = &[Abi::X86_64, Abi::I386];
+/// As above, for AArch64.
+#[cfg(target_arch = "aarch64")]
+const SERVED: &[Abi] = &[Abi::Aarch64];
+/// As above, for ARMv7-A.
+#[cfg(target_arch = "arm")]
+const SERVED: &[Abi] = &[Abi::Arm];
+
 /// The child's first sandboxing step, while it is still root: the mount
 /// namespace and everything in it. Allocates nothing.
 pub(crate) fn enter(plan: &Plan) -> io::Result<()> {
@@ -305,13 +337,18 @@ pub(crate) fn enter(plan: &Plan) -> io::Result<()> {
     Ok(())
 }
 
-/// The child's last sandboxing step before `execve`: no new privileges. A
-/// seccomp filter goes after it, when there is one to install (S3).
+/// The child's next to last sandboxing step: no new privileges.
 pub(crate) fn lock(plan: &Plan) -> io::Result<()> {
     if plan.no_new_privileges {
         sys::no_new_privileges()?;
     }
     Ok(())
+}
+
+/// The child's last step before `execve`: the seccomp filter. Allocates
+/// nothing.
+pub(crate) fn confine(plan: &Plan) -> io::Result<()> {
+    sys::install_filter(&plan.filter)
 }
 
 #[cfg(test)]
@@ -396,19 +433,35 @@ mod tests {
             private_network: true,
             ..Sandbox::default()
         };
-        let planned = plan(&network).ok().flatten().unwrap_or_default();
+        let planned = plan(&network, false, false)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         assert!(planned.network && planned.mount_namespace);
         assert!(planned.read_only.is_empty() && planned.tmpfs.is_empty());
     }
 
     #[test]
-    fn a_filter_without_its_kernel_half_refuses_by_name() {
+    fn a_filter_is_compiled_and_implies_no_new_privs_without_privilege() {
         let filter = Sandbox {
             system_call_filter: Some(ferrix_svc::kind::SystemCallFilter::default()),
             ..Sandbox::default()
         };
-        let refused = plan(&filter).err().map(|why| why.why).unwrap_or_default();
-        assert!(refused.starts_with("SystemCallFilter= needs seccomp filters"));
-        assert!(plan(&Sandbox::default()).is_ok_and(|plan| plan.is_none()));
+        let as_root = plan(&filter, false, false)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert!(as_root.confines() && !as_root.locks());
+        let as_user = plan(&filter, true, false)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert!(as_user.confines() && as_user.locks());
+        assert!(!as_user.mount_namespace && !as_user.network);
+    }
+
+    #[test]
+    fn nothing_asked_is_no_plan() {
+        assert!(plan(&Sandbox::default(), true, true).is_ok_and(|plan| plan.is_none()));
     }
 }

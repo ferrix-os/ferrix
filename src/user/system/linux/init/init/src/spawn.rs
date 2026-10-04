@@ -63,6 +63,8 @@ pub(crate) enum Step {
     Namespace = 226,
     /// `PR_SET_NO_NEW_PRIVS`: `EXIT_NO_NEW_PRIVILEGES`.
     NoNewPrivileges = 227,
+    /// The seccomp filter: `EXIT_SECCOMP`.
+    Seccomp = 228,
 }
 
 impl Step {
@@ -77,6 +79,7 @@ impl Step {
             Step::Setsid,
             Step::Namespace,
             Step::NoNewPrivileges,
+            Step::Seccomp,
         ]
         .into_iter()
         .find(|step| *step as u32 == code)
@@ -93,6 +96,7 @@ impl Step {
             Step::Setsid => "setsid",
             Step::Namespace => "setting up the sandbox's mount namespace",
             Step::NoNewPrivileges => "setting no_new_privs",
+            Step::Seccomp => "installing the seccomp filter",
         }
     }
 }
@@ -201,7 +205,11 @@ pub(crate) fn prepare(
 ) -> Result<Prepared, Unprepared> {
     // First, so a key the kernel cannot do refuses the unit before anything
     // else is looked at.
-    let sandbox = sandbox::plan(&spec.sandbox)?;
+    let unprivileged = spec
+        .user
+        .as_deref()
+        .is_some_and(|user| user != "root" && user != "0");
+    let sandbox = sandbox::plan(&spec.sandbox, unprivileged, spec.bootstrap)?;
     let user = match &spec.user {
         Some(name) => Some(lookup_user(name)?),
         None => None,
@@ -800,12 +808,20 @@ fn child(
     if let Some(go) = pipes.go {
         sys::wait_readable(go);
     }
-    // The last steps: no new privileges, then (with S3) the seccomp filter,
-    // which must see nothing of init's but the `execve`.
+    // The last steps: no new privileges, then the seccomp filter, which
+    // must see nothing of init's but the `execve`. A program the filter
+    // does not let `execve`, or a failed `execve` whose report the filter
+    // does not let be written, ends by the filter's action, as under
+    // systemd.
     if let Some(plan) = prepared.sandbox.as_ref().filter(|plan| plan.locks())
         && let Err(error) = sandbox::lock(plan)
     {
         fail(Step::NoNewPrivileges, error);
+    }
+    if let Some(plan) = prepared.sandbox.as_ref().filter(|plan| plan.confines())
+        && let Err(error) = sandbox::confine(plan)
+    {
+        fail(Step::Seccomp, error);
     }
     let error = sys::execve(&prepared.path, argv, envp);
     fail(Step::Exec, error)
