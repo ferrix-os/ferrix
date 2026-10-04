@@ -710,10 +710,10 @@ fn input_devices() -> String {
         return String::new();
     };
     let mut xml = String::from(
-        "    <input type='keyboard' bus='virtio' model='virtio-non-transitional'>\n\
+        "    <input type='keyboard' bus='virtio'>\n\
          \x20     <driver iommu='on'/>\n\
          \x20   </input>\n\
-         \x20   <input type='mouse' bus='virtio' model='virtio-non-transitional'>\n\
+         \x20   <input type='mouse' bus='virtio'>\n\
          \x20     <driver iommu='on'/>\n\
          \x20   </input>\n",
     );
