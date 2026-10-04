@@ -1415,7 +1415,7 @@ QEMU with independent workspaces; a plugin-shaped extension loaded from the
 configuration.
 
 **waybar in Rust draws the user's bar (2026-09-27).**
-`src/user/system/linux/compositor/waybar` reads the user's own `~/.config/waybar/config.jsonc`
+The waybar app (ferrix-os/apps since 2026-10-04) reads the user's own `~/.config/waybar/config.jsonc`
 and `style.css` as waybar does: jsoncpp's JSONC, `src/config.cpp`'s search
 path, `include` merging and `output` matching, libfmt's format strings, a
 GTK3 stylesheet with `@define-color`, `alpha()`, `calc()`, layered `url()`

@@ -258,7 +258,7 @@ impl WaybarBoot {
             )));
         }
         let (want, expected_path, modules) = waybar_expected(arch, &files, &fonts)?;
-        let guest = build(arch, "compositor-waybar", "waybar")?;
+        let guest = crate::apps::program(arch, "waybar", "waybar")?;
         // waybar runs every `exec` as `/bin/sh -c`, and the test config's
         // scripts are `echo`s: zinc is the shell, and nothing else is needed.
         let mut carried = Carried {
@@ -330,7 +330,7 @@ fn waybar_expected(
     crate::waybar::write_here(&here, files, crate::waybar::HOME_DIR)?;
     crate::waybar::write_here(&here.join("fonts"), fonts, crate::dotfiles::FONT_DIR)?;
     let expected_path = paths::build_dir(arch).join("waybar-expected.ppm");
-    let host = build(Arch::X86_64, "compositor-waybar", "waybar")?;
+    let host = crate::apps::program(Arch::X86_64, "waybar", "waybar")?;
     let (width, height) = crate::waybar::SIZE;
     let rendered = std::process::Command::new(&host)
         .arg("-c")

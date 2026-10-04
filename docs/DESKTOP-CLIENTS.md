@@ -204,7 +204,7 @@ match it pixel for pixel on `x86_64` (within 2 a channel elsewhere).
 
 ## 3. waybar
 
-`src/user/system/linux/compositor/waybar` is `/bin/waybar`: it reads `config.jsonc` and
+The waybar app (ferrix-os/apps) is `/bin/waybar`: it reads `config.jsonc` and
 `style.css` the way waybar 0.15 (Alexays/Waybar at 1684389) and GTK 3.24
 read them, and draws the bar GTK would draw from them. Upstream's source is
 the reference, read file by file; `waybar-probe` is the host-side check
@@ -318,7 +318,7 @@ starts it.
 
 The gate is `cargo xtask test-compositor --boot waybar`: the user's
 `style.css` and `icons/` (read from this machine, never committed) over a
-test config of the tree's (`src/user/system/linux/compositor/waybar/data/boot/`: the
+test config of the tree's (the waybar app's `data/boot/`: the
 user's bar with each Python script an `echo` of a fixed answer, and
 `"output": "Virtual-1"`). The host's build draws the same files with
 `--render`, and the guest's screen must show those pixels: all 1024x40

@@ -9,25 +9,26 @@ use std::path::Path;
 
 use super::apps::VKGEARS_PATH;
 use super::run::{with_layout, with_network};
-use super::{CLIENT_PATH, CONFIG_PATH, Carried, build, steam_window};
+use super::{CLIENT_PATH, CONFIG_PATH, Carried, steam_window};
 use crate::args::Args;
 use crate::paths::Arch;
 use crate::{Error, Result};
 
-/// The desktop's own clients, written for Ferrix from waybar, fuzzel,
-/// hyprlock and hypridle (`docs/DESKTOP-CLIENTS.md`): each `(package,
-/// binary)` is built and carried as `/bin/<binary>` on every desktop a person
-/// uses (`run-compositor`, `flash --compositor`), so the user's own
-/// `exec-once = waybar` and `bind = …, exec, hyprlock` find it. One line a
-/// program, added by its stream when it lands. A judged boot carries none,
-/// so its archive stays the bytes it was.
-const DESKTOP_CLIENTS: &[(&str, &str)] = &[("compositor-waybar", "waybar")];
-
-/// The desktop's clients that are apps (ferrix-os/apps), as `(app,
-/// binary)`: built from the app's folder and carried at `/bin/<binary>`
-/// unless an installed app has put that file there already, so a desktop
-/// has them with `--no-apps` too, and one installed app is one copy.
-const DESKTOP_APPS: &[(&str, &str)] = &[("hyprlock", "hyprlock"), ("fuzzel", "fuzzel")];
+/// The desktop's own clients, written for Ferrix from waybar, fuzzel and
+/// hyprlock (`docs/DESKTOP-CLIENTS.md`) and apps in ferrix-os/apps since
+/// 2026-10-04, as `(app, binary)`: each is built from the app's folder and
+/// carried as `/bin/<binary>` on every desktop a person uses
+/// (`run-compositor`, `flash --compositor`), so the user's own `exec-once =
+/// waybar` and `bind = …, exec, hyprlock` find it -- unless an installed app
+/// has put that file there already, so a desktop has them with `--no-apps`
+/// too, and one installed app is one copy. A judged boot carries none, so
+/// its archive stays the bytes it was. (hypridle is in every compositor
+/// image, through `Programs`.)
+const DESKTOP_APPS: &[(&str, &str)] = &[
+    ("waybar", "waybar"),
+    ("fuzzel", "fuzzel"),
+    ("hyprlock", "hyprlock"),
+];
 
 /// Where `run-compositor` puts the wallpaper it carries.
 const WALLPAPER_PATH: &str = "etc/wallpaper.fxwall";
@@ -84,16 +85,6 @@ pub(super) fn desktop_programs(
     carried: &[crate::ports::File],
 ) -> Result<Vec<crate::ports::File>> {
     let mut files = Vec::new();
-    for (package, binary) in DESKTOP_CLIENTS {
-        let program = build(arch, package, binary)?;
-        let bytes = std::fs::read(&program)
-            .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
-        files.push(crate::ports::File {
-            path: format!("bin/{binary}"),
-            mode: 0o755,
-            content: crate::ports::Content::Bytes(bytes),
-        });
-    }
     for (app, binary) in DESKTOP_APPS {
         let path = format!("bin/{binary}");
         if carried.iter().any(|file| file.path == path) {

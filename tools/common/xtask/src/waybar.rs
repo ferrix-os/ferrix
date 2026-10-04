@@ -16,13 +16,13 @@
 use std::path::{Path, PathBuf};
 
 use crate::ports::{Content, File};
-use crate::{Error, Result, paths};
+use crate::{Error, Result};
 
 /// The boot's config, in the tree.
-const BOOT_CONFIG: &str = "src/user/system/linux/compositor/waybar/data/boot/config.jsonc";
+const BOOT_CONFIG: &str = "data/boot/config.jsonc";
 
 /// The stylesheet a machine without the user's takes, in the tree.
-const FALLBACK_STYLE: &str = "src/user/system/linux/compositor/waybar/data/boot/style.css";
+const FALLBACK_STYLE: &str = "data/boot/style.css";
 
 /// Where the boot's files go in the image: under the desktop's `HOME`, `/`.
 pub(crate) const HOME_DIR: &str = ".config/waybar-boot";
@@ -43,7 +43,8 @@ pub(crate) const GROUND: &str = "111111";
 ///
 /// A file of the tree's, or of the user's that is there, that cannot be read.
 pub(crate) fn files() -> Result<(Vec<File>, bool)> {
-    let root = paths::workspace_root();
+    // The waybar app's own boot configuration, in its folder.
+    let root = crate::apps::folder("waybar")?;
     let read = |path: &Path| {
         std::fs::read(path).map_err(|error| Error::new(format!("{}: {error}", path.display())))
     };
