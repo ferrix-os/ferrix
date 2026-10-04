@@ -1574,7 +1574,7 @@ fn checks_skipped(
     arch: Arch,
     args: &Args,
     loader: &Path,
-    kernel: &Path,
+    kernel: &cargo::Kernel,
     archive: &[u8],
 ) -> Result<()> {
     let options = format!("{} ferrix.checks=skip\n", command_line().trim_end());

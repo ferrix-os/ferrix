@@ -106,7 +106,7 @@ pub(crate) struct Opened {
 /// file.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Image<'a> {
-    /// [`IMAGE`], in kernel memory.
+    /// The built-in program, in the archive the kernel keeps.
     BuiltIn(&'static [u8]),
     /// A file [`Launcher::open`] opened.
     File(&'a ProgramFile),
@@ -355,24 +355,149 @@ pub(crate) fn read_option(view: &BootView<'_>) {
     }
 }
 
-/// The embedded program, or nothing. See `src/kernel/build.rs`.
-pub(crate) static IMAGE: &[u8] = include_bytes!(env!("FERRIX_INIT_IMAGE"));
+/// One entry of the boot initramfs beneath `.ferrix`, as the filesystem's
+/// load side hands it over (`crate::fs::init`), which is where the archive
+/// is read: by the item's dependency rules this file names no archive or
+/// filesystem crate.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct InputEntry {
+    /// Its name relative to the root, without a leading `./` or `/`.
+    pub(crate) name: &'static [u8],
+    /// Whether it is a regular file.
+    pub(crate) regular: bool,
+    /// Whether it is a directory.
+    pub(crate) directory: bool,
+    /// Its link count, as the archive gives it.
+    pub(crate) links: u32,
+    /// Its bytes, in the archive the kernel keeps for the whole boot.
+    pub(crate) data: &'static [u8],
+}
 
-/// What `/proc/self/exe` names for [`IMAGE`], which has no file of its own.
+/// What pid 1 is started with when nothing is named on the command line:
+/// a program and a script for its `sh -c`, or a list of commands. Each is
+/// empty when the image carries none, as an unset variable left it when
+/// `cargo xtask` compiled them into the kernel.
+#[derive(Clone, Copy, Debug, Default)]
+struct Inputs {
+    /// The program, `sh -i` or `sh -c` [`Inputs::script`].
+    program: &'static [u8],
+    /// A script for the program's `sh -c`, or nothing for an interactive one.
+    script: &'static [u8],
+    /// Commands to run in turn instead of the program; see
+    /// [`run_commands`] for the encoding.
+    commands: &'static [u8],
+}
+
+/// Pid 1's inputs, taken once from the boot initramfs by [`set_inputs`].
+static INPUTS: Once<Inputs> = Once::new();
+
+/// The directories the inputs are carried under, which are expected and say
+/// nothing, and the three names an input may have.
+const INPUT_DIRECTORIES: [&[u8]; 2] = [b".ferrix", b".ferrix/init"];
+const PROGRAM_INPUT: &[u8] = b".ferrix/init/program";
+const SCRIPT_INPUT: &[u8] = b".ferrix/init/script";
+const COMMANDS_INPUT: &[u8] = b".ferrix/init/commands";
+
+/// Take pid 1's inputs from `entries`, the boot initramfs's entries beneath
+/// `.ferrix` in the archive's order. Called once, by `crate::fs::init`; a
+/// second call changes nothing and answers `false`.
+///
+/// An entry that cannot be an input is refused with a line that names it and
+/// says why, and the input it would have been is taken as absent: a second
+/// entry of one name (both are refused), one that is not a regular file or
+/// has more than one link, any other name, a script with a NUL in it, which
+/// cannot survive being an argument, and a list of commands that does not
+/// end its last command with an empty argument.
+pub(crate) fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
+    if INPUTS.get().is_some() {
+        return false;
+    }
+    let inputs = judge(entries);
+    let mut first = false;
+    let _ = INPUTS.call_once(|| {
+        first = true;
+        inputs
+    });
+    first
+}
+
+/// [`set_inputs`]'s judgement, printing a line for each refusal.
+fn judge(entries: impl Iterator<Item = InputEntry>) -> Inputs {
+    // Each input's name, what was found for it, and whether it was refused.
+    let mut slots: [(&[u8], Option<&'static [u8]>, bool); 3] = [
+        (PROGRAM_INPUT, None, false),
+        (SCRIPT_INPUT, None, false),
+        (COMMANDS_INPUT, None, false),
+    ];
+    for entry in entries {
+        if INPUT_DIRECTORIES.contains(&entry.name) {
+            if !entry.directory {
+                refuse(entry.name, "is not a directory");
+            }
+            continue;
+        }
+        let Some(slot) = slots.iter_mut().find(|slot| slot.0 == entry.name) else {
+            refuse(entry.name, "is not one of init's inputs");
+            continue;
+        };
+        if slot.1.is_some() || slot.2 {
+            refuse(entry.name, "is in the archive twice");
+            slot.1 = None;
+            slot.2 = true;
+        } else if !entry.regular {
+            refuse(entry.name, "is not a regular file");
+            slot.2 = true;
+        } else if entry.links > 1 {
+            refuse(entry.name, "has more than one link");
+            slot.2 = true;
+        } else {
+            slot.1 = Some(entry.data);
+        }
+    }
+    let [program, script, commands] = slots.map(|(_, found, _)| found.unwrap_or_default());
+    let script = if script.contains(&0) {
+        refuse(SCRIPT_INPUT, "holds a NUL, which cannot survive being an argument");
+        b""
+    } else {
+        script
+    };
+    let commands = if !commands.is_empty() && !commands.ends_with(b"\0\0") {
+        refuse(
+            COMMANDS_INPUT,
+            "does not end its last command with an empty argument",
+        );
+        b""
+    } else {
+        commands
+    };
+    Inputs {
+        program,
+        script,
+        commands,
+    }
+}
+
+/// Say that the entry `name` is not taken as an input, and why.
+fn refuse(name: &[u8], why: &str) {
+    println!(
+        "  init     /{} refused: {why}; taken as absent",
+        Argv(&[name])
+    );
+}
+
+/// Pid 1's inputs, or none before [`set_inputs`] ran.
+fn inputs() -> Inputs {
+    INPUTS.get().copied().unwrap_or_default()
+}
+
+/// What `/proc/self/exe` names for the built-in program, which has no file of
+/// its own.
 ///
 /// Absolute, because glibc's static start-up reads that link back and asserts
 /// it is (`_dl_get_origin`): named after its first argument, `sh`, Ubuntu's
 /// static busybox aborted with 134 before `main`. It is named where busybox
 /// lives; `AT_EXECFN` keeps the name it was started by.
 const BUILT_IN_EXE: &[u8] = b"/bin/busybox";
-
-/// A script for the shell to run with `-c`, or nothing for an interactive
-/// one. See `src/kernel/build.rs`.
-static SCRIPT: &[u8] = include_bytes!(env!("FERRIX_INIT_SCRIPT_FILE"));
-
-/// Commands to run in turn instead of the shell, or nothing. See
-/// `src/kernel/build.rs` for the encoding.
-static COMMANDS: &[u8] = include_bytes!(env!("FERRIX_INIT_COMMANDS_FILE"));
 
 /// Where a command's program is looked for: `PATH`, which is one directory.
 ///
@@ -418,15 +543,16 @@ pub(crate) fn run() {
             ),
         }
     }
-    if !COMMANDS.is_empty() {
-        run_commands(launcher, COMMANDS);
+    let inputs = inputs();
+    if !inputs.commands.is_empty() {
+        run_commands(launcher, inputs.commands);
         return;
     }
-    if IMAGE.is_empty() {
+    if inputs.program.is_empty() {
         run_default(launcher);
         return;
     }
-    run_built_in(launcher);
+    run_built_in(launcher, inputs);
 }
 
 /// Why a file could not be started as pid 1.
@@ -493,17 +619,17 @@ fn run_default(launcher: &Launcher) {
 
 /// Start the program built into the kernel: `sh -i`, or `sh -c` with the
 /// built-in script.
-fn run_built_in(launcher: &Launcher) {
+fn run_built_in(launcher: &Launcher, inputs: Inputs) {
     let interactive: [&[u8]; 2] = [b"sh", b"-i"];
-    let scripted: [&[u8]; 3] = [b"sh", b"-c", SCRIPT];
-    let (args, how): (&[&[u8]], _) = if SCRIPT.is_empty() {
+    let scripted: [&[u8]; 3] = [b"sh", b"-c", inputs.script];
+    let (args, how): (&[&[u8]], _) = if inputs.script.is_empty() {
         (&interactive, "`sh -i`")
     } else {
         (&scripted, "`sh -c` with a built-in script")
     };
     println!(
         "  init     {} KiB program built in, starting {how}",
-        IMAGE.len() / 1024
+        inputs.program.len() / 1024
     );
 
     let name = args.first().copied().unwrap_or(b"");
@@ -512,7 +638,7 @@ fn run_built_in(launcher: &Launcher) {
     // initramfs, where `cargo xtask test-shell --interpreter` put them, and
     // the launcher reads them from there.
     let status = (launcher.start)(Start {
-        image: Image::BuiltIn(IMAGE),
+        image: Image::BuiltIn(inputs.program),
         exe: BUILT_IN_EXE,
         exec_fn: name,
         argv: args,

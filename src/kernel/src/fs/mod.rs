@@ -535,6 +535,17 @@ pub(crate) fn init(view: &BootView<'_>) -> Result<Report, InitError> {
     if let Some((phys, len)) = view.initrd() {
         let archive = initrd(view, phys, len)?;
         let _ = ARCHIVE.call_once(|| archive);
+        // Pid 1's inputs, which the unpack below leaves out of the root:
+        // read where the archive is, through the interface init defines.
+        let _ = crate::init::set_inputs(initramfs::init_entries(archive).map(|entry| {
+            crate::init::InputEntry {
+                name: entry.name,
+                regular: entry.regular,
+                directory: entry.directory,
+                links: entry.links,
+                data: entry.data,
+            }
+        }));
         report.initramfs_bytes = Some(len);
         report.unpacked = Some(initramfs::unpack(ns, &ctx, archive).map_err(InitError::Unpack)?);
     }

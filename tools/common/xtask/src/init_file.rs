@@ -80,7 +80,7 @@ const INIT_EXITED: &str = "FX-1501";
 pub(crate) struct Parts<'a> {
     pub(crate) arch: Arch,
     pub(crate) loader: &'a Path,
-    pub(crate) kernel: &'a Path,
+    pub(crate) kernel: &'a crate::cargo::Kernel,
     pub(crate) natives: &'a [native::Built],
     pub(crate) program: &'a Path,
     pub(crate) carried: &'a [File],

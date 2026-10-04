@@ -939,7 +939,7 @@ fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
             let archive = initramfs::build(None, &natives, None, &links)?;
             fat::write_image_with(arch, &loader, &kernel, &archive, cmdline.as_deref())?
         };
-        return Ok((image, kernel));
+        return Ok((image, kernel.elf));
     };
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &program, "")?;
@@ -957,7 +957,7 @@ fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
     )?;
     let cmdline = image_cmdline(args);
     let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
-    Ok((image, kernel))
+    Ok((image, kernel.elf))
 }
 
 /// The image `run` boots when no program is named: a kernel with nothing in
@@ -989,7 +989,7 @@ fn build_init_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
         cmdline = format!("{} {extra}", cmdline.trim_end());
     }
     let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&cmdline))?;
-    Ok((image, kernel))
+    Ok((image, kernel.elf))
 }
 
 /// Compile what `flash` copies onto a board: the loader, the kernel and the
@@ -1100,7 +1100,7 @@ fn build_parts(arch: Arch, args: &Args) -> Result<powerfail::Built> {
     })
 }
 
-fn build_halves(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
+fn build_halves(arch: Arch, args: &Args) -> Result<(PathBuf, cargo::Kernel)> {
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel(arch, args.release)?;
     Ok((loader, kernel))

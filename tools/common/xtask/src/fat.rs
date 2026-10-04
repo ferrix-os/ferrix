@@ -499,7 +499,7 @@ pub(crate) fn set_strip_kernel(strip: bool) {
 pub(crate) fn write_image(
     arch: Arch,
     loader: &Path,
-    kernel: &Path,
+    kernel: &crate::cargo::Kernel,
     natives: &[crate::native::Built],
     cmdline: Option<&str>,
 ) -> Result<PathBuf> {
@@ -518,7 +518,7 @@ pub(crate) fn write_image(
 pub(crate) fn write_image_with(
     arch: Arch,
     loader: &Path,
-    kernel: &Path,
+    kernel: &crate::cargo::Kernel,
     initramfs: &[u8],
     cmdline: Option<&str>,
 ) -> Result<PathBuf> {
@@ -528,15 +528,21 @@ pub(crate) fn write_image_with(
 /// [`write_image_with`], and the image's own options in `FERRIX/DEFAULTS.TXT`
 /// when there are any: the file `flash` writes beside a card owner's
 /// `CMDLINE.TXT`, which the loader appends after it (`src/boot/common/uefi/src/main.rs`).
+///
+/// The initramfs is `initramfs` with `kernel`'s init inputs added, which is
+/// where pid 1's program, script and commands are carried.
 pub(crate) fn write_image_carrying(
     arch: Arch,
     loader: &Path,
-    kernel: &Path,
+    kernel: &crate::cargo::Kernel,
     initramfs: &[u8],
     cmdline: Option<&str>,
     defaults: Option<&str>,
 ) -> Result<PathBuf> {
     let mut fs = Fat32::new(IMAGE_BYTES)?;
+    let carried = kernel.initramfs(initramfs)?;
+    let initramfs = carried.as_slice();
+    let kernel: &Path = kernel;
 
     let loader_bytes = std::fs::read(loader)
         .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;

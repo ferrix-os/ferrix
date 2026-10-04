@@ -138,11 +138,105 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     Ok((build, made))
 }
 
-/// Build the kernel for `arch` and return the ELF it produced.
-pub(crate) fn build_kernel(arch: Arch, release: bool) -> Result<PathBuf> {
+/// A built kernel, and what the initramfs of an image of it must carry for
+/// pid 1 under `.ferrix/init/` (`src/kernel/src/init.rs`): a program, a
+/// script for its `sh -c`, or a list of commands. Until 2026-10-04 these were
+/// compiled into the kernel, so that each test's init was a kernel of its
+/// own; now one kernel serves every test, and an image is written from both
+/// together (`crate::fat`, `crate::flash`), so an init asked for cannot be
+/// left out of it. Dereferences to the ELF, for what only reads that.
+#[derive(Debug, Clone)]
+pub(crate) struct Kernel {
+    /// The ELF.
+    pub(crate) elf: PathBuf,
+    /// The program pid 1 runs, when one was asked for.
+    program: Option<PathBuf>,
+    /// The script it runs with `sh -c`, empty for an interactive shell.
+    script: String,
+    /// A list `vfs::encode` wrote, run in place of the program.
+    commands: Option<PathBuf>,
+}
+
+impl Kernel {
+    /// A kernel whose images carry no init of their own.
+    pub(crate) fn plain(elf: PathBuf) -> Kernel {
+        Kernel {
+            elf,
+            program: None,
+            script: String::new(),
+            commands: None,
+        }
+    }
+
+    /// What pid 1's inputs are, by name under `.ferrix/init/`.
+    fn inputs(&self) -> Result<Vec<(&'static str, Vec<u8>)>> {
+        let read = |path: &Path| {
+            std::fs::read(path)
+                .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
+        };
+        let mut inputs = Vec::new();
+        if let Some(program) = &self.program {
+            inputs.push(("program", read(program)?));
+        }
+        if !self.script.is_empty() {
+            inputs.push(("script", self.script.clone().into_bytes()));
+        }
+        if let Some(commands) = &self.commands {
+            inputs.push(("commands", read(commands)?));
+        }
+        Ok(inputs)
+    }
+
+    /// `archive` with this kernel's init inputs added, read back to be sure
+    /// the image carries what was asked for: a test whose init went missing
+    /// would boot `/sbin/init` or nothing and say little about why.
+    ///
+    /// # Errors
+    ///
+    /// An input that cannot be read, an archive that does not parse, or one
+    /// that does not carry an input after it was added.
+    pub(crate) fn initramfs(&self, archive: &[u8]) -> Result<Vec<u8>> {
+        let inputs = self.inputs()?;
+        let borrowed: Vec<(&str, &[u8])> = inputs
+            .iter()
+            .map(|(name, data)| (*name, data.as_slice()))
+            .collect();
+        let built = crate::initramfs::with_init_inputs(archive, &borrowed)?;
+        carries(&built, &inputs)?;
+        Ok(built)
+    }
+}
+
+impl std::ops::Deref for Kernel {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.elf
+    }
+}
+
+/// Whether `archive` carries each of `inputs` under `.ferrix/init/`, byte
+/// for byte.
+fn carries(archive: &[u8], inputs: &[(&'static str, Vec<u8>)]) -> Result<()> {
+    let carried = crate::initramfs::init_inputs(archive)?;
+    for (name, data) in inputs {
+        if !carried
+            .iter()
+            .any(|(found, bytes)| found == name && bytes == data)
+        {
+            return Err(Error::new(format!(
+                "the initramfs does not carry pid 1's {name}, which was asked for"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Build the kernel for `arch` and return it, with no init of its own.
+pub(crate) fn build_kernel(arch: Arch, release: bool) -> Result<Kernel> {
     let (build, made) = kernel(arch, release)?;
     build.output(&made).run()?;
-    artifact(made)
+    Ok(Kernel::plain(artifact(made)?))
 }
 
 /// Build `binary`, a native program in `package`, for `arch` into
@@ -171,9 +265,10 @@ pub(crate) fn build_native(
     artifact(path)
 }
 
-/// Compile the kernel with `init` built in, told to run `script` with `sh -c`.
+/// The kernel, with `init` as pid 1's program, told to run `script` with
+/// `sh -c`: both go in the image's initramfs, not in the kernel ([`Kernel`]).
 ///
-/// Set on the child rather than taken from this process's environment, so the
+/// Taken from the arguments rather than this process's environment, so the
 /// command a person typed is the whole of what was built: a `FERRIX_INIT` left
 /// exported in the shell cannot quietly substitute a different program.
 pub(crate) fn build_kernel_with_init(
@@ -181,32 +276,39 @@ pub(crate) fn build_kernel_with_init(
     release: bool,
     init: &Path,
     script: &str,
-) -> Result<PathBuf> {
-    let (build, made) = kernel(arch, release)?;
-    build
-        .input("FERRIX_INIT", init)
-        .env("FERRIX_INIT_SCRIPT", script)
-        .output(&made)
-        .run()?;
-    artifact(made)
+) -> Result<Kernel> {
+    if script.contains('\0') {
+        return Err(Error::new(
+            "the init script contains a NUL, which cannot survive being an argument",
+        ));
+    }
+    let mut kernel = build_kernel(arch, release)?;
+    kernel.program = Some(init.to_path_buf());
+    kernel.script = script.to_owned();
+    Ok(kernel)
 }
 
-/// Compile the kernel told to run the commands in `commands`, a file
-/// `vfs::encode` wrote, in place of a shell.
-///
-/// Named by path rather than carried in the variable, for the reason
-/// `src/kernel/build.rs` gives: the list is full of NULs.
+/// The kernel, told to run the commands in `commands`, a file
+/// `vfs::encode` wrote, in place of a shell: the list goes in the image's
+/// initramfs ([`Kernel`]).
 pub(crate) fn build_kernel_with_commands(
     arch: Arch,
     release: bool,
     commands: &Path,
-) -> Result<PathBuf> {
-    let (build, made) = kernel(arch, release)?;
-    build
-        .input("FERRIX_INIT_COMMANDS", commands)
-        .output(&made)
-        .run()?;
-    artifact(made)
+) -> Result<Kernel> {
+    let list = std::fs::read(commands)
+        .map_err(|error| Error::new(format!("reading {}: {error}", commands.display())))?;
+    // Refused here so that a list cut short fails the build rather than
+    // losing its last command at boot, where init refuses it too.
+    if !list.is_empty() && !list.ends_with(b"\0\0") {
+        return Err(Error::new(format!(
+            "{} does not end its last command with an empty argument",
+            commands.display()
+        )));
+    }
+    let mut kernel = build_kernel(arch, release)?;
+    kernel.commands = Some(commands.to_path_buf());
+    Ok(kernel)
 }
 
 /// `cargo build -p <package> --target <target>`, for the caller to add to
@@ -301,4 +403,94 @@ pub(crate) fn finished(status: std::process::ExitStatus, description: &str) -> R
 /// toolchain the user chose.
 pub(crate) fn cargo() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kernel_with(program: Option<&[u8]>, script: &str) -> (Kernel, tempfile_dir::Dir) {
+        let dir = tempfile_dir::Dir::new();
+        let mut kernel = Kernel::plain(dir.path().join("ferrix-kernel"));
+        if let Some(bytes) = program {
+            let path = dir.path().join("program");
+            std::fs::write(&path, bytes).unwrap();
+            kernel.program = Some(path);
+        }
+        kernel.script = script.to_owned();
+        (kernel, dir)
+    }
+
+    /// A directory of its own under the target directory, removed when dropped.
+    mod tempfile_dir {
+        use std::path::{Path, PathBuf};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+        pub(super) struct Dir(PathBuf);
+
+        impl Dir {
+            pub(super) fn new() -> Dir {
+                let path = std::env::temp_dir().join(format!(
+                    "xtask-cargo-test-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                std::fs::create_dir_all(&path).unwrap();
+                Dir(path)
+            }
+
+            pub(super) fn path(&self) -> &Path {
+                &self.0
+            }
+        }
+
+        impl Drop for Dir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn an_images_initramfs_carries_pid_1s_program_and_script() {
+        let (kernel, _dir) = kernel_with(Some(b"\x7fELF busybox"), "echo hi");
+        let base = crate::initramfs::plain(&["bin"], &[("bin/true", 0o755, b"t")]).unwrap();
+        let built = kernel.initramfs(&base).unwrap();
+        let carried = crate::initramfs::init_inputs(&built).unwrap();
+        assert_eq!(
+            carried,
+            vec![
+                ("program".to_owned(), b"\x7fELF busybox".to_vec()),
+                ("script".to_owned(), b"echo hi".to_vec()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plain_kernels_initramfs_is_the_archive_it_was_given_with_nothing_added() {
+        let (kernel, _dir) = kernel_with(None, "");
+        let base = crate::initramfs::plain(&["bin"], &[("bin/true", 0o755, b"t")]).unwrap();
+        let built = kernel.initramfs(&base).unwrap();
+        assert!(crate::initramfs::init_inputs(&built).unwrap().is_empty());
+        assert_eq!(built, base);
+    }
+
+    #[test]
+    fn an_init_asked_for_and_not_carried_is_an_error_not_a_quiet_default() {
+        let base = crate::initramfs::plain(&["bin"], &[("bin/true", 0o755, b"t")]).unwrap();
+        let asked = [("program", b"\x7fELF".to_vec())];
+        let error = carries(&base, &asked).unwrap_err().to_string();
+        assert!(error.contains("does not carry pid 1's program"), "{error}");
+        // Carried with other bytes is not carried either.
+        let other = crate::initramfs::with_init_inputs(&base, &[("program", b"else")]).unwrap();
+        assert!(carries(&other, &asked).is_err());
+    }
+
+    #[test]
+    fn an_archive_that_carries_the_inputs_directory_already_is_refused() {
+        let base = crate::initramfs::plain(&[".ferrix"], &[]).unwrap();
+        assert!(crate::initramfs::with_init_inputs(&base, &[("script", b"x")]).is_err());
+    }
 }

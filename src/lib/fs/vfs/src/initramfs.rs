@@ -57,6 +57,59 @@ pub struct Unpacked {
     /// Entries refused for a name that would escape the root, or of a kind
     /// there is nothing to make of.
     pub skipped: u32,
+    /// Entries left out because they are pid 1's inputs ([`is_init_input`]),
+    /// which the kernel's init reads from the archive and nothing unpacks.
+    pub init_inputs: u32,
+}
+
+/// The directory an image carries pid 1's inputs under: the program, the
+/// script for its `sh -c` and the list of commands that `cargo xtask` once
+/// compiled into the kernel (`src/kernel/src/init.rs`). Read from the archive
+/// by the kernel, never created in a filesystem it is unpacked into.
+pub const INIT_INPUTS: &[u8] = b".ferrix";
+
+/// Whether `name`, as an archive gives it, is [`INIT_INPUTS`] or anything
+/// beneath it, matched as [`unpack`] matches a name: `./` and `/` prefixes
+/// and trailing `/` taken off.
+#[must_use]
+pub fn is_init_input(name: &str) -> bool {
+    let name = normalise(name);
+    name == INIT_INPUTS
+        || name
+            .strip_prefix(INIT_INPUTS)
+            .is_some_and(|rest| rest.starts_with(b"/"))
+}
+
+/// An entry of the archive beneath [`INIT_INPUTS`], as the kernel's init is
+/// given it to judge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitEntry<'a> {
+    /// Its name relative to the root, normalised as [`unpack`] does.
+    pub name: &'a [u8],
+    /// Whether it is a regular file.
+    pub regular: bool,
+    /// Whether it is a directory.
+    pub directory: bool,
+    /// Its link count, as the archive gives it.
+    pub links: u32,
+    /// Its bytes, borrowed from the archive.
+    pub data: &'a [u8],
+}
+
+/// Each entry of `archive` that [`is_init_input`], in the archive's order,
+/// up to its first malformed header (which [`unpack`] refuses anyway).
+pub fn init_entries(archive: &[u8]) -> impl Iterator<Item = InitEntry<'_>> {
+    Archive::new(archive)
+        .entries()
+        .map_while(Result::ok)
+        .filter(|entry| entry.is_safe_path() && is_init_input(entry.name))
+        .map(|entry| InitEntry {
+            name: normalise(entry.name),
+            regular: entry.is_file(),
+            directory: entry.is_dir(),
+            links: entry.nlink,
+            data: entry.data,
+        })
 }
 
 /// Why an unpack stopped.
@@ -113,6 +166,10 @@ pub fn unpack(ns: &Namespace, ctx: &Context, archive: &[u8]) -> Result<Unpacked,
         let entry = entry.map_err(UnpackError::Archive)?;
         if !entry.is_safe_path() {
             unpacker.made.skipped = unpacker.made.skipped.saturating_add(1);
+            continue;
+        }
+        if is_init_input(entry.name) {
+            unpacker.made.init_inputs = unpacker.made.init_inputs.saturating_add(1);
             continue;
         }
         unpacker

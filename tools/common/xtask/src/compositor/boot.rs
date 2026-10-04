@@ -171,7 +171,7 @@ pub(super) fn judged_image(
     };
     let image =
         crate::fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&command_line))?;
-    Ok((image, kernel))
+    Ok((image, kernel.elf))
 }
 
 /// [`boot_and_dump`], with files carried beside the programs and words for
@@ -445,7 +445,7 @@ pub(super) fn build_image(
     let command_line = command_line(args);
     let image =
         crate::fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&command_line))?;
-    Ok((image, kernel))
+    Ok((image, kernel.elf))
 }
 
 /// Init's command line, with `ferrix.checks=skip` after it when
@@ -485,7 +485,7 @@ pub(super) fn build_desktop_image(
         Some(&command_line),
         Some(defaults),
     )?;
-    Ok((image, kernel))
+    Ok((image, kernel.elf))
 }
 
 /// libxkbcommon's default include directory, which every compositor image
@@ -503,7 +503,7 @@ pub(super) fn build_parts(
     config: &str,
     carried_too: Carried,
     args: &Args,
-) -> Result<(PathBuf, PathBuf, Vec<u8>)> {
+) -> Result<(PathBuf, crate::cargo::Kernel, Vec<u8>)> {
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel = crate::cargo::build_kernel(arch, args.release)?;
     let natives = crate::native::build(arch, args.release)?;

@@ -140,7 +140,10 @@ impl Build {
         self
     }
 
-    /// An environment variable naming a file the build reads.
+    /// An environment variable naming a file the build reads. No build sets
+    /// one since pid 1's inputs left the kernel (2026-10-04); a plan still
+    /// carries them, and the tests make them.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn input(mut self, key: &str, file: impl Into<PathBuf>) -> Build {
         self.inputs.push((key.to_owned(), file.into()));

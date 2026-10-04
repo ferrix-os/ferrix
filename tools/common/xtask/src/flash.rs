@@ -181,7 +181,7 @@ pub(crate) struct BoardFiles {
     /// The kernel as built, with its debug information: [`stripped_kernel`]
     /// strips the copy the card gets, and a panic's addresses are resolved
     /// against this one.
-    pub(crate) kernel: PathBuf,
+    pub(crate) kernel: crate::cargo::Kernel,
     /// The archive the loader hands over, byte for byte what an image
     /// carries: [`card_initramfs`] strips the programs in the card's copy.
     pub(crate) initramfs: Vec<u8>,
@@ -239,9 +239,9 @@ pub(crate) fn run(arch: Arch, files: &BoardFiles, args: &Args) -> Result<()> {
     copy(loader, &loader_target)?;
     copy(&stripped_kernel(kernel), &kernel_target)?;
     write_defaults(&target, *defaults)?;
-    // The same archive an image carries, so a board unpacks what QEMU does,
-    // less the programs' symbols.
-    let initramfs = card_initramfs(arch, initramfs)?;
+    // The same archive an image carries, pid 1's inputs included, so a board
+    // unpacks what QEMU does, less the programs' symbols.
+    let initramfs = card_initramfs(arch, &kernel.initramfs(initramfs)?)?;
     let initramfs_target = target.join(INITRD_PATH);
     std::fs::write(&initramfs_target, &initramfs)
         .map_err(|error| Error::new(format!("writing {}: {error}", initramfs_target.display())))?;

@@ -219,6 +219,76 @@ pub(crate) fn package(entries: &[ports::File]) -> Result<Vec<u8>> {
     archive.finish()
 }
 
+/// Where an image carries pid 1's inputs: the kernel reads them from the
+/// archive and nothing unpacks them (`src/kernel/src/init.rs`,
+/// `src/lib/fs/vfs/src/initramfs.rs`).
+pub(crate) const INIT_DIRECTORY: &str = ".ferrix/init";
+
+/// `archive` with pid 1's inputs added under [`INIT_DIRECTORY`]: each of
+/// `inputs` is a name there (`program`, `script` or `commands`) and its
+/// bytes. Every entry of `archive` stays as it was; the directories and the
+/// files are appended before the trailer, each file with one link.
+///
+/// # Errors
+///
+/// An archive that does not parse, or one that carries the directory already.
+pub(crate) fn with_init_inputs(archive: &[u8], inputs: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    let mut out = Newc::new();
+    let mut last_ino = 0;
+    for entry in ferrix_cpio::Archive::new(archive).entries() {
+        let entry = entry.map_err(|error| Error::new(format!("reading the archive: {error:?}")))?;
+        if entry.name.trim_start_matches("./").starts_with(".ferrix") {
+            return Err(Error::new(format!(
+                "the initramfs carries {} already, where pid 1's inputs go",
+                entry.name
+            )));
+        }
+        last_ino = last_ino.max(entry.ino);
+        out.entry(
+            entry.name,
+            entry.mode,
+            entry.ino,
+            entry.nlink,
+            (entry.uid, entry.gid),
+            entry.data,
+        )?;
+    }
+    if inputs.is_empty() {
+        return out.finish();
+    }
+    out.entry(".ferrix", 0o040_755, last_ino + 1, 2, (0, 0), b"")?;
+    out.entry(INIT_DIRECTORY, 0o040_755, last_ino + 2, 2, (0, 0), b"")?;
+    for (offset, (name, data)) in (3..).zip(inputs) {
+        out.entry(
+            &format!("{INIT_DIRECTORY}/{name}"),
+            0o100_644,
+            last_ino + offset,
+            1,
+            (0, 0),
+            data,
+        )?;
+    }
+    out.finish()
+}
+
+/// Pid 1's inputs as `archive` carries them, by name under
+/// [`INIT_DIRECTORY`].
+///
+/// # Errors
+///
+/// An archive that does not parse.
+pub(crate) fn init_inputs(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+    let prefix = format!("{INIT_DIRECTORY}/");
+    let mut found = Vec::new();
+    for entry in ferrix_cpio::Archive::new(archive).entries() {
+        let entry = entry.map_err(|error| Error::new(format!("reading the archive: {error:?}")))?;
+        if let Some(name) = entry.name.trim_start_matches("./").strip_prefix(&prefix) {
+            found.push((name.to_owned(), entry.data.to_vec()));
+        }
+    }
+    Ok(found)
+}
+
 /// `archive` again, with each regular file's contents replaced where `change`
 /// returns new ones, and every other entry and header field as it was.
 ///

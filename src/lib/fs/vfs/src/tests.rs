@@ -1998,6 +1998,51 @@ fn an_archive_unpacks_with_links_nodes_and_unsafe_names_skipped() {
 }
 
 #[test]
+fn pid_1s_inputs_are_read_from_the_archive_and_never_unpacked() {
+    let mut archive = Newc::new();
+    archive.entry(".", 0o040_700, 1, 2, (0, 0), b"");
+    archive.entry("./.ferrix/", 0o040_755, 2, 2, (0, 0), b"");
+    archive.entry(".ferrix/init", 0o040_755, 3, 2, (0, 0), b"");
+    archive.entry("./.ferrix/init/program", 0o100_755, 4, 1, (0, 0), b"\x7fELF");
+    archive.entry(".ferrix/init/script", 0o100_644, 5, 1, (0, 0), b"echo hi");
+    archive.entry("bin", 0o040_755, 6, 2, (0, 0), b"");
+    archive.entry("bin/true", 0o100_755, 7, 1, (0, 0), b"t");
+    // Not beneath it: a name that only starts the same way is unpacked.
+    archive.entry(".ferrixish", 0o100_644, 8, 1, (0, 0), b"x");
+    let archive = archive.finish();
+
+    let (ns, ctx) = fresh();
+    let made = initramfs::unpack(&ns, &ctx, &archive).unwrap();
+    assert_eq!(made.init_inputs, 4);
+    assert_eq!(made.skipped, 0);
+    assert_eq!(made.files, 2);
+    assert_eq!(made.directories, 1);
+    assert!(ns.resolve(&ctx, None, b"/.ferrix", true).is_err());
+    assert!(ns.resolve(&ctx, None, b"/.ferrix/init/program", true).is_err());
+    assert_eq!(read_file(&ns, &ctx, "/bin/true").unwrap(), b"t");
+    assert_eq!(read_file(&ns, &ctx, "/.ferrixish").unwrap(), b"x");
+
+    let entries: Vec<_> = initramfs::init_entries(&archive).collect();
+    let names: Vec<&[u8]> = entries.iter().map(|entry| entry.name).collect();
+    assert_eq!(
+        names,
+        [
+            &b".ferrix"[..],
+            b".ferrix/init",
+            b".ferrix/init/program",
+            b".ferrix/init/script"
+        ]
+    );
+    assert!(!entries[0].regular);
+    assert!(entries[0].directory && entries[1].directory);
+    assert!(!entries[2].directory);
+    assert!(entries[2].regular);
+    assert_eq!(entries[2].links, 1);
+    assert_eq!(entries[2].data, b"\x7fELF");
+    assert_eq!(entries[3].data, b"echo hi");
+}
+
+#[test]
 fn a_truncated_archive_is_an_error_not_a_partial_success() {
     let mut archive = Newc::new();
     archive.entry("file", 0o100_644, 1, 1, (0, 0), b"0123456789");

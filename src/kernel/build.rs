@@ -42,7 +42,7 @@
 )]
 
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Where the kernel is linked, by word width.
 ///
@@ -88,55 +88,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo::rerun-if-changed={}", script.display());
     println!("cargo::rerun-if-changed=build.rs");
 
-    // The first program to run, if one was asked for.
-    //
-    // Opt-in through `FERRIX_INIT`, because the obvious binary is a host's own
-    // `busybox` and a build that picked it up silently would stop being
-    // reproducible — `xtask build` promises the same image byte for byte, and
-    // two machines do not have the same `/usr/bin`. With the variable unset the
-    // kernel embeds an empty file and boots exactly as it did before.
-    //
-    // A different init must rebuild the kernel, and the file's mtime cannot
-    // be trusted to say so: cargo reruns this script only for a file newer
-    // than its last run, and `cargo xtask test-input` switches between two
-    // flavours of one program at one path, which cargo restores with the
-    // older build's mtime. So xtask passes the file's SHA-256 beside its path
-    // (`builds::Build::make`), and a variable is compared by value.
-    println!("cargo::rerun-if-env-changed=FERRIX_INIT");
-    let init = match std::env::var_os("FERRIX_INIT") {
-        Some(path) => {
-            let path = PathBuf::from(path);
-            println!("cargo::rerun-if-changed={}", path.display());
-            content_named("FERRIX_INIT");
-            path
-        }
-        None => {
-            let empty = PathBuf::from(std::env::var("OUT_DIR")?).join("no-init");
-            std::fs::write(&empty, b"")?;
-            empty
-        }
-    };
-    println!("cargo::rustc-env=FERRIX_INIT_IMAGE={}", init.display());
-
-    // What the first program is told to do. Empty means an interactive shell;
-    // anything else is handed to `sh -c`, which is how `cargo xtask test-shell`
-    // makes stage 7's exit criterion a check rather than a transcript. Written
-    // to a file rather than passed as `rustc-env`, because a script has
-    // newlines and a `cargo::` directive is one line.
-    println!("cargo::rerun-if-env-changed=FERRIX_INIT_SCRIPT");
-    let script = std::env::var("FERRIX_INIT_SCRIPT").unwrap_or_default();
-    if script.contains('\0') {
-        return Err(
-            "FERRIX_INIT_SCRIPT contains a NUL, which cannot survive being an argument".into(),
-        );
-    }
-    let script_file = PathBuf::from(std::env::var("OUT_DIR")?).join("init-script");
-    std::fs::write(&script_file, script)?;
-    println!(
-        "cargo::rustc-env=FERRIX_INIT_SCRIPT_FILE={}",
-        script_file.display()
-    );
-    init_commands()
+    // Pid 1's program, script and commands are not built in: an image carries
+    // them in its initramfs under `.ferrix/init/` (`src/kernel/src/init.rs`),
+    // so that one kernel serves every test and a different init is a new
+    // initramfs rather than a new kernel (stage 20, 2026-10-04).
+    Ok(())
 }
 
 /// What makes the image movable, so that the loader can put it somewhere new
@@ -167,64 +123,4 @@ fn relocatable_link() -> Result<&'static [&'static str], Box<dyn Error>> {
         "arm" => &["--emit-relocs"],
         other => return Err(format!("the kernel does not know how to move on {other}").into()),
     })
-}
-
-/// A list of programs for init to run in turn, in place of the shell.
-///
-/// How `cargo xtask test-vfs` makes stage 8's exit criterion a check: three
-/// programs rather than one, which this busybox's shell cannot start by
-/// itself. `FERRIX_INIT_COMMANDS` names a file rather than holding the list,
-/// because each argument ends in a NUL and each command in an empty argument --
-/// a second NUL -- so that an argument can be a script with any byte in it but
-/// that one, and an environment variable cannot hold a NUL at all. Unset, the
-/// kernel embeds an empty list and init does what it did before.
-fn init_commands() -> Result<(), Box<dyn Error>> {
-    println!("cargo::rerun-if-env-changed=FERRIX_INIT_COMMANDS");
-    let commands = match std::env::var_os("FERRIX_INIT_COMMANDS") {
-        Some(path) => {
-            let path = PathBuf::from(path);
-            println!("cargo::rerun-if-changed={}", path.display());
-            content_named("FERRIX_INIT_COMMANDS");
-            let list = std::fs::read(&path)?;
-            // Checked here so that a list cut short fails the build rather
-            // than losing its last command silently at boot.
-            if !list.is_empty() && !list.ends_with(b"\0\0") {
-                return Err(format!(
-                    "{} does not end its last command with an empty argument",
-                    path.display()
-                )
-                .into());
-            }
-            path
-        }
-        None => {
-            let empty = PathBuf::from(std::env::var("OUT_DIR")?).join("no-init-commands");
-            std::fs::write(&empty, b"")?;
-            empty
-        }
-    };
-    println!(
-        "cargo::rustc-env=FERRIX_INIT_COMMANDS_FILE={}",
-        commands.display()
-    );
-    Ok(())
-}
-
-/// Declare `<variable>_DIGEST`, the SHA-256 of the file `variable` names, as
-/// what reruns this script, and warn when it was not given.
-///
-/// A kernel built around the wrong init boots and runs it: `test-input`'s
-/// negative control once booted the plain program and passed the check it
-/// exists to fail. xtask always sets both variables together. A build by hand
-/// that sets only the path is warned rather than refused, and falls back to
-/// the file's mtime, which is right unless the file was put back older.
-fn content_named(variable: &str) {
-    let digest = format!("{variable}_DIGEST");
-    println!("cargo::rerun-if-env-changed={digest}");
-    if std::env::var_os(&digest).is_none_or(|value| value.is_empty()) {
-        println!(
-            "cargo::warning={variable} is set without {digest}, the file's SHA-256: \
-             an older file put back at the same path will not rebuild the kernel"
-        );
-    }
 }

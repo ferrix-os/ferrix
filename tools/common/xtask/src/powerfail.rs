@@ -63,7 +63,7 @@ const LONGEST: Duration = Duration::from_millis(4000);
 #[derive(Debug)]
 pub(crate) struct Built {
     pub(crate) loader: PathBuf,
-    pub(crate) kernel: PathBuf,
+    pub(crate) kernel: crate::cargo::Kernel,
     pub(crate) initramfs: Vec<u8>,
 }
 
