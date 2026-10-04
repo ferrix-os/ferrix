@@ -129,7 +129,7 @@ twenty minutes, mid-gate. Brief each agent:
 
 The image row of *What a landing runs* (`docs/BACKLOG.md`) is the long one:
 `check`, the release build, and boots on every architecture with x86_64 under
-KVM and under TCG. Run alone per branch, it fills the gate pool's three slots
+KVM and under TCG. Run alone per branch, it fills the gate pool's slots
 with near-identical work while 20 more runs wait half an hour each for a
 slot. `~/.local/share/ferrix/fleet/batch.sh` runs it once for several
 branches (customer, 2026-10-04):
@@ -145,7 +145,7 @@ branches (customer, 2026-10-04):
   joined, or at four entries. It stacks the entries' commits on `main` in
   join order as branch `batch/<id>` and runs the union of their gates once on
   the tip. Every gate is its own `gate.sh run`, all queued at once, longest
-  first by the pool's own past run times, so the three slots fill together
+  first by the pool's own past run times, so the slots fill together
   and finish together. An entry that does not apply on the ones before it is
   DROPPED with its conflicts and rebases.
 * **A failure costs one round more, not one row per branch.** The failed
@@ -229,7 +229,37 @@ What it looks for:
   reaches further names the path the narrower row misses; if it does, the
   wider row runs and `gate-rows` gets a row for the gap.
 * **Time that is waiting, not running.** `pool-summary`'s `waited=` against
-  `ran=`: a long wait is fixed by fewer runs, not faster ones.
+  `ran=`: a long wait is fixed by fewer runs, not faster ones. On 2026-10-04,
+  78 runs waited 66,454 s and ran 11,556 s: 85% of a gate was the queue.
+* **Busy slots on an idle processor.** A busy slot is not a busy CPU. Most
+  of a gate uses one or two of the gate host's 24 threads: the kernel
+  crate's single rustc, `check`'s serial steps, a guest that mostly waits.
+  Measure the processor (`vmstat 2`, `/proc/pressure/cpu` and `memory`), not
+  `gate.sh status`. With three slots all busy, the processor sat 70-80%
+  idle at load 12-14 while runs queued. Five slots (the customer, 2026-10-04)
+  took it to 92% busy at load 21. `gate.sh` waits above load 36 and gives
+  back slots above 2 under 50 GB free, so a slot count is safe to raise
+  while memory pressure stays near zero. Raise it further only on that
+  measurement.
+* **Changing the pool.** Edit a copy of `gate.sh` or `batch.sh` and `mv`
+  it over the old file: bash reads a script as it runs, so an edit in place
+  breaks the runs reading it. A run already started keeps the old values:
+  after the slot count went from 3 to 5, the runs that were waiting still
+  looked only at slots 1-3, and since the queue is first come, first
+  served, slots 4 and 5 stayed empty behind them until they started (about
+  ten minutes). Let them drain. Killing a waiting run of a batch fails the
+  batch.
+* **Processes nobody watches.** Look at the top of `ps -eo
+  pcpu,etimes,args --sort=-pcpu` for long-running work that is no gate: on
+  2026-10-04 a subagent's `git range-diff` over a three-dot range against a
+  `main` that had moved held a core for 70 minutes. The session that owns
+  it (its parent shell's socket says which) kills it by PID, never by
+  pattern.
+* **Dependent branches in one batch.** A batch stacks entries in join
+  order and drops one that does not apply on those before it. A branch
+  built on another entry, or touching the same lines as one, waits for
+  that stack to land and rebases onto it (or onto the stack's tip at once)
+  before it joins.
 
 Each saving it proposes names what it removes and the run it measured it
 on, the way `docs/TEST-TIME.md` records its cuts; one that changes a tool
