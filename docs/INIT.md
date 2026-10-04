@@ -1780,8 +1780,19 @@ failing on its own key's lines and nothing else:
   `PrivateNetwork= needs network namespaces`", and "netns.service ran
   without the key it asked for".
 
-The rows, `check` and `test-init --arch all`, ran through the gate pool
-under the tags `l13init-check` and `l13init-init`.
+The rows ran through the gate pool on 5748c67f: `check` passed
+(`l13init-check`, 214 s in a warm slot) and `test-init --arch all` passed on
+all three architectures (`l13init-init2`), the sandboxing stage on each. The
+first `test-init` row (`l13init-init`, on 61982a69) had failed on armv7a
+outside the stage: `svc audit`'s end marker was typed literally, and the
+typed line's echo, wrapped around `svc status` output still arriving, gave a
+line reading it alone, so the wait ended before the records came. The marker
+is built from a variable now, as every other marker in the test is (log kept
+at `~/.local/share/ferrix/logs/l13init-init-armv7-audit-race.log`).
+
+Estimate against spend: L13a was estimated at 5 of L13's re-sized 10 points
+and took about 5, with two gate rows run twice for the marker fix, four
+controls booted on the host, and one x86-64 boot before the rows.
 
 **What the next session does first.** Nothing of L1 to L12 is left. L13b
 waits for network namespaces (branch `stage13-netns`) and L13c for
