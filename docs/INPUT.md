@@ -522,7 +522,7 @@ and that is what this is.
   every modifier named at any of its levels -- and a combination that then
   matches nothing is **level zero**, never nothing at all. `de` has 64 keys
   deeper than two levels, `us` 17.
-* **A client reads the keymap it was handed.** `src/user/system/linux/compositor/term` is a client,
+* **A client reads the keymap it was handed.** The term app is a client,
   and it read the first shipped table whatever the keymap said, so
   `kb_layout = de` gave it an American keyboard. There is no libxkbcommon
   here to compile with, so `compositor_xkb::groups_of` reads the group names

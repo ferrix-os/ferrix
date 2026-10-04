@@ -107,7 +107,7 @@ package FerrixAssurance {
         doc /* The panic screen's font against the BDF committed beside it. */
     }
     #implemented verification terminalFont : Gate {
-        attribute :>> command = "python3 tools/common/gen/gen-term-font.py --check";
+        attribute :>> command = "cargo xtask check (terminal font: the term app's tools/gen-font.py --check)";
         doc /* The terminal's font, rasterised from the TrueType faces
              * committed beside it by a rasteriser in the repository, so the
              * result is byte-identical on every checkout. */
@@ -375,7 +375,7 @@ package FerrixAssurance {
     }
     #implemented verification def PtyTest {
         @stage { number = 18; }
-        doc /* cargo xtask test-pty: src/user/system/linux/compositor/term --headless runs a program
+        doc /* cargo xtask test-pty: the term app's term --headless runs a program
              * on a pseudoterminal pair, and what it wrote comes back through
              * the master and the terminal's grid. */
         subject os : Ferrix;

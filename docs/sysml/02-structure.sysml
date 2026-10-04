@@ -1423,7 +1423,7 @@ package FerrixStructure {
                  * embedded Spleen 8x16 font, clipped rather than refused and
                  * allocating nothing: what the panic screen
                  * (src/kernel/src/panic/screen.rs) draws with, and
-                 * src/user/system/linux/compositor/term as well. */
+                 * the term app (ferrix-os/apps) as well. */
         }
         #implemented part qr : LibraryCrate {
             attribute :>> path = "src/lib/kernel/qr";

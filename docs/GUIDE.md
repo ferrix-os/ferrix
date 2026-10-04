@@ -435,7 +435,7 @@ in a scope of its own (`svc list` shows them as `app-*.scope`): the compositor r
 Wayland socket, tiles what connects to it and puts the frame on the screen.
 The configuration it writes into the initramfs starts a terminal first --
 `exec-once = /bin/term /bin/zinc` -- so the boot ends at a shell prompt rather
-than at a picture. [`src/user/system/linux/compositor/term`](../src/user/system/linux/compositor/README.md) is the terminal,
+than at a picture. The term app (ferrix-os/apps) is the terminal,
 a character grid with the escape sequences a shell actually sends, and it runs
 the program it is given on a pseudoterminal; that program is
 [zinc](../src/user/system/linux/zinc/README.md), with the busybox applets, the uutils and the ported

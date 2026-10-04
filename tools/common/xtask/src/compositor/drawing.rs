@@ -480,13 +480,13 @@ pub(super) fn one_picture(
 
 /// A ninth boot: a terminal, with a program running in it.
 ///
-/// The whole path at once: the compositor starts `src/user/system/linux/compositor/term`, which
+/// The whole path at once: the compositor starts the term app, which
 /// opens `/dev/ptmx`, opens the slave, runs a program on it with the slave
 /// for its session and its three descriptors, reads what it wrote back
 /// through the master, draws it in a grid with its antialiased Hack, and
 /// puts that in a `wl_shm` buffer the compositor composes into the frame.
 /// Every pixel of that frame is compared against the one
-/// `src/user/system/linux/compositor/term`'s own test blesses.
+/// the term app's own test blesses.
 pub(super) fn test_terminal(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (screens, said) = boot_and_dump(
         arch,

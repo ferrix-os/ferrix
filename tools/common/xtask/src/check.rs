@@ -61,6 +61,16 @@ fn docs() -> Result<()> {
     Ok(())
 }
 
+/// The terminal's font is rasterised from the TrueType faces committed beside
+/// it, by a rasteriser in the term app rather than by whatever `FreeType` the
+/// machine has: that is what makes "byte-identical" a demand this gate can
+/// make of every checkout. The generator is the app's own
+/// (`tools/gen-font.py`, found through its folder, since 2026-10-04).
+fn terminal_font() -> Result<()> {
+    let script = crate::apps::folder("term")?.join("tools/gen-font.py");
+    python_with(&script.to_string_lossy(), &["--check"])
+}
+
 /// The first step of every check: whether the commit hooks are armed.
 fn commit_hooks() -> Result<()> {
     python_with("tools/common/check/check-commit-authors.py", &["--hooks"])
@@ -190,14 +200,6 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     // The panic screen's font is generated from the BDF committed beside
     // it, and a hand edit to either would otherwise drift silently.
     ("font", &[&["tools/common/gen/gen-font.py", "--check"]]),
-    // The terminal's font is rasterised from the TrueType faces committed
-    // beside it, by a rasteriser in the repository rather than by
-    // whatever FreeType the machine has: that is what makes
-    // "byte-identical" a demand this gate can make of every checkout.
-    (
-        "terminal font",
-        &[&["tools/common/gen/gen-term-font.py", "--check"]],
-    ),
     // The explanations a panic prints are rendered into a document, which
     // goes stale the moment an entry changes without it.
     (
@@ -225,6 +227,7 @@ fn run(args: &Args) -> Result<()> {
     })?;
 
     steps_at_once(AUDITS)?;
+    step("terminal font", terminal_font)?;
     step("btrfs allocates fallibly", item_crates_allocate_fallibly)?;
 
     step("crate layering", || {

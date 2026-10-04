@@ -3,7 +3,7 @@
 //!
 //! `docs/ROADMAP.md` stage 18's exit asks for a terminal, and a terminal is a
 //! program holding one end of a pseudoterminal with another program on the
-//! other. This is the pair without the window: `src/user/system/linux/compositor/term --headless`
+//! other. This is the pair without the window: the term app's `term --headless`
 //! opens `/dev/ptmx`, asks it which pair it is, unlocks it, opens
 //! `/dev/pts/<n>`, forks, gives the child the slave for its session and its
 //! three descriptors, and runs it. What the child writes comes back through
@@ -107,7 +107,7 @@ pub(crate) fn test_pty(args: &Args) -> Result<()> {
             println!("  {arch}: no target for the compositor's programs; skipped");
             continue;
         }
-        let term = build(arch, "compositor-term", "term")?;
+        let term = crate::apps::program(arch, "term", "term")?;
         let ctl = build(arch, "compositor-ctl", "hyprctl")?;
         let said = boot(arch, &term, &ctl, args)?;
         let has = |wanted: &str| said.iter().any(|line| line.contains(wanted));

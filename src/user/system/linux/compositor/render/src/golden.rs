@@ -177,7 +177,7 @@ pub(crate) fn check(name: &str, width: u32, height: u32, data: &[u8]) {
 }
 
 /// The same, for a crate whose expected images are somewhere else: the
-/// terminal's, which are drawn by `src/user/system/linux/compositor/term` and kept here with the
+/// terminal's, which are drawn by the term app and kept here with the
 /// rest.
 ///
 /// # Panics

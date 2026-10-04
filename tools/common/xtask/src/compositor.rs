@@ -212,7 +212,7 @@ impl Programs {
             client: build(arch, "compositor-pattern", "pattern")?,
             ctl: build(arch, "compositor-ctl", "hyprctl")?,
             plug: build(arch, "compositor-plug", "plug")?,
-            term: build(arch, "compositor-term", "term")?,
+            term: crate::apps::program(arch, "term", "term")?,
             clip: build(arch, "compositor-clip", "clip")?,
             lswt: build(arch, "compositor-lswt", "lswt")?,
             shot: build(arch, "compositor-shot", "shot")?,

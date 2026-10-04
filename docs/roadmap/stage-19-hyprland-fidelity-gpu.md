@@ -555,10 +555,10 @@ has gone". The slave answers every terminal request, including the
 session and process-group ones, with a pair's own session and foreground
 group; the master answers those that act on the pair, as Linux's does.
 
-`src/user/system/linux/compositor/term` is the terminal: a character grid with the escape
+The term app (ferrix-os/apps since 2026-10-04) is the terminal: a character grid with the escape
 sequences a shell and its programs actually send (the cursor, the erases,
 the colours, the cursor's visibility), drawn with Hack, antialiased --
-`tools/common/gen/gen-term-font.py` rasterises the TrueType faces vendored beside
+The app's `tools/gen-font.py` rasterises the TrueType faces vendored beside
 it into coverage cells, and the terminal blends them over the cell's
 background -- into a `wl_shm` buffer. It starts a program on a pair with
 the slave for its session and its three descriptors, sends what is typed

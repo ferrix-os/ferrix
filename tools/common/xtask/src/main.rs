@@ -234,7 +234,7 @@ COMMANDS:
     test-audio    Boot src/user/system/linux/compositor/tone as init with virtio-snd, play a second of a counter, and require every frame back from QEMU's wav file
     test-badapple Boot the badapple app's player as init, play 30 s of Bad Apple!!, and require the held frame on the screen, the song in QEMU's wav file, and the two in step
     test-seat     Boot the compositor with a client, type into it over QMP, and require the key and the keybind to land
-    test-pty      Boot src/user/system/linux/compositor/term as init, run a program on a pseudoterminal, and require its output back
+    test-pty      Boot the term app as init, run a program on a pseudoterminal, and require its output back
     test-foot     Boot the compositor with foot, the ported Wayland terminal, and require its font and its text on screen
     test-vkgears  Boot the compositor with vkgears and the Venus card, and require it drew frames on the host's GPU (Linux hosts)
     test-jobs     Boot an interactive shell on the console, type a session with jobs at it, and require the answers

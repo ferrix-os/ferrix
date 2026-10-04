@@ -15,7 +15,7 @@ members = [
     "anim", "blank", "caption", "clip", "config", "ctl", "drm", "evecho", "fan",
     "hyprix", "hyprlang", "image", "ipc", "layout",
     "lock", "lswt", "pattern", "plug", "protocol", "reboot", "regex", "render",
-    "server", "sessiond", "shm", "shot", "socket", "seat", "term", "text", "tone", "toolkit", "vdagent", "virgl",
+    "server", "sessiond", "shm", "shot", "socket", "seat", "text", "tone", "toolkit", "vdagent", "virgl",
     "vkbd", "wire", "xkb", "xmoveresize",
 ]
 

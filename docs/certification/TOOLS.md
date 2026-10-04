@@ -50,7 +50,7 @@ trusted.
 |---|---|---|---|
 | `gen-panic-catalog.py` | the panic explanation catalogue | **yes** | T3 |
 | `gen-font.py` | the panic screen's font | **yes** | T3 |
-| `gen-term-font.py` | the terminal's font | no — compositor | T3 |
+| the term app's `tools/gen-font.py` (was `gen-term-font.py`) | the terminal's font | no — compositor | T3 |
 | `gen-wayland-protocol.py` | compositor interface tables | no — compositor | T3 |
 | `gen-xkb-tables.py` | keymap tables | no — compositor | T3 |
 | `gen-btrfs-fixtures.py` | test fixtures | no — verification only | T2 |

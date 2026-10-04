@@ -7,7 +7,7 @@ use std::os::fd::{AsRawFd as _, OwnedFd};
 /// A descriptor that arrived over a socket shares its file offset with the
 /// compositor's own, so reading it would move the compositor's offset and
 /// leave the next client an empty keymap; the protocol says a client maps
-/// it, and that is why (`src/user/system/linux/compositor/term` found this first).
+/// it, and that is why (the term app found this first).
 pub(crate) fn read(fd: &OwnedFd, size: usize) -> Option<String> {
     if size == 0 {
         return None;

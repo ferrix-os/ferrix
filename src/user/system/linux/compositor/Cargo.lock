@@ -316,22 +316,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compositor-term"
-version = "0.1.0"
-dependencies = [
- "compositor-evecho",
- "compositor-layout",
- "compositor-protocol",
- "compositor-render",
- "compositor-shm",
- "compositor-socket",
- "compositor-wire",
- "compositor-xkb",
- "ferrix-fbtext",
- "libc",
-]
-
-[[package]]
 name = "compositor-text"
 version = "0.1.0"
 dependencies = [

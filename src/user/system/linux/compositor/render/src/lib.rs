@@ -106,7 +106,7 @@ mod scratch;
 pub mod timing;
 pub mod transform;
 
-// Public, and not only for this crate's own tests: `src/user/system/linux/compositor/term` draws
+// Public, and not only for this crate's own tests: the term app draws
 // its expected image with its own font and its own grid, and the images live
 // together whichever crate blesses one.
 pub mod golden;

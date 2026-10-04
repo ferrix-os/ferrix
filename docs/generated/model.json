@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7f4caf8873e6e8611050447348262d6064fa4caed8a9a67b1b99e6c63452da86",
+  "digest": "20663328900a1dc48627bd87cffa0113d828a87365d0c78ac5e97031f65b9dce",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -5937,7 +5937,7 @@
               "kind": "part",
               "type": "LibraryCrate",
               "maturity": "implemented",
-              "doc": "Text and filled rectangles on a linear framebuffer, with an embedded Spleen 8x16 font, clipped rather than refused and allocating nothing: what the panic screen (src/kernel/src/panic/screen.rs) draws with, and src/user/system/linux/compositor/term as well.",
+              "doc": "Text and filled rectangles on a linear framebuffer, with an embedded Spleen 8x16 font, clipped rather than refused and allocating nothing: what the panic screen (src/kernel/src/panic/screen.rs) draws with, and the term app (ferrix-os/apps) as well.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
                 "line": 1418
@@ -18770,7 +18770,7 @@
               "qualifiedName": "FerrixAssurance::terminalFont",
               "kind": "attribute",
               "redefines": "command",
-              "value": "\"python3 tools/common/gen/gen-term-font.py --check\"",
+              "value": "\"cargo xtask check (terminal font: the term app's tools/gen-font.py --check)\"",
               "source": {
                 "file": "docs/sysml/11-assurance.sysml",
                 "line": 110
@@ -19670,7 +19670,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 18,
-          "doc": "cargo xtask test-pty: src/user/system/linux/compositor/term --headless runs a program on a pseudoterminal pair, and what it wrote comes back through the master and the terminal's grid.",
+          "doc": "cargo xtask test-pty: the term app's term --headless runs a program on a pseudoterminal pair, and what it wrote comes back through the master and the terminal's grid.",
           "source": {
             "file": "docs/sysml/11-assurance.sysml",
             "line": 376

@@ -32,7 +32,7 @@ so `exec-once = waybar` and `bind = …, exec, hyprlock` find it.
 
 Four crates, on branch `clients-base` until each lands on `main`. They
 exist so that the four programs do not each write a fifth copy of the
-hand-rolled Wayland client that `src/user/system/linux/compositor/term`, `src/user/system/linux/compositor/lock` and
+hand-rolled Wayland client that the term app, `src/user/system/linux/compositor/lock` and
 `src/user/system/linux/compositor/pattern` each carry.
 
 ### 2.1 `src/user/system/linux/compositor/toolkit` -- the Wayland client runtime

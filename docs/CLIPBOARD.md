@@ -321,10 +321,10 @@ agent is `std` and the driver is not.
 ## 6a. The terminal
 
 Copy and paste has to be reachable from a keyboard or it is not a feature a
-person has. `src/user/system/linux/compositor/term` had **no clipboard code of any kind** when this was written --
+person has. the term app had **no clipboard code of any kind** when this was written --
 no `wl_data_device`, no paste -- so `CTRL`+`SHIFT`+`V` in a Ferrix terminal
 would do nothing even with every part above built and working. That was
-found by reading `src/user/system/linux/compositor/term/src/client.rs` after a person tried exactly
+found by reading the term app's `src/client.rs` after a person tried exactly
 that key and nothing happened.
 
 So the terminal binds `wl_data_device`: `CTRL`+`SHIFT`+`V` asks for the
@@ -373,7 +373,7 @@ nothing from the kernel and are pure host-tested logic.
 | 4 | the console driver library | `src/lib/drivers/console/virtio-console` | landed |
 | 5 | the driver and its socket, and `devmgr`'s kind | `src/user/system/native/drivers/console/vport`, `src/user/system/native/devmgr` | landed |
 | 6 | the agent | `src/user/system/linux/compositor/vdagent` | landed |
-| 7 | paste and copy in the terminal | `src/user/system/linux/compositor/term` | landed |
+| 7 | paste and copy in the terminal | the term app | landed |
 | 8a | `--clipboard`: the device on the bus | `xtask` | landed |
 | 8b | starting the agent, and `test-clipboard` | `xtask` | landed |
 

@@ -363,7 +363,7 @@ that a program which asks for isolation now finds out it cannot have it.
   fontconfig with freetype and expat, plus an actual font on the image. They
   are static libraries in foot's build today; Chromium, built dynamically,
   will want them as shared ones. The compositor still draws its own text
-  with the coverage cells `src/user/system/linux/compositor/term` carries; a client brings its own
+  with the coverage cells the term app carries; a client brings its own
   fonts, which is what these are for. Note that `src/user/system/linux/compositor/README.md`'s "no
   C device stack, ever" is a rule about the compositor, not about its
   clients.

@@ -542,7 +542,7 @@ one of 786,432 pixels, on x86-64 and AArch64.
 
 **Done — the terminal (2026-09-17).** The last thing this stage owed. It
 needed pseudoterminals, which the kernel did not have and now does, and a
-terminal emulator, which is `src/user/system/linux/compositor/term`: stage 19's own entry has the
+terminal emulator, which is the term app (ferrix-os/apps since 2026-10-04): stage 19's own entry has the
 whole of it, since that is where the work landed. `cargo xtask test-pty`
 proves the pair without a window and `cargo xtask test-compositor` boots a
 terminal in the compositor and requires the picture it makes.

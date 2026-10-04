@@ -1,6 +1,6 @@
 //! The Wayland client runtime Ferrix's desktop clients share.
 //!
-//! `src/user/system/linux/compositor/term`, `src/user/system/linux/compositor/lock` and `src/user/system/linux/compositor/pattern` each speak
+//! the term app, `src/user/system/linux/compositor/lock` and `src/user/system/linux/compositor/pattern` each speak
 //! Wayland by hand over `src/user/system/linux/compositor/wire`: fixed object ids, a registry read
 //! into a map, a `Reader` loop, a memfd from `src/user/system/linux/compositor/shm`. That is the
 //! right size for a test client that makes five objects. waybar, fuzzel,
