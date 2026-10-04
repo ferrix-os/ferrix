@@ -161,10 +161,11 @@ answered with its banner.
 **Built for the init (2026-10-04, branch `l13-init`): L13a**, the sandboxing
 keys (`docs/INIT.md` §4.5). All five are read; `NoNewPrivileges=`,
 `PrivateTmp=` and `ProtectSystem=` are carried out in each service's own
-mount namespace, gated by `test-init`'s sandboxing stage. **Still to do:**
-L13b, `PrivateNetwork=`, once network namespaces land, and L13c,
-`SystemCallFilter=`, once seccomp's S3 does; until then a unit asking for
-either is refused with the reason.
+mount namespace, gated by `test-init`'s sandboxing stage. **L13b** (branch
+`l13b`, over network namespaces): `PrivateNetwork=`, a network namespace
+with only `lo`, up. **Still to do:** L13c, `SystemCallFilter=`, once
+seccomp's S3 lands; until then a unit asking for it is refused with the
+reason.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with
