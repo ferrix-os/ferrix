@@ -436,18 +436,50 @@ fn link(_target: &Path, to: &Path) -> Result<()> {
 /// workspace its builds run in too ([`plan_manifests`]), and of the uutils
 /// projects its builds compile, which are the ones `cargo xtask uutils`
 /// unpacked last.
+///
+/// One directory cannot hold one version of a package from two sources, and
+/// two workspaces may take the same version from crates.io and from git
+/// (`pulseaudio` 0.3.1, 2026-10-04). A workspace whose lockfile names such a
+/// package from git is vendored apart, into `vendor-apart-N` beside `into`:
+/// its crates.io crates are copied into `into`, and its git sources are
+/// pointed at its own directory.
 fn vendor(into: &Path, plan: Option<&Path>) -> Result<String> {
     let root = paths::workspace_root();
+    let mut manifests = Vec::new();
+    if let Some(plan) = plan {
+        manifests = plan_manifests(&plan.join("plan"), &root)?;
+        manifests.extend(script_manifests());
+    }
+    let (apart, together) = split_conflicting(&root, manifests);
+    let printed = run_vendor(&root, None, &together, into)?;
+    let mut config = printed.replace(&into.display().to_string(), VENDOR);
+    for (index, manifest) in apart.iter().enumerate() {
+        let name = format!("vendor-apart-{index}");
+        let dir = into.with_file_name(&name);
+        let printed = run_vendor(&root, Some(manifest), &[], &dir)?;
+        copy_missing(&dir, into)?;
+        config.push_str(&git_sections(&printed, &config, &name));
+    }
+    Ok(config + OFFLINE)
+}
+
+/// Run `cargo vendor --versioned-dirs` into `into`, for the root workspace or
+/// `manifest`'s, syncing `also`, and return the configuration it printed.
+fn run_vendor(
+    root: &Path,
+    manifest: Option<&Path>,
+    also: &[PathBuf],
+    into: &Path,
+) -> Result<String> {
     let mut command = Command::new(cargo::cargo());
     let _ = command
-        .current_dir(&root)
-        .args(["vendor", "--locked", "--offline"]);
-    if let Some(plan) = plan {
-        let mut manifests = plan_manifests(&plan.join("plan"), &root)?;
-        manifests.extend(script_manifests());
-        for manifest in manifests {
-            let _ = command.arg("--sync").arg(manifest);
-        }
+        .current_dir(root)
+        .args(["vendor", "--locked", "--offline", "--versioned-dirs"]);
+    if let Some(manifest) = manifest {
+        let _ = command.arg("--manifest-path").arg(manifest);
+    }
+    for manifest in also {
+        let _ = command.arg("--sync").arg(manifest);
     }
     // Not `--quiet`, which keeps the configuration from being printed too;
     // what it says as it goes is shown only when it fails.
@@ -465,9 +497,100 @@ fn vendor(into: &Path, plan: Option<&Path>) -> Result<String> {
     }
     // What `cargo vendor` prints is the configuration that uses what it
     // vendored, git sources included, with this machine's path in it.
-    let printed =
-        String::from_utf8_lossy(&output.stdout).replace(&into.display().to_string(), VENDOR);
-    Ok(printed + OFFLINE)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// `manifests` split into those vendored apart and the rest: a manifest goes
+/// apart when its workspace's lockfile takes a package from git at a version
+/// another lockfile here, the root's included, takes from elsewhere.
+fn split_conflicting(root: &Path, manifests: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let locked = |manifest: &Path| {
+        lockfile_of(manifest)
+            .and_then(|lock| std::fs::read_to_string(lock).ok())
+            .map(|text| locked_sources(&text))
+            .unwrap_or_default()
+    };
+    let mut every = locked(&root.join("Cargo.toml"));
+    for manifest in &manifests {
+        every.extend(locked(manifest));
+    }
+    manifests.into_iter().partition(|manifest| {
+        locked(manifest).iter().any(|(name, version, source)| {
+            source.starts_with("git+")
+                && every
+                    .iter()
+                    .any(|(n, v, s)| n == name && v == version && s != source)
+        })
+    })
+}
+
+/// The lockfile of `manifest`'s workspace: the nearest `Cargo.lock` above it.
+fn lockfile_of(manifest: &Path) -> Option<PathBuf> {
+    manifest
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join("Cargo.lock"))
+        .find(|lock| lock.is_file())
+}
+
+/// Each `[[package]]` of a lockfile that names a source, as (name, version,
+/// source without its `#commit`).
+fn locked_sources(text: &str) -> Vec<(String, String, String)> {
+    let mut found = Vec::new();
+    for package in text.split("[[package]]").skip(1) {
+        let field = |key: &str| {
+            package.lines().find_map(|line| {
+                line.strip_prefix(key)
+                    .and_then(|rest| rest.trim().strip_prefix('='))
+                    .map(|value| value.trim().trim_matches('"').to_owned())
+            })
+        };
+        if let (Some(name), Some(version), Some(source)) =
+            (field("name "), field("version "), field("source "))
+        {
+            let source = source.split('#').next().unwrap_or_default().to_owned();
+            found.push((name, version, source));
+        }
+    }
+    found
+}
+
+/// Copy each crate directory of `from` that `into` does not have.
+fn copy_missing(from: &Path, into: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        if into.join(entry.file_name()).exists() {
+            continue;
+        }
+        let mut command = Command::new("cp");
+        let _ = command
+            .args(["-a", "--reflink=auto"])
+            .arg(entry.path())
+            .arg(into);
+        cargo::run(command, "copying a vendored crate")?;
+    }
+    Ok(())
+}
+
+/// The git sources of a configuration `cargo vendor` printed for a directory
+/// vendored apart, pointed at that directory as `/data/<name>`, less any
+/// source `config` already replaces.
+fn git_sections(printed: &str, config: &str, name: &str) -> String {
+    let mut out = String::new();
+    for section in printed.split("\n[").skip(1) {
+        let header = section.lines().next().unwrap_or_default();
+        if !header.starts_with("source.\"git+") || config.contains(header) {
+            continue;
+        }
+        out.push_str("\n[");
+        out.push_str(&section.replace("\"vendored-sources\"", &format!("\"{name}\"")));
+    }
+    if !out.is_empty() {
+        out.push_str(&format!(
+            "\n[source.{name}]\ndirectory = \"/data/{name}\"\n"
+        ));
+    }
+    out
 }
 
 /// The manifest of each directory of the tree a build in `plan` runs in that
@@ -728,6 +851,51 @@ mod tests {
         // `main.rs`'s `build` prints "built <image>", and the image is
         // `paths::build_dir`'s `ferrix.img` under the guest's source.
         assert_eq!(BUILT, format!("built {SOURCE}/build/x86_64/ferrix.img"));
+    }
+
+    #[test]
+    fn a_lockfile_gives_each_sourced_package_without_its_commit() {
+        let lock = "version = 4\n\n[[package]]\nname = \"zinc\"\nversion = \"0.1.0\"\n\n\
+                    [[package]]\nname = \"pulseaudio\"\nversion = \"0.3.1\"\n\
+                    source = \"git+https://github.com/colinmarc/pulseaudio-rs?rev=3c03#3c0325fe\"\n\n\
+                    [[package]]\nname = \"libc\"\nversion = \"0.2.177\"\n\
+                    source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+                    checksum = \"abc\"\n";
+        assert_eq!(
+            locked_sources(lock),
+            vec![
+                (
+                    "pulseaudio".to_owned(),
+                    "0.3.1".to_owned(),
+                    "git+https://github.com/colinmarc/pulseaudio-rs?rev=3c03".to_owned()
+                ),
+                (
+                    "libc".to_owned(),
+                    "0.2.177".to_owned(),
+                    "registry+https://github.com/rust-lang/crates.io-index".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_workspace_vendored_apart_keeps_its_git_sources_in_its_own_directory() {
+        let printed = "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n\
+                       [source.\"git+https://github.com/colinmarc/pulseaudio-rs?rev=3c03\"]\n\
+                       git = \"https://github.com/colinmarc/pulseaudio-rs\"\nrev = \"3c03\"\n\
+                       replace-with = \"vendored-sources\"\n\n\
+                       [source.vendored-sources]\ndirectory = \"/tmp/x\"\n";
+        let sections = git_sections(printed, "[source.crates-io]\n", "vendor-apart-0");
+        assert!(
+            sections
+                .contains("[source.\"git+https://github.com/colinmarc/pulseaudio-rs?rev=3c03\"]")
+        );
+        assert!(sections.contains("replace-with = \"vendor-apart-0\""));
+        assert!(sections.contains("[source.vendor-apart-0]\ndirectory = \"/data/vendor-apart-0\""));
+        assert!(!sections.contains("crates-io"));
+        assert!(!sections.contains("/tmp/x"));
+        // A source the main configuration already replaces is left to it.
+        assert!(git_sections(printed, printed, "vendor-apart-0").is_empty());
     }
 
     #[test]
