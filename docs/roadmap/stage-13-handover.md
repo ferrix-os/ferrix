@@ -61,7 +61,7 @@ each chain; a later branch in a chain sits on the earlier one.
 
 | Branch | Tip | Worktree | State | To land it |
 |---|---|---|---|---|
-| `stage13-netns` | 4cc2ab39d | `netns` | Network namespaces, veth pairs, per-namespace stacks. Every row PASSED on 5e19c599c (`ae23-*`: check, three boots, `test-init`, `test-shell`, `test-vfs`, `test-net` on all architectures); controls ae-nn-01..31, 31c and b1 FIRED. **Cleared by the consultant** on 5e19c599c (on 75c03a259), on the condition that `main` changed nothing under `src/`, `tools/common/data` or `docs/sysml` since 75c03a259. | Take the lock, rebase onto `origin/main`, check `git diff 75c03a259 origin/main -- src tools/common/data docs/sysml` is empty and say so in the landing message (if not empty, re-run the `ae23` rows), carry coverage, regenerate the generated docs, land. |
+| `stage13-netns` | landed | `netns` | Landed 2026-10-04 on def906ba2, gated on 2428b0d95 (`l13ns-*`). | -- |
 | `stage13-timens` | 88b073c3a | `timens` | Time namespaces, on netns. Boots on x86_64. A native child gets its creator's time namespace and shifted vDSO (controls c25, c26). BACKLOG rows written. Not reviewed. | Its `ae24` check and `test-init` rows FAILED; find why. The consultant's open question: the vDSO swap answers Ok when the shifted vDSO is missing, which may fail open. Then the 26 controls (`ae-tn-*`; c01, c03-c07 FIRED so far; c02 and c08 need `--expect` on the native-child message) and review. |
 
 ### exit criterion

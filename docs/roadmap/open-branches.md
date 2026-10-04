@@ -47,9 +47,9 @@ the plain `stage13-<part>` branch of each; the `-presquash`, `-hist`, `-v2`,
   controls. Then `stage13-s4` (design OK with conditions: an L row, a VA row,
   native calls fail closed, a restart-code case), `stage13-s5`, `stage13-s6`.
   `stage13-s3-wip` does not build.
-- `stage13-netns`, then `stage13-timens`: OK with conditions C1
-  (`IFLA_NET_NS_PID` through `pidns::find_in`), C2 (neighbour and reassembly
-  charging, or a VA residual), C3 records, C4 a re-gate.
+- `stage13-netns` **landed 2026-10-04**, rebased onto def906ba2 and gated
+  on 2428b0d95 (`l13ns-*`; the consultant's ledger line 333). Next is
+  `stage13-timens`, which must rebase onto it.
 - `stage13-fdinfo` (NP), then `stage13-n5`, then `stage13-bwrap-user`: NP is
   not yet cleared: B1 armv7a `Newfstatat`, B2 dumpable bypass on the capability
   path, C1 the newborn window failing closed, C2-C5.
@@ -75,7 +75,6 @@ is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 | `stage13-s3-wip` | 2026-10-01 | 4 | history | WIP, does not build: S3's filters, half written when the customer asked to stop |
 | `stage13-s3-onmain` | 2026-10-01 | 7 | history | WIP: wind-down state of s3-onmain |
 | `stage13-s3` | 2026-10-01 | 7 | work | WIP: wind-down state of stage13-s3 |
-| `stage13-netns` | 2026-10-01 | 8 | work | Roadmap: network namespaces' state at the wind-down |
 | `stage13-n5` | 2026-10-01 | 15 | work | Roadmap: where N5 stands at the wind-down |
 | `stage13-fdinfo-v3` | 2026-10-01 | 6 | history | NP: the small-namespace check's people say they are dumpable, as bubblewrap does |
 | `stage13-fdinfo-v2` | 2026-10-01 | 4 | history | NP: the dumpable test applies on the capability path, mountinfo is Linux's, the check look |
