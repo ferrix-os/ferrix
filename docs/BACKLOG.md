@@ -821,6 +821,17 @@ redrawn from it.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-04 (customer)** **The roadmap's queue is built first, then
+  shortest.** The Gantt's forecast queue orders the sized rows that are built
+  and only need landing first, smallest first, then every other sized row,
+  smallest points first; ties keep the table's order. The rule is the sort
+  key in `tools/common/gen/gen-roadmap-charts.py`, and the status table's
+  sized rows follow it. The date does not move at the same rate; more items
+  finish sooner and the large ones (Chrome on the DK1, CUDA) last.
+* **2026-10-04 (customer)** **The Gantt splits wait from work.** Each
+  in-progress row shows, after today, a faint bar for its wait in the queue
+  and a light dashed bar for its work, with "N pts left, ~MM-DD" at the end,
+  so a row's bar length is its size.
 * **2026-10-04 (customer)** **Each session gets its own certification
   consultant.** A session that needs a review briefs its own consultant
   subagent with `AGENTS.md`'s *The certification consultant* and the ledger on

@@ -69,6 +69,10 @@ REMAINING = [
     ("NVIDIA N2 to N4", 64, "added, unlanded"),
     ("NVIDIA N5, CUDA", 52, "added"),
 ]
+# The queue's order (customer, 2026-10-04): built rows first, those that only
+# need landing ("unlanded"), then every other sized row, smallest points first
+# in each group; ties keep the order written above. A new row falls into place.
+REMAINING.sort(key=lambda r: (0 if "unlanded" in r[2] else 1, r[1]))
 SCOPE = sum(p for _, p, _ in REMAINING)
 
 # The rate the forecast uses is what came off a fixed scope, not what landed.
@@ -308,9 +312,9 @@ def gantt():
              "the status table's order: the size of the work, not a plan; "
              "hollow rows have no session on them",
              fill=MUTED)
-    svg.text(24, 60, "In progress: solid is done; the light dashed bar is what is missing, "
-             "to where that work ends in the queue below (same rate); a dotted "
-             "bar to the edge is unsized work, with no estimate",
+    svg.text(24, 60, "In progress: solid is done; the faint bar is the wait for the queue "
+             "below (built rows first, then shortest first), the light dashed bar "
+             "the work itself; a dotted bar to the edge is unsized work",
              fill=MUTED)
     x = lambda days: left + (right - left) * days / span
     bottom = h - 40
@@ -358,10 +362,16 @@ def gantt():
             svg.text(x(qd) + 6, by + row_h / 2 + 4, "remaining unknown (unsized)",
                      fill=ACTIVE_C, size=11)
         else:
-            e = qd + max(sched[n][1] for n in items)
+            segs = sorted(sched[n] for n in items)
+            s0, e = qd + segs[0][0], qd + segs[-1][1]
             left_pts = sum(pts_of[n] for n in items)
-            svg.rect(x(qd), by + 4, max(x(e) - x(qd), 3), row_h - 8, "#b6e3ff",
-                     ACTIVE_C, "4 2")
+            # The wait: from today to where the row's work starts in the queue.
+            if s0 > qd:
+                svg.rect(x(qd), by + 4, x(s0) - x(qd), row_h - 8, "#eef6fd",
+                         "#b6d4f2", "1 3")
+            for t0, t1 in segs:
+                svg.rect(x(qd + t0), by + 4, max(x(qd + t1) - x(qd + t0), 3),
+                         row_h - 8, "#b6e3ff", ACTIVE_C, "4 2")
             svg.text(x(e) + 6, by + row_h / 2 + 4,
                      f"{left_pts} pts left, ~{label(start_day + timedelta(days=math.ceil(e)))}",
                      fill=ACTIVE_C, size=11)
