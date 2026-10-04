@@ -41,7 +41,15 @@ pub(super) fn unexpected(
 /// run-length image of `XRGB8888` rows, with a row that repeats the one above
 /// written as a single byte.
 pub(super) fn expected(relative: &str) -> Result<Vec<u8>> {
-    let path = paths::workspace_root().join(relative);
+    // `app:<name>/<path>`: a picture in an app's own folder, found as apps
+    // are, so nothing here names where the app is (docs/APPS.md §4, rule 1).
+    let path = match relative
+        .strip_prefix("app:")
+        .and_then(|rest| rest.split_once('/'))
+    {
+        Some((app, inside)) => crate::apps::folder(app)?.join(inside),
+        None => paths::workspace_root().join(relative),
+    };
     let bytes = std::fs::read(&path)
         .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
     let word = |at: usize| -> Result<u32> {

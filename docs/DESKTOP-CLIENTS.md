@@ -450,7 +450,7 @@ clicked (hyprix); the startup time above; aarch64 boot.
 
 ## 5. hyprlock
 
-`src/user/system/linux/compositor/hyprlock` is hyprlock 0.9.6 (`/var/cache/hyprland-build/src/
+The hyprlock app (ferrix-os/apps) is hyprlock 0.9.6 (`/var/cache/hyprland-build/src/
 hyprlock`) for Ferrix, installed as `/bin/hyprlock`. It reads
 `~/.config/hypr/hyprlock.conf` unchanged, or the file `-c` names, found
 as upstream's `findConfig` finds it (`$XDG_CONFIG_HOME`, `$HOME/.config`,
@@ -565,13 +565,13 @@ zeroed when dropped.
 
 ### Where it stands
 
-2026-09-26. **On main:** `src/user/system/linux/compositor/hyprlock`'s library -- the
+2026-09-26. **On main:** hyprlock's library (the hyprlock app since 2026-10-04) -- the
 configuration model on `compositor/hyprlang` (every option and default of
 `ConfigManager.cpp`), layout, formatting, the field's session, the
 authentication interface with `Missing`, the blur, and every widget drawn
 by `scene::Scene` -- with 34 host tests. The customer's real file reads with
 no diagnostic and no unsupported line
-(`cargo run -p compositor-hyprlock --example probe`); on a screen that is
+(`cargo run --example probe` in the app's folder); on a screen that is
 not one of their three `desc:` monitors, upstream's rule gives only the
 clock panel, `$TIME` and the date, and their Lenovo gets all 8 widgets.
 

@@ -44,15 +44,15 @@ const HYPRLOCK_EXPECTED: [(&str, &str); 5] = [
     ),
     (
         "locked by hyprlock, its field empty",
-        "src/user/system/linux/compositor/hyprlock/tests/data/hyprlock-locked.xrle",
+        "app:hyprlock/tests/data/hyprlock-locked.xrle",
     ),
     (
         "five characters typed, five dots",
-        "src/user/system/linux/compositor/hyprlock/tests/data/hyprlock-dots.xrle",
+        "app:hyprlock/tests/data/hyprlock-dots.xrle",
     ),
     (
         "a wrong password refused, the field in fail_color",
-        "src/user/system/linux/compositor/hyprlock/tests/data/hyprlock-failed.xrle",
+        "app:hyprlock/tests/data/hyprlock-failed.xrle",
     ),
     (
         "the windows again, once the right password let the lock go",
@@ -83,7 +83,7 @@ const HYPRLOCK_BINDS: [(&str, &[&str]); 4] = [
 /// unlocks it. The seed is the gate's own and only this boot carries it;
 /// no other image gets a password it did not ask for. The configuration is
 /// the crate's own test data; the pictures are drawn from it on the host by
-/// `src/user/system/linux/compositor/hyprlock/tests/gate.rs`, with the same code, and
+/// the hyprlock app's `tests/gate.rs`, with the same code, and
 /// composited as hyprix composites a lock surface.
 pub(super) fn test_hyprlock(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let carried = Carried {
@@ -196,7 +196,7 @@ const HYPRLOCK_UNSET_BINDS: [(&str, &[&str]); 1] = [("L, which runs hyprlock", &
 /// root's, `ferrix`'s and authd's accounts, the font, and one account's
 /// password where one is given.
 fn hyprlock_files(arch: Arch, seed: Option<(&str, &str)>) -> Result<Vec<crate::ports::File>> {
-    let data = paths::workspace_root().join("src/user/system/linux/compositor/hyprlock/tests/data");
+    let data = crate::apps::folder("hyprlock")?.join("tests/data");
     let read = |path: &Path| -> Result<Vec<u8>> {
         std::fs::read(path)
             .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
@@ -207,7 +207,7 @@ fn hyprlock_files(arch: Arch, seed: Option<(&str, &str)>) -> Result<Vec<crate::p
         content: crate::ports::Content::Bytes(bytes),
     };
     let fonts = paths::workspace_root().join("assets/fonts/liberation");
-    let hyprlock = build(arch, "compositor-hyprlock", "hyprlock")?;
+    let hyprlock = crate::apps::program(arch, "hyprlock", "hyprlock")?;
     let mut ports = crate::auth::carried(arch, None)?;
     if ports.is_empty() {
         return Err(Error::new(format!("{arch}: authd is not built for it")));

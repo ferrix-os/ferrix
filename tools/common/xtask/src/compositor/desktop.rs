@@ -24,8 +24,13 @@ use crate::{Error, Result};
 const DESKTOP_CLIENTS: &[(&str, &str)] = &[
     ("compositor-waybar", "waybar"),
     ("compositor-fuzzel", "fuzzel"),
-    ("compositor-hyprlock", "hyprlock"),
 ];
+
+/// The desktop's clients that are apps (ferrix-os/apps), as `(app,
+/// binary)`: built from the app's folder and carried at `/bin/<binary>`
+/// unless an installed app has put that file there already, so a desktop
+/// has them with `--no-apps` too, and one installed app is one copy.
+const DESKTOP_APPS: &[(&str, &str)] = &[("hyprlock", "hyprlock")];
 
 /// Where `run-compositor` puts the wallpaper it carries.
 const WALLPAPER_PATH: &str = "etc/wallpaper.fxwall";
@@ -88,6 +93,20 @@ pub(super) fn desktop_programs(
             .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
         files.push(crate::ports::File {
             path: format!("bin/{binary}"),
+            mode: 0o755,
+            content: crate::ports::Content::Bytes(bytes),
+        });
+    }
+    for (app, binary) in DESKTOP_APPS {
+        let path = format!("bin/{binary}");
+        if carried.iter().any(|file| file.path == path) {
+            continue;
+        }
+        let program = crate::apps::program(arch, app, binary)?;
+        let bytes = std::fs::read(&program)
+            .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
+        files.push(crate::ports::File {
+            path,
             mode: 0o755,
             content: crate::ports::Content::Bytes(bytes),
         });

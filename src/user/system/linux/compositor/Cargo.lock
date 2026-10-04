@@ -174,23 +174,6 @@ name = "compositor-hyprlang"
 version = "0.1.0"
 
 [[package]]
-name = "compositor-hyprlock"
-version = "0.1.0"
-dependencies = [
- "compositor-anim",
- "compositor-config",
- "compositor-hyprlang",
- "compositor-image",
- "compositor-render",
- "compositor-text",
- "compositor-toolkit",
- "ferrix-auth-client",
- "ferrix-auth-proto",
- "libc",
- "tiny-skia",
-]
-
-[[package]]
 name = "compositor-image"
 version = "0.1.0"
 dependencies = [
@@ -495,14 +478,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
-]
-
-[[package]]
-name = "ferrix-auth-client"
-version = "0.1.0"
-dependencies = [
- "ferrix-auth-proto",
- "libc",
 ]
 
 [[package]]
