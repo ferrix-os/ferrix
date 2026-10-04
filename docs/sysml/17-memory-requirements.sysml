@@ -1266,7 +1266,8 @@ package FerrixMemoryRequirements {
                 source's bytes.";
             attribute :>> parent = "H.MEM.8";
             attribute :>> unit = ("user::vmo::Vmo::fill_for_fault",
-                "user::vmo::Vmo::new_filled", "user::vmo::Vmo::insert_absent");
+                "user::vmo::Vmo::new_filled", "user::vmo::Vmo::insert_absent",
+                "user::vmo::Vmo::fill_one_page");
         }
         requirement <'L.user.38'> insertAbsentKeepsWhatIsThere : ItemLowLevel {
             attribute :>> statement = "Vmo::insert_absent shall put a frame in a page
@@ -2279,7 +2280,9 @@ package FerrixMemoryRequirements {
                 disk show its bytes, not zeros, on their first touch; a page whose
                 read fails ends the program with SIGBUS.";
             attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = "user::space::AddressSpace::fill_file_page";
+            attribute :>> unit = ("user::space::AddressSpace::fill_file_page",
+                "user::space::AddressSpace::fill_file_pages",
+                "user::space::AddressSpace::fill_file_page_alone");
         }
         requirement <'L.user.104'> aFaultIsResolvedWithNoPreemptionLockHeld : ItemLowLevel {
             attribute :>> statement = "fault shall stop a debug kernel, naming the
