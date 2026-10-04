@@ -36,8 +36,11 @@ for the item, `land.sh`.
 Written by os-7c at the customer's wind-down at 22:00 on 2026-10-04, after a
 landing round from 19:50 that a held gate pool (an AOSP build on nazuna,
 20:37-20:52) and a power cut on the Windows PC (about 21:15; nazuna is on a
-UPS) cut short. `main` is 50518ac1d. Tonight landed `selfhost-components`
-as cb872a732 (batch 20261004T185433Z), which fixes CI's self-hosting job.
+UPS) cut short. `main` was 50518ac1d at 22:00. Tonight landed `selfhost-components`
+as cb872a732 (batch 20261004T185433Z), which fixes CI's self-hosting job, and
+`selfhost-matrix` (below, item 2; its tip on `main` is 77783565a). The
+branches' own entries in the sections further down still describe them as
+unlanded.
 Every branch below is on GitHub under `tonight/<name>`, rebased onto
 67efb9fb1 unless it says otherwise, and on nazuna as `os7c-tonight/<name>`;
 each has its worktree under `.claude/worktrees/tonight-<name>`. The
@@ -71,7 +74,9 @@ In this order:
    --arch aarch64` on that tip (99c5166cd) twice: if it fails, bisect the four
    on aarch64 (np-land touches /proc and `may_access`, the likeliest). Then
    rebase onto main and join again as one batch.
-2. **`tonight/selfhost-matrix`** (64a2b32d6): batch 20261004T191902Z passed
+2. **`tonight/selfhost-matrix`: LANDED** on `main` (tip 77783565a, after the
+   batch below; check the product owner's record for the controls' and the
+   transcript comparison's verdicts). Before it landed, batch 20261004T191902Z passed
    16 of 17 gates on its tip 43d205bed; the 17th, `test-init`, failed only
    for "no sshdt built for x86_64" in its slot. Re-run that gate in a slot
    with sshdt, then the transcript comparison its consultant asks (OK IF,
@@ -199,7 +204,8 @@ Gate pool notes, for whoever runs it:
 
 ### Stage 20: Ferrix built on Ferrix (ferrix-d4)
 
-- `selfhost-matrix` (e8b57ed4f): pid 1's inputs (init program, `sh -c`
+- `selfhost-matrix` (e8b57ed4f; **landed 2026-10-04**, tip 77783565a, the
+  owed list below is as written before it): pid 1's inputs (init program, `sh -c`
   script, command list) move from the kernel into the initramfs under
   `.ferrix/init/`, so one kernel serves every test (stage 20's plan: 66
   kernel builds to 6, 271 builds to 188; about 2 s a gate on nazuna), plus
@@ -229,7 +235,8 @@ Gate pool notes, for whoever runs it:
 
 ### Components, apps and main's red CI (ferrix-db)
 
-- `selfhost-components` (1fcbe409e, 1 commit): fixes main's red "rustc on
+- `selfhost-components` (1fcbe409e, 1 commit; **landed 2026-10-04** as
+  cb872a732): fixes main's red "rustc on
   Ferrix, and Ferrix built on Ferrix" CI job, broken by the components split
   (2263225e1, landed by components-flip). test-selfhost now copies each
   component checkout's tracked files into the volume, and
@@ -295,8 +302,8 @@ Gate pool notes, for whoever runs it:
 | `l13b` | 2026-10-04 | 10 | work | INIT.md: L13b, PrivateNetwork=, as built |
 | `l13c` | 2026-10-04 | 22 | work | test-init: filter checks for SystemCallFilter= and its two keys |
 | `np-land` | 2026-10-04 | 2 | work | Handover: NP as AUTH P2.1 at the 2026-10-04 wind-down |
-| `selfhost-matrix` | 2026-10-04 | 17 | work | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
-| `selfhost-components` | 2026-10-04 | 1 | work | test-selfhost: the volume carries the components, and the guest clones none |
+| `selfhost-matrix` | 2026-10-04 | 17 | landed 2026-10-04 | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
+| `selfhost-components` | 2026-10-04 | 1 | landed 2026-10-04 | test-selfhost: the volume carries the components, and the guest clones none |
 | `foot-shell` | 2026-10-04 | 1 | work | test-foot carries zinc, the /bin/sh its keyboard check is a script for |
 | `land-n6` | 2026-10-04 | 1 | work | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
 | `nvidia-n2` | 2026-10-04 | 21 | work | Handover update: land-n6 dropped by a docs/generated conflict, input passthrough works, the customer's performance order |
