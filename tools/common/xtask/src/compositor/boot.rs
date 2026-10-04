@@ -488,6 +488,10 @@ pub(super) fn build_desktop_image(
     Ok((image, kernel))
 }
 
+/// libxkbcommon's default include directory, which every compositor image
+/// carries (empty) so `xkb_context_new` succeeds in its clients.
+const XKB_DIRECTORIES: [&str; 2] = ["usr/share/X11", "usr/share/X11/xkb"];
+
 /// What [`build_image`] puts in an image, which is also what `flash` copies
 /// onto a card: the loader, a kernel with no program in it, and the
 /// initramfs, in which `/sbin/init` is pid 1 and the compositor
@@ -528,6 +532,20 @@ pub(super) fn build_parts(
             mode: 0o755,
             content: crate::ports::Content::Bytes(read(program)?),
         });
+    }
+    // libxkbcommon's default include directory. The keymap a client is
+    // handed is whole (`hyprix::keymap`), so nothing is read from it -- but
+    // `xkb_context_new` fails outright when none of its default directories
+    // exists, and a client then has no keymap and drops every key: foot,
+    // and every client that links libxkbcommon, until 2026-10-04.
+    for directory in XKB_DIRECTORIES {
+        if !carried.iter().any(|file| file.path == directory) {
+            carried.push(crate::ports::File {
+                path: directory.to_owned(),
+                mode: 0o755,
+                content: crate::ports::Content::Directory,
+            });
+        }
     }
     carried.push(crate::ports::File {
         path: CONFIG_PATH.to_owned(),

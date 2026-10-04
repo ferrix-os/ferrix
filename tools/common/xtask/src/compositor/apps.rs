@@ -31,8 +31,21 @@ use crate::{Error, Result};
 /// an error off.
 const FOOT_CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-foot`.
-exec-once = /bin/foot --log-level=info --log-colorize=never --log-no-syslog --hold /bin/hyprctl version
+exec-once = /bin/foot --log-level=info --log-colorize=never --log-no-syslog --hold /usr/libexec/ferrix/foot-check
 ";
+
+/// What foot runs in `test-foot`: something to draw (`hyprctl version`), and
+/// then a line read from the keyboard -- the keys the test presses, through
+/// the compositor, foot's keymap and the pseudoterminal -- said on the
+/// console, where the test reads it.
+const FOOT_CHECK: &str =
+    "#!/bin/sh\n/bin/hyprctl version\nread line\necho \"foot-typed: $line\" > /dev/console\n";
+
+/// Where [`FOOT_CHECK`] goes.
+const FOOT_CHECK_PATH: &str = "usr/libexec/ferrix/foot-check";
+
+/// The line the console shows once foot has passed the typed keys on.
+const FOOT_TYPED: &str = "foot-typed: ok";
 
 /// Who uid 0 is. foot looks its user up for the shell it would start, and
 /// says it could not as an error even when it was given a program instead;
@@ -89,6 +102,29 @@ fn colours(screen: &Image) -> usize {
     }
 }
 
+/// `ports` with what the foot boot adds beside the foot app: root's account,
+/// the program foot runs, and fontconfig's cache directories.
+fn with_foot_files(mut ports: Vec<crate::ports::File>) -> Vec<crate::ports::File> {
+    ports.push(crate::ports::File {
+        path: "etc/passwd".to_owned(),
+        mode: 0o644,
+        content: crate::ports::Content::Bytes(FOOT_PASSWD.as_bytes().to_vec()),
+    });
+    ports.push(crate::ports::File {
+        path: FOOT_CHECK_PATH.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(FOOT_CHECK.as_bytes().to_vec()),
+    });
+    for directory in FONTCONFIG_CACHE {
+        ports.push(crate::ports::File {
+            path: directory.to_owned(),
+            mode: 0o755,
+            content: crate::ports::Content::Directory,
+        });
+    }
+    ports
+}
+
 /// `test-foot`: foot, a Wayland terminal nobody here wrote, on the
 /// compositor, on Ferrix.
 ///
@@ -124,21 +160,8 @@ pub(crate) fn test_foot(args: &Args) -> Result<()> {
             continue;
         }
         let programs = Programs::build(arch)?;
-        let mut ports = ports;
-        ports.push(crate::ports::File {
-            path: "etc/passwd".to_owned(),
-            mode: 0o644,
-            content: crate::ports::Content::Bytes(FOOT_PASSWD.as_bytes().to_vec()),
-        });
-        for directory in FONTCONFIG_CACHE {
-            ports.push(crate::ports::File {
-                path: directory.to_owned(),
-                mode: 0o755,
-                content: crate::ports::Content::Directory,
-            });
-        }
         let carried = Carried {
-            ports,
+            ports: with_foot_files(ports),
             ..Carried::none()
         };
         let (image, kernel) =
@@ -190,6 +213,16 @@ pub(crate) fn test_foot(args: &Args) -> Result<()> {
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
+            // Type into it: a line foot hands the program on its
+            // pseudoterminal, which says it on the console. A client whose
+            // libxkbcommon has no context drops every key, and draws all
+            // the same.
+            for key in ["o", "k", "ret"] {
+                super::boot::press(&mut qmp, &[key])?;
+            }
+            let _ = watching.read_more(Instant::now() + FOOT_PATIENCE, |lines| {
+                lines.iter().any(|line| line.contains(FOOT_TYPED))
+            })?;
             let _ = watching.read_more(Instant::now() + Duration::from_secs(2), |_| false)?;
             said = watching
                 .lines()
@@ -201,6 +234,13 @@ pub(crate) fn test_foot(args: &Args) -> Result<()> {
         };
         let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
         judge_foot(arch, &said, best.as_ref(), &dump)?;
+        if !said.iter().any(|line| line.contains(FOOT_TYPED)) {
+            return Err(Error::new(format!(
+                "{arch}: foot drew, but the keys pressed never reached its program: \
+                 no `{FOOT_TYPED}` on the console"
+            )));
+        }
+        println!("  {arch}: the keys typed into foot reached its program: `{FOOT_TYPED}`");
     }
     Ok(())
 }
