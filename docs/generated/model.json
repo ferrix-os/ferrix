@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "6ddcb8611302bc1596d417cf92c5d86ac22edee7ad1309e326ee8b2a42621ecf",
+  "digest": "91d5032132195aa3629bc889ba6c47eabce49fdd1483c26d66e90a87a872879d",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -2173,7 +2173,7 @@
               "type": "UserProcess",
               "maturity": "implemented",
               "stage": 15,
-              "doc": "/sbin/init (src/user/system/linux/init/, docs/INIT.md), since 2026-09-26: pid 1 around src/lib/init/svc's manager. It mounts /run and cgroup2, runs each service in a cgroup of its own from clone3, reaps, restarts, gives the console a getty and a shell with a session of its own, and powers off. /bin/svc drives it over /run/ferrix/control; it waits for notify readiness, starts services on a socket's first connection, and applies MemoryMax=, TasksMax= and OOMPolicy= over the scoped OOM kill. It gives services bootstrap channels, starts native ones in their cgroup's job, and routes the directory's OPENs. It is pid 1 of cargo xtask run and of every desktop image, where the compositor is hyprix.service and each program it starts is in a scope of its own (L10). devmgr restarts drivers by its restart policy (L11), and on an image booted with ferrix.devmgr=init pid 1 starts devmgr itself, through the kernel's starter (L12, 2026-09-27). L13a (2026-10-04): NoNewPrivileges=, PrivateTmp= and ProtectSystem= in a mount namespace per service; L13b PrivateNetwork= and L13c SystemCallFilter= wait for network namespaces and seccomp's S3.",
+              "doc": "/sbin/init (src/user/system/linux/init/, docs/INIT.md), since 2026-09-26: pid 1 around src/lib/init/svc's manager. It mounts /run and cgroup2, runs each service in a cgroup of its own from clone3, reaps, restarts, gives the console a getty and a shell with a session of its own, and powers off. /bin/svc drives it over /run/ferrix/control; it waits for notify readiness, starts services on a socket's first connection, and applies MemoryMax=, TasksMax= and OOMPolicy= over the scoped OOM kill. It gives services bootstrap channels, starts native ones in their cgroup's job, and routes the directory's OPENs. It is pid 1 of cargo xtask run and of every desktop image, where the compositor is hyprix.service and each program it starts is in a scope of its own (L10). devmgr restarts drivers by its restart policy (L11), and on an image booted with ferrix.devmgr=init pid 1 starts devmgr itself, through the kernel's starter (L12, 2026-09-27). L13a (2026-10-04): NoNewPrivileges=, PrivateTmp= and ProtectSystem= in a mount namespace per service; L13b PrivateNetwork=, a network namespace with lo up; L13c SystemCallFilter= waits for seccomp's S3.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
                 "line": 377

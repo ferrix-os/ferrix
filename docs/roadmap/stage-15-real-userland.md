@@ -165,13 +165,15 @@ mount namespace, gated by `test-init`'s sandboxing stage on all three
 architectures, with four negative controls fired. Init is outside the
 certified item.
 
-**Still to do for the init: L13b and L13c (2026-10-04, on branches).** L13b,
-`PrivateNetwork=`, is `l13b` fac927209 (a local x86-64 `test-init` and two
-controls). L13c, `SystemCallFilter=` with `SystemCallErrorNumber=` and
-`SystemCallArchitectures=`, is `l13c` 91045526a on S3 (a local x86-64
-`test-init`; its controls are not run). Until they land, a unit asking for
-either is refused with the reason. Next: rebase and batch `l13b`, then run
-L13c's controls and batch it after S3.
+**Built for the init (2026-10-05, branch `l13b` on `main`): L13b**,
+`PrivateNetwork=`, a network namespace with only `lo`, up (`docs/INIT.md`
+§4.5), gated by `test-init`'s sandboxing stage.
+
+**Still to do for the init: L13c (2026-10-04, on a branch).**
+`SystemCallFilter=` with `SystemCallErrorNumber=` and
+`SystemCallArchitectures=` is `l13c` 91045526a (a local x86-64 `test-init`;
+its controls are not run). Until it lands, a unit asking for it is refused
+with the reason. Next: rebase it on `l13b`, run its controls and batch it.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with

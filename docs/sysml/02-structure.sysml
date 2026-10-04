@@ -394,8 +394,8 @@ package FerrixStructure {
                  * itself, through the kernel's starter (L12, 2026-09-27).
                  * L13a (2026-10-04): NoNewPrivileges=, PrivateTmp= and
                  * ProtectSystem= in a mount namespace per service; L13b
-                 * PrivateNetwork= and L13c SystemCallFilter= wait for
-                 * network namespaces and seccomp's S3. */
+                 * PrivateNetwork=, a network namespace with lo up; L13c
+                 * SystemCallFilter= waits for seccomp's S3. */
         }
         #implemented part shell : UserProcess {
             doc /* busybox sh was the first foreign binary to run on Ferrix:
