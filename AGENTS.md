@@ -87,7 +87,9 @@ lock, unblocking, pushes), plus the calls the customer has delegated to it.
   branches could join, and is any branch running its full row alone that a
   batch would have carried?
 * *Red on `main`*: is any gate failing on `main` itself? A working `main`
-  comes before every other row.
+  comes before every other row. When one is, find the landing that broke it
+  and give its fix to the session that landed it (*A red `main` goes back to
+  whoever broke it*, below).
 * Push `main` to `origin` when `origin/main..main` is not empty: fast-forward
   only, never forced, never with `--no-verify` (customer, 2026-09-27). Before
   pushing, `git fetch origin`, because the customer merges pull requests on
@@ -164,6 +166,33 @@ branches (customer, 2026-10-04):
   `test-compositor`, ...) goes in `--gate FILE`, never dropped. The batch
   checks no less than the row each entry would have run alone.
 
+### A red `main` goes back to whoever broke it
+
+When a gate fails on `main`, the product owner finds the landing that made
+it red and gives the fix to the session that landed it, ahead of
+everything else that session owns:
+
+1. **Find the commit.** Take the last commit of `main` the failing gate
+   passed on (`logs/queue/INDEX`, the lander's post-landing boot) and the
+   first it failed on. Between them, run that gate alone on each landing's
+   commit through `gate.sh run`, all at once while they fit the slots, as a
+   batch finds its failing entry. Keep the logs; a failure that does not
+   repeat is a flake with a row of its own, not a culprit.
+2. **Find the session.** The fleet's landing log
+   (`~/.local/share/ferrix/fleet/log`) names who held the lock when that
+   commit landed (`TAKEN by <session>`). Session names change on restart,
+   so match the branch and the commit to the transcript before writing to
+   anyone; `ListAgents` only when the log and the transcripts don't say.
+3. **Assign it, first.** The fix becomes that session's top row in
+   `docs/BACKLOG.md`, above its other work, with the failing gate, the
+   commit and the log. Tell the session in one message: what fails, since
+   which commit, the log, and that nothing else of its lands until `main`
+   is green. A session that is gone hands its fix to the area's owner, and
+   the product owner says so in the row.
+4. **Hold the fleet's landings.** Until the fix lands, the product owner
+   lands only the fix and changes the failure cannot touch. Reverting the
+   landing instead of fixing it forward is the customer's call.
+
 ### Consulting on build and test time
 
 Test run time is a customer priority (2026-09-27, `docs/TEST-TIME.md`), and
@@ -193,6 +222,12 @@ What it looks for:
   change does not touch (the gate stands, `docs/CONVENTIONS.md`, splitting
   rule 3), the same gate run twice on the same tree, or the image row run
   for a change the table gives a narrower row (`cargo xtask gate-rows`).
+  The product owner **declines** these, not only advises against them: a
+  Markdown edit that asks for the full row again, or a rebuild of a tree no
+  build input changed in, is refused with the row it owes instead (for
+  `docs/` alone, `cargo xtask check`). A session that thinks the change
+  reaches further names the path the narrower row misses; if it does, the
+  wider row runs and `gate-rows` gets a row for the gap.
 * **Time that is waiting, not running.** `pool-summary`'s `waited=` against
   `ran=`: a long wait is fixed by fewer runs, not faster ones.
 
