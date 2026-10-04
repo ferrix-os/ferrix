@@ -121,9 +121,6 @@ const PLAN_TIMEOUT: u64 = 6 * 3600;
 /// Where the plan is on the volume.
 const PLAN: &str = "/data/plan";
 
-/// The workspaces beside the root one whose crates a build may compile.
-const WORKSPACES: &[&str] = &["compositor", "zinc", "threads-test", "ferrousli"];
-
 /// Guest memory unless `--memory` says otherwise. btrfs file pages stay in
 /// memory once read or written, and the build reads the toolchain's 350 MiB
 /// of libraries and writes about 1.3 GiB.
@@ -324,7 +321,7 @@ fn stage(tree: &Path, work: &Path, plan: Option<&Path>) -> Result<PathBuf> {
     cargo::run(command, "copying the toolchain tree")?;
     let copied = copy_sources(&stage.join("src"))?;
     println!("  {copied} tracked files in src/");
-    let config = vendor(&stage.join("vendor"), plan.is_some())?;
+    let config = vendor(&stage.join("vendor"), plan)?;
     std::fs::create_dir_all(stage.join("cargo-home"))?;
     std::fs::write(stage.join("cargo-home/config.toml"), config)?;
     std::fs::create_dir_all(stage.join("home"))?;
@@ -435,20 +432,18 @@ fn link(_target: &Path, to: &Path) -> Result<()> {
 
 /// `cargo vendor` the workspace's crates.io dependencies into `into`, from
 /// Cargo's own cache: no network here either, and return the Cargo
-/// configuration the guest uses them with. With `every`, the crates of the
-/// [`WORKSPACES`] beside it too, and of the uutils projects a plan's builds
-/// compile, which are the ones `cargo xtask uutils` unpacked last.
-fn vendor(into: &Path, every: bool) -> Result<String> {
+/// configuration the guest uses them with. With a plan, the crates of every
+/// workspace its builds run in too ([`plan_manifests`]), and of the uutils
+/// projects its builds compile, which are the ones `cargo xtask uutils`
+/// unpacked last.
+fn vendor(into: &Path, plan: Option<&Path>) -> Result<String> {
     let root = paths::workspace_root();
     let mut command = Command::new(cargo::cargo());
     let _ = command
         .current_dir(&root)
         .args(["vendor", "--locked", "--offline"]);
-    if every {
-        let mut manifests: Vec<PathBuf> = WORKSPACES
-            .iter()
-            .map(|workspace| root.join(workspace).join("Cargo.toml"))
-            .collect();
+    if let Some(plan) = plan {
+        let mut manifests = plan_manifests(&plan.join("plan"), &root)?;
         manifests.extend(script_manifests());
         for manifest in manifests {
             let _ = command.arg("--sync").arg(manifest);
@@ -473,6 +468,28 @@ fn vendor(into: &Path, every: bool) -> Result<String> {
     let printed =
         String::from_utf8_lossy(&output.stdout).replace(&into.display().to_string(), VENDOR);
     Ok(printed + OFFLINE)
+}
+
+/// The manifest of each directory of the tree a build in `plan` runs in that
+/// has one, other than the root's: the workspaces beside the root one, read
+/// off the plan rather than listed here, since the tree moves them.
+fn plan_manifests(plan: &Path, root: &Path) -> Result<Vec<PathBuf>> {
+    let text = std::fs::read_to_string(plan)
+        .map_err(|error| Error::new(format!("reading {}: {error}", plan.display())))?;
+    Ok(manifests_in(&text, root))
+}
+
+/// [`plan_manifests`] of a plan's text.
+fn manifests_in(text: &str, root: &Path) -> Vec<PathBuf> {
+    let mut manifests: Vec<PathBuf> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("dir ${ROOT}/"))
+        .map(|dir| root.join(dir).join("Cargo.toml"))
+        .filter(|manifest| manifest.is_file())
+        .collect();
+    manifests.sort();
+    manifests.dedup();
+    manifests
 }
 
 /// The manifest of every Rust project a script build compiles -- each uutils
@@ -711,6 +728,17 @@ mod tests {
         // `main.rs`'s `build` prints "built <image>", and the image is
         // `paths::build_dir`'s `ferrix.img` under the guest's source.
         assert_eq!(BUILT, format!("built {SOURCE}/build/x86_64/ferrix.img"));
+    }
+
+    #[test]
+    fn a_plans_workspaces_are_the_directories_its_builds_run_in_that_have_a_manifest() {
+        let root = paths::workspace_root();
+        let plan = "build 1\ndir ${ROOT}\nend\nbuild 2\ndir ${ROOT}/src/user/system/linux/zinc\nend\n\
+                    build 3\ndir ${ROOT}/src/user/system/linux/zinc\nend\nbuild 4\ndir ${ROOT}/docs\nend\n";
+        assert_eq!(
+            manifests_in(plan, &root),
+            vec![root.join("src/user/system/linux/zinc/Cargo.toml")]
+        );
     }
 
     #[test]
