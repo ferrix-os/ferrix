@@ -172,6 +172,17 @@ pub(crate) trait Filler: Send + Sync + fmt::Debug {
     /// The filesystem's: `EIO` for a page it could not read, `ENOMEM` for
     /// frames.
     fn fill(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
+
+    /// Fill page `index` of `vmo` alone, if the file has it and `vmo` lacks
+    /// it: no run after it. For a write the kernel makes itself into one page
+    /// it knows is the only one wanted, as the loader's zeroing of a
+    /// segment's `.bss` tail, where a read-ahead would read pages of the
+    /// program that nothing touches.
+    ///
+    /// # Errors
+    ///
+    /// As [`Filler::fill`].
+    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
 }
 
 /// A pageable memory object.
@@ -448,6 +459,19 @@ impl Vmo {
     pub(crate) fn fill_for_fault(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
         match &self.filler {
             Some(filler) => filler.fill(self, index),
+            None => Ok(()),
+        }
+    }
+
+    /// [`Vmo::fill_for_fault`] for page `index` alone, with no read-ahead
+    /// ([`Filler::fill_one`]). Must be called with no lock held.
+    ///
+    /// # Errors
+    ///
+    /// As [`Filler::fill_one`].
+    pub(crate) fn fill_one_page(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
+        match &self.filler {
+            Some(filler) => filler.fill_one(self, index),
             None => Ok(()),
         }
     }

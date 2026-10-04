@@ -222,6 +222,15 @@ impl Filler for Fill {
         let last = index.saturating_add(MAX_FILL_RUN as u64 - 1);
         self.fill_run(vmo, index, self.run(vmo, index, last))
     }
+
+    /// The one page, and no run after it.
+    fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<()> {
+        if !self.wants_fill(vmo, index) {
+            super::seam::served(1);
+            return Ok(());
+        }
+        self.fill_run(vmo, index, 1)
+    }
 }
 
 impl Fill {

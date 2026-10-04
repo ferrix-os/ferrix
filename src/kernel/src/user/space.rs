@@ -1131,6 +1131,26 @@ impl AddressSpace {
     /// [`SpaceError::Unreadable`] for a page the filesystem could not read,
     /// and [`SpaceError::OutOfMemory`] for frames to read it into.
     fn fill_file_page(&self, address: u64) -> Result<(), SpaceError> {
+        self.fill_file_pages(address, false)
+    }
+
+    /// [`AddressSpace::fill_file_page`] for the page at `address` alone, with
+    /// no read-ahead after it: for the loader, which writes zeros into a
+    /// writable segment's last file page itself, and must read that page of
+    /// the program and no other (`syscall/load.rs`, `zero_tails`). The write's
+    /// own fault then finds the page in the file's object and reads nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::fill_file_page`].
+    pub(crate) fn fill_file_page_alone(&self, address: u64) -> Result<(), SpaceError> {
+        self.fill_file_pages(address, true)
+    }
+
+    /// The body of [`AddressSpace::fill_file_page`] and
+    /// [`AddressSpace::fill_file_page_alone`]: `alone` asks the file for the
+    /// one page, without the read-ahead a fault's fill does.
+    fn fill_file_pages(&self, address: u64, alone: bool) -> Result<(), SpaceError> {
         let (vmo, index) = {
             let inner = self.inner.lock();
             let Some(region) = inner.map.find(address) else {
@@ -1145,7 +1165,12 @@ impl AddressSpace {
             };
             (vmo, offset.saturating_add(into_region) / PAGE_SIZE)
         };
-        match vmo.fill_for_fault(index) {
+        let filled = if alone {
+            vmo.fill_one_page(index)
+        } else {
+            vmo.fill_for_fault(index)
+        };
+        match filled {
             Ok(()) => Ok(()),
             Err(ferrix_vfs::Errno::ENOMEM) => Err(SpaceError::OutOfMemory),
             Err(_) => Err(SpaceError::Unreadable(address)),
