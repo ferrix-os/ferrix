@@ -3,7 +3,8 @@
 //! and `execve`.
 //!
 //! The child's order is the design's. First, while it is still root and
-//! before anything drops a privilege, [`enter`]: a mount namespace of its
+//! before anything drops a privilege, [`enter`]: for `PrivateNetwork=` a
+//! network namespace of its own with `lo` up, then a mount namespace of its
 //! own, its mounts made slaves, a fresh tmpfs on `/tmp` and `/var/tmp` for
 //! `PrivateTmp=`, and every place `ProtectSystem=` names remounted
 //! read-only. Then the child changes directory and user as before. Last,
@@ -14,9 +15,9 @@
 //!
 //! Everything that needs a decision or an allocation is in [`plan`], in the
 //! parent, where a failure is the unit's `SpawnFailed` with a line saying
-//! why. That includes the two keys whose kernel half is not on `main` yet:
-//! `PrivateNetwork=` and `SystemCallFilter=` refuse to start the unit, with
-//! the reason, rather than run it without what it asked for.
+//! why. That includes the key whose kernel half is not on `main` yet:
+//! `SystemCallFilter=` refuses to start the unit, with the reason, rather
+//! than run it without what it asked for.
 
 use std::ffi::CString;
 use std::fs;
@@ -53,7 +54,9 @@ struct ReadOnly {
 /// A [`Sandbox`] worked out for the child, which allocates nothing.
 #[derive(Debug, Default)]
 pub(crate) struct Plan {
-    /// `unshare(CLONE_NEWNS)` first.
+    /// `unshare(CLONE_NEWNET)` and `lo` up, first of all.
+    network: bool,
+    /// `unshare(CLONE_NEWNS)`.
     mount_namespace: bool,
     /// Directories to make (if missing) before the tmpfs mounts.
     make: Vec<CString>,
@@ -77,14 +80,6 @@ pub(crate) fn plan(sandbox: &Sandbox) -> Result<Option<Plan>, Unprepared> {
     if sandbox.is_empty() {
         return Ok(None);
     }
-    if sandbox.private_network {
-        return Err(Unprepared {
-            errno: libc::EOPNOTSUPP,
-            why: "PrivateNetwork= needs network namespaces, which this kernel does not have \
-                  yet; refusing to start the unit without it"
-                .to_owned(),
-        });
-    }
     if sandbox.system_call_filter.is_some() {
         return Err(Unprepared {
             errno: libc::EOPNOTSUPP,
@@ -94,7 +89,10 @@ pub(crate) fn plan(sandbox: &Sandbox) -> Result<Option<Plan>, Unprepared> {
         });
     }
     let mut plan = Plan {
-        mount_namespace: sandbox.needs_mount_namespace(),
+        network: sandbox.private_network,
+        // `PrivateNetwork=` implies a mount namespace, as systemd's
+        // `PrivateMounts=` does for it.
+        mount_namespace: sandbox.needs_mount_namespace() || sandbox.private_network,
         no_new_privileges: sandbox.no_new_privileges,
         ..Plan::default()
     };
@@ -261,6 +259,10 @@ fn read_only(
 /// The child's first sandboxing step, while it is still root: the mount
 /// namespace and everything in it. Allocates nothing.
 pub(crate) fn enter(plan: &Plan) -> io::Result<()> {
+    if plan.network {
+        sys::unshare(libc::CLONE_NEWNET)?;
+        sys::loopback_up()?;
+    }
     if !plan.mount_namespace {
         return Ok(());
     }
@@ -389,13 +391,18 @@ mod tests {
     }
 
     #[test]
-    fn the_two_keys_without_a_kernel_half_refuse_by_name() {
+    fn private_network_plans_both_namespaces() {
         let network = Sandbox {
             private_network: true,
             ..Sandbox::default()
         };
-        let refused = plan(&network).err().map(|why| why.why).unwrap_or_default();
-        assert!(refused.starts_with("PrivateNetwork= needs network namespaces"));
+        let planned = plan(&network).ok().flatten().unwrap_or_default();
+        assert!(planned.network && planned.mount_namespace);
+        assert!(planned.read_only.is_empty() && planned.tmpfs.is_empty());
+    }
+
+    #[test]
+    fn a_filter_without_its_kernel_half_refuses_by_name() {
         let filter = Sandbox {
             system_call_filter: Some(ferrix_svc::kind::SystemCallFilter::default()),
             ..Sandbox::default()
