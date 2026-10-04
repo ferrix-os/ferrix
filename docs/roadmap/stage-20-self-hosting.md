@@ -134,10 +134,9 @@ Done, on `main`:
   the volume a build left (above).
 * 7f002affe: `L.init.1-4` and `H.BOOT.15` reserved for the init change
   below.
-
-On branch `selfhost-matrix` (pushed e8b57ed4f, 17 commits on `main`
-528cea144, handover `docs/handover/2026-10-04-stage20-selfhost.md` there),
-not landed:
+* The change below, branch `selfhost-matrix`, rebased onto `main` and
+  landed with its tip 77783565a (handover
+  `docs/handover/2026-10-04-stage20-selfhost.md`):
 
 * **One kernel for every test.** A test's init program, `sh -c` script and
   command list go in the image's initramfs under `.ferrix/init/` instead of
@@ -157,25 +156,26 @@ not landed:
 * **Passed:** the host tests, kernel clippy on three targets, traceability,
   the item boundary, coverage carried; test-boot, test-init, test-shell and
   test-vfs on x86-64 by hand; 9 of the 14 negative controls on 5e2eca4b2.
-
-Still to do, in order:
-
-* **CI's self-hosting job green again.** "rustc on Ferrix, and Ferrix built
-  on Ferrix" has been red on `main` since the components moved to
+* cb872a732, **CI's self-hosting job's fix.** "rustc on Ferrix, and Ferrix
+  built on Ferrix" had been red on `main` since the components moved to
   repositories of their own (2263225e1, 2026-10-03): the volume carried only
   what git tracks in this checkout, where the component checkouts are
   ignored now, and the guest's `cargo xtask build` tried to clone them with
-  no network. Branch `selfhost-components` (1fcbe409e, unlanded) copies each
-  component checkout's tracked files onto the volume and has xtask clone
-  components only in a git checkout; `test-selfhost --accel kvm` passes with
-  it. Owed: one full batch run, then CI's next run on `main`.
-* **Land the branch.** `cargo xtask check` on its head; the 14 controls of
+  no network. The volume now carries each component checkout's tracked
+  files, and xtask brings components in only in a tree that is a git
+  checkout.
+
+Still to do, in order:
+
+* **CI's next run on `main`** shows whether the self-hosting job is green;
+  the local `test-selfhost --accel kvm` passed on the fix.
+* **The landing's open conditions.** The 14 controls of
   `~/.local/share/ferrix/logs/linit-controls.md` again on the landing hash
   (5e2eca4b2 failed `cargo fmt --check`, fixed in 0eda22d00; `test-init`
-  needs `sshdt` built in its gate slot); then a batch (`batch.sh join` with
-  `~/.local/share/ferrix/selfhost-matrix/batch-gate.txt`), and the product
-  owner lands it once every control fired and the four boots' transcripts
-  equal `main`'s apart from the `inputs` line and the sizes.
+  needs `sshdt` built in its gate slot) and the one-line report that the
+  four boots' transcripts equal `main`'s apart from the `inputs` line and
+  the sizes; check the product owner's record for whether they were met
+  before the landing.
 * **Plan mode made complete.** It stops a row at its first boot and misses
   23 of 153 distinct builds, the ones a test makes after a boot (negative
   variants, later boots' programs); those tests are to build every variant
