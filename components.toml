@@ -24,7 +24,7 @@ commit = "a7eb7a99c34d983dff189d131c0d514fb2666645"
 [pixel7]
 path = "tools/vendor/google/pixel7"
 repo = "https://github.com/ferrix-os/pixel7"
-commit = "d080ac0db235dae562c0973e1593c7b0eb68c283"
+commit = "4cd45a66a5848ba4daa404f38bf0dad4b1b622a8"
 
 # The website, served at https://ferrix-os.github.io/.
 [website]
