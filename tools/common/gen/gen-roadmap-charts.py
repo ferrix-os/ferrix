@@ -68,6 +68,11 @@ REMAINING = [
     ("Stage 22, the rest (guess)", 23, ""),
     ("NVIDIA N2 to N4", 64, "added, unlanded"),
     ("NVIDIA N5, CUDA", 52, "added"),
+    # Sized 2026-10-04 evening, by three sizing agents; ranges 40-75, 30-50
+    # and 130-210. Most milestones are guesses.
+    ("Stage 20, self-hosting", 50, "added"),
+    ("Pixel 7, the USB driver's rest", 37, "added"),
+    ("Certification findings, in-repository work", 165, "added"),
 ]
 # The queue's order (customer, 2026-10-04): built rows first, those that only
 # need landing ("unlanded"), then every other sized row, smallest points first
@@ -119,12 +124,14 @@ DONE = [
 ACTIVE = [
     ("Stage 19, the rest", D(2026, 9, 17),
      ["Client pages as texture backing", "Second pass and xray"]),
-    ("Stage 20, self-hosting", D(2026, 9, 22), None),
+    ("Stage 20, self-hosting", D(2026, 9, 22), ["Stage 20, self-hosting"]),
     ("Stage 13: the controllers (S3 landed)", D(2026, 9, 23),
      ["Stage 13, the controllers' rest"]),
     ("Gears (50 of 71)", D(2026, 9, 24), ["GC400, the rest"]),
-    ("Certification findings", D(2026, 9, 25), None),
-    ("Pixel 7: the USB driver", D(2026, 9, 26), None),
+    ("Certification findings", D(2026, 9, 25),
+     ["Certification findings, in-repository work"]),
+    ("Pixel 7: USB beyond the console driver", D(2026, 9, 26),
+     ["Pixel 7, the USB driver's rest"]),
     ("Steam: the game step", D(2026, 9, 30),
      ["Stage 22, bubblewrap's rest", "Stage 22, the rest (guess)"]),
     ("NVIDIA N2 to N6, unlanded", D(2026, 10, 3), ["NVIDIA N2 to N4"]),
@@ -302,14 +309,14 @@ def gantt():
     rows = len(DONE) + len(ACTIVE) + len(forecast)
     row_h, sec_h = 22, 30
     w = 1040
-    left, right = 310, w - 60
+    left, right = 310, w - 140
     top = 82
     h = top + rows * row_h + 3 * sec_h + 50
     svg = Svg(w, h, "Ferrix Gantt")
     svg.text(24, 28, "Ferrix: done, in progress, and a forecast", size=16,
              weight="bold")
-    svg.text(24, 46, f"The forecast is one queue at {FORECAST_RATE} points a day in "
-             "the status table's order: the size of the work, not a plan; "
+    svg.text(24, 46, f"The forecast is one queue at {FORECAST_RATE} points a day, "
+             "built rows first, then shortest first: the size of the work, not a plan; "
              "hollow rows have no session on them",
              fill=MUTED)
     svg.text(24, 60, "In progress: solid is done; the faint bar is the wait for the queue "
