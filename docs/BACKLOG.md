@@ -27,7 +27,7 @@ These add to `docs/CONVENTIONS.md`, which still governs commits.
 
 | The change touches | Gate |
 |---|---|
-| Only `docs/` | `cargo xtask check` |
+| Only documentation: `docs/`, top-level Markdown, the skills and agent definitions under `.claude/` (Markdown nothing compiles), and the generators that write documents alone (`tools/common/gen/gen-roadmap-charts.py`, `gen-arch-doc.py`, `split-roadmap.py`, `build-roadmap-book.sh`) | `cargo xtask check-docs` only: the commit hooks, the audits and the generated-document checks, no cargo step (customer, 2026-10-04); it runs on any host, the Windows PC included. A generator that writes code or test data (`gen-xkb-tables.py`, `gen-wayland-protocol.py`, `gen-font.py`, `gen-btrfs-fixtures.py`, the fuzz-corpus seeds) keeps the row of what it writes |
 | Only `src/user/system/linux/ferrousli/` | `cargo xtask check --ferrousli`, then `cargo xtask busybox` and, with the busybox it built, `test-shell` and `test-vfs` on x86_64 with `--init ferrousli`, so the binary the gates run never lags the library; then `cargo xtask uutils`, which links uutils/coreutils against it and is the larger consumer of the two, since it brings Rust's whole `std` with it; a change to `src/user/system/linux/ferrousli/tools/ports/` also runs `cargo xtask build-apps` for the ported apps it touches (curl and git on every architecture) and `test-net --arch x86_64 --init ferrousli`, which fetches with the curl it built, then `test-net --arch all` with the static busybox, which fetches and clones with them |
 | Only `src/user/system/linux/zinc/` | `cargo xtask check --fast --zinc`: zinc's formatting, clippy, unit tests and the two pty tests (`src/user/system/linux/zinc/tests/pty_completion.py`, `src/user/system/linux/zinc/tests/pty_jobs.py`); a change to what zinc does at boot also runs `test-boot` on x86_64, and a change to how it starts, waits for or signals a process also runs `test-shell --arch all` and `test-jobs`, which is the only gate that types at a console |
 | Only `src/user/system/linux/init/`, or `src/lib/init/svc` | `cargo xtask check`, which runs `src/user/system/linux/init/`'s formatting, clippy and tests by default and `src/lib/init/svc`'s with the host's, then `cargo xtask test-init --arch all`, which boots `/sbin/init` as pid 1 and types at the shell its getty gives |
@@ -821,6 +821,15 @@ redrawn from it.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-04 (customer)** **A docs-only change runs `check-docs`, not
+  `check`.** A change that touches only `docs/`, top-level Markdown, the
+  skills and agent definitions under `.claude/`, or the generators that write documents alone (`gen-roadmap-charts.py`,
+  `gen-arch-doc.py`, `split-roadmap.py`, `build-roadmap-book.sh`) owes
+  `cargo xtask check-docs` and nothing more, to save the 3.5 to 9 minutes of
+  a full `check` (*What a landing runs*). It needs no gate host. Owed:
+  `cargo xtask gate-rows` (`tools/common/xtask/src/gate_rows.rs`, `is_docs`)
+  still counts those four generators as code; teaching it is an xtask change
+  with its own row.
 * **2026-10-04 (customer)** **The roadmap's queue is built first, then
   shortest.** The Gantt's forecast queue orders the sized rows that are built
   and only need landing first, smallest first, then every other sized row,

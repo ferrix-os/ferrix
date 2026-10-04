@@ -182,7 +182,8 @@ What it looks for:
   The product owner **declines** these, not only advises against them: a
   Markdown edit that asks for the full row again, or a rebuild of a tree no
   build input changed in, is refused with the row it owes instead (for
-  `docs/` alone, `cargo xtask check`). A session that thinks the change
+  documentation alone, `cargo xtask check-docs`, customer 2026-10-04; *What
+  a landing runs* says what counts). A session that thinks the change
   reaches further names the path the narrower row misses; if it does, the
   wider row runs and `gate-rows` gets a row for the gap.
 * **Time that is waiting, not running.** `pool-summary`'s `waited=` against
