@@ -158,18 +158,6 @@ name = "compositor-fan"
 version = "0.1.0"
 
 [[package]]
-name = "compositor-fuzzel"
-version = "0.1.0"
-dependencies = [
- "compositor-image",
- "compositor-layout",
- "compositor-render",
- "compositor-text",
- "compositor-toolkit",
- "compositor-xkb",
-]
-
-[[package]]
 name = "compositor-hyprlang"
 version = "0.1.0"
 

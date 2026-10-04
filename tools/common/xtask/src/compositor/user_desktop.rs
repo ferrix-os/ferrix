@@ -15,7 +15,7 @@ use super::boot::{
 };
 use super::desktop::{desktop_auth, desktop_programs, with_chrome};
 use super::run::everything_config;
-use super::{Carried, EITHER, MARKER, Programs, SETTLE, build};
+use super::{Carried, EITHER, MARKER, Programs, SETTLE};
 use crate::args::Args;
 use crate::display::{DEVICE_ID, Qmp, free_port};
 use crate::paths::{self, Arch};
@@ -30,12 +30,12 @@ use crate::{Error, Result};
 /// `zwp_virtual_keyboard_v1`, with the test pattern ranked first and
 /// selected; and after `vkbd` has pressed Return, fuzzel gone and the
 /// pattern's window it started tiled alone. The first two are the pictures
-/// `src/user/system/linux/compositor/fuzzel`'s own host test makes of the same frames -- fuzzel's
+/// the fuzzel app's own host test makes of the same frames -- fuzzel's
 /// drawing composited by `src/user/system/linux/compositor/render` as the compositor composites a
 /// layer surface -- so a launcher that drew one pixel differently on Ferrix
 /// fails here.
 pub(super) fn test_fuzzel(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
-    let fuzzel = build(arch, "compositor-fuzzel", "fuzzel")?;
+    let fuzzel = crate::apps::program(arch, "fuzzel", "fuzzel")?;
     let carried = Carried {
         ports: crate::fuzzel::boot_files(&fuzzel)?,
         ..Carried::none()
@@ -132,7 +132,7 @@ fn fuzzel_user_setup(arch: Arch) -> Result<Option<(String, Carried, String)>> {
         println!("  {arch}: {} binds no #!/bin/sh launcher; the boot is skipped", conf.display());
         return Ok(None);
     };
-    let fuzzel = build(arch, "compositor-fuzzel", "fuzzel")?;
+    let fuzzel = crate::apps::program(arch, "fuzzel", "fuzzel")?;
     let bytes = std::fs::read(&fuzzel)
         .map_err(|error| Error::new(format!("reading {}: {error}", fuzzel.display())))?;
     let mut ports = dotfiles;

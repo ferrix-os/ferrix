@@ -21,16 +21,13 @@ use crate::{Error, Result};
 /// `exec-once = waybar` and `bind = …, exec, hyprlock` find it. One line a
 /// program, added by its stream when it lands. A judged boot carries none,
 /// so its archive stays the bytes it was.
-const DESKTOP_CLIENTS: &[(&str, &str)] = &[
-    ("compositor-waybar", "waybar"),
-    ("compositor-fuzzel", "fuzzel"),
-];
+const DESKTOP_CLIENTS: &[(&str, &str)] = &[("compositor-waybar", "waybar")];
 
 /// The desktop's clients that are apps (ferrix-os/apps), as `(app,
 /// binary)`: built from the app's folder and carried at `/bin/<binary>`
 /// unless an installed app has put that file there already, so a desktop
 /// has them with `--no-apps` too, and one installed app is one copy.
-const DESKTOP_APPS: &[(&str, &str)] = &[("hyprlock", "hyprlock")];
+const DESKTOP_APPS: &[(&str, &str)] = &[("hyprlock", "hyprlock"), ("fuzzel", "fuzzel")];
 
 /// Where `run-compositor` puts the wallpaper it carries.
 const WALLPAPER_PATH: &str = "etc/wallpaper.fxwall";

@@ -350,7 +350,7 @@ on the host with GTK before blessing a golden image.
 
 ## 4. fuzzel
 
-`src/user/system/linux/compositor/fuzzel`, `/bin/fuzzel`: a port of fuzzel 1.12
+The fuzzel app (ferrix-os/apps), `/bin/fuzzel`: a port of fuzzel 1.12
 (codeberg.org/dnkl/fuzzel, read from a shallow clone in
 `~/.local/share/ferrix/clients-ref/fuzzel`). Each module names the part of
 fuzzel's source it follows: `config` is `config.c`, with every option and its
