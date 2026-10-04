@@ -1783,13 +1783,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        254,
-        "the x86-64 table maps 254 calls"
+        255,
+        "the x86-64 table maps 255 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        222,
-        "the AArch64 table maps 222 calls"
+        223,
+        "the AArch64 table maps 223 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -2298,7 +2298,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 272, "the ARMv7-A table maps 272 calls");
+    assert_eq!(mapped_arm().len(), 273, "the ARMv7-A table maps 273 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
