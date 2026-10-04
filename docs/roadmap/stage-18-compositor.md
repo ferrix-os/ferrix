@@ -336,6 +336,19 @@ pixels, and exits by choice with no protocol error.
 each step of it; the record summarises the busiest frame rather than
 committing a picture of somebody else's font rendering.
 
+**Done — foot takes keys (2026-10-04, def906ba2).** foot drew, but typing
+into it did nothing: libxkbcommon's `xkb_context_new` fails when its default
+include directory is missing, and without a context foot has no keymap.
+Every compositor image now carries `usr/share/X11/xkb`. `cargo xtask
+test-foot` presses `o`, `k` and Return and requires the line to reach the
+program foot runs (`foot-typed: ok` on the console). That check runs only
+with the test's fix on branch `foot-shell` (3e5fd3c02, unlanded): the program is
+a `/bin/sh` script and the boot carried no shell, so it now carries zinc.
+On that branch the check passes, and with the xkb directory removed it
+fails with "the keys pressed never reached its program". Owed: one full
+batch run; the gate slots have no foot built, so the test's evidence comes
+from a session's own target until a slot builds it.
+
 **Done — `hyprctl`, driven by Hyprland's own client (2026-09-17).**
 `src/user/system/linux/compositor/ipc` is the request shape and the answers: the flags in front of
 a request, `[[BATCH]]`, and the JSON and readable forms of `version`,

@@ -220,6 +220,11 @@ recorded (271 builds, 188 once a test's init went into the initramfs and one
 kernel served every test), and that change, with the record-without-booting
 mode a weekly CI job needs, waits on branch `selfhost-matrix` (e8b57ed4f) for
 its negative controls and a batch.
+CI's self-hosting job has been
+red since the components split (2263225e1, 2026-10-03), because the guest
+tried to clone the component repositories with no network. The fix is
+branch `selfhost-components` (1fcbe409e), which passes `test-selfhost
+--accel kvm` and is owed one full batch run.
 
 Dynamic linking is done: Debian's glibc busybox runs on its own `ld-linux`,
 and on ferrousli's loader and `libc.so.6` in glibc's place, on all three
@@ -252,11 +257,11 @@ at logout is the customer's call.
 
 Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
-reclaim, freezing, `cpu.max`, `io`, namespaces and seccomp are left. Of
-the namespaces, Steam's user and mount ones are being built
-(`docs/NAMESPACES.md`): per-mount flags (N1, 2026-09-28), binds (N2) and
-mount namespaces with `pivot_root` (N3, both 2026-09-30) are in, and
-bubblewrap runs as root; user namespaces (N4) are next.
+mount, user, UTS, IPC, cgroup and pid namespaces, seccomp's checker and
+hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
+Seccomp filters (S3) are gated and reviewed and wait for one batch re-run;
+reclaim, freezing, `cpu.max`, `io`, time namespaces and S4 to S6 are on
+branches (`stage-13-handover.md`).
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
 headless and in a window on the compositor, on x86-64, and both on ferrousli's
@@ -307,7 +312,12 @@ Rust -- are all on `main`. waybar and fuzzel are on `main` (2026-09-27):
 SUPER+R runs their launcher script into fuzzel, and the clipboard is shared
 with the host's through xtask. hypridle is on `main` too (2026-09-26), its
 `idle` boots passing on x86-64 and AArch64. hyprlock is on `main` too
-(2026-10-03), its lock over `authd`.
+(2026-10-03), its lock over `authd`. Since 2026-10-04 they, and term, are
+apps in `ferrix-os/apps`, built by xtask from their folders (def906ba2), and
+foot takes keys: every compositor image carries libxkbcommon's
+`usr/share/X11/xkb`. `test-foot`'s check that a typed line reaches foot's
+program passes on branch `foot-shell` (3e5fd3c02), which is owed one full batch
+run before it lands.
 
 Stage 21 is bare metal with a card of Ferrix's own, and stage 22 is Steam,
 whose 32-bit x86 ABI is under way (`docs/I386.md`): I1 to I4 are on `main`

@@ -22,6 +22,7 @@ is **not met**. It needs cgctl and S3 on `main`, then `stage13-container` run.
 | The small namespaces (UTS, IPC, cgroup), nsfs and `setns` | 63f9f97e5, 8cfa36b00 |
 | Pid namespaces | a2af5061a, d3ffdc467 |
 | `L.trap.8` reserved for S4 | d229861b0 |
+| Network namespaces (2026-10-04) | 8afc45211..81f68f8ff, landed in 22384874f |
 
 ## Unfinished branches, where to take over
 
@@ -37,6 +38,16 @@ each chain; a later branch in a chain sits on the earlier one.
 | `stage13-cgctl` | 670b4c49a | `cgctl` | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller. Every gate row PASSED on 89c2f911a (INDEX `cs-*`, x86_64 under kvm and the release build included). Controls FIRED: io-charge, io-parent, io-throttle, io-root, io-limit, io-ended, cpu-throttle, reclaim-hole. | Run the 11 controls not run (cpu-kill, cpu-charge, cpu-rearm-write, cpu-rearm-move, freeze-park, freeze-sigcont, park-poll, reclaim-none, reclaim-sibling, reclaim-min, dentry-keep on armv7a); reclaim-sibling has never shown its own message. Update CGROUPS.md §14's control table. Have the consultant see the `cpu.max` bound widened from two fifths to two thirds of a processor. Delete its entry from `tools/common/data/requirement-reservations.json` in the commit carrying L.object.106-112, L.sched.3-4, H.QUOTA.10-12. Nazuna worktree `os-cg-wt` and side refs `os-cgctl/*` are kept for this. |
 
 ### seccomp (S3 lands first)
+
+**2026-10-04: resume S3 from `stage13-s3-on-netns` 0527dd365**, not from the
+rows below. It is S3 on main 22384874f with two fixes: the table sizes (255,
+223, 273) and the filters check listing its tasks. Its rows passed on
+6c539b276 (`l13s3f-*`), all 19 controls FIRED, consultant OK at ledger line
+336; k7, k13 and k17 FIRED on 0527dd365 (`l13s3n2-*`) and the rest carry
+(`~/.local/share/ferrix/logs/s3-range-diff.txt`). Owed: one batch re-run
+(`fleet/batch.sh join`, gate file `~/.local/share/ferrix/logs/l13-s3-gate.txt`)
+and the consultant's final OK. Handover: `~/.local/share/ferrix/l13-coord/HANDOVER.md`.
+The two rows below are history.
 
 | Branch | Tip | Worktree | State | To land it |
 |---|---|---|---|---|

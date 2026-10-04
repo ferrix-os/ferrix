@@ -160,6 +160,15 @@ not landed:
 
 Still to do, in order:
 
+* **CI's self-hosting job green again.** "rustc on Ferrix, and Ferrix built
+  on Ferrix" has been red on `main` since the components moved to
+  repositories of their own (2263225e1, 2026-10-03): the volume carried only
+  what git tracks in this checkout, where the component checkouts are
+  ignored now, and the guest's `cargo xtask build` tried to clone them with
+  no network. Branch `selfhost-components` (1fcbe409e, unlanded) copies each
+  component checkout's tracked files onto the volume and has xtask clone
+  components only in a git checkout; `test-selfhost --accel kvm` passes with
+  it. Owed: one full batch run, then CI's next run on `main`.
 * **Land the branch.** `cargo xtask check` on its head; the 14 controls of
   `~/.local/share/ferrix/logs/linit-controls.md` again on the landing hash
   (5e2eca4b2 failed `cargo fmt --check`, fixed in 0eda22d00; `test-init`

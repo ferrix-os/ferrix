@@ -246,14 +246,14 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 | Branch (origin) | What | State at the wind-down |
 |---|---|---|
 | `stage13-cgctl` 670b4c49a | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | every gate row PASSED on 89c2f911a (`cs-*`, kvm and release included); 8 of 18 controls FIRED, 11 not run; consultant: fixes accepted, but it has not seen the `cpu.max` bound widened to two thirds of a processor or the stale CGROUPS §14 control table |
-| `stage13-s3` d19606300, `stage13-s3-onmain` 8ce395f53 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions) | check and three boots PASSED on 6ec5b4081; controls k1-k5, k11-k15 FIRED; owed: k6-k10, k16-k19, `test-shell`, `test-vfs`, and the rows on the rebased hash. Cleared on that evidence |
+| `stage13-s3-on-netns` 0527dd365 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions), on main 22384874f | **2026-10-04:** every row PASSED on 6c539b276 (`l13s3f-*`: check, three boots, `test-threads`, `test-init`, `test-shell`, `test-vfs`) and all 19 controls FIRED; consultant OK (ledger line 336). Rebased onto netns: k7, k13, k17 FIRED on 0527dd365 (`l13s3n2-*`), the other 16 carry by range-diff. Batch 20261004T135748Z stopped at the wind-down undecided: every gate PASSED but `test-selfhost` (red on main) and `test-shell` (QEMU killed from outside); owed: one batch re-run, then the consultant's final OK. `stage13-s3`, `-onmain`, `-rebase` are history |
 | `stage13-s4` 9ad2c718e | `SECCOMP_RET_TRAP` | consultant: OK if five conditions; three written; controls t2-t7 and the rows owed; lands after S3 |
 | `stage13-s5` 298399f1e | `TSYNC` | consultant: OK if; a new thread fails closed (written); owed: a measured bound for the TSYNC ancestor walk, the rows, four controls |
 | `stage13-s6` 64e891f7e | `cargo xtask test-seccomp` (S6a) | passed on all four ABIs in a direct run; pool INDEX lines owed; Linux's `seccomp_bpf` selftest not done |
 | `stage13-fdinfo` 225eb2410 | `/proc` by `ptrace_may_access`, dumpable, `/proc/<pid>/fdinfo` (NP) | superseded on 2026-10-04 by `np-land` (403b05626, pushed), which lands it as AUTH's P2.1: rebased onto 22384874f, squashed into 1373cf7ca, `ns/net` brought under the rule; controls c02-c04, c06, c12 FIRED there; owes `check`, c01, c05, c07-c13 and a batch; consultant OK IF at ledger lines 226, 338, 342 |
 | `stage13-n5` 7a0c04fdd | unprivileged mounting | on fdinfo; consultant asked for changes, built (remount by the superblock's owner, the bottom mount locked, a sleeping write-out), not gated; earlier tip's boots, `test-vfs`, `test-shell`, `test-bwrap` PASSED |
 | `stage13-bwrap-user` dad30e7f2 | `test-bwrap` as uid 1000 | passes (a new tmpfs is now 1777 and the mounter's); needs a rebase onto N5, a control for the tmpfs case, review |
-| `stage13-netns` | network namespaces, veth, per-namespace stacks | **landed 2026-10-04**: every row PASSED on 2428b0d95 (`l13ns-*`, `test-init` on its third run), kmem controls nn20/24/28-30 and b1, 31c re-run and FIRED; the consultant's OK (ledger line 333) |
+| `stage13-netns` | network namespaces, veth, per-namespace stacks | **landed 2026-10-04 in 22384874f**: every row PASSED on 2428b0d95 (`l13ns-*`, `test-init` on its third run), kmem controls nn20/24/28-30 and b1, 31c re-run and FIRED; the consultant's OK (ledger line 333) |
 | `stage13-timens` 88b073c3a | time namespaces | on netns; boots on x86_64; native child gets its creator's time namespace (c25, c26); gate and 26 controls stopped mid-run (c01, c03-c07 FIRED); not reviewed |
 | `stage13-container` cda83faef | `cargo xtask test-container`, the exit criterion as a program | written, never built or run; needs cgctl and S3 on `main` |
 
@@ -263,6 +263,17 @@ seccomp chain and `no_new_privs`. Each branch above carries that fix and its
 check. Not started: N6 and N7 (Steam as uid 1000, pressure-vessel). Rough
 remaining size: about 40 to 45 points, about 5 to 7 hours with four landing
 chains and a consultant at once.
+
+**Where stage 13 stands (wind-down, 2026-10-04).** Network namespaces landed
+in 22384874f (batch 20261004T133714Z, every full-profile row PASSED). S3 is
+fully gated and reviewed and waits for one batch re-run on
+`stage13-s3-on-netns` 0527dd365; two blockers found on the rebase are fixed
+on it: the table-size checks counting seccomp on top of mincore, and the
+filters check listing its tasks (`check::spawn_in`), without which main's
+pending-work word stopped the boot with FX-0520. Init's L13 is built on three
+branches on top of these (stage 15). Next: re-run the batch with
+`stage13-s3-on-netns` then `l13-init`; then `l13b` and `l13c`. The exit
+criterion still needs cgctl and `stage13-container`.
 
 **Landed -- the small namespaces and `setns` (built 2026-09-30, landed
 2026-10-01 after the consultant's review):** UTS, IPC and cgroup
