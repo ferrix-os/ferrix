@@ -10,5 +10,10 @@ publish = false
 [dependencies]
 ferrix-restart.workspace = true
 
+[dev-dependencies]
+# The kernel's verifier and interpreter, which run every compiled filter in
+# the host tests (docs/INIT.md §4.5).
+ferrix-seccomp.workspace = true
+
 [lints]
 workspace = true
