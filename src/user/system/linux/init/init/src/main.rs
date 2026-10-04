@@ -33,6 +33,7 @@ mod directory;
 mod logs;
 mod probe;
 mod readiness;
+mod sandbox;
 mod sockets;
 mod spawn;
 mod sys;
@@ -802,6 +803,14 @@ impl Init {
                 error: ferrix_svc::event::Errno(libc::EINVAL),
             });
         };
+        if !spec.sandbox.is_empty() {
+            return fail(
+                self,
+                "the sandboxing keys apply to Linux programs, and a Type=native service has \
+                 none of them yet; refusing to start it without them"
+                    .to_owned(),
+            );
+        }
         let Some(directory) = self.directory.as_mut() else {
             return fail(self, "Type=native needs the native calls".to_owned());
         };
