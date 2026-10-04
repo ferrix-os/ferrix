@@ -2,7 +2,8 @@
 
 Every branch on GitHub that still holds work `main` does not have, as of
 2026-10-01 evening (`main` 7afed6fdc), written at os-5d's wind-down, after
-the product owner's and the certification consultant's. It is where the next
+the product owner's and the certification consultant's; the 2026-10-04
+wind-down's branches are in the section after this introduction. It is where the next
 session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
@@ -30,6 +31,208 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
 
+## Wind-down 2026-10-04: start here
+
+Written by the product owner (ferrix-d7) at the customer's wind-down on
+2026-10-04, from each session's own entry; `main` was 900c2e8c6, pushed. Every
+branch below is on GitHub. Landed that day, through `fleet/batch.sh`
+(`AGENTS.md`, *Batching full runs*): console-revoke and `stage13-netns`
+(22384874f), and the apps pin and the gateway test's flake fix (900c2e8c6).
+
+In this order:
+
+1. **`selfhost-components`** first: `main`'s CI job "rustc on Ferrix, and
+   Ferrix built on Ferrix" is red until it lands (since 2263225e1, the
+   components split). The Windows job's red was a flake, fixed in 900c2e8c6.
+2. The batch that was running at the wind-down, 20261004T135748Z
+   (`stage13-s3-on-netns`, `l13-init`, `selfhost-components` and the
+   product owner's `po-cpu-learnings`), was stopped before its verdict, so
+   it is NOT DECIDED. Its full run failed only `test-selfhost` (red on
+   `main` until `selfhost-components` lands) and `test-shell --arch all
+   --init ferrousli`, whose x86_64 QEMU ended from outside 7.1 s into the
+   boot; every other gate passed. Each entry joins again once.
+3. Then `land-n6`, `foot-shell`, `np-land` and `selfhost-matrix`, each as its
+   bullet says, then the work branches (`l13b`, `l13c`, `nvidia-n2`).
+
+Gate pool notes, for whoever runs it:
+
+- It has five slots since 2026-10-04 (the customer); with three, the CPU sat
+  70-80% idle while runs queued (`AGENTS.md`, *Busy slots on an idle
+  processor*).
+- Something on the host ended QEMUs 7-8 s into a boot three times on
+  2026-10-04 (ferrix-da twice, the batch once), with no OOM in the kernel log
+  and not xtask's own orphan killer. Not found; when it happens, take `ps -eo
+  pid,ppid,lstart,args` at once.
+- `batch.sh` gaps, rows for the product owner: `batch.sh wait` restarts the
+  runner even when the fleet is told to hold; a gate red on `main` that an
+  entry of the batch fixes makes the search for the failing entry end in
+  MAIN-RED; the next batch must not close before the last PASSED stack has
+  been landed or based on (fixed for new runners: `passed-tip`).
+- Another session on the host (an AOSP build) asked at the wind-down that
+  nothing heavy start until it says so; check with the customer before the
+  first gate.
+
+### Stage 13 and init's L13 (ferrix-21; handover `~/.local/share/ferrix/l13-coord/HANDOVER.md`)
+
+- `stage13-s3-on-netns` (0527dd365): S3 on main 22384874f. Passed on
+  6c539b276 before the rebase onto netns: 8 rows and all 19 controls
+  (`l13s3f-*`); consultant OK at ledger line 336, B1/B2 closed at 327. On
+  0527dd365: k7, k13 and k17 FIRED (`l13s3n2-*`); the full rows were in
+  batch 20261004T135748Z . The other 16 controls carry under the line-321
+  rule; evidence `git range-diff 65a33486c..6c539b276 22384874f..0527dd365
+  -- src tools/common/data`, saved at
+  `~/.local/share/ferrix/logs/s3-range-diff.txt`. Next: send the batch
+  verdict with the range-diff to the consultant for the final OK, then
+  update SECCOMP.md §12 and the roadmap. Trap: a boot check's user tasks
+  must be listed (`check::spawn_in`), or main's pending-work word panics
+  FX-0520. `stage13-s3`, `stage13-s3-onmain` and `stage13-s3-rebase` are
+  history.
+- `l13-init` (21d67b095), L13a: NoNewPrivileges=, PrivateTmp= and
+  ProtectSystem= (INIT.md §4.5). check and test-init on all three arches
+  passed on 5748c67fb (`l13init-*`); rebased onto 22384874f; in batch
+  20261004T135748Z. Outside the item (ledger line 323). Trap: docs/generated
+  conflicts on every rebase; take main's copy, then rerun gen-arch-doc.py.
+- `l13b` (fac927209), PrivateNetwork= (a network namespace with lo up), on
+  l13-init. A local x86 test-init passed and the netns and loup controls
+  FIRED; not pool-gated. Next: rebase onto main after l13-init lands, then a
+  batch with `--profile none`, gate `check` and `test-init --arch all`.
+- `l13c` (91045526a), SystemCallFilter=, SystemCallErrorNumber= and
+  SystemCallArchitectures= as per-ABI BPF, on S3 plus l13b. A local x86
+  test-init passed; its negative controls were cut off by the wind-down
+  (script `~/.local/share/ferrix/logs/l13c-ctl.py`). Next: run them, rebase
+  after S3 and l13b land, then a batch with `check` and `test-init --arch
+  all`.
+
+### Authentication phase 2 (ferrix-da)
+
+- `np-land` (403b05626, pushed 2026-10-04; handover
+  `docs/handover/2026-10-04-np.md` on the branch): NP (`/proc` by
+  `ptrace_may_access` with dumpability, and `/proc/<pid>/fdinfo`) landing as
+  AUTH P2.1. It is `stage13-fdinfo` rebased onto main 22384874f and squashed
+  into 1373cf7ca, so every commit builds; it supersedes `stage13-fdinfo`.
+  Since the rebase onto netns, `ns/net`'s readlink and open
+  (`net::netns_file::may_open`) ask `credentials::may_access` too, and
+  procacc opens `ns/net`. Passed: test-boot x86_64 (procacc 309 calls, 155
+  refusals; netns 1103/19); coverage carried, 0 anchors dropped; `check` on
+  31faa9f0e (owed on 1373cf7ca). Controls FIRED: c01, c02, c04, c05, c06 on
+  31faa9f0e; c04 and c06 again on 1373cf7ca; c03 fired on the allowed-side
+  message, which ledger line 342 accepts; c02, c03 and c12 were left running
+  on 1373cf7ca (`logs/queue/np3-*.log`). Owed: the controls not yet FIRED on
+  the landing hash (c01-c03, c05, c07-c13; c13 puts netns `may_open` back to
+  ids only), `check`, then `batch.sh join` with the full profile plus
+  `test-init --arch all`, `test-shell` (busybox and zinc) and `test-vfs`
+  (ferrousli). Consultant OK IF, ledger 226, 338, 342. Next: rebase onto
+  main, `check`, the 13 controls (lines in the handover), join. Traps: a
+  union merge of `catalog.rs` can leave a `};` inside `ALL`; netns's
+  `Place::Namespace(pid, Net)` arm must stay inside the guarded match.
+- `console-revoke` **landed 2026-10-04** as 0f94a6d1a in batch
+  20261004T133714Z (main 22384874f); consultant lines 329, 339, 341 met.
+
+### Stage 20: Ferrix built on Ferrix (ferrix-d4)
+
+- `selfhost-matrix` (e8b57ed4f): pid 1's inputs (init program, `sh -c`
+  script, command list) move from the kernel into the initramfs under
+  `.ferrix/init/`, so one kernel serves every test (stage 20's plan: 66
+  kernel builds to 6, 271 builds to 188; about 2 s a gate on nazuna), plus
+  the stage 20 harness outside the item (`FERRIX_BUILDS=plan:`, the 57-row
+  `selfhost-matrix.sh plan|record|replay`, script apps recorded,
+  test-selfhost --plan vendoring). Consultant OK IF, ledger lines 328,
+  331-333, 340, 343. Passed: host tests, kernel clippy x3, traceability,
+  item boundary, coverage carried; test-boot, test-init, test-shell (musl)
+  and test-vfs on x86_64 by hand; controls b, c1-c7 and e FIRED on
+  5e2eca4b2. Owed: (1) `cargo xtask check` on the head (stopped at the
+  wind-down), (2) every control in
+  `~/.local/share/ferrix/logs/linit-controls.md` again on the landing hash,
+  with the spec's re-run notes for a, g, e-host, f and f2, (3) `batch.sh
+  join ... --gate ~/.local/share/ferrix/selfhost-matrix/batch-gate.txt`,
+  then the one-line report to the PO (all controls FIRED, the four boots'
+  transcripts equal main's apart from the `inputs` line and sizes). Traps:
+  5e2eca4b2 failed `cargo fmt --check` in src/lib/fs/vfs/src/tests.rs (fixed
+  0eda22d00), which is why e-host and g did not fire; `test-init` in a gate
+  slot needs `build-apps --arch x86_64 --app sshdt` there first (pin with
+  GATE_SLOT); the generated architecture files conflict on every rebase
+  (take either side, run tools/common/gen/gen-arch-doc.py); carry-coverage
+  after a commit that wrote the coverage files needs `--from HEAD`;
+  boot-21b's H.BOOT.10-14 reconcile with H.BOOT.15 at whichever lands second
+  (ledger 333). Next after landing: tests build every variant before their
+  first boot (approved), then the weekly CI job. Handover:
+  `docs/handover/2026-10-04-stage20-selfhost.md` on the branch.
+
+### Components, apps and main's red CI (ferrix-db)
+
+- `selfhost-components` (1fcbe409e, 1 commit): fixes main's red "rustc on
+  Ferrix, and Ferrix built on Ferrix" CI job, broken by the components split
+  (2263225e1, landed by components-flip). test-selfhost now copies each
+  component checkout's tracked files into the volume, and
+  `components::ensure()` skips a tree with no `.git`, so the guest never
+  clones. Passed: `test-selfhost --accel kvm` locally, clippy and fmt. It
+  touches only `tools/common/xtask`, outside the item, but that is the image
+  row: it owes one full-profile batch with its test-selfhost line (batch
+  20261004T135748Z was stopped at the wind-down, NOT DECIDED). **Fix this
+  first: main's CI is red until it lands.** Next: rebase onto main,
+  `batch.sh join <session> selfhost-components selfhost-components --gate
+  <file: test-selfhost --accel kvm --timeout 1800>`.
+- `foot-shell` (3e5fd3c02, 1 commit): test-foot carries zinc as `/bin/sh`
+  for its foot-check script; before this, the keyboard check from def906ba2
+  never ran ("failed to execute: No such file or directory"). Passed
+  locally: `foot-typed: ok`, and the control with XKB_DIRECTORIES emptied
+  fails with "the keys pressed never reached its program". Owed: a
+  full-profile batch. Next: rebase onto main, `batch.sh join` with the full
+  profile. Trap: test-foot can't run in the gate slots until a slot has
+  `cargo xtask build-apps --arch x86_64 --app foot` (a row for the test-time
+  owner); until then its evidence is from a session's own target.
+- Red, not owned: test-badapple armv7a's window-on-the-desktop boot, red
+  since at least 594d69146: "holding frame 359" while the dump shows an
+  earlier frame (62057 of 196608 pixels wrong), hyprix drawing in software
+  on armv7a. The window path was only gated on x86_64.
+
+### NVIDIA on the RTX 3060 (ferrix-74)
+
+- `land-n6` (3d6621a64, one squashed commit): resume the NVIDIA landing
+  here. Vulkan, NVKMS and nvrm as the display core's copying driver
+  (displayctl v8 copies flag, `Refusal::Copies`), PIN_CONTIGUOUS, devfs
+  inotify, init `.device` units (hyprix.service
+  `Requires=dev-dri-card0.device`) and `run-compositor --nvidia`: Chrome
+  renders WebGL on the RTX 3060, shown on the 3060's own monitor. Consultant
+  land-ahead verdict, ledger 318, L1-L6: L1 and L3-L6 are in the commit, L2
+  is the gate rows. `cargo xtask check` PASSED on 3d6621a64; a batch DROPPED
+  it on docs/generated conflicts. Next: rebase onto main, take main's
+  `docs/generated/*`, run `cargo xtask model-doc`, carry-coverage only if
+  main touched `src/kernel`, amend, then `batch.sh join … land-n6` with the
+  full profile plus `test-compositor --arch x86_64 --accel kvm`,
+  `test-compositor --arch aarch64`, `test-nvrm --arch x86_64` and
+  `test-nvrm-link --arch x86_64`. Trap: docs/generated conflicts on every
+  rebase; regenerate, never merge by hand. Owed after landing (BACKLOG
+  O1-O6): ledgers 293 D7/D8/D10, 310 E1-E6/devfs D2-D5/C3/C4/C10/K1-K7, the
+  294/300 rows; F-61 open.
+- `nvidia-n2` (dbb23fd6f): continue NVIDIA work here; handover
+  `docs/handover/2026-10-03-nvidia-n6.md` with its 2026-10-04 update.
+  Everything in land-n6, plus `FERRIX_NVIDIA_INPUT` evdev keyboard/mouse
+  passthrough (worked on the TV), plus N3b in progress: Chrome GPU
+  compositing over dmabuf for 60 fps (design OK IF, ledger 316 B1-B14).
+  Done: nvrm's nvidia-drm subset `os/glue/drm.c` and the nvos bindings.
+  Half-written: the kernel render node, dmabuf object and native calls
+  0x1060/0x1061, and hyprix `zwp_linux_dmabuf_v1`. Next: finish the kernel
+  and hyprix halves, boot `run-compositor --nvidia` with the TV on and read
+  `webgl-fps`; then the customer's order, a hardware cursor through NVKMS,
+  then measuring page loads (network against rendering). Trap: HEAD
+  (36cc30354 onward) does NOT build; the last building state is d8c980c9b
+  plus 76301d0f4 and b1b35a3db.
+
+| Branch | Last commit | Unlanded | Kind | Tip |
+|---|---|---:|---|---|
+| `stage13-s3-on-netns` | 2026-10-04 | 9 | work | S3: carry the coverage anchors onto network namespaces |
+| `l13-init` | 2026-10-04 | 7 | work | INIT.md: L13a's gate rows, and the audit marker the first one tripped on |
+| `l13b` | 2026-10-04 | 10 | work | INIT.md: L13b, PrivateNetwork=, as built |
+| `l13c` | 2026-10-04 | 22 | work | test-init: filter checks for SystemCallFilter= and its two keys |
+| `np-land` | 2026-10-04 | 2 | work | Handover: NP as AUTH P2.1 at the 2026-10-04 wind-down |
+| `selfhost-matrix` | 2026-10-04 | 17 | work | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
+| `selfhost-components` | 2026-10-04 | 1 | work | test-selfhost: the volume carries the components, and the guest clones none |
+| `foot-shell` | 2026-10-04 | 1 | work | test-foot carries zinc, the /bin/sh its keyboard check is a script for |
+| `land-n6` | 2026-10-04 | 1 | work | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
+| `nvidia-n2` | 2026-10-04 | 21 | work | Handover update: land-n6 dropped by a docs/generated conflict, input passthrough works, the customer's performance order |
+| `po-cpu-learnings` | 2026-10-04 | 2 | work | AGENTS.md: what the product owner learned about the gate pool; this page |
+
 ## Stage 13: namespaces, cgroups, seccomp
 
 os-7c's [stage 13 handover](stage-13-handover.md), landed the same evening,
@@ -43,16 +246,15 @@ the plain `stage13-<part>` branch of each; the `-presquash`, `-hist`, `-v2`,
   and 18 controls. It holds L.object.106-112, L.sched.3-4 and H.QUOTA.10-12,
   and its landing deletes its entry in
   `tools/common/data/requirement-reservations.json`.
-- `stage13-s3`: fixes c779b29c accepted; needs its gate and 19 `--expect`
-  controls. Then `stage13-s4` (design OK with conditions: an L row, a VA row,
+- `stage13-s3`: resumed as `stage13-s3-on-netns` (*Wind-down 2026-10-04*
+  above); `stage13-s3`, `-onmain` and `-rebase` are history. Then `stage13-s4` (design OK with conditions: an L row, a VA row,
   native calls fail closed, a restart-code case), `stage13-s5`, `stage13-s6`.
   `stage13-s3-wip` does not build.
-- `stage13-netns` **landed 2026-10-04**, rebased onto def906ba2 and gated
-  on 2428b0d95 (`l13ns-*`; the consultant's ledger line 333). Next is
+- `stage13-netns` **landed 2026-10-04** in main 22384874f (batch
+  20261004T133714Z), gated on 2428b0d95 (`l13ns-*`; ledger line 333). Next is
   `stage13-timens`, which must rebase onto it.
-- `stage13-fdinfo` (NP), then `stage13-n5`, then `stage13-bwrap-user`: NP is
-  not yet cleared: B1 armv7a `Newfstatat`, B2 dumpable bypass on the capability
-  path, C1 the newborn window failing closed, C2-C5.
+- `stage13-fdinfo` (NP) is superseded by `np-land` (*Wind-down 2026-10-04*
+  above, authentication); then `stage13-n5`, then `stage13-bwrap-user`.
 - `stage13-container`: the exit criterion as one program, never run.
 - `stage13-timens`'s worktree held its work staged with a conflict in
   `panic/catalog.rs` (FX-0907 beside FX-0910): take both, then regenerate
@@ -60,7 +262,8 @@ the plain `stage13-<part>` branch of each; the `-presquash`, `-hist`, `-v2`,
 
 Every namespace and seccomp branch got the same blocker once:
 `launch::load_native` must give a native child the creator's whole namespace
-set, pid namespace, seccomp chain and `no_new_privs`. The consultant's ledger
+set, pid namespace, seccomp chain and `no_new_privs`. netns (landed) and
+`stage13-s3-on-netns` carry it. The consultant's ledger
 is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 
 | Branch | Last commit | Unlanded | Kind | Tip |
@@ -74,12 +277,12 @@ is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 | `stage13-s4` | 2026-10-01 | 11 | work | WIP: wind-down state of stage13-s4 |
 | `stage13-s3-wip` | 2026-10-01 | 4 | history | WIP, does not build: S3's filters, half written when the customer asked to stop |
 | `stage13-s3-onmain` | 2026-10-01 | 7 | history | WIP: wind-down state of s3-onmain |
-| `stage13-s3` | 2026-10-01 | 7 | work | WIP: wind-down state of stage13-s3 |
+| `stage13-s3` | 2026-10-01 | 7 | history | WIP: wind-down state of stage13-s3 |
 | `stage13-n5` | 2026-10-01 | 15 | work | Roadmap: where N5 stands at the wind-down |
 | `stage13-fdinfo-v3` | 2026-10-01 | 6 | history | NP: the small-namespace check's people say they are dumpable, as bubblewrap does |
 | `stage13-fdinfo-v2` | 2026-10-01 | 4 | history | NP: the dumpable test applies on the capability path, mountinfo is Linux's, the check look |
 | `stage13-fdinfo-presquash` | 2026-10-01 | 12 | history | NP: clippy, and the procacc line names what it reads |
-| `stage13-fdinfo` | 2026-10-01 | 6 | work | Roadmap: where NP stands at the wind-down |
+| `stage13-fdinfo` | 2026-10-01 | 6 | history | Roadmap: where NP stands at the wind-down |
 | `stage13-container` | 2026-10-01 | 17 | work | WIP: test-container, stage 13's exit criterion as one program, never run |
 | `stage13-cgctl` | 2026-10-01 | 19 | work | WIP: record where stage13-cgctl stands at the wind-down |
 | `stage13-bwrap-user` | 2026-10-01 | 16 | work | Roadmap: where test-bwrap as uid 1000 stands at the wind-down |
@@ -398,6 +601,11 @@ surveyed tips): `backup/2026-10-01/os5d/gate-rows`,
 `pre-pull-backup-2026-09-13`.
 
 ## Not on a branch
+
+- **The test-badapple armv7a window boot is red**, not owned: red since at
+  least 594d69146; "holding frame 359" while the dump shows an earlier frame
+  (62057 of 196608 pixels wrong), hyprix drawing in software on armv7a. The
+  window path was only ever gated on x86_64 (ferrix-db, 2026-10-04).
 
 - **The gate pool's deadlock fix** for `~/.local/share/ferrix/fleet/gate.sh`
   on nazuna, which is not in the repository: a run held to one slot
