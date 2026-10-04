@@ -158,17 +158,20 @@ its listening socket from init (`LISTEN_FDS`), and `test-init` on x86-64
 has the first connection to `sshd.socket` start `sshd.service` and be
 answered with its banner.
 
-**Still to do for the init: L13, the sandboxing keys (2026-10-04, unlanded;
-`docs/INIT.md` §4.5, 10 points).** L13a, `NoNewPrivileges=`, `PrivateTmp=`
-and `ProtectSystem=`, is branch `l13-init` 21d67b095: check and `test-init`
-on all three architectures PASSED on 5748c67fb, four negative controls fired;
-it waits for the batch re-run with S3. L13b, `PrivateNetwork=`, is `l13b`
-fac927209 (a local x86-64 `test-init` and two controls). L13c,
-`SystemCallFilter=` with `SystemCallErrorNumber=` and
+**Built for the init (2026-10-04, branch `l13-init`): L13a**, the sandboxing
+keys (`docs/INIT.md` §4.5). All five are read; `NoNewPrivileges=`,
+`PrivateTmp=` and `ProtectSystem=` are carried out in each service's own
+mount namespace, gated by `test-init`'s sandboxing stage on all three
+architectures, with four negative controls fired. Init is outside the
+certified item.
+
+**Still to do for the init: L13b and L13c (2026-10-04, unlanded).** L13b,
+`PrivateNetwork=`, is `l13b` fac927209 (a local x86-64 `test-init` and two
+controls). L13c, `SystemCallFilter=` with `SystemCallErrorNumber=` and
 `SystemCallArchitectures=`, is `l13c` 91045526a on S3 (a local x86-64
-`test-init`; its controls are not run). Init is outside the certified item.
-Next: land L13a, then rebase and batch `l13b`, then run L13c's controls and
-batch it after S3.
+`test-init`; its controls are not run). Until they land, a unit asking for
+either is refused with the reason. Next: rebase and batch `l13b`, then run
+L13c's controls and batch it after S3.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with
