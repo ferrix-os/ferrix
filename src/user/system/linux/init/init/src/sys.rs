@@ -482,6 +482,35 @@ pub(crate) fn become_user(uid: u32, gid: u32, groups: &[u32]) -> io::Result<()> 
     check(unsafe { libc::setuid(uid) }).map(drop)
 }
 
+/// `unshare(2)`: leave the namespaces `flags` names for new copies.
+pub(crate) fn unshare(flags: libc::c_int) -> io::Result<()> {
+    // SAFETY: no pointers.
+    check(unsafe { libc::unshare(flags) }).map(drop)
+}
+
+/// `mkdir(2)`; a directory that is there already is not an error.
+pub(crate) fn make_directory(path: &CStr, mode: libc::mode_t) -> io::Result<()> {
+    // SAFETY: `path` is NUL-terminated.
+    match check(unsafe { libc::mkdir(path.as_ptr(), mode) }) {
+        Ok(_) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(libc::EEXIST) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// `chmod(2)`.
+pub(crate) fn change_mode(path: &CStr, mode: libc::mode_t) -> io::Result<()> {
+    // SAFETY: `path` is NUL-terminated.
+    check(unsafe { libc::chmod(path.as_ptr(), mode) }).map(drop)
+}
+
+/// `prctl(PR_SET_NO_NEW_PRIVS, 1)`: no `execve` from here on gains a
+/// privilege, for this process and everything it starts.
+pub(crate) fn no_new_privileges() -> io::Result<()> {
+    // SAFETY: no pointers; the unused arguments are 0, as the call insists.
+    check(unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) }).map(drop)
+}
+
 /// Block until `fd` has a byte or its writer has gone, reading the byte:
 /// the child's wait for init's go-ahead.
 pub(crate) fn wait_readable(fd: RawFd) {
