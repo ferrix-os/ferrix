@@ -279,10 +279,14 @@ fn run_to_its_end(process: &Arc<Process>) -> Result<i32, &'static str> {
     Ok(status)
 }
 
-/// The large segment's whole pages are one private mapping of the file, from
-/// the segment's offset in it, writable, and named by the file.
+/// The large segment's file pages are one private mapping of the file, from
+/// the segment's offset in it, writable, and named by the file. A writable
+/// segment's last file page is mapped whole, as Linux's `elf_map` maps it,
+/// and its `.bss` tail zeroed in the program's private copy
+/// (`syscall/load.rs`, `file_runs` and `zero_tails`), so the mapping ends on
+/// the page boundary after the segment's file contents.
 fn check_the_segment_is_the_files(space: &AddressSpace) -> Result<(), &'static str> {
-    let end = (LARGE_VADDR + LARGE_FILESZ) & !(PAGE_SIZE - 1);
+    let end = (LARGE_VADDR + LARGE_FILESZ).div_ceil(PAGE_SIZE) * PAGE_SIZE;
     let region = space
         .regions()
         .map_err(|_| "no memory to list the regions")?
@@ -294,7 +298,7 @@ fn check_the_segment_is_the_files(space: &AddressSpace) -> Result<(), &'static s
     };
     if offset != LARGE_OFFSET || region.end != end {
         return Err(
-            "the large segment's mapping is not its whole pages, from its offset in the file",
+            "the large segment's mapping is not its file pages, from its offset in the file",
         );
     }
     if !region.flags.write || region.flags.shared || region.flags.execute {
