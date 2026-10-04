@@ -298,6 +298,53 @@ const TEST_UNITS: &[(&str, &str)] = &[
          ExecStart=/bin/dirclient ferrix.test\n",
     ),
     (
+        "boxed.service",
+        "[Unit]\n\
+         Description=Checks its own sandbox: NoNewPrivileges=, PrivateTmp=, ProtectSystem=strict\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=boxed\n\
+         NoNewPrivileges=yes\n\
+         PrivateTmp=yes\n\
+         ProtectSystem=strict\n\
+         ExecStart=:/bin/suid-sh -c 'echo \"$P-ids $UID $EUID\"; while read k v; do [ \"$k\" = NoNewPrivs: ] && echo \"$P-nnp $v\"; done < /proc/self/status; [ -e /tmp/l13-host ] && echo \"$P-tmp-shared\" || echo \"$P-tmp-private\"; echo in > /tmp/l13-$P && echo \"$P-tmp-writable\"; echo in > /run/l13-open/$P && echo \"$P-run-writable\" || echo \"$P-run-refused\"; echo \"$P-done\"'\n",
+    ),
+    (
+        "open.service",
+        "[Unit]\n\
+         Description=The same checks with no sandbox, to show each would see the difference\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=open\n\
+         ExecStart=:/bin/suid-sh -c 'echo \"$P-ids $UID $EUID\"; while read k v; do [ \"$k\" = NoNewPrivs: ] && echo \"$P-nnp $v\"; done < /proc/self/status; [ -e /tmp/l13-host ] && echo \"$P-tmp-shared\" || echo \"$P-tmp-private\"; echo in > /tmp/l13-$P && echo \"$P-tmp-writable\"; echo in > /run/l13-open/$P && echo \"$P-run-writable\" || echo \"$P-run-refused\"; echo \"$P-done\"'\n",
+    ),
+    (
+        "netns.service",
+        "[Unit]\n\
+         Description=Asks for PrivateNetwork=, which waits for network namespaces\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         PrivateNetwork=yes\n\
+         ExecStart=:/bin/sh -c 'echo netns-ran'\n",
+    ),
+    (
+        "filtered.service",
+        "[Unit]\n\
+         Description=Asks for SystemCallFilter=, which waits for seccomp filters\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         SystemCallFilter=@system-service\n\
+         ExecStart=:/bin/sh -c 'echo filtered-ran'\n",
+    ),
+    (
         "getty@.service.d/test.conf",
         "[Service]\n\
          Environment=TERM=dumb \"PS1=init-test%%# \"\n",
@@ -650,6 +697,13 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
             content: Content::Link(format!("/etc/ferrix/units/{name}")),
         });
     }
+    // The sandboxing stage's set-uid shell: zinc, set-uid root, which a
+    // uid-1000 service runs to see whether `execve` gave it root.
+    files.push(File {
+        path: "bin/suid-sh".to_owned(),
+        mode: 0o4755,
+        content: Content::Bytes(shell.to_vec()),
+    });
     files.push(File {
         path: "bin/dirclient".to_owned(),
         mode: 0o755,
@@ -891,6 +945,7 @@ fn after_stage_one(at: &mut Watching<'_>, failures: &mut Vec<String>, sshd: bool
     sockets(at, failures)?;
     resources(at, failures)?;
     directory(at, failures)?;
+    sandboxing(at, failures)?;
     devmgr_by_init(at, failures)?;
     audit_read_back(at, failures)?;
     login(at, failures)?;
@@ -1572,6 +1627,202 @@ fn directory(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// What each run of the sandboxing stage's script prints last.
+const SANDBOX_DONE: [&str; 2] = ["boxed-done", "open-done"];
+
+/// The sandboxing keys (L13, §4.5). `boxed.service`, uid 1000 with
+/// `NoNewPrivileges=yes`, `PrivateTmp=yes` and `ProtectSystem=strict`, and
+/// `open.service`, the same script with none of them, each run a
+/// set-uid root shell and look from inside:
+///
+/// * its ids: through the set-uid bit `open.service` must become
+///   effective root, so that `boxed.service` staying 1000 in both shows
+///   `no_new_privs`, and `NoNewPrivs:` in its `status` must be 1 where the
+///   kernel has the line (S3 adds it);
+/// * `/tmp`: a file the prompt put in the machine's `/tmp` must be missing
+///   from the sandboxed one's, which it can write, and what it writes there
+///   must not reach the machine's;
+/// * `/run/l13-open`, a directory the prompt made mode 0777, and so a
+///   write only a read-only mount can refuse: the sandboxed one's write
+///   must be refused, and must not reach the machine.
+///
+/// Then `netns.service` and `filtered.service`, which ask for the two keys
+/// whose kernel half has not landed, must be refused with the reason, and
+/// must not run.
+fn sandboxing(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let before = at.after().len();
+    at.type_in(
+        b"echo host > /tmp/l13-host; mkdir -m 777 /run/l13-open; \
+          svc start open.service; svc start boxed.service\n",
+    )?;
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        SANDBOX_DONE.iter().all(|done| {
+            lines
+                .get(before..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(".service[") && line.trim_end().ends_with(done))
+        })
+    })?;
+    let said = since(at, before).to_vec();
+    let judged = judge_sandbox(&said);
+    if judged.is_empty() {
+        println!(
+            "  sandboxing: NoNewPrivileges= kept a set-uid shell at uid 1000, PrivateTmp= gave \
+             a /tmp of its own, ProtectSystem=strict refused a write to a 0777 directory"
+        );
+    }
+    failures.extend(judged);
+
+    let leaked = ask(
+        at,
+        "m=l13; for f in /tmp/l13-boxed /run/l13-open/boxed /tmp/l13-open /run/l13-open/open; do \
+         [ -e $f ] && echo \"$m-there $f\"; done; echo \"$m-looked\"\n",
+        "l13-looked",
+    )?;
+    let there = since(at, before)
+        .iter()
+        .filter_map(|line| line.trim().strip_prefix("l13-there "))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if leaked.is_none() {
+        failures.push("the machine's /tmp and /run/l13-open were never looked at".into());
+    }
+    for (path, wanted) in [
+        ("/tmp/l13-boxed", false),
+        ("/run/l13-open/boxed", false),
+        ("/tmp/l13-open", true),
+        ("/run/l13-open/open", true),
+    ] {
+        if there.iter().any(|seen| seen == path) != wanted {
+            failures.push(format!(
+                "{path} is {} the machine after the sandboxing stage, where it should {}be",
+                if wanted { "missing from" } else { "on" },
+                if wanted { "" } else { "not " }
+            ));
+        }
+    }
+
+    let before = at.after().len();
+    at.type_in(
+        b"svc start netns.service; svc start filtered.service; m=l13; echo \"$m-refusals\"\n",
+    )?;
+    let _ = wait_for(at, before, "l13-refusals")?;
+    let _ = wait_for(at, before, "filtered.service: SystemCallFilter=")?;
+    let said = since(at, before).to_vec();
+    for (unit, reason, ran) in [
+        (
+            "netns.service",
+            "PrivateNetwork= needs network namespaces",
+            "netns-ran",
+        ),
+        (
+            "filtered.service",
+            "SystemCallFilter= needs seccomp filters",
+            "filtered-ran",
+        ),
+    ] {
+        if !has(&said, &format!("init     {unit}: {reason}")) {
+            failures.push(format!("{unit} was not refused with `{reason}`"));
+        }
+        if said
+            .iter()
+            .any(|line| line.contains(&format!("{unit}[")) && line.contains(ran))
+        {
+            failures.push(format!("{unit} ran without the key it asked for"));
+        }
+    }
+    Ok(())
+}
+
+/// What the two runs of the sandboxing script said, judged; one line per
+/// thing wrong.
+fn judge_sandbox(said: &[String]) -> Vec<String> {
+    let lines_of = |unit: &str| -> Vec<String> {
+        said.iter()
+            .filter_map(|line| {
+                let (_, after) = line.split_once(&format!("{unit}["))?;
+                let (_, text) = after.split_once("]: ")?;
+                Some(text.trim().to_owned())
+            })
+            .collect()
+    };
+    let value = |lines: &[String], key: &str| {
+        lines
+            .iter()
+            .find_map(|line| line.strip_prefix(key).map(str::to_owned))
+    };
+    let says = |lines: &[String], text: &str| lines.iter().any(|line| line == text);
+    let boxed = lines_of("boxed.service");
+    let open = lines_of("open.service");
+    let mut wrong = Vec::new();
+    for (unit, lines, prefix) in [
+        ("boxed.service", &boxed, "boxed"),
+        ("open.service", &open, "open"),
+    ] {
+        if !says(lines, &format!("{prefix}-done")) {
+            wrong.push(format!("{unit} never finished its checks: {lines:?}"));
+        }
+        if !says(lines, &format!("{prefix}-tmp-writable")) {
+            wrong.push(format!("{unit} could not write to its /tmp"));
+        }
+    }
+    match value(&open, "open-ids ").as_deref() {
+        Some("1000 0") => {}
+        other => wrong.push(format!(
+            "open.service's set-uid shell did not become effective root, so nothing shows \
+             NoNewPrivileges= at work: ids {other:?}"
+        )),
+    }
+    match value(&boxed, "boxed-ids ").as_deref() {
+        Some("1000 1000") => {}
+        other => wrong.push(format!(
+            "boxed.service, with NoNewPrivileges=yes, gained a privilege through a set-uid \
+             program: ids {other:?}, not 1000 1000"
+        )),
+    }
+    for (unit, lines, key, wanted) in [
+        ("boxed.service", &boxed, "boxed-nnp ", "1"),
+        ("open.service", &open, "open-nnp ", "0"),
+    ] {
+        if let Some(flag) = value(lines, key)
+            && flag != wanted
+        {
+            wrong.push(format!(
+                "{unit}'s status says NoNewPrivs: {flag}, not {wanted}"
+            ));
+        }
+    }
+    for (lines, text, why) in [
+        (
+            &boxed,
+            "boxed-tmp-private",
+            "boxed.service's /tmp is not private",
+        ),
+        (
+            &open,
+            "open-tmp-shared",
+            "open.service did not see the machine's /tmp",
+        ),
+        (
+            &boxed,
+            "boxed-run-refused",
+            "boxed.service, under ProtectSystem=strict, wrote to a 0777 directory in /run",
+        ),
+        (
+            &open,
+            "open-run-writable",
+            "open.service could not write to /run/l13-open",
+        ),
+    ] {
+        if !says(lines, text) {
+            wrong.push(format!("{why}: {lines:?}"));
+        }
+    }
+    wrong
 }
 
 /// `devmgr` started by pid 1 (L12, §7.3), under `ferrix.devmgr=init`: the
@@ -2279,6 +2530,54 @@ mod tests {
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|line| (*line).to_owned()).collect()
+    }
+
+    /// What a passing sandboxing stage prints, before S3 adds `NoNewPrivs:`.
+    const SANDBOXED: [&str; 10] = [
+        "  open.service[301]: open-ids 1000 0",
+        "  open.service[301]: open-tmp-shared",
+        "  open.service[301]: open-tmp-writable",
+        "  open.service[301]: open-run-writable",
+        "  open.service[301]: open-done",
+        "  boxed.service[302]: boxed-ids 1000 1000",
+        "  boxed.service[302]: boxed-tmp-private",
+        "  boxed.service[302]: boxed-tmp-writable",
+        "init-test# boxed.service[302]: boxed-run-refused",
+        "  boxed.service[302]: boxed-done",
+    ];
+
+    #[test]
+    fn a_sandbox_that_holds_passes_with_or_without_the_status_line() {
+        assert_eq!(judge_sandbox(&lines(&SANDBOXED)), Vec::<String>::new());
+        let mut with = SANDBOXED.to_vec();
+        with.push("  boxed.service[302]: boxed-nnp 1");
+        with.push("  open.service[301]: open-nnp 0");
+        assert_eq!(judge_sandbox(&lines(&with)), Vec::<String>::new());
+    }
+
+    #[test]
+    fn each_key_that_did_nothing_fails_on_its_own_line() {
+        let swap = |from: &str, to: &str| {
+            let changed: Vec<String> = SANDBOXED
+                .iter()
+                .map(|line| line.replace(from, to))
+                .collect();
+            judge_sandbox(&changed)
+        };
+        let nnp = swap("boxed-ids 1000 1000", "boxed-ids 1000 0");
+        assert_eq!(nnp.len(), 1, "{nnp:?}");
+        assert!(nnp[0].starts_with("boxed.service, with NoNewPrivileges=yes, gained"));
+        let tmp = swap("boxed-tmp-private", "boxed-tmp-shared");
+        assert_eq!(tmp.len(), 1, "{tmp:?}");
+        assert!(tmp[0].starts_with("boxed.service's /tmp is not private"));
+        let ro = swap("boxed-run-refused", "boxed-run-writable");
+        assert_eq!(ro.len(), 1, "{ro:?}");
+        assert!(ro[0].starts_with("boxed.service, under ProtectSystem=strict, wrote"));
+        let control = swap("open-ids 1000 0", "open-ids 1000 1000");
+        assert!(control[0].starts_with("open.service's set-uid shell did not become"));
+        let mut flagged = SANDBOXED.to_vec();
+        flagged.push("  boxed.service[302]: boxed-nnp 0");
+        assert_eq!(judge_sandbox(&lines(&flagged)).len(), 1);
     }
 
     #[test]
