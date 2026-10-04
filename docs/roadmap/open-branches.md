@@ -31,6 +31,75 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
 
+## Night of 2026-10-04: start here
+
+Written by os-7c at the customer's wind-down at 22:00 on 2026-10-04, after a
+landing round from 19:50 that a held gate pool (an AOSP build on nazuna,
+20:37-20:52) and a power cut on the Windows PC (about 21:15; nazuna is on a
+UPS) cut short. `main` is 50518ac1d. Tonight landed `selfhost-components`
+as cb872a732 (batch 20261004T185433Z), which fixes CI's self-hosting job.
+Every branch below is on GitHub under `tonight/<name>`, rebased onto
+67efb9fb1 unless it says otherwise, and on nazuna as `os7c-tonight/<name>`;
+each has its worktree under `.claude/worktrees/tonight-<name>`. The
+`tonight/*` branches supersede the branches named in the next section.
+
+**Main's two red gates, both read as the gate pool, not code.** Batch
+20261004T190141Z ended MAIN-RED on cb872a732:
+
+- `test-shell --arch all --init ferrousli`: QEMU ended by signal 15 from
+  outside 7.0 s into the x86_64 boot (b0-1), the host problem below, now six
+  times.
+- `test-init --arch all`: aarch64 only, "the revoke stage's reader was not
+  waiting (state R)" (b0-2), a timing check of console-revoke's under load.
+  The same tip's own `test-init --arch aarch64` passed. Owner: console-revoke's
+  session (ferrix-da); make the wait robust or file it as a flake with its row.
+- `test-init` in a gate slot also fails "no sshdt built for x86_64" unless the
+  slot has `cargo xtask build-apps --arch x86_64 --app sshdt`; slots 3 and 4
+  have it since tonight, slot 2 has it, check 1 and 5. The batch should build
+  what its gates need (a row for the gate pool's owner).
+
+In this order:
+
+1. **`tonight/stage13-s3-on-netns`** (8bf380332), **`tonight/np-land`**
+   (3b04624ba), **`tonight/l13-init`** (c2e457f6d) and **`tonight/foot-shell`**
+   (ec976b389): each passed everything it owes before the batch (check, its
+   controls FIRED, its consultant: s3 OK IF ledger 347, np OK IF 346, l13 and
+   foot outside the item). Their batch was MAIN-RED, and its tip also failed
+   `test-init --arch all` on aarch64 (`login plain` did not log in, /dev/tty
+   checks, revoke reader never started; batch-20261004T190141Z-5) while the
+   tip's per-arch aarch64 line passed. Before rejoining, re-run `test-init
+   --arch aarch64` on that tip (99c5166cd) twice: if it fails, bisect the four
+   on aarch64 (np-land touches /proc and `may_access`, the likeliest). Then
+   rebase onto main and join again as one batch.
+2. **`tonight/selfhost-matrix`** (64a2b32d6): batch 20261004T191902Z passed
+   16 of 17 gates on its tip 43d205bed; the 17th, `test-init`, failed only
+   for "no sshdt built for x86_64" in its slot. Re-run that gate in a slot
+   with sshdt, then the transcript comparison its consultant asks (OK IF,
+   ledger 345), then land. selfhost-components merges cleanly with it.
+3. **`tonight/land-n6`** (aac7eef62): batch 20261004T175923Z FAILED it with
+   FX-0871 at every boot (exec loading read 65 of 18437 pages through a
+   32-page read-ahead on the writable segment's tail page). The customer
+   chose the fix: fill that page alone. 7db4a95f6 does that (consultant OK
+   IF, ledger 348, H1-H4) but failed `check` and the KVM boot; aac7eef62
+   then changes what the stage 8 check expects of that page, which is a
+   check change and needs the consultant before anything else. `check`
+   passed on aac7eef62; the boot, the control and the batch (~/n6-gates.txt,
+   11 rows) are owed.
+4. **`po-skill`** (this page's branch): the product owner's role as the
+   skill `.claude/skills/product-owner/SKILL.md` and the agent
+   `.claude/agents/product-owner.md`. Docs only, so it owes `check`; land it
+   first tomorrow so the next PO can load it. Owed beside it: a dated
+   *Decisions* entry in `docs/BACKLOG.md` for the customer's rule that each
+   session briefs its own certification consultant (2026-10-04), and
+   AGENTS.md's consultant section, which still describes one standing seat.
+
+Leftovers on nazuna, to delete by exact name: `~/target-os7c-land-n6`,
+`~/Documents/projects/os/ferrix/target-os7c-l13-init`,
+`~/.local/share/ferrix/target-os7c-selfhost-matrix`, and the worktrees
+`.claude/worktrees/os7c-n6`, `os7c-l13-init` and `os7c-shm` in
+`~/Documents/projects/os/ferrix`. The open queue's entries set aside during
+the hold are in `~/.local/share/ferrix/fleet/batch/po-aside-2026-10-04/`.
+
 ## Wind-down 2026-10-04: start here
 
 Written by the product owner (ferrix-d7) at the customer's wind-down on
