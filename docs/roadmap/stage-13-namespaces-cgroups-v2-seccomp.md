@@ -247,7 +247,7 @@ checker to six programs carrying the real Linux 7.0 verifier's answer
 
 **Done -- NP and `/proc/<pid>/fdinfo` (built 2026-10-01, landed 2026-10-04,
 as AUTH's P2.1):** `credentials::may_access` is Linux's `ptrace_may_access`;
-`/proc/<pid>/root`, `cwd`, `exe`, `fd`, `fdinfo`, `maps`, `mountinfo` and
+`/proc/<pid>/root`, `cwd`, `exe`, `fd`, `fdinfo`, `maps` and
 `ns/*` of another process, and `get_robust_list` of its threads, ask it, so a
 same-uid process may not read them from one that is not dumpable.
 `/proc/<pid>/fdinfo` lists a file per descriptor with Linux's first lines,

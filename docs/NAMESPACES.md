@@ -1517,6 +1517,11 @@ its inheritance refuses rather than leaks. The `procacc` line (FX-0894) looks
 at every entry of seven kinds of target, as uid 1000, as a caller whose real
 and filesystem ids differ, as root and as root inside a user namespace, and
 each negative control stops the boot with a message only its sabotage
-produces. The small-namespace check's processes set `PR_SET_DUMPABLE` after
+produces: `np4-c01` to `np4-c13` (c13 as `np4-c13b`, the first run's QEMU
+killed from outside) FIRED on e6d2f939e through `gate.sh control`. c03,
+the real and filesystem ids swapped, is caught by this check's own case for
+a caller whose filesystem id is the target's, which it refuses; c08
+(`fd/<n>`) and c09 (`fdinfo/<n>`) drop both guards, at lookup and at the
+read, since either one alone refuses. The small-namespace check's processes set `PR_SET_DUMPABLE` after
 they drop their ids, since the owner's opening of their namespace links is
 now judged as Linux judges it.
