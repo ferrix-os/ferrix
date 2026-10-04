@@ -288,14 +288,11 @@ remaining size: about 40 to 45 points, about 5 to 7 hours with four landing
 chains and a consultant at once.
 
 **Where stage 13 stands (wind-down, 2026-10-04).** Network namespaces landed
-in 22384874f (batch 20261004T133714Z, every full-profile row PASSED). S3 is
-fully gated and reviewed and waits for one batch re-run on
-`stage13-s3-on-netns` 0527dd365; two blockers found on the rebase are fixed
-on it: the table-size checks counting seccomp on top of mincore, and the
+in 22384874f (batch 20261004T133714Z, every full-profile row PASSED). S3 landed
+later that night (248799bdd, from `stage13-s3-on-netns`); two blockers found on the rebase were fixed
+in it: the table-size checks counting seccomp on top of mincore, and the
 filters check listing its tasks (`check::spawn_in`), without which main's
-pending-work word stopped the boot with FX-0520. Init's L13 is built on three
-branches on top of these (stage 15). Next: re-run the batch with
-`stage13-s3-on-netns` then `l13-init`; then `l13b` and `l13c`. The exit
+pending-work word stopped the boot with FX-0520. Init's L13a landed on top (stage 15); L13b and L13c are on branches (`l13b`, `l13c`). The exit
 criterion still needs cgctl and `stage13-container`.
 
 **Landed -- the small namespaces and `setns` (built 2026-09-30, landed

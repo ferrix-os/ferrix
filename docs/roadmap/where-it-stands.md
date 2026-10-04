@@ -261,10 +261,10 @@ under `sessiond` (P2.4), hyprix unlocks only on `authd`'s grant (P2.5),
 (P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own
 terminal. On 2026-10-04 getty began revoking the console before every login
 (0f94a6d1a, landed in batch 22384874f), so a program left by one login
-reads nothing of the next one's password. Left: K-B (P2.1) is NP on the
-pushed branch `np-land`, rebased onto 22384874f, squashed and partly
-controlled -- it owes `check`, eight of its thirteen controls and a batch
-(`docs/handover/2026-10-04-np.md` on the branch); K-C (P2.2) is not started;
+reads nothing of the next one's password. K-B (P2.1), NP, landed the same night
+(7e9a2806f): `/proc`'s private links are decided by `ptrace_may_access`,
+dumpability included, and `/proc/<pid>/fdinfo` exists (`docs/handover/2026-10-04-np.md`).
+Left: K-C (P2.2) is not started;
 the other desktop images still run as root; and ending a user's processes
 at logout is the customer's call.
 
@@ -272,7 +272,7 @@ Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
 mount, user, UTS, IPC, cgroup and pid namespaces, seccomp's checker and
 hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
-Seccomp filters (S3) are gated and reviewed and wait for one batch re-run;
+Seccomp filters (S3) landed on 2026-10-04 (248799bdd: `seccomp(2)`, `prctl(PR_SET_SECCOMP)`, chains per thread);
 reclaim, freezing, `cpu.max`, `io`, time namespaces and S4 to S6 are on
 branches (`stage-13-handover.md`).
 
@@ -329,8 +329,8 @@ with the host's through xtask. hypridle is on `main` too (2026-09-26), its
 apps in `ferrix-os/apps`, built by xtask from their folders (def906ba2), and
 foot takes keys: every compositor image carries libxkbcommon's
 `usr/share/X11/xkb`. `test-foot`'s check that a typed line reaches foot's
-program passes on branch `foot-shell` (3e5fd3c02), which is owed one full batch
-run before it lands.
+program runs and passes since f55e8ab28 (2026-10-04), which gives `test-foot` zinc as `/bin/sh`
+for its keyboard check; before that the check never ran.
 
 Stage 21 is bare metal with a card of Ferrix's own. NVIDIA's driver
 already draws the desktop and Chrome's WebGL on the RTX 3060's own

@@ -158,14 +158,14 @@ its listening socket from init (`LISTEN_FDS`), and `test-init` on x86-64
 has the first connection to `sshd.socket` start `sshd.service` and be
 answered with its banner.
 
-**Built for the init (2026-10-04, branch `l13-init`): L13a**, the sandboxing
+**Landed for the init (2026-10-04, from branch `l13-init`): L13a**, the sandboxing
 keys (`docs/INIT.md` §4.5). All five are read; `NoNewPrivileges=`,
 `PrivateTmp=` and `ProtectSystem=` are carried out in each service's own
 mount namespace, gated by `test-init`'s sandboxing stage on all three
 architectures, with four negative controls fired. Init is outside the
 certified item.
 
-**Still to do for the init: L13b and L13c (2026-10-04, unlanded).** L13b,
+**Still to do for the init: L13b and L13c (2026-10-04, on branches).** L13b,
 `PrivateNetwork=`, is `l13b` fac927209 (a local x86-64 `test-init` and two
 controls). L13c, `SystemCallFilter=` with `SystemCallErrorNumber=` and
 `SystemCallArchitectures=`, is `l13c` 91045526a on S3 (a local x86-64
@@ -223,7 +223,7 @@ Left: K-B and K-C in the kernel (P2.1, P2.2); the desktop images other than
 `--everything`, which still run as root; and the customer's decision on
 ending a user's processes at logout (`docs/BACKLOG.md`).
 
-P2.1 (K-B) is NAMESPACES' NP, on branch `np-land` (pushed, 403b05626):
+P2.1 (K-B) is NAMESPACES' NP, **landed 2026-10-04** (7e9a2806f; the text that follows is as written on branch `np-land` before it landed, so its "owes" is met or in the product owner's record):
 `stage13-fdinfo` rebased onto main 22384874f and squashed into one commit
 (1373cf7ca), with `ns/net` brought under the same `ptrace_may_access` rule
 (netns had landed it with the old one). Its x86-64 boot passes with the

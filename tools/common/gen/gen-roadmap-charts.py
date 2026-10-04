@@ -59,8 +59,8 @@ REMAINING = [
     ("Second pass and xray", 8, ""),
     ("GC400, the rest", 21, "idle"),
     ("Stage 13, the controllers' rest", 30, "unlanded"),
-    ("Stage 15, auth's rest", 8, ""),
-    ("Stage 15, init L13", 10, "added, unlanded"),
+    ("Stage 15, auth's rest", 6, ""),
+    ("Stage 15, init L13b and L13c", 5, "added, unlanded"),
     ("Chrome on the DK1", 50, "idle"),
     ("Stage 14, real-time", 40, "idle"),
     ("dmabuf and virgl", 48, "idle"),
@@ -109,17 +109,19 @@ DONE = [
     ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
     ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
 ]
+# Each row: name, first day, and the remaining sized points after today (the
+# REMAINING entries it maps to), or None when the row has no size.
 ACTIVE = [
-    ("Stage 19, the rest (16 left)", D(2026, 9, 17)),
-    ("Stage 20, self-hosting", D(2026, 9, 22)),
-    ("Stage 13: S3 and the controllers", D(2026, 9, 23)),
-    ("Gears (50 of 71)", D(2026, 9, 24)),
-    ("Certification findings", D(2026, 9, 25)),
-    ("Pixel 7: the USB driver", D(2026, 9, 26)),
-    ("Steam: the game step", D(2026, 9, 30)),
-    ("NVIDIA N2 to N6, unlanded (64)", D(2026, 10, 3)),
-    ("Init L13, three branches (10)", D(2026, 10, 4)),
-    ("Auth P2.1, on np-land", D(2026, 10, 4)),
+    ("Stage 19, the rest (16 left)", D(2026, 9, 17), 16),
+    ("Stage 20, self-hosting", D(2026, 9, 22), None),
+    ("Stage 13: the controllers (S3 landed)", D(2026, 9, 23), 30),
+    ("Gears (50 of 71)", D(2026, 9, 24), 21),
+    ("Certification findings", D(2026, 9, 25), None),
+    ("Pixel 7: the USB driver", D(2026, 9, 26), None),
+    ("Steam: the game step", D(2026, 9, 30), 23),
+    ("NVIDIA N2 to N6, unlanded (64)", D(2026, 10, 3), 64),
+    ("Init L13b and L13c (5)", D(2026, 10, 4), 5),
+    ("Auth P2, the rest (6; P2.1 landed)", D(2026, 10, 4), 6),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
@@ -293,7 +295,7 @@ def gantt():
     row_h, sec_h = 22, 30
     w = 1040
     left, right = 310, w - 60
-    top = 70
+    top = 82
     h = top + rows * row_h + 3 * sec_h + 50
     svg = Svg(w, h, "Ferrix Gantt")
     svg.text(24, 28, "Ferrix: done, in progress, and a forecast", size=16,
@@ -301,6 +303,10 @@ def gantt():
     svg.text(24, 46, f"The forecast is one queue at {FORECAST_RATE} points a day in "
              "the status table's order: the size of the work, not a plan; "
              "hollow rows have no session on them",
+             fill=MUTED)
+    svg.text(24, 60, "In progress: solid is done, the dashed segment after today is "
+             "the row's remaining sized points at the same rate; a faded segment "
+             "to the right edge is unsized work, with no end date",
              fill=MUTED)
     x = lambda days: left + (right - left) * days / span
     bottom = h - 40
@@ -332,8 +338,21 @@ def gantt():
     for name, a, b in DONE:
         bar(name, day(a), day(b) + 1, DONE_C)
     section("In progress")
-    for name, a in ACTIVE:
+    for name, a, pts in ACTIVE:
         bar(name, day(a), day(queue_start), ACTIVE_C)
+        by = yy - row_h
+        if pts is None:
+            svg.rect(x(day(queue_start)), by + 4, x(span) - x(day(queue_start)),
+                     row_h - 8, "#ddf4ff", ACTIVE_C, "1 3")
+            svg.text(x(day(queue_start)) + 6, by + row_h / 2 + 4, "unsized",
+                     fill=ACTIVE_C, size=11)
+        else:
+            e = day(queue_start) + pts / FORECAST_RATE
+            svg.rect(x(day(queue_start)), by + 4, max(x(e) - x(day(queue_start)), 3),
+                     row_h - 8, FORECAST_C, ACTIVE_C, "3 2")
+            svg.text(x(e) + 6, by + row_h / 2 + 4,
+                     label(queue_start + timedelta(days=pts / FORECAST_RATE)),
+                     fill=ACTIVE_C, size=11)
     section(f"Forecast, {FORECAST_RATE} a day, one queue")
     q = day(queue_start)
     for name, a, b, state in forecast:
