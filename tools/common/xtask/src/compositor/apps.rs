@@ -103,7 +103,8 @@ fn colours(screen: &Image) -> usize {
 }
 
 /// `ports` with what the foot boot adds beside the foot app: root's account,
-/// the program foot runs, and fontconfig's cache directories.
+/// the program foot runs (a script, for the zinc the boot carries), and
+/// fontconfig's cache directories.
 fn with_foot_files(mut ports: Vec<crate::ports::File>) -> Vec<crate::ports::File> {
     ports.push(crate::ports::File {
         path: "etc/passwd".to_owned(),
@@ -160,8 +161,10 @@ pub(crate) fn test_foot(args: &Args) -> Result<()> {
             continue;
         }
         let programs = Programs::build(arch)?;
+        // zinc is the `/bin/sh` foot's program is a script for.
         let carried = Carried {
             ports: with_foot_files(ports),
+            zinc: crate::zinc::build(arch)?,
             ..Carried::none()
         };
         let (image, kernel) =
