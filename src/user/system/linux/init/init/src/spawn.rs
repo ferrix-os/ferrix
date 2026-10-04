@@ -17,6 +17,11 @@
 //! systemd's exit code for the step, so its unit fails as the unit of a
 //! program that could not run fails there.
 //!
+//! The sandboxing keys (§4.5) are [`crate::sandbox`]'s: planned in the
+//! parent with the rest, entered after the streams are set up and before
+//! the directory and the user change, and locked last, after init's
+//! go-ahead and just before `execve`.
+//!
 //! [`Event::SpawnFailed`]: ferrix_svc::event::Event
 
 use std::collections::BTreeMap;
@@ -31,6 +36,7 @@ use ferrix_svc::event::SpawnSpec;
 use ferrix_svc::exec::Command;
 use ferrix_svc::kind::{Input, Output, ServiceType};
 
+use crate::sandbox::{self, Plan};
 use crate::sys::{self, Forked};
 
 /// The search path for a command that is not an absolute path, and the
@@ -53,6 +59,10 @@ pub(crate) enum Step {
     User = 217,
     /// The session: `EXIT_SETSID`.
     Setsid = 220,
+    /// The mount namespace and its mounts: `EXIT_NAMESPACE`.
+    Namespace = 226,
+    /// `PR_SET_NO_NEW_PRIVS`: `EXIT_NO_NEW_PRIVILEGES`.
+    NoNewPrivileges = 227,
 }
 
 impl Step {
@@ -65,6 +75,8 @@ impl Step {
             Step::Stdout,
             Step::User,
             Step::Setsid,
+            Step::Namespace,
+            Step::NoNewPrivileges,
         ]
         .into_iter()
         .find(|step| *step as u32 == code)
@@ -79,6 +91,8 @@ impl Step {
             Step::Stdout => "opening standard output",
             Step::User => "setting the user and groups",
             Step::Setsid => "setsid",
+            Step::Namespace => "setting up the sandbox's mount namespace",
+            Step::NoNewPrivileges => "setting no_new_privs",
         }
     }
 }
@@ -154,6 +168,8 @@ pub(crate) struct Prepared {
     /// Whether the child waits, before `execve`, for init to have given it
     /// its bootstrap channel (§5.2 step 3).
     waits_for_bootstrap: bool,
+    /// The sandboxing keys, worked out (§4.5).
+    sandbox: Option<Plan>,
 }
 
 /// Why a spawn could not be worked out.
@@ -183,6 +199,9 @@ pub(crate) fn prepare(
     terminal: &str,
     passed: &Passed,
 ) -> Result<Prepared, Unprepared> {
+    // First, so a key the kernel cannot do refuses the unit before anything
+    // else is looked at.
+    let sandbox = sandbox::plan(&spec.sandbox)?;
     let user = match &spec.user {
         Some(name) => Some(lookup_user(name)?),
         None => None,
@@ -300,6 +319,7 @@ pub(crate) fn prepare(
         directory,
         user: user_ids,
         notify,
+        sandbox,
     })
 }
 
@@ -757,6 +777,12 @@ fn child(
     {
         fail(Step::Stdout, error);
     }
+    // While still root: the mount namespace and what is mounted in it.
+    if let Some(plan) = &prepared.sandbox
+        && let Err(error) = sandbox::enter(plan)
+    {
+        fail(Step::Namespace, error);
+    }
     if let Some((path, missing_ok)) = &prepared.directory
         && let Err(error) = sys::chdir(path)
         && !*missing_ok
@@ -773,6 +799,13 @@ fn child(
     // the pipe's end, either way the program runs.
     if let Some(go) = pipes.go {
         sys::wait_readable(go);
+    }
+    // The last steps: no new privileges, then (with S3) the seccomp filter,
+    // which must see nothing of init's but the `execve`.
+    if let Some(plan) = prepared.sandbox.as_ref().filter(|plan| plan.locks())
+        && let Err(error) = sandbox::lock(plan)
+    {
+        fail(Step::NoNewPrivileges, error);
     }
     let error = sys::execve(&prepared.path, argv, envp);
     fail(Step::Exec, error)
