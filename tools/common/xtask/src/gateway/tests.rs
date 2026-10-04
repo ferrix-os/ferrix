@@ -1081,10 +1081,14 @@ fn a_lost_segment_is_sent_again_alone() {
     stream.expected = lost;
     stream.send(Flags::ACK, &[]);
     drain(&mut stream, &mut sent);
+    // Before the duplicates, not after: the gateway restarts its timer when
+    // the third reaches it, and a test thread descheduled between sending it
+    // and reading the clock would let that timer fire inside the window and
+    // its rewind be taken for a resend of everything.
+    let asked = std::time::Instant::now();
     for _ in 0..3 {
         stream.send(Flags::ACK, &[]);
     }
-    let asked = std::time::Instant::now();
 
     let (again, _) = stream
         .data_within(PATIENCE)
