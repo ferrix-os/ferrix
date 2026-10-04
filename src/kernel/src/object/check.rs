@@ -2371,8 +2371,8 @@ fn check_pin_refusals(
             [0, 3 * PAGE_SIZE, 0],
             "a pin past the end of its VMO was taken",
         ),
-        // 1 is PIN_READ_ONLY and 2 PIN_COHERENT: 4 is the first bit unknown.
-        ([0, PAGE_SIZE, 4], "a pin with an unknown option was taken"),
+        // 1 PIN_READ_ONLY, 2 PIN_COHERENT, 4 PIN_CONTIGUOUS: 8 is unknown.
+        ([0, PAGE_SIZE, 8], "a pin with an unknown option was taken"),
         ([0, 0, 0], "an empty pin was taken"),
     ] {
         let [offset, length, options] = args;
