@@ -827,7 +827,7 @@ after the final rebase; the consultant's OK on the diff before each
 | N2 | Binds: directory, subtree, file, socket; `MS_REC`; `MNT_DETACH` of a subtree, detached top without a parent; propagation no-ops; the kernel-wide dentry cache, rename lock and mount ids; mutable parents under the table lock | the tree bwrap builds, in the first namespace | boot checks: binds, detach, `readlink` = `mountinfo` | 6 |
 | N3 | Mount namespaces: `ns` in the fs context, per-mount namespace, crossing by the mount's table, copy on `clone`/`unshare(CLONE_NEWNS)` from root, teardown, `pivot_root` (with `"."`, `"."`), `chroot_fs_refs`, the recorded root and `root_disk`'s line, `/proc/<pid>/ns/mnt`, `mount-max`, F-37's mount-namespace fill; native children inherit the creator's namespace, root and cwd (§2.5) | **root bwrap works: `test-steam-bootstrap`'s check passes as root** | boot checks: privacy, bwrap-as-root sequence; `test-bwrap` as root | 8 |
 | N4 | User namespaces: `UserNamespace`, `CLONE_NEWUSER` and its refusals, `privileged()` in the first namespace only, `ns_capable`, cap sets, `capget`/`capset`/`PR_CAPBSET_*` in a child, `execve`'s recomputation and U7, the map files and `setgroups`, `/proc/<pid>/ns/user`, the sysctls, ids at the boundary, `status`'s `Cap*`; F-37's fill; audit's uid is the kernel id (§2.5) | U1 to U9 | boot checks: maps, the U rules, id sites, the audit record | 8 |
-| NP | procfs by `ptrace_may_access` (M8): `root`, `cwd`, `exe`, `fd/*` and `fd`'s listing, `maps`, `mountinfo`, `ns/*` (dumpable is cleared by a set-id `execve` since 2026-09-30); closes the `proc_fd_link` row of `docs/BACKLOG.md` and the "procfs honouring `PR_SET_DUMPABLE`" part of `docs/AUTH.md`'s phase 2 | M8 | boot checks of §8's M8 line | 3 |
+| NP | procfs by `ptrace_may_access` (M8): `root`, `cwd`, `exe`, `fd/*` and `fd`'s listing, `fdinfo`, `maps`, `ns/*` (`mountinfo` is not guarded, as on Linux) (dumpable is cleared by a set-id `execve` since 2026-09-30); closes the `proc_fd_link` row of `docs/BACKLOG.md` and the "procfs honouring `PR_SET_DUMPABLE`" part of `docs/AUTH.md`'s phase 2 | M8 | boot checks of §8's M8 line | 3 |
 | N5 | Unprivileged mounting: `may_mount` by `ns_capable`, M2's types and forced flags, M3's locking on copy, M4, M5, the lock's move on `pivot_root` | **bwrap as uid 1000 works** | boot checks: M1 to M5; `test-bwrap` as uid 1000 | 6 |
 | N6 | `test-steam-bootstrap` as uid 1000 (§11) without the set-aside: the image gets what bwrap's sandbox execs (`/usr/bin/true`, a static busybox under `/usr`, since the volume's libraries are links into `/data` that dangle inside the sandbox); the checker must exit 0 | the customer's end point | `test-steam-bootstrap --arch x86_64` | 3 |
 | N7 | pressure-vessel on Ferrix: `_v2-entry-point` running the §1 probe in the steamrt64 container, as uid 1000; whatever it needs beyond namespaces is filed as rows (hard links on btrfs, `F_OFD_SETLK`, the host `/usr` layout it copies graphics drivers from) | the container `steamwebhelper` runs in | a probe script in `test-steam-bootstrap` | 3, plus what it finds |
@@ -1372,7 +1372,10 @@ How it differs from Linux, and from the design above:
   `may_open` compares against the target's effective ids only; Linux's rule
   compares the caller's fsuid with the target's uid, euid and suid, and
   `readlink` of `ns/*` has no gate at all; NP replaces both by
-  `ptrace_may_access` with dumpability. (C3) NP's scope includes `ns/*`, as
+  `ptrace_may_access` with dumpability -- done, and since NP's landing on
+  the network namespaces `ns/net` too: its readlink and its open
+  (`net::netns_file::may_open`, which netns had landed with the old rule)
+  ask `credentials::may_access`, and the `procacc` line opens it. (C3) NP's scope includes `ns/*`, as
   §9's row says, and not only `root`, `cwd`, `exe` and `fd`. (C4) An nsfs
   descriptor keeps a mount namespace alive past its last process, and `setns`
   can drop the last reference: the write-out check owed before N5 must cover a
@@ -1491,3 +1494,29 @@ boot check and a control in the `netns` line (FX-0893); `CLONE_NEWNET` is no
 longer `EINVAL` through `clone`, `clone3` and `unshare`; and a network namespace
 is created, configured and ended under the owner rule of §2.2, charged to the
 creating job as §5 asks (three more fills in `kmem_check`).
+
+**NP (2026-10-01, os-7c).** `credentials::may_access` is Linux's
+`__ptrace_may_access`: the process itself; a caller whose filesystem ids (its
+real ones for `get_robust_list`) are every one of the target's real, effective
+and saved ids, or that holds `CAP_SYS_PTRACE` over the target's user namespace
+-- and then, of a target that is not dumpable, only a caller privileged in the
+first namespace. Linux asks the capability in the namespace the target's
+program was loaded in; here that is always the first, so a process that
+cleared `PR_SET_DUMPABLE` and made a user namespace (Chrome, bubblewrap) is not
+readable by the namespace's owner from outside. `/proc/<pid>/root`, `cwd`,
+`exe`, `fd` and `fdinfo` (listings, entries and links), `maps` and `ns/*` ask
+it and are refused `EACCES`, and `nsfs::may_open` asks it for a namespace
+link that is followed; `get_robust_list` of another process's thread is
+`EPERM`, closing the gap the review of f16ab27a named. `mountinfo` and
+`mounts` are not guarded, as on Linux. Dumpability is the attributes module's
+(cleared by a change of ids and by a set-id `execve`, set again by
+`PR_SET_DUMPABLE`); a fork child, and a native child of a creator, reads as
+not dumpable from its making until `attributes::inherit` has run
+(`Process::attributes_pending`), so the moment between its publication and
+its inheritance refuses rather than leaks. The `procacc` line (FX-0894) looks
+at every entry of seven kinds of target, as uid 1000, as a caller whose real
+and filesystem ids differ, as root and as root inside a user namespace, and
+each negative control stops the boot with a message only its sabotage
+produces. The small-namespace check's processes set `PR_SET_DUMPABLE` after
+they drop their ids, since the owner's opening of their namespace links is
+now judged as Linux judges it.

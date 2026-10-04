@@ -83,6 +83,7 @@ Causes are listed most likely first.
 | [FX-0891](#fx-0891) | A pid namespace failed its self-check |
 | [FX-0892](#fx-0892) | A UTS, IPC or cgroup namespace, or setns, failed its self-check |
 | [FX-0893](#fx-0893) | A network namespace failed its self-check |
+| [FX-0894](#fx-0894) | /proc let a process look into another's tree |
 | [FX-0901](#fx-0901) | the native ABI's objects failed their self-check |
 | [FX-0902](#fx-0902) | an allocation failure was not survived |
 | [FX-0903](#fx-0903) | a native call accepted what the ABI says it refuses |
@@ -1967,6 +1968,32 @@ section 8, NN1 to NN17).
 See: src/kernel/src/fs/netns_check.rs; src/kernel/src/net/namespace.rs;
 src/kernel/src/net/veth.rs; src/kernel/src/net/device.rs;
 src/kernel/src/net/netlink/link.rs; docs/NETNS.md.
+
+<a id="fx-0894"></a>
+
+## FX-0894 — /proc let a process look into another's tree
+
+`fs::procaccess_check::run` makes a dumpable process of uid 1000, one that
+cleared PR_SET_DUMPABLE, one of uid 2000 and one of root, and reads their
+/proc/<pid>/root, cwd, exe, fd, fdinfo, maps and ns/*, and asks get_robust_list
+of their threads, as uid 1000, as root and as root inside a user namespace.
+Linux's ptrace_may_access decides: the same user reads a dumpable process of its
+own, never a non-dumpable one or another user's; root reads all; root inside a
+namespace reads nothing of another uid. A refusal is EACCES. get_robust_list of
+a thread of another uid's process must be refused.
+
+1. `credentials::may_access` answers true for a caller that is neither the same
+   user nor privileged over the target's user namespace.
+2. `procfs::may_inspect` is skipped on a link, on the `fd` or `fdinfo`
+   directory, or on `maps`.
+3. `credentials::may_access` lets the capability over a target's user namespace
+   stand for the capability over a target that is not dumpable, or reads a
+   process findable before `attributes::inherit` as dumpable.
+4. `attributes::credentials_changed` is not called when a process changes the
+   ids it acts as, so the process stays dumpable.
+
+See: src/kernel/src/fs/procaccess_check.rs; src/kernel/src/fs/procfs.rs;
+src/kernel/src/syscall/credentials.rs.
 
 <a id="fx-0901"></a>
 

@@ -57,6 +57,7 @@ pub(crate) mod pidfd;
 pub(crate) mod pidns_check;
 pub(crate) mod pipe;
 pub(crate) mod portfd;
+pub(crate) mod procaccess_check;
 pub(crate) mod procfs;
 pub(crate) mod pty;
 pub(crate) mod root_disk;

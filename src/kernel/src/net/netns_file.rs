@@ -160,24 +160,10 @@ pub(crate) fn of(file: &OpenFile) -> Option<Arc<NetNamespace>> {
 }
 
 /// Whether the caller may open the network namespace of `target`, as a link
-/// of `/proc/<target>/ns` leads: Linux asks `ptrace_may_access` of it. The
-/// caller's real, effective and saved ids must all be the target's effective
-/// ones as kernel ids -- the same person -- or the caller must be privileged.
+/// of `/proc/<target>/ns` leads: Linux asks `ptrace_may_access` of it, with
+/// the filesystem ids, and so does `fs::nsfs::may_open` for the other kinds --
+/// [`crate::syscall::credentials::may_access`], dumpability included.
 pub(crate) fn may_open(target: &crate::syscall::process::Process) -> bool {
-    let Some(caller) = crate::syscall::userns::acting() else {
-        return true;
-    };
-    if core::ptr::eq(Arc::as_ptr(&caller), target) {
-        return true;
-    }
-    let (uid, gid) = target.with_credentials(|held| (held.user.effective, held.group.effective));
-    caller.with_credentials(|held| {
-        held.privileged()
-            || (held.user.real == uid
-                && held.user.effective == uid
-                && held.user.saved == uid
-                && held.group.real == gid
-                && held.group.effective == gid
-                && held.group.saved == gid)
-    })
+    crate::syscall::userns::acting()
+        .is_none_or(|caller| crate::syscall::credentials::may_access(&caller, target, false))
 }
