@@ -78,7 +78,7 @@ pub(crate) fn check() -> Result<CheckReport, &'static str> {
             1,
         ),
         (
-            &[made_up(PROGRAM_INPUT, false, true, 2, b"")],
+            &[made_up(PROGRAM_INPUT, false, true, 1, b"")],
             b"",
             b"",
             b"",
