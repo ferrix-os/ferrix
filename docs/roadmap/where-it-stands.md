@@ -215,6 +215,11 @@ Ferrix builds its AArch64 image there in about nine minutes, and
 `cargo xtask test-selfhost --arch aarch64 --volume` finds the volume a clean
 btrfs and boots the image to the end of its self-checks
 (`tools/vendor/google/pixel7/selfhost.sh`).
+The whole matrix built by Ferrix is not done: on 2026-10-04 its 57 rows were
+recorded (271 builds, 188 once a test's init went into the initramfs and one
+kernel served every test), and that change, with the record-without-booting
+mode a weekly CI job needs, waits on branch `selfhost-matrix` (e8b57ed4f) for
+its negative controls and a batch.
 
 Dynamic linking is done: Debian's glibc busybox runs on its own `ld-linux`,
 and on ferrousli's loader and `libc.so.6` in glibc's place, on all three
@@ -235,10 +240,15 @@ architectures (2026-09-27), and hyprlock over `authd` (P1.5, 2026-10-03).
 Phase 2, all landed on 2026-10-03: `--everything`'s desktop runs as `ferrix`
 under `sessiond` (P2.4), hyprix unlocks only on `authd`'s grant (P2.5),
 `login` on the console (P2.3), a session that ends with its compositor
-(P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own terminal; the console revoked when getty
-starts followed on 2026-10-04. Left: K-B and K-C in
-the kernel (P2.1, P2.2), the other desktop images off root, and the
-customer's call on ending a user's processes at logout.
+(P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own
+terminal. On 2026-10-04 getty began revoking the console before every login
+(0f94a6d1a, landed in batch 22384874f), so a program left by one login
+reads nothing of the next one's password. Left: K-B (P2.1) is NP on the
+pushed branch `np-land`, rebased onto 22384874f, squashed and partly
+controlled -- it owes `check`, eight of its thirteen controls and a batch
+(`docs/handover/2026-10-04-np.md` on the branch); K-C (P2.2) is not started;
+the other desktop images still run as root; and ending a user's processes
+at logout is the customer's call.
 
 Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);

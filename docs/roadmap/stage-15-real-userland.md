@@ -193,20 +193,35 @@ with Argon2id, throttles and audits.
 `cargo xtask test-auth` on all three architectures (2026-09-27), and
 hyprlock over `authd` (P1.5, 2026-10-03).
 
-*Phase 2, the desktop as a user: done but for three items.* All on
-2026-10-03, each with the certification consultant's OK:
+*Phase 2, the desktop as a user: done but for three items.* All but the
+console revoke on 2026-10-03, each with the certification consultant's OK:
 `--everything`'s desktop runs as `ferrix` under `sessiond`, with its own
 home disk (P2.4); hyprix unlocks only on `authd`'s grant over the seat
 channel, and a new locker takes over a dead one's lock (P2.5); `login` on
 the console, with a first password chosen there (P2.3, `cargo xtask run
 --login`); a session ends with its compositor, at the console's login
 (P2.7); `su` for `wheel` (P2.6); and `/dev/tty` is the caller's own
-terminal, not the console to anyone; and on 2026-10-04 getty revokes the
-console before every login, so that a program left by one login cannot read
-the next one's password. Left: K-B and K-C in the kernel (P2.1, P2.2); the
-desktop images other than `--everything`, which still run as root; and the
-customer's decision on ending a user's processes at logout
-(`docs/BACKLOG.md`).
+terminal, not the console to anyone. On 2026-10-04 getty revokes the
+console before every login (0f94a6d1a, in batch 22384874f; consultant OK at
+ledger line 341): every open of the console made before `vhangup` reads
+nothing more, a waiting read is woken with `EIO`, only root may take the
+console from a live session, and `login` stops the console's last session;
+a left-over program can still write to the console (`docs/AUTH.md` §1).
+Left: K-B and K-C in the kernel (P2.1, P2.2); the desktop images other than
+`--everything`, which still run as root; and the customer's decision on
+ending a user's processes at logout (`docs/BACKLOG.md`).
+
+P2.1 (K-B) is NAMESPACES' NP, on branch `np-land` (pushed, 403b05626):
+`stage13-fdinfo` rebased onto main 22384874f and squashed into one commit
+(1373cf7ca), with `ns/net` brought under the same `ptrace_may_access` rule
+(netns had landed it with the old one). Its x86-64 boot passes with the
+`procacc` and `netns` lines; controls c02, c03, c04, c06 and c12 FIRED on
+1373cf7ca. It owes `cargo xtask check` and controls c01, c05 and c07 to c13
+on its landing hash, then a batch with `test-init --arch all`, `test-shell`
+and `test-vfs`; the certification consultant's OK IF is at ledger lines 226,
+338 and 342, and the steps are in `docs/handover/2026-10-04-np.md` on the
+branch. P2.2 (K-C, freed socket, pipe and tty buffers zeroed) is not
+started.
 
 *Phase 3* adds PAM for ferrousli's programs, TOTP, ssh passwords and
 privilege prompts (about 32 points), not started.

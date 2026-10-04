@@ -125,25 +125,65 @@ kernel, 22345 KiB initramfs). Back on the host, `cargo xtask test-selfhost
 not fire. The USB link to the phone drops now and then, so the script moves
 the volume in checksummed pieces and runs the phone's long steps detached.
 
-What the exit needs now:
+**The matrix, 2026-10-03 and -04: where it stands.**
 
-* **Room for a preempted processor.** Both FX-0001 stops came with example at
-  a load of 42 to 52 on 24 cores, eight virtual processors deep in a parallel
-  build. `smp.rs` already gives a shootdown holder four seconds because "a
-  holder preempted on a host with more virtual processors than real ones can
-  lose whole seconds without being stuck"; the processors it waits on get
-  one. Giving them the same room, as Linux's unbounded wait does, is the fix
-  to try first; then run the plan again.
-* **The plan made on Ferrix, then replayed.** Record on the final tree,
-  `test-selfhost --plan`, then `selfhost-matrix.sh replay` until every row
-  passes on what Ferrix built.
-* **The Arm C programs.** The Arm ports and busybox are built with cross gcc
-  and ferrousli's Arm `libc.so.6` with Rust targets the sysroot lacks
-  (`aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`,
-  `armv7-unknown-linux-musleabihf`), so the matrix's Arm rows boot Alpine's
-  musl busybox and `test-shell` on ferrousli's loader runs on x86-64 only.
-* **Chrome.** `test-chrome` needs the volume `tools/common/fetch/fetch-chrome.sh`
-  makes, and is not in the matrix.
+Done, on `main`:
+
+* d488da992 (and the two commits before it): Ferrix builds its own AArch64
+  image on the Pixel 7, and `test-selfhost --arch aarch64 --volume` judges
+  the volume a build left (above).
+* 7f002affe: `L.init.1-4` and `H.BOOT.15` reserved for the init change
+  below.
+
+On branch `selfhost-matrix` (pushed e8b57ed4f, 17 commits on `main`
+528cea144, handover `docs/handover/2026-10-04-stage20-selfhost.md` there),
+not landed:
+
+* **One kernel for every test.** A test's init program, `sh -c` script and
+  command list go in the image's initramfs under `.ferrix/init/` instead of
+  the kernel (`init::set_inputs`, `L.init.1-3` under `H.BOOT.15`,
+  SAFETY-MANUAL AoU-24). The matrix's plan falls from 271 builds to 188, 66
+  kernel builds to 6, and Ferrix no longer writes some sixty 125 MB kernel
+  ELFs onto the btrfs volume it keeps in memory; a gate on nazuna saves about
+  2 s. The certification consultant's OK IF, ledger lines 328 to 343.
+* **The matrix itself.** `selfhost-matrix.sh` has 57 rows (the 31 of
+  2026-09-24, the 19 gates added since, `build-apps` first) and a `plan`
+  mode, `FERRIX_BUILDS=plan:`, that records every build without booting: 36
+  minutes for the whole matrix. The script apps (curl, git, foot, sshdt,
+  vkgears, btop, the ALSA apps) are recorded as builds, so a replay can no
+  longer make them on the host unseen. `test-selfhost --plan` vendors the
+  workspaces the plan's builds run in, read off the plan, and vendors apart
+  one whose git crate collides (`pulseaudio` 0.3.1).
+* **Passed:** the host tests, kernel clippy on three targets, traceability,
+  the item boundary, coverage carried; test-boot, test-init, test-shell and
+  test-vfs on x86-64 by hand; 9 of the 14 negative controls on 5e2eca4b2.
+
+Still to do, in order:
+
+* **Land the branch.** `cargo xtask check` on its head; the 14 controls of
+  `~/.local/share/ferrix/logs/linit-controls.md` again on the landing hash
+  (5e2eca4b2 failed `cargo fmt --check`, fixed in 0eda22d00; `test-init`
+  needs `sshdt` built in its gate slot); then a batch (`batch.sh join` with
+  `~/.local/share/ferrix/selfhost-matrix/batch-gate.txt`), and the product
+  owner lands it once every control fired and the four boots' transcripts
+  equal `main`'s apart from the `inputs` line and the sizes.
+* **Plan mode made complete.** It stops a row at its first boot and misses
+  23 of 153 distinct builds, the ones a test makes after a boot (negative
+  variants, later boots' programs); those tests are to build every variant
+  before their first boot (approved by the product owner).
+* **A weekly CI job.** Plan mode, then Ferrix makes the builds in a guest
+  of about 8 GB, then a replay of the rows a runner can boot; the rows that
+  need nazuna's volumes (Chrome, Steam, Claude Code) replayed there.
+* **The apps and the Arm C programs built by Ferrix.** Mesa (vkgears) wants
+  Python's mako and glslang, btop LLVM's C++ runtime; the Arm busybox and
+  ports want cross gcc and the Rust targets `aarch64-unknown-linux-gnu`,
+  `armv7-unknown-linux-gnueabihf` and `armv7-unknown-linux-musleabihf` in
+  the toolchain.
+* **FX-0001 under a loaded host.** A shootdown wait on x86-64 still ends when
+  the host runs the waiter and not the processor waited for (it also fired at
+  a load of 13 on 2026-09-30); Arm invalidates in hardware and never waits.
+  The 2026-10-04 plan run never reached its kernel builds, so it is untested
+  whether the plan now finishes.
 
 ---
 
