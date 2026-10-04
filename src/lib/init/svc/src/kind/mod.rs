@@ -35,7 +35,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub use mount::Mount;
-pub use sandbox::{FilterRule, GROUPS, ProtectSystem, Sandbox, SystemCallFilter};
+pub use sandbox::{FilterAction, FilterRule, ProtectSystem, Sandbox, SystemCallFilter};
 pub use service::{
     Input, Kill, KillMode, OomPolicy, Output, Restart, Service, ServiceType, WorkingDirectory,
 };

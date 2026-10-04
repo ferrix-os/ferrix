@@ -8,7 +8,9 @@ use alloc::vec::Vec;
 
 use super::rig::Rig;
 use crate::event::{Action, Request, SpawnSpec};
-use crate::kind::{Config, FilterRule, ProtectSystem, Sandbox, Service, SystemCallFilter};
+use crate::kind::{
+    Config, FilterAction, FilterRule, ProtectSystem, Sandbox, Service, SystemCallFilter,
+};
 use crate::source::{Entry, Layer, Source};
 
 fn service(text: &str) -> (Service, Vec<String>) {
@@ -37,11 +39,11 @@ fn sandbox(keys: &str) -> (Sandbox, Vec<String>) {
     (service.sandbox, warnings)
 }
 
-fn rule(name: &str, add: bool, action: Option<&str>) -> FilterRule {
+fn rule(name: &str, add: bool, action: Option<FilterAction>) -> FilterRule {
     FilterRule {
         name: name.to_owned(),
         add,
-        action: action.map(str::to_owned),
+        action,
     }
 }
 
@@ -143,8 +145,8 @@ fn a_deny_list_takes_actions_and_a_later_allow_takes_from_it() {
             allow_list: false,
             rules: alloc::vec![
                 rule("@privileged", true, None),
-                rule("@reboot", true, Some("EPERM")),
-                rule("mount", true, Some("13")),
+                rule("@reboot", true, Some(FilterAction::Errno(1))),
+                rule("mount", true, Some(FilterAction::Errno(13))),
                 rule("reboot", false, None),
             ],
         })
@@ -171,8 +173,8 @@ fn unknown_groups_bad_names_and_bad_actions_warn_and_are_dropped() {
     assert_eq!(
         filter.rules,
         [
-            rule("ptrace", true, Some("EPERM")),
-            rule("kexec_load", true, Some("kill")),
+            rule("ptrace", true, Some(FilterAction::Errno(1))),
+            rule("kexec_load", true, Some(FilterAction::Kill)),
             rule("init_module", true, None),
         ]
     );
@@ -195,7 +197,7 @@ fn unknown_groups_bad_names_and_bad_actions_warn_and_are_dropped() {
 
 #[test]
 fn the_keys_not_built_warn_by_name_and_load() {
-    let (s, warnings) = sandbox("ProtectHome=yes\nSystemCallArchitectures=native\n");
+    let (s, warnings) = sandbox("ProtectHome=yes\nInaccessiblePaths=/x\n");
     assert!(s.is_empty());
     assert_eq!(warnings.len(), 2, "{warnings:?}");
     assert!(

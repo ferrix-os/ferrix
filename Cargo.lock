@@ -565,6 +565,7 @@ name = "ferrix-svc"
 version = "0.1.0"
 dependencies = [
  "ferrix-restart",
+ "ferrix-seccomp",
 ]
 
 [[package]]

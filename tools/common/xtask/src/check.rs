@@ -197,6 +197,13 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "xkb keymap and tables",
         &[&["tools/common/gen/gen-xkb-tables.py", "--check"]],
     ),
+    // init's system call, errno and group tables are generated from Linux's
+    // headers and systemd's listing, committed beside them: a number typed
+    // by hand would be a filter that lets through what it was asked to stop.
+    (
+        "init's system call tables",
+        &[&["tools/common/gen/gen-init-syscall-tables.py", "--check"]],
+    ),
     // The panic screen's font is generated from the BDF committed beside
     // it, and a hand edit to either would otherwise drift silently.
     ("font", &[&["tools/common/gen/gen-font.py", "--check"]]),
