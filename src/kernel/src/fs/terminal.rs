@@ -43,7 +43,7 @@
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_linux_abi::types::{
@@ -82,6 +82,11 @@ const PUMP_NANOS: u64 = 20_000_000;
 
 /// Whether the `console` thread has been started. Set once, by the first read.
 static PUMPING: AtomicBool = AtomicBool::new(false);
+
+/// How many times the console has been hung up (`vhangup`). An open of it
+/// remembers the count it was opened at, and once the count has moved on
+/// it may no longer read (`fs::console`, `docs/AUTH.md` §1).
+static HANGUPS: AtomicU64 = AtomicU64::new(0);
 /// A tenth of a second, `VTIME`'s unit.
 const DECISECOND_NANOS: u64 = 100_000_000;
 
@@ -779,6 +784,40 @@ pub(crate) fn available() -> usize {
     with(|terminal| terminal.discipline.available())
 }
 
+/// The hangup count now: what an open of the console is stamped with.
+pub(crate) fn hangups() -> u64 {
+    HANGUPS.load(Ordering::Acquire)
+}
+
+/// Whether the console has been hung up since an open stamped `opened`.
+/// `None` is an open no hangup reaches: init's own descriptors.
+pub(crate) fn hung_up_since(opened: Option<u64>) -> bool {
+    opened.is_some_and(|opened| hangups() != opened)
+}
+
+/// Hang the console up if it is the controlling terminal of `session`:
+/// every open made before now may no longer read, and a reader or poller
+/// waiting on it is woken to find that out. Whether it was.
+///
+/// Counted under the terminal's lock, which [`read`] asks under, and with
+/// the session asked under the same lock. A reader sleeps [`POLL_NANOS`] at
+/// a time and looks again, so it notices by itself; the wake is for a `poll`
+/// that trusts the input queue to wake it, which nothing else would until
+/// the next keystroke.
+pub(crate) fn hang_up(session: u32) -> bool {
+    let hung_up = with(|terminal| {
+        if session == 0 || terminal.session != session {
+            return false;
+        }
+        let _ = HANGUPS.fetch_add(1, Ordering::AcqRel);
+        true
+    });
+    if hung_up {
+        console::input::waiters().wake_all();
+    }
+    hung_up
+}
+
 /// A program's read of the console.
 ///
 /// Canonical mode waits for a line. Otherwise `VMIN` and `VTIME` decide, as
@@ -792,8 +831,14 @@ pub(crate) fn available() -> usize {
 ///
 /// # Errors
 ///
-/// `EAGAIN`, as above; `EINTR` when a signal is waiting to be delivered.
-pub(crate) fn read(buf: &mut [u8], nonblock: bool) -> Result<usize, Errno> {
+/// `EAGAIN`, as above; `EINTR` when a signal is waiting to be delivered;
+/// `EIO` once the console has been hung up since the open stamped `opened`
+/// ([`hung_up_since`]), asked at every look for input, so a reader already
+/// waiting when the hangup comes never takes the next line.
+pub(crate) fn read(buf: &mut [u8], nonblock: bool, opened: Option<u64>) -> Result<usize, Errno> {
+    if hung_up_since(opened) {
+        return Err(Errno::EIO);
+    }
     if buf.is_empty() {
         return Ok(0);
     }
@@ -801,11 +846,22 @@ pub(crate) fn read(buf: &mut [u8], nonblock: bool) -> Result<usize, Errno> {
     let mut timer = ReadTimer::new(now());
     loop {
         pump();
+        // Asked under the terminal's lock, which [`hang_up`] counts under:
+        // a hangup is either before this step, and nothing is taken, or
+        // after it.
         let step = with(|terminal| {
-            terminal
-                .discipline
-                .read_step(buf, &mut timer, now(), nonblock)
+            if hung_up_since(opened) {
+                return None;
+            }
+            Some(
+                terminal
+                    .discipline
+                    .read_step(buf, &mut timer, now(), nonblock),
+            )
         });
+        let Some(step) = step else {
+            return Err(Errno::EIO);
+        };
         // The console has no receive interrupt to wake it, so it looks again
         // every `POLL_NANOS` whatever the deadline says.
         if let ReadStep::Took(count) = step {

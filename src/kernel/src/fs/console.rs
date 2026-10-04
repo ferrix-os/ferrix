@@ -26,6 +26,23 @@
 //! echoes what is typed and Enter arrives as a carriage return. On Linux the
 //! tty layer's `ECHO` and `ICRNL` fix both, between the keyboard and the
 //! program, and here the terminal does the same.
+//!
+//! # Every open is a file of its own, and a hangup ends its reading
+//!
+//! The device is one inode, but each open of it is a [`ConsoleFile`] that
+//! remembers when it was opened. `vhangup` (`syscall/tty.rs`) counts a hangup
+//! of the console, and an open made before it may no longer read: a read is
+//! `EIO`, `poll` reports a hangup, and every `ioctl` is `EIO`. It may still
+//! write. That is what lets getty take the console back for a new login
+//! from a program the last one left running, which could otherwise read the
+//! next person's password (`docs/AUTH.md` §1), without cutting off the
+//! services whose output goes to the console.
+//!
+//! Two kinds of open are not stamped. Init's own descriptors, which the
+//! kernel makes, may always read: no hangup is meant for init. A native
+//! process's, which the kernel also makes, may never read: anyone may start
+//! one, and it would otherwise be a fresh open of the console, unrevoked,
+//! for whoever asked.
 
 use alloc::sync::Arc;
 use core::any::Any;
@@ -65,6 +82,71 @@ pub(crate) fn console_inode() -> Arc<dyn Inode> {
     Arc::clone(CONSOLE.call_once(|| Arc::new(Console)))
 }
 
+/// Whether an open of the console may read, and until when.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reading {
+    /// Whatever hangs the console up: init's own descriptors.
+    Always,
+    /// Until the console is next hung up after the hangup count given.
+    Since(u64),
+    /// Never: a native process's descriptors.
+    Never,
+}
+
+/// An open of the console: see the module documentation.
+#[derive(Debug)]
+pub(crate) struct ConsoleFile {
+    /// Whether it may read.
+    reading: Reading,
+}
+
+impl ConsoleFile {
+    /// Whether the open may no longer read.
+    fn revoked(&self) -> bool {
+        match self.reading {
+            Reading::Always => false,
+            Reading::Since(opened) => terminal::hung_up_since(Some(opened)),
+            Reading::Never => true,
+        }
+    }
+
+    /// The count a read stops at: see [`terminal::read`].
+    fn opened(&self) -> Option<u64> {
+        match self.reading {
+            Reading::Always => None,
+            Reading::Since(opened) => Some(opened),
+            // A count no hangup is stamped with: always hung up since.
+            Reading::Never => Some(u64::MAX),
+        }
+    }
+}
+
+/// A new open of the console, which may read until the console is next hung
+/// up: what opening `/dev/console` or `/dev/tty` gives.
+pub(crate) fn open_file() -> Arc<dyn Inode> {
+    open_reading(Reading::Since(terminal::hangups()))
+}
+
+/// A new open of the console, reading as `reading` says.
+fn open_reading(reading: Reading) -> Arc<dyn Inode> {
+    Arc::new(ConsoleFile { reading })
+}
+
+/// Whether `io` -- what an open file reads and writes -- is the console:
+/// the device itself, or an open of it.
+pub(crate) fn is(io: &Arc<dyn Inode>) -> bool {
+    Arc::ptr_eq(io, &console_inode()) || Arc::clone(io).into_any().is::<ConsoleFile>()
+}
+
+/// Whether `io` is an open of the console that may no longer read: one made
+/// before the console's last hangup, or a native process's.
+pub(crate) fn is_revoked(io: &Arc<dyn Inode>) -> bool {
+    Arc::clone(io)
+        .into_any()
+        .downcast::<ConsoleFile>()
+        .is_ok_and(|file| file.revoked())
+}
+
 /// Open the console for reading and writing, as a new process's descriptors
 /// 0, 1 and 2 are.
 ///
@@ -78,8 +160,9 @@ pub(crate) fn console_inode() -> Arc<dyn Inode> {
 ///
 /// # Errors
 ///
-/// Whatever [`OpenFile::new`] refuses, which for this inode is nothing.
-pub(crate) fn open_console() -> Result<Arc<OpenFile>, Errno> {
+/// Whatever [`OpenFile::new`] refuses, which for this inode is nothing, and
+/// `ENOMEM` past the job's memory limit.
+pub(crate) fn open_console(reading: Reading) -> Result<Arc<OpenFile>, Errno> {
     let flags = OpenFlags {
         read: true,
         write: true,
@@ -87,10 +170,11 @@ pub(crate) fn open_console() -> Result<Arc<OpenFile>, Errno> {
     };
     let namespace = fs::namespace();
     let named = namespace.open(&namespace.context(), None, b"/dev/console", &flags, 0);
-    match named {
-        Ok(file) if Arc::ptr_eq(file.inode(), &console_inode()) => Ok(file),
-        _ => OpenFile::new(detached(), &flags),
-    }
+    let file = match named {
+        Ok(file) if Arc::ptr_eq(file.inode(), &console_inode()) => file,
+        _ => OpenFile::new(detached(), &flags)?,
+    };
+    file.with_io(open_reading(reading))
 }
 
 /// The console's place in a namespace nothing else is in.
@@ -177,13 +261,12 @@ impl Inode for Console {
         Ok((data.len(), 0))
     }
 
-    fn read_at(&self, _offset: u64, buf: &mut [u8]) -> ferrix_vfs::Result<usize> {
-        terminal::read(buf, false)
-    }
-
-    /// A read through a descriptor, which knows whether it may wait.
-    fn read_stream(&self, buf: &mut [u8], nonblock: bool) -> ferrix_vfs::Result<usize> {
-        terminal::read(buf, nonblock)
+    /// Refused: a read comes through an open of the console, a
+    /// [`ConsoleFile`], which knows whether it may still read. Nothing
+    /// reads the device itself but a node that stands for it and was never
+    /// opened, which is no reader.
+    fn read_at(&self, _offset: u64, _buf: &mut [u8]) -> ferrix_vfs::Result<usize> {
+        Err(Errno::EIO)
     }
 
     fn poll(&self) -> Readiness {
@@ -199,5 +282,62 @@ impl Inode for Console {
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
         visit(fs::wake::lent(crate::console::input::waiters()));
         crate::console::input::interrupt_driven()
+    }
+
+    /// Every open is a file of its own, stamped with the hangup count.
+    fn open(&self) -> ferrix_vfs::Result<Option<Arc<dyn Inode>>> {
+        Ok(Some(open_file()))
+    }
+}
+
+/// What an open of the console reads and writes through: the device's, until
+/// it is revoked, and then only its writes.
+impl Inode for ConsoleFile {
+    fn metadata(&self) -> Metadata {
+        Console.metadata()
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+        self
+    }
+
+    fn is_stream(&self) -> bool {
+        true
+    }
+
+    fn write_at(&self, offset: u64, data: &[u8], append: bool) -> ferrix_vfs::Result<(usize, u64)> {
+        Console.write_at(offset, data, append)
+    }
+
+    fn read_at(&self, _offset: u64, buf: &mut [u8]) -> ferrix_vfs::Result<usize> {
+        terminal::read(buf, false, self.opened())
+    }
+
+    /// A read through a descriptor, which knows whether it may wait.
+    fn read_stream(&self, buf: &mut [u8], nonblock: bool) -> ferrix_vfs::Result<usize> {
+        terminal::read(buf, nonblock, self.opened())
+    }
+
+    /// Hung up, never readable, once revoked: as a Linux terminal's file is
+    /// after `vhangup`, though here it may still be written.
+    fn poll(&self) -> Readiness {
+        if self.revoked() {
+            return Readiness {
+                readable: false,
+                writable: true,
+                hangup: true,
+                error: false,
+                priority: false,
+            };
+        }
+        Console.poll()
+    }
+
+    fn poll_changes(&self) -> Option<u64> {
+        Console.poll_changes()
+    }
+
+    fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
+        Console.poll_queues(visit)
     }
 }

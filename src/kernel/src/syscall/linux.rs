@@ -32,7 +32,7 @@ use ferrix_linux_abi::types::{AT_FDCWD, O_CREAT, O_TRUNC, O_WRONLY};
 use super::{
     Personality, attributes, compat, credentials, epoll, eventfd, exec, family, fd, file, flock,
     fsctl, futex, kill, limits, memfd, memory, namespace, path, poll, process, sem, shm, signal,
-    signalfd, sockets, system, thread, thread_area, time, timerfd, unanswered,
+    signalfd, sockets, system, thread, thread_area, time, timerfd, tty, unanswered,
 };
 use crate::arch;
 use crate::sched;
@@ -316,8 +316,8 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
         Syscall::Msgget | Syscall::Msgsnd | Syscall::Msgrcv | Syscall::Msgctl => Err(Errno::ENOSYS),
         // No process accounting to switch on.
         Syscall::Acct => Err(Errno::ENOSYS),
-        // No controlling terminals to hang up until stage 15's tty layer.
-        Syscall::Vhangup => Err(Errno::ENOSYS),
+        // The console's, before a login (`docs/AUTH.md` §1).
+        Syscall::Vhangup => tty::vhangup(process),
         // `rseq` is refused in `attributes::dispatch`, which says why.
         // `mmap` and `mmap2` differ in one argument's unit and nothing else,
         // which is exactly why they are separate calls: the difference is

@@ -37,6 +37,20 @@
 //!
 //! Every request that needs a controlling terminal answers `ENOTTY` to a
 //! process whose session does not hold the console, as Linux does.
+//!
+//! # Hangup, and who may take the console
+//!
+//! `vhangup` hangs the console up (`fs::console`): every open of it made
+//! before may no longer read, and every request on one is `EIO`. getty does
+//! it before every login, so that what a program left running by the last
+//! one holds cannot read the next person's password (`docs/AUTH.md` §1).
+//!
+//! That would be undone if such a program could take the console back, so
+//! taking it is guarded. Taking it from a live session (`TIOCSCTTY` with 1)
+//! needs root, as Linux needs `CAP_SYS_ADMIN`. Taking a free one, by
+//! `TIOCSCTTY` or by a first job-control question, needs a descriptor open
+//! for reading: one that could not read the console gets no terminal to read
+//! through `/dev/tty` either.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -59,13 +73,19 @@ use crate::syscall::{registry, uaccess};
 /// The caller, `crate::syscall::fd::sys_ioctl`, has resolved the descriptor
 /// and checked that it is the console. Every request not listed is `ENOTTY`,
 /// which is what Linux's terminal layer answers for one it does not know.
+/// Every request on an open the console was hung up after is `EIO`, as on a
+/// Linux terminal after `vhangup`: none of them is a write, and settings
+/// changed through one -- echo turned on under the next password prompt --
+/// would be a way to read after all.
 pub(crate) fn ioctl(
     process: &Process,
     file: &Arc<OpenFile>,
     request: u32,
     arg: u64,
 ) -> Result<usize, Errno> {
-    let _ = file;
+    if crate::fs::console::is_revoked(file.io()) {
+        return Err(Errno::EIO);
+    }
     match request {
         TCGETS => {
             let termios = terminal::with(|terminal| terminal.discipline.termios());
@@ -122,7 +142,7 @@ pub(crate) fn ioctl(
         TCXONC if arg <= TCION => Ok(0),
         TCXONC => Err(Errno::EINVAL),
         TIOCSCTTY | TIOCNOTTY | TIOCGPGRP | TIOCSPGRP | TIOCGSID => {
-            job_control(process, request, arg)
+            job_control(process, request, arg, file.readable())
         }
         _ => Err(Errno::ENOTTY),
     }
@@ -149,10 +169,19 @@ fn set(flush: bool, settings: impl FnOnce(Termios) -> Termios) {
 /// after it is released: dropping the last reference to a process frees its
 /// memory, which is not something to do under a spin lock.
 #[inline(never)]
-fn job_control(process: &Process, request: u32, arg: u64) -> Result<usize, Errno> {
+///
+/// `readable` is whether the descriptor asked through is open for reading,
+/// without which the console is not taken (see the module documentation).
+fn job_control(process: &Process, request: u32, arg: u64, readable: bool) -> Result<usize, Errno> {
     let live = registry::live()?;
+    let privileged = process.with_credentials(|ids| ids.privileged());
+    let taker = Taker {
+        process,
+        readable,
+        privileged,
+    };
     let answer = match request {
-        TIOCSCTTY => terminal::with(|terminal| take_controlling(process, terminal, &live, arg)),
+        TIOCSCTTY => terminal::with(|terminal| take_controlling(&taker, terminal, &live, arg)),
         TIOCNOTTY => terminal::with(|terminal| {
             if terminal.session != process.sid() || terminal.session == 0 {
                 return Err(Errno::ENOTTY);
@@ -165,31 +194,44 @@ fn job_control(process: &Process, request: u32, arg: u64) -> Result<usize, Errno
             }
             Ok(0)
         }),
-        TIOCGPGRP => terminal::with(|terminal| controlling(process, terminal, &live)).and_then(
+        TIOCGPGRP => terminal::with(|terminal| controlling(&taker, terminal, &live)).and_then(
             |(_, foreground)| put_int(process, arg, pidns::pgrp_to_user(process, foreground)),
         ),
-        TIOCGSID => terminal::with(|terminal| controlling(process, terminal, &live))
+        TIOCGSID => terminal::with(|terminal| controlling(&taker, terminal, &live))
             .and_then(|(session, _)| put_int(process, arg, pidns::sid_to_user(process, session))),
-        TIOCSPGRP => set_foreground(process, &live, arg),
+        TIOCSPGRP => set_foreground(&taker, &live, arg),
         _ => Err(Errno::ENOTTY),
     };
     drop(live);
     answer
 }
 
-/// The console's session and foreground group, if the console is `process`'s
-/// controlling terminal -- giving it to `process` first if it is a session
-/// leader and nobody else holds it. See the module documentation.
+/// Who asks for the console, and through what.
+struct Taker<'a> {
+    /// The process asking.
+    process: &'a Process,
+    /// Whether the descriptor it asks through is open for reading.
+    readable: bool,
+    /// Whether it is root (`Credentials::privileged`).
+    privileged: bool,
+}
+
+/// The console's session and foreground group, if the console is the taker's
+/// controlling terminal -- giving it to the taker first if it is a session
+/// leader asking through a readable descriptor and nobody else holds it. See
+/// the module documentation.
 fn controlling(
-    process: &Process,
+    taker: &Taker<'_>,
     terminal: &mut Terminal,
     live: &[Arc<Process>],
 ) -> Result<(u32, u32), Errno> {
+    let process = taker.process;
     let sid = process.sid();
     if sid != 0 && terminal.session == sid {
         return Ok((terminal.session, terminal.foreground));
     }
-    if sid != 0 && process.pid() == sid && session_is_gone(terminal.session, live) {
+    if sid != 0 && process.pid() == sid && taker.readable && session_is_gone(terminal.session, live)
+    {
         terminal.session = sid;
         terminal.foreground = process.pgid();
         return Ok((terminal.session, terminal.foreground));
@@ -199,14 +241,16 @@ fn controlling(
 
 /// `TIOCSCTTY`: Linux's rules. A session leader only; nothing to do if its
 /// session already has the console; `EPERM` if another live session does,
-/// unless `arg` is 1 and the caller may steal it -- which everyone may, since
-/// everything runs as root.
+/// unless `arg` is 1 and the caller is root, as Linux needs `CAP_SYS_ADMIN`.
+/// And here, `EPERM` through a descriptor not open for reading (see the
+/// module documentation).
 fn take_controlling(
-    process: &Process,
+    taker: &Taker<'_>,
     terminal: &mut Terminal,
     live: &[Arc<Process>],
     arg: u64,
 ) -> Result<usize, Errno> {
+    let process = taker.process;
     let sid = process.sid();
     if process.pid() != sid || sid == 0 {
         return Err(Errno::EPERM);
@@ -214,7 +258,10 @@ fn take_controlling(
     if terminal.session == sid {
         return Ok(0);
     }
-    if !session_is_gone(terminal.session, live) && arg != 1 {
+    if !taker.readable {
+        return Err(Errno::EPERM);
+    }
+    if !session_is_gone(terminal.session, live) && !(arg == 1 && taker.privileged) {
         return Err(Errno::EPERM);
     }
     terminal.session = sid;
@@ -230,8 +277,9 @@ fn take_controlling(
 /// `SIGTTOU` on Linux unless it ignores it -- which a shell's children do not
 /// yet, and nothing delivers a signal, so the change is simply allowed.
 #[inline(never)]
-fn set_foreground(process: &Process, live: &[Arc<Process>], arg: u64) -> Result<usize, Errno> {
-    let (session, _) = terminal::with(|terminal| controlling(process, terminal, live))?;
+fn set_foreground(taker: &Taker<'_>, live: &[Arc<Process>], arg: u64) -> Result<usize, Errno> {
+    let process = taker.process;
+    let (session, _) = terminal::with(|terminal| controlling(taker, terminal, live))?;
     let mut bytes = [0_u8; 4];
     get(process, arg, &mut bytes)?;
     let group = u32::try_from(i32::from_le_bytes(bytes)).map_err(|_| Errno::EINVAL)?;
@@ -254,6 +302,33 @@ fn set_foreground(process: &Process, live: &[Arc<Process>], arg: u64) -> Result<
             terminal.foreground = group;
         }
     });
+    Ok(0)
+}
+
+/// `vhangup`: hang up the caller's controlling terminal, as Linux's needs
+/// `CAP_SYS_TTY_CONFIG` -- root here. The console is hung up (see the module
+/// documentation); a pty is not yet, which is `ENOSYS` rather than a hangup
+/// that did nothing, and a caller with no controlling terminal has nothing
+/// to hang up, which is success, as on Linux.
+///
+/// The caller keeps the console: getty opens it again and goes on with it.
+/// Linux takes it from the session too, and agetty takes it back at once.
+pub(crate) fn vhangup(process: &Process) -> Result<usize, Errno> {
+    if !process.with_credentials(|ids| ids.privileged()) {
+        return Err(Errno::EPERM);
+    }
+    let sid = process.sid();
+    if terminal::hang_up(sid) {
+        return Ok(0);
+    }
+    let holds_a_pty = sid != 0
+        && crate::fs::pty::numbers()
+            .into_iter()
+            .filter_map(crate::fs::pty::pair)
+            .any(|pty| pty.session() == sid);
+    if holds_a_pty {
+        return Err(Errno::ENOSYS);
+    }
     Ok(0)
 }
 

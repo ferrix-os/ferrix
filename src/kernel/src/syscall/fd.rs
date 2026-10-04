@@ -122,6 +122,9 @@ pub(crate) fn user_path(process: &Process, at: u64) -> Result<Vec<u8>, Errno> {
 /// process gets them and what a program can observe: `fcntl(0, F_SETFL,
 /// O_NONBLOCK)` changes descriptor 1 too.
 ///
+/// `reading` is whether they may read the console (`fs::console`): always
+/// for init's, never for a native process's.
+///
 /// Charged to no job (`quota::charging_nobody`): a job at its memory limit
 /// must not be able to make this fail. The table is charged to the
 /// process's job the first time it grows.
@@ -136,9 +139,11 @@ pub(crate) fn user_path(process: &Process, at: u64) -> Result<Vec<u8>, Errno> {
 /// whose `Arc` cannot report a refusal (MEMORY-AND-TIMING §1.3). A console
 /// that cannot be opened, or a new table with no room for three, is a kernel
 /// bug and stops it (`CONSOLE_DESCRIPTORS`).
-pub(crate) fn standard_streams() -> Result<FdTable<Arc<OpenFile>>, AllocError> {
+pub(crate) fn standard_streams(
+    reading: console::Reading,
+) -> Result<FdTable<Arc<OpenFile>>, AllocError> {
     ferrix_fallible::check()?;
-    match crate::object::quota::charging_nobody(console_table) {
+    match crate::object::quota::charging_nobody(|| console_table(reading)) {
         Ok(table) => Ok(table),
         Err(Errno::ENOMEM) => Err(AllocError),
         Err(errno) => fatal!(
@@ -150,8 +155,8 @@ pub(crate) fn standard_streams() -> Result<FdTable<Arc<OpenFile>>, AllocError> {
 }
 
 /// See [`standard_streams`].
-fn console_table() -> Result<FdTable<Arc<OpenFile>>, Errno> {
-    let console = console::open_console()?;
+fn console_table(reading: console::Reading) -> Result<FdTable<Arc<OpenFile>>, Errno> {
+    let console = console::open_console(reading)?;
     let mut table = FdTable::new();
     for _ in 0..3 {
         let _ = table.insert(Arc::clone(&console), false)?;
@@ -655,7 +660,7 @@ pub(crate) fn sys_ioctl(
     // By what reads and writes reach, not by what `fstat` reports: `/dev/tty`
     // is a devfs node of its own that opens the console, and busybox's shell
     // asks its job-control questions through it.
-    if Arc::ptr_eq(file.io(), &console::console_inode()) {
+    if console::is(file.io()) {
         return tty::ioctl(process, &file, request, arg);
     }
     // An open card (`docs/DISPLAY.md` §2.3), by its per-open object.

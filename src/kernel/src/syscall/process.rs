@@ -61,6 +61,7 @@ use ferrix_vfs::{Context, Location, OpenFile};
 use ferrix_vma::VmaFlags;
 
 use crate::fs;
+use crate::fs::console::Reading;
 use crate::object::job::{self, Job};
 use crate::object::process::Host;
 use crate::object::{self, HandleTable};
@@ -332,16 +333,26 @@ struct Heap {
 impl Process {
     /// A process over an address space, with no heap yet.
     ///
-    /// It is in the root job, and counted there from now on.
+    /// It is in the root job, and counted there from now on. Its descriptors
+    /// 0 to 2 may write the console and never read it: it is a native
+    /// process, which anyone may start, and a fresh open that could read
+    /// would undo a hangup of the console (`fs::console`).
     ///
     /// # Errors
     ///
     /// [`AllocError`] when the core's part of it could not be allocated.
     pub(crate) fn new(space: Arc<AddressSpace>) -> Result<Process, AllocError> {
+        Process::reading(space, Reading::Never)
+    }
+
+    /// [`Process::new`], with the console on its descriptors reading as
+    /// `reading` says.
+    fn reading(space: Arc<AddressSpace>, reading: Reading) -> Result<Process, AllocError> {
         Process::with_pid(
             space,
             object::process::allocate().unwrap_or(0),
             Arc::clone(job::root()),
+            reading,
         )
     }
 
@@ -355,13 +366,19 @@ impl Process {
         let pid = object::process::allocate_init()
             .or_else(object::process::allocate)
             .unwrap_or(0);
-        Process::with_pid(space, pid, Arc::clone(job::root()))
+        Process::with_pid(space, pid, Arc::clone(job::root()), Reading::Always)
     }
 
     /// A process over an address space, numbered `pid`, which the caller has
-    /// reserved in the registry, and counted in `job`.
-    fn with_pid(space: Arc<AddressSpace>, pid: u32, job: Arc<Job>) -> Result<Process, AllocError> {
-        let files = fallible::try_arc(SpinLock::new(fd::standard_streams()?))?;
+    /// reserved in the registry, and counted in `job`, with the console on
+    /// its descriptors 0 to 2 reading as `reading` says (`fs::console`).
+    fn with_pid(
+        space: Arc<AddressSpace>,
+        pid: u32,
+        job: Arc<Job>,
+        reading: Reading,
+    ) -> Result<Process, AllocError> {
+        let files = fallible::try_arc(SpinLock::new(fd::standard_streams(reading)?))?;
         let fs = fallible::try_arc(SpinLock::new(fs::root_disk::process_context()))?;
         Process::with_context(space, pid, job, files, fs)
     }
@@ -2307,8 +2324,13 @@ pub(crate) fn run_program(_argument: usize) {
 /// # Errors
 ///
 /// Whatever [`AddressSpace::new`] refuses.
+///
+/// Its console descriptors read as an open of the console made now does: the
+/// checks ask the console's terminal questions through them.
 pub(crate) fn new_for_check() -> Result<Arc<Process>, SpaceError> {
-    let process = Process::new(AddressSpace::new()?).map_err(|_| SpaceError::OutOfMemory)?;
+    let reading = Reading::Since(fs::terminal::hangups());
+    let process =
+        Process::reading(AddressSpace::new()?, reading).map_err(|_| SpaceError::OutOfMemory)?;
     Ok(registry::register(process))
 }
 

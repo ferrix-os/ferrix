@@ -235,8 +235,8 @@ architectures (2026-09-27), and hyprlock over `authd` (P1.5, 2026-10-03).
 Phase 2, all landed on 2026-10-03: `--everything`'s desktop runs as `ferrix`
 under `sessiond` (P2.4), hyprix unlocks only on `authd`'s grant (P2.5),
 `login` on the console (P2.3), a session that ends with its compositor
-(P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own terminal.
-Left: revoking the console when getty starts (being built), K-B and K-C in
+(P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own terminal; the console revoked when getty
+starts followed on 2026-10-04. Left: K-B and K-C in
 the kernel (P2.1, P2.2), the other desktop images off root, and the
 customer's call on ending a user's processes at logout.
 

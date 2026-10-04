@@ -811,6 +811,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_a_pseudoterminal_slave_reads_as_vmin_and_vtime_say()?;
     check_the_console_answers_as_a_terminal(&process)?;
     check_a_dead_leaders_terminals_are_let_go()?;
+    check_a_hangup_revokes_the_consoles_reading()?;
     check_a_signal_disposition_reads_back_as_it_was_set(&process)?;
     check_the_blocked_mask_follows_how(&process)?;
     check_kill_finds_its_targets_and_refuses_what_it_should(&process)?;
@@ -2679,9 +2680,10 @@ fn check_the_console_answers_as_a_terminal(process: &Process) -> Result<(), &'st
 /// See [`check_the_console_answers_as_a_terminal`]: `/dev/tty` is the
 /// caller's controlling terminal (`docs/AUTH.md` §1), asked of the rule
 /// devfs opens it by, since a check runs on no process's task: the console
-/// for the session it is the terminal of, the same object a console
-/// descriptor is -- so busybox's shell asks its job-control questions of the
-/// console through it -- and `ENXIO` once the session has let it go.
+/// for the session it is the terminal of, an open of the console as a
+/// console descriptor is -- so busybox's shell asks its job-control
+/// questions of the console through it -- and `ENXIO` once the session has
+/// let it go.
 fn terminal_answers_through_dev_tty(process: &Process, _page: u64) -> Result<(), &'static str> {
     use ferrix_linux_abi::types::TIOCSCTTY;
 
@@ -2693,7 +2695,7 @@ fn terminal_answers_through_dev_tty(process: &Process, _page: u64) -> Result<(),
     )?;
     let opened = crate::fs::devfs::terminal_of_session(process.sid())
         .map_err(|_| "/dev/tty did not open for the session the console is the terminal of")?;
-    if !Arc::ptr_eq(&opened, &crate::fs::console::console_inode()) {
+    if !crate::fs::console::is(&opened) {
         return Err("/dev/tty for the console's session is not the console");
     }
     crate::fs::terminal::with(|terminal| {
@@ -2705,6 +2707,151 @@ fn terminal_answers_through_dev_tty(process: &Process, _page: u64) -> Result<(),
         Ok(_) => Err("/dev/tty opened for a session with no controlling terminal"),
         Err(_) => Err("/dev/tty with no controlling terminal was refused with other than ENXIO"),
     }
+}
+
+/// How long the console revoke check gives a reader to come back after the
+/// hangup: a reader looks again every two milliseconds.
+const REVOKE_PATIENCE_NANOS: u64 = 2_000_000_000;
+
+/// The open the console revoke check's reader reads through.
+static REVOKE_READER: crate::sync::SpinLock<Option<Arc<dyn ferrix_vfs::Inode>>> =
+    crate::sync::SpinLock::new(None);
+
+/// What that reader's read answered, once it has.
+static REVOKE_ANSWER: crate::sync::SpinLock<Option<Result<usize, Errno>>> =
+    crate::sync::SpinLock::new(None);
+
+/// Woken when it has.
+static REVOKE_ANSWERED: WaitQueue = WaitQueue::new();
+
+/// `vhangup` revokes the console's reading (`docs/AUTH.md` §1; the
+/// certification consultant's R1 to R3, ledger line 317). An open made
+/// before it: a read is `EIO`, a reader already waiting is woken with `EIO`
+/// (R2), `poll` reports a hangup and never input, `TCSETS` and `TIOCSCTTY`
+/// are `EIO` (R1), and a write still goes out. An open made after it reads
+/// as before. Init's opens are never revoked and a native process's never
+/// read (R3). `vhangup` is root's alone. The negative controls: `hang_up`
+/// not counting (the reader is not refused), and `read` not asking again
+/// after it sleeps (the waiting reader is not woken).
+fn check_a_hangup_revokes_the_consoles_reading() -> Result<(), &'static str> {
+    use crate::fs::terminal;
+
+    let saved = terminal::with(|terminal| (terminal.session, terminal.foreground));
+    let outcome = hangup_revokes_reading();
+    terminal::with(|terminal| (terminal.session, terminal.foreground) = saved);
+    let leftover = REVOKE_READER.lock().take();
+    drop(leftover);
+    outcome
+}
+
+/// See [`check_a_hangup_revokes_the_consoles_reading`].
+fn hangup_revokes_reading() -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::{TCSETS, TIOCSCTTY};
+
+    use crate::fs::console::{self, Reading};
+    use crate::fs::terminal;
+    use crate::syscall::tty;
+
+    let leader = process::new_for_check().map_err(|_| "could not make a session leader")?;
+    let _ = crate::syscall::family::sys_setsid(&leader);
+    let sid = leader.sid();
+    terminal::with(|terminal| {
+        terminal.session = sid;
+        terminal.foreground = leader.pgid();
+    });
+    let before = console::open_file();
+    let before_file = console::open_console(Reading::Since(terminal::hangups()))
+        .map_err(|_| "the console did not open")?;
+    let init_file =
+        console::open_console(Reading::Always).map_err(|_| "the console did not open")?;
+    let native_file =
+        console::open_console(Reading::Never).map_err(|_| "the console did not open")?;
+
+    // A reader waiting on `before` when the hangup comes.
+    *REVOKE_ANSWER.lock() = None;
+    *REVOKE_READER.lock() = Some(Arc::clone(&before));
+    let reader = crate::sched::spawn(
+        "revoke-reader",
+        revoke_reader,
+        0,
+        ferrix_sched::NICE_0_WEIGHT,
+    )
+    .map_err(|_| "could not start the revoke check's reader")?;
+    crate::sched::sleep_for(20_000_000);
+    if REVOKE_ANSWER.lock().is_some() {
+        return Err("the revoke check's reader came back before the hangup");
+    }
+
+    // Only root hangs the console up.
+    let ferrix = process::new_for_check().map_err(|_| "could not make a process")?;
+    ferrix.with_credentials(|ids| ids.user.effective = 1000);
+    if tty::vhangup(&ferrix) != Err(Errno::EPERM) {
+        return Err("vhangup was not refused to uid 1000");
+    }
+    if tty::vhangup(&leader) != Ok(0) {
+        return Err("vhangup was refused to root with the console as its terminal");
+    }
+
+    let deadline = crate::timer::now_nanos().saturating_add(REVOKE_PATIENCE_NANOS);
+    let _ = REVOKE_ANSWERED.wait_until_deadline(|| REVOKE_ANSWER.lock().is_some(), deadline);
+    let answer = REVOKE_ANSWER.lock().take();
+    drop(reader);
+    match answer {
+        Some(Err(Errno::EIO)) => {}
+        Some(_) => {
+            return Err("a reader waiting on the console when it was hung up did not get EIO");
+        }
+        None => return Err("a reader waiting on the console was not woken by the hangup"),
+    }
+
+    let mut buf = [0_u8; 4];
+    if before.read_stream(&mut buf, true) != Err(Errno::EIO) {
+        return Err("an open made before the hangup still reads the console");
+    }
+    if before.write_at(0, b"", false).is_err() {
+        return Err("an open made before the hangup may no longer write");
+    }
+    let readiness = before.poll();
+    if readiness.readable || !readiness.hangup {
+        return Err("poll on an open made before the hangup does not report a hangup");
+    }
+    for (request, said) in [
+        (
+            TCSETS,
+            "TCSETS through a revoked open of the console was not EIO",
+        ),
+        (
+            TIOCSCTTY,
+            "TIOCSCTTY through a revoked open of the console was not EIO",
+        ),
+    ] {
+        if tty::ioctl(&leader, &before_file, request, 0) != Err(Errno::EIO) {
+            return Err(said);
+        }
+    }
+    let after = console::open_file();
+    if after.read_stream(&mut buf, true) == Err(Errno::EIO) {
+        return Err("an open made after the hangup does not read the console");
+    }
+    if init_file.io().read_stream(&mut buf, true) == Err(Errno::EIO) {
+        return Err("init's open of the console was revoked");
+    }
+    if native_file.io().read_stream(&mut buf, true) != Err(Errno::EIO) {
+        return Err("a native process's open of the console reads it");
+    }
+    Ok(())
+}
+
+/// The revoke check's reader: one waiting read of [`REVOKE_READER`].
+fn revoke_reader(_argument: usize) {
+    let file = REVOKE_READER.lock().clone();
+    let mut buf = [0_u8; 16];
+    let answer = match file {
+        Some(file) => file.read_stream(&mut buf, false),
+        None => Err(Errno::EBADF),
+    };
+    *REVOKE_ANSWER.lock() = Some(answer);
+    REVOKE_ANSWERED.wake_all();
 }
 
 /// A session's leader ending lets go of its terminals, the console's and a
@@ -6853,12 +7000,12 @@ fn check_standard_streams_report_running_out(
     task: crate::sched::TaskId,
 ) -> Result<(), &'static str> {
     crate::fallible::inject(task, 1);
-    let refused = fd::standard_streams().is_err();
+    let refused = fd::standard_streams(crate::fs::console::Reading::Never).is_err();
     let failed = crate::fallible::stop_injecting();
     if !refused || failed == 0 {
         return Err("a new process's descriptors were made with every allocation failing");
     }
-    match fd::standard_streams() {
+    match fd::standard_streams(crate::fs::console::Reading::Never) {
         Ok(table) if table.len() == 3 => Ok(()),
         _ => Err("a new process's descriptors were refused with memory to spare"),
     }

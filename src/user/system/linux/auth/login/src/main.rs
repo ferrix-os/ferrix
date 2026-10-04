@@ -16,6 +16,9 @@
 //! id read back -- and execs its shell as a login shell, in its home, with
 //! an environment of its own. Three wrong passwords end it, and getty's
 //! restart brings the prompt back.
+//!
+//! On the console, as root, it first stops the console's last session
+//! (`session.rs`), and names its own as the console's once it has one.
 
 mod session;
 
@@ -43,6 +46,17 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // SAFETY: no arguments.
+    let console = session::on_console() && unsafe { libc::geteuid() } == 0;
+    if console {
+        match session::end_console() {
+            Ok(Some(unit)) => say(&format!("login: the console's last session ended ({unit})")),
+            Ok(None) => {}
+            Err(why) => say(&format!(
+                "login: the console's last session may live on: {why}"
+            )),
+        }
+    }
     for _ in 0..TRIES {
         let Some(name) = named.clone().or_else(ask_name) else {
             return ExitCode::FAILURE;
@@ -50,7 +64,7 @@ fn main() -> ExitCode {
         let verdict = Connection::open()
             .and_then(|connection| converse(&connection, "login", &name, &mut Terminal::new()));
         match verdict {
-            Ok(Verdict::Accepted { uid, account }) => return start(&account, uid),
+            Ok(Verdict::Accepted { uid, account }) => return start(&account, uid, console),
             Ok(Verdict::Failed {
                 retry_after_ms,
                 text,
@@ -89,7 +103,8 @@ fn ask_name() -> Option<String> {
 }
 
 /// What follows `authd`'s ACCEPTED: the scope, the account, its shell.
-fn start(name: &str, uid: u32) -> ExitCode {
+/// `console` is whether the scope is the console's session.
+fn start(name: &str, uid: u32, console: bool) -> ExitCode {
     let Some(account) = account::find(name, "/etc/passwd", "/etc/group") else {
         say(&format!("login: {name} is not in /etc/passwd"));
         return ExitCode::FAILURE;
@@ -107,7 +122,14 @@ fn start(name: &str, uid: u32) -> ExitCode {
         return ExitCode::FAILURE;
     }
     match session::join(account.uid) {
-        Ok(scope) => say(&format!("login: {name} in {scope}")),
+        Ok((slice, unit)) => {
+            say(&format!("login: {name} in {slice}/{unit}"));
+            if console && let Err(why) = session::remember_console(&slice, &unit) {
+                say(&format!(
+                    "login: {why}; the next login here will not end this session"
+                ));
+            }
+        }
         Err(why) => say(&format!(
             "login: no session scope for {name}: {why}; logging in without one"
         )),

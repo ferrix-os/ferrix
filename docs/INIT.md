@@ -500,7 +500,9 @@ then on like a service it did not start. A scope has no `ExecStart=`, is
 stopped by signal and `cgroup.kill`, and is removed once empty. `login`
 creates `session-N.scope` under `user-<uid>.slice` for the session it
 starts, while it is still root (`docs/AUTH.md` §6.2; `getty --login` execs
-it). hyprix creates
+it). On the console it also names the scope in `/run/ferrix/login/console`,
+and the next `login` there stops that scope, if it is still there, before it
+asks who is logging in. hyprix creates
 `app-<name>-<n>.scope` for each program it starts, so `svc status` answers
 which window a runaway process came from, and `svc stop` closes all of it.
 
@@ -1218,7 +1220,10 @@ host tests by default, as it runs the compositor's.
   `SIGTERM` or `SIGINT` to pid 1 is `Request::Poweroff` from a client that
   gets no answer. `Route`, `Refuse` and `Reply` wait for L6 and L8.
 * **`getty TTY`** calls `setsid` (an `EPERM` is ignored), opens the
-  terminal, takes it with `TIOCSCTTY` 1, puts it on descriptors 0, 1 and 2,
+  terminal, takes it with `TIOCSCTTY` 1, hangs it up with `vhangup` and
+  opens and takes it again -- so no open of it made before, what a program
+  the last session left running holds, can read it (`docs/AUTH.md` §1,
+  since 2026-10-04) -- puts it on descriptors 0, 1 and 2,
   prints `Ferrix <host> on <tty>`, and becomes `$SHELL`, `/bin/sh` by
   default, as a login shell. There is no `login` yet. `getty-generator`
   links `getty@<name>.service` into `multi-user.target.wants` for each

@@ -671,6 +671,16 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
             content: Content::Link("busybox".to_owned()),
         });
     }
+    for (path, text) in [
+        ("bin/revoke-reader", REVOKE_READER),
+        ("bin/revoke-steal", REVOKE_STEAL),
+    ] {
+        files.push(File {
+            path: path.to_owned(),
+            mode: 0o755,
+            content: Content::Bytes(text.as_bytes().to_vec()),
+        });
+    }
     for (path, text) in [("etc/passwd", PASSWD), ("etc/group", GROUP)] {
         files.push(File {
             path: path.to_owned(),
@@ -896,6 +906,7 @@ fn after_stage_one(at: &mut Watching<'_>, failures: &mut Vec<String>, sshd: bool
     login(at, failures)?;
     su(at, failures)?;
     dev_tty(at, failures)?;
+    console_revoke(at, failures)?;
     if sshd {
         sshd_activated(at, failures)?;
     }
@@ -1241,6 +1252,125 @@ fn dev_tty(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
             println!("  /dev/tty: opens for root's shell, whose session's terminal is the console");
         }
         None => failures.push("/dev/tty did not open for the shell on the console".into()),
+    }
+    Ok(())
+}
+
+/// The console revoke stage's reader: a program a console session leaves
+/// running, reading the console. It waits until root has moved it into a
+/// scope of its own, so that nothing but the hangup can end it, then becomes
+/// a `cat` reading the console, which says how its read ended.
+const REVOKE_READER: &str = "#!/bin/sh
+echo $$ > /tmp/revoke-reader
+until [ -e /tmp/revoke-moved ]; do :; done
+exec cat >> /tmp/stolen
+";
+
+/// What busybox's `cat` says when its read is refused with `EIO`: the
+/// reader's read ended by the hangup, not at an end of file.
+const REVOKED_READ: &str = "cat: read error: I/O error";
+
+/// The console revoke stage's thief: run by ferrix under `setsid -c`, which
+/// tries to steal the console with `TIOCSCTTY` 1 through a descriptor that
+/// can read it, then asks whether `/dev/tty` is now its.
+const REVOKE_STEAL: &str = "#!/bin/sh
+if (exec 3<>/dev/tty) 2>/dev/null; then
+    echo revoke-steal-took
+else
+    echo revoke-steal-refused
+fi
+";
+
+/// The console revoke stage (`docs/AUTH.md` §1; the certification
+/// consultant's R0 to R4, ledger line 317). A uid-1000 reader holding root's
+/// shell's console descriptors is moved into a scope of its own and seen
+/// blocked in `read`; root's shell exits, and getty, restarting, hangs the
+/// console up. The reader must end, its read refused, and a line typed at
+/// the new shell must not reach it. Then ferrix, in a session of its own,
+/// may not steal the console from root's live session.
+fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let said_by_probe = |lines: &[String], marker: &str| {
+        lines
+            .iter()
+            .any(|line| line.trim_start().starts_with(marker))
+    };
+    let before = at.after().len();
+    let start = "su ferrix -c 'setsid /bin/revoke-reader' & \
+                 until [ -s /tmp/revoke-reader ]; do :; done; \
+                 p=$(cat /tmp/revoke-reader); \
+                 svc scope --unit revoke-reader.scope $p && : > /tmp/revoke-moved; \
+                 until case \"$(cat /proc/$p/stat)\" in *revoke-reader*|*'(sh)'*) false;; *') S '*) true;; *) false;; esac; do :; done; \
+                 m=revoke; echo \"$m-reader $(cat /proc/$p/stat)\"; exit\n";
+    match ask(at, start, "revoke-reader ")? {
+        Some(line) => {
+            let state = line
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_ascii_whitespace().next().map(str::to_owned));
+            let script = line.contains("(revoke-reader)") || line.contains("(sh)");
+            if state.as_deref() == Some("S") && !script {
+                println!(
+                    "  revoke: ferrix's reader, in a scope of its own, waits in read on the console"
+                );
+            } else {
+                failures.push(format!(
+                    "the revoke stage's reader was not waiting (state {state:?}): `{}`",
+                    line.trim()
+                ));
+            }
+        }
+        None => {
+            failures.push("the revoke stage's reader never started".into());
+            return Ok(());
+        }
+    }
+    // Root's shell has exited; getty restarts and hangs the console up.
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        said_by_probe(lines.get(before..).unwrap_or_default(), REVOKED_READ)
+    })?;
+    if said_by_probe(since(at, before), REVOKED_READ) {
+        println!("  revoke: getty's hangup ended the reader's read of the console with EIO");
+    } else {
+        failures.push(
+            "the console was not revoked: a reader from the last session still reads it after getty \
+             restarted"
+                .into(),
+        );
+    }
+    // A line typed at the new shell, as a password would be.
+    let _ = ask(
+        at,
+        ": revoke-typed-after-the-hangup\nm=revoke; echo \"$m-typed\"\n",
+        "revoke-typed",
+    )?;
+    match ask(
+        at,
+        "m=revoke; echo \"$m-stolen $(stat -c %s /tmp/stolen)\"\n",
+        "revoke-stolen ",
+    )? {
+        Some(line) if line.trim() == "revoke-stolen 0" => {
+            println!("  revoke: nothing typed after the hangup reached the reader");
+        }
+        Some(line) => failures.push(format!(
+            "what was typed after getty's hangup reached the last session's reader: `{}`",
+            line.trim()
+        )),
+        None => failures.push("the revoke stage's /tmp/stolen was never measured".into()),
+    }
+    // R0: ferrix, a session leader holding a console descriptor that can
+    // read, may not take the console from root's live session.
+    let before = at.after().len();
+    at.type_in(b"su ferrix -c 'setsid -c /bin/revoke-steal'\n")?;
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        let lines = lines.get(before..).unwrap_or_default();
+        said_by_probe(lines, "revoke-steal-took") || said_by_probe(lines, "revoke-steal-refused")
+    })?;
+    let said = since(at, before).to_vec();
+    if said_by_probe(&said, "revoke-steal-refused") && !said_by_probe(&said, "revoke-steal-took") {
+        println!("  revoke: ferrix could not steal the console from root's session");
+    } else {
+        failures.push("a uid-1000 process stole the console from a live session".into());
     }
     Ok(())
 }

@@ -768,9 +768,9 @@ pub(crate) fn terminal_of_session(session: u32) -> Result<Arc<dyn Inode>> {
     if session == 0 {
         return Err(Errno::ENXIO);
     }
-    let console = fs::terminal::with(|terminal| (terminal.session == session).then(console_inode));
-    if let Some(console) = console {
-        return Ok(console);
+    let console = fs::terminal::with(|terminal| terminal.session == session);
+    if console {
+        return Ok(fs::console::open_file());
     }
     let slave: Arc<dyn Inode> = pty::open_slave_of_session(session)?;
     Ok(slave)
@@ -1047,6 +1047,8 @@ impl Inode for Node {
                 time::fill_random(buf);
                 Ok(buf.len())
             }
+            // Never reached for a node that was opened, whose reads go to
+            // what its open gave; refused by the device itself.
             Behaviour::Console | Behaviour::ConsoleItself => console_inode().read_at(offset, buf),
             // The node is never the object: opening it makes a pair and
             // gives back the master, which is what reads and writes.

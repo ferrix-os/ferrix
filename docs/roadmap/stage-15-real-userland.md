@@ -193,7 +193,7 @@ with Argon2id, throttles and audits.
 `cargo xtask test-auth` on all three architectures (2026-09-27), and
 hyprlock over `authd` (P1.5, 2026-10-03).
 
-*Phase 2, the desktop as a user: done but for four items.* All on
+*Phase 2, the desktop as a user: done but for three items.* All on
 2026-10-03, each with the certification consultant's OK:
 `--everything`'s desktop runs as `ferrix` under `sessiond`, with its own
 home disk (P2.4); hyprix unlocks only on `authd`'s grant over the seat
@@ -201,9 +201,9 @@ channel, and a new locker takes over a dead one's lock (P2.5); `login` on
 the console, with a first password chosen there (P2.3, `cargo xtask run
 --login`); a session ends with its compositor, at the console's login
 (P2.7); `su` for `wheel` (P2.6); and `/dev/tty` is the caller's own
-terminal, not the console to anyone. Left: revoking the console when getty
-starts, so that a program left by one login cannot read the next one's
-password (being built); K-B and K-C in the kernel (P2.1, P2.2); the
+terminal, not the console to anyone; and on 2026-10-04 getty revokes the
+console before every login, so that a program left by one login cannot read
+the next one's password. Left: K-B and K-C in the kernel (P2.1, P2.2); the
 desktop images other than `--everything`, which still run as root; and the
 customer's decision on ending a user's processes at logout
 (`docs/BACKLOG.md`).
