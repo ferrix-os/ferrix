@@ -160,7 +160,8 @@ const VDAGENT_PATH: &str = "bin/vdagent";
 /// Where `sessiond` goes: seat0's owner, which starts the `--everything`
 /// desktop as its user (`crate::session`).
 pub(crate) const SESSIOND_PATH: &str = "bin/sessiond";
-/// hypridle, and the `loginctl` that reaches it (`src/user/system/linux/compositor/hypridle`).
+/// hypridle, and the `loginctl` that reaches it: the hypridle app's, which
+/// every compositor image carries whether or not the app is installed.
 const HYPRIDLE_PATH: &str = "bin/hypridle";
 const LOGINCTL_PATH: &str = "bin/loginctl";
 /// `reboot`, with the word for the firmware busybox's cannot pass; it takes
@@ -217,8 +218,8 @@ impl Programs {
             shot: build(arch, "compositor-shot", "shot")?,
             lock: build(arch, "compositor-lock", "lock")?,
             vkbd: build(arch, "compositor-vkbd", "vkbd")?,
-            hypridle: build(arch, "compositor-hypridle", "hypridle")?,
-            loginctl: build(arch, "compositor-hypridle", "loginctl")?,
+            hypridle: crate::apps::program(arch, "hypridle", "hypridle")?,
+            loginctl: crate::apps::program(arch, "hypridle", "loginctl")?,
             reboot: build(arch, "compositor-reboot", "reboot")?,
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
             sessiond: build(arch, "compositor-sessiond", "sessiond")?,

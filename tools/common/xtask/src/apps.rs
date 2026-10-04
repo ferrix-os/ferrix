@@ -469,6 +469,81 @@ fn recorded(entry: &ports::File) -> Option<Installed> {
     }
 }
 
+/// The target a Linux app is built for on `arch`: the target's own musl,
+/// and on ARMv7-A its hard-float ABI, as the compositor and its clients are,
+/// so a program the desktop carries and the same app installed are one
+/// binary.
+pub(crate) fn linux_target(arch: Arch) -> Option<&'static str> {
+    crate::display::target(arch)
+}
+
+/// The flags a Linux app is built with on `arch`: zinc's static, fixed
+/// address executable, and on ARMv7-A the Cortex-A7 the boards have, with
+/// its NEON.
+fn linux_rustflags(arch: Arch) -> String {
+    if arch == Arch::Armv7a {
+        format!("{} -C target-cpu=cortex-a7", zinc::RUSTFLAGS)
+    } else {
+        zinc::RUSTFLAGS.to_owned()
+    }
+}
+
+/// `cargo build --release` of a Linux app for `arch` with `selection`
+/// (`--bins`, or `--bin` and a name), into its own target directory,
+/// requiring `outputs` of it; where they are, or `None` on an architecture
+/// with no target.
+fn cargo_linux(
+    app: &App,
+    arch: Arch,
+    outputs: &[String],
+    selection: &[&str],
+) -> Result<Option<PathBuf>> {
+    let name = app.name();
+    let Some(target) = linux_target(arch) else {
+        println!("  {name} is not built for {arch} yet: there is no musl target");
+        return Ok(None);
+    };
+    let target_dir = paths::target_dir().join("apps").join(name);
+    let out = target_dir.join(target).join("release");
+    let mut build =
+        crate::builds::Build::cargo(format!("cargo build ({name}) --target {target}"), &app.dir)
+            .args(["build", "--release", "--target", target])
+            .args(selection)
+            .env("CARGO_TARGET_DIR", &target_dir)
+            // For zinc's reason: RUSTFLAGS replaces the flags every config file up
+            // the tree would otherwise merge in.
+            .env("RUSTFLAGS", linux_rustflags(arch))
+            // And the linker, so an app needs no `.cargo/config.toml` of its own:
+            // the musl targets carry their C runtime, so rust-lld is the whole
+            // toolchain on any host.
+            .env(&linker_variable(target), "rust-lld");
+    for output in outputs {
+        build = build.output(out.join(output));
+    }
+    println!("  building {name} for {target}");
+    build.run()?;
+    Ok(Some(out))
+}
+
+/// One program of the Linux app `name`, built for `arch` from its folder,
+/// and where it is: for what carries a program the system needs whether or
+/// not the app is installed -- the desktop's clients, the gates that boot
+/// them.
+///
+/// # Errors
+///
+/// No app of that name, an architecture it has no target on, or a build
+/// that fails.
+pub(crate) fn program(arch: Arch, name: &str, binary: &str) -> Result<PathBuf> {
+    let app = discover()?
+        .into_iter()
+        .find(|app| app.name() == name)
+        .ok_or_else(|| Error::new(format!("there is no app `{name}` in {}", places())))?;
+    let out = cargo_linux(&app, arch, &[binary.to_owned()], &["--bin", binary])?
+        .ok_or_else(|| Error::new(format!("{name} has no build for {arch}")))?;
+    Ok(out.join(binary))
+}
+
 /// `built`, the files of `app`'s package for `arch`, with its record made
 /// from the `[package]` its `app.toml` has now, as a package archive.
 fn packed(app: &App, arch: Arch, built: Vec<ports::File>) -> Result<Vec<u8>> {
@@ -581,30 +656,11 @@ fn build(app: &App, arch: Arch, release: bool) -> Result<Option<Built>> {
             out
         }
         (Build::Cargo, Abi::Linux) => {
-            let Some(target) = zinc::target(arch) else {
-                println!("  {name} is not built for {arch} yet: there is no musl target");
-                return Ok(None);
-            };
-            let out = target_dir.join(target).join("release");
-            let mut build = crate::builds::Build::cargo(
-                format!("cargo build ({name}) --target {target}"),
-                &app.dir,
-            )
-            .args(["build", "--release", "--bins", "--target", target])
-            .env("CARGO_TARGET_DIR", &target_dir)
-            // For zinc's reason: RUSTFLAGS replaces the flags every config
-            // file up the tree would otherwise merge in.
-            .env("RUSTFLAGS", zinc::RUSTFLAGS)
-            // And the linker, so an app needs no `.cargo/config.toml` of
-            // its own: the musl targets carry their C runtime, so rust-lld
-            // is the whole toolchain on any host.
-            .env(&linker_variable(target), "rust-lld");
-            for spec in built_by_it(app) {
-                build = build.output(out.join(&spec.from));
+            let outputs: Vec<String> = built_by_it(app).map(|spec| spec.from.clone()).collect();
+            match cargo_linux(app, arch, &outputs, &["--bins"])? {
+                Some(out) => out,
+                None => return Ok(None),
             }
-            println!("  building {name} for {target}");
-            build.run()?;
-            out
         }
         (Build::Script, _) => {
             let out = target_dir.join(arch.name()).join("out");
@@ -908,8 +964,9 @@ pub(crate) fn host(app: &App) -> Result<()> {
         cargo_in(app, &clippy),
         &format!("{}: cargo clippy", app.name()),
     )?;
+    // The lib's tests and the integration tests beside it in `tests/`.
     cargo::run(
-        cargo_in(app, &["test", "--lib"]),
+        cargo_in(app, &["test", "--lib", "--tests"]),
         &format!("{}: cargo test", app.name()),
     )
 }
@@ -930,14 +987,17 @@ pub(crate) fn targets(app: &App) -> Result<()> {
         }
         let target = match app.recipe.package.abi {
             Abi::Native => arch.kernel_target(),
-            Abi::Linux => match zinc::target(arch) {
+            Abi::Linux => match linux_target(arch) {
                 Some(target) => target,
                 None => continue,
             },
         };
         let mut clippy = vec!["clippy", "--bins", "--target", target, "--"];
         clippy.extend(LINTS);
-        let command = cargo_in(app, &clippy);
+        let mut command = cargo_in(app, &clippy);
+        if app.recipe.package.abi == Abi::Linux {
+            let _ = command.env("RUSTFLAGS", linux_rustflags(arch));
+        }
         cargo::run(
             command,
             &format!("{}: cargo clippy --target {target}", app.name()),

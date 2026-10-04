@@ -592,7 +592,7 @@ AArch64 boot, and `SIGUSR1` as `authctl unlock-seat`.
 
 ## 6. hypridle
 
-`src/user/system/linux/compositor/hypridle` is upstream hypridle 0.1.8
+The hypridle app (in ferrix-os/apps) is upstream hypridle 0.1.8
 (`/var/cache/hyprland-build/src/hypridle`) in Rust: `/bin/hypridle`, with
 `-c`/`--config`, `-q`, `-v`, `-V` and `-h` as upstream's `main.cpp` has
 them, and the file looked for where `Hyprutils::Path::findConfig` looks

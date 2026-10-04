@@ -13,7 +13,7 @@
 resolver = "3"
 members = [
     "anim", "blank", "caption", "clip", "config", "ctl", "drm", "evecho", "fan",
-    "fuzzel", "hypridle", "hyprix", "hyprlang", "hyprlock", "image", "ipc", "layout",
+    "fuzzel", "hyprix", "hyprlang", "hyprlock", "image", "ipc", "layout",
     "lock", "lswt", "pattern", "plug", "protocol", "reboot", "regex", "render",
     "server", "sessiond", "shm", "shot", "socket", "seat", "term", "text", "tone", "toolkit", "vdagent", "virgl",
     "vkbd", "waybar", "wire", "xkb", "xmoveresize",

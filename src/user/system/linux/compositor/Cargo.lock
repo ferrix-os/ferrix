@@ -170,14 +170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compositor-hypridle"
-version = "0.1.0"
-dependencies = [
- "compositor-hyprlang",
- "compositor-toolkit",
-]
-
-[[package]]
 name = "compositor-hyprlang"
 version = "0.1.0"
 
