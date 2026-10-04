@@ -155,7 +155,7 @@
     },
     {
       "file": "arch/aarch64/mod.rs",
-      "lines": "1267",
+      "lines": "1270",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU resets."
