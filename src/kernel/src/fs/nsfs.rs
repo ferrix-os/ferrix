@@ -30,6 +30,7 @@ use ferrix_vfs::{
 };
 
 use crate::fs;
+use crate::syscall::credentials;
 use crate::syscall::namespace::{CLONE_NEWNS, CLONE_NEWUSER};
 use crate::syscall::nsproxy::{CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS, CgroupNamespace};
 use crate::syscall::process::Process;
@@ -280,29 +281,11 @@ fn open(handle: Handle) -> Result<Arc<OpenFile>, Errno> {
     OpenFile::new(location(handle)?, &flags)
 }
 
-/// Whether `process` may open the namespaces of `target`, as a link of
-/// `/proc/<target>/ns` leads: Linux asks `ptrace_may_access` of it. Here the
-/// caller's real, effective and saved ids must all be the target's effective
-/// ones as kernel ids -- the same person -- or the caller must be root in the
-/// first user namespace. The target's dumpability is not asked (`docs/
-/// NAMESPACES.md` §12).
+/// Whether the calling process may open the namespaces of `target`, as a link
+/// of `/proc/<target>/ns` leads: Linux asks `ptrace_may_access` of it, with the
+/// filesystem ids, and so does [`credentials::may_access`].
 pub(crate) fn may_open(target: &Process) -> bool {
-    let Some(caller) = userns::acting() else {
-        return true;
-    };
-    if core::ptr::eq(Arc::as_ptr(&caller), target) {
-        return true;
-    }
-    let (uid, gid) = target.with_credentials(|held| (held.user.effective, held.group.effective));
-    caller.with_credentials(|held| {
-        held.privileged()
-            || (held.user.real == uid
-                && held.user.effective == uid
-                && held.user.saved == uid
-                && held.group.real == gid
-                && held.group.effective == gid
-                && held.group.saved == gid)
-    })
+    userns::acting().is_none_or(|caller| credentials::may_access(&caller, target, false))
 }
 
 /// A request to an nsfs file: Linux's `ns_ioctl`.

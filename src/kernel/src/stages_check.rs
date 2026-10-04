@@ -392,6 +392,7 @@ pub(super) fn check_namespaces(disk: bool) {
     check_small_namespaces();
     check_pid_namespaces();
     check_network_namespaces();
+    check_proc_access();
 }
 
 /// User namespaces: the rules of `docs/NAMESPACES.md` §4 attempted and
@@ -406,6 +407,22 @@ fn check_user_namespaces() {
     };
     println!(
         "  userns   {} calls answered as Linux answers them, {} of them refusals: a namespace named apart, ids 65534 until mapped, a gid_map refused before setgroups is denied, kernel root and a second id unmappable, a map written once, fake root refused what only root may do, a chrooted process refused, a set-id bit ignored, a read-only /proc/sys refusing a write",
+        checked.calls, checked.refusals,
+    );
+}
+
+/// What a process keeps private in `/proc`, refused to other users
+/// (`docs/NAMESPACES.md` M8, landing NP).
+fn check_proc_access() {
+    let checked = match fs::procaccess_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_PROC_ACCESS,
+            "/proc access self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  procacc  {} calls answered as Linux answers them, {} of them refusals: root, cwd, exe, fd, fdinfo, maps and ns/* of another uid's or a non-dumpable process refused EACCES, read by the same user, by root, and by root inside a user namespace as ptrace_may_access allows; get_robust_list of another uid's thread refused",
         checked.calls, checked.refusals,
     );
 }

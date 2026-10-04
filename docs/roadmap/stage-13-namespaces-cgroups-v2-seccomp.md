@@ -245,6 +245,17 @@ Linux's 32768 with `fits_path`/`path_cost` and a host test of both ends,
 checker to six programs carrying the real Linux 7.0 verifier's answer
 (`oracle.c --accept`), and an empty chain answers `KILL_PROCESS`.
 
+**Done -- NP and `/proc/<pid>/fdinfo` (built 2026-10-01, landed 2026-10-04,
+as AUTH's P2.1):** `credentials::may_access` is Linux's `ptrace_may_access`;
+`/proc/<pid>/root`, `cwd`, `exe`, `fd`, `fdinfo`, `maps`, `mountinfo` and
+`ns/*` of another process, and `get_robust_list` of its threads, ask it, so a
+same-uid process may not read them from one that is not dumpable.
+`/proc/<pid>/fdinfo` lists a file per descriptor with Linux's first lines,
+and a directory a jail holds for an ended process lists empty (Chrome's
+zygote, SECCOMP R4). Evidence: the `procacc` line (FX-0894), its negative
+controls each stopping the boot with the check's message, and the packet
+pipe's owed control. The newborn-child window is a BACKLOG row.
+
 **Where stage 13 stands (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
 scoped OOM kill and a seccomp filter that blocks a call -- is **not met**.
@@ -262,7 +273,7 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 | `stage13-s4` 9ad2c718e | `SECCOMP_RET_TRAP` | consultant: OK if five conditions; three written; controls t2-t7 and the rows owed; lands after S3 |
 | `stage13-s5` 298399f1e | `TSYNC` | consultant: OK if; a new thread fails closed (written); owed: a measured bound for the TSYNC ancestor walk, the rows, four controls |
 | `stage13-s6` 64e891f7e | `cargo xtask test-seccomp` (S6a) | passed on all four ABIs in a direct run; pool INDEX lines owed; Linux's `seccomp_bpf` selftest not done |
-| `stage13-fdinfo` 225eb2410 | `/proc` by `ptrace_may_access`, dumpable, `/proc/<pid>/fdinfo` (NP) | superseded on 2026-10-04 by `np-land` (403b05626, pushed), which lands it as AUTH's P2.1: rebased onto 22384874f, squashed into 1373cf7ca, `ns/net` brought under the rule; controls c02-c04, c06, c12 FIRED there; owes `check`, c01, c05, c07-c13 and a batch; consultant OK IF at ledger lines 226, 338, 342 |
+| `stage13-fdinfo` | **landed 2026-10-04** (NP, as AUTH P2.1) | see above |
 | `stage13-n5` 7a0c04fdd | unprivileged mounting | on fdinfo; consultant asked for changes, built (remount by the superblock's owner, the bottom mount locked, a sleeping write-out), not gated; earlier tip's boots, `test-vfs`, `test-shell`, `test-bwrap` PASSED |
 | `stage13-bwrap-user` dad30e7f2 | `test-bwrap` as uid 1000 | passes (a new tmpfs is now 1777 and the mounter's); needs a rebase onto N5, a control for the tmpfs case, review |
 | `stage13-netns` | network namespaces, veth, per-namespace stacks | **landed 2026-10-04 in 22384874f**: every row PASSED on 2428b0d95 (`l13ns-*`, `test-init` on its third run), kmem controls nn20/24/28-30 and b1, 31c re-run and FIRED; the consultant's OK (ledger line 333) |
@@ -341,3 +352,4 @@ starts in the code, how landings are gated now, and what cost a gate on
 
 ---
 
+- State 2026-10-01 wind-down, `stage13-fdinfo` (NP + fdinfo, 3250d96c6 code = 3700bfe1e + docs, on fcc7af7de): consultant ae46f413631b883c6 OK IF all of: gates on the landing hash (fdi23: check, x86_64, aarch64, armv7a, armv7a --smp 2, test-init --arch all, test-shell green; test-vfs not yet run), k4/k5 re-run with the message that fires, k8-k17 FIRED on that hash, NAMESPACES §12 quoting the control INDEX names. Not landed.

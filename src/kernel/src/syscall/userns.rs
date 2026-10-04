@@ -58,6 +58,8 @@ pub(crate) const CAP_SETPCAP: u32 = 8;
 pub(crate) const CAP_NET_ADMIN: u32 = 12;
 /// `CAP_NET_RAW`.
 pub(crate) const CAP_NET_RAW: u32 = 13;
+/// `CAP_SYS_PTRACE`.
+pub(crate) const CAP_SYS_PTRACE: u32 = 19;
 /// `CAP_SYS_CHROOT`.
 pub(crate) const CAP_SYS_CHROOT: u32 = 18;
 /// `CAP_SYS_ADMIN`.
