@@ -742,6 +742,9 @@ fn test_kaslr(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask test-shell`.
+///
+/// Verifies: L.init.1
 fn test_shell(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         // The shell the kernel starts. zinc, the shell this tree has,
@@ -781,6 +784,9 @@ fn test_shell(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask test-vfs`.
+///
+/// Verifies: L.init.1
 fn test_vfs(args: &Args) -> Result<()> {
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new(

@@ -1041,6 +1041,18 @@ package FerrixItemRequirements {
                 or of any image, direct-map or vmap address the serial log printed.";
             attribute :>> parent = "O.ISOLATE";
         }
+        requirement <'H.BOOT.15'> pid1IsWhatTheImageNames : ItemHighLevel {
+            attribute :>> statement = "Pid 1 shall be the program the boot names: the
+                file ferrix.init= names, else the commands or the program the boot
+                initramfs carries under .ferrix/init, else /sbin/init; an input that
+                cannot be one shall be refused with a line saying which and why,
+                and never replaced by a guess.";
+            attribute :>> criterion = "Each way of starting pid 1 boots as named
+                (test-shell, test-vfs, test-init); malformed inputs are each refused
+                and taken as absent (L.init.1 to L.init.3); and none is unpacked
+                into a root, which SAFETY-MANUAL AoU-24 assumes of the unpacker.";
+            attribute :>> parent = "O.FAILSAFE";
+        }
     }
 
     package Quotas {

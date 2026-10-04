@@ -460,6 +460,22 @@ as its own requester"). The integrator shall use a platform whose DMAR
 places every function that needs interrupts behind a unit that remaps, as
 its own requester, or accept that those functions run without interrupts.
 
+### AoU-24 — the initramfs unpacker reads pid 1's inputs and creates none of them
+Pid 1's program, its `sh -c` script and the list of commands come from the
+boot initramfs, under `.ferrix/init/` (`L.init.2`, ITEM.md §2). The item takes
+them from the archive itself, so which program runs as pid 1 does not depend
+on the unpacker; what does is that no writable copy of them sits beside it in
+a filesystem a program can open. `ferrix-vfs`'s `initramfs::unpack`, which is
+in no ring of the item, creates nothing named `.ferrix` or beneath it in any
+root it unpacks an archive into -- the tmpfs root and a persistent volume's
+alike -- and `initramfs::init_entries` lists exactly those entries, parsed as
+`unpack` parses every other. Its host test
+(`pid_1s_inputs_are_read_from_the_archive_and_never_unpacked`) and two gate
+controls, the unpacker made to create the entries on a tmpfs-root boot
+(`test-shell`) and on a root-disk boot (`test-init`), are the evidence. The
+integrator shall use `ferrix-vfs` as this tree builds it, or show the same of
+the unpacker it uses.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

@@ -1997,6 +1997,8 @@ fn an_archive_unpacks_with_links_nodes_and_unsafe_names_skipped() {
     assert_eq!(ns.stat(&ctx.root).unwrap().metadata.permissions, 0o700);
 }
 
+/// The evidence of SAFETY-MANUAL AoU-24: the unpacker reads pid 1's inputs
+/// and creates none of them.
 #[test]
 fn pid_1s_inputs_are_read_from_the_archive_and_never_unpacked() {
     let mut archive = Newc::new();

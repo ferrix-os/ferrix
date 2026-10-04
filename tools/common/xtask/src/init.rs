@@ -697,6 +697,8 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
 ///
 /// When an image cannot be built, a boot fails, or anything §15's stages
 /// one and two require is missing, with the serial log's path.
+///
+/// Verifies: L.init.1
 pub(crate) fn test_init(args: &Args) -> Result<()> {
     let checker = Checker::required()?;
     for arch in args.arches()? {

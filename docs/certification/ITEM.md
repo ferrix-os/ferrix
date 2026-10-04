@@ -166,7 +166,9 @@ test. The load reads the archive -- `fs::init`, over `ferrix-vfs`'s
 creating any of it in either root -- and hands each entry to
 `init::set_inputs`, an interface `init.rs` defines and accepts once. `init.rs`
 judges the entries itself (its refusals are `L.init.3`) and names no
-filesystem or archive crate.
+filesystem or archive crate. That the unpacker, in no ring, lists the entries
+correctly and creates none of them is an assumption of use,
+SAFETY-MANUAL AoU-24, not a requirement of the item.
 
 **`main.rs` is in the item, and it is the composition root.** The manifest
 puts it in the `item` ring as bring-up, and nothing about that is changed
