@@ -108,6 +108,20 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   loop owed no frame after one that started an animation. A compositor boot
   whose kernel panics now also asks QEMU where every processor is
   (`panic-registers.txt`), for FX-0001, seen twice there.
+* **NVIDIA's own driver drives the RTX 3060's monitor** (2026-10-03 and
+  -04, stage 21, `docs/NVIDIA.md`). Done, but not on `main`:
+  * Chrome's WebGL renders on the card, through ANGLE on NVIDIA's Vulkan.
+  * The desktop runs on the customer's TV on the 3060's HDMI port, with
+    NVKMS inside `nvrm` and `nvrm` as the display core's copying driver.
+  * The customer drives it with a dedicated keyboard and mouse.
+
+  It runs at 44–53 fps, with software compositing. `land-n6` is ready to
+  land after a rebase (consultant ledger 318). Next, in the customer's
+  order:
+  1. dmabufs for Chrome's GPU compositing (N3b, half built on
+     `nvidia-n2`);
+  2. a hardware cursor;
+  3. measuring page loads.
 * **Sound** is done: alsa-lib (U1) and `pulsed`, a PulseAudio-protocol
   server Chrome plays through on the desktop (U2a to U2d, 2026-09-27).
 * **Windows**: the desktop runs under WHPX with the TSC as its clock
@@ -319,7 +333,10 @@ foot takes keys: every compositor image carries libxkbcommon's
 program passes on branch `foot-shell` (3e5fd3c02), which is owed one full batch
 run before it lands.
 
-Stage 21 is bare metal with a card of Ferrix's own, and stage 22 is Steam,
+Stage 21 is bare metal with a card of Ferrix's own. NVIDIA's driver
+already draws the desktop and Chrome's WebGL on the RTX 3060's own
+monitor, through libvirt (unlanded, `land-n6`; see its page). Stage 22 is
+Steam,
 whose 32-bit x86 ABI is under way (`docs/I386.md`): I1 to I4 are on `main`
 (32-bit programs, their threads, signals and fork, Alpine's and Debian's i386
 busybox), and I5a: Valve's `steamcmd` logs in to Steam, from `test-steamcmd`
