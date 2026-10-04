@@ -327,12 +327,27 @@ const TEST_UNITS: &[(&str, &str)] = &[
     (
         "netns.service",
         "[Unit]\n\
-         Description=Asks for PrivateNetwork=, which waits for network namespaces\n\
+         Description=Looks at its network from inside PrivateNetwork=\n\
          \n\
          [Service]\n\
          Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=netns\n\
          PrivateNetwork=yes\n\
-         ExecStart=:/bin/sh -c 'echo netns-ran'\n",
+         ExecStart=:/bin/sh -c 'n=0; while read i rest; do [ \"$i\" = lo ] && n=1; done < /proc/net/route; echo \"$P-lo-route $n\"; while read i rest; do case $i in *:) echo \"$P-dev $i\";; esac; done < /proc/net/dev; echo ping | nc 127.0.0.1 7777; echo \"$P-net-done\"'\n",
+    ),
+    (
+        "netopen.service",
+        "[Unit]\n\
+         Description=The same look at the network with no PrivateNetwork=\n\
+         \n\
+         [Service]\n\
+         Type=oneshot\n\
+         RemainAfterExit=yes\n\
+         User=ferrix\n\
+         Environment=P=netopen\n\
+         ExecStart=:/bin/sh -c 'n=0; while read i rest; do [ \"$i\" = lo ] && n=1; done < /proc/net/route; echo \"$P-lo-route $n\"; while read i rest; do case $i in *:) echo \"$P-dev $i\";; esac; done < /proc/net/dev; echo ping | nc 127.0.0.1 7777; echo \"$P-net-done\"'\n",
     ),
     (
         "filtered.service",
@@ -1947,35 +1962,101 @@ fn sandboxing(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     }
 
     let before = at.after().len();
-    at.type_in(
-        b"svc start netns.service; svc start filtered.service; m=l13; echo \"$m-refusals\"\n",
-    )?;
+    at.type_in(b"svc start netopen.service; svc start netns.service\n")?;
+    let deadline = Instant::now() + PATIENCE;
+    let _ = at.read_more(deadline, |lines| {
+        ["netns-net-done", "netopen-net-done"].iter().all(|done| {
+            lines
+                .get(before..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(".service[") && line.trim_end().ends_with(done))
+        })
+    })?;
+    let judged = judge_network(since(at, before));
+    if judged.is_empty() {
+        println!(
+            "  sandboxing: PrivateNetwork= gave a namespace with only lo, up, where the \
+             machine's loopback services cannot be reached"
+        );
+    }
+    failures.extend(judged);
+
+    let before = at.after().len();
+    at.type_in(b"svc start filtered.service; m=l13; echo \"$m-refusals\"\n")?;
     let _ = wait_for(at, before, "l13-refusals")?;
     let _ = wait_for(at, before, "filtered.service: SystemCallFilter=")?;
     let said = since(at, before).to_vec();
-    for (unit, reason, ran) in [
-        (
-            "netns.service",
-            "PrivateNetwork= needs network namespaces",
-            "netns-ran",
-        ),
-        (
-            "filtered.service",
-            "SystemCallFilter= needs seccomp filters",
-            "filtered-ran",
-        ),
-    ] {
-        if !has(&said, &format!("init     {unit}: {reason}")) {
-            failures.push(format!("{unit} was not refused with `{reason}`"));
-        }
-        if said
-            .iter()
-            .any(|line| line.contains(&format!("{unit}[")) && line.contains(ran))
-        {
-            failures.push(format!("{unit} ran without the key it asked for"));
-        }
+    let reason = "SystemCallFilter= needs seccomp filters";
+    if !has(&said, &format!("init     filtered.service: {reason}")) {
+        failures.push(format!("filtered.service was not refused with `{reason}`"));
+    }
+    if said
+        .iter()
+        .any(|line| line.contains("filtered.service[") && line.contains("filtered-ran"))
+    {
+        failures.push("filtered.service ran without the key it asked for".into());
     }
     Ok(())
+}
+
+/// What `netns.service` (`PrivateNetwork=yes`) and `netopen.service` (the
+/// same script without it) said, judged; one line per thing wrong. Inside
+/// the namespace `lo` must be up (its route is there), it must be the only
+/// interface, and `echo.socket` on the machine's 127.0.0.1:7777 must not
+/// answer; outside, the same connection must be answered, which shows the
+/// check could see the difference.
+fn judge_network(said: &[String]) -> Vec<String> {
+    let lines_of = |unit: &str| -> Vec<String> {
+        said.iter()
+            .filter_map(|line| {
+                let (_, after) = line.split_once(&format!("{unit}["))?;
+                let (_, text) = after.split_once("]: ")?;
+                Some(text.trim().to_owned())
+            })
+            .collect()
+    };
+    let inside = lines_of("netns.service");
+    let outside = lines_of("netopen.service");
+    let says = |lines: &[String], text: &str| lines.iter().any(|line| line == text);
+    let mut wrong = Vec::new();
+    for (unit, lines, prefix) in [
+        ("netns.service", &inside, "netns"),
+        ("netopen.service", &outside, "netopen"),
+    ] {
+        if !says(lines, &format!("{prefix}-net-done")) {
+            wrong.push(format!("{unit} never finished its checks: {lines:?}"));
+        }
+    }
+    if !says(&inside, "netns-lo-route 1") {
+        wrong.push(format!(
+            "netns.service's lo is not up in its network namespace: {inside:?}"
+        ));
+    }
+    let devices: Vec<&String> = inside
+        .iter()
+        .filter(|line| line.starts_with("netns-dev "))
+        .collect();
+    if devices.len() != 1 || !says(&inside, "netns-dev lo:") {
+        wrong.push(format!(
+            "netns.service has other interfaces than lo, so it is not in a namespace of its \
+             own: {devices:?}"
+        ));
+    }
+    if says(&inside, "echoed ping") {
+        wrong.push(
+            "netns.service, with PrivateNetwork=yes, reached the machine's echo.socket on \
+             127.0.0.1:7777"
+                .into(),
+        );
+    }
+    if !says(&outside, "echoed ping") {
+        wrong.push(format!(
+            "netopen.service could not reach echo.socket, so nothing shows PrivateNetwork= \
+             at work: {outside:?}"
+        ));
+    }
+    wrong
 }
 
 /// What the two runs of the sandboxing script said, judged; one line per
@@ -2793,6 +2874,43 @@ mod tests {
         with.push("  boxed.service[302]: boxed-nnp 1");
         with.push("  open.service[301]: open-nnp 0");
         assert_eq!(judge_sandbox(&lines(&with)), Vec::<String>::new());
+    }
+
+    /// What a passing `PrivateNetwork=` check prints.
+    const NETWORKED: [&str; 9] = [
+        "  netopen.service[401]: netopen-lo-route 1",
+        "  netopen.service[401]: netopen-dev lo:",
+        "  netopen.service[401]: netopen-dev eth0:",
+        "  netopen.service[401]: echoed ping",
+        "  netopen.service[401]: netopen-net-done",
+        "  netns.service[402]: netns-lo-route 1",
+        "  netns.service[402]: netns-dev lo:",
+        "  netns.service[402]: nc: can't connect to remote host (127.0.0.1): Connection refused",
+        "  netns.service[402]: netns-net-done",
+    ];
+
+    #[test]
+    fn a_private_network_passes_and_each_leak_fails_alone() {
+        assert_eq!(judge_network(&lines(&NETWORKED)), Vec::<String>::new());
+        let with = |extra: &str, from: &str, to: &str| {
+            let mut changed: Vec<String> = NETWORKED
+                .iter()
+                .map(|line| line.replace(from, to))
+                .collect();
+            if !extra.is_empty() {
+                changed.push(extra.to_owned());
+            }
+            judge_network(&changed)
+        };
+        let down = with("", "netns-lo-route 1", "netns-lo-route 0");
+        assert_eq!(down.len(), 1, "{down:?}");
+        assert!(down[0].starts_with("netns.service's lo is not up"));
+        let shared = with("  netns.service[402]: netns-dev eth0:", "", "");
+        assert_eq!(shared.len(), 1, "{shared:?}");
+        assert!(shared[0].starts_with("netns.service has other interfaces"));
+        let reached = with("  netns.service[402]: echoed ping", "", "");
+        assert_eq!(reached.len(), 1, "{reached:?}");
+        assert!(reached[0].contains("reached the machine's echo.socket"));
     }
 
     #[test]
