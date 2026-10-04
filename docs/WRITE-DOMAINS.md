@@ -91,7 +91,7 @@ because the user granted the authority. §4's undo is the answer there.
 | The desktop and every program it starts run as root | `docs/AUTH.md` §6.1; `hyprix.service` has no `User=` (`tools/common/xtask/src/init.rs:487-497`) | Today every GUI app can rewrite every file |
 | Landlock | `ENOSYS` (`docs/CHROME.md:638`) | No program can restrict itself |
 | seccomp | No filter can be installed yet, and a filter never sees a path (`docs/SECCOMP.md` §3.2) | Cannot say "only under this folder" |
-| init's sandboxing keys | Warned about and ignored (`src/lib/init/svc/src/kind/service.rs:557-575`; `docs/INIT.md`, L13) | `ProtectHome=` and `ReadOnlyPaths=` do nothing yet |
+| init's sandboxing keys | `NoNewPrivileges=`, `PrivateTmp=` and `ProtectSystem=` carried out since L13a (`docs/INIT.md` §4.5); the rest warned about and ignored (`src/lib/init/svc/src/kind/sandbox.rs`, `NOT_BUILT`) | `ProtectHome=`, `ReadOnlyPaths=` and `ReadWritePaths=` do nothing yet |
 | `app.toml` | Declares files, not permissions (`docs/APPS.md` §3) | No place to say what an app may write |
 | Extended attributes | No filesystem keeps them: get is `ENODATA`, set is `EOPNOTSUPP` (`src/kernel/src/syscall/fsctl.rs:101-106`) | Nowhere to store a per-file tag (§10, Q3) |
 | btrfs snapshots | The writer refuses a volume with any (`src/lib/fs/btrfs-write/src/lib.rs:42-51`); planned as Stage C (`docs/ARCHITECTURE.md`, `BtrfsSubvolumes` in `docs/sysml/09-storage.sysml`) | No undo |

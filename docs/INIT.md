@@ -332,16 +332,164 @@ WantedBy=multi-user.target
 | `StandardInput=`, `StandardOutput=`, `StandardError=` | `null`, `tty`, `console`, `log` (§10) |
 | `TTYPath=` | The terminal for `tty`; init makes it the controlling terminal of a new session |
 | `Offers=`, `Uses=` | Names in the directory (§6) |
+| `NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=`, `PrivateNetwork=`, `SystemCallFilter=` | The sandboxing keys of L13 (§4.5) |
 
-The sandboxing keys wait for the rest of stage 13 and are landing L13:
-`PrivateTmp=`, `ProtectSystem=`, `PrivateNetwork=` (namespaces),
-`SystemCallFilter=` (seccomp), and `NoNewPrivileges=`, which `prctl` answers
-already. Until then init warns about them and runs the service without them.
-It does not refuse the service, because a unit that loads on systemd should
-load here.
+The other sandboxing keys systemd has warn by name, and init runs the
+service without them. It does not refuse the service, because a unit that
+loads on systemd should load here. The two of L13 whose kernel half has not
+landed, `PrivateNetwork=` and `SystemCallFilter=`, are different: they are
+read, and a unit that asks for one is refused at its start, with the reason,
+rather than run without what it asked for (§4.5).
 
 `[Install]` takes `WantedBy=`, `RequiredBy=` and `Alias=`. `svc enable` makes
 the links in `/etc/ferrix/units/<target>.wants/` that systemd makes.
+
+### 4.5 Sandboxing (L13)
+
+Five of systemd's sandboxing keys, each read as systemd 259 reads it
+(`systemd.exec(5)`, checked against the host's man page and
+`systemd-analyze syscall-filter`). They are parsed into a `Sandbox` in
+`src/lib/init/svc/src/kind/sandbox.rs`, handed to the backend in each
+`SpawnSpec`, and carried out by init's child between `clone3` and `execve`
+(`src/user/system/linux/init/init/src/sandbox.rs`). A command with the `+`
+prefix runs without them, as under systemd. A value that does not parse is
+a warning in systemd's words and the assignment is ignored. The other
+sandboxing keys systemd has (`ProtectHome=`, `PrivateDevices=`,
+`ReadOnlyPaths=`, `SystemCallErrorNumber=`, ...) still warn by name, and the
+service runs without them (§4.4).
+
+| Key | systemd | Ferrix |
+|---|---|---|
+| `NoNewPrivileges=` | A boolean. No `execve` of the service or anything it starts gains a privilege, through set-uid or set-gid bits or file capabilities (`PR_SET_NO_NEW_PRIVS`). | The same `prctl`, the last step before `execve`. The kernel drops a set-id program's bits under it (`syscall/exec.rs`). Ferrix has no file capabilities, so set-id bits are all it covers. systemd's extra of mounting everything `nosuid` in a new mount namespace is not done; the flag makes it unneeded. |
+| `PrivateTmp=` | A boolean or `disconnected`. `yes`: a new mount namespace whose `/tmp` and `/var/tmp` are directories of the host's own `/tmp` and `/var/tmp`, made per unit and removed when it stops, and shared with units that name it in `JoinsNamespaceOf=`. `disconnected` (since 256): a new tmpfs on each. | `yes` and `disconnected` alike are a new tmpfs on `/tmp` and `/var/tmp`, mode 1777, `nosuid,nodev`, made in each process's own namespace. Nothing is left on the host to remove; what the service wrote goes with its namespace. **Differs:** each command of the unit gets its own, so what `ExecStartPre=` writes to `/tmp` is not seen by `ExecStart=`, and there is no `JoinsNamespaceOf=`. `/var` and `/var/tmp` are made if missing. |
+| `ProtectSystem=` | A boolean, `full` or `strict`. `yes`: `/usr`, `/boot` and `/efi` read-only. `full`: and `/etc`. `strict`: the whole hierarchy but `/dev`, `/proc` and `/sys`; with `PrivateTmp=` the private `/tmp` and `/var/tmp` stay writable. `ReadWritePaths=` opens places again. | Each place is remounted `MS_REMOUNT\|MS_BIND\|MS_RDONLY` in the service's own mount namespace, keeping the mount's `nosuid`, `nodev`, `noexec` and atime flags as `mountinfo` gives them, since a bind remount sets exactly the flags it is given. A place that is no mount's root is bound onto itself first, with `MS_REC`. Every mount beneath it, from `/proc/self/mountinfo` read in the parent, is remounted the same way, so `/data` and `/run` under `/` are read-only under `strict`. **Differs:** `yes` adds `/bin`, `/sbin`, `/lib` and `/lib64` when they are directories, since Ferrix's images keep them at the top where a merged `/usr` would have them under `/usr`; a link among them is left, as what it names is covered where it is. `ReadWritePaths=` is not built. |
+| `PrivateNetwork=` | A boolean. A new network namespace with only `lo` in it, up; implies a private mount namespace, and `/sys` is remounted for the new namespace. | **Refuses to start the unit** until network namespaces land (branch `stage13-netns`), with `PrivateNetwork= needs network namespaces, which this kernel does not have yet; refusing to start the unit without it`. A sandboxing key that the unit asked for is never dropped in silence. |
+| `SystemCallFilter=` | A list of system call names and `@group`s. Without `~` it is an allow-list: only those (and `@default`, added first) run. With `~` a deny-list. Later assignments add to the set when they agree with the first and take from it otherwise; an empty one resets. A denied call kills the process with `SIGSYS`, or returns `SystemCallErrorNumber=`'s errno, or a deny-list word's own `:errno`. A `User=` service gets `NoNewPrivileges=` implied, since it has no `CAP_SYS_ADMIN` to install the filter without it. | Parsed with the merge kept as an ordered list of words, each marked add or take, since expanding a group needs its per-ABI members. Unknown groups and malformed names or actions warn. **Refuses to start the unit** until seccomp filters land (S3, branch `stage13-s3-rebase`), with `SystemCallFilter= needs seccomp filters, ...`. |
+
+**The child's order.** Everything that decides or allocates is done in the
+parent first (`sandbox::plan`): a key that cannot be had refuses the unit
+there, as `SpawnFailed` with a line naming the reason, before any other
+lookup. The child then, after its signals, session, terminal and streams:
+
+1. **Network** (when built): `unshare(CLONE_NEWNET)` and `lo` up.
+2. **Mounts**, while still root and before anything drops a privilege:
+   `unshare(CLONE_NEWNS)`; `/` and everything under it made slaves
+   (`MS_REC|MS_SLAVE`, accepted and a no-op today, since no mount is ever
+   shared); `/var` and `/var/tmp` made if missing; a tmpfs on each of `/tmp`
+   and `/var/tmp`, then `chmod 1777`, because Ferrix's tmpfs reads no
+   options; then the read-only remounts. A failure is systemd's
+   `EXIT_NAMESPACE`, 226.
+3. **Directory and user**, as before (§5.2): `chdir` resolves in the new
+   namespace, then `setgroups`, `setgid`, `setuid`.
+4. **init's go-ahead** for a bootstrap channel (§6).
+5. **`PR_SET_NO_NEW_PRIVS`**, `EXIT_NO_NEW_PRIVILEGES`, 227.
+6. **The seccomp filter** (when built), last of all, so that it sees
+   nothing of init's but the `execve`. `EXIT_SECCOMP`, 228.
+7. `execve`.
+
+The mounts come before the user change because only a privileged process
+may make a mount namespace or mount (Ferrix's `unshare` and `mount` ask for
+privilege as Linux asks for `CAP_SYS_ADMIN`). `no_new_privs` comes after the
+user change and before the filter because a filter needs it, or privilege,
+to be installed, and a filter that ran earlier would have to allow
+everything init's own steps call. A `Type=native` service with any of the
+keys is refused, since none applies to a native process yet: it is not
+started by `execve` and has no Linux mount namespace of its own to change.
+
+**`PrivateNetwork=`, once network namespaces land.** Step 1 is
+`unshare(CLONE_NEWNET)` in the child, as root, then a `SIOCSIFFLAGS` with
+`IFF_UP` on `lo` through a datagram socket made and closed there (a stack
+`ifreq`, so nothing is allocated), which gives the namespace 127.0.0.1 and
+`::1` (`docs/NETNS.md` §2.2). It implies a mount namespace, as systemd's
+does; `/sys` is not remounted, since Ferrix's sysfs shows no network
+devices per namespace. A socket unit's `PrivateNetwork=` and
+`JoinsNamespaceOf=` are not in this design. What changes: `plan` stops
+refusing, the plan gains a flag, and `enter` gains step 1. The gate's
+refusal check becomes a check, from inside the unit, that `lo` is up and
+`10.0.2.2` cannot be reached.
+
+**`SystemCallFilter=`, once S3 lands.** In the parent, per architecture the
+kernel serves to the service (x86-64's native and its i386 entry, AArch64,
+ARMv7-A; `docs/SECCOMP.md` §3.2):
+
+1. The words are applied in order to a set of names, each group expanded
+   from a table of systemd's groups kept beside the parser (from
+   `systemd-analyze syscall-filter` of the version it names), each name
+   looked up in that ABI's table (`ferrix-linux-abi`'s `nr`). A name the ABI
+   lacks is left out of that ABI's filter, as libseccomp leaves it; a name
+   no ABI has warns, as systemd's does.
+2. The calls systemd always allows are added: `execve`, `exit`,
+   `exit_group`, `getrlimit`, `rt_sigreturn`, `sigreturn` and the time and
+   sleep calls. **Ferrix adds** the native calls a unit's `Uses=` or
+   `Offers=` imply (`process_bootstrap` and the channel calls, §6), since
+   the native range goes through the filter like any other number
+   (`docs/SECCOMP.md` SR2) and the program takes its bootstrap channel after
+   `execve`; and a group `@ferrix-native` names the whole range for a unit
+   that wants it. On ARMv7-A the private calls a C library needs (`set_tls`,
+   `cacheflush`) are checked against systemd's own ARM table when built.
+3. A classic BPF program: load `arch`; for each ABI a block, entered by its
+   `AUDIT_ARCH_*` token, which loads `nr`, refuses an x86-64 number with the
+   x32 bit (`0x40000000`) with the default action, and compares the number
+   against each listed call (`JEQ`, linear, at most `docs/SECCOMP.md` §3.5's
+   4096 instructions; a binary search when a measured filter needs it); an
+   architecture with no block gets `KILL_PROCESS`, libseccomp's bad-arch
+   action. An allow-list's listed calls return `ALLOW` and everything else
+   the default; a deny-list's listed calls return their own `:errno`, or the
+   default, and everything else `ALLOW`. The default is
+   `SECCOMP_RET_KILL_PROCESS`, or `SECCOMP_RET_ERRNO` with
+   `SystemCallErrorNumber=` once that key is read too.
+4. `NoNewPrivileges=` is implied when the unit has `User=`, as systemd's
+   rule has it: the child is unprivileged by then, and the kernel refuses
+   its filter without `no_new_privs` (`docs/SECCOMP.md` §3.5, step 5).
+
+The child installs the program with `seccomp(SECCOMP_SET_MODE_FILTER, 0,
+&prog)` as its step 6. The compiler is host code and gets host tests: the
+merge rules, the expansion, and a filter run through `src/lib/kernel/seccomp`'s
+interpreter on each ABI's numbers, with the arch check's negative case.
+`SystemCallArchitectures=` and `SystemCallErrorNumber=` are read in the
+same landing. The gate gains a unit whose `SystemCallFilter=~@mount` makes
+its `mount` fail and kill it, and one whose `:EPERM` returns the errno.
+
+**The gate (`test-init`'s sandboxing stage).** It starts two oneshots from
+the prompt, `boxed.service` (uid 1000, `NoNewPrivileges=yes`,
+`PrivateTmp=yes`, `ProtectSystem=strict`) and `open.service` (the same script
+and user, no sandbox), and each looks from inside, running a set-uid root
+copy of zinc. What each check proves:
+
+* **`NoNewPrivileges=`.** `open.service`'s shell must report uid 1000 and
+  effective uid 0: the set-uid bit works, so it is a real privilege to
+  withhold. `boxed.service`'s must report 1000 and 1000: its `execve` of the
+  same file gained nothing, which only `no_new_privs` (or a kernel ignoring
+  every set-uid bit, which `open.service` rules out) explains. Where the
+  kernel prints `NoNewPrivs:` in `/proc/self/status` (S3 adds the line), it
+  must read 1 and 0.
+* **`PrivateTmp=`.** A file the prompt wrote to `/tmp` just before must be
+  missing from `boxed.service`'s `/tmp` and present in `open.service`'s;
+  `boxed.service` must still write its own `/tmp` (the mode is 1777), and
+  that file must not be in the machine's `/tmp` afterwards. That shows the
+  tmpfs is new, writable by the user and private both ways.
+* **`ProtectSystem=strict`.** The prompt makes `/run/l13-open` with mode
+  0777, so the only thing that can refuse a uid-1000 write into it is a
+  read-only mount. `boxed.service`'s write must be refused and
+  `open.service`'s must succeed, and the refused file must not be there
+  afterwards. That shows a mount beneath `/` was remounted read-only in the
+  service's namespace and not in the machine's. `/` itself is remounted the
+  same way first; the check reaches it through `/run`, a mount of its own,
+  because a uid-1000 write to `/` is refused by its mode anyway.
+* **The two keys not yet built.** `netns.service` and `filtered.service`
+  must be refused by init with their reasons and must never print.
+
+The host tests in `src/lib/init/svc/src/tests/sandbox.rs` hold the parsing
+and the `+` prefix, those in `init/src/sandbox.rs` the mount plan (which
+places, which flags, what is bound first, what is exempt) and the two
+refusals, and `tools/common/xtask/src/init.rs`'s judge tests hold the stage
+to one failure line per key that did nothing.
+
+**Certification.** Init is ring 3 (`src/user/system/linux/init`) and outside
+`tools/common/data/certification-item.json`'s rings; whether its keys belong
+to the item is for the certification consultant to rule. If they do, the
+claims above are the ones to review: each key's check and its negative
+control, listed in §16.
 
 ## 5. Supervision: a service is a cgroup
 
@@ -905,10 +1053,10 @@ cgroup half is what §0 asks for first.
 | L10 | Move the images over: `cargo xtask run` and `run-compositor` boot init with `multi-user.target` / `graphical.target`; hyprix stops being pid 1 and makes a scope per client. **Done 2026-09-26** (§16) | L5, L6 | `test-compositor` under init | 6 |
 | L11 | `devmgr` shares the restart policy. **Done 2026-09-26** by ferrix-55b: the policy is its own no-alloc crate, `src/lib/init/restart`, with systemd's fixed-window start limit, and devmgr reads each death's status through K6 | L2 | `test-restart` | 2 |
 | L12 | The kernel starts init alone and init starts `devmgr` (§7.3). **Done 2026-09-27**, re-sized from 8 to 12 for the starter, the re-root and the certification record | L8 | `test-init --arch all` with a root disk, the whole image row | 12 |
-| L13 | *after the rest of stage 13*: `PrivateTmp=`, `ProtectSystem=`, `PrivateNetwork=`, `SystemCallFilter=`, `NoNewPrivileges=` | L4, stage 13 | `test-init` stage six | 8 |
+| L13 | The sandboxing keys (§4.5), re-sized from 8 to 10 and split by the kernel half each needs. **L13a built 2026-10-04** (§16): all five parsed, `NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=` carried out, the other two refusing the unit. L13b: `PrivateNetwork=`. L13c: `SystemCallFilter=`, with `SystemCallArchitectures=` and `SystemCallErrorNumber=` | L4; L13a mount and user namespaces (N1 to N3) and `prctl`; L13b network namespaces; L13c S3 | `test-init`'s sandboxing stage | 5 + 1 + 4 |
 
 The kernel items of §11 are counted inside the landings that carry them.
-L1 to L10 add up to 67 points, and L11 to L13 to 22 more (L12 re-sized from 8 to 12). L1 to L4 are what
+L1 to L10 add up to 67 points, and L11 to L13 to 24 more (L12 re-sized from 8 to 12, L13 from 8 to 10). L1 to L4 are what
 the roadmap calls "a working init". L5 is what makes it a resource manager.
 L8 is what makes it one a microkernel could keep.
 
@@ -961,6 +1109,11 @@ landing adds a stage, and each stage requires its lines:
 5. **The directory** (L8). A native test service is offered and started on
    first OPEN, and is found in its unit's cgroup. A unit that does not declare
    the name is REFUSED.
+6. **Sandboxing** (L13). A uid-1000 service with `NoNewPrivileges=yes`,
+   `PrivateTmp=yes` and `ProtectSystem=strict` runs a set-uid root shell
+   and stays uid 1000, cannot see the machine's `/tmp` and leaves nothing in
+   it, and cannot write into a 0777 directory under `/run`, while the same
+   service without the keys can do all three (§4.5).
 
 Every stage has a negative control, per this repository's rule. It must show
 it fired: a marker line, a sabotage that matches exactly one line, then that
@@ -982,7 +1135,8 @@ the system people will actually use.
 | L10 | done, 2026-09-26 | "Boot the images through init, and the compositor as its service" |
 | L11 | done, 2026-09-26, by ferrix-55b with T0 | "Give the restart policy a crate of its own that allocates nothing"; "Restart drivers by the service manager's policy, and report how they died" |
 | L12 | done, 2026-09-27, as built in §7.3 | "Let pid 1 start devmgr, through a starter the kernel gives it" |
-| L13 | parked until stage 13's namespaces and seccomp exist (the customer, 2026-09-26) | |
+| L13a | built 2026-10-04 on branch `l13-init`, gating (below) | |
+| L13b, L13c | wait for network namespaces and seccomp's S3 | |
 
 All of L1 to L12's 81 points are spent. L11 put `devmgr` on the restart
 policy, which moved into `src/lib/init/restart` because `devmgr` has no
@@ -990,8 +1144,9 @@ allocator; its start limit became systemd's fixed window. The customer
 counts the init done at L11 (2026-09-26). L12 (2026-09-27) has pid 1 start
 `devmgr` through a starter under `ferrix.devmgr=init`, which every image
 that boots init now sets. `sshd` runs under socket activation in L9's gate
-since 2026-09-27. L13, the sandboxing keys, is parked until stage 13's
-namespaces and seccomp exist.
+since 2026-09-27. L13a, the sandboxing keys that need only mount namespaces and
+`prctl`, is built (2026-10-04); L13b and L13c wait for network namespaces and
+seccomp.
 
 **L1, as built (5 points).** `src/lib/init/svc` is on `main`: `no_std` with
 `alloc`, `forbid(unsafe_code)`, 52 host tests, a Miri step in CI and in
@@ -1564,8 +1719,51 @@ it to use. Linux services' own OFFERs are kept but no gate offers one yet.
 * **`test-jobs`** types its session at the getty's shell, and ends it with
   `exit`, after which init must give the console a new session.
 
-**What the next session does first.** Nothing of L1 to L12 is left. L13
-waits for stage 13's
-namespaces and seccomp. `docs/AUTH.md`'s P0 to P0c are done: a native
+**L13a, as built (5 points, 2026-10-04).** §4.5 is the design. What is on
+branch `l13-init`:
+
+* `src/lib/init/svc/src/kind/sandbox.rs`: the five keys parsed into a
+  `Sandbox`, in `SpawnSpec` for every command but a `+` one. 11 host tests
+  (`tests/sandbox.rs`): systemd's values, bad values warning and keeping the
+  last good one, the filter's merge in both directions, its reset, the
+  warnings for an unknown group, a malformed name, a bad action and an
+  allow-listed action, the keys not built, and the `+` prefix.
+* `src/user/system/linux/init/init/src/sandbox.rs`: the plan in the parent
+  and the child's two steps, `enter` and `lock`, with 6 host tests of the
+  mount plan and the two refusals.
+* `test-init`'s sandboxing stage (§4.5, the gate), with 2 host tests of its
+  judge.
+
+**The kernel, checked first.** `MS_REMOUNT|MS_BIND|MS_RDONLY` works on
+`main`: N1 made per-mount flags real and N2 the bind remount of one mount
+(`syscall/fsctl.rs`, `remount_at`; the `binds` boot line, FX-0886), and the
+first boot of the stage showed it from inside a service:
+`boxed.service[471]: suid-sh:1: read-only file system (os error 30):
+/run/l13-open/boxed`. `unshare(CLONE_NEWNS)` from a forked root child, the
+`MS_REC|MS_SLAVE` no-op, tmpfs mounts in the copy and `PR_SET_NO_NEW_PRIVS`
+all worked as documented. No kernel gap was found. One difference the code
+works around: Ferrix's tmpfs reads no mount options, so `mode=1777` is
+followed by a `chmod`.
+
+**What building it changed.**
+
+* `PrivateNetwork=` and `SystemCallFilter=` refuse the unit, where §4.4
+  said every sandboxing key would warn and run. A unit asking to be cut off
+  the network, or filtered, and run without it would be a sandbox that
+  reports itself on and is off.
+* `NoNewPrivs:` is not in `/proc/<pid>/status` until S3, so the stage shows
+  `no_new_privs` by its effect, a set-uid root shell that stays uid 1000
+  beside one that becomes root, and reads the line too once it exists.
+* `ProtectSystem=yes` covers Ferrix's top-level `/bin`, `/sbin`, `/lib`
+  and `/lib64` (§4.5).
+
+**The gate, and the negative controls.** First boot, x86-64 under TCG, on
+the host directly: the stage passed with the rest of `test-init`. The rows
+(`check`, `test-init --arch all`) and the controls are listed below as the
+pool gives them.
+
+**What the next session does first.** Nothing of L1 to L12 is left. L13b
+waits for network namespaces (branch `stage13-netns`) and L13c for
+seccomp's S3 (branch `stage13-s3-rebase`); §4.5 says what each changes. `docs/AUTH.md`'s P0 to P0c are done: a native
 process runs as its maker, a native service as its `User=`, and a
 delegated cgroup's limits stay its delegator's.
