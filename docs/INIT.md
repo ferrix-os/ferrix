@@ -1758,9 +1758,25 @@ followed by a `chmod`.
   and `/lib64` (§4.5).
 
 **The gate, and the negative controls.** First boot, x86-64 under TCG, on
-the host directly: the stage passed with the rest of `test-init`. The rows
-(`check`, `test-init --arch all`) and the controls are listed below as the
-pool gives them.
+the host directly: the stage passed with the rest of `test-init`. Four
+negative controls, each a one-line edit of `init/src/sandbox.rs` booted
+once on x86-64 (logs `~/.local/share/ferrix/logs/l13init-ctl-*.out`), each
+failing on its own key's lines and nothing else:
+
+* `no_new_privs` never set: "boxed.service, with NoNewPrivileges=yes,
+  gained a privilege through a set-uid program: ids Some("1000 0"), not
+  1000 1000".
+* no tmpfs mounted: "boxed.service's /tmp is not private", and
+  "/tmp/l13-boxed is on the machine after the sandboxing stage".
+* the remount without `MS_RDONLY`: "boxed.service, under
+  ProtectSystem=strict, wrote to a 0777 directory in /run", and
+  "/run/l13-open/boxed is on the machine after the sandboxing stage".
+* `PrivateNetwork=` not refused: "netns.service was not refused with
+  `PrivateNetwork= needs network namespaces`", and "netns.service ran
+  without the key it asked for".
+
+The rows, `check` and `test-init --arch all`, ran through the gate pool
+under the tags `l13init-check` and `l13init-init`.
 
 **What the next session does first.** Nothing of L1 to L12 is left. L13b
 waits for network namespaces (branch `stage13-netns`) and L13c for
