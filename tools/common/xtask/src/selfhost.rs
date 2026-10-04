@@ -12,8 +12,9 @@
 //!   `x86_64-unknown-none` and `x86_64-unknown-uefi`, and Debian's glibc and
 //!   gcc driver, copied into the staging directory (extents shared where the
 //!   host can);
-//! * `src/`, every file git tracks in this checkout, as it is in the work
-//!   tree, so an uncommitted change is built there as it would be here;
+//! * `src/`, every file git tracks in this checkout and in each component's
+//!   checkout (`components.toml`), as it is in the work tree, so an
+//!   uncommitted change is built there as it would be here;
 //! * `vendor/`, the workspace's crates.io dependencies from `cargo vendor
 //!   --offline`, and a Cargo home whose configuration points at them, since
 //!   nothing in the guest's build goes to the network;
@@ -343,13 +344,39 @@ fn stage(tree: &Path, work: &Path, plan: Option<&Path>) -> Result<PathBuf> {
     Ok(volume)
 }
 
-/// Copy every file git tracks in this checkout, as the work tree has it, into
-/// `into`, and say how many.
+/// Copy every file git tracks in this checkout, and in each component's
+/// checkout at its path, as the work trees have them, into `into`, and say
+/// how many.
+///
+/// The components are files there, with no `.git`, like the tree around
+/// them: the guest has no network to clone them, and a tree that is not a
+/// git checkout is not one xtask brings components into
+/// ([`crate::components::ensure`]).
 fn copy_sources(into: &Path) -> Result<usize> {
     let root = paths::workspace_root();
+    let mut copied = copy_tracked(&root, into)?;
+    for component in crate::components::manifest()? {
+        if component.commit.is_none() {
+            continue;
+        }
+        let checkout = crate::components::checkout(&component);
+        if !checkout.join(".git").exists() {
+            return Err(Error::new(format!(
+                "{} is not checked out at {}: run any xtask command to clone it",
+                component.name, component.path
+            )));
+        }
+        copied += copy_tracked(&checkout, &into.join(&component.path))?;
+    }
+    Ok(copied)
+}
+
+/// Copy every file git tracks in the checkout at `root` into `into`, and say
+/// how many.
+fn copy_tracked(root: &Path, into: &Path) -> Result<usize> {
     let listed = Command::new("git")
         .arg("-C")
-        .arg(&root)
+        .arg(root)
         .args(["ls-files", "-z"])
         .output()
         .map_err(|error| Error::new(format!("running git ls-files: {error}")))?;

@@ -179,10 +179,17 @@ pub(crate) fn checkout(component: &Component) -> PathBuf {
 /// move the clean ones that are behind it. A checkout with work of its own is
 /// left as it is.
 ///
+/// A tree that is not a git checkout -- the copy test-selfhost puts on its
+/// volume, for a guest with no network -- carries its components as files
+/// and is left as it is.
+///
 /// # Errors
 ///
 /// When the manifest is unreadable, or a clone or checkout fails.
 pub(crate) fn ensure() -> Result<()> {
+    if !workspace_root().join(".git").exists() {
+        return Ok(());
+    }
     sync(&manifest()?)
 }
 
