@@ -83,6 +83,9 @@ lock, unblocking, pushes), plus the calls the customer has delegated to it.
 
 * `land.sh status`: is the lock free, or is a hold older than fifteen
   minutes stale?
+* `batch.sh status` and `gate.sh status`: is a batch open that more ready
+  branches could join, and is any branch running its full row alone that a
+  batch would have carried?
 * *Red on `main`*: is any gate failing on `main` itself? A working `main`
   comes before every other row.
 * Push `main` to `origin` when `origin/main..main` is not empty: fast-forward
@@ -114,9 +117,52 @@ twenty minutes, mid-gate. Brief each agent:
 * A negative control for each new check, with the run that shows it fired.
 * For a change that needs certification review, end the turn with a diff
   summary for the consultant, before `land.sh take`.
+* A branch ready to land joins a batch for its full row (below) instead of
+  running the row alone, and waits with `batch.sh wait` in the foreground.
 * Agents don't push. The product owner pushes after each landing.
 * Ferrix is "Ferrix, a Rust operating system", never "a hobby OS", including
   in the context line of an agent's prompt (customer, 2026-09-28).
+
+### Batching full runs
+
+The image row of *What a landing runs* (`docs/BACKLOG.md`) is the long one:
+`check`, the release build, and boots on every architecture with x86_64 under
+KVM and under TCG. Run alone per branch, it fills the gate pool's three slots
+with near-identical work while 20 more runs wait half an hour each for a
+slot. `~/.local/share/ferrix/fleet/batch.sh` runs it once for several
+branches (customer, 2026-10-04):
+
+* **Join when ready.** A branch that is rebased onto `main`, has passed its
+  own fast gates and has the consultant's OK when it needs one runs
+  `batch.sh join <session> <ref> <tag>`, with `--gate FILE` for the lines its
+  row adds beyond the profile (one xtask command a line, as `gate.sh run`
+  takes it), or `--profile kvm` when it owes only the KVM boot. Then
+  `batch.sh wait <tag>`, again after each exit 3, until it says PASSED,
+  FAILED, DROPPED or MAIN-RED. `batch.sh profile` prints what `full` runs.
+* **One run for all.** The batch closes ten minutes after its first entry
+  joined, or at four entries. It stacks the entries' commits on `main` in
+  join order as branch `batch/<id>` and runs the union of their gates once on
+  the tip. Every gate is its own `gate.sh run`, all queued at once, longest
+  first by the pool's own past run times, so the three slots fill together
+  and finish together. An entry that does not apply on the ones before it is
+  DROPPED with its conflicts and rebases.
+* **A failure costs one round more, not one row per branch.** The failed
+  gates alone run on the stack's prefixes, all at once while they fit the
+  slots, so a batch of four finds its failing entry in one round. That entry
+  is FAILED with the logs; the others go back to the front of the next batch
+  and run the whole row again without it. When the first entry fails, `main`
+  runs too, and a red `main` fails nobody's branch (MAIN-RED: it is the
+  *Red on `main`* row above).
+* **Land the stack whole.** A PASSED verdict names the stack tip, which
+  holds every entry of the batch. The product owner, or the entry it names,
+  lands it under one `land.sh take` with `git merge --ff-only <tip>`, says
+  every tag in the landing log, and boots `main` once under `--accel kvm` as
+  any landing does. An entry never lands its own stack commit alone: only
+  the tip ran the gates.
+* **What a batch does not replace.** Negative controls stay `gate.sh
+  control` runs of their own, and a gate outside the profile (`test-shell`,
+  `test-compositor`, ...) goes in `--gate FILE`, never dropped. The batch
+  checks no less than the row each entry would have run alone.
 
 ### Records
 

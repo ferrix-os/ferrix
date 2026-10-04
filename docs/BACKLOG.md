@@ -785,6 +785,13 @@ neither.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-04 (customer)** **Full runs are batched.** Branches ready to
+  land share one run of the image row instead of paying it each:
+  `~/.local/share/ferrix/fleet/batch.sh` stacks them on `main`, runs the
+  union of their gates once across the gate pool's slots, finds a failing
+  entry by running its failed gates on the stack's prefixes at once, and the
+  stack lands whole. How the product owner runs it is in `AGENTS.md`, *The
+  product owner*, *Batching full runs*.
 * **2026-10-03 (customer)** **The `--everything` desktop runs as the user
   `ferrix`, and the machine keeps the users' files apart from the system.**
   The session is started the way `docs/AUTH.md` §6 plans it, not as an
