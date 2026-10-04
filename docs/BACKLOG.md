@@ -821,6 +821,10 @@ redrawn from it.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-04 (customer)** **Each session gets its own certification
+  consultant.** A session that needs a review briefs its own consultant
+  subagent with `AGENTS.md`'s *The certification consultant* and the ledger on
+  the gate host, instead of sending to one standing consultant session.
 * **2026-10-04 (customer)** **The product owner lands batch stacks.** A
   stack `batch.sh` PASSED is landed by the product owner, under `land.sh
   take` with `git merge --ff-only <tip>`; the sessions whose branches are in

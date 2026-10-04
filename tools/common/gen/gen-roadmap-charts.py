@@ -339,13 +339,18 @@ def gantt():
 
     day = lambda d: (d - start_day).days
     section("Done")
-    for name, a, b in DONE:
+    for name, a, b in sorted(DONE, key=lambda r: (r[1], r[2])):
         bar(name, day(a), day(b) + 1, DONE_C)
     section("In progress")
     qd = day(queue_start)
     sched = {r[0]: (f[1], f[2]) for r, f in zip(REMAINING, forecast)}
     pts_of = {n: p for n, p, _ in REMAINING}
-    for name, a, items in ACTIVE:
+    def remainder_end(items):
+        return (span if items is None
+                else max(sched[n][1] for n in items) + qd)
+    # Drawn by start day, ties by where the remainder ends; the data's order
+    # and the forecast queue's order (the status table's) are not changed.
+    for name, a, items in sorted(ACTIVE, key=lambda r: (r[1], remainder_end(r[2]))):
         bar(name, day(a), qd, ACTIVE_C)
         by = yy - row_h
         if items is None:

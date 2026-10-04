@@ -87,8 +87,10 @@ branches (customer, 2026-10-04):
 
 ## The certification consultant
 
-The customer names this session too ("you are the certification agent").
-It is a standing role: when the fleet winds down, it winds down last.
+Since 2026-10-04 (customer) each session gets its own certification
+consultant: a session that needs a review briefs its own consultant subagent
+with this section and the ledger on the gate host, instead of sending to one
+standing consultant session. The role's rules below are unchanged.
 
 Ferrix's certification targets are required, not optional (customer,
 2026-10-01): Common Criteria EAL5+, DO-178C DAL C, IEC 62304 Class C and

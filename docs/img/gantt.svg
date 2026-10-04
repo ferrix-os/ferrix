@@ -92,30 +92,30 @@
 <rect x="489.8" y="314.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="347.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">cgroups P1, M1, S1 (28)</text>
 <rect x="522.4" y="336.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="369.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Audio, alsa-lib, pulsed (45)</text>
-<rect x="522.4" y="358.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="391.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Chrome: zygote, speed, ferrousli</text>
-<rect x="522.4" y="380.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="369.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Chrome: zygote, speed, ferrousli</text>
+<rect x="522.4" y="358.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="391.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Audio, alsa-lib, pulsed (45)</text>
+<rect x="522.4" y="380.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="413.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">i386 ABI I1 to I4 (42)</text>
 <rect x="538.8" y="402.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="435.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Installer MVP</text>
-<rect x="555.1" y="424.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="457.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">yserver, the X server (36)</text>
-<rect x="555.1" y="446.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="479.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Mount namespaces N1 to N3 (19)</text>
-<rect x="555.1" y="468.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="501.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Claude Code on Ferrix</text>
-<rect x="571.5" y="490.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="523.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Speculation domain, round trip</text>
-<rect x="604.1" y="512.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="545.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">btrfs in the certified item</text>
-<rect x="620.5" y="534.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="567.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N0 and N1 (60)</text>
-<rect x="620.5" y="556.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="589.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Authentication P1, P2 (desktop as a user)</text>
-<rect x="538.8" y="578.0" width="130.7" height="14.0" rx="2" fill="#8c959f"/>
-<text x="300.0" y="611.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Network namespaces</text>
-<rect x="604.1" y="600.0" width="65.4" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="435.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Authentication P1, P2 (desktop as a user)</text>
+<rect x="538.8" y="424.0" width="130.7" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="457.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Installer MVP</text>
+<rect x="555.1" y="446.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="479.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">yserver, the X server (36)</text>
+<rect x="555.1" y="468.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="501.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Mount namespaces N1 to N3 (19)</text>
+<rect x="555.1" y="490.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="523.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Claude Code on Ferrix</text>
+<rect x="571.5" y="512.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="545.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Speculation domain, round trip</text>
+<rect x="604.1" y="534.0" width="49.0" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="567.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Network namespaces</text>
+<rect x="604.1" y="556.0" width="65.4" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="589.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">btrfs in the certified item</text>
+<rect x="620.5" y="578.0" width="16.3" height="14.0" rx="2" fill="#8c959f"/>
+<text x="300.0" y="611.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N0 and N1 (60)</text>
+<rect x="620.5" y="600.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="633.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Components and apps in repositories</text>
 <rect x="636.8" y="622.0" width="32.7" height="14.0" rx="2" fill="#8c959f"/>
 <text x="24.0" y="661.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">In progress</text>
@@ -151,14 +151,14 @@
 <rect x="636.8" y="828.0" width="32.7" height="14.0" rx="2" fill="#0969da"/>
 <rect x="669.5" y="828.0" width="251.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
 <text x="927.2" y="839.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">64 pts left, ~10-21</text>
-<text x="300.0" y="861.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Init L13b and L13c</text>
+<text x="300.0" y="861.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Auth P2, the rest (P2.1 landed)</text>
 <rect x="653.2" y="850.0" width="16.3" height="14.0" rx="2" fill="#0969da"/>
-<rect x="669.5" y="850.0" width="63.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="739.2" y="861.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">5 pts left, ~10-09</text>
-<text x="300.0" y="883.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Auth P2, the rest (P2.1 landed)</text>
+<rect x="669.5" y="850.0" width="59.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="735.2" y="861.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">6 pts left, ~10-09</text>
+<text x="300.0" y="883.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Init L13b and L13c</text>
 <rect x="653.2" y="872.0" width="16.3" height="14.0" rx="2" fill="#0969da"/>
-<rect x="669.5" y="872.0" width="59.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="735.2" y="883.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">6 pts left, ~10-09</text>
+<rect x="669.5" y="872.0" width="63.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="739.2" y="883.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">5 pts left, ~10-09</text>
 <text x="24.0" y="911.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">Forecast, 20 a day, one queue</text>
 <text x="300.0" y="935.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Client pages as texture backing (8, idle)</text>
 <rect x="669.5" y="924.0" width="6.5" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
