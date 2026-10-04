@@ -156,8 +156,8 @@ branches (customer, 2026-10-04):
   runs too, and a red `main` fails nobody's branch (MAIN-RED: it is the
   *Red on `main`* row above).
 * **Land the stack whole.** A PASSED verdict names the stack tip, which
-  holds every entry of the batch. The product owner, or the entry it names,
-  lands it under one `land.sh take` with `git merge --ff-only <tip>`, says
+  holds every entry of the batch. The product owner lands it (customer,
+  2026-10-04) under one `land.sh take` with `git merge --ff-only <tip>`, says
   every tag in the landing log, and boots `main` once under `--accel kvm` as
   any landing does. An entry never lands its own stack commit alone: only
   the tip ran the gates.

@@ -787,6 +787,10 @@ neither.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-04 (customer)** **The product owner lands batch stacks.** A
+  stack `batch.sh` PASSED is landed by the product owner, under `land.sh
+  take` with `git merge --ff-only <tip>`; the sessions whose branches are in
+  it join, wait for the verdict and leave `main` alone.
 * **2026-10-04 (customer)** **Full runs are batched.** Branches ready to
   land share one run of the image row instead of paying it each:
   `~/.local/share/ferrix/fleet/batch.sh` stacks them on `main`, runs the
