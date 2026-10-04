@@ -220,6 +220,9 @@ pub(crate) fn load_native_in(
     }
     process.with_credentials(|held| *held = credentials);
     if let Some(context) = context {
+        // A creator's child: findable from `register` on, and its attributes
+        // come from the creator in `launch`, after it.
+        process.await_attributes();
         // Not shared with anything yet; what it replaces goes after the lock.
         let started_in = core::mem::replace(&mut *process.fs_context().lock(), context);
         drop(started_in);

@@ -91,6 +91,12 @@ fn person() -> Result<Arc<Process>, &'static str> {
             .map(drop)
             .map_err(|_| "a small-namespace check's process could not become 1000")?;
     }
+    // A change of ids made it not dumpable, which keeps even its own user from
+    // opening its namespace links (`ptrace_may_access`); a program that drops
+    // its ids and means to be inspected says so, as bubblewrap does.
+    by_number(&made, Syscall::Prctl, [4, 1, 0, 0, 0, 0])
+        .map(drop)
+        .map_err(|_| "a small-namespace check's process could not become dumpable")?;
     Ok(made)
 }
 

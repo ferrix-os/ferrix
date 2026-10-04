@@ -157,6 +157,11 @@ pub(crate) struct Process {
     /// [`Process::hand_on_newly_blocked`] -- or zero: for the checks that such
     /// a signal reaches the thread that can take it.
     handed_to: AtomicU32,
+    /// Set while the process is findable but `attributes::inherit` has not yet
+    /// given it its parent's `no_new_privs` and dumpability: a fork child from
+    /// its making, a native child of a creator likewise. `ptrace_may_access`
+    /// reads it as not dumpable, so the window refuses and does not leak.
+    attributes_pending: AtomicBool,
     /// Set by the one [`Process::release`] that runs, as it starts.
     released: AtomicBool,
     /// Set as that release finishes, after its orphans have gone on and before
@@ -412,6 +417,7 @@ impl Process {
             exec_thread: AtomicU32::new(0),
             thread_left: WaitQueue::new(),
             handed_to: AtomicU32::new(0),
+            attributes_pending: AtomicBool::new(false),
             released: AtomicBool::new(false),
             release_finished: AtomicBool::new(false),
             leader_status: AtomicI32::new(0),
@@ -541,6 +547,7 @@ impl Process {
         child.credentials = SpinLock::new(parent.credentials.lock().clone());
         child.nsproxy = SpinLock::new(parent.nsproxy.lock().clone());
         child.identity = SpinLock::new(parent.identity.lock().clone());
+        child.attributes_pending = AtomicBool::new(true);
         Ok(shared)
     }
 
@@ -568,6 +575,22 @@ impl Process {
     pub(crate) fn set_net_ns(&self, namespace: Arc<crate::net::NetNamespace>) {
         let displaced = self.nsproxy.lock().net.replace(namespace);
         drop(displaced);
+    }
+
+    /// Whether the attributes a fork child takes from its parent are still to
+    /// be given (`attributes::inherit` ends it).
+    pub(crate) fn attributes_pending(&self) -> bool {
+        self.attributes_pending.load(Ordering::Acquire)
+    }
+
+    /// The attributes have been given: [`Process::attributes_pending`] ends.
+    pub(crate) fn settle_attributes(&self) {
+        self.attributes_pending.store(false, Ordering::Release);
+    }
+
+    /// For a native child of a creator, made before its attributes are given.
+    pub(crate) fn await_attributes(&self) {
+        self.attributes_pending.store(true, Ordering::Release);
     }
 
     /// Its descriptor table.

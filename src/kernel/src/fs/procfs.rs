@@ -113,6 +113,7 @@ use crate::panic::{catalog, fatal};
 use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::Process;
 use crate::syscall::registry;
+use crate::syscall::{credentials, userns};
 
 /// What an entry's functions are handed at the top level: nothing, because a
 /// top-level file describes the kernel rather than a process.
@@ -151,6 +152,10 @@ pub(crate) enum Content<T: 'static> {
     IdMap(MapFile),
     /// `/proc/<pid>/fd`: a link per open descriptor.
     Descriptors,
+    /// `/proc/<pid>/fdinfo`: a file per open descriptor, with its position,
+    /// flags, mount and inode (`docs/SECCOMP.md` R4: Chrome's zygote jails
+    /// itself in `/proc/<pid>/fdinfo` of a child that then ends).
+    DescriptorInfo,
     /// `/proc/<pid>/ns`: a link per namespace the process is in: `mnt`,
     /// `user`, `uts`, `ipc` and `cgroup` (`docs/NAMESPACES.md` §2.4).
     Namespaces,
@@ -239,6 +244,7 @@ impl<T> Entry<T> {
             Content::File { .. } | Content::IdMap(_) => FileType::Regular,
             Content::Link(_) => FileType::Symlink,
             Content::Descriptors
+            | Content::DescriptorInfo
             | Content::Namespaces
             | Content::Threads
             | Content::Directory { .. } => FileType::Directory,
@@ -409,11 +415,16 @@ static SYS_KERNEL: [Entry<Kernel>; 8] = [
 ];
 
 /// `/proc/<pid>`.
-pub(crate) static PER_PROCESS: [Entry<Process>; 18] = [
+pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
     Entry {
         name: b"fd",
         permissions: 0o500,
         content: Content::Descriptors,
+    },
+    Entry {
+        name: b"fdinfo",
+        permissions: 0o500,
+        content: Content::DescriptorInfo,
     },
     Entry {
         name: b"task",
@@ -720,6 +731,8 @@ enum Place {
     Entry(u32, usize),
     /// `/proc/<pid>/fd/<fd>`.
     Descriptor(u32, i32),
+    /// `/proc/<pid>/fdinfo/<fd>`.
+    DescriptorInfo(u32, i32),
     /// `/proc/<pid>/ns/<kind>`.
     Namespace(u32, NamespaceKind),
     /// `/proc/<pid>/task/<tid>`.
@@ -796,7 +809,13 @@ impl Place {
             Place::Process(id) => block(id),
             Place::Entry(id, index) => block(id) + ENTRY_INODES + index as u64,
             Place::Descriptor(id, fd) => {
-                block(id) + DESCRIPTOR_INODES + u64::from(fd.unsigned_abs()) % DESCRIPTOR_SPAN
+                block(id) + DESCRIPTOR_INODES + u64::from(fd.unsigned_abs()) % (DESCRIPTOR_SPAN / 2)
+            }
+            Place::DescriptorInfo(id, fd) => {
+                block(id)
+                    + DESCRIPTOR_INODES
+                    + DESCRIPTOR_SPAN / 2
+                    + u64::from(fd.unsigned_abs()) % (DESCRIPTOR_SPAN / 2)
             }
             Place::Namespace(id, kind) => block(id) + NAMESPACE_INODES + kind as u64,
             Place::Thread(_, tid) => block(tid) + THREAD_INODES,
@@ -826,6 +845,7 @@ impl Place {
                     of(entry.kind(), entry.permissions)
                 }),
             Place::Descriptor(..) => of(FileType::Symlink, 0o700),
+            Place::DescriptorInfo(..) => of(FileType::Regular, 0o400),
             Place::Namespace(..) => of(FileType::Symlink, 0o777),
             Place::ThreadEntry(_, _, index) => PER_THREAD
                 .get(index)
@@ -877,8 +897,8 @@ impl Node {
                     let bytes = render::id_map(&process, *file);
                     // Who opened it is judged at each write, beside who
                     // writes (rule U3).
-                    let opener = crate::syscall::userns::acting()
-                        .map(|opener| opener.with_credentials(|held| held.clone()));
+                    let opener =
+                        userns::acting().map(|opener| opener.with_credentials(|held| held.clone()));
                     let file = *file;
                     let writer: Writer = Box::new(move |data| {
                         render::write_id_map(&process, file, opener.as_ref(), data)
@@ -887,6 +907,9 @@ impl Node {
                         .map(|snapshot| Some(snapshot.only_at_start()))
                 }
                 Some(Content::File { render, write }) => {
+                    if is_private(index) {
+                        may_inspect(pid)?;
+                    }
                     let process = alive(pid)?;
                     let bytes = render(&process)?;
                     Snapshot::new(
@@ -901,6 +924,11 @@ impl Node {
                 }
                 _ => Ok(None),
             },
+            Place::DescriptorInfo(pid, fd) => {
+                may_inspect(pid)?;
+                let bytes = render::fdinfo(&*alive(pid)?, fd)?;
+                Snapshot::new(metadata, bytes, None, refusal, splices).map(Some)
+            }
             Place::ThreadEntry(pid, tid, index) => {
                 match PER_THREAD.get(index).map(|entry| &entry.content) {
                     Some(Content::File { render, write }) => {
@@ -976,6 +1004,17 @@ impl Node {
         }
     }
 
+    /// Whether this node is a process's `fdinfo` directory, and whose.
+    fn descriptor_info_of(&self) -> Option<u32> {
+        match self.place {
+            Place::Entry(pid, index) => PER_PROCESS
+                .get(index)
+                .filter(|entry| matches!(entry.content, Content::DescriptorInfo))
+                .map(|_| pid),
+            _ => None,
+        }
+    }
+
     /// Whether this node is a process's descriptor directory, and whose.
     fn descriptors_of(&self) -> Option<u32> {
         match self.place {
@@ -986,6 +1025,31 @@ impl Node {
             _ => None,
         }
     }
+}
+
+/// Whether the running process may look into what `pid` keeps private:
+/// `EACCES` if not, as Linux's `proc_fd_access_allowed` and `proc_pid_get_link`
+/// answer (`docs/NAMESPACES.md` M8). The kernel's own reads, with no process
+/// running, may.
+fn may_inspect(pid: u32) -> Result<()> {
+    let Some(caller) = userns::acting() else {
+        return Ok(());
+    };
+    let target = alive(pid)?;
+    if credentials::may_access(&caller, &target, false) {
+        Ok(())
+    } else {
+        Err(Errno::EACCES)
+    }
+}
+
+/// Whether `index` in a process's directory is one of the private ones that
+/// [`may_inspect`] guards: the links that reach into its tree, and the files
+/// that describe its memory and mounts.
+fn is_private(index: usize) -> bool {
+    PER_PROCESS
+        .get(index)
+        .is_some_and(|entry| matches!(entry.name, b"root" | b"cwd" | b"exe" | b"maps"))
 }
 
 /// The live process with this pid, or `ENOENT`: a directory a program is
@@ -1084,6 +1148,7 @@ impl Inode for Node {
             Place::Process(pid)
             | Place::Entry(pid, _)
             | Place::Descriptor(pid, _)
+            | Place::DescriptorInfo(pid, _)
             | Place::Namespace(pid, _)
             | Place::Thread(pid, _)
             | Place::ThreadEntry(pid, ..) => registry::find(pid).map_or((0, 0), |process| {
@@ -1221,6 +1286,16 @@ impl Inode for Node {
                     .ok_or(Errno::ENOENT)?;
                 Ok(self.at(Place::ThreadEntry(pid, tid, index)))
             }
+            _ if self.descriptor_info_of().is_some() => {
+                let pid = self.descriptor_info_of().ok_or(Errno::ENOTDIR)?;
+                may_inspect(pid)?;
+                let fd = descriptor_number(name).ok_or(Errno::ENOENT)?;
+                let open = alive(pid)?.files().lock().get(fd).is_ok();
+                if !open {
+                    return Err(Errno::ENOENT);
+                }
+                Ok(self.at(Place::DescriptorInfo(pid, fd)))
+            }
             _ if self.namespaces_of().is_some() => {
                 let pid = self.namespaces_of().ok_or(Errno::ENOTDIR)?;
                 let _ = alive(pid)?;
@@ -1243,6 +1318,7 @@ impl Inode for Node {
             }
             _ => {
                 let pid = self.descriptors_of().ok_or(Errno::ENOTDIR)?;
+                may_inspect(pid)?;
                 let fd = descriptor_number(name).ok_or(Errno::ENOENT)?;
                 let open = alive(pid)?.files().lock().get(fd).is_ok();
                 if !open {
@@ -1274,6 +1350,16 @@ impl Inode for Node {
                 let _ = list_table(&PER_THREAD, cursor, ino, emit);
                 Ok(())
             }
+            _ if self.descriptor_info_of().is_some() => {
+                let pid = self.descriptor_info_of().ok_or(Errno::ENOTDIR)?;
+                // A directory held for a process that has ended is empty: a
+                // root made of it (Chrome's zygote) must list as one.
+                if alive(pid).is_err() {
+                    return Ok(());
+                }
+                may_inspect(pid)?;
+                list_descriptors(pid, cursor, true, emit)
+            }
             _ if self.namespaces_of().is_some() => {
                 let pid = self.namespaces_of().ok_or(Errno::ENOTDIR)?;
                 let _ = alive(pid)?;
@@ -1298,7 +1384,11 @@ impl Inode for Node {
             }
             _ => {
                 let pid = self.descriptors_of().ok_or(Errno::ENOTDIR)?;
-                list_descriptors(pid, cursor, emit)
+                if alive(pid).is_err() {
+                    return Ok(());
+                }
+                may_inspect(pid)?;
+                list_descriptors(pid, cursor, false, emit)
             }
         }
     }
@@ -1315,22 +1405,32 @@ impl Inode for Node {
                 _ => Err(Errno::EINVAL),
             },
             Place::Entry(pid, index) => match PER_PROCESS.get(index).map(|entry| &entry.content) {
-                Some(Content::Link(target)) => target(&*alive(pid)?),
+                Some(Content::Link(target)) => {
+                    if is_private(index) {
+                        may_inspect(pid)?;
+                    }
+                    target(&*alive(pid)?)
+                }
                 _ => Err(Errno::EINVAL),
             },
-            Place::Descriptor(pid, fd) => render::descriptor(&*alive(pid)?, fd),
-            Place::Namespace(pid, NamespaceKind::Mount) => render::mount_namespace(&*alive(pid)?),
-            Place::Namespace(pid, NamespaceKind::User) => render::user_namespace(&*alive(pid)?),
-            Place::Namespace(pid, NamespaceKind::Uts) => render::uts_namespace(&*alive(pid)?),
-            Place::Namespace(pid, NamespaceKind::Ipc) => render::ipc_namespace(&*alive(pid)?),
-            Place::Namespace(pid, NamespaceKind::Cgroup) => render::cgroup_namespace(&*alive(pid)?),
-            Place::Namespace(pid, NamespaceKind::Pid) => {
-                render::pid_namespace(&*alive(pid)?, false)
+            Place::Descriptor(pid, fd) => {
+                may_inspect(pid)?;
+                render::descriptor(&*alive(pid)?, fd)
             }
-            Place::Namespace(pid, NamespaceKind::PidForChildren) => {
-                render::pid_namespace(&*alive(pid)?, true)
+            Place::Namespace(pid, kind) => {
+                may_inspect(pid)?;
+                let process = alive(pid)?;
+                match kind {
+                    NamespaceKind::Mount => render::mount_namespace(&process),
+                    NamespaceKind::User => render::user_namespace(&process),
+                    NamespaceKind::Uts => render::uts_namespace(&process),
+                    NamespaceKind::Ipc => render::ipc_namespace(&process),
+                    NamespaceKind::Cgroup => render::cgroup_namespace(&process),
+                    NamespaceKind::Pid => render::pid_namespace(&process, false),
+                    NamespaceKind::PidForChildren => render::pid_namespace(&process, true),
+                    NamespaceKind::Net => render::net_namespace(&process),
+                }
             }
-            Place::Namespace(pid, NamespaceKind::Net) => render::net_namespace(&*alive(pid)?),
             _ => Err(Errno::EINVAL),
         }
     }
@@ -1346,6 +1446,9 @@ impl Inode for Node {
     /// See [`descriptor_location`].
     fn link_location(&self) -> Option<Result<Location>> {
         if let Place::Descriptor(pid, fd) = self.place {
+            if let Err(errno) = may_inspect(pid) {
+                return Some(Err(errno));
+            }
             return descriptor_location(pid, fd);
         }
         // Following `/proc/<pid>/ns/net` opens the namespace as a file.
@@ -1365,6 +1468,9 @@ impl Inode for Node {
         };
         if PER_PROCESS.get(index)?.name != b"exe" {
             return None;
+        }
+        if let Err(errno) = may_inspect(pid) {
+            return Some(Err(errno));
         }
         match alive(pid) {
             Ok(process) => process.exe_location().map(Ok),
@@ -1488,6 +1594,7 @@ fn list_threads(
 fn list_descriptors(
     pid: u32,
     cursor: u64,
+    info: bool,
     emit: &mut dyn FnMut(DirEntry<'_>) -> bool,
 ) -> Result<()> {
     let process = alive(pid)?;
@@ -1502,8 +1609,16 @@ fn list_descriptors(
             continue;
         }
         let accepted = emit(DirEntry {
-            ino: Place::Descriptor(pid, fd).ino(),
-            kind: FileType::Symlink,
+            ino: if info {
+                Place::DescriptorInfo(pid, fd).ino()
+            } else {
+                Place::Descriptor(pid, fd).ino()
+            },
+            kind: if info {
+                FileType::Regular
+            } else {
+                FileType::Symlink
+            },
             name: decimal(at, &mut digits),
             next: FIRST_CURSOR.saturating_add(at).saturating_add(1),
         });
