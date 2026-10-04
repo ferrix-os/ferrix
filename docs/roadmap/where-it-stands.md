@@ -136,13 +136,12 @@ without waiting".
 | `boot-21b` | W-8 boot requirements, part b (root, init, power, random, F-51) | the consultant's diff review, a rebase with carry, then 21c (`devmgr`) |
 | `w8-armv7a` | W-8 file 24, ARMv7-A and `arch/arm_common` (drafts) | write the SysML file against the code as F-48 and F-50 left it |
 | `f46-power-off` | F-46, power-off gates that took a triple fault for a power-off | correct the message, rebase, gate, the consultant's OK |
-| `hyprlock` | hyprlock over `authd` (AUTH P1.5) | rebase and its boots |
 
 **Next**, in the order the customer last gave: test and gate run time
 (the rest of cut 2, then KVM by default on x86-64 where the host has it,
 `docs/TEST-TIME.md` *Next*); Steam, retiring its workarounds, with stage
 13's namespaces and seccomp under them (os-7c); W-8's 21b, 21c and file 24;
-the desktop's hyprlock P1.5 and fuzzel's second-press toggle.
+fuzzel's second-press toggle; the rest of authentication's phase 2 (below).
 
 **Waiting on the customer** (`docs/BACKLOG.md`, *Waiting on the customer*):
 F-43 (W^X for programs, or a narrower claim), the Common Criteria version
@@ -229,11 +228,17 @@ a getty, and powers the machine off, on all three architectures (`cargo xtask
 test-init`). `run` and the desktop boot it, and the compositor is its service.
 
 Stage 15's authentication (`docs/AUTH.md`, approved by the customer on
-2026-09-26) is under way: its kernel fix, P0, is in (a native process runs as
-the one that made it), and so is most of phase 1 -- Argon2id, `authd`,
+2026-09-26) has phase 1 done and most of phase 2. Phase 1: its kernel fix,
+P0 (a native process runs as the one that made it), Argon2id, `authd`,
 `passwd` and `authctl`, gated by `cargo xtask test-auth` on all three
-architectures (2026-09-27). Its last slice, hyprlock over `authd` (P1.5), is
-parked on branch `hyprlock`.
+architectures (2026-09-27), and hyprlock over `authd` (P1.5, 2026-10-03).
+Phase 2, all landed on 2026-10-03: `--everything`'s desktop runs as `ferrix`
+under `sessiond` (P2.4), hyprix unlocks only on `authd`'s grant (P2.5),
+`login` on the console (P2.3), a session that ends with its compositor
+(P2.7), `su` for `wheel` (P2.6), and `/dev/tty` as the caller's own terminal.
+Left: revoking the console when getty starts (being built), K-B and K-C in
+the kernel (P2.1, P2.2), the other desktop images off root, and the
+customer's call on ending a user's processes at logout.
 
 Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
@@ -286,14 +291,13 @@ second-pass effects; Mesa and `zwp_linux_dmabuf`, for clients that draw on
 the GPU themselves, are priced beside it.
 
 The desktop's own clients -- waybar, fuzzel, hyprlock and hypridle, written in
-Rust -- are three quarters done. waybar and fuzzel are on `main` (2026-09-27):
+Rust -- are all on `main`. waybar and fuzzel are on `main` (2026-09-27):
 `cargo xtask run-compositor --everything` boots the customer's own
 `hyprland.conf`, dotfiles, fonts and monitor EDID, waybar draws their bar,
 SUPER+R runs their launcher script into fuzzel, and the clipboard is shared
 with the host's through xtask. hypridle is on `main` too (2026-09-26), its
-`idle` boots passing on x86-64 and AArch64. hyprlock's library is on
-`main`; its program and its lock over `authd` (P1.5) are parked on branch
-`hyprlock`.
+`idle` boots passing on x86-64 and AArch64. hyprlock is on `main` too
+(2026-10-03), its lock over `authd`.
 
 Stage 21 is bare metal with a card of Ferrix's own, and stage 22 is Steam,
 whose 32-bit x86 ABI is under way (`docs/I386.md`): I1 to I4 are on `main`

@@ -14,8 +14,9 @@ or run `git`, `curl` and `rustc`. Those are ordinary Linux binaries running on
 Ferrix's own Rust kernel. Disk, network, graphics and input drivers run as
 separate processes that Ferrix can restart if they crash.
 
-Ferrix is still experimental. Authentication and parts of process isolation
-are unfinished, so it is not ready to be your everyday OS.
+Ferrix is still experimental. Logins, `su` and the lock screen check
+passwords, but parts of authentication and of process isolation are
+unfinished, so it is not ready to be your everyday OS.
 
 [Boot Ferrix](#boot-ferrix) · [See what works](#what-works) ·
 [Read the technical guide](docs/GUIDE.md) · [Visit the website](https://ferrix-os.github.io/)
@@ -99,6 +100,11 @@ this tree at the commits [`components.toml`](components.toml) names.
   programs appear as ordinary windows through yserver, an X server written in
   Rust. The bar, launcher and idle daemon are Rust rewrites of waybar, fuzzel
   and hypridle that read their usual configuration files.
+- **Users and passwords:** The full desktop (`run-compositor --everything`)
+  runs as the user `ferrix`, not root, and its lock screen unlocks only with
+  that user's password. `cargo xtask run --login` boots to a console login
+  prompt, and `su` asks the user's own password. Passwords are checked by
+  `authd`, a service of Ferrix's own that stores them as Argon2id hashes.
 - **Drivers outside the kernel:** Disk, network, graphics, input, sound and
   console drivers run as processes. On x86-64 and AArch64, an IOMMU limits their device
   access. Ferrix can restart them after a crash.

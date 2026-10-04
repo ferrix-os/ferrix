@@ -1449,8 +1449,8 @@ that program's environment. As a global `env =` line it had hidden the
 user's `~/.config` from waybar and hypridle. hyprix reports a program that
 does not exist, or a script whose `#!` interpreter does not, once per
 program rather than on every press of a bind that runs it. Still to do: the
-script's `pkill -x fuzzel` toggle does not close fuzzel yet, and hyprlock's
-lock over `authd` (P1.5) is parked on its branch (`docs/BACKLOG.md`).
+script's `pkill -x fuzzel` toggle does not close fuzzel yet. hyprlock's
+lock over `authd` (P1.5) landed on 2026-10-03.
 
 **Where the exit stands (reviewed 2026-09-21).** The existing exit criterion
 is met: `cargo xtask test-compositor` covers the non-GPU path on x86-64 and

@@ -181,15 +181,37 @@ host-only and were built while stage 13 was.
 service manager they drive, with the directory native services are reached
 through (L1 to L11), gated by `cargo xtask test-init` on all three
 architectures, `test-compositor` and `test-jobs`. The
-stage's exit has been met by `test-jobs` since 2026-09-19.
+stage's exit has been met by `test-jobs` since 2026-09-19. What keeps the
+stage open is the rest of authentication's phase 2 (below), L13, and the
+apps' tail (`docs/APPS.md` §10).
 
-**Next: authentication (`docs/AUTH.md`, approved by the customer on
-2026-09-26, all eleven decisions as recommended).** `authd`, a service
-that checks a person's password with Argon2id, throttles and audits, with
-`passwd`, `authctl` and hyprlock's real backend on it: phase 1, 27 points,
-not started. Phase 2 moves the desktop off root (31, and L10) and phase 3
-adds PAM for ferrousli's programs, TOTP, ssh passwords and privilege
-prompts (about 32). Its P0 was a kernel hole it named:
+**Authentication (`docs/AUTH.md`, approved by the customer on 2026-09-26,
+all eleven decisions as recommended).** `authd` checks a person's password
+with Argon2id, throttles and audits.
+
+*Phase 1, done (27 points).* `authd`, `passwd` and `authctl`, gated by
+`cargo xtask test-auth` on all three architectures (2026-09-27), and
+hyprlock over `authd` (P1.5, 2026-10-03).
+
+*Phase 2, the desktop as a user: done but for four items.* All on
+2026-10-03, each with the certification consultant's OK:
+`--everything`'s desktop runs as `ferrix` under `sessiond`, with its own
+home disk (P2.4); hyprix unlocks only on `authd`'s grant over the seat
+channel, and a new locker takes over a dead one's lock (P2.5); `login` on
+the console, with a first password chosen there (P2.3, `cargo xtask run
+--login`); a session ends with its compositor, at the console's login
+(P2.7); `su` for `wheel` (P2.6); and `/dev/tty` is the caller's own
+terminal, not the console to anyone. Left: revoking the console when getty
+starts, so that a program left by one login cannot read the next one's
+password (being built); K-B and K-C in the kernel (P2.1, P2.2); the
+desktop images other than `--everything`, which still run as root; and the
+customer's decision on ending a user's processes at logout
+(`docs/BACKLOG.md`).
+
+*Phase 3* adds PAM for ferrousli's programs, TOTP, ssh passwords and
+privilege prompts (about 32 points), not started.
+
+Its P0 was a kernel hole it named:
 `process_create` gave the process it made root's credentials instead of
 its creator's. Fixed on 2026-09-26: the child takes a copy of its
 creator's ids, and the `creator` boot line proves it for a uid-1000 service
