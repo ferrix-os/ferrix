@@ -251,6 +251,10 @@ fn install(inside: &Context) -> Result<Installed, &'static str> {
     }
     let unpacked = initramfs::unpack(ns, inside, archive)
         .map_err(|_| "could not take the system: the initramfs did not unpack onto it")?;
+    // AoU-24 on the volume too: pid 1's inputs stay in the archive.
+    if ns.resolve(inside, None, b"/.ferrix", false).is_ok() {
+        return Err("could not take the system: pid 1's inputs were unpacked onto it");
+    }
     // Written last, so a boot that dies part-way through installs again.
     write_stamp(inside, stamp.as_bytes()).map_err(|_| "could not record the system")?;
     Ok(Installed::Fresh(unpacked.bytes))

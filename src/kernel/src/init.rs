@@ -92,9 +92,6 @@ use crate::sync::SpinLock;
 use crate::syscall;
 use crate::syscall::program::ProgramFile;
 
-mod check;
-pub(crate) use check::check;
-
 /// A program opened to be started: its image, and the path it was read from
 /// with its links resolved, which `/proc/self/exe` names.
 #[derive(Debug)]
@@ -381,14 +378,14 @@ pub(crate) struct InputEntry {
 /// empty when the image carries none, as an unset variable left it when
 /// `cargo xtask` compiled them into the kernel.
 #[derive(Clone, Copy, Debug, Default)]
-struct Inputs {
+pub(crate) struct Inputs {
     /// The program, `sh -i` or `sh -c` [`Inputs::script`].
-    program: &'static [u8],
+    pub(crate) program: &'static [u8],
     /// A script for the program's `sh -c`, or nothing for an interactive one.
-    script: &'static [u8],
+    pub(crate) script: &'static [u8],
     /// Commands to run in turn instead of the program; see
     /// [`run_commands`] for the encoding.
-    commands: &'static [u8],
+    pub(crate) commands: &'static [u8],
 }
 
 /// Pid 1's inputs, taken once from the boot initramfs by [`set_inputs`].
@@ -397,9 +394,9 @@ static INPUTS: Once<Inputs> = Once::new();
 /// The directories the inputs are carried under, which are expected and say
 /// nothing, and the three names an input may have.
 const INPUT_DIRECTORIES: [&[u8]; 2] = [b".ferrix", b".ferrix/init"];
-const PROGRAM_INPUT: &[u8] = b".ferrix/init/program";
-const SCRIPT_INPUT: &[u8] = b".ferrix/init/script";
-const COMMANDS_INPUT: &[u8] = b".ferrix/init/commands";
+pub(crate) const PROGRAM_INPUT: &[u8] = b".ferrix/init/program";
+pub(crate) const SCRIPT_INPUT: &[u8] = b".ferrix/init/script";
+pub(crate) const COMMANDS_INPUT: &[u8] = b".ferrix/init/commands";
 
 /// Take pid 1's inputs from `entries`, the boot initramfs's entries beneath
 /// `.ferrix` in the archive's order. Called once, by `crate::fs::init`; a
@@ -428,7 +425,10 @@ pub(crate) fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
 type Slot = (&'static [u8], Option<&'static [u8]>, bool);
 
 /// [`set_inputs`]'s judgement, telling `refuse` of each entry refused and why.
-fn judge(entries: impl Iterator<Item = InputEntry>, refuse: &mut dyn FnMut(&[u8], &str)) -> Inputs {
+pub(crate) fn judge(
+    entries: impl Iterator<Item = InputEntry>,
+    refuse: &mut dyn FnMut(&[u8], &str),
+) -> Inputs {
     // Each input's name, what was found for it, and whether it was refused.
     let mut slots: [Slot; 3] = [
         (PROGRAM_INPUT, None, false),
@@ -495,7 +495,7 @@ fn refuse(name: &[u8], why: &str) {
 }
 
 /// Pid 1's inputs, or none before [`set_inputs`] ran.
-fn inputs() -> Inputs {
+pub(crate) fn inputs() -> Inputs {
     INPUTS.get().copied().unwrap_or_default()
 }
 

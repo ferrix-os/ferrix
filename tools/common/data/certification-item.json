@@ -181,6 +181,7 @@
         "discovery/pci.rs",
         "discovery/pci/**",
         "init.rs",
+        "init_check.rs",
         "main.rs",
         "power.rs",
         "random.rs",

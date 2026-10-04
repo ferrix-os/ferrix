@@ -1,9 +1,9 @@
-//! init's own self-check: pid 1's inputs judged as `set_inputs` says
-//! (`L.init.2`, `L.init.3`; the `inputs` line, FX-1503). A child of `init`
-//! so that it can drive `judge` and read the inputs without either being
-//! visible beyond init.
+//! init's own self-check: pid 1's inputs judged as `init::set_inputs` says
+//! (`L.init.2`, `L.init.3`; the `inputs` line, FX-1503). A file of its own,
+//! beside `init.rs` in the item, because a check in a product file is not a
+//! requirement's verifier.
 
-use super::{
+use crate::init::{
     COMMANDS_INPUT, InputEntry, Inputs, PROGRAM_INPUT, SCRIPT_INPUT, inputs, judge, set_inputs,
 };
 

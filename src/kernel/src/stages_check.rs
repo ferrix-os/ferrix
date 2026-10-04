@@ -547,7 +547,7 @@ pub(super) fn check_init_calls() {
 /// Pid 1's inputs from the initramfs: each refused as `init::set_inputs`
 /// says, and taken once.
 pub(super) fn check_init_inputs() {
-    let report = match init::check() {
+    let report = match init_check::check() {
         Ok(report) => report,
         Err(problem) => fatal!(
             catalog::INIT_INPUTS,

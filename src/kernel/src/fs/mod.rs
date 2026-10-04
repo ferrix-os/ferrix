@@ -500,6 +500,10 @@ pub(crate) enum InitError {
     Tmp(Errno),
     /// A kernel filesystem could not be mounted on the directory named.
     Mount(&'static str, Errno),
+    /// Pid 1's inputs were unpacked into the root, where a program could
+    /// open them, when the unpacker must leave them in the archive
+    /// (SAFETY-MANUAL AoU-24).
+    InputsUnpacked,
 }
 
 impl fmt::Display for InitError {
@@ -510,6 +514,9 @@ impl fmt::Display for InitError {
             InitError::Tmp(errno) => write!(f, "/tmp could not be mounted: errno {}", errno.0),
             InitError::Mount(at, errno) => {
                 write!(f, "{at} could not be mounted: errno {}", errno.0)
+            }
+            InitError::InputsUnpacked => {
+                f.write_str("pid 1's inputs were unpacked into the root: /.ferrix exists")
             }
         }
     }
@@ -548,6 +555,15 @@ pub(crate) fn init(view: &BootView<'_>) -> Result<Report, InitError> {
         }));
         report.initramfs_bytes = Some(len);
         report.unpacked = Some(initramfs::unpack(ns, &ctx, archive).map_err(InitError::Unpack)?);
+        // AoU-24, checked on every boot: the unpacker left pid 1's inputs in
+        // the archive. Fails closed: a root with a copy beside them is no root.
+        if ns.resolve(&ctx, None, b"/.ferrix", false).is_ok() {
+            return Err(InitError::InputsUnpacked);
+        }
+    } else {
+        // No archive, no inputs: said once, so that init's own check finds
+        // them taken and a second `set_inputs` refused.
+        let _ = crate::init::set_inputs(core::iter::empty());
     }
 
     match ns.mkdir(&ctx, None, b"/tmp", 0o1777) {

@@ -25,6 +25,7 @@ mod fallible;
 mod fs;
 mod hooks;
 mod init;
+mod init_check;
 mod interfaces;
 mod iommu;
 mod irq;

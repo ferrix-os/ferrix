@@ -130,7 +130,16 @@ kept in the owner's handover), checked against the timings above:
    kernel crate again, about 70 s, and no gate switches flavours in release.
    A target dir per flavour would turn each flavour's first build into a
    cold one and win back 2 s only when the same worktree used it again.
-   Cut 1 was dropped by the product owner on 2026-09-28.
+   Cut 1 was dropped by the product owner on 2026-09-28. **Closed by
+   another route, 2026-10-04 (stage 20):** a test's init is no longer
+   compiled in at all. Its program, script and commands go in the image's
+   initramfs under `.ferrix/init/` (`init::set_inputs`), so one kernel serves
+   every test and `src/kernel/build.rs` reads no `FERRIX_INIT*`. A gate saves
+   only the 2 s relink measured above; what it was for is stage 20's
+   self-hosted builds, where the plan of the 57-row matrix fell from 66
+   kernel builds to 6 (271 builds to 188) and Ferrix no longer writes some
+   sixty 125 MB kernel ELFs onto the btrfs volume whose pages it keeps in
+   memory.
 2. **Every `--arch all` loop is sequential**: `build`, `test-boot`,
    `test-init`, `test-compositor`, `test-audio` and `coverage`. The host has
    24 threads and a boot uses 4. **Cut:** run the three arches' boots at
