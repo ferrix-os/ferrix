@@ -172,7 +172,7 @@ impl Build {
     pub(crate) fn run(self) -> Result<()> {
         match Mode::from_environment()? {
             Mode::Build => self.make(),
-            Mode::Record(directory) => {
+            Mode::Record(directory) | Mode::Plan(directory) => {
                 self.make()?;
                 record(&directory, &self)
             }
@@ -214,8 +214,31 @@ pub(crate) fn digest_variable(key: &str) -> String {
 pub(crate) fn active() -> bool {
     matches!(
         Mode::from_environment(),
-        Ok(Mode::Record(_) | Mode::Replay(_))
+        Ok(Mode::Record(_) | Mode::Plan(_) | Mode::Replay(_))
     )
+}
+
+/// Whether builds are recorded without booting what they made
+/// (`FERRIX_BUILDS=plan:<DIR>`): a plan written in minutes and with no
+/// machine to boot, as a scheduled CI job makes one. `crate::qemu` refuses
+/// every boot then, and a test stops at its first.
+pub(crate) fn boots_skipped() -> bool {
+    matches!(Mode::from_environment(), Ok(Mode::Plan(_)))
+}
+
+/// An error in place of a boot when [`boots_skipped`], for `crate::qemu` to
+/// return before it starts a machine.
+///
+/// # Errors
+///
+/// When boots are skipped.
+pub(crate) fn refuse_boot(arch: impl std::fmt::Display) -> Result<()> {
+    if boots_skipped() {
+        return Err(Error::new(format!(
+            "{arch}: not booted: FERRIX_BUILDS=plan: records the builds and boots nothing"
+        )));
+    }
+    Ok(())
 }
 
 /// Every file in the directories `build` reads, sorted, with its digest.
@@ -247,6 +270,8 @@ fn text(value: &OsStr) -> String {
 enum Mode {
     Build,
     Record(PathBuf),
+    /// [`Mode::Record`] with every boot refused: see [`boots_skipped`].
+    Plan(PathBuf),
     Replay(PathBuf),
 }
 
@@ -263,11 +288,13 @@ impl Mode {
             Ok(Mode::Build)
         } else if let Some(directory) = value.strip_prefix("record:") {
             Ok(Mode::Record(PathBuf::from(directory)))
+        } else if let Some(directory) = value.strip_prefix("plan:") {
+            Ok(Mode::Plan(PathBuf::from(directory)))
         } else if let Some(directory) = value.strip_prefix("replay:") {
             Ok(Mode::Replay(PathBuf::from(directory)))
         } else {
             Err(Error::new(format!(
-                "{VARIABLE}={value} is neither record:<DIR> nor replay:<DIR>"
+                "{VARIABLE}={value} is none of record:<DIR>, plan:<DIR> and replay:<DIR>"
             )))
         }
     }
@@ -859,6 +886,10 @@ mod tests {
         assert_eq!(
             Mode::parse("replay:/tmp/plan/store").unwrap(),
             Mode::Replay("/tmp/plan/store".into())
+        );
+        assert_eq!(
+            Mode::parse("plan:/tmp/plan").unwrap(),
+            Mode::Plan("/tmp/plan".into())
         );
         assert!(Mode::parse("sideways:/tmp").is_err());
     }

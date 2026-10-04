@@ -83,6 +83,7 @@ pub(crate) fn run(arch: Arch, image: &Path, args: &Args) -> Result<()> {
         None => args,
     };
     let console = console::open()?;
+    crate::builds::refuse_boot(arch)?;
     let (mut command, network) = qemu_command(arch, image, None, args, &console)?;
     if args.gdb {
         let _ = command.args(["-s", "-S"]);
@@ -1359,6 +1360,7 @@ fn watch_hooked(
     at_marker: Option<AtMarker<'_>>,
 ) -> Result<Watched> {
     let symbols = Symbolizer::open(kernel);
+    crate::builds::refuse_boot(arch)?;
     let (mut command, network) = qemu_command(arch, image, Some(kernel), args, &Console::Owned)?;
     // Every DMA fault the machine's IOMMU records, which the run is judged by
     // below; `crate::dma_faults` says why QEMU's own remarks are not enough.

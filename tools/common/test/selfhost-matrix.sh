@@ -7,6 +7,12 @@
 #     tools/common/test/selfhost-matrix.sh replay DIR    # the matrix again, every build
 #                                              # answered from DIR/store
 #
+# `plan DIR` writes the same plan as `record DIR` without booting anything
+# (FERRIX_BUILDS=plan:DIR): minutes, no QEMU, and none of the volumes the
+# boots need, which is what lets a scheduled CI job make one. Every row then
+# ends at its first boot, so a row for `--arch all` runs once per
+# architecture, and a row's exit says nothing.
+#
 # Each row is a test command of the gate matrix, run with
 # FERRIX_BUILDS=record:DIR or replay:DIR/store (tools/common/xtask/src/builds.rs). Both
 # runs use a home of their own, DIR/home, so that the programs the script
@@ -22,8 +28,9 @@ mode=${1:?record or replay}
 mkdir -p "${2:?the plan directory}" && dir=$(cd "$2" && pwd) || exit 2
 case $mode in
     record) builds=record:$dir ;;
+    plan) builds=plan:$dir ;;
     replay) builds=replay:$dir/store ;;
-    *) echo "selfhost-matrix: $mode is neither record nor replay" >&2; exit 2 ;;
+    *) echo "selfhost-matrix: $mode is none of record, plan and replay" >&2; exit 2 ;;
 esac
 cd "$(dirname "$0")/../../.." || exit 2
 
@@ -31,7 +38,7 @@ cd "$(dirname "$0")/../../.." || exit 2
 # plan and its store belong to the tree they were recorded on: its hash, so
 # that squashing the commits above it changes nothing, and what is modified.
 tree="$(git rev-parse 'HEAD^{tree}') $(git status --porcelain --untracked-files=no | sha256sum | cut -c1-16)"
-if [ "$mode" = record ]; then
+if [ "$mode" = record ] || [ "$mode" = plan ]; then
     echo "$tree" > "$dir/tree"
 elif [ "$(cat "$dir/tree" 2>/dev/null)" != "$tree" ]; then
     echo "selfhost-matrix: $dir was recorded on $(cat "$dir/tree" 2>/dev/null), this is $tree" >&2
@@ -71,6 +78,18 @@ echo "== $mode $(git log --oneline -1) $(date +%F' '%T)" >> "$log/summary"
 run() {
     local name=$1
     shift
+    if [ "$mode" = plan ] && [[ " $* " == *" --arch all "* ]]; then
+        local arch argument
+        for arch in x86_64 aarch64 armv7a; do
+            local each=()
+            for argument in "$@"; do
+                [ "$argument" = all ] && [ "${each[-1]:-}" = --arch ] && argument=$arch
+                each+=("$argument")
+            done
+            run "$name-$arch" "${each[@]}"
+        done
+        return
+    fi
     echo "== $name: start $(date +%T)" >> "$log/summary"
     "$@" > "$log/$name.log" 2>&1 < /dev/null
     echo "== $name: exit $? $(date +%T)" >> "$log/summary"
