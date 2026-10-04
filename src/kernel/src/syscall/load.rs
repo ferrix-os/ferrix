@@ -662,6 +662,12 @@ fn map_runs(space: &AddressSpace, file: &ProgramFile, runs: &[FileRun]) -> Resul
 /// Zero each writable segment's `.bss` where it shares a page mapped from the
 /// file with the segment's last file bytes: the mapping is private, so the
 /// write copies that page, and the file never sees it. Linux's `padzero`.
+///
+/// The page is filled from the file alone first
+/// ([`AddressSpace::fill_file_page_alone`]): the write's fault would read
+/// ahead a run of the pages after it, which for a data segment followed by a
+/// large one are pages of the program nothing touches, and loading must
+/// read only what it uses (`fs/exec_check.rs`, `LOAD_MOST`; FX-0871).
 fn zero_tails(space: &AddressSpace, segments: &[Moved], runs: &[FileRun]) -> Result<(), LoadError> {
     const ZEROS: [u8; 4096] = [0; 4096];
     for segment in segments.iter().filter(|segment| segment.flags & PF_W != 0) {
@@ -675,6 +681,7 @@ fn zero_tails(space: &AddressSpace, segments: &[Moved], runs: &[FileRun]) -> Res
                 let zeros = ZEROS
                     .get(..len)
                     .ok_or(LoadError::Malformed(ElfError::SegmentOutOfBounds))?;
+                space.fill_file_page_alone(from)?;
                 uaccess::copy_to_user(space, from, zeros)?;
             }
         }
