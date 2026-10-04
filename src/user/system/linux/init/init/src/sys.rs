@@ -504,6 +504,49 @@ pub(crate) fn change_mode(path: &CStr, mode: libc::mode_t) -> io::Result<()> {
     check(unsafe { libc::chmod(path.as_ptr(), mode) }).map(drop)
 }
 
+/// `struct ifreq`'s size on every architecture init is built for: the
+/// interface's name in 16 bytes, then a 24-byte union whose first two bytes
+/// are `ifr_flags`.
+const IFREQ: usize = 40;
+
+/// Bring the loopback interface of the caller's network namespace up, as
+/// `ip link set lo up` does: read its flags, add `IFF_UP`, write them back
+/// through a datagram socket made and closed here. Allocates nothing.
+pub(crate) fn loopback_up() -> io::Result<()> {
+    // SAFETY: no pointers.
+    let fd =
+        owned(unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) })?;
+    let mut request = [0_u8; IFREQ];
+    for (slot, byte) in request.iter_mut().zip(b"lo") {
+        *slot = *byte;
+    }
+    // SAFETY: `request` is a writable `struct ifreq` for the call's length.
+    let _ = check(unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            libc::SIOCGIFFLAGS as _,
+            request.as_mut_ptr(),
+        )
+    })?;
+    let flags = match request.get(16..18) {
+        Some(&[low, high]) => u16::from_ne_bytes([low, high]),
+        _ => 0,
+    };
+    let up = flags | u16::try_from(libc::IFF_UP).unwrap_or(1);
+    for (slot, byte) in request.iter_mut().skip(16).zip(up.to_ne_bytes()) {
+        *slot = byte;
+    }
+    // SAFETY: as above; the kernel only reads it.
+    check(unsafe {
+        libc::ioctl(
+            fd.as_raw_fd(),
+            libc::SIOCSIFFLAGS as _,
+            request.as_mut_ptr(),
+        )
+    })
+    .map(drop)
+}
+
 /// `prctl(PR_SET_NO_NEW_PRIVS, 1)`: no `execve` from here on gains a
 /// privilege, for this process and everything it starts.
 pub(crate) fn no_new_privileges() -> io::Result<()> {
