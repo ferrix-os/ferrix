@@ -16,8 +16,9 @@
 //! file's mtime cannot be trusted to say it changed: cargo reruns this script
 //! only for a file newer than its last run, and a kernel put back at the same
 //! path with an older mtime would leave the old one embedded, to be booted on
-//! the phone without anyone noticing. The kernel's own `build.rs` does the
-//! same for its init.
+//! the phone without anyone noticing. The variables are a rebuild key and
+//! nothing more: the loader checks no digest at boot (VULNERABILITY-ANALYSIS
+//! V-12).
 
 #![allow(
     clippy::print_stdout,

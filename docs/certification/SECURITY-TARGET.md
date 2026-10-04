@@ -137,7 +137,7 @@ driver answering the TOE's reads with bytes of its choosing.
 | Id | Assumption |
 |---|---|
 | A.PHYSICAL | The platform is physically protected. No defence is claimed against an attacker with bus access, cold-boot or fault injection. |
-| A.FIRMWARE | UEFI, TF-A and the loader behave as specified and deliver an unmodified TOE image. The TOE performs no secure or measured boot (§9.2). |
+| A.FIRMWARE | UEFI, TF-A and the loader behave as specified and deliver an unmodified TOE image: the kernel and its initramfs, which carries pid 1's program (VULNERABILITY-ANALYSIS V-12), and on the Pixel 7 ABL and Ferrix's own loader, which carries both. The TOE performs no secure or measured boot (§9.2), and no Android Verified Boot claim is made. |
 | A.ADMIN | Whoever composes the system image and selects which drivers run is trusted to do so competently. |
 | A.HARDWARE | The MMU, IOMMU and interrupt controller behave as their specifications state. |
 | A.STORAGE | The storage device under the TOE's `WriteDevice` keeps its flush and FUA promises: every write that returned before a flush is durable when the flush returns ([SAFETY-MANUAL.md](SAFETY-MANUAL.md) AoU-16). |

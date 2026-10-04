@@ -56,6 +56,15 @@ the gate does not flag it. Its ratchet baseline,
 `tools/common/data/fallible-alloc-baseline.json`, records `process.rs`'s 14 and nothing
 else: a count may fall and not rise, and a new unmarked site fails the build.
 
+**Pid 1's inputs allocate nothing (2026-10-04).** The program init starts,
+its `sh -c` script and the list of commands come from the boot initramfs
+under `.ferrix/init/` (`init::set_inputs`, ITEM.md §2). They are not copied:
+each is a `&'static` slice of the archive `fs::init` keeps for the whole boot
+(`fs::ARCHIVE`), and `init.rs` keeps three such slices in a `Once`. Judging the
+entries is a three-slot array on the stack and a pass over an iterator, so
+an archive with any number of entries under `.ferrix/` costs time in
+proportion to them and no memory; each refusal is one console line.
+
 ### 1.2 How failure is reported
 
 The obvious fix is unavailable. `#[alloc_error_handler]` is an unstable

@@ -157,6 +157,17 @@ item defines and `main.rs` composes the two (`syscall::Personality`). `main.rs` 
 module, and its `register_load` is the one place the load is told to
 register, in bring-up order, with a boot check that it did.
 
+Pid 1's inputs cross the same way (2026-10-04). The program init starts
+when nothing is named, the script for its `sh -c` and the list of commands
+were compiled into the kernel until then; an image carries them in its
+initramfs under `.ferrix/init/` instead, so that one kernel serves every
+test. The load reads the archive -- `fs::init`, over `ferrix-vfs`'s
+`initramfs::init_entries`, which also keeps `ferrix-vfs`'s unpacker from
+creating any of it in either root -- and hands each entry to
+`init::set_inputs`, an interface `init.rs` defines and accepts once. `init.rs`
+judges the entries itself (its refusals are `L.init.3`) and names no
+filesystem or archive crate.
+
 **`main.rs` is in the item, and it is the composition root.** The manifest
 puts it in the `item` ring as bring-up, and nothing about that is changed
 here. But it is also where the load is put together with the item. Since
