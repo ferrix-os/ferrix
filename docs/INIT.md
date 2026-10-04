@@ -336,10 +336,10 @@ WantedBy=multi-user.target
 
 The other sandboxing keys systemd has warn by name, and init runs the
 service without them. It does not refuse the service, because a unit that
-loads on systemd should load here. The two of L13 whose kernel half has not
-landed, `PrivateNetwork=` and `SystemCallFilter=`, are different: they are
-read, and a unit that asks for one is refused at its start, with the reason,
-rather than run without what it asked for (§4.5).
+loads on systemd should load here. The one of L13 whose kernel half has not
+landed, `SystemCallFilter=`, is different: it is read, and a unit that asks
+for it is refused at its start, with the reason, rather than run without
+what it asked for (§4.5).
 
 `[Install]` takes `WantedBy=`, `RequiredBy=` and `Alias=`. `svc enable` makes
 the links in `/etc/ferrix/units/<target>.wants/` that systemd makes.
@@ -363,7 +363,7 @@ service runs without them (§4.4).
 | `NoNewPrivileges=` | A boolean. No `execve` of the service or anything it starts gains a privilege, through set-uid or set-gid bits or file capabilities (`PR_SET_NO_NEW_PRIVS`). | The same `prctl`, the last step before `execve`. The kernel drops a set-id program's bits under it (`syscall/exec.rs`). Ferrix has no file capabilities, so set-id bits are all it covers. systemd's extra of mounting everything `nosuid` in a new mount namespace is not done; the flag makes it unneeded. |
 | `PrivateTmp=` | A boolean or `disconnected`. `yes`: a new mount namespace whose `/tmp` and `/var/tmp` are directories of the host's own `/tmp` and `/var/tmp`, made per unit and removed when it stops, and shared with units that name it in `JoinsNamespaceOf=`. `disconnected` (since 256): a new tmpfs on each. | `yes` and `disconnected` alike are a new tmpfs on `/tmp` and `/var/tmp`, mode 1777, `nosuid,nodev`, made in each process's own namespace. Nothing is left on the host to remove; what the service wrote goes with its namespace. **Differs:** each command of the unit gets its own, so what `ExecStartPre=` writes to `/tmp` is not seen by `ExecStart=`, and there is no `JoinsNamespaceOf=`. `/var` and `/var/tmp` are made if missing. |
 | `ProtectSystem=` | A boolean, `full` or `strict`. `yes`: `/usr`, `/boot` and `/efi` read-only. `full`: and `/etc`. `strict`: the whole hierarchy but `/dev`, `/proc` and `/sys`; with `PrivateTmp=` the private `/tmp` and `/var/tmp` stay writable. `ReadWritePaths=` opens places again. | Each place is remounted `MS_REMOUNT\|MS_BIND\|MS_RDONLY` in the service's own mount namespace, keeping the mount's `nosuid`, `nodev`, `noexec` and atime flags as `mountinfo` gives them, since a bind remount sets exactly the flags it is given. A place that is no mount's root is bound onto itself first, with `MS_REC`. Every mount beneath it, from `/proc/self/mountinfo` read in the parent, is remounted the same way, so `/data` and `/run` under `/` are read-only under `strict`. **Differs:** `yes` adds `/bin`, `/sbin`, `/lib` and `/lib64` when they are directories, since Ferrix's images keep them at the top where a merged `/usr` would have them under `/usr`; a link among them is left, as what it names is covered where it is. `ReadWritePaths=` is not built. |
-| `PrivateNetwork=` | A boolean. A new network namespace with only `lo` in it, up; implies a private mount namespace, and `/sys` is remounted for the new namespace. | **Refuses to start the unit** until network namespaces land (branch `stage13-netns`), with `PrivateNetwork= needs network namespaces, which this kernel does not have yet; refusing to start the unit without it`. A sandboxing key that the unit asked for is never dropped in silence. |
+| `PrivateNetwork=` | A boolean. A new network namespace with only `lo` in it, up; implies a private mount namespace, and `/sys` is remounted for the new namespace. | Since L13b: `unshare(CLONE_NEWNET)` in the child, then `lo` up (`SIOCGIFFLAGS`, `IFF_UP`, `SIOCSIFFLAGS`), which gives it 127.0.0.1 and `::1`; a mount namespace is implied, as systemd implies it. **Differs:** `/sys` is not remounted, since Ferrix's sysfs shows no interfaces per namespace; `JoinsNamespaceOf=` and the key on a socket unit are not built. Abstract `AF_UNIX` names are per network namespace here as on Linux, so `vport`'s and the like are out of reach. |
 | `SystemCallFilter=` | A list of system call names and `@group`s. Without `~` it is an allow-list: only those (and `@default`, added first) run. With `~` a deny-list. Later assignments add to the set when they agree with the first and take from it otherwise; an empty one resets. A denied call kills the process with `SIGSYS`, or returns `SystemCallErrorNumber=`'s errno, or a deny-list word's own `:errno`. A `User=` service gets `NoNewPrivileges=` implied, since it has no `CAP_SYS_ADMIN` to install the filter without it. | Parsed with the merge kept as an ordered list of words, each marked add or take, since expanding a group needs its per-ABI members. Unknown groups and malformed names or actions warn. **Refuses to start the unit** until seccomp filters land (S3, branch `stage13-s3-rebase`), with `SystemCallFilter= needs seccomp filters, ...`. |
 
 **The child's order.** Everything that decides or allocates is done in the
@@ -396,17 +396,15 @@ everything init's own steps call. A `Type=native` service with any of the
 keys is refused, since none applies to a native process yet: it is not
 started by `execve` and has no Linux mount namespace of its own to change.
 
-**`PrivateNetwork=`, once network namespaces land.** Step 1 is
+**`PrivateNetwork=`, as built (L13b).** Step 1 is
 `unshare(CLONE_NEWNET)` in the child, as root, then a `SIOCSIFFLAGS` with
 `IFF_UP` on `lo` through a datagram socket made and closed there (a stack
 `ifreq`, so nothing is allocated), which gives the namespace 127.0.0.1 and
 `::1` (`docs/NETNS.md` §2.2). It implies a mount namespace, as systemd's
 does; `/sys` is not remounted, since Ferrix's sysfs shows no network
 devices per namespace. A socket unit's `PrivateNetwork=` and
-`JoinsNamespaceOf=` are not in this design. What changes: `plan` stops
-refusing, the plan gains a flag, and `enter` gains step 1. The gate's
-refusal check becomes a check, from inside the unit, that `lo` is up and
-`10.0.2.2` cannot be reached.
+`JoinsNamespaceOf=` are not in this design. `plan` sets a flag and `enter`
+does step 1 (`sys::loopback_up`).
 
 **`SystemCallFilter=`, once S3 lands.** In the parent, per architecture the
 kernel serves to the service (x86-64's native and its i386 entry, AArch64,
@@ -476,8 +474,18 @@ copy of zinc. What each check proves:
   service's namespace and not in the machine's. `/` itself is remounted the
   same way first; the check reaches it through `/run`, a mount of its own,
   because a uid-1000 write to `/` is refused by its mode anyway.
-* **The two keys not yet built.** `netns.service` and `filtered.service`
-  must be refused by init with their reasons and must never print.
+* **`PrivateNetwork=`.** `netns.service` (uid 1000, `PrivateNetwork=yes`)
+  and `netopen.service` (the same script without it) read
+  `/proc/net/route` and `/proc/net/dev`, which show the reader's own
+  namespace, and send a line to `echo.socket` on the machine's
+  127.0.0.1:7777. Inside, `lo` must have its route (it was brought up),
+  must be the only interface, and `echo.socket` must not answer: the
+  namespace is new, not the machine's. Outside, `echo.socket` must answer,
+  which shows the check can see the difference. (The test machine has no
+  interface but `lo`, so the interface list alone would not tell them
+  apart; the connection does.)
+* **The key not yet built.** `filtered.service` must be refused by init
+  with its reason and must never print.
 
 The host tests in `src/lib/init/svc/src/tests/sandbox.rs` hold the parsing
 and the `+` prefix, those in `init/src/sandbox.rs` the mount plan (which
@@ -1055,7 +1063,7 @@ cgroup half is what §0 asks for first.
 | L10 | Move the images over: `cargo xtask run` and `run-compositor` boot init with `multi-user.target` / `graphical.target`; hyprix stops being pid 1 and makes a scope per client. **Done 2026-09-26** (§16) | L5, L6 | `test-compositor` under init | 6 |
 | L11 | `devmgr` shares the restart policy. **Done 2026-09-26** by ferrix-55b: the policy is its own no-alloc crate, `src/lib/init/restart`, with systemd's fixed-window start limit, and devmgr reads each death's status through K6 | L2 | `test-restart` | 2 |
 | L12 | The kernel starts init alone and init starts `devmgr` (§7.3). **Done 2026-09-27**, re-sized from 8 to 12 for the starter, the re-root and the certification record | L8 | `test-init --arch all` with a root disk, the whole image row | 12 |
-| L13 | The sandboxing keys (§4.5), re-sized from 8 to 10 and split by the kernel half each needs. **L13a built 2026-10-04** (§16): all five parsed, `NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=` carried out, the other two refusing the unit. L13b: `PrivateNetwork=`. L13c: `SystemCallFilter=`, with `SystemCallArchitectures=` and `SystemCallErrorNumber=` | L4; L13a mount and user namespaces (N1 to N3) and `prctl`; L13b network namespaces; L13c S3 | `test-init`'s sandboxing stage | 5 + 1 + 4 |
+| L13 | The sandboxing keys (§4.5), re-sized from 8 to 10 and split by the kernel half each needs. **L13a built 2026-10-04** (§16), **L13b built the same day**: all five parsed, `NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=` carried out, the other two refusing the unit. L13b: `PrivateNetwork=`. L13c: `SystemCallFilter=`, with `SystemCallArchitectures=` and `SystemCallErrorNumber=` | L4; L13a mount and user namespaces (N1 to N3) and `prctl`; L13b network namespaces; L13c S3 | `test-init`'s sandboxing stage | 5 + 1 + 4 |
 
 The kernel items of §11 are counted inside the landings that carry them.
 L1 to L10 add up to 67 points, and L11 to L13 to 24 more (L12 re-sized from 8 to 12, L13 from 8 to 10). L1 to L4 are what
@@ -1138,7 +1146,8 @@ the system people will actually use.
 | L11 | done, 2026-09-26, by ferrix-55b with T0 | "Give the restart policy a crate of its own that allocates nothing"; "Restart drivers by the service manager's policy, and report how they died" |
 | L12 | done, 2026-09-27, as built in §7.3 | "Let pid 1 start devmgr, through a starter the kernel gives it" |
 | L13a | built 2026-10-04 on branch `l13-init`, gating (below) | |
-| L13b, L13c | wait for network namespaces and seccomp's S3 | |
+| L13b | built 2026-10-04 on branch `l13b`, over the batch with network namespaces | |
+| L13c | waits for seccomp's S3 | |
 
 All of L1 to L12's 81 points are spent. L11 put `devmgr` on the restart
 policy, which moved into `src/lib/init/restart` because `devmgr` has no
@@ -1794,8 +1803,26 @@ Estimate against spend: L13a was estimated at 5 of L13's re-sized 10 points
 and took about 5, with two gate rows run twice for the marker fix, four
 controls booted on the host, and one x86-64 boot before the rows.
 
-**What the next session does first.** Nothing of L1 to L12 is left. L13b
-waits for network namespaces (branch `stage13-netns`) and L13c for
-seccomp's S3 (branch `stage13-s3-rebase`); §4.5 says what each changes. `docs/AUTH.md`'s P0 to P0c are done: a native
+**L13b, as built (1 point, 2026-10-04).** On branch `l13b`, over
+`batch/20261004T133714Z` (main with console revoke and network namespaces),
+L13a's seven commits cherry-picked onto it with the generated model pages
+regenerated. `PrivateNetwork=` stops refusing: the child's first step is
+`unshare(CLONE_NEWNET)` and `lo` up (§4.5). One more host test of the plan,
+one of the gate's judge. `test-init --arch x86_64` passed on the host with
+the new check; its two negative controls, booted once each on x86-64 (logs
+`~/.local/share/ferrix/logs/l13b-ctl-*.out`):
+
+* no `unshare(CLONE_NEWNET)`: "netns.service, with PrivateNetwork=yes,
+  reached the machine's echo.socket on 127.0.0.1:7777".
+* `lo` not brought up: "netns.service's lo is not up in its network
+  namespace". Its first boot also failed console revoke's stage ("the
+  console was not revoked: a reader from the last session still reads it
+  after getty restarted"), which this change does not reach; the log is
+  kept as `l13b-ctl-loup-1-revoke-flake.out`. Booted again
+  (`l13b-r2-ctl-loup.out`) it failed on its own line alone.
+
+**What the next session does first.** Nothing of L1 to L12 is left. L13c
+waits for seccomp's S3 (branch `stage13-s3-on-netns`); §4.5 says what it
+changes. `docs/AUTH.md`'s P0 to P0c are done: a native
 process runs as its maker, a native service as its `User=`, and a
 delegated cgroup's limits stay its delegator's.
