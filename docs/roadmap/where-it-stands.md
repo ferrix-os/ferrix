@@ -232,13 +232,12 @@ btrfs and boots the image to the end of its self-checks
 The whole matrix built by Ferrix is not done: on 2026-10-04 its 57 rows were
 recorded (271 builds, 188 once a test's init went into the initramfs and one
 kernel served every test), and that change, with the record-without-booting
-mode a weekly CI job needs, waits on branch `selfhost-matrix` (e8b57ed4f) for
-its negative controls and a batch.
-CI's self-hosting job has been
-red since the components split (2263225e1, 2026-10-03), because the guest
-tried to clone the component repositories with no network. The fix is
-branch `selfhost-components` (1fcbe409e), which passes `test-selfhost
---accel kvm` and is owed one full batch run.
+mode a weekly CI job needs, landed on `main` the same day (branch
+`selfhost-matrix`, ending at 77783565a). CI's self-hosting job was red
+from the components split (2263225e1, 2026-10-03), because the guest
+tried to clone the component repositories with no network; the volume now
+carries the components and the guest clones none (`selfhost-components`,
+cb872a732), and CI's next run on `main` is what shows it green.
 
 Dynamic linking is done: Debian's glibc busybox runs on its own `ld-linux`,
 and on ferrousli's loader and `libc.so.6` in glibc's place, on all three
