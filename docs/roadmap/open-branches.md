@@ -57,7 +57,7 @@ In this order:
 Gate pool notes, for whoever runs it:
 
 - It has five slots since 2026-10-04 (the customer); with three, the CPU sat
-  70-80% idle while runs queued (`AGENTS.md`, *Busy slots on an idle
+  70-80% idle while runs queued (the `product-owner` skill, *Busy slots on an idle
   processor*).
 - Something on the host ended QEMUs 7-8 s into a boot three times on
   2026-10-04 (ferrix-da twice, the batch once), with no OOM in the kernel log
