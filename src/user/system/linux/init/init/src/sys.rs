@@ -566,6 +566,33 @@ pub(crate) fn loopback_up() -> io::Result<()> {
     .map(drop)
 }
 
+/// `SECCOMP_SET_MODE_FILTER` (`linux/seccomp.h`).
+const SECCOMP_SET_MODE_FILTER: libc::c_uint = 1;
+
+/// `seccomp(SECCOMP_SET_MODE_FILTER, 0, &prog)`: install `filter` for the
+/// caller and everything it starts. Allocates nothing.
+pub(crate) fn install_filter(filter: &[libc::sock_filter]) -> io::Result<()> {
+    let program = libc::sock_fprog {
+        len: u16::try_from(filter.len()).map_err(|_| io::Error::from_raw_os_error(libc::E2BIG))?,
+        filter: filter.as_ptr().cast_mut(),
+    };
+    // SAFETY: `program` names `filter`, which outlives the call; the kernel
+    // only reads both.
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_seccomp,
+            SECCOMP_SET_MODE_FILTER,
+            0_u32,
+            ptr::from_ref(&program),
+        )
+    };
+    if ret < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// `prctl(PR_SET_NO_NEW_PRIVS, 1)`: no `execve` from here on gains a
 /// privilege, for this process and everything it starts.
 pub(crate) fn no_new_privileges() -> io::Result<()> {
