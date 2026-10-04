@@ -99,6 +99,14 @@ In this order:
    *Decisions* entry in `docs/BACKLOG.md` for the customer's rule that each
    session briefs its own certification consultant (2026-10-04), and
    AGENTS.md's consultant section, which still describes one standing seat.
+5. **CI's `Test (windows-latest)` is red on `main`** since at least
+   67efb9fb1: `gateway::tests::a_lost_segment_is_sent_again_alone` fails on
+   Windows only, with different numbers each run (tests.rs:1096, run
+   37229234877, and 1105). Timing-dependent; 900c2e8c6 did not cover it.
+   Next: reproduce on the Windows PC (50+ runs, also under load), find
+   whether the gateway or the test is at fault, fix the gateway if it is
+   (an xtask change: the image row on nazuna). Owner: open (the gateway's);
+   the BACKLOG's *Red on `main`* has the row. Nobody works on it tonight.
 
 Leftovers on nazuna, to delete by exact name: `~/target-os7c-land-n6`,
 `~/Documents/projects/os/ferrix/target-os7c-l13-init`,
