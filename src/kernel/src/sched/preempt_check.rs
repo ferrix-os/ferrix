@@ -101,35 +101,51 @@ fn wait_finished(count: u64, what: &'static str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Wait for the moving check's `count` tasks, moving one of them that is
-/// waiting its turn to another processor every millisecond meanwhile.
+/// Wait for the moving check's `count` tasks; until one of them has been
+/// seen to move, stay on this processor rather than sleep, and move one
+/// that waits its turn to another processor every millisecond.
 ///
-/// **The moves are made, not hoped for.** Left to itself the scheduler
+/// **The first move is made, not hoped for.** Left to itself the scheduler
 /// moves a task only when an idle processor steals one that waits, and
-/// these tasks sleep far more than they run: eight of them are less than
-/// one processor's work. A boot under KVM on a loaded host (main 77783565a,
+/// these tasks sleep far more than they run: all eight are less than one
+/// processor's work. A boot under KVM on a loaded host (main 77783565a,
 /// `batch-20261004T194624Z-b0-1`, 2026-10-04) put all eight on the
-/// checker's processor: the processors they were placed on had not woken
-/// from their kicks when the checker went to sleep, its processor stole
-/// each one before it first ran, the three it had left halted with nothing
-/// to wake them, and the tasks finished where they started, with no move
-/// to see. Starving two virtual processors of host time does the same 2
-/// rounds in 400. So the checker takes a waiting task off one processor's
-/// queue and puts it on the next one's, through the scheduler's own
+/// checker's processor: the processors they were placed on had not yet
+/// woken from their kicks when the checker went to sleep, its processor
+/// went idle and stole each one before it first ran, the three it robbed
+/// halted again with nothing to wake them, and the tasks finished where
+/// they had started, with no move to see. Starving two virtual processors
+/// of host time does the same 2 rounds in 400.
+///
+/// So the checker takes a waiting task off one processor's queue and puts
+/// it on the next one's, through the scheduler's own
 /// [`super::steal_from`] -- the move a stealing processor makes, of a task
-/// the timer may have preempted -- and has the receiver decide. The moves
-/// the scheduler makes besides are counted as before.
+/// the timer may have preempted -- and has the receiver decide. It spins
+/// meanwhile, because a sleeping checker leaves its processor idle, and an
+/// idle processor steals the moved task back before the receiver wakes:
+/// moved that way and slept on, the 2 rounds in 400 stayed 1. The moves
+/// the scheduler makes are counted as before; the checker only stops
+/// spinning once a task has seen itself on another processor.
 fn wait_moving(count: u64, online: usize) -> Result<(), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let mut from = 0;
     while FINISHED.load(Ordering::Acquire) < count {
-        if crate::timer::now_nanos() >= deadline {
+        let now = crate::timer::now_nanos();
+        if now >= deadline {
             return Err("a task of the moving lock check never finished");
         }
-        if online >= 2 {
-            move_one(online, &mut from);
+        if online < 2 || MOVES.load(Ordering::Acquire) > 0 {
+            super::sleep_for(1_000_000);
+            continue;
         }
-        super::sleep_for(1_000_000);
+        move_one(online, &mut from);
+        let next = now.saturating_add(1_000_000);
+        while MOVES.load(Ordering::Acquire) == 0
+            && FINISHED.load(Ordering::Acquire) < count
+            && crate::timer::now_nanos() < next
+        {
+            core::hint::spin_loop();
+        }
     }
     Ok(())
 }
