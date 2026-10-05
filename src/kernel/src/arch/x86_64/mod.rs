@@ -146,6 +146,38 @@ pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
     trap::check::run()
 }
 
+/// Stage 9: what the switch gives a program back, read by programs in ring 3
+/// -- the vector-state contract of the native calls that block, and the `FS`
+/// base kept in the task (`docs/OPAQUE-KERNEL.md` §9.8, 3a and 3b). See
+/// `switch::check`.
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    let report = switch::check::run()?;
+    if report.xsave {
+        crate::console::println!(
+            "  vectors  {} wakes from a blocking native call reset the vector registers with \
+             their own MXCSR and control word; {} Linux sleeps, preemptions and calls after one \
+             kept them",
+            report.reset,
+            report.kept
+        );
+    } else {
+        crate::console::println!(
+            "  vectors  saved with FXSAVE: every switch keeps the vector registers whole, and \
+             the reset's cases are not run"
+        );
+    }
+    crate::console::println!(
+        "  fsbase   {} switches between two FS bases, each its own; a base cleared by a null \
+         selector came back as recorded, and leaked to no program",
+        report.traded
+    );
+    Ok(())
+}
+
 /// Install the descriptor tables and the trap handlers.
 ///
 /// Until this runs the kernel is executing on firmware's tables: a fault would
