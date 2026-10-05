@@ -170,17 +170,12 @@ certified item.
 §4.5; b909a18e7, 7312a449d, e9bc4ab15, 90dbef5cc), gated by `test-init`'s
 sandboxing stage, which now looks at the namespace from inside.
 
-**Still to do for the init: L13c (2026-10-05, built, on `po6/l13c`).**
+**Built for the init (2026-10-07, branch `po10-l13c/l13c` on `main`): L13c**,
 `SystemCallFilter=` with `SystemCallErrorNumber=` and
-`SystemCallArchitectures=` is on `po6/l13c` (aed1c3fa0, on `main`'s
-3349682db): the seccomp filter is installed as the child's last step, and
-`test-init` has filter checks for the three keys. Batch 20261005T184633Z, with
-`land-n6`, failed it on one gate, `test-vfs --arch x86_64 --init ferrousli`:
-the cgroup applet's `rmdir /tmp/cq/q` answered "Resource busy" right after a
-fork refused within `pids.max`. `main` alone and `main` with `land-n6` both
-passed it; whether it is a race or an L13c fault is not yet known, and the
-first step is to rerun that gate on the branch alone. Until it lands, a unit
-asking for the filter is refused with the reason.
+`SystemCallArchitectures=`, compiled by init to a seccomp filter per ABI
+over S3 and installed as the child's last step (`docs/INIT.md` §4.5), gated
+by `test-init`'s sandboxing stage on all three architectures, with its
+negative controls fired. With it every key of L13 is carried out.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with
