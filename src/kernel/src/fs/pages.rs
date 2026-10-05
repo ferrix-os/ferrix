@@ -260,7 +260,7 @@ impl Fill {
     /// Whether page `index`, if the VMO does not hold it, is the source's to
     /// fill.
     fn sourced(&self, index: u64) -> bool {
-        index
+        !crate::user::cache::LOST.load(core::sync::atomic::Ordering::Relaxed) && index
             .checked_mul(PAGE_SIZE)
             .is_some_and(|start| start < *self.sourced_below.lock())
     }
