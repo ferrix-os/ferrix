@@ -84,9 +84,9 @@ table are in `docs/BACKLOG.md`. This skill does not repeat them.
 
 ## Running agents
 
-Run about four agents at once, in priority order, and queue the rest. With
-eight running on 2026-09-29, the usage limit stopped all of them within
-twenty minutes, mid-gate. Brief each agent:
+Run at most six agents at once (customer, 2026-10-05), in priority order,
+and queue the rest. With eight running on 2026-09-29, the usage limit
+stopped all of them within twenty minutes, mid-gate. Brief each agent:
 
 * Its own worktree, made by hand (`git worktree add -b <branch>
   .claude/worktrees/<name> main`), and its own `CARGO_TARGET_DIR` on the gate
