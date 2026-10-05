@@ -311,6 +311,12 @@ and regenerate `docs/generated/` on the gate host after any `.sysml` edit.
 
 **When.** It is light enough to start whenever a session is free.
 
+**As an agent.** The role is also the project agent
+[`.claude/agents/docs-steward.md`](.claude/agents/docs-steward.md), which
+runs on Sonnet. The product owner starts it after each landing round to bring
+`status.md` and `where-it-stands.md` up to what landed (customer,
+2026-10-05), and lands the docs branch it leaves.
+
 ### Fuzz and security warden
 
 **The gap.** The fuzzer found a real init bug, and a service spawned into a
