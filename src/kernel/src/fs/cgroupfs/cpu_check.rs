@@ -39,6 +39,11 @@ const WINDOW_NANOS: u64 = 600_000_000;
 /// holds it. Two thirds of one is a program held, a fifth of what it takes free.
 const HELD_MOST: u64 = 650;
 
+/// The least, in thousandths of the wall clock, that such a program may be
+/// found to have used: a twelfth of a processor, rounded up, as the
+/// requirements have it. Less is a program starved, not held.
+const HELD_LEAST: u64 = 84;
+
 /// Run it. How many periods the quota throttled, across the check.
 ///
 /// # Errors
@@ -269,7 +274,7 @@ fn quota_comes_late(harness: &mut Harness) -> Checked<u64> {
 fn held_to_a_fifth(harness: &Harness, what: &'static str) -> Checked<()> {
     crate::sched::sleep_for(150_000_000);
     let held = share(harness, b"/check-c/cpu.stat")?;
-    if !(80..=HELD_MOST).contains(&held) {
+    if !(HELD_LEAST..=HELD_MOST).contains(&held) {
         crate::console::println!("  cpu      {what}: held to {held} thousandths of the wall clock");
         return Err(what);
     }
@@ -360,7 +365,7 @@ fn measured(harness: &Harness, program: &Running) -> Checked<u64> {
     crate::sched::sleep_for(150_000_000);
     let counted = freeze_check::counts(&program.process)?;
     let held = share(harness, b"/check-c/cpu.stat")?;
-    if !(80..=HELD_MOST).contains(&held) {
+    if !(HELD_LEAST..=HELD_MOST).contains(&held) {
         crate::console::println!("  cpu      held to {held} thousandths of the wall clock");
         return Err(
             "a program under cpu.max 20000 100000 was not held to about a fifth of a processor",
@@ -425,7 +430,7 @@ fn held_beneath(harness: &Harness, program: &Running) -> Checked<u64> {
     freeze_check::wait_running(&program.process)?;
     crate::sched::sleep_for(150_000_000);
     let held = share(harness, b"/check-c/cpu.stat")?;
-    if !(80..=HELD_MOST).contains(&held) {
+    if !(HELD_LEAST..=HELD_MOST).contains(&held) {
         crate::console::println!(
             "  cpu      beneath, held to {held} thousandths of the wall clock"
         );
