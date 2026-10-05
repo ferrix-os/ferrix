@@ -390,4 +390,52 @@ impl RingMemory for Ring {
     fn barrier(&self) {
         fence(Ordering::SeqCst);
     }
+
+    // The indices the kernel moves while this side reads them are `u32`s, and
+    // each is one access here: composed from bytes, a tail stepping from
+    // 0x00ff to 0x0100 reads 0x01ff on the other side, which is "the peer's
+    // tail ran more than a ring ahead" and ends the ring (`ferrix-blkring`'s
+    // `RingMemory`). The ring VMO is mapped page-aligned and the layout puts
+    // every index at an aligned offset; anything unaligned is composed.
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        if !(self.base + offset).is_multiple_of(2) {
+            return u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset + 1)]);
+        }
+        assert!(offset + 2 <= self.len, "a read inside the ring");
+        // SAFETY: as for `read_u8`, and aligned to two within the mapping.
+        u16::from_le(unsafe { ptr::read_volatile((self.base + offset) as *const u16) })
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        if !(self.base + offset).is_multiple_of(4) {
+            return u32::from(self.read_u16(offset)) | (u32::from(self.read_u16(offset + 2)) << 16);
+        }
+        assert!(offset + 4 <= self.len, "a read inside the ring");
+        // SAFETY: as for `read_u8`, and aligned to four within the mapping.
+        u32::from_le(unsafe { ptr::read_volatile((self.base + offset) as *const u32) })
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        if !(self.base + offset).is_multiple_of(2) {
+            let [low, high] = value.to_le_bytes();
+            self.write_u8(offset, low);
+            self.write_u8(offset + 1, high);
+            return;
+        }
+        assert!(offset + 2 <= self.len, "a write inside the ring");
+        // SAFETY: as for `write_u8`, and aligned to two within the mapping.
+        unsafe { ptr::write_volatile((self.base + offset) as *mut u16, value.to_le()) }
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        if !(self.base + offset).is_multiple_of(4) {
+            self.write_u16(offset, value as u16);
+            self.write_u16(offset + 2, (value >> 16) as u16);
+            return;
+        }
+        assert!(offset + 4 <= self.len, "a write inside the ring");
+        // SAFETY: as for `write_u8`, and aligned to four within the mapping.
+        unsafe { ptr::write_volatile((self.base + offset) as *mut u32, value.to_le()) }
+    }
 }

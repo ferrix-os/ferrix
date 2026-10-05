@@ -164,6 +164,26 @@ impl RingMemory for Mem<'_> {
     }
 
     fn barrier(&self) {}
+
+    // One side at a time touches this memory, so bytes compose.
+    fn read_u16(&self, offset: usize) -> u16 {
+        u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset + 1)])
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        u32::from(self.read_u16(offset)) | (u32::from(self.read_u16(offset + 2)) << 16)
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        let [low, high] = value.to_le_bytes();
+        self.write_u8(offset, low);
+        self.write_u8(offset + 1, high);
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        self.write_u16(offset, value as u16);
+        self.write_u16(offset + 2, (value >> 16) as u16);
+    }
 }
 
 /// Build a driver, then a kernel attached to its ring, run `body`, and check

@@ -122,6 +122,18 @@ impl RingMemory for Step<'_> {
 
     fn barrier(&self) {}
 
+    fn read_u16(&self, offset: usize) -> u16 {
+        self.lock.access(self.side, |bytes| {
+            u16::from_le_bytes(bytes[offset..offset + 2].try_into().expect("two bytes"))
+        })
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        self.lock.access(self.side, |bytes| {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        });
+    }
+
     fn read_u32(&self, offset: usize) -> u32 {
         self.lock.access(self.side, |bytes| {
             u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("four bytes"))

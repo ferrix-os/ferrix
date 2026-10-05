@@ -207,13 +207,34 @@ pub use layout::{HeaderError, Op, RingLayout, Status, Submission};
 
 /// The ring VMO, as bytes.
 ///
-/// Only [`RingMemory::read_u8`], [`RingMemory::write_u8`] and
-/// [`RingMemory::barrier`] have to be implemented. The wider accessors are
-/// little-endian compositions of them; an implementation over a mapping should
-/// override them with single loads and stores, both for speed and so that a
-/// field the peer is changing is read in one access rather than torn across
-/// several. A torn read is not a safety problem — every value read is checked
-/// as if the peer chose it — but it is a corruption report nobody needed.
+/// **The `u16` and `u32` accessors are not provided, and over memory the
+/// peer shares each must be one access.** The ring's indices -- both tails,
+/// both heads, the want-bell words -- are `u32`s one side writes while the
+/// other reads them. Composed from bytes, a tail stepping from `0x00ff` to
+/// `0x0100` is read as `0x01ff`, or written through `0x0000`, and the other
+/// side reports [`Corruption::TailOverrun`] or [`Corruption::TailBackwards`]
+/// and ends the ring. A torn read is not a safety problem -- every value read
+/// is checked as if the peer chose it -- but it ends a healthy ring: these
+/// used to be provided from the byte accessors, `ferrix-driver`'s block ring
+/// inherited them, and a disk's requests failed after 30 s about once in
+/// 2,300 boots under load (`docs/BACKLOG.md`, the seam's deeper run). Only
+/// [`RingMemory::read_u64`] and [`RingMemory::write_u64`] are provided, since
+/// no 64-bit field is changed by one side while the other reads it. Memory
+/// only one side touches at a time, as a test's is, may compose them from
+/// bytes.
+///
+/// An implementation that gives only the byte accessors does not compile:
+///
+/// ```compile_fail,E0046
+/// struct Bytes;
+/// impl ferrix_blkring::RingMemory for Bytes {
+///     fn read_u8(&self, _offset: usize) -> u8 {
+///         0
+///     }
+///     fn write_u8(&mut self, _offset: usize, _value: u8) {}
+///     fn barrier(&self) {}
+/// }
+/// ```
 ///
 /// # Why this trait is safe
 ///
@@ -253,33 +274,26 @@ pub trait RingMemory {
     /// after it, as seen from the other side.
     fn barrier(&self);
 
-    /// Read a little-endian `u16` at `offset`.
-    fn read_u16(&self, offset: usize) -> u16 {
-        u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset.wrapping_add(1))])
-    }
+    /// Read the little-endian `u16` at `offset`, in one access where it is
+    /// aligned.
+    fn read_u16(&self, offset: usize) -> u16;
 
-    /// Read a little-endian `u32` at `offset`.
-    fn read_u32(&self, offset: usize) -> u32 {
-        u32::from(self.read_u16(offset)) | (u32::from(self.read_u16(offset.wrapping_add(2))) << 16)
-    }
+    /// Read the little-endian `u32` at `offset`, in one access where it is
+    /// aligned.
+    fn read_u32(&self, offset: usize) -> u32;
 
     /// Read a little-endian `u64` at `offset`.
     fn read_u64(&self, offset: usize) -> u64 {
         u64::from(self.read_u32(offset)) | (u64::from(self.read_u32(offset.wrapping_add(4))) << 32)
     }
 
-    /// Write a little-endian `u16` at `offset`.
-    fn write_u16(&mut self, offset: usize, value: u16) {
-        let [low, high] = value.to_le_bytes();
-        self.write_u8(offset, low);
-        self.write_u8(offset.wrapping_add(1), high);
-    }
+    /// Write the little-endian `u16` at `offset`, in one access where it is
+    /// aligned.
+    fn write_u16(&mut self, offset: usize, value: u16);
 
-    /// Write a little-endian `u32` at `offset`.
-    fn write_u32(&mut self, offset: usize, value: u32) {
-        self.write_u16(offset, value as u16);
-        self.write_u16(offset.wrapping_add(2), (value >> 16) as u16);
-    }
+    /// Write the little-endian `u32` at `offset`, in one access where it is
+    /// aligned.
+    fn write_u32(&mut self, offset: usize, value: u32);
 
     /// Write a little-endian `u64` at `offset`.
     fn write_u64(&mut self, offset: usize, value: u64) {
