@@ -123,6 +123,18 @@ pub(crate) fn trap_words(number: usize, args: [usize; 6]) -> (usize, [usize; 3])
     let [a0, a1, a2, a3, a4, a5] = args;
     let result;
     let (w0, w1, w2);
+    // The vector registers: `channel_write_read`, `object_wait_one` and
+    // `port_wait` destroy every register the System V ABI makes caller-saved,
+    // as a function call does (`ferrix_native_abi::nr`, the vector-state
+    // contract; `docs/OPAQUE-KERNEL.md` §9.8, 3a). `clobber_abi("sysv64")`
+    // declares exactly that, so the compiler keeps no live value in an `XMM`
+    // or `YMM` register, an x87 register or a mask register across the trap;
+    // the explicit operands override it for the registers that carry
+    // arguments and results. It is declared for every call through this one
+    // block rather than for the three in a block of their own: the
+    // assembly's budget has no room for a second, and a call that keeps the
+    // registers loses nothing but the compiler's choice to keep a value there.
+    //
     // SAFETY: `raw` was built by `src/lib/proto/native`, which puts in a pointer
     // argument only the address of a slice `raw` borrows — shared if the
     // kernel reads it, exclusive if it writes — and `raw` outlives this trap.
@@ -141,6 +153,7 @@ pub(crate) fn trap_words(number: usize, args: [usize; 6]) -> (usize, [usize; 3])
             in("r9") a5,
             lateout("rcx") _,
             lateout("r11") _,
+            clobber_abi("sysv64"),
             options(nostack),
         );
     }

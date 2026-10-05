@@ -45,13 +45,6 @@
       "branch": "step4-prep",
       "date": "2026-10-03",
       "purpose": "OPAQUE-KERNEL.md §9.7 part 6, step 4's groundwork (session B): ferrix.fastpath, the boot switch read once and printed at stage 9, off by default in the certified configuration (the customer, 2026-10-02)"
-    },
-    {
-      "ids": ["H.SCHED.12", "L.sched.54", "L.x86_64.152-158"],
-      "owner": "po6-ipcB",
-      "branch": "po6/step3",
-      "date": "2026-10-05",
-      "purpose": "OPAQUE-KERNEL.md §9.8 steps 3a and 3b (the consultant's OK IF of 2026-10-02, conditions 7 and 8): the vector state of a task resumed from a blocking native call, the entry's mark, the partial save, the full save kept, the reset on every path, the accessor, PKRU kept out of the reset; the switch writing the incoming FS and GS bases at every switch with no base read"
     }
   ]
 }

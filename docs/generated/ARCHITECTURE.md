@@ -119,7 +119,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 132 packages, 6348 elements, 215 relations. Model digest `91d5032132195aa3`.
+26 files, 132 packages, 6392 elements, 215 relations. Model digest `095a8f1311d11c09`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -292,7 +292,7 @@ Processor time: the fair class, placement and sleep. ASR-8 (partially met: the i
 | `H.SCHED.5` | A task that sleeps for a duration shall not be woken before the duration has passed, and shall be woken within twenty times it. | A 20 ms sleep returns after at least 20 ms and at most 400 ms (the `sleep` line). | `G.1, ASR-8` |
 | `H.SCHED.6` | Code running on a processor shall find, through that processor's per-processor register, the record that names that processor and no other. | In 100 rounds of work run on every online processor at once, each processor runs each round once and the record its register gives it names its own hardware identifier every time: 0 misplaced runs (the `smp` line). | `O.ISOLATE, ASR-1` |
 | `H.SCHED.7` | A thread's thread-local segment descriptors and data selectors shall be its own whenever it runs in ring 3, never another thread's. x86-64 only. | Two i386 programs pinned to one processor, with one descriptor slot and selector but bases 4 bytes apart, each read their own word through %gs 200 times across sched_yield: both exit 42. | `O.ISOLATE, G.1` |
-| `H.SCHED.8` | The user-mode state a trap does not save -- the FS and GS bases and the x87 and SSE registers -- shall be the running task's own whenever it runs in ring 3, inherited by a fork child and reset by an execve. | Two programs pinned to one processor, each with its own FS and GS bases and XMM, MXCSR and x87 control values, read back their own across N yields: 0 mismatches; a fork child reads its parent's, and an execve'd image the reset values. | `O.ISOLATE, G.1` |
+| `H.SCHED.8` | The user-mode state a trap does not save -- the FS and GS bases and the x87 and SSE registers -- shall be the running task's own whenever it runs in ring 3, inherited by a fork child and reset by an execve, except that the vector registers of a task resumed from a blocking native call may be the initial state instead (H.SCHED.12). | Two programs pinned to one processor, each with its own FS and GS bases and XMM, MXCSR and x87 control values, read back their own across N yields: 0 mismatches; a fork child reads its parent's, and an execve'd image the reset values. | `O.ISOLATE, G.1` |
 | `H.SCHED.9` | A clock read through the vDSO shall answer as the system call would, between system calls made on either side of it. | A program reading each of the 7 clocks, gettimeofday and time through the vDSO finds each answer between system calls made on either side: exit 120. | `G.5` |
 
 9 requirements.
@@ -3972,6 +3972,7 @@ flowchart LR
 | `L.sched.34` | `theWakeHookIsStageNinesAlone` | — | — | — |
 | `L.sched.35` | `theCoreTellsEveryTaskOfAnEnd` | — | — | — |
 | `L.sched.40` | `aPostIsFencedBeforeItsWake` | — | — | — |
+| `L.sched.54` | `everyResumeGoesThroughTheRestore` | — | — | — |
 | `L.sched.20` | `theCountStaysWithItsProcessor` | — | — | — |
 | `L.sched.21` | `aCountThatCannotBeKeptStops` | — | — | — |
 | `L.sched.22` | `mayBlockReadsItsOwnCount` | — | — | — |
@@ -4220,6 +4221,13 @@ flowchart LR
 | `L.x86_64.10` | `fpuStateTravelsWithTask` | — | — | — |
 | `L.x86_64.11` | `forkChildInheritsUserState` | — | — | — |
 | `L.x86_64.12` | `newProgramStartsWithResetState` | — | — | — |
+| `L.x86_64.152` | `theEntryMarksTheThreeBlockingCalls` | — | — | — |
+| `L.x86_64.153` | `aBlockedNativeCallKeepsOnlyItsControls` | — | — | — |
+| `L.x86_64.154` | `aRunnableTaskIsSavedWhole` | — | — | — |
+| `L.x86_64.155` | `anUnsavedStateIsReset` | — | — | — |
+| `L.x86_64.156` | `anUnsavedStateReadsAsInitial` | — | — | — |
+| `L.x86_64.157` | `pkruIsNeverReset` | — | — | — |
+| `L.x86_64.158` | `theBasesAreWrittenAtEverySwitch` | — | — | — |
 | `L.x86_64.13` | `sigreturnLoadsFpu` | — | — | — |
 | `L.x86_64.14` | `compatEntryHasUserData` | — | — | — |
 | `L.x86_64.15` | `handlerEnteredWithUserData` | — | — | — |

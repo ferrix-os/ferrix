@@ -2131,6 +2131,13 @@ fn swap_address_space(
 /// know when to catch up, which is a mechanism of its own for later.
 ///
 /// A dead task's state is not saved: nothing will ever load it.
+///
+/// Every resume of a task with user state comes through here, whatever woke
+/// it and whichever path chose it, so the architecture's restore is where a
+/// state saved only in part is reset before the task runs again
+/// (`docs/OPAQUE-KERNEL.md` §9.8, 3a, the consultant's condition 7). The save
+/// is told whether `previous` leaves blocked, which is what decides on x86-64
+/// whether a blocking native call's vector registers are kept.
 fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
     if !previous.is_dead() {
         // SAFETY: (SHARED) this processor holds the run queue lock that owns `previous`.
@@ -2140,18 +2147,53 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
             let state = unsafe { &mut *state };
             // SAFETY: (CONTEXT) `previous` is the task this processor was running, so the
             // registers are its.
-            unsafe { arch::save_user_state(state) };
+            unsafe { arch::save_user_state(state, previous.is_blocked()) };
         }
     }
     // SAFETY: (SHARED) as above, for `next`.
     if let Some(state) = unsafe { next.user_state() } {
         let entry_stack = next.stack_top().unwrap_or(0);
         // SAFETY: (SHARED) as above, `next`'s own boxed state under the queue lock.
-        let state = unsafe { &*state };
+        let state = unsafe { &mut *state };
         // SAFETY: (CONTEXT) `next` is the task this processor is switching to, and its
         // stack is its own and mapped for as long as the queue holds it.
         unsafe { arch::restore_user_state(state, entry_stack) };
     }
+}
+
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        dead_code,
+        reason = "only x86-64's entry and arch_prctl keep a record this way"
+    )
+)]
+/// Run `change` on the running task's own saved user state, the record the
+/// switch loads it from: the vector-state contract's mark the `SYSCALL`
+/// entry raises and lowers, and the `FS` and `GS` bases `arch_prctl` and
+/// `execve` set (`docs/OPAQUE-KERNEL.md` §9.8, 3a and 3b). `None` for a
+/// kernel thread.
+///
+/// # Safety
+///
+/// (CONTEXT) Interrupts masked on this processor, by the caller, for the whole
+/// call. Then no switch can happen here, so the record is not this
+/// processor's to save or restore; and no other processor touches it, since
+/// a switch elsewhere saves only the task it ran and restores only the one it
+/// chose, and the running task is neither. That is the same exclusion the
+/// run queue lock gives [`switch_user_state`], from the other side.
+pub(crate) unsafe fn with_own_user_state<R>(
+    change: impl FnOnce(&mut arch::UserState) -> R,
+) -> Option<R> {
+    with_current(|task| {
+        // SAFETY: (SHARED) the caller's guarantee stands for the queue lock
+        // [`Task::user_state`] asks for: nothing else reaches the running
+        // task's record while interrupts are masked here.
+        let state = unsafe { task.user_state() }?;
+        // SAFETY: (SHARED) as above; the borrow does not outlive `change`.
+        Some(change(unsafe { &mut *state }))
+    })
+    .flatten()
 }
 
 /// Release the lock the switch handed over, and dispose of what ran before.
