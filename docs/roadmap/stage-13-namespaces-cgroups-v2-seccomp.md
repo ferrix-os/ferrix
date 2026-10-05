@@ -268,7 +268,7 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 
 | Branch (origin) | What | State at the wind-down |
 |---|---|---|
-| `stage13-cgctl` 670b4c49a | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | every gate row PASSED on 89c2f911a (`cs-*`, kvm and release included); 8 of 18 controls FIRED, 11 not run; consultant: fixes accepted, but it has not seen the `cpu.max` bound widened to two thirds of a processor or the stale CGROUPS §14 control table. **2026-10-05:** continued as `po6/cgctl` 69fe7b51c and `po6/cgctl-n6` c4e2b8f9d, 23 controls FIRED, gated; the consultant has not seen the D1 fix |
+| `stage13-cgctl` (`po6/cgctl`) | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | **2026-10-05:** rebased onto main 3349682db; the freeze now posts `STOP` through main's pending-work word, and a parked process moved out of a frozen cgroup is released (the consultant's D1). check, x86_64 kvm and tcg, aarch64, armv7a `--smp 2` and `test-vfs` PASSED (`po6-cgctl-*`); all 23 controls of `CGROUPS.md` §14 FIRED (`po6-cgctl-ctl-*`), reclaim-sibling for the first time; the consultant's follow-up OK IF, its conditions met; then the landing batch |
 | `stage13-s3-on-netns` 0527dd365 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions), on main 22384874f | **2026-10-04:** every row PASSED on 6c539b276 (`l13s3f-*`: check, three boots, `test-threads`, `test-init`, `test-shell`, `test-vfs`) and all 19 controls FIRED; consultant OK (ledger line 336). Rebased onto netns: k7, k13, k17 FIRED on 0527dd365 (`l13s3n2-*`), the other 16 carry by range-diff. Batch 20261004T135748Z stopped at the wind-down undecided: every gate PASSED but `test-selfhost` (red on main) and `test-shell` (QEMU killed from outside); owed: one batch re-run, then the consultant's final OK. `stage13-s3`, `-onmain`, `-rebase` are history |
 | `stage13-s4` 9ad2c718e | `SECCOMP_RET_TRAP` | consultant: OK if five conditions; three written; controls t2-t7 and the rows owed; lands after S3 |
 | `stage13-s5` 298399f1e | `TSYNC` | consultant: OK if; a new thread fails closed (written); owed: a measured bound for the TSYNC ancestor walk, the rows, four controls |
@@ -292,21 +292,8 @@ in 22384874f (batch 20261004T133714Z, every full-profile row PASSED). S3 landed
 later that night (248799bdd, from `stage13-s3-on-netns`); two blockers found on the rebase were fixed
 in it: the table-size checks counting seccomp on top of mincore, and the
 filters check listing its tasks (`check::spawn_in`), without which main's
-pending-work word stopped the boot with FX-0520. Init's L13a landed on top (stage 15); L13b landed on 2026-10-05 and L13c is on a branch (`po6/l13c`). The exit
+pending-work word stopped the boot with FX-0520. Init's L13a landed on top (stage 15); L13b and L13c are on branches (`l13b`, `l13c`). The exit
 criterion still needs cgctl and `stage13-container`.
-
-**Where the controllers stand (wind-down, 2026-10-05).** The controllers (M2's
-reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller;
-30 points, the Gantt's "Stage 13, the controllers' rest") are built, gated and
-**not on `main`**. Session po6-cgctl took `stage13-cgctl` over as `po6/cgctl`
-(69fe7b51c, on `main`'s 3349682db), and `po6/cgctl-n6` (c4e2b8f9d) is the same
-work rebased onto `land-n6` (which landed later that evening), with the coverage carried and no gate run yet; both
-are on origin. All 23 of its negative controls FIRED, its gate rows passed on
-cf400dff2 and 17acf31dc, and the consultant's finding D1 is fixed. Owed before
-it lands: the consultant has not seen the D1 fix and the four new controls.
-`land-n6` landed the same evening (a84992dc5), so `po6/cgctl-n6` is the branch
-to rebase onto `main`; then carry coverage, run `check`, the x86-64 KVM boot and armv7a at `--smp 2`, and join a
-batch. `stage13-container` still needs it.
 
 **Landed -- the small namespaces and `setns` (built 2026-09-30, landed
 2026-10-01 after the consultant's review):** UTS, IPC and cgroup
@@ -354,7 +341,7 @@ the namespace ends. Abstract unix names are per namespace. The `netns` boot line
 charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
 controls and what is open.
 
-**Done -- M2, F1, S2 and B1, the rest of the controllers (2026-09-30).** A
+**Done -- M2, F1, S2 and B1, the rest of the controllers (built 2026-09-30, landed 2026-10-05).** A
 charge past `memory.max` reclaims inside the job before it kills: the clean
 page cache of files on a read-only disk mount, charged to the job and never a
 sibling's, goes back the way a truncation's pages do and is read again from
