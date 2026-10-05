@@ -4,7 +4,8 @@ Every branch on GitHub that still holds work `main` does not have, as of
 2026-10-01 evening (`main` 7afed6fdc), written at os-5d's wind-down, after
 the product owner's and the certification consultant's; the 2026-10-04
 wind-down's branches are in the sections after this introduction, and
-*2026-10-05: refreshed* says what of them has landed since. It is where the
+*2026-10-05: refreshed* and *2026-10-05, evening: refreshed* say what of them
+has landed since, and which branches origin no longer has. It is where the
 next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
@@ -31,6 +32,88 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-05, evening: refreshed
+
+Refreshed by po6-steward2 on 2026-10-05 against `origin/main` e3e15bc7f,
+after `git fetch --prune origin`, with `git cherry origin/main origin/<branch>`
+for every branch the tables name. The *2026-10-05: refreshed* section below
+is dated against 634c7ed0e; where it says "in progress", this section is the
+newer word.
+
+**Origin was cleaned on 2026-10-05.** 122 branches were deleted from GitHub
+(landed, patch-equal, or pre-rebase copies of work that is on `main`); origin
+holds 119 branches besides `main` now. Every deleted tip is in
+`~/.local/share/ferrix/branch-archive-2026-10-05/origin-all.bundle` on the
+gate host (its lists are `safe.txt` and `superseded.tsv`; the cleanup of
+nazuna's worktrees and target dirs is in `nazuna-cleanup.log` there). So
+many branches the tables name are no longer on origin. This page drops a row
+only for a branch that is gone and whose work is on `main` (each of its
+unlanded commits has its subject on `main`, or the cleanup's own lists call
+it landed): 26 rows, those of `foot-shell`, `l13-init`, `np-land`,
+`selfhost-matrix`, `selfhost-components`, `po-cpu-learnings`,
+`stage13-s3-on-netns`, `s3-onmain`, `os-02/dead`, `os-02/unix-gc`,
+`os-12/crng`, `os-12/curl`, `os-12/https`, `os-12/btop` to `btop4`,
+`win-parity/gateway`, `default-wallpaper`, `chrome-groundwork`,
+`cov-before-rebase4`, `fuzzel-window-pre-split`, `board-reset-3c-pre-rebase`,
+`os-d1/armv7-compositor`, `pixel7-chromium` and `pixel7-vm-try`. A row that
+names a branch origin no longer has stays when some of its commits are not
+on `main` under any subject; read its tip from the bundle (`git fetch
+<bundle> refs/remotes/origin/<branch>`). Those, as of this refresh, are
+`fuzzel-window-prerebase`, `guest-frame-time-local`, `netns-presquash`, `os-12/ports`, `os-12/ports-curl-btop`, `os-35/ipc-lazytlb`, `os-35/ipc-lazytlb-571ea292`, `os-35/ipc-lazytlb-on-eeaa`, `os-35/ipc-lazytlb-pre-measure`, `os-35/ipc-lazytlb-wip`, `os-8d/stage20-before-rebase`, `os-ac/venus-wip`, `os-ipc/zircon-trip`, `s2-backup`, `s4-hist`, `s5-hist`, `s6-hist`, `s6-hist2`, `smallns-presquash`, `stage13-fdinfo`, `stage13-fdinfo-presquash`, `stage13-fdinfo-v2`, `stage13-fdinfo-v3`, `stage13-integ`, `stage13-np`, `stage13-s3`, `stage13-s3-onmain`, `stage13-s3-wip`, `stage13-seccomp`, `timens-presquash`, `timens-presquash2`, `timens-presquash3`, `unix-creds`, `vmo-map-wip`, `zinc`. The three IPC branches `step2f`, `bench-exact` and `step4-prep`
+were never on GitHub (local on the gate host, as that section says) and are
+unchanged.
+
+**Landed on 2026-10-05 after 634c7ed0e**, all on `main`:
+
+- po5-docs, po5-skill and po5-c1, the last as 6384c4861 (the verification
+  audit's rows in `docs/BACKLOG.md`; `po5/c1` is an ancestor of `main`),
+  with the two small fixes of the night section's item 6: FINDINGS' count
+  (1797bc129) and the Pixel 7 handover (c19aeefcb), so `po5/docs` is gone;
+- the gateway fix, `po5/gateway-retransmit`: 1d726d9ac (the retransmission
+  timer out of the fast-retransmit test) and 39e520e31, an ancestor of
+  `main`; the Windows job's red of the night section's item 5 is that, and
+  d6849c86b records a second Windows gateway flake;
+- s2-plan (`po5/s2-plan`): ce133294c and a3b240c6b, stage 20's S-2, every
+  touched test builds its variants before the first boot;
+- c1-n12 (`po5/c1-n12`): da133821e, f746a3e47, 82c12c721 and 904d1af7c,
+  F-63 filed and closed, N10, N12 and N13 done;
+- red = `po5/red-main` and `po5/sigterm`: the steal rule 4419e7b82 and its
+  coverage d779e31f4, test-init's password and reader fixes ae5b2c8b8 and
+  abe1b2583 (ae5b2c8b8 also carries xtask's non-UTF-8 reader fix, which is
+  `po5/sigterm`'s ee2cd25f3), the diagnosis 6ad46f503, and the Backlog
+  entries up to 0ece8826e. `po6/red` counts 0 unlanded; `po5/red-main` (2)
+  and `po5/sigterm` (2) still count `+` because their commits landed under
+  other hashes, history now;
+- docs rounds: d6849c86b, fcc5f43e0 (the docs steward as a project agent)
+  and e3e15bc7f.
+
+**In progress now, not landed.** None of these is on origin except where it
+says so; the others are branches in the gate host's repository, which `git
+fetch --prune origin` does not show.
+
+- `po6/g3` (8b0d8acda, 1 unlanded): FX-1012, the stage 10 G3 fix (G3 and R5
+  take their check byte in the receive path, out of the pump's reach); about
+  to go into a batch.
+- `l13b` and `l13c` (session po6-l13): origin still has the pre-rebase tips
+  (fac927209 with 5 unlanded, 91045526a with 10); the gate host's local
+  branches are rebased onto `main` (f08289ef4 with 4, 3f0501d1e with 7).
+- `po6/seam` (d9acd2ef8, 2 unlanded, on the gate host): the stage 10 seam
+  panic. Its `po6/seam-diag`, `po6/seam-diag-fix` and `po6/seam-diag3` are
+  diagnostics beside it.
+- `po6/gw2`: the Windows gateway's refused-connect flake (the second flake
+  d6849c86b records). No branch by that name exists on the gate host yet.
+- `land-n6`, NVIDIA N2 to N6: `po5/land-n6` (47b0a2294, 7 unlanded, on the
+  gate host, not on origin) is the resume point, ready; it waits for the G3
+  fix. On origin, `land-n6` (3d6621a64, 1) and `tonight/land-n6` (2e936ad65,
+  6) are its earlier states. `nvidia-n1c` (1 unlanded) is on origin and was
+  not on this page.
+- `po5/red-diag` (6 unlanded, K2 diagnostics) is on the gate host, not for
+  landing.
+
+The next section's other in-progress items are settled as above (po5-gw,
+po5-red, the two held-back fixes). `nvidia-n2` still counts 21 unlanded, and
+`stage13-netns` counts 5 as a pre-rebase copy of 22384874f.
 
 ## 2026-10-05: refreshed
 
@@ -171,7 +254,11 @@ Leftovers on nazuna, to delete by exact name: `~/target-os7c-land-n6`,
 `~/Documents/projects/os/ferrix/target-os7c-l13-init`,
 `~/.local/share/ferrix/target-os7c-selfhost-matrix`, and the worktrees
 `.claude/worktrees/os7c-n6`, `os7c-l13-init` and `os7c-shm` in
-`~/Documents/projects/os/ferrix`. The open queue's entries set aside during
+`~/Documents/projects/os/ferrix`. On 2026-10-05 `~/target-os7c-land-n6` was
+removed (`nazuna-cleanup.log` in the branch archive), and on this refresh
+`target-os7c-l13-init`, `target-os7c-selfhost-matrix` and the `os7c-shm`
+worktree are not there either; `os7c-n6` and `os7c-l13-init` are still listed
+as worktrees. The open queue's entries set aside during
 the hold are in `~/.local/share/ferrix/fleet/batch/po-aside-2026-10-04/`.
 
 ## Wind-down 2026-10-04: start here
@@ -376,17 +463,12 @@ Gate pool notes, for whoever runs it:
 
 | Branch | Last commit | Unlanded | Kind | Tip |
 |---|---|---:|---|---|
-| `stage13-s3-on-netns` | 2026-10-04 | 2 | history: landed 2026-10-04 | S3: carry the coverage anchors onto network namespaces |
-| `l13-init` | 2026-10-04 | 2 | history: landed 2026-10-04 | INIT.md: L13a's gate rows, and the audit marker the first one tripped on |
-| `l13b` | 2026-10-04 | 5 | work | INIT.md: L13b, PrivateNetwork=, as built |
-| `l13c` | 2026-10-04 | 10 | work | test-init: filter checks for SystemCallFilter= and its two keys |
-| `np-land` | 2026-10-04 | 1 | history: landed 2026-10-04 | Handover: NP as AUTH P2.1 at the 2026-10-04 wind-down |
-| `selfhost-matrix` | 2026-10-04 | 2 | history: landed 2026-10-04 | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
-| `selfhost-components` | 2026-10-04 | 0 | landed 2026-10-04 | test-selfhost: the volume carries the components, and the guest clones none |
-| `foot-shell` | 2026-10-04 | 0 | landed 2026-10-04 | test-foot carries zinc, the /bin/sh its keyboard check is a script for |
-| `land-n6` | 2026-10-04 | 1 | history: resume from `tonight/land-n6` (6), po5-n6 | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
+| `l13b` | 2026-10-04 | 5 | work: this is the pre-rebase tip; resume from the gate host's local `l13b` (f08289ef4, 4 unlanded, rebased onto `main`), po6-l13 | INIT.md: L13b, PrivateNetwork=, as built |
+| `l13c` | 2026-10-04 | 10 | work: this is the pre-rebase tip; resume from the gate host's local `l13c` (3f0501d1e, 7 unlanded, rebased onto `main`), po6-l13 | test-init: filter checks for SystemCallFilter= and its two keys |
+| `land-n6` | 2026-10-04 | 1 | history: resume from `po5/land-n6` on the gate host (47b0a2294, 7 unlanded, not on origin), po5-n6; ready, waiting for the G3 fix | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
+| `tonight/land-n6` | 2026-10-04 | 6 | history: land-n6's earlier state on origin; `po5/land-n6` is later | docs: regenerate the model and traceability after the rebase onto f55e8ab28 |
+| `nvidia-n1c` | 2026-10-03 | 1 | work: not named before this refresh; NVIDIA N1c | WIP (N1c, wind-down): nvrm's OS layer, ferrix-nvos and the kept C |
 | `nvidia-n2` | 2026-10-04 | 21 | work | Handover update: land-n6 dropped by a docs/generated conflict, input passthrough works, the customer's performance order |
-| `po-cpu-learnings` | 2026-10-04 | 0 | landed (merged) | AGENTS.md: what the product owner learned about the gate pool; this page |
 
 ## Stage 13: namespaces, cgroups, seccomp
 
@@ -427,10 +509,11 @@ is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 | `timens-presquash3` | 2026-10-01 | 8 | history | wip timens: native-child VA row, roadmap |
 | `timens-presquash2` | 2026-10-01 | 2 | history | wip timens on netns |
 | `timens-presquash` | 2026-10-01 | 29 | history | BACKLOG: the time namespace's differences from Linux |
-| `stage13-timens` | 2026-10-01 | 9 | work | Roadmap: the time namespace's state at the wind-down |
-| `stage13-s6` | 2026-10-01 | 16 | work | WIP: wind-down state of stage13-s6 |
-| `stage13-s5` | 2026-10-01 | 14 | work | WIP: wind-down state of stage13-s5 |
-| `stage13-s4` | 2026-10-01 | 11 | work | WIP: wind-down state of stage13-s4 |
+| `stage13-netns` | 2026-10-01 | 5 | history: landed 2026-10-04 (22384874f), pre-rebase copy | Roadmap: network namespaces' state at the wind-down |
+| `stage13-timens` | 2026-10-01 | 6 | work | Roadmap: the time namespace's state at the wind-down |
+| `stage13-s6` | 2026-10-01 | 12 | work | WIP: wind-down state of stage13-s6 |
+| `stage13-s5` | 2026-10-01 | 10 | work | WIP: wind-down state of stage13-s5 |
+| `stage13-s4` | 2026-10-01 | 7 | work | WIP: wind-down state of stage13-s4 |
 | `stage13-s3-wip` | 2026-10-01 | 4 | history | WIP, does not build: S3's filters, half written when the customer asked to stop |
 | `stage13-s3-onmain` | 2026-10-01 | 7 | history | WIP: wind-down state of s3-onmain |
 | `stage13-s3` | 2026-10-01 | 7 | history | WIP: wind-down state of stage13-s3 |
@@ -447,12 +530,11 @@ is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 | `s6-hist` | 2026-10-01 | 22 | history | WIP S6: clippy |
 | `s5-hist` | 2026-10-01 | 17 | history | WIP S5: docs |
 | `s4-hist` | 2026-10-01 | 13 | history | WIP S4: docs say what Linux does with a blocked SIGSYS |
-| `s3-onmain` | 2026-10-01 | 6 | history | S3: the early endings borrow what they are given |
 | `s2-backup` | 2026-10-01 | 11 | history | S2: record the review, the deviations, the gates and the controls |
 | `pidns-dbg` | 2026-10-01 | 12 | never land | DEBUG3 |
 | `netns-presquash` | 2026-10-01 | 21 | history | The small namespaces' flag check no longer expects network namespaces to be refused |
 | `cgctl-dbg` | 2026-10-01 | 11 | never land | DEBUG kmem |
-| `backup/2026-10-01/wip-timens` | 2026-10-01 | 9 | snapshot | Backup of uncommitted work in timens (stage13-timens) before a PC switch, 2026-10-01 |
+| `backup/2026-10-01/wip-timens` | 2026-10-01 | 6 | snapshot | Backup of uncommitted work in timens (stage13-timens) before a PC switch, 2026-10-01 |
 | `backup/2026-10-01/wip-n5` | 2026-10-01 | 15 | snapshot | Backup of uncommitted work in n5 (stage13-n5) before a PC switch, 2026-10-01 |
 | `backup/2026-10-01/stage13-n5` | 2026-10-01 | 14 | snapshot | N5: a plain remount asks for privilege over the filesystem's owner; the bottom's flags loc |
 | `backup/2026-10-01/stage13-fdinfo` | 2026-10-01 | 5 | snapshot | NP: the stat address-field residual in the vulnerability analysis; the proc_fd_link row na |
@@ -513,8 +595,8 @@ still needs its own landing.
 | `bench-exact` | 2026-10-03 | 1 | work | bench-ipc made exact: fenced counter, sorted samples, one pinned processor, alternation |
 | `step4-prep` | 2026-10-03 | 3 | work | Say where step 4 stands (OPAQUE-KERNEL.md §9.7) |
 | `os-ipc/zircon-trip` | 2026-10-01 | 10 | history | WIP: save a task's vector state with XSAVEOPT at a switch, where the processor has it |
-| `os-ipc/prof2` | 2026-10-01 | 12 | never land | PROFILE: user-state sub-spans |
-| `os-ipc/prof` | 2026-10-01 | 7 | never land | PROFILE, not for landing: spans of a round trip |
+| `os-ipc/prof2` | 2026-10-01 | 10 | never land | PROFILE: user-state sub-spans |
+| `os-ipc/prof` | 2026-10-01 | 5 | never land | PROFILE, not for landing: spans of a round trip |
 | `os-35/ipc-wake` | 2026-10-01 | 3 | work | WIP: poll before an idle halt, and interrupt one core with a targeted SGI (os-35 part C) |
 | `os-35/ipc-ring-land` | 2026-10-01 | 2 | work | WIP: Hold the seam's trip trace down outside the hop check |
 | `os-35/ipc-ring` | 2026-10-01 | 2 | work | WIP: Take the block ring's task off the data path (os-35 part B) |
@@ -588,16 +670,13 @@ read its last section first.
 | `readme-gui` | 2026-09-27 | 2 | work | WIP: uncommitted work found in the readme-gui worktree at the 2026-09-27 wind-down |
 | `hyprlock` | 2026-09-27 | 4 | work | WIP hyprlock: rustfmt the auth backend and its tests |
 | `frame-budget` | 2026-09-27 | 2 | work | File the lock boot that counted a bind after the unlock as one during it |
-| `default-wallpaper` | 2026-09-27 | 1 | work | Stop Chrome asking to sign in on the desktop run-compositor starts |
 | `clipboard-vdagent` | 2026-09-27 | 1 | work | WIP: uncommitted work found in the clipboard-vdagent worktree at the 2026-09-27 wind-down |
 | `hyprlock-full-4e813ac4` | 2026-09-26 | 7 | work | WIP hyprlock: lib.rs as slice 1 has it |
 | `fuzzel-window-prerebase` | 2026-09-26 | 12 | history | fixup! Say in the desktop clients' design what fuzzel does with the user's file |
-| `fuzzel-window-pre-split` | 2026-09-26 | 3 | history | Say in the desktop clients' design what fuzzel does with the user's file |
 | `wip/display-show` | 2026-09-24 | 1 | snapshot | WIP snapshot of worktree display-show, 2026-09-24, before switching PCs |
 | `wip/display-design` | 2026-09-24 | 1 | snapshot | WIP snapshot of worktree display-design, 2026-09-24, before switching PCs |
 | `wip/clipboard` | 2026-09-24 | 1 | snapshot | WIP snapshot of worktree clipboard, 2026-09-24, before switching PCs |
 | `dk1-console/tx-fix` | 2026-09-24 | 12 | work | Let a quiesce wait out a dead driver's end the kernel still holds |
-| `os-d1/armv7-compositor` | 2026-09-23 | 1 | work | Say in the docs that the display and input gates run on ARMv7-A |
 | `dk1-test` | 2026-09-23 | 4 | work | hyprix: follow_mouse focuses the window under the pointer |
 | `worktree-bridge-cse_017NVB1xDHbNpY7HnGonPpen` | 2026-09-20 | 7 | work | Let the runtime say which Linux table it is, not the library |
 | `ivf-row` | 2026-09-19 | 1 | work | File the host's missing IVF wallpapers |
@@ -641,13 +720,6 @@ read its last section first.
 | `os-12/probe` | 2026-09-16 | 3 | never land | probe: https in the guest (not for landing) |
 | `os-12/ports-curl-btop` | 2026-09-16 | 1 | history | Port git onto ferrousli, and clone over HTTP inside the guest |
 | `os-12/ports` | 2026-09-16 | 1 | history | Port git onto ferrousli, and clone over HTTP inside the guest |
-| `os-12/https` | 2026-09-16 | 1 | history | Check curl's HTTPS inside the guest, against Mbed TLS's own test server |
-| `os-12/curl` | 2026-09-16 | 1 | history | Port curl onto ferrousli, and carry it in every x86-64 image with a busybox |
-| `os-12/crng` | 2026-09-16 | 1 | work | Start the clock at firmware's time, and seed a ChaCha20 generator for getrandom |
-| `os-12/btop4` | 2026-09-16 | 2 | history | Port btop onto ferrousli, over LLVM's C++ runtime built against it |
-| `os-12/btop3` | 2026-09-16 | 3 | history | Port btop onto ferrousli, over LLVM's C++ runtime built against it |
-| `os-12/btop2` | 2026-09-16 | 3 | history | Port btop onto ferrousli, over LLVM's C++ runtime built against it |
-| `os-12/btop` | 2026-09-16 | 4 | history | Port btop onto ferrousli, over LLVM's C++ runtime built against it |
 | `os-12/autobuild` | 2026-09-16 | 1 | work | wip: build the ports when stale |
 | `zinc` | 2026-09-14 | 1 | history | Start zinc, a zsh-compatible shell in Rust (WIP) |
 | `os-50/ferrousli-patterns` | 2026-09-14 | 2 | work | WIP: dirname from ferrousli-misc and regex, stopped unfinished at the 2026-09-14 wind-down |
@@ -676,11 +748,8 @@ read its last section first.
 | `wip/steam-y6` | 2026-09-29 | 1 | snapshot | WIP snapshot: WM_NORMAL_HINTS, a fixed-size window floats |
 | `wip/steam-userns` | 2026-09-29 | 2 | snapshot | WIP snapshot: N2 bind mounts, host tests in progress |
 | `wip/steam-e2e` | 2026-09-29 | 2 | snapshot | WIP snapshot: Steam window harness into the repo |
-| `pixel7-vm-try` | 2026-09-27 | 2 | work | Give a console named by its address the console's getty |
-| `pixel7-chromium` | 2026-09-26 | 2 | work | Return from AArch64 signal handlers through a vDSO trampoline |
 | `os-ac/vulkan` | 2026-09-24 | 1 | work | WIP: vkgears port |
 | `os-ac/venus-wip` | 2026-09-24 | 14 | history | WIP: dispatch patch |
-| `chrome-groundwork` | 2026-09-20 | 2 | work | Re-check the Chrome assessment, and mark what is done |
 
 ## Kernel, init, storage, boards, certification work
 
@@ -704,7 +773,6 @@ read its last section first.
 | `w8-armv7a` | 2026-09-27 | 1 | work | wip: W-8 file 24 drafts (arch/armv7a, arch/arm_common), parked for the wind-down |
 | `f46-power-off` | 2026-09-27 | 2 | work | WIP F-46: controls run, qemu.rs .get() fix, evidence edits; not reviewed, not rebased |
 | `boot-21b` | 2026-09-27 | 1 | work | Write the boot's low-level requirements, and count ferrix.checks as product (W-8 boot, 21b |
-| `cov-before-rebase4` | 2026-09-26 | 4 | history | Re-measure coverage on every architecture, and list what needs a test |
 | `wip/init-l4` | 2026-09-24 | 1 | snapshot | WIP snapshot of worktree init-l4, 2026-09-24, before switching PCs |
 | `sysml-studio-submodule` | 2026-09-23 | 4 | work | Move SysML Studio to its settings and shortcuts |
 | `os-8d/stage20-before-rebase` | 2026-09-23 | 11 | history | wip: plan test covers reads |
@@ -713,10 +781,7 @@ read its last section first.
 | `unix-creds` | 2026-09-17 | 2 | history | WIP 3c SCM_CREDENTIALS/SO_PASSCRED, written but never compiled |
 | `os-26/fx1151-diag` | 2026-09-17 | 1 | never land | DIAGNOSTIC: net ring exit reasons (not for main) |
 | `os-02/unix-creds` | 2026-09-17 | 2 | work | WIP 3c SCM_CREDENTIALS/SO_PASSCRED, written but never compiled |
-| `win-parity/gateway` | 2026-09-16 | 1 | work | Boot `run` under the host's hypervisor unless told otherwise |
-| `os-02/unix-gc` | 2026-09-16 | 1 | work | Collect AF_UNIX sockets that only each other's queues keep alive |
 | `os-02/fx0701-diag` | 2026-09-16 | 1 | never land | WIP FX-0701 diagnostics |
-| `os-02/dead` | 2026-09-16 | 1 | work | Name a disk driver that died, and how, instead of a disk that never came |
 | `fx0701` | 2026-09-16 | 1 | never land | WIP FX-0701 diagnostics |
 | `stage9/log-header` | 2026-09-14 | 1 | work | WIP: Name the tree a gate ran on as the first line of its log |
 | `stage8-filemmap` | 2026-09-14 | 4 | work | WIP: file mmap, what is left of MAP_SHARED and MAP_PRIVATE (8 + 8 points) |
@@ -729,7 +794,6 @@ read its last section first.
 | `stage10-ring` | 2026-09-13 | 2 | work | WIP: the block ring's kernel side, unbuilt |
 | `sched-diag` | 2026-09-13 | 1 | never land | Charge the running task before a queue insert, honour a reschedule owed from an empty reap |
 | `os-c4/diag` | 2026-09-13 | 2 | never land | DIAGNOSTIC, not for landing: count frames by release route across two self-check windows |
-| `board-reset-3c-pre-rebase` | 2026-09-13 | 2 | history | Reset the machine when asked, so a board run needs no hand at the board |
 
 ## os-5d: superseded by main
 
@@ -744,9 +808,10 @@ its older copies; delete them.
 
 ## Already on main
 
-Every change on these branches is on `main` under another hash; they can be
-deleted when the user says so (`branch-cleanup-method`: by patch-id, only the
-surveyed tips): `backup/2026-10-01/os5d/gate-rows`,
+Every change on these branches was on `main` under another hash. All of them
+were deleted from origin on 2026-10-05 (tips in
+`~/.local/share/ferrix/branch-archive-2026-10-05/origin-all.bundle`; see
+*2026-10-05, evening: refreshed*): `backup/2026-10-01/os5d/gate-rows`,
 `backup/2026-10-01/os5d/profile-iterate`, `backup/2026-10-01/po-winddown`,
 `os5d/compositor-skip`, `stage13-n4-userns`, `stage13-s1`, `stage13-todos`,
 `wip/steam-procfs-fd`, `pixel7/bootloader`, `os-d1/monitor-transform`, `omz`,
@@ -754,9 +819,9 @@ surveyed tips): `backup/2026-10-01/os5d/gate-rows`,
 `os-02/smmu`, `os-50/batch3b`, `os-50/batch3c`, `os-50/ci`, `os-50/land`,
 `os-a8/kept-os02-stub-462f7714`, `os-50/wscanf`, `os-12/btop5`,
 `os-50/ferrousli-link-breakers`, `os-50/ferrousli-netdb`,
-`pre-pull-backup-2026-09-13`, and since 2026-10-04 `foot-shell`,
-`selfhost-components`, `tonight/foot-shell`, `tonight/l13-init`,
-`tonight/selfhost-matrix` and `tonight/stage13-s3-on-netns`.
+`pre-pull-backup-2026-09-13`, `foot-shell`, `selfhost-components`,
+`tonight/foot-shell`, `tonight/l13-init`, `tonight/selfhost-matrix` and
+`tonight/stage13-s3-on-netns`.
 
 ## Not on a branch
 
