@@ -237,7 +237,8 @@ mode a weekly CI job needs, landed on `main` the same day (branch
 from the components split (2263225e1, 2026-10-03), because the guest
 tried to clone the component repositories with no network; the volume now
 carries the components and the guest clones none (`selfhost-components`,
-cb872a732), and CI's next run on `main` is what shows it green.
+cb872a732); CI's job has passed on `main` since, from 77783565a (run
+37229234877) on.
 
 Dynamic linking is done: Debian's glibc busybox runs on its own `ld-linux`,
 and on ferrousli's loader and `libc.so.6` in glibc's place, on all three
@@ -249,6 +250,10 @@ services in cgroups of their own over `src/lib/init/svc`'s manager, with `svc` t
 drive it, readiness, socket activation and resource limits, gives the console
 a getty, and powers the machine off, on all three architectures (`cargo xtask
 test-init`). `run` and the desktop boot it, and the compositor is its service.
+Since 2026-10-04 a unit can be sandboxed with L13a's `NoNewPrivileges=`,
+`PrivateTmp=` and `ProtectSystem=` (1e1f2543a, `docs/INIT.md` §4.5);
+L13b's `PrivateNetwork=` and L13c's `SystemCallFilter=` are on branches
+`l13b` and `l13c`.
 
 Stage 15's authentication (`docs/AUTH.md`, approved by the customer on
 2026-09-26) has phase 1 done and most of phase 2. Phase 1: its kernel fix,
