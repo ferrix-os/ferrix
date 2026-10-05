@@ -99,9 +99,10 @@ each has its worktree under `.claude/worktrees/tonight-<name>`. The
 progress 2026-10-05: session po5-red. Batch
 20261004T190141Z ended MAIN-RED on cb872a732:
 
-- `test-shell --arch all --init ferrousli`: QEMU ended by signal 15 from
-  outside 7.0 s into the x86_64 boot (b0-1), the host problem below, now six
-  times.
+- `test-shell --arch all --init ferrousli`: QEMU ended by signal 15 7.0 s
+  into the x86_64 boot (b0-1), six times. Not the host: xtask sent it, after
+  a stage 10 panic's echoed 0xF5 ended its reader (po5-sig, 2026-10-05; the
+  row in `docs/BACKLOG.md`'s *Red on `main`*, xtask half on `po5/sigterm`).
 - `test-init --arch all`: aarch64 only, "the revoke stage's reader was not
   waiting (state R)" (b0-2), a timing check of console-revoke's under load.
   The same tip's own `test-init --arch aarch64` passed. Owner: console-revoke's
