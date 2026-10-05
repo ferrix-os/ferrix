@@ -346,7 +346,7 @@ fn write_fpstate(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     // holds this program's x87 and SSE registers.
     let state = unsafe { switch::UserState::capture() };
     let image = state.fxsave();
-    let [fcw_low, fcw_high, fsw_low, fsw_high, ..] = *image;
+    let [fcw_low, fcw_high, fsw_low, fsw_high, ..] = image;
     let control = u32::from(u16::from_le_bytes([fcw_low, fcw_high]));
     let status = u16::from_le_bytes([fsw_low, fsw_high]);
     let mut area = FrameBytes::zeroed(FPSTATE_SIZE)?;
@@ -354,7 +354,7 @@ fn write_fpstate(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     area.put_u32(4, u32::from(status))?;
     area.put(FPSTATE_STATUS, &status.to_le_bytes())?;
     area.put(FPSTATE_MAGIC, &0_u16.to_le_bytes())?;
-    area.put(FXSAVE_AT, image)?;
+    area.put(FXSAVE_AT, &image)?;
     area.write(space, fpstate)
 }
 

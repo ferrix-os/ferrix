@@ -515,7 +515,9 @@ package FerrixItemRequirements {
             attribute :>> statement = "The user-mode state a trap does not save --
                 the FS and GS bases and the x87 and SSE registers -- shall be the
                 running task's own whenever it runs in ring 3, inherited by a fork
-                child and reset by an execve.";
+                child and reset by an execve, except that the vector registers of
+                a task resumed from a blocking native call may be the initial
+                state instead (H.SCHED.12).";
             attribute :>> criterion = "Two programs pinned to one processor, each
                 with its own FS and GS bases and XMM, MXCSR and x87 control values,
                 read back their own across N yields: 0 mismatches; a fork child
@@ -556,6 +558,21 @@ package FerrixItemRequirements {
                 made with a spin lock held returns without sleeping and its line
                 reaches the port.";
             attribute :>> parent = "O.QUOTA";
+        }
+        requirement <'H.SCHED.12'> blockedNativeCallVectorState : ItemHighLevel {
+            attribute :>> statement = "A task resumed after blocking in
+                channel_write_read, object_wait_one or port_wait, made with SYSCALL,
+                shall hold in its vector registers either its own state or every
+                component's initial state with its own MXCSR and x87 control word,
+                never a value another program left. x86-64 only; every other call
+                and architecture keeps the whole state (H.SCHED.8).";
+            attribute :>> criterion = "A program blocked in one of the calls, every
+                vector register its pattern, beside a second program filling them
+                with another on its processor, reads back neither pattern and its
+                own MXCSR and control word after a message, its peer's close and a
+                message with a signal pending; blocked in a Linux call, preempted,
+                or past the woken call, it reads its own (the `vectors` line).";
+            attribute :>> parent = ("O.ISOLATE", "G.1");
         }
     }
 

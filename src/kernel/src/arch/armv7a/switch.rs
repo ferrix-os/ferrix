@@ -179,7 +179,7 @@ impl UserState {
     pub(crate) unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         // SAFETY: (CONTEXT) the caller's guarantee.
-        unsafe { save_user_state(&mut state) };
+        unsafe { save_user_state(&mut state, false) };
         state
     }
 
@@ -371,13 +371,16 @@ pub(super) unsafe fn fpu_features1() -> u32 {
     unsafe { ferrix_fpu_features1() }
 }
 
-/// Store the program state this processor holds into `state`.
+/// Store the program state this processor holds into `state`, in full:
+/// whether the task leaves `_blocked` matters only to x86-64's vector-state
+/// contract (`docs/OPAQUE-KERNEL.md` §9.8, 3a), which this architecture does
+/// not have.
 ///
 /// # Safety
 ///
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor.
-pub(crate) unsafe fn save_user_state(state: &mut UserState) {
+pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
     state.thread_pointer = super::cpu::read_tpidruro();
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`
     // structure, which is the two words the assembly writes.

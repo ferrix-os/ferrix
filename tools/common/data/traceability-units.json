@@ -41,6 +41,7 @@
     "arch::aarch64::gic::gicv3::idle_line_for_check": "Finds a GICv3 line nothing has enabled for the machine check; it needs the register windows private to gicv3.rs.",
     "arch::aarch64::gic::idle_line_for_check": "Finds a line nothing has enabled, for the machine check's masking case; it needs the driver choice private to gic.rs.",
     "arch::x86_64::check_exception_entry": "It only runs the paranoid, syscall, gdt and trap checks' run functions, for main.rs's stage 3; it can move into a check file under arch::x86_64.",
+    "arch::x86_64::check_switch_state": "It only runs switch/check.rs's run function and prints its boot lines, for stage 9's switch-state check through the arch interface (the Arm pair answer Ok there); it can move into that check file.",
     "arch::x86_64::cpu::forbid_user_access": "Closes SMAP's window through arch::forbid_user_access, whose only callers are user/check.rs's checks.",
     "arch::x86_64::cpu::permit_user_access": "Opens SMAP's window through arch::permit_user_access, whose only callers are user/check.rs's checks of the window; the kernel's own user copies do not use it.",
     "arch::x86_64::cpu::write_breakpoint_address": "Arms a debug register; called only from arch/x86_64/paranoid/check.rs, whose breakpoint checks are its reason to exist.",

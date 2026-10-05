@@ -216,7 +216,15 @@ and a process outside every domain, the default, has no such exception
 
 **FDP_RIP.2** Full residual information protection. The TSF shall ensure that
 any previous information content is made unavailable upon **allocation** of a
-physical frame to any object.
+physical frame to any object, **and of the register state a program is given
+at every switch**: its own, restored, or on x86-64, for a task resumed from
+`channel_write_read`, `object_wait_one` or `port_wait`, every vector register's
+initial state with its own `MXCSR` and x87 control word, never a value another
+program left (H.SCHED.8, H.SCHED.12). The refinement was widened from frames
+by the customer on 2026-10-02 (`docs/OPAQUE-KERNEL.md` §9.8, question 10);
+ADV_ARC describes the mechanism: the switch's restore, the reset of a state
+saved only in part, and the `FS` and `GS` bases written from the task's record
+at every switch.
 
 **FDP_SDI.2** Stored data integrity monitoring and action. The TSF shall
 monitor user data stored in containers controlled by the TSF for **a
