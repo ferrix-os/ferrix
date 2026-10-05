@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from the evidence's own commits, no anchor dropped.",
+      "what": "Measure and test or argue the new and edited lines on every architecture: sched/mod.rs's set_idle_at_switch (both outcomes: the bit already as wanted, and changed), take_resched's load before its swap (both outcomes), regroup_current's compare by two loads, its store and the fence when the counts differ, note_moved's SeqCst increment, and choose_next's moves into previous and current with the let-else that unlocks when either is absent (defensive: both were stored the line above); arch/speculation.rs's entered_space loads and stores and count_here; object/quota.rs's effective through ferrix_sched::carried_weight; and the check code, sched/check.rs's a_running_processor_is_not_idle_across_switches and switch_and_look, and object/quota_check.rs's check_the_weight bound."
+    },
+    {
       "landing": "po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2)",
       "architectures": [
         "x86_64",

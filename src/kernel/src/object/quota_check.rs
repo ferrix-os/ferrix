@@ -391,7 +391,11 @@ fn scaled(weight: u32) -> i64 {
 /// changes its parent's load at once, by the difference of the two weights
 /// as the scheduler scales them, while an idle job's changes nothing.
 ///
+/// The largest, in task units, is below 2^32, which `quota::effective`'s
+/// 64-bit arithmetic rests on (OPAQUE-KERNEL.md §9.8, 2f, Q7).
+///
 /// Verifies: L.object.62
+/// Verifies: L.object.161
 fn check_the_weight(tree: &Arc<Job>) -> Result<(), &'static str> {
     let parent = tree.new_child().map_err(|_| "a job refused a child")?;
     let busy = parent.new_child().map_err(|_| "a job refused a child")?;
@@ -401,6 +405,9 @@ fn check_the_weight(tree: &Arc<Job>) -> Result<(), &'static str> {
     let high = busy.cpu_weight();
     if low != MIN_WEIGHT || high != MAX_WEIGHT {
         return Err("cpu.weight was not clamped to 1 to 10,000");
+    }
+    if u32::try_from(scaled(high)).is_err() {
+        return Err("the largest cpu.weight is not below 2^32 in task units");
     }
     let _ = busy.set_cpu_weight(DEFAULT_WEIGHT);
     if quota::load(parent.quota_index()) != 0 {

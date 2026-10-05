@@ -242,13 +242,33 @@ pub(crate) fn entered_space(root: u64) {
     };
     // Taken, not read: a root installed without `entering_space` before it,
     // as a check may, is in no domain rather than the last one named here.
-    let incoming = ENTERING_DOMAIN
-        .get(cpu)
-        .map_or(0, |domain| domain.swap(0, Ordering::SeqCst));
-    let outgoing = LAST_DOMAIN
-        .get(cpu)
-        .map_or(0, |domain| domain.swap(incoming, Ordering::SeqCst));
-    if last.swap(root, Ordering::Relaxed) == root {
+    //
+    // Loads and stores, not read-modify-writes (OPAQUE-KERNEL.md §9.8, 2f):
+    // this runs with interrupts masked (`AddressSpace::install`'s contract),
+    // and only this processor writes its `ENTERING_DOMAIN`. `LAST_DOMAIN` and
+    // `LAST_ROOT` are also written by `forget_root` from another processor,
+    // which clears a root no space uses yet and the domain with it: a store
+    // here that overwrites that clear stores this processor's own root and
+    // domain, never the forgotten root, which is all `forget_root` asks.
+    // And `LAST_DOMAIN`'s remote reader, `leaving_domain`'s scan, is since
+    // F-60's fix only a shortcut: every processor checks its own at the
+    // grace period's answer (`answer_leaving`), after any switch it was
+    // making. So no ordering rests on these accesses beyond their own
+    // processor's program order. The table in §9.8 lists every remote
+    // reader of a word the switch writes.
+    let incoming = ENTERING_DOMAIN.get(cpu).map_or(0, |domain| {
+        let incoming = domain.load(Ordering::Relaxed);
+        domain.store(0, Ordering::Relaxed);
+        incoming
+    });
+    let outgoing = LAST_DOMAIN.get(cpu).map_or(0, |domain| {
+        let outgoing = domain.load(Ordering::Relaxed);
+        domain.store(incoming, Ordering::Relaxed);
+        outgoing
+    });
+    let previous = last.load(Ordering::Relaxed);
+    last.store(root, Ordering::Relaxed);
+    if previous == root {
         return;
     }
     // Inside one speculation domain the predictor invalidation is left out,
@@ -260,7 +280,7 @@ pub(crate) fn entered_space(root: u64) {
         if machine::switch_barrier_in_domain(cpu)
             && let Some(refilled) = REFILLS_IN_DOMAIN.get(cpu)
         {
-            let _ = refilled.fetch_add(1, Ordering::Relaxed);
+            count_here(refilled);
         }
         return;
     }
@@ -271,13 +291,25 @@ pub(crate) fn entered_space(root: u64) {
 /// it: the decision, and the invalidation if the processor has one.
 fn issue_barrier(cpu: usize) {
     if let Some(decided) = BARRIER_DECISIONS.get(cpu) {
-        let _ = decided.fetch_add(1, Ordering::Relaxed);
+        count_here(decided);
     }
     if machine::switch_barrier(cpu)
         && let Some(issued) = SWITCH_BARRIERS.get(cpu)
     {
-        let _ = issued.fetch_add(1, Ordering::Relaxed);
+        count_here(issued);
     }
+}
+
+/// Add one to `counter`, a word of this processor's that only it writes,
+/// with interrupts masked (every caller: the switch, the grace period's
+/// answer, the barrier interrupt): a load and a store, not a locked add
+/// (2f). Another processor reads it whole, as a report or the domain check
+/// does after the switches it counts.
+fn count_here(counter: &AtomicU64) {
+    counter.store(
+        counter.load(Ordering::Relaxed).wrapping_add(1),
+        Ordering::Relaxed,
+    );
 }
 
 /// How many times each processor refilled its return stack at a switch

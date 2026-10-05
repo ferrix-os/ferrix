@@ -490,13 +490,16 @@ fn ferrousli(root: &std::path::Path) -> Result<()> {
 /// Windows those steps run in WSL, as ferrousli's do.
 /// The `loom` models of `src/tests/loom`: the orderings the kernel's wait
 /// and its way back to user mode rest on (`docs/OPAQUE-KERNEL.md` §9.8, 2c's
-/// case 9 and 2e's condition 5), each with a control that must fail.
+/// case 9, 2e's condition 5 and 2f's regroup word), each with a control that
+/// must fail.
 ///
 /// A workspace of its own, as `src/tests/fuzz` is, so that loom and what it
 /// pulls in stay out of the kernel's dependency graph and `deny.toml`
 /// (the customer's decision of 2026-10-03). `--locked`, so the versions run
 /// are the lock file's. Seconds: the models are small and run under a
 /// preemption bound of three.
+///
+/// Verifies: L.sched.51
 pub(crate) fn loom(root: &std::path::Path) -> Result<()> {
     let dir = root.join("src/tests/loom");
     let native = |arguments: &[&str]| {

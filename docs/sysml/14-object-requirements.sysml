@@ -873,6 +873,30 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.SCHED.3";
             attribute :>> unit = "object::quota::Quota::set_weight";
         }
+        requirement <'L.object.160'> theCarriedWeightIsTheWideFormula : ItemLowLevel {
+            attribute :>> statement = "quota::effective shall carry a task's weight up
+                its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving,
+                before it clamps the answer, the value the same formula gives in
+                128-bit arithmetic, bit for bit, for every base and entity weight
+                below 2^32 and every load.";
+            attribute :>> criterion = "ferrix-sched's host test compares the two over
+                50000 random and boundary bases, weights and loads at each job depth
+                from 1 to 8, and at every weight 2^32 - 1, and finds no difference;
+                with one division made in 32 bits, it finds one.";
+            attribute :>> parent = "H.SCHED.3";
+            attribute :>> unit = "object::quota::effective";
+        }
+        requirement <'L.object.161'> everyEntityWeightIsBelowTwoToThe32 : ItemLowLevel {
+            attribute :>> statement = "Every entity weight a job can be given, its
+                cpu.weight clamped to 1 to 10000 and scaled to task units, shall be
+                below 2^32, as every task's weight, a u32, is.";
+            attribute :>> criterion = "The kernel's build asserts that 10000 scaled
+                to task units fits a u32; the quota check sets cpu.weight to 20000,
+                reads 10000 back, and finds it scaled below 2^32.";
+            attribute :>> parent = "H.SCHED.3";
+            attribute :>> unit = ("object::quota::Quota::set_weight",
+                "object::quota::Slot::entity_weight");
+        }
     }
 
     package Jobs {

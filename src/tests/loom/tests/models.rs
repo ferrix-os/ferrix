@@ -1,8 +1,9 @@
 //! The models (`docs/OPAQUE-KERNEL.md` §9.8): 2c's case 9, the pending-work
-//! word's clear against its post, and 2e's condition 5, a channel waiter
+//! word's clear against its post, 2e's condition 5, a channel waiter
 //! listed and not yet blocked against its waker, for a message, a close and
-//! an end. Each `*_control` drops the one ordering its argument needs and is
-//! expected to fail: it passes only when `loom` finds the interleaving.
+//! an end, and 2f's regroup word, a move against a way out. Each `*_control`
+//! drops the ordering its argument needs and is expected to fail: it passes
+//! only when `loom` finds the interleaving.
 //!
 //! A model checks the protocol restated here, not the kernel's code: that each
 //! model matches the kernel sites it names is a matter of review, and each
@@ -239,4 +240,65 @@ fn condition_5_control_the_writer_without_its_fence() {
 #[should_panic(expected = "missed its word and was not woken")]
 fn condition_5_control_the_mark_after_the_wake() {
     condition_5(&[(PEER_CLOSED, Order::MarkAfterWake)]);
+}
+
+// ---------------------------------------------------------------------------
+// 2f, condition 6: the regroup word (`sched::regroup_current`)
+// ---------------------------------------------------------------------------
+
+/// A job, as a quota slot's index.
+const OLD_JOB: u32 = 1;
+const NEW_JOB: u32 = 2;
+
+/// A move stores the process's new job, then increments `MOVES` (`SeqCst`:
+/// `sched::note_moved`); a way out loads `MOVES`, compares it with what its
+/// processor last saw (`RUNNING_SEEN`, a load and a store since 2f), and
+/// only when they differ fences (`SeqCst`) and reads the job. With
+/// `ordered` the model is the kernel's; without it, the control, the load of
+/// `MOVES` is `Relaxed` and the fence is gone. A way out that sees the move
+/// counted must see the job it moved to.
+///
+/// Kernel sites: `object::process` (the job's store, then
+/// `sched::note_moved`); `sched::regroup_current` (the load of `MOVES`, the
+/// compare with `RUNNING_SEEN`, the fence, then `quota_slot`).
+fn regroup(ordered: bool) {
+    model(move || {
+        let job = Arc::new(AtomicU32::new(OLD_JOB));
+        let moves = Arc::new(AtomicU32::new(0));
+        let mover = {
+            let (job, moves) = (Arc::clone(&job), Arc::clone(&moves));
+            thread::spawn(move || {
+                job.store(NEW_JOB, Ordering::Relaxed);
+                let _ = moves.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let seen = 0;
+        let now = moves.load(if ordered {
+            Ordering::Acquire
+        } else {
+            Ordering::Relaxed
+        });
+        if now != seen {
+            if ordered {
+                fence(Ordering::SeqCst);
+            }
+            assert_eq!(
+                job.load(Ordering::Relaxed),
+                NEW_JOB,
+                "a way out saw the move counted and read the old job"
+            );
+        }
+        mover.join().unwrap();
+    });
+}
+
+#[test]
+fn regroup_a_counted_move_reads_its_job() {
+    regroup(true);
+}
+
+#[test]
+#[should_panic(expected = "saw the move counted and read the old job")]
+fn regroup_control_without_the_order() {
+    regroup(false);
 }

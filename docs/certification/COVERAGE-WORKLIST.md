@@ -41,6 +41,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | Landing | Architectures | Dropped by the carry | Owed |
 |---|---|---|---|
+| OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new and edited lines on every architecture: sched/mod.rs's set_idle_at_switch (both outcomes: the bit already as wanted, and changed), take_resched's load before its swap (both outcomes), regroup_current's compare by two loads, its store and the fence when the counts differ, note_moved's SeqCst increment, and choose_next's moves into previous and current with the let-else that unlocks when either is absent (defensive: both were stored the line above); arch/speculation.rs's entered_space loads and stores and count_here; object/quota.rs's effective through ferrix_sched::carried_weight; and the check code, sched/check.rs's a_running_processor_is_not_idle_across_switches and switch_and_look, and object/quota_check.rs's check_the_weight bound. |
 | po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new lines on every architecture: sched/mod.rs steal_from's keeps_its_last, both outcomes -- a victim running its idle task with one waiting task kept, and one with two or more, or a busy victim, stolen from. |
 | NVIDIA.md N1e, the chardev core's native calls (branch nvidia-n1d; the consultant's ledger 297, condition L2) | x86_64, aarch64, armv7a | carried from bc508107e, no anchor dropped. | Measure and test or argue the new lines on every architecture: syscall/native.rs's five SERVED rows, the five chardev calls in answer()'s served arm and ChardevControlCreate in the audit arm, the buffer() constructor answer() now uses, and main.rs's register_load calling chardev::install. |
 | NVIDIA.md N1c, MAP_FIXED_NOREPLACE over a mapped page answers EEXIST (branch nvidia-n1c; the consultant's OK IF of 2026-10-03, ledger 292, condition K3) | x86_64, aarch64, armv7a | carried from f0dad0f78, no anchor dropped. | Measure and test or argue the new lines on every architecture: syscall/memory.rs's MAP_FIXED_NOREPLACE branch in place() and taken(), and syscall/check.rs's check_noreplace_refuses_a_taken_place. |
@@ -169,7 +170,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1078, 1994 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1119, 2041 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
