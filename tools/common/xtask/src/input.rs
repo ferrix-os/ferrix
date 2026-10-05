@@ -56,7 +56,13 @@ pub(crate) fn build_evecho(arch: Arch, negative: bool) -> Result<PathBuf> {
         ))
     })?;
     let flavour = if negative { "negative" } else { "plain" };
-    let target_dir = paths::target_dir().join("compositor").join("evecho");
+    // A directory of its own for each flavour: `test-input` builds both
+    // before its first boot, and one would otherwise overwrite the other.
+    let target_dir = paths::target_dir().join("compositor").join(if negative {
+        "evecho-negative"
+    } else {
+        "evecho"
+    });
     println!("  building src/user/system/linux/compositor/evecho ({flavour}) for {target}");
     let program = target_dir.join(target).join("release").join("evecho");
     let mut build = crate::builds::Build::cargo(
@@ -207,7 +213,10 @@ pub(crate) fn test_input(args: &Args) -> Result<()> {
             continue;
         }
 
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the negative control too.
         let plain = build_evecho(arch, false)?;
+        let negative = build_evecho(arch, true)?;
         let (opened, echoed) = boot_and_send(arch, &plain, args)?;
         let keyboard = node_of(&opened, KEYBOARD).unwrap_or_default();
         let tablet = node_of(&opened, TABLET).unwrap_or_default();
@@ -237,7 +246,6 @@ pub(crate) fn test_input(args: &Args) -> Result<()> {
             "  {arch}: a key and a touch put in at QEMU arrived whole at {keyboard} and {tablet}"
         );
 
-        let negative = build_evecho(arch, true)?;
         let (opened, echoed) = boot_and_send(arch, &negative, args)?;
         let keyboard = node_of(&opened, KEYBOARD).unwrap_or_default();
         let tablet = node_of(&opened, TABLET).unwrap_or_default();

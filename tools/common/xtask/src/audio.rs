@@ -212,12 +212,21 @@ fn describe(played: &[(u16, u16)], at: u32) -> String {
 pub(crate) fn test_audio(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let wav = paths::build_dir(arch).join("audio.wav");
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the later boots' programs too. The pulsed
+        // and mixed boots build theirs again where they did, which is then
+        // cargo saying they are current.
         let plain = build_tone(arch, Flavour::Plain)?;
+        let negative = build_tone(arch, Flavour::Negative)?;
+        let restart = build_tone(arch, Flavour::Restart)?;
+        if crate::zinc::built(arch)?.is_some() {
+            let _ = build_media(arch, "media-pulsed", "pulsed")?;
+            let _ = build_media(arch, "media-pa-tone", "pa-tone")?;
+        }
         let lines = boot_and_play(arch, &plain, &wav, args)?;
         played_whole(arch, &lines, &wav)?;
         println!("  {arch}: all {FRAMES} frames written reached the device whole and in order");
 
-        let negative = build_tone(arch, Flavour::Negative)?;
         let lines = boot_and_play(arch, &negative, &wav, args)?;
         if !lines.iter().any(|line| line.contains(DONE)) {
             return Err(Error::new(format!(
@@ -244,7 +253,6 @@ pub(crate) fn test_audio(args: &Args) -> Result<()> {
             }
         }
 
-        let restart = build_tone(arch, Flavour::Restart)?;
         let lines = boot_and_play(arch, &restart, &wav, args)?;
         played_whole(arch, &lines, &wav)?;
         let restarts = lines.iter().filter(|line| line.contains(RESTARTED)).count();

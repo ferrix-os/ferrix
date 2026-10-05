@@ -247,6 +247,12 @@ impl Programs {
     }
 }
 
+/// Build [`Programs`] for `arch`, for a test that boots the compositor after
+/// a boot of its own and builds them before its first (stage 20, S-2).
+pub(crate) fn build_programs(arch: Arch) -> Result<()> {
+    Programs::build(arch).map(drop)
+}
+
 /// Build one of the compositor's programs for `arch`, and say where it is.
 fn build(arch: Arch, package: &str, binary: &str) -> Result<PathBuf> {
     let target = crate::display::target(arch).ok_or_else(|| {
@@ -289,6 +295,7 @@ pub(crate) fn test_compositor(args: &Args) -> Result<()> {
             test_gpu(arch, &programs, args)?;
             continue;
         }
+        build_ahead(arch, args)?;
         // The first boot runs the kernel's self-checks on this machine, with
         // its card, input and seat; each one after it skips them, since the
         // same checks on the same machine would say the same thing again,
@@ -306,6 +313,45 @@ pub(crate) fn test_compositor(args: &Args) -> Result<()> {
                 boot_args.checks_skipped = true;
             }
         }
+    }
+    Ok(())
+}
+
+/// Build, before the first boot, every program a boot of [`BOOTS`] that
+/// `--boot` asked for builds for itself beyond [`Programs`]: each boot still
+/// builds it where it did, which is then cargo saying it is current. A run
+/// under `FERRIX_BUILDS=plan:`, which records the builds and stops at the
+/// first boot, then has every build the whole test makes (stage 20, S-2).
+/// What a boot carries only when this machine has it -- the user's own
+/// desktop for `fuzzel-user` and `everything-desktop` -- is built by those
+/// boots alone.
+fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
+    let asked = |names: &[&str]| names.iter().any(|name| wanted(args, name));
+    if asked(&["restart", "waybar", "waybar-volume"]) {
+        let _ = crate::zinc::build(arch)?;
+    }
+    if asked(&[
+        "hyprlock",
+        "hyprlock-unset",
+        "hyprlock-session",
+        "session-end",
+    ]) {
+        let _ = crate::apps::program(arch, "hyprlock", "hyprlock")?;
+        let _ = crate::auth::carried(arch, None)?;
+    }
+    if asked(&["caption"]) {
+        let _ = build(arch, "compositor-caption", "caption")?;
+        let _ = build(Arch::X86_64, "compositor-caption", "caption")?;
+    }
+    if asked(&["waybar", "waybar-volume"]) {
+        let _ = crate::apps::program(arch, "waybar", "waybar")?;
+        let _ = crate::apps::program(Arch::X86_64, "waybar", "waybar")?;
+    }
+    if asked(&["waybar-volume"]) {
+        let _ = crate::audio::build_media(arch, "media-pulsed", "pulsed")?;
+    }
+    if asked(&["fuzzel"]) {
+        let _ = crate::apps::program(arch, "fuzzel", "fuzzel")?;
     }
     Ok(())
 }

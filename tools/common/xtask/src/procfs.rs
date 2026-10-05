@@ -64,7 +64,16 @@ pub(crate) fn test_procfs(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");
 
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the negative controls too.
         let program = build_test("procfs", arch, None, args.i686)?;
+        let negatives = NEGATIVE
+            .iter()
+            .map(|&(feature, failure, passed)| {
+                let program = build_test("procfs", arch, Some(feature), args.i686)?;
+                Ok((feature, failure, passed, program))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let lines = boot(arch, &program, args)?;
         let mut remaining = lines.iter();
         for want in STEPS {
@@ -93,9 +102,8 @@ pub(crate) fn test_procfs(args: &Args) -> Result<()> {
              a memfd, /proc/net/tcp's inode matches, every /proc inode fits 32 bits: {counted}"
         );
 
-        for (feature, failure, passed) in NEGATIVE {
-            let negative = build_test("procfs", arch, Some(feature), args.i686)?;
-            let lines = boot(arch, &negative, args)?;
+        for (feature, failure, passed, negative) in &negatives {
+            let lines = boot(arch, negative, args)?;
             let failed_there = lines.iter().any(|line| line.contains(failure));
             let passed_it = lines.iter().any(|line| says(line, passed));
             if !failed_there || passed_it || status(&lines) != Some(1) {

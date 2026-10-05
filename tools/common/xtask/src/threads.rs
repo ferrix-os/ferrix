@@ -121,7 +121,10 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");
 
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the negative control too.
         let program = build(arch, false, args.i686)?;
+        let negative = build(arch, true, args.i686)?;
         let lines = boot(arch, &program, args)?;
         let mut remaining = lines.iter();
         for want in STEPS {
@@ -145,7 +148,6 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
             "  {arch}: std::thread, Mutex and mpsc ran, /proc/self counted every thread, exit 0"
         );
 
-        let negative = build(arch, true, args.i686)?;
         let lines = boot(arch, &negative, args)?;
         let failed_there = lines.iter().any(|line| says(line, NEGATIVE_FAILURE));
         let passed_proc = lines.iter().any(|line| says(line, "threads: proc ok"));

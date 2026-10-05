@@ -789,7 +789,12 @@ pub(crate) fn test_badapple(args: &Args) -> Result<()> {
             continue;
         }
         let wav = paths::build_dir(arch).join("badapple.wav");
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the window boot's desktop and the negative
+        // control too.
         let player = build_player(arch, false)?;
+        let negative = build_player(arch, true)?;
+        crate::compositor::build_programs(arch)?;
         let played = boot(arch, &player, &inputs.files, SECONDS, &wav, args)?;
         show(arch, &played.lines);
         if let Some(line) = played.lines.iter().find(|line| line.contains(FAILED)) {
@@ -810,7 +815,6 @@ pub(crate) fn test_badapple(args: &Args) -> Result<()> {
         check_picture(arch, &inputs, played)?;
         check_song(arch, &inputs, &wav, WINDOW_SECONDS)?;
 
-        let negative = build_player(arch, true)?;
         let played = boot(arch, &negative, &inputs.files, NEGATIVE_SECONDS, &wav, args)?;
         check_negative(arch, &inputs, played)?;
     }

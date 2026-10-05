@@ -609,7 +609,10 @@ pub(crate) fn test_display(args: &Args) -> Result<()> {
             println!("  {arch}: no virtio-gpu in QEMU's machine; skipped");
             continue;
         }
+        // Every build before the first boot, so a plan run, which stops at
+        // the first boot, records the negative control too.
         let plain = build_blank(arch, false)?;
+        let negative = build_blank(arch, true)?;
         let Some(screen) = boot_and_dump(arch, &plain, args, "display")? else {
             println!(
                 "  {arch}: a GL console cannot be dumped; the screen's pixels are the 2D boot's to judge"
@@ -630,7 +633,6 @@ pub(crate) fn test_display(args: &Args) -> Result<()> {
             screen.height
         );
 
-        let negative = build_blank(arch, true)?;
         let Some(screen) = boot_and_dump(arch, &negative, args, "display-negative")? else {
             continue;
         };
