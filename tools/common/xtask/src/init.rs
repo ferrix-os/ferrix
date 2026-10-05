@@ -1055,10 +1055,9 @@ fn login(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// `login ferrix` at the console, the `answers` typed blind one after the
-/// other (a prompt has no newline, so it is never a line to wait for), and
-/// the shell that follows checked and left: whether it ran as ferrix in
-/// `scope`.
+/// `login ferrix` at the console, the `answers` given at its prompts in
+/// turn ([`answer_prompts`]), and the shell that follows checked and left:
+/// whether it ran as ferrix in `scope`.
 fn log_in(
     at: &mut Watching<'_>,
     failures: &mut Vec<String>,
@@ -1067,7 +1066,11 @@ fn log_in(
     offer: Option<&str>,
 ) -> Result<bool> {
     let before = at.after().len();
-    at.type_in(b"login ferrix\n")?;
+    let _ = ask(
+        at,
+        "m=login; echo \"$m-starts\"; login ferrix\n",
+        "login-starts",
+    )?;
     if let Some(offer) = offer {
         let deadline = Instant::now() + PATIENCE;
         let offered = at.read_more(deadline, |lines| {
@@ -1082,11 +1085,8 @@ fn log_in(
             return Ok(false);
         }
     }
-    for answer in answers {
-        thread::sleep(Duration::from_secs(2));
-        let mut keys = answer.as_bytes().to_vec();
-        keys.push(b'\n');
-        at.type_in(&keys)?;
+    for (index, answer) in answers.iter().enumerate() {
+        let _ = answer_prompt(at, before, index, answer)?;
         if *answer != FIRST_PASSWORD {
             // A refusal is held for the policy's two seconds.
             let deadline = Instant::now() + PATIENCE;
@@ -1184,9 +1184,12 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     }
     // The right password: root in every id.
     let before = at.after().len();
-    at.type_in(b"su -c 'cat /proc/self/status; m=su; echo \"$m-root\"'\n")?;
-    thread::sleep(Duration::from_secs(2));
-    at.type_in(format!("{FIRST_PASSWORD}\n").as_bytes())?;
+    let _ = ask(
+        at,
+        "m=su; echo \"$m-starts\"; su -c 'cat /proc/self/status; m=su; echo \"$m-root\"'\n",
+        "su-starts",
+    )?;
+    let _ = answer_prompts(at, before, &[FIRST_PASSWORD])?;
     let _ = wait_for(at, before, "su-root")?;
     let said = at.after().get(before..).unwrap_or_default().to_vec();
     if has(&said, ROOT_IDS) && has(&said, "su-root") {
@@ -1198,9 +1201,12 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     }
     // A wrong one.
     let before = at.after().len();
-    at.type_in(b"su -c 'm=su; echo \"$m-wrong-root\"'; m=su; echo \"$m-wrong\"\n")?;
-    thread::sleep(Duration::from_secs(2));
-    at.type_in(b"not the password\n")?;
+    let _ = ask(
+        at,
+        "m=su; echo \"$m-starts\"; su -c 'm=su; echo \"$m-wrong-root\"'; m=su; echo \"$m-wrong\"\n",
+        "su-starts",
+    )?;
+    let _ = answer_prompts(at, before, &["not the password"])?;
     let _ = wait_for(at, before, "su-wrong")?;
     let said = at.after().get(before..).unwrap_or_default().to_vec();
     if has(&said, "su: Authentication failure") && !has(&said, "su-wrong-root") {
@@ -1324,7 +1330,10 @@ exec cat >> /tmp/stolen
 ";
 
 /// What busybox's `cat` says when its read is refused with `EIO`: the
-/// reader's read ended by the hangup, not at an end of file.
+/// reader's read ended by the hangup, not at an end of file. Looked for
+/// anywhere in a line: the shell getty starts next prints its prompt on the
+/// same console at the same moment, and may print it first (2026-10-05, on
+/// main 634c7ed0e). Nothing typed in the stage says it.
 const REVOKED_READ: &str = "cat: read error: I/O error";
 
 /// The console revoke stage's thief: run by ferrix under `setsid -c`, which
@@ -1345,6 +1354,16 @@ fi
 /// console up. The reader must end, its read refused, and a line typed at
 /// the new shell must not reach it. Then ferrix, in a session of its own,
 /// may not steal the console from root's live session.
+///
+/// The reader is judged on the one look at its `stat` that ended the wait
+/// for it, and that look is the line echoed. A console read sleeps two
+/// milliseconds at a time between looks for a keystroke
+/// (`fs::terminal::POLL_NANOS`), so a reader waiting in it reads `R` for as
+/// long as it waits its turn after each, which on a loaded host is often: a
+/// second look, after the one that saw `S`, failed the stage with a reader
+/// that was waiting all along (2026-10-04, `batch-20261004T190141Z-b0-2`).
+/// A reader that never waits ends the wait after 500 looks, and the look
+/// echoed then says what it was doing instead.
 fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let said_by_probe = |lines: &[String], marker: &str| {
         lines
@@ -1356,8 +1375,8 @@ fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
                  until [ -s /tmp/revoke-reader ]; do :; done; \
                  p=$(cat /tmp/revoke-reader); \
                  svc scope --unit revoke-reader.scope $p && : > /tmp/revoke-moved; \
-                 until case \"$(cat /proc/$p/stat)\" in *revoke-reader*|*'(sh)'*) false;; *') S '*) true;; *) false;; esac; do :; done; \
-                 m=revoke; echo \"$m-reader $(cat /proc/$p/stat)\"; exit\n";
+                 n=0; until s=$(cat /proc/$p/stat); case \"$s\" in *revoke-reader*|*'(sh)'*) false;; *') S '*) true;; *) n=$((n+1)); [ $n -ge 500 ];; esac; do :; done; \
+                 m=revoke; echo \"$m-reader $s\"; exit\n";
     match ask(at, start, "revoke-reader ")? {
         Some(line) => {
             let state = line
@@ -1383,9 +1402,9 @@ fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
     // Root's shell has exited; getty restarts and hangs the console up.
     let deadline = Instant::now() + PATIENCE;
     let _ = at.read_more(deadline, |lines| {
-        said_by_probe(lines.get(before..).unwrap_or_default(), REVOKED_READ)
+        has(lines.get(before..).unwrap_or_default(), REVOKED_READ)
     })?;
-    if said_by_probe(since(at, before), REVOKED_READ) {
+    if has(since(at, before), REVOKED_READ) {
         println!("  revoke: getty's hangup ended the reader's read of the console with EIO");
     } else {
         failures.push(
@@ -1432,8 +1451,8 @@ fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
     Ok(())
 }
 
-/// `login NAME` at the console with `answers` typed blind: whether its
-/// shell started.
+/// `login NAME` at the console with `answers` given at its prompts in turn
+/// ([`answer_prompts`]): whether its shell started.
 fn enter(
     at: &mut Watching<'_>,
     failures: &mut Vec<String>,
@@ -1441,11 +1460,12 @@ fn enter(
     answers: &[&str],
 ) -> Result<bool> {
     let before = at.after().len();
-    at.type_in(format!("login {name}\n").as_bytes())?;
-    for answer in answers {
-        thread::sleep(Duration::from_secs(2));
-        at.type_in(format!("{answer}\n").as_bytes())?;
-    }
+    let _ = ask(
+        at,
+        &format!("m=login; echo \"$m-starts\"; login {name}\n"),
+        "login-starts",
+    )?;
+    let _ = answer_prompts(at, before, answers)?;
     let wanted = format!("login: {name} in user-");
     if wait_for(at, before, &wanted)? {
         Ok(true)
@@ -1453,6 +1473,68 @@ fn enter(
         failures.push(format!("`login {name}` did not log {name} in"));
         Ok(false)
     }
+}
+
+/// How long an answer typed at a password prompt is given to be read
+/// before it is typed again ([`answer_prompts`]).
+const ANSWER_RETYPE: Duration = Duration::from_secs(3);
+
+/// Give `answers` to the password prompts of a `login` or `su` started after
+/// line `before`, one per prompt, each typed again every [`ANSWER_RETYPE`]
+/// until its prompt has taken it. Says whether every one was taken within
+/// [`PATIENCE`] of the last.
+///
+/// An answer may not be typed ahead. The prompt flushes what is waiting
+/// (`TCSAFLUSH`, as `getpass` does, so nothing typed before the question is
+/// taken as its answer), and so does turning the echo back on after: an
+/// answer typed before its prompt's flush is thrown away, and on a loaded
+/// host the prompt comes seconds late. Typed blind two seconds apart, one
+/// answer was lost, the next question took the next line the gate typed,
+/// and every stage after it read the wrong program (`login plain`,
+/// 2026-10-04, `batch-20261004T190141Z-5`).
+///
+/// A prompt ends no line, but a password prompt's line ends once its
+/// answer has been read: the echo is off, and the program writes the
+/// newline itself after it turns the echo back on. So the prompts that have
+/// taken an answer are the lines saying `password: ` -- `Password: `, `New
+/// password: `, `Retype new password: ` -- and an answer still not taken
+/// is typed again. A copy typed after the first was read meets the flush of
+/// the echo's restore or of the next prompt; only one typed after the next
+/// prompt's flush, when the newline took longer to arrive than
+/// [`ANSWER_RETYPE`], is read again, by the next prompt or the new shell.
+fn answer_prompts(at: &mut Watching<'_>, before: usize, answers: &[&str]) -> Result<bool> {
+    for (index, answer) in answers.iter().enumerate() {
+        if !answer_prompt(at, before, index, answer)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Give `answer` to the password prompt numbered `index` from 0 since line
+/// `before`, as [`answer_prompts`] does: typed, and typed again every
+/// [`ANSWER_RETYPE`], until that many prompts and one more have taken an
+/// answer. Says whether it was taken within [`PATIENCE`].
+fn answer_prompt(at: &mut Watching<'_>, before: usize, index: usize, answer: &str) -> Result<bool> {
+    let taken = |lines: &[String]| {
+        lines
+            .get(before..)
+            .unwrap_or_default()
+            .iter()
+            .filter(|line| line.contains("assword: "))
+            .count()
+            > index
+    };
+    let deadline = Instant::now() + PATIENCE;
+    while !taken(at.after()) {
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        at.type_in(format!("{answer}\n").as_bytes())?;
+        let retype = (Instant::now() + ANSWER_RETYPE).min(deadline);
+        let _ = at.read_more(retype, taken)?;
+    }
+    Ok(true)
 }
 
 /// The lines from `before` on.

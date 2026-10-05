@@ -1518,19 +1518,46 @@ fn finish_watching(
 }
 
 /// Read `stdout` a line at a time on a thread of its own, into a channel.
+///
+/// **Bytes, not UTF-8.** A line is read up to its newline as bytes and
+/// decoded lossily, a byte that is not UTF-8 shown as U+FFFD. `lines()`
+/// answers such a line with an error, which ended this thread, and the
+/// watch took the closed channel for the guest closing its serial port and
+/// stopped QEMU: an x86-64 `test-init` boot of main 3c08d5657 ended that
+/// way at 7.5 s, its last line the I/O APIC's conversion just before the
+/// console's own interrupt line is converted (2026-10-05,
+/// `batch-20261005T114127Z-b0-3`). Only the end of QEMU's output, or a read
+/// that fails, ends it now.
 fn read_lines(
     stdout: std::process::ChildStdout,
 ) -> (mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
     let (sender, receiver) = mpsc::channel();
     let reader = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if sender.send(line).is_err() {
-                break;
-            }
-        }
+        send_lines(BufReader::new(stdout), &sender);
     });
     (receiver, reader)
+}
+
+/// [`read_lines`]'s loop: each line of `input`, its newline and a carriage
+/// return before it taken off, decoded lossily, sent until the input ends,
+/// a read fails or nobody listens.
+fn send_lines(mut input: impl BufRead, sender: &mpsc::Sender<String>) {
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        match input.read_until(b'\n', &mut bytes) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if sender
+            .send(String::from_utf8_lossy(line).into_owned())
+            .is_err()
+        {
+            break;
+        }
+    }
 }
 
 /// The error for a boot that was waited on for [`SUCCESS_MARKER`] and printed
@@ -3145,8 +3172,30 @@ mod tests {
         Arch, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER, blocks_compatibility_format,
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fault_problem,
         iommu_problem, msi_problem, namespace_problem, parse_qemu_version, queue_problem,
-        remap_problem, xstate_problem,
+        remap_problem, send_lines, xstate_problem,
     };
+
+    /// A byte that is not UTF-8 is shown, not the end of the guest's
+    /// output: the lines after it still arrive (`batch-20261005T114127Z-b0-3`).
+    #[test]
+    fn a_line_that_is_not_utf8_does_not_end_the_watch() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        send_lines(
+            &b"before\r\nbad \xff\xfe here\nafter\nlast, no newline"[..],
+            &sender,
+        );
+        drop(sender);
+        let lines: Vec<String> = receiver.iter().collect();
+        assert_eq!(
+            lines,
+            [
+                "before",
+                "bad \u{fffd}\u{fffd} here",
+                "after",
+                "last, no newline"
+            ]
+        );
+    }
 
     /// Only the build `fetch-qemu-linux.sh` makes is taken for x86-64.
     #[test]
