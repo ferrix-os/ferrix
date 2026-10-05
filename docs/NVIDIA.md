@@ -630,6 +630,27 @@ sits in the `load` ring beside display and render (§6).
   The round trip therefore stays off the per-frame path. The measured
   native round trip is 2.6–6.5 µs (`docs/BACKLOG.md`, 2026-10-01).
 
+**As built in N1e (2026-10-03), and what is deferred** (the consultant's
+N11 and N15, ledger 294 and 297). Registration is the driver's HELLO on its
+control channel, judged by `ferrix_chardevctl::session`, not a native call
+(N1), and the kernel names the nodes (N3); `nvidia-uvm`'s majors are not
+registered yet. The core forwards `open`, `ioctl` and `release`, nothing
+else:
+
+* `mmap` of a node is `ENODEV` and never reaches `nvrm` (the file has no
+  pages to map). Forwarding it is N2's, designed under ledger 300's M1-M12,
+  and its code goes to the consultant before it lands.
+* `poll` never reports a node readable or writable, only hangup and error
+  once its driver is gone; events (`EVENT(file)`) come with mmap.
+* `read` and `write` are `EINVAL`, as on NVIDIA's own nodes.
+* `request_file` is built, as `chardev_file` (`0x105E`): scoped to the
+  outstanding request's client and to this control's own files.
+* `request_pin`, the client-page pin of §4.3, is not. `nvrm`'s
+  `os_lock_user_pages` and `os_lookup_user_io_memory` are loud stubs
+  (`os/glue/stubs.c`: a line naming the stub, then
+  `NV_ERR_NOT_SUPPORTED`) until a gate needs them, and the kernel call goes
+  to the consultant for review before any code is written.
+
 `/proc/driver/nvidia/{params,version,gpus/<bdf>/information}` are text
 files that the core asks `nvrm` for, under a `procfs` hook. A `/sys/module/
 nvidia/initstate` reading `live` is added to sysfs, which already serves
@@ -1505,9 +1526,14 @@ and took the recommended answer for D2, D3 and D5.
     was found in that review and fixed before landing: the program's call
     returns only once no copy for it is running (L1). **Owed** before N2
     lands, or before `nvrm` goes into any other image (BACKLOG): ledger
-    294's N10, N12, N13 (plus a control for L1) and N15's remainder, N5's
+    294's N10's code half (F-63), N12 and N13 (plus a control for L1), N5's
     switch when fault windows land, ledger 293's D1–D10, and a
-    `test-nvidia-smi` gate.
+    `test-nvidia-smi` gate. N10's text, the core's bounds, is in
+    `docs/certification/MEMORY-AND-TIMING.md` §2.2k, and N15's remainder,
+    what is deferred, in §4.4 (2026-10-05). Writing N10 found the queue to
+    `nvrm` unbounded (F-63, reserved, ledger 361): an abandoned request
+    stays queued while a new one is admitted. N10 stays owed until the
+    code holds the bound.
 
 ## 11. CUDA (N5)
 

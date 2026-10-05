@@ -798,6 +798,79 @@ recorded refuses (`start_thread`). Listing a task
 can run, and a start whose task cannot be listed fails before anything runs
 (F-23).
 
+### 2.2k The chardev core's tables (`interfaces::chardev`, load ring)
+
+NVIDIA's N1e forwarding core (`docs/NVIDIA.md` §4.4) is in the `load`
+ring, outside the item; the item gains only its five call numbers and their
+`SERVED` rows. Its bounds are written here because the consultant made them
+a condition of landing it (ledger 294, N10). They hold on every image, and
+the core does nothing on any image but `run-nvidia`'s: a control is made only
+for a device devmgr has handed over isolated.
+
+Memory. A control is made by `chardev_control_create`, one per device
+(`CLAIMS`), and everything it will hold is reserved then: the request table,
+a list of at most `MAX_OUTSTANDING`, 256, requests sorted by id, and the
+queue of messages for the driver, both `try_reserve_exact` for 256 entries,
+and the control itself through `fallible::try_arc`; a refusal is
+`NO_MEMORY` with nothing kept. Each open of a node reserves one more queue
+slot for its release (`hold_release`, `ENOMEM` on failure), so queuing a
+release allocates nothing and cannot fail (N8). A request is one fallible
+allocation (`ENOMEM`); the 257th outstanding request is `EBUSY`.
+
+**The queue's bound does not hold today (F-63, reserved 2026-10-05, ledger
+361).** An abandoned request leaves the request table but stays in the
+queue for the driver, which is written only while the driver's channel has
+room. So with a driver that stops reading, clients that are signalled and
+call again keep 256 requests outstanding while the abandoned ones pile up in
+the queue, past its 256 entries and the releases held. The queue's
+`push_back` in `call` is then an allocation that cannot report failure, under
+the control's spin lock, and can run until the kernel stops. The nodes are
+`0666`. It is open on every image that runs `nvrm`, which is `run-nvidia`'s
+alone, and has been since N1e. The fix takes abandoned requests out of the
+queue, or skips them, or counts them at admission, with a boot self-check
+and a negative control (N12, N13); until then this section's bound on the
+queue is the intended one, not the built one. The global lists are bounded by what they list: `STARTING` and
+`CONTROLS` hold one entry per control, at most one per device, and
+`PUBLISHED` one per published minor, unique system-wide and at most 256
+(minors 0 to 255, at most eight a HELLO). A copy's bounce buffer is one
+fallible heap allocation of at most 4 KiB per call, never kernel stack.
+
+Locks and time. Nothing is copied, waited for or mapped under a lock of the
+core, and no lock of the core is taken under another. The one lock taken
+beneath them is the heap's, an interrupt-masking spin lock, through the
+fallible allocations named here: a request's record and an open's
+reservation under the control's `state`, and the lists' room under
+`PUBLISHED`, `CONTROLS` and `STARTING`.
+
+* A control's `state`: a request's admission (the count, the id, one
+  allocation, two pushes into reserved room), a reply's or an abandonment's
+  lookup by binary search over at most 256 ids, and its removal, which
+  moves at most 255 pointers; a release's push; an open's reservation,
+  which may allocate.
+* A request's `inner`: a handful of loads and stores (`alive`, `answer`,
+  the count of copies in flight).
+* `CONTROLS`: a reply's or copy's search for the control whose driver end
+  the handle names, one pointer comparison per live control.
+* `PUBLISHED`: a HELLO's uniqueness test, at most 8 by 256 comparisons, and
+  an open's lookup of its minor, at most 256.
+
+No copy runs under a lock. A copy call moves at most 1 MiB, 256 chunks of
+4 KiB, through the bounce buffer; between chunks it takes the request's
+lock to read that the request is still alive and unanswered, and drops it
+before the next chunk. The copies are plain user accesses: `main` has no
+fault a ring-3 driver serves, so a copy cannot wait on `nvrm`. When fault
+windows land the copies must switch to the mode that refuses a window
+(ledger 294's N5, a `docs/BACKLOG.md` row).
+
+Waiting. A client's open or ioctl sleeps until its driver answers,
+with no deadline, as a call to any ring-3 driver does; a signal ends the
+wait with `EINTR`, after which the request is dead and its client waits out
+at most one chunk of a copy already in flight (N4, the drain), and the same
+drain follows an answer (L1). A release does not wait: it is
+queued and the client goes on. These are waits on a driver, not work of the
+item, and no bound is claimed for them. The driver's HELLO is waited for at
+most 10 s by the control's own task, never by a client or the boot.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

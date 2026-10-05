@@ -173,17 +173,18 @@ SAFETY-MANUAL AoU-24, not a requirement of the item.
 **`main.rs` is in the item, and it is the composition root.** The manifest
 puts it in the `item` ring as bring-up, and nothing about that is changed
 here. But it is also where the load is put together with the item. Since
-2026-09-26 the gate reads its calls into the load -- 27 modules on
-2026-10-03 -- and records them under `composition_root` in the manifest
+2026-09-26 the gate reads its calls into the load -- 28 modules on
+2026-10-05 -- and records them under `composition_root` in the manifest
 rather than in the debt register: ratcheted the same way, filed against no
-finding. Of the 27, 7 are the load's own boot self-checks (`fs::check`,
+finding. Of the 28, 7 are the load's own boot self-checks (`fs::check`,
 `net::check`, `fs::btrfs_write_check`, `fs::btrfs_powerfail`,
 `fs::mmap_check`, `fs::procfs::check` and
-`interfaces::block_ring::driver_check`), and 20 are product modules:
+`interfaces::block_ring::driver_check`), and 21 are product modules:
 registration (`syscall::launch`, `syscall::linux`, `syscall::deliver`,
 `syscall::seccomp`, `platform::st::stm32mp1`,
 `platform::google::gs201::usb`, `fs`, `fs::procfs`, and since W-5
-`block_ring`, `net_ring`, `render`, `input`, `audio` and `logctl`), and the
+`block_ring`, `net_ring`, `render`, `input`, `audio` and `logctl`, and
+since NVIDIA's N1e `chardev`), and the
 load's subsystems brought up in order (`fs::root_disk`, `fs::data_disk`,
 `fs::home_disk`, `net`, `syscall::time`, `display`). The manifest's list is
 the authority; this sentence is recounted from it.
