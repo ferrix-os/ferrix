@@ -2392,7 +2392,8 @@ fn steal_from(me: usize, victim: usize) -> bool {
         (&mut *second_queue, &mut *first_queue)
     };
 
-    let moved = match theirs_queue.steal_candidate(me) {
+    let keeps_its_last = theirs_queue.is_running_idle() && theirs_queue.waiting() <= 1;
+    let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
         Some(id) => match theirs_queue.release(id) {
             Some((task, state)) => {
                 task.store_entity_state(state);
