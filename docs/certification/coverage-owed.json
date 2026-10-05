@@ -168,6 +168,16 @@
       ],
       "dropped": "Carried onto main with 0 anchors dropped as unmeasured.",
       "what": "Measure main.rs's two new calls of fs::home_disk::mount, after each fs::data_disk::mount in bring-up: no coverage run attaches a home disk, so a run reaches the calls but not a mount behind them; test-shell's K7 boots, `cargo xtask run` and `run-compositor` attach one."
+    },
+    {
+      "landing": "the chardev core held to its queue's room and checked at boot, F-63 and NVIDIA N12 (branch po5/c1-n12)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "Carried onto main 39e520e31 with 0 anchors dropped as unmeasured; only main.rs's anchors moved, by one line.",
+      "what": "Measure stages_check.rs's check_chardev (its fatal arm is reached only when the check fails, its not-checked arm only on a machine with no PCI function) and main.rs's new call of it in check_block_ring."
     }
   ]
 }
