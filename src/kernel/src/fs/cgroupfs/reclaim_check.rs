@@ -324,12 +324,26 @@ fn high(
     wrote.map_err(|_| "a tmpfs file would not take its pages")?;
     let before = other.number(harness, "memory.current", "")?;
     let beside_filled = source_b.filled.load(Ordering::Relaxed);
+    // The sibling lost nothing: asked first after each read, since a reclaim
+    // that took the sibling's pages would also leave this cgroup over its mark.
+    let untouched = || -> Checked<()> {
+        if other.number(harness, "memory.current", "")? != before
+            || beside.committed_bytes() != SIBLING_PAGES * PAGE_SIZE
+            || memory.committed_bytes() != SHMEM_PAGES * PAGE_SIZE
+            || source_b.filled.load(Ordering::Relaxed) != beside_filled
+            || other.number(harness, "memory.stat", "pgsteal")? != 0
+        {
+            return Err("a sibling cgroup's pages were reclaimed for another's memory.high");
+        }
+        Ok(())
+    };
 
     if !group.read_all(file, PAGES)? {
         return Err(
             "a file read in a cgroup over its memory.high did not read as its source has it",
         );
     }
+    untouched()?;
     let current = group.number(harness, "memory.current", "")?;
     if current > MARK_BYTES {
         crate::console::println!("  reclaim  memory.current {current}, memory.high {MARK_BYTES}");
@@ -358,16 +372,7 @@ fn high(
     if group.number(harness, "memory.stat", "pgsteal")? <= filled {
         return Err("a second read over memory.high took nothing more");
     }
-
-    // The sibling lost nothing.
-    if other.number(harness, "memory.current", "")? != before
-        || beside.committed_bytes() != SIBLING_PAGES * PAGE_SIZE
-        || memory.committed_bytes() != SHMEM_PAGES * PAGE_SIZE
-        || source_b.filled.load(Ordering::Relaxed) != beside_filled
-        || other.number(harness, "memory.stat", "pgsteal")? != 0
-    {
-        return Err("a sibling cgroup's pages were reclaimed for another's memory.high");
-    }
+    untouched()?;
     if other.number(harness, "memory.stat", "file")? != SIBLING_PAGES * PAGE_SIZE
         || other.number(harness, "memory.stat", "shmem")? != SHMEM_PAGES * PAGE_SIZE
     {
