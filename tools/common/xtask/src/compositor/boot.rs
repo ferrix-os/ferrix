@@ -559,6 +559,7 @@ pub(super) fn build_parts(
     // busybox and zinc go in through the same slots `build` and `run` use, so
     // the applet links, `/etc/passwd` and `/bin/zsh` come with them.
     carried.extend(carried_too.ports);
+    drop_linked_xkb_directories(&mut carried);
     let initramfs = crate::initramfs::build(
         carried_too.busybox.as_deref(),
         &natives,
@@ -566,6 +567,32 @@ pub(super) fn build_parts(
         &carried,
     )?;
     Ok((loader, kernel, initramfs))
+}
+
+/// Leave out [`XKB_DIRECTORIES`] where the image links one of them, or a
+/// directory above them, somewhere else.
+///
+/// The `--everything` desktop links `usr/share/X11` into its volume
+/// (`yserver::LINKS`), where the real directory is, keymaps and all. The
+/// empty placeholder went into the archive first, and the kernel cannot put
+/// a link over a directory the archive has already filled: every
+/// `run-compositor --everything` since 2026-10-04 stopped at "the initramfs
+/// did not unpack: entry 739 could not be created: errno 39".
+fn drop_linked_xkb_directories(carried: &mut Vec<crate::ports::File>) {
+    let linked = |directory: &str| {
+        carried.iter().any(|file| {
+            matches!(file.content, crate::ports::Content::Link(_))
+                && (directory == file.path || directory.starts_with(&format!("{}/", file.path)))
+        })
+    };
+    let covered: Vec<&str> = XKB_DIRECTORIES
+        .into_iter()
+        .filter(|directory| linked(directory))
+        .collect();
+    carried.retain(|file| {
+        !(matches!(file.content, crate::ports::Content::Directory)
+            && covered.contains(&file.path.as_str()))
+    });
 }
 
 /// Print the line the compositor said when its screen came up.
@@ -777,5 +804,52 @@ mod tests {
         }
         // The bar's binds `A` alone: pressing SUPER C there asks nothing.
         assert!(!super::binds_the_asked(BAR_CONFIG));
+    }
+
+    fn file(path: &str, content: crate::ports::Content) -> crate::ports::File {
+        crate::ports::File {
+            path: path.to_owned(),
+            mode: 0o755,
+            content,
+        }
+    }
+
+    fn paths(files: &[crate::ports::File]) -> Vec<&str> {
+        files.iter().map(|file| file.path.as_str()).collect()
+    }
+
+    #[test]
+    fn a_linked_x11_directory_takes_the_place_of_the_xkb_placeholder() {
+        use crate::ports::Content::{Directory, Link};
+        // The `--everything` image: the placeholder, then the volume's link.
+        let mut carried = vec![
+            file("usr/share/X11", Directory),
+            file("usr/share/X11/xkb", Directory),
+            file("usr/share/X11", Link("/data/usr/share/X11".to_owned())),
+        ];
+        super::drop_linked_xkb_directories(&mut carried);
+        assert_eq!(paths(&carried), ["usr/share/X11"]);
+        assert!(matches!(carried[0].content, Link(_)));
+
+        // A link above it stands in the placeholder's way just the same.
+        let mut carried = vec![
+            file("usr/share/X11", Directory),
+            file("usr/share/X11/xkb", Directory),
+            file("usr/share", Link("/data/usr/share".to_owned())),
+        ];
+        super::drop_linked_xkb_directories(&mut carried);
+        assert_eq!(paths(&carried), ["usr/share"]);
+
+        // Every other image keeps the directory libxkbcommon needs.
+        let mut carried = vec![
+            file("usr/share/X11", Directory),
+            file("usr/share/X11/xkb", Directory),
+            file("usr/share/fonts", Link("/data/usr/share/fonts".to_owned())),
+        ];
+        super::drop_linked_xkb_directories(&mut carried);
+        assert_eq!(
+            paths(&carried),
+            ["usr/share/X11", "usr/share/X11/xkb", "usr/share/fonts"]
+        );
     }
 }
