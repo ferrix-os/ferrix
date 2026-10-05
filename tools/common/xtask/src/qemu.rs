@@ -1518,19 +1518,42 @@ fn finish_watching(
 }
 
 /// Read `stdout` a line at a time on a thread of its own, into a channel.
+///
+/// Lines are read as bytes and made text afterwards, as `crate::serial` and
+/// `crate::noise` already do: a line that is not UTF-8 is a line to print
+/// with a replacement character, not the end of the guest's output.
+/// `lines()` stopped at the first such byte, the channel closed with QEMU
+/// still running, and the watcher took that for QEMU's exit: it asked QEMU
+/// to stop (SIGTERM, through `kill(1)`), then reported "QEMU exited before
+/// the guest printed" -- the gate killed by "signal 15 from pid N" with no
+/// one to blame (2026-10-05).
 fn read_lines(
     stdout: std::process::ChildStdout,
 ) -> (mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
     let (sender, receiver) = mpsc::channel();
     let reader = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if sender.send(line).is_err() {
+        let mut reader = BufReader::new(stdout);
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            match reader.read_until(b'\n', &mut bytes) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            if sender.send(text_of(&bytes)).is_err() {
                 break;
             }
         }
     });
     (receiver, reader)
+}
+
+/// One line of the guest's output as text: its line ending gone, and any
+/// byte that is not UTF-8 replaced.
+fn text_of(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches(['\r', '\n'])
+        .to_owned()
 }
 
 /// The error for a boot that was waited on for [`SUCCESS_MARKER`] and printed
@@ -3161,6 +3184,25 @@ mod tests {
             "QEMU emulator version 9.2.4 (v9.2.4-dirty)\n"
         ));
         assert!(!blocks_compatibility_format(""));
+    }
+
+    /// A byte that is not UTF-8 is one replaced character, and the lines
+    /// after it still arrive: the reader does not end, so the watcher never
+    /// takes QEMU for gone and SIGTERMs it.
+    #[cfg(unix)]
+    #[test]
+    fn a_line_that_is_not_utf8_does_not_end_the_guests_output() {
+        let mut child = std::process::Command::new("printf")
+            .arg(r"first\r\n\365 second\nthird\n")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("printf runs");
+        let stdout = child.stdout.take().expect("piped");
+        let (receiver, reader) = super::read_lines(stdout);
+        let lines: Vec<String> = receiver.iter().collect();
+        reader.join().expect("the reader ends");
+        let _ = child.wait();
+        assert_eq!(lines, ["first", "\u{FFFD} second", "third"]);
     }
 
     /// A secret goes in any case and every time, and nothing else does.
