@@ -8,7 +8,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use crate::args::Args;
@@ -1095,6 +1095,9 @@ type AtMarker<'a> = &'a mut dyn FnMut(&mut Watching<'_>) -> Result<()>;
 pub(crate) struct Watching<'a> {
     lines: &'a [String],
     receiver: &'a mpsc::Receiver<String>,
+    /// What the guest has printed since its last newline
+    /// ([`Watching::unfinished_line`]).
+    unfinished: &'a Mutex<Vec<u8>>,
     log: &'a mut std::fs::File,
     started: Instant,
     after: Vec<String>,
@@ -1165,6 +1168,29 @@ impl Watching<'_> {
     /// The lines read since, by [`Watching::read_more`].
     pub(crate) fn after(&self) -> &[String] {
         &self.after
+    }
+
+    /// What the guest has printed since its last newline, decoded lossily
+    /// and [`redacted`]: a prompt waiting for its answer, which ends no line
+    /// and so never reaches [`Watching::read_more`]. Not printed or logged;
+    /// the line is, once it ends.
+    ///
+    /// Read every line sent before looking ([`Watching::read_more`]): the
+    /// reader empties this before it sends the line it held, so a line is
+    /// never here and in [`Watching::after`] at once, but may for a moment
+    /// be in neither.
+    pub(crate) fn unfinished_line(&self) -> String {
+        let bytes = self
+            .unfinished
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let line = String::from_utf8_lossy(&bytes);
+        if self.hidden.is_empty() {
+            line.into_owned()
+        } else {
+            redacted(&line, &self.hidden)
+        }
     }
 
     /// Type `keys` at the guest's console, as a person at the terminal
@@ -1392,7 +1418,7 @@ fn watch_hooked(
     // A reader thread and a channel, rather than a non-blocking read: the guest
     // may say nothing for seconds at a time, and the timeout has to apply to
     // the boot as a whole rather than to each line.
-    let (receiver, reader) = read_lines(stdout);
+    let (receiver, unfinished, reader) = read_lines(stdout);
 
     let log_path = paths::build_dir(arch).join("serial.log");
     let mut log = std::fs::File::create(&log_path)?;
@@ -1464,7 +1490,7 @@ fn watch_hooked(
         at_marker,
         verdict,
         &mut lines,
-        &receiver,
+        (&receiver, &unfinished),
         &mut log,
         started,
         keyboard.as_mut(),
@@ -1517,47 +1543,95 @@ fn finish_watching(
     })
 }
 
-/// Read `stdout` a line at a time on a thread of its own, into a channel.
+/// What the guest has printed since its last newline, as [`send_lines`]
+/// keeps it for [`Watching::unfinished_line`].
+type Unfinished = Arc<Mutex<Vec<u8>>>;
+
+/// Read `stdout` a line at a time on a thread of its own, into a channel,
+/// and keep the line it has not finished yet beside it.
 ///
 /// **Bytes, not UTF-8.** A line is read up to its newline as bytes and
 /// decoded lossily, a byte that is not UTF-8 shown as U+FFFD. `lines()`
 /// answers such a line with an error, which ended this thread, and the
 /// watch took the closed channel for the guest closing its serial port and
-/// stopped QEMU: an x86-64 `test-init` boot of main 3c08d5657 ended that
-/// way at 7.5 s, its last line the I/O APIC's conversion just before the
-/// console's own interrupt line is converted (2026-10-05,
-/// `batch-20261005T114127Z-b0-3`). Only the end of QEMU's output, or a read
-/// that fails, ends it now.
+/// stopped QEMU through `kill -s TERM`: the "terminating on signal 15 from
+/// pid N" that no sender could be found for was xtask's own kill. An x86-64
+/// `test-init` boot of main 3c08d5657 ended that way at 7.5 s, its last
+/// line the I/O APIC's conversion just before the console's own interrupt
+/// line is converted (2026-10-05, `batch-20261005T114127Z-b0-3`), and a
+/// stage 10 panic's echoed 0xF5 hid the panic the same way (po5-sig). Only
+/// the end of QEMU's output, or a read that fails, ends it now.
 fn read_lines(
     stdout: std::process::ChildStdout,
-) -> (mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
+) -> (
+    mpsc::Receiver<String>,
+    Unfinished,
+    std::thread::JoinHandle<()>,
+) {
     let (sender, receiver) = mpsc::channel();
+    let unfinished = Unfinished::default();
+    let kept = Arc::clone(&unfinished);
     let reader = std::thread::spawn(move || {
-        send_lines(BufReader::new(stdout), &sender);
+        send_lines(BufReader::new(stdout), &sender, &kept);
     });
-    (receiver, reader)
+    (receiver, unfinished, reader)
 }
 
 /// [`read_lines`]'s loop: each line of `input`, its newline and a carriage
 /// return before it taken off, decoded lossily, sent until the input ends,
-/// a read fails or nobody listens.
-fn send_lines(mut input: impl BufRead, sender: &mpsc::Sender<String>) {
+/// a read fails or nobody listens; a last line with no newline is sent at
+/// the end. Meanwhile `unfinished` holds what has come of the next line.
+///
+/// `unfinished` is emptied before the line it held is sent, never after:
+/// someone who has read every line sent and then looks at it may find a
+/// line in neither place for a moment, but never one line in both, so a
+/// prompt still waiting is never counted beside its own finished line.
+fn send_lines(mut input: impl BufRead, sender: &mpsc::Sender<String>, unfinished: &Mutex<Vec<u8>>) {
+    let keep = |bytes: &[u8]| {
+        let mut kept = unfinished.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.clear();
+        kept.extend_from_slice(bytes);
+    };
     let mut bytes = Vec::new();
     loop {
-        bytes.clear();
-        match input.read_until(b'\n', &mut bytes) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
-        let line = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        if sender
-            .send(String::from_utf8_lossy(line).into_owned())
-            .is_err()
-        {
+        let available = match input.fill_buf() {
+            Ok(available) => available,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        if available.is_empty() {
             break;
         }
+        let Some(newline) = available.iter().position(|&byte| byte == b'\n') else {
+            bytes.extend_from_slice(available);
+            let used = available.len();
+            input.consume(used);
+            keep(&bytes);
+            continue;
+        };
+        let (line, _) = available.split_at(newline + 1);
+        bytes.extend_from_slice(line);
+        input.consume(newline + 1);
+        keep(&[]);
+        if !send_line(sender, &bytes) {
+            return;
+        }
+        bytes.clear();
     }
+    keep(&[]);
+    if !bytes.is_empty() {
+        let _ = send_line(sender, &bytes);
+    }
+}
+
+/// Send one line of `bytes`, its newline and a carriage return before it
+/// taken off, decoded lossily. Says whether anybody still listens.
+fn send_line(sender: &mpsc::Sender<String>, bytes: &[u8]) -> bool {
+    let line = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    sender
+        .send(String::from_utf8_lossy(line).into_owned())
+        .is_ok()
 }
 
 /// The error for a boot that was waited on for [`SUCCESS_MARKER`] and printed
@@ -1595,7 +1669,7 @@ fn run_hook(
     at_marker: Option<AtMarker<'_>>,
     verdict: Verdict,
     lines: &mut Vec<String>,
-    receiver: &mpsc::Receiver<String>,
+    (receiver, unfinished): (&mpsc::Receiver<String>, &Mutex<Vec<u8>>),
     log: &mut std::fs::File,
     started: Instant,
     keyboard: Option<&mut std::process::ChildStdin>,
@@ -1609,6 +1683,7 @@ fn run_hook(
     let mut watching = Watching {
         lines,
         receiver,
+        unfinished,
         log,
         started,
         after: Vec::new(),
@@ -3180,9 +3255,11 @@ mod tests {
     #[test]
     fn a_line_that_is_not_utf8_does_not_end_the_watch() {
         let (sender, receiver) = std::sync::mpsc::channel();
+        let unfinished = std::sync::Mutex::default();
         send_lines(
             &b"before\r\nbad \xff\xfe here\nafter\nlast, no newline"[..],
             &sender,
+            &unfinished,
         );
         drop(sender);
         let lines: Vec<String> = receiver.iter().collect();
@@ -3195,6 +3272,56 @@ mod tests {
                 "last, no newline"
             ]
         );
+    }
+
+    /// Bytes the guest's serial port gives as they come, one write at a time.
+    struct Arriving(std::sync::mpsc::Receiver<Vec<u8>>);
+
+    impl std::io::Read for Arriving {
+        fn read(&mut self, into: &mut [u8]) -> std::io::Result<usize> {
+            let Ok(bytes) = self.0.recv() else {
+                return Ok(0);
+            };
+            into[..bytes.len()].copy_from_slice(&bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    /// A prompt ends no line, yet is seen while it waits: the unfinished
+    /// line holds what has come since the last newline, grows as more comes,
+    /// and is empty once its line has ended and been sent, never in both
+    /// places at once. `test-init` answers a password prompt only once it is
+    /// seen here (`init::answer_prompt`).
+    #[test]
+    fn a_prompt_with_no_newline_is_the_unfinished_line() {
+        let (guest, arriving) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let unfinished = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = std::sync::Arc::clone(&unfinished);
+        let reader = std::thread::spawn(move || {
+            send_lines(std::io::BufReader::new(Arriving(arriving)), &sender, &kept);
+        });
+        let now = || String::from_utf8_lossy(&unfinished.lock().unwrap()).into_owned();
+        let settle = |wanted: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while now() != wanted && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            now()
+        };
+        let wait = std::time::Duration::from_secs(10);
+        guest.send(b"su-starts\r\nPass".to_vec()).unwrap();
+        assert_eq!(receiver.recv_timeout(wait).unwrap(), "su-starts");
+        assert_eq!(settle("Pass"), "Pass");
+        guest.send(b"word: ".to_vec()).unwrap();
+        assert_eq!(settle("Password: "), "Password: ");
+        guest.send(b"\r\nsu-root\r\n".to_vec()).unwrap();
+        assert_eq!(receiver.recv_timeout(wait).unwrap(), "Password: ");
+        assert_eq!(now(), "", "a sent line is no longer unfinished");
+        assert_eq!(receiver.recv_timeout(wait).unwrap(), "su-root");
+        drop(guest);
+        reader.join().unwrap();
+        assert!(receiver.recv().is_err(), "nothing more");
     }
 
     /// Only the build `fetch-qemu-linux.sh` makes is taken for x86-64.

@@ -1475,33 +1475,40 @@ fn enter(
     }
 }
 
-/// How long an answer typed at a password prompt is given to be read
-/// before it is typed again ([`answer_prompts`]).
-const ANSWER_RETYPE: Duration = Duration::from_secs(3);
+/// How often [`answer_prompt`] looks at the console's unfinished line for
+/// the prompt it waits on.
+const PROMPT_LOOK: Duration = Duration::from_millis(10);
+
+/// What every password prompt says -- `Password: `, `New password: `,
+/// `Retype new password: ` -- and the end of its line once it has taken an
+/// answer, trailing blanks aside.
+const PROMPT: &str = "assword: ";
 
 /// Give `answers` to the password prompts of a `login` or `su` started after
-/// line `before`, one per prompt, each typed again every [`ANSWER_RETYPE`]
-/// until its prompt has taken it. Says whether every one was taken within
-/// [`PATIENCE`] of the last.
+/// line `before`, one per prompt, each typed once its prompt is on the
+/// console. Says whether every one was taken within [`PATIENCE`] of the
+/// last.
 ///
 /// An answer may not be typed ahead. The prompt flushes what is waiting
 /// (`TCSAFLUSH`, as `getpass` does, so nothing typed before the question is
-/// taken as its answer), and so does turning the echo back on after: an
-/// answer typed before its prompt's flush is thrown away, and on a loaded
-/// host the prompt comes seconds late. Typed blind two seconds apart, one
-/// answer was lost, the next question took the next line the gate typed,
-/// and every stage after it read the wrong program (`login plain`,
-/// 2026-10-04, `batch-20261004T190141Z-5`).
+/// taken as its answer), and so does turning the echo back on after. An
+/// answer typed before its prompt's flush is thrown away whole if it all
+/// came before the flush (`login plain`, 2026-10-04,
+/// `batch-20261004T190141Z-5`: typed blind two seconds apart, one answer was
+/// lost, the next question took the next line the gate typed), and **cut**
+/// if the flush came while it arrived: a QEMU serial port takes 16 bytes
+/// at a time, so `chosen at the console` came in two, the flush threw away
+/// the first and `su` read ` console` as the password (2026-10-05,
+/// `po5-red-tip-init-all-1`, the echo showing `chosen at the` before
+/// `Password: `). Typing it again could not mend that, since `su` asks once.
 ///
-/// A prompt ends no line, but a password prompt's line ends once its
-/// answer has been read: the echo is off, and the program writes the
-/// newline itself after it turns the echo back on. So the prompts that have
-/// taken an answer are the lines saying `password: ` -- `Password: `, `New
-/// password: `, `Retype new password: ` -- and an answer still not taken
-/// is typed again. A copy typed after the first was read meets the flush of
-/// the echo's restore or of the next prompt; only one typed after the next
-/// prompt's flush, when the newline took longer to arrive than
-/// [`ANSWER_RETYPE`], is read again, by the next prompt or the new shell.
+/// So each answer is typed once, when its prompt is the console's unfinished
+/// line ([`Watching::unfinished_line`]): the program echoes nothing and
+/// flushes before it prints the prompt (`ferrix-auth-client`'s `Terminal`),
+/// so what is typed after the prompt is all read. A password prompt's line
+/// ends once its answer has been read -- the echo is off, and the program
+/// writes the newline itself -- so a prompt has taken its answer when a
+/// line ends with it.
 fn answer_prompts(at: &mut Watching<'_>, before: usize, answers: &[&str]) -> Result<bool> {
     for (index, answer) in answers.iter().enumerate() {
         if !answer_prompt(at, before, index, answer)? {
@@ -1512,27 +1519,42 @@ fn answer_prompts(at: &mut Watching<'_>, before: usize, answers: &[&str]) -> Res
 }
 
 /// Give `answer` to the password prompt numbered `index` from 0 since line
-/// `before`, as [`answer_prompts`] does: typed, and typed again every
-/// [`ANSWER_RETYPE`], until that many prompts and one more have taken an
-/// answer. Says whether it was taken within [`PATIENCE`].
+/// `before`, as [`answer_prompts`] does: typed once, when `index` prompts
+/// have taken an answer and one more is on the console, finished line or
+/// not. Says whether it was taken within [`PATIENCE`].
+///
+/// A prompt is counted as shown wherever it is, and as answered only at the
+/// end of a line: a line the console's log wrote into while the prompt
+/// waited shows it without its answer.
 fn answer_prompt(at: &mut Watching<'_>, before: usize, index: usize, answer: &str) -> Result<bool> {
-    let taken = |lines: &[String]| {
+    let answered = |lines: &[String]| {
         lines
             .get(before..)
             .unwrap_or_default()
             .iter()
-            .filter(|line| line.contains("assword: "))
+            .filter(|line| line.trim_end().ends_with(PROMPT.trim_end()))
             .count()
-            > index
     };
+    let taken = |lines: &[String]| answered(lines) > index;
     let deadline = Instant::now() + PATIENCE;
+    let mut typed = false;
     while !taken(at.after()) {
         if Instant::now() >= deadline {
             return Ok(false);
         }
-        at.type_in(format!("{answer}\n").as_bytes())?;
-        let retype = (Instant::now() + ANSWER_RETYPE).min(deadline);
-        let _ = at.read_more(retype, taken)?;
+        // The lines first, then the unfinished one: a line leaves the
+        // unfinished one before it is sent, so it is never counted twice.
+        let shown = since(at, before)
+            .iter()
+            .map(|line| line.matches(PROMPT).count())
+            .sum::<usize>()
+            + at.unfinished_line().matches(PROMPT).count();
+        if !typed && shown > index && answered(at.after()) == index {
+            at.type_in(format!("{answer}\n").as_bytes())?;
+            typed = true;
+        }
+        let look = (Instant::now() + PROMPT_LOOK).min(deadline);
+        let _ = at.read_more(look, taken)?;
     }
     Ok(true)
 }

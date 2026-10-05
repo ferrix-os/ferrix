@@ -316,10 +316,6 @@ impl Terminal {
 
 impl Person for Terminal {
     fn ask(&mut self, visible: bool, text: &str) -> Option<Secret> {
-        let mut err = io::stderr().lock();
-        let _ = write!(err, "{text}");
-        let _ = err.flush();
-        drop(err);
         // The terminal only when standard input is one: a secret piped in
         // by a script is read from the pipe, not waited for on the console.
         let tty = if self.tty_only {
@@ -343,12 +339,16 @@ impl Person for Terminal {
                 .flatten()
         };
         let answer = match tty {
-            Some(file) => read_from_terminal(&file, visible),
-            None if self.ended || self.tty_only => None,
+            Some(file) => read_from_terminal(&file, visible, text),
             None => {
-                let answer = read_line(&mut io::stdin().lock());
-                self.ended = answer.is_none();
-                answer
+                show_prompt(text);
+                if self.ended || self.tty_only {
+                    None
+                } else {
+                    let answer = read_line(&mut io::stdin().lock());
+                    self.ended = answer.is_none();
+                    answer
+                }
             }
         };
         if !visible {
@@ -362,6 +362,13 @@ impl Person for Terminal {
     }
 }
 
+/// Write `text`, a question, to standard error with no newline after it.
+fn show_prompt(text: &str) {
+    let mut err = io::stderr().lock();
+    let _ = write!(err, "{text}");
+    let _ = err.flush();
+}
+
 /// Whether `fd` is a terminal.
 fn is_terminal(fd: RawFd) -> bool {
     // SAFETY: `isatty` reads nothing through its argument; any number is
@@ -369,8 +376,17 @@ fn is_terminal(fd: RawFd) -> bool {
     unsafe { libc::isatty(fd) == 1 }
 }
 
-/// One line from a terminal, its echo off for a secret and restored after.
-fn read_from_terminal(file: &std::fs::File, visible: bool) -> Option<Secret> {
+/// One line from a terminal after `prompt`, its echo off for a secret and
+/// restored after.
+///
+/// **The echo goes off, and what was typed ahead is thrown away, before
+/// the prompt is shown**, as `getpass` does. Whatever is typed once the
+/// question is on the screen is then all the answer. With the prompt shown
+/// first, an answer typed as soon as it appeared could meet the flush part
+/// way through: `test-init`'s `su` lost the first 13 bytes of a password
+/// that the serial port took in two pieces, and read the rest as the
+/// password (2026-10-05).
+fn read_from_terminal(file: &std::fs::File, visible: bool, prompt: &str) -> Option<Secret> {
     let fd = file.as_raw_fd();
     let mut saved = std::mem::MaybeUninit::<libc::termios>::uninit();
     // SAFETY: `saved` is valid for a `termios` write; `fd` is open.
@@ -384,6 +400,7 @@ fn read_from_terminal(file: &std::fs::File, visible: bool) -> Option<Secret> {
         // SAFETY: `quiet` is a valid `termios` copied from the terminal's own.
         let _ = unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &raw const quiet) };
     }
+    show_prompt(prompt);
     let mut reader = io::BufReader::new(file);
     let answer = read_line(&mut reader);
     if let (Some(original), false) = (saved, visible) {
