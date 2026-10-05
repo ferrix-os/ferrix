@@ -17,7 +17,12 @@ rebased and reviewed. **F-49**, ARMv7-A's
 `psci_system` not declaring `r12` clobbered where `psci_call` does; not yet
 fixed. **F-51**, the manifest's `checks.rs` test-file pattern counting the
 self-check switch (`src/kernel/src/checks.rs`, product code) as verification;
-closes with W-8's boot slice 21b. Until they are filed the tally above
+closes with W-8's boot slice 21b. **F-64** (2026-10-05, Moderate,
+the consultant's ledger 382), `forget_root` clearing a processor's
+`LAST_DOMAIN` as a second access after its `LAST_ROOT`, which can erase
+a domain the processor has just recorded so that a later leave of that
+domain finds no barrier owed there (`docs/OPAQUE-KERNEL.md` §9.8, 2f's
+re-read); older than 2f, its fix is a landing of its own. Until they are filed the tally above
 does not count them. (F-58, reserved here on 2026-10-02, is filed below.)
 
 **Severity.** *Blocking* — a rating cannot be claimed while it stands.

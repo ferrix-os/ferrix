@@ -208,6 +208,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_dead_task_is_not_filed_as_a_sleeper()?;
     made_runnable_here_runs_without_another_interrupt()?;
     super::preempt_check::run(topology)?;
+    a_running_processor_is_not_idle_across_switches(topology)?;
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;
@@ -769,6 +770,8 @@ const LOCAL_WAKE_PATIENCE_NANOS: u64 = 200_000_000;
 /// begins with a yield, which re-arms this processor's timer for what is on
 /// it now. A timer still armed for an earlier sleep would rescue the task for
 /// the wrong reason.
+///
+/// Verifies: L.sched.52
 fn made_runnable_here_runs_without_another_interrupt() -> Result<(), &'static str> {
     let allocations = crate::vmap::usage().allocations;
     let here = super::current()
@@ -1392,4 +1395,99 @@ fn reap_while_held(me: &Task, here: usize, holders: u64) -> Result<(usize, u64),
     crate::fallible::inject(me.id, 1);
     let reaped = super::reap();
     Ok((reaped, crate::fallible::stop_injecting()))
+}
+
+/// Resumptions after a switch [`a_running_processor_is_not_idle_across_switches`]'s
+/// tasks make between them.
+const IDLE_SWITCHES: u64 = 10_000;
+
+/// Every how many turns each of its tasks sleeps instead of yielding.
+const IDLE_SLEEP_EVERY: u64 = 16;
+
+/// Its resumptions so far.
+static IDLE_RESUMED: AtomicU64 = AtomicU64::new(0);
+
+/// Its resumptions that followed a sleep.
+static IDLE_SLEPT: AtomicU64 = AtomicU64::new(0);
+
+/// Set by one of its tasks that found its processor reading as idle.
+static READ_AS_IDLE: AtomicBool = AtomicBool::new(false);
+
+/// A processor running a task never reads as idle, after a switch between
+/// two tasks or one from the idle task (`docs/OPAQUE-KERNEL.md` §9.8, 2f,
+/// where a switch writes `IDLE` only when the bit changes). Two tasks a
+/// processor yield to each other until they have resumed after a switch
+/// [`IDLE_SWITCHES`] times between them, and every [`IDLE_SLEEP_EVERY`]th
+/// turn each sleeps instead, so that a processor whose tasks both sleep
+/// halts in its idle loop and a timer interrupt's exit switches from the
+/// idle task straight to the sleeper. Each looks at its processor's bit
+/// after every resumption.
+///
+/// Verifies: L.sched.50
+fn a_running_processor_is_not_idle_across_switches(
+    topology: &Topology,
+) -> Result<(), &'static str> {
+    IDLE_RESUMED.store(0, Ordering::Release);
+    IDLE_SLEPT.store(0, Ordering::Release);
+    READ_AS_IDLE.store(false, Ordering::Release);
+    DONE.store(0, Ordering::Release);
+    let tasks = topology.online().saturating_mul(2);
+    let mut running: Vec<Arc<Task>> = Vec::with_capacity(tasks);
+    for index in 0..tasks {
+        running.push(super::spawn(
+            "check-idle",
+            switch_and_look,
+            index,
+            NICE_0_WEIGHT,
+        )?);
+    }
+    wait_for(
+        || DONE.load(Ordering::Acquire) >= tasks as u64,
+        "a task of the idle-bit check never finished",
+    )?;
+    for task in &running {
+        super::wait_until_gone(task, super::REAPER_PATIENCE_NANOS)?;
+    }
+    drop(running);
+    crate::console::println!(
+        "  idle     {} resumptions, {} after a sleep; read as idle: {}",
+        IDLE_RESUMED.load(Ordering::Relaxed),
+        IDLE_SLEPT.load(Ordering::Relaxed),
+        READ_AS_IDLE.load(Ordering::Relaxed),
+    );
+    if READ_AS_IDLE.load(Ordering::Acquire) {
+        return Err("a processor running a task read as idle after a switch");
+    }
+    Ok(())
+}
+
+/// One task of [`a_running_processor_is_not_idle_across_switches`].
+fn switch_and_look(_index: usize) {
+    let Some(me) = super::current() else {
+        finish();
+        return;
+    };
+    let mut turn = 0u64;
+    while IDLE_RESUMED.load(Ordering::Relaxed) < IDLE_SWITCHES {
+        turn = turn.wrapping_add(1);
+        let before = me.switches();
+        let sleeps = turn.is_multiple_of(IDLE_SLEEP_EVERY);
+        if sleeps {
+            super::sleep_for(IDLE_LOOK_SLEEP_NANOS);
+        } else {
+            super::yield_now();
+        }
+        if me.switches() == before {
+            continue;
+        }
+        let _ = IDLE_RESUMED.fetch_add(1, Ordering::Relaxed);
+        if sleeps {
+            let _ = IDLE_SLEPT.fetch_add(1, Ordering::Relaxed);
+        }
+        if super::this_cpu_reads_as_idle() {
+            READ_AS_IDLE.store(true, Ordering::Release);
+        }
+    }
+    drop(me);
+    finish();
 }

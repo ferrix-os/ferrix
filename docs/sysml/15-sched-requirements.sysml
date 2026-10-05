@@ -353,4 +353,52 @@ package FerrixSchedRequirements {
                 "sched::borrow::running", "sched::current");
         }
     }
+
+    package TheSwitchWords {
+        doc /* src/kernel/src/sched/mod.rs: the words the switch and every way
+             * out write, by plain loads and stores where only their own
+             * processor writes them (docs/OPAQUE-KERNEL.md §9.8, 2f; the
+             * consultant's OK IF of 2026-10-02, condition 6). */
+
+        requirement <'L.sched.50'> theIdleBitChangesOnlyWithTheIdleTask : ItemLowLevel {
+            attribute :>> statement = "At a switch, choose_next shall write the
+                processor's bit in IDLE only when the bit differs from whether the
+                incoming task is the processor's idle task, so that the bit is clear
+                whenever another task runs.";
+            attribute :>> criterion = "Two tasks a processor, yielding to each other
+                and every 16th turn sleeping, so that a processor whose tasks both
+                sleep switches from its idle task at a timer interrupt's exit, resume
+                after a switch 10000 times between them and never read their
+                processor as idle (the `idle` line); with the switch's clear skipped,
+                the check fails by name.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::set_idle_at_switch", "sched::set_idle");
+        }
+        requirement <'L.sched.51'> aCountedMoveIsReadWithItsJob : ItemLowLevel {
+            attribute :>> statement = "note_moved shall count a move with a SeqCst
+                increment of MOVES after the move has stored the process's new job;
+                regroup_current shall load MOVES with Acquire, compare it with its processor's
+                RUNNING_SEEN by a load, store RUNNING_SEEN only when they differ, and
+                then make a SeqCst fence before it reads the job, so that a way out
+                that sees a move counted reads the job it moved to.";
+            attribute :>> criterion = "The loom model of a move against a way out
+                finds every way out that sees the move counted reading the new job,
+                and its control, the count's load Relaxed and the fence removed,
+                finds one reading the old job (`cargo xtask loom`, src/tests/loom).";
+            attribute :>> parent = "H.OBJ.12";
+            attribute :>> unit = ("sched::note_moved", "sched::regroup_current");
+        }
+        requirement <'L.sched.52'> aWayOutSwapsOnlyItsOwnPostedRequest : ItemLowLevel {
+            attribute :>> statement = "take_resched shall read its own processor's
+                reschedule request by a load, and clear it by a swap only when the
+                load finds it set.";
+            attribute :>> criterion = "A task spawned onto its spawner's processor
+                and a task woken onto the waker's, by a spinning task that leaves
+                through no interrupt exit, each run within 200 ms (stage 5); with
+                take_resched loading another processor's request, the check fails
+                by name.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::take_resched";
+        }
+    }
 }

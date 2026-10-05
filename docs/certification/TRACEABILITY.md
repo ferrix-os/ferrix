@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 124 | 73 | 51 |
-| Low (`L.*`) | 807 | 536 | 271 |
+| Low (`L.*`) | 812 | 541 | 271 |
 
-1663 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1669 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1665 |
-| Accessors, covered by the requirement they serve | 856 |
+| Named by a low-level requirement | 1671 |
+| Accessors, covered by the requirement they serve | 855 |
 | Check code in a product file | 68 |
-| Named by none | 884 |
+| Named by none | 881 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -468,6 +468,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.60` | effective shall scale a task's weight, at each level from its job up, by the job's weight over the job's load, and adjust shall keep each job's load the weight of its runnable tasks and busy children. | One spinning task alone in a job keeps about half a processor against eight in another job; with the tasks gone every job's load reads 0. | H.SCHED.3 | `object::quota::effective`, `object::quota::adjust` | `src/kernel/src/object/quota_check.rs::check_the_processor` | reached | reached | reached |
 | `L.object.61` | Job::set_cpu_weight shall make the job's weight the value written. | cpu.weight written 300 through cgroupfs reads back 300 from the job. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::job::Job::set_cpu_weight`, `object::job::Job::cpu_weight` | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | reached | reached | reached |
 | `L.object.62` | Quota::set_weight shall clamp the weight to 1 to 10000, and change a busy job's contribution to its parent's load at once. | A weight of 0 is stored as 1 and one of 20000 as 10000; setting a busy job's weight changes its parent's load by the difference of the scaled weights. | H.SCHED.3 | `object::quota::Quota::set_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
+| `L.object.160` | quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load. | ferrix-sched's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one. | H.SCHED.3 | `object::quota::effective` | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host test | host test | host test |
+| `L.object.161` | Every entity weight a job can be given, its cpu.weight clamped to 1 to 10000 and scaled to task units, shall be below 2^32, as every task's weight, a u32, is. | The kernel's build asserts that 10000 scaled to task units fits a u32; the quota check sets cpu.weight to 20000, reads 10000 back, and finds it scaled below 2^32. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::quota::Slot::entity_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
 
 ### Jobs
 
@@ -591,6 +593,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 |---|---|---|---|---|---|---|---|---|
 | `L.sched.24` | Whenever interrupts are on, each processor's record shall name, as Arc::as_ptr, the task its run queue's current holds; the scheduler shall write the two together, on that processor with interrupts masked and its queue lock held, at the boot task's adoption, at an idle task's installation and at every switch, and nowhere else. | From boot to the end of stage 5, an audit compares the record with the queue's current, read under its lock, once the boot task is adopted, as each processor's idle task first runs, in the incoming context of every switch and at every interrupt exit, and finds no mismatch at any site; and two tasks per processor, yielding to each other, resume after a switch 10000 times, each time with the record naming the queue's current and the task itself (the `borrow` line). Removing the record's write at the adoption, at the idle installation or at the switch stops the boot on that site's message. | H.SCHED.1, H.SCHED.6 | `sched::set_current`, `sched::adopt_boot_task`, `sched::enter_idle`, `sched::choose_next`, `sched::borrow::RunningSlot::set`, `sched::audit_here`, `sched::borrow::audit`, `sched::borrow::end_audit` | `src/kernel/src/sched/borrow_check.rs::installed`, `src/kernel/src/sched/borrow_check.rs::run` | not built | not built | not built |
 | `L.sched.25` | with_current shall lend the running task only to a closure, by a reference its result cannot name, read from the processor's record so that the processor and its record are one processor's (one instruction on x86-64, interrupts masked on Arm); current() shall answer the running task as an Arc of the caller's own without taking the run queue's lock; and before the records are kept both shall answer none. | Each of the borrow check's 10000 resumptions borrows the running task and finds the task itself, and every audit's borrowed pointer equals the queue's current (the `borrow` line); every boot, shell and bench gate runs on current() made this way. | H.SCHED.1, H.SCHED.6 | `sched::borrow::with_current`, `sched::borrow::current_arc`, `sched::borrow::current_ptr`, `sched::borrow::running`, `sched::current` | `src/kernel/src/sched/borrow_check.rs::run` | not built | not built | not built |
+
+### TheSwitchWords
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.sched.50` | At a switch, choose_next shall write the processor's bit in IDLE only when the bit differs from whether the incoming task is the processor's idle task, so that the bit is clear whenever another task runs. | Two tasks a processor, yielding to each other and every 16th turn sleeping, so that a processor whose tasks both sleep switches from its idle task at a timer interrupt's exit, resume after a switch 10000 times between them and never read their processor as idle (the `idle` line); with the switch's clear skipped, the check fails by name. | H.SCHED.1 | `sched::set_idle_at_switch`, `sched::set_idle` | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | not reached | not reached | not reached |
+| `L.sched.51` | note_moved shall count a move with a SeqCst increment of MOVES after the move has stored the process's new job; regroup_current shall load MOVES with Acquire, compare it with its processor's RUNNING_SEEN by a load, store RUNNING_SEEN only when they differ, and then make a SeqCst fence before it reads the job, so that a way out that sees a move counted reads the job it moved to. | The loom model of a move against a way out finds every way out that sees the move counted reading the new job, and its control, the count's load Relaxed and the fence removed, finds one reading the old job (`cargo xtask loom`, src/tests/loom). | H.OBJ.12 | `sched::note_moved`, `sched::regroup_current` | `tools/common/xtask/src/check.rs::loom` | xtask gate | xtask gate | xtask gate |
+| `L.sched.52` | take_resched shall read its own processor's reschedule request by a load, and clear it by a swap only when the load finds it set. | A task spawned onto its spawner's processor and a task woken onto the waker's, by a spinning task that leaves through no interrupt exit, each run within 200 ms (stage 5); with take_resched loading another processor's request, the check fails by name. | H.SCHED.1 | `sched::take_resched` | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | reached | reached | reached |
 
 ### Discovery
 
@@ -1712,6 +1722,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/quota_check.rs::check_objects` | kernel | L.object.9, L.object.27, L.object.59, H.QUOTA.3 |
 | `src/kernel/src/object/quota_check.rs::check_the_counters` | kernel | L.object.50, L.object.51, L.object.64 |
 | `src/kernel/src/object/quota_check.rs::check_the_processor` | kernel | L.object.60 |
+| `src/kernel/src/object/quota_check.rs::check_the_weight` | kernel | L.object.161 |
 | `src/kernel/src/object/quota_check.rs::check_the_weight` | kernel | L.object.62 |
 | `src/kernel/src/object/quota_check.rs::run` | kernel | L.object.53, H.QUOTA.4 |
 | `src/kernel/src/object/write_read_check.rs::check_a_sync_wake_keeps_a_pinned_reader` | kernel | L.sched.8, H.SCHED.4 |
@@ -1722,6 +1733,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/borrow_check.rs::installed` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.25 |
+| `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
+| `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |
 | `src/kernel/src/sched/check.rs::sleeping` | kernel | L.x86_64.91 |
 | `src/kernel/src/sched/preempt_check.rs::a_failed_try_leaves_the_count` | kernel | L.sched.23 |
@@ -1977,6 +1990,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/paging/src/vtd/tests.rs::irta_holds_the_table_in_xapic_format_with_256_entries` | host | L.iommu.50 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_queue_registers_name_slots_of_sixteen_bytes` | host | L.iommu.47 |
 | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host | L.sched.1 |
+| `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host | L.object.160 |
 | `src/lib/kernel/sched/src/tests.rs::yielding_alone_leaves_the_request_as_it_was` | host | L.sched.2 |
 | `src/lib/kernel/vdso/src/tests.rs::counter_nanos_is_the_wide_formula_exactly` | host | L.sched.6 |
 | `src/lib/platform/acpi/src/tests.rs::an_io_apic_s_source_id_is_matched_by_its_madt_id` | host | L.x86_64.130 |
@@ -2018,6 +2032,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/proto/devmgr-proto/src/isolation_tests.rs::the_refusal_names_the_device_and_the_mark` | host | L.device.27 |
 | `src/lib/proto/native/src/tests.rs::a_device_reports_an_aperture_whole_and_reaches_its_configuration_window` | host | L.device.24 |
 | `tools/common/xtask/src/check.rs::item_crates_allocate_fallibly` | gate | L.btrfs.22 |
+| `tools/common/xtask/src/check.rs::loom` | gate | L.sched.51 |
 | `tools/common/xtask/src/init.rs::audit_read_back` | gate | H.AUD.10 |
 | `tools/common/xtask/src/init.rs::checks_skipped` | gate | H.AUD.12 |
 | `tools/common/xtask/src/init.rs::devmgr_by_init` | gate | L.quiesce.4 |

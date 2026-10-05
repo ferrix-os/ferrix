@@ -1452,3 +1452,86 @@ fn placement_still_prefers_a_lighter_processor_when_counts_are_equal() {
     let loads = [busy(LOAD_SCALE * 4, 2), busy(LOAD_SCALE, 2)];
     assert_eq!(place(&loads, &all_cpus(2), 0), Some(1));
 }
+
+/// The 128-bit formula `carried_weight` replaced, as the kernel's
+/// `quota::effective` computed it before 2f.
+fn carried_weight_128(base: u32, levels: &[(u32, i64)]) -> u128 {
+    let mut weight = u128::from(base);
+    let mut below = i64::from(base);
+    for &(own, load) in levels {
+        let load = load.max(below).max(1);
+        let own = i64::from(own);
+        weight = weight.saturating_mul(u128::try_from(own).unwrap_or(1))
+            / u128::try_from(load).unwrap_or(1);
+        below = own;
+    }
+    weight
+}
+
+/// A small generator, so the sweep is the same every run.
+struct Xorshift(u64);
+
+impl Xorshift {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    /// A weight, often at a boundary.
+    fn weight(&mut self) -> u32 {
+        const EDGES: [u32; 8] = [0, 1, 2, 15, 1024, 88_761, u32::MAX - 1, u32::MAX];
+        let pick = self.next();
+        if pick.is_multiple_of(4) {
+            EDGES[(pick / 4 % 8) as usize]
+        } else {
+            (self.next() >> (self.next() % 33)) as u32
+        }
+    }
+
+    /// A load, often at a boundary, sometimes below what it must be at least.
+    fn load(&mut self) -> i64 {
+        const EDGES: [i64; 7] = [i64::MIN, -1, 0, 1, 2, u32::MAX as i64, i64::MAX];
+        let pick = self.next();
+        if pick.is_multiple_of(4) {
+            EDGES[(pick / 4 % 7) as usize]
+        } else {
+            (self.next() >> (self.next() % 64)) as i64
+        }
+    }
+}
+
+/// `carried_weight` in 64 bits equals the 128-bit formula, bit for bit, over
+/// random and boundary weights and loads at job depths 1 to 8: every entity
+/// weight below 2^32, as a `u32` is.
+///
+/// Verifies: L.object.160
+#[test]
+fn the_carried_weight_is_the_wide_formula() {
+    let mut random = Xorshift(0x9E37_79B9_7F4A_7C15);
+    for depth in 1..=8 {
+        for _ in 0..50_000 {
+            let base = random.weight();
+            let levels: Vec<(u32, i64)> = (0..depth)
+                .map(|_| (random.weight(), random.load()))
+                .collect();
+            let wide = carried_weight_128(base, &levels);
+            let narrow = carried_weight(base, levels.iter().copied());
+            assert_eq!(
+                u128::from(narrow),
+                wide,
+                "base {base}, levels {levels:?}: 64 bits gave {narrow}, 128 gave {wide}"
+            );
+        }
+    }
+    // The largest products the bound allows, at every depth.
+    for depth in 1..=8 {
+        let levels: Vec<(u32, i64)> = (0..depth).map(|_| (u32::MAX, 0_i64)).collect();
+        assert_eq!(
+            u128::from(carried_weight(u32::MAX, levels.iter().copied())),
+            carried_weight_128(u32::MAX, &levels),
+            "at depth {depth} with every weight u32::MAX"
+        );
+    }
+}

@@ -121,6 +121,34 @@ pub fn weight_of_nice(nice: i32) -> Option<u32> {
     WEIGHTS.get(index).copied()
 }
 
+/// A task's weight carried up its jobs: `base` times, at each level, that
+/// job's own weight over its load, the load taken no smaller than what the
+/// level below adds to it (`base` at the first level, then the level below's
+/// own weight), nor than one. `levels` gives each level's own weight and
+/// load, innermost first. Not clamped: the caller bounds the answer.
+///
+/// **In 64 bits, and exact.** The weight carried never exceeds the own
+/// weight of the level below: true of `base` at the start, and kept by every
+/// level, since `weight <= below <= load` makes `weight * own / load <= own`.
+/// So each product is at most two entity weights multiplied, and with every
+/// entity weight below 2^32 -- a `u32`, which `own` is -- it fits in a `u64`,
+/// and the 64-bit quotient is the 128-bit formula's, bit for bit (the host
+/// test holds it to that at depths 1 to 8). It was 128-bit arithmetic, a
+/// software division on every architecture, at every wake
+/// (OPAQUE-KERNEL.md §9.8, 2f).
+#[must_use]
+pub fn carried_weight(base: u32, levels: impl IntoIterator<Item = (u32, i64)>) -> u64 {
+    let mut weight = u64::from(base);
+    let mut below = u64::from(base);
+    for (own, load) in levels {
+        let load = u64::try_from(load).unwrap_or(0).max(below).max(1);
+        let own = u64::from(own);
+        weight = weight.saturating_mul(own) / load;
+        below = own;
+    }
+    weight
+}
+
 /// Why something was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SchedError {

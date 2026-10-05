@@ -3431,9 +3431,64 @@ remote reader of a word the switch writes, and the ordering it relies on:
 | `LAST_DOMAIN` | `forget_root` (store), `leaving_domain` (load) | after F-60's fix, none for the leave: each processor checks itself at the grace-period answer. `forget_root`'s as for `LAST_ROOT` |
 | `RUNNING` | `current_id` from another processor (reports, the failure policy) | none: a whole word, a hint |
 | `RUNNING_GROUP` | a charge made by the running task; reports | written and read by the processor itself with interrupts masked; a remote read is a report |
-| `RUNNING_SEEN` against `MOVES` | `note_moved` increments `MOVES`, then each processor's way out compares | a store-buffer pattern: a move stores the process's new job, then `MOVES`; the way out stores `RUNNING_SEEN`, then reads the job. With the swap made a load and a compare, the way out keeps a `SeqCst` fence between seeing a changed `MOVES` and reading the job, paired with a `SeqCst` increment of `MOVES` after the job's store. The fence runs only when the counts differ, so the common way out stays a load |
+| `RUNNING_SEEN` against `MOVES` | `note_moved` increments `MOVES`, then each processor's way out compares | message passing, not a store-buffer pattern (the consultant's correction, 2026-10-05, ledger 382): a move stores the process's new job, then increments `MOVES`, and no mover reads a `RUNNING*` word afterwards; the way out loads `MOVES` (`Acquire`), then reads the job. The `Acquire` load orders the two; the way out also keeps a `SeqCst` fence between seeing a changed `MOVES` and reading the job, paired with the `SeqCst` increment after the job's store, as a second order kept on purpose. The fence runs only when the counts differ, so the common way out stays a load |
 | the space's `CpuMask` | a shootdown's sender | the locked join before the root write and leave after it, unchanged |
 | per-processor counters (`REFILLS_IN_DOMAIN`, `BARRIER_DECISIONS`, `SWITCH_BARRIERS`) | the domain check, reports | none: a whole word, read after the switches it counts, through the check's own synchronisation |
+
+
+**The table re-read against the code (2026-10-05, on `step2f` rebased onto
+`main` e41489fd7).** Every access to `LAST_DOMAIN`, `LAST_ROOT`,
+`ENTERING_DOMAIN`, `IDLE`, `RUNNING_SEEN` and `MOVES`, and every caller of
+the functions that make them, was listed with `grep` and read:
+- `LAST_DOMAIN` is written by its own processor in `left_space`,
+  `entered_space` (a load and a `Relaxed` store since 2f), `answer_leaving`
+  and `serve_wanted_barrier` (each a `SeqCst` store), and by another
+  processor only in `forget_root`. It is read remotely by `leaving_domain`'s
+  scan (`SeqCst`) and by stage 9's `last_domain_on`. **`answer_leaving` (F-60's
+  fix) reads it, but never another processor's:** its one caller,
+  `smp::answer_grace_periods`, runs on the answering processor with
+  interrupts masked, reached through `as_this_cpu` from `synchronize` and
+  its wait, and from the grace-period interrupt. `entered_space` also runs
+  with interrupts masked, so on one processor an answer comes wholly before
+  or wholly after a switch, and reads what the switch stored by program
+  order alone. The table's row stands: no ordering for the leave rests on
+  the switch's accesses.
+- `LAST_ROOT`: as the table says. `forget_root`'s compare-exchange and this
+  processor's load and store are each single-copy atomic; a store that
+  follows the clear stores the root being installed, never the forgotten
+  one.
+- `ENTERING_DOMAIN`, `RUNNING_SEEN` and the three counters: written and read
+  only by their own processor with interrupts masked, read elsewhere only
+  as reports or by a check after the switches it counts.
+- `IDLE`: `set_idle` is called only with the calling processor's own number
+  (the idle loop's four calls and `set_idle_at_switch`), so the switch's
+  load of its own bit reads what it last wrote.
+- `MOVES`: incremented only by `note_moved` (`SeqCst`, after
+  `Process::move_charged`'s store of the new job's slot), read by `regroup_current`
+  (`Acquire`, then the fence when the counts differ). It is message
+  passing: no mover reads a `RUNNING*` word after its increment, so the
+  `Acquire` load alone orders the job's read, and the fence is a second
+  order, kept. The `loom` model `regroup` holds it; its control drops both
+  the `Acquire` and the fence and finds a way out reading the old job
+  (dropping either alone does not fail, which is why the control drops
+  both).
+
+One thing the re-read found is not 2f's and is older than it: **`forget_root`
+can erase the domain a processor has just recorded.** It compares and clears
+a processor's `LAST_ROOT`, then stores zero to its `LAST_DOMAIN` as a second
+access. A processor whose `LAST_ROOT` names a freed root, in the middle of
+`entered_space` for a member's space, can store the member's domain between
+the two, so that the switch skips the barrier inside the domain while the
+processor's `LAST_DOMAIN` ends at zero. If that member then leaves the domain
+on this processor, `leaving_domain`'s scan and `answer_leaving` both find
+zero there, and no barrier separates it from the member that ran before it.
+The old swaps allowed the same interleaving, so 2f neither opens nor closes
+it. The fix proposed is for `forget_root` to clear only `LAST_ROOT`: the
+domain a processor records is the one it last ran, whichever root it was
+in, and the incoming domain always comes from `ENTERING_DOMAIN`, so a reused
+root cannot inherit a domain through it. The consultant confirmed it and
+numbered it **F-64** (Moderate; ledger 382), reserved in FINDINGS.md; its
+fix is a landing of its own (`docs/BACKLOG.md`).
 
 The 64-bit weight arithmetic is accepted with its host test at depths 1 to
 8, and the weight setters' assertion that every entity weight is below
@@ -3925,8 +3980,15 @@ domain is 2,556 ns p50 with every mitigation on (37 us before step 1, 3,021
 ns after it). The target is seL4's 440 ns (§9.6); Redox's scheme round trip
 is 1,965 ns without any speculative defence (§9.6a).
 
-**Not on `main`:** 2f (branch `step2f`, WIP and ungated), the exact
-`bench-ipc` (`bench-exact`), and step 4's groundwork (`step4-prep`: the
+**2f (2026-10-06, with this text):** no global or locked writes in the
+switch (§9.8). The exact `bench-ipc` landed as 3349682db; against `main`
+de0eb7b32, five ABAB rounds (`bench-ipc --release --accel kvm --smp 1
+--alternate main --rounds 5`, host load 2 to 4) put the domain-call p50 at
+2,427 ns with 2f against 2,536 ns without it, 0.957 the median ratio
+(spread 0.953 to 0.961). The customer's target since 2026-10-06 is under
+400 ns.
+
+**Not on `main`:** step 4's groundwork (`step4-prep`: the
 boot switch, the park protocol's `loom` model and `ipc-equiv`).
 `docs/roadmap/open-branches.md` lists what each owes. 3a, 3b, step 4's fast
 path, step 5 and step 4b are not started.
