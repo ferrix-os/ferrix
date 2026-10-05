@@ -101,6 +101,61 @@ fn wait_finished(count: u64, what: &'static str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Wait for the moving check's `count` tasks, moving one of them that is
+/// waiting its turn to another processor every millisecond meanwhile.
+///
+/// **The moves are made, not hoped for.** Left to itself the scheduler
+/// moves a task only when an idle processor steals one that waits, and
+/// these tasks sleep far more than they run: eight of them are less than
+/// one processor's work. A boot under KVM on a loaded host (main 77783565a,
+/// `batch-20261004T194624Z-b0-1`, 2026-10-04) put all eight on the
+/// checker's processor: the processors they were placed on had not woken
+/// from their kicks when the checker went to sleep, its processor stole
+/// each one before it first ran, the three it had left halted with nothing
+/// to wake them, and the tasks finished where they started, with no move
+/// to see. Starving two virtual processors of host time does the same 2
+/// rounds in 400. So the checker takes a waiting task off one processor's
+/// queue and puts it on the next one's, through the scheduler's own
+/// [`super::steal_from`] -- the move a stealing processor makes, of a task
+/// the timer may have preempted -- and has the receiver decide. The moves
+/// the scheduler makes besides are counted as before.
+fn wait_moving(count: u64, online: usize) -> Result<(), &'static str> {
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let mut from = 0;
+    while FINISHED.load(Ordering::Acquire) < count {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("a task of the moving lock check never finished");
+        }
+        if online >= 2 {
+            move_one(online, &mut from);
+        }
+        super::sleep_for(1_000_000);
+    }
+    Ok(())
+}
+
+/// Move one task waiting its turn on a processor's queue to the next
+/// processor's, starting the search at `from`, which is left at the
+/// processor after the one moved from; and have the receiver decide, as a
+/// balancing pull does. Nothing moves when no task waits anywhere.
+fn move_one(online: usize, from: &mut usize) {
+    for _ in 0..online {
+        let victim = *from % online;
+        let to = (victim + 1) % online;
+        *from = to;
+        if super::steal_from(to, victim) {
+            let saved = <crate::arch::Irq as IrqControl>::disable();
+            if super::this_cpu() == Some(to) {
+                super::resched_here(to);
+            } else {
+                super::kick(to);
+            }
+            <crate::arch::Irq as IrqControl>::restore(saved);
+            return;
+        }
+    }
+}
+
 /// The decision an enable makes before it lowers anything: a word that does
 /// not cover the release is refused, whichever half falls short, and one
 /// that does is lowered.
@@ -259,10 +314,7 @@ fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> R
     let spawned_ms100 = (crate::timer::now_nanos() - started) / 100_000;
     let mut idle_after_spawn = [false; 4];
     for (cpu, slot) in idle_after_spawn.iter_mut().enumerate() { *slot = super::diag_cpu(cpu).3; }
-    wait_finished(
-        tasks as u64,
-        "a task of the moving lock check never finished",
-    )?;
+    wait_moving(tasks as u64, online)?;
 
     for (index, task) in running.iter().enumerate() {
         if let Some(slot) = ended_on.get_mut(index) { *slot = task.cpu() as u8; }
