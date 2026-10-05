@@ -375,7 +375,7 @@ fn serve(mut core: Core, stop: &AtomicBool) {
         // this link could ever have carried; or, on Windows, the report that
         // an earlier send found no socket at QEMU's address, which is QEMU
         // having exited and is not this thread's to act on.
-        if let Ok((len, from)) = core.socket.recv_from(&mut frame)
+        if let Ok((len, from)) = next_frame(&core.socket, &mut frame)
             && Some(from) != core.own_address
             && core.is_guest(from)
         {
@@ -393,6 +393,36 @@ fn serve(mut core: Core, stop: &AtomicBool) {
         core.poll_tcp();
         core.poll_icmp();
         core.expire();
+    }
+}
+
+/// The next datagram on `socket`, waiting at most its read timeout, [`TURN`].
+///
+/// Waited for with a peek, and only then taken: on Windows a receive that
+/// times out can lose the datagram that arrives as it does. The timeout is
+/// kept by the 15.6 ms timer tick, the sender's own sleeps and timeouts end
+/// on that tick too, and under load the two meet often -- 39 of 90 lone
+/// datagrams lost on a 24-thread PC, where peeking first lost none, and none
+/// of 1,200 in a stream against 12 lost by receiving (2026-10-05). A peek
+/// that times out takes nothing, and the receive after one that did not
+/// finds the datagram already queued. A guest's TCP sends a lost frame again,
+/// but a frame the guest sends once -- a lone SYN, a DHCP request -- waited
+/// for its own timer, and a test sending it once waited forever.
+///
+/// Any other error the peek reports, a datagram too long for the buffer or
+/// the reset Windows reports after a send found nobody, is left for the
+/// receive to take, so that it does not come back on every turn.
+fn next_frame(socket: &UdpSocket, frame: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+    match socket.peek_from(frame) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            Err(error)
+        }
+        _ => socket.recv_from(frame),
     }
 }
 

@@ -118,8 +118,12 @@ impl Guest {
     }
 
     /// The next frame, or `None` if none arrives.
+    ///
+    /// Peeked for before it is taken, as the gateway does in `next_frame`: on
+    /// Windows a receive that times out can lose the frame arriving as it does.
     fn frame(&self) -> Option<Vec<u8>> {
         let mut buffer = [0_u8; 2048];
+        let _ = self.socket.peek(&mut buffer).ok()?;
         let len = self.socket.recv(&mut buffer).ok()?;
         Some(buffer[..len].to_vec())
     }
@@ -861,8 +865,11 @@ fn resets_a_connection_to_a_port_nothing_listens_on() {
 
     // A refusal takes as long as the host's stack takes to say so: at once on
     // Linux, which answers a closed loopback port with a reset, but on
-    // Windows only after it has sent the SYN again and given up, which can
-    // take the gateway's whole CONNECT_TIMEOUT. So wait past that.
+    // Windows only after it has sent the SYN again and given up, about two
+    // seconds (2026-10-05), and the gateway's whole CONNECT_TIMEOUT if a SYN
+    // goes unanswered. So wait past that. The SYN is sent once and nothing
+    // sends it again: a gateway that loses it answers nothing, which is how
+    // its Windows receive race showed (see `next_frame`).
     guest
         .socket
         .set_read_timeout(Some(super::tcp::CONNECT_TIMEOUT + PATIENCE))
