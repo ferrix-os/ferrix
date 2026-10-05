@@ -104,6 +104,7 @@ Causes are listed most likely first.
 | [FX-1010](#fx-1010) | two cores enabling neighbouring interrupt lines lost one's setting |
 | [FX-1011](#fx-1011) | a driver's configuration window or device_aperture did not answer as specified |
 | [FX-1012](#fx-1012) | interrupt remapping could not come up as specified |
+| [FX-1013](#fx-1013) | the chardev core answered a driver or a program wrongly |
 | [FX-1101](#fx-1101) | the btrfs disk did not mount and read back as the host wrote it |
 | [FX-1150](#fx-1150) | the net core did not carry a packet round its own loopback |
 | [FX-1151](#fx-1151) | the net ring did not carry a frame between the kernel and a driver |
@@ -2627,6 +2628,37 @@ blocked, never arrive.
 See: src/kernel/src/iommu/remapping.rs; src/kernel/src/arch/x86_64/mod.rs
 convert_console_line; src/kernel/src/irq.rs move_handler; docs/NVIDIA.md section
 12.3.
+
+<a id="fx-1013"></a>
+
+## FX-1013 — the chardev core answered a driver or a program wrongly
+
+The chardev core forwards open, ioctl and release on major 195's nodes to a
+ring-3 driver undecoded (`docs/NVIDIA.md` section 4.4). `chardev::check::run`
+plays the driver from a process given a PCI function and the programs from
+kernel tasks, and requires each HELLO the session refuses refused, the driver's
+end impossible to duplicate, a request there and back with copies each way,
+copies refused once the request is answered or abandoned or named through
+another driver's control, every call waiting out a copy in flight, the 257th
+request refused, the queue to a driver that reads nothing bounded (F-63), and a
+program woken with ENODEV when its driver goes.
+
+1. A refusal, or its absence: `ferrix_chardevctl::session::judge` or `publish`
+   no longer refuses what the message names.
+2. The driver's end was made with `DUPLICATE` or `TRANSFER`: `DRIVER_RIGHTS`
+   changed.
+3. A copy reached a request it must not: `control_of` stopped matching the
+   driver's end, or `copy` stopped checking that the request is alive and
+   unanswered.
+4. A call returned while a copy was in flight: `drain` is no longer called on
+   the answered or the abandoned path (N4, L1).
+5. The queue to the driver outgrew its room: `abandon` left a request queued, or
+   `admit` stopped counting queued requests against `MAX_OUTSTANDING` (F-63).
+6. A program never woke when its driver went: `finish` did not answer the table.
+
+See: src/kernel/src/interfaces/chardev/mod.rs;
+src/kernel/src/interfaces/chardev/check.rs; docs/NVIDIA.md section 4.4;
+docs/certification/FINDINGS.md F-63.
 
 <a id="fx-1101"></a>
 

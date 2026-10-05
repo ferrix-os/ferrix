@@ -74,6 +74,7 @@ use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::timer;
 
+pub(crate) mod check;
 pub(crate) mod file;
 
 /// The most requests one control has outstanding; the next is `EBUSY`.

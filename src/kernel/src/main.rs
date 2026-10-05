@@ -511,6 +511,7 @@ fn report_initrd(built: &fs::Report, verified: &str) {
 fn check_block_ring() {
     if checks::run() {
         stages_check::check_ring_control();
+        stages_check::check_chardev();
         // Before devmgr, which may start a driver that claims the log.
         stages_check::check_log_control();
     }

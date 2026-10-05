@@ -1247,6 +1247,36 @@ pub(super) fn check_ring_control() {
     }
 }
 
+/// Stage 10's chardev core, from a fake driver given a PCI function and
+/// programs played by kernel tasks (N12; F-63): all check, and on a machine
+/// with no PCI function nothing at all.
+pub(super) fn check_chardev() {
+    let report = match chardev::check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE10_CHARDEV,
+            "stage 10 chardev self-check failed: {problem}"
+        ),
+    };
+    if let Some(why) = report.skipped {
+        println!("  chardev  not checked: {why}");
+        return;
+    }
+    println!(
+        "  chardev  {} HELLOs, copies and requests refused as specified, {} requests answered, \
+         {} abandoned with the queue to a driver that reads nothing at most {} requests{}",
+        report.refusals,
+        report.answered,
+        report.abandoned,
+        report.most_queued,
+        if report.one_device {
+            "; one PCI function, so no second driver"
+        } else {
+            ""
+        },
+    );
+}
+
 /// The net ring, played from both ends with no network device: the whole
 /// kernel side of an interface, from the control handshake to a frame in and a
 /// frame out.
