@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from the evidence's own commits, no anchor dropped.",
+      "what": "Measure and test or argue the new lines on every architecture: sched/mod.rs steal_from's keeps_its_last, both outcomes -- a victim running its idle task with one waiting task kept, and one with two or more, or a busy victim, stolen from."
+    },
+    {
       "landing": "NVIDIA.md N1e, the chardev core's native calls (branch nvidia-n1d; the consultant's ledger 297, condition L2)",
       "architectures": [
         "x86_64",
