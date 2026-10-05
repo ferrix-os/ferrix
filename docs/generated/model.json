@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "91d5032132195aa3629bc889ba6c47eabce49fdd1483c26d66e90a87a872879d",
+  "digest": "388d5cd2d054549f93ef68d33018359001c554d2883d7cefdb59163eb1d0f11f",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 132,
-    "elements": 6348,
+    "elements": 6405,
     "maturity": {
       "implemented": 277,
       "inProgress": 15,
@@ -14863,7 +14863,7 @@
           "definition": true,
           "maturity": "inProgress",
           "stage": 13,
-          "doc": "One unified hierarchy (v2), exposed as cgroupfs. cpu is not a separate mechanism: it is bandwidth and weight handed to the scheduling classes. memory scopes reclaim and the OOM kill.\n\nBuilt (docs/CGROUPS.md, 55 of its 85 points): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging and its scoped OOM kill, and cpu.weight, over the certification's job quotas. Left: the rest of memory.stat, memory's reclaim, freezing, cpu.max and io.",
+          "doc": "One unified hierarchy (v2), exposed as cgroupfs. cpu is not a separate mechanism: it is bandwidth and weight handed to the scheduling classes. memory scopes reclaim and the OOM kill.\n\nBuilt (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging, its reclaim, memory.high and its scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io, over the certification's job quotas. Left: the rest of memory.stat, io.weight, io.latency, cpu.idle and cpu.max.burst.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
             "line": 68
@@ -14876,7 +14876,7 @@
               "type": "Cgroup",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 80
+                "line": 81
               }
             }
           ]
@@ -14891,7 +14891,7 @@
           "doc": "Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 83
+            "line": 84
           },
           "children": [
             {
@@ -14901,7 +14901,7 @@
               "type": "ClassicBpfInterpreter",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 87
+                "line": 88
               }
             },
             {
@@ -14910,7 +14910,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 88
+                "line": 89
               }
             },
             {
@@ -14919,7 +14919,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 89
+                "line": 90
               }
             }
           ]
@@ -14934,7 +14934,7 @@
           "doc": "src/lib/kernel/seccomp, owed before seccomp is built.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 92
+            "line": 93
           }
         },
         {
@@ -14947,7 +14947,7 @@
           "doc": "Unix: uid, gid, supplementary groups, POSIX capability sets, no-new-privs. They sit on top of the handle system rather than beside it.\n\nsrc/kernel/src/syscall/credentials.rs: Linux's four user ids and four group ids and the supplementary groups on every Process, copied by fork, kept by execve with the saved and filesystem ids made the effective ones, and changed by the set*id calls under kernel/sys.c's rules. They are enforced: the VFS checks file permissions against the filesystem ids, and the calls only root may make, and those that reach another user's processes, refuse anyone else. A set-user-id program runs as its file's owner unless PR_SET_NO_NEW_PRIVS forbade it.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 97
+            "line": 98
           },
           "children": [
             {
@@ -14957,7 +14957,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 112
+                "line": 113
               }
             },
             {
@@ -14967,7 +14967,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 113
+                "line": 114
               }
             },
             {
@@ -14978,7 +14978,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 114
+                "line": 115
               }
             },
             {
@@ -14990,7 +14990,7 @@
               "doc": "No capability sets are kept: an effective uid of 0 stands for every capability, capget reports every set empty for any other, and capset refuses a process whose real or saved uid is 0 and whose effective uid is not.",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 115
+                "line": 116
               }
             },
             {
@@ -15000,7 +15000,7 @@
               "type": "Boolean",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 121
+                "line": 122
               }
             }
           ]
@@ -24608,6 +24608,144 @@
                               }
                             }
                           ]
+                        },
+                        {
+                          "name": "cpuBandwidthIsBounded",
+                          "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::cpuBandwidthIsBounded",
+                          "kind": "requirement",
+                          "shortName": "H.QUOTA.10",
+                          "type": "ItemHighLevel",
+                          "source": {
+                            "file": "docs/sysml/13-item-requirements.sysml",
+                            "line": 1153
+                          },
+                          "children": [
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::cpuBandwidthIsBounded",
+                              "kind": "attribute",
+                              "redefines": "statement",
+                              "value": "\"A job's tasks, with those of every job beneath it, shall use no more processor time in a period than the job's cpu.max allows, and a task kept waiting for the period to end shall leave the wait at once for a kill or a signal.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1157
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::cpuBandwidthIsBounded",
+                              "kind": "attribute",
+                              "redefines": "criterion",
+                              "value": "\"A program in a job limited to 20000 of 100000 microseconds is held to between a twelfth and two thirds of a processor with the throttling counted in cpu.stat, and one in a job limited to 1000 of 1000000 ends within a quarter of a second of its SIGKILL (the `cgroups` line, cpu).\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1162
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::cpuBandwidthIsBounded",
+                              "kind": "attribute",
+                              "redefines": "parent",
+                              "value": "\"O.QUOTA\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1163
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "aFrozenJobStops",
+                          "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::aFrozenJobStops",
+                          "kind": "requirement",
+                          "shortName": "H.QUOTA.11",
+                          "type": "ItemHighLevel",
+                          "source": {
+                            "file": "docs/sysml/13-item-requirements.sysml",
+                            "line": 1165
+                          },
+                          "children": [
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::aFrozenJobStops",
+                              "kind": "attribute",
+                              "redefines": "statement",
+                              "value": "\"A process in a job, or beneath one, whose cgroup.freeze is set shall run no user code until the job is thawed or the process is killed; SIGCONT shall not thaw it, and cgroup.events shall say frozen only once every live process beneath has stopped.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1170
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::aFrozenJobStops",
+                              "kind": "attribute",
+                              "redefines": "criterion",
+                              "value": "\"A program of three threads in a frozen cgroup stops counting, cgroup.events says frozen 1 and wakes its poller, SIGCONT changes neither, and thawing restarts its futex wait (the `cgroups` line, freeze).\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1174
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::aFrozenJobStops",
+                              "kind": "attribute",
+                              "redefines": "parent",
+                              "value": "\"O.QUOTA\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1175
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "reclaimComesBeforeTheKill",
+                          "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::reclaimComesBeforeTheKill",
+                          "kind": "requirement",
+                          "shortName": "H.QUOTA.12",
+                          "type": "ItemHighLevel",
+                          "source": {
+                            "file": "docs/sysml/13-item-requirements.sysml",
+                            "line": 1177
+                          },
+                          "children": [
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::reclaimComesBeforeTheKill",
+                              "kind": "attribute",
+                              "redefines": "statement",
+                              "value": "\"A charge refused by a job's memory limit, and a program over its memory.high, shall first take back clean file cache charged to that job or beneath it, never a sibling's and never a child's at or under its memory.min, and read back as its source has it, before anything is killed.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1182
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::reclaimComesBeforeTheKill",
+                              "kind": "attribute",
+                              "redefines": "criterion",
+                              "value": "\"A cgroup reading a file twice its memory.high is brought back to it, its sibling's cache untouched, every page read back as the source has it, and a read at memory.max kills nothing where its clean cache was room (the `cgroups` line, reclaim).\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1187
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Quotas::reclaimComesBeforeTheKill",
+                              "kind": "attribute",
+                              "redefines": "parent",
+                              "value": "(\"G.8\", \"O.QUOTA\")",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1188
+                              }
+                            }
+                          ]
                         }
                       ]
                     },
@@ -24618,7 +24756,7 @@
                       "doc": "The audit record of the TSF's own decisions: O.AUDIT (FAU_GEN.1, FAU_GEN.2, FAU_SAR.1, FAU_SAR.2, FAU_STG.1, FAU_STG.4), for P.ACCOUNTABILITY. docs/certification/AUDIT.md is the design.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1154
+                        "line": 1192
                       },
                       "children": [
                         {
@@ -24629,7 +24767,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1159
+                            "line": 1197
                           },
                           "children": [
                             {
@@ -24640,7 +24778,7 @@
                               "value": "\"Each audit ring shall number its records from zero without a gap, the high-value ring's first being the start-up record with the boot's whole audit id and both ring lengths; a second start shall change nothing, and a reader asking for a record the ring overwrote shall be moved on and told exactly how many it lost.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1165
+                                "line": 1203
                               }
                             },
                             {
@@ -24651,7 +24789,7 @@
                               "value": "\"On a store of four high-value records, the start-up record is number 0 and carries the id and lengths; a second start is refused; after six grants a read from 0 copies records 3 to 6 and reports 3 lost; a read of two from 3 resumes at 5.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1170
+                                "line": 1208
                               }
                             },
                             {
@@ -24662,7 +24800,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1171
+                                "line": 1209
                               }
                             }
                           ]
@@ -24675,7 +24813,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1173
+                            "line": 1211
                           },
                           "children": [
                             {
@@ -24686,7 +24824,7 @@
                               "value": "\"The first eight system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1177
+                                "line": 1215
                               }
                             },
                             {
@@ -24697,7 +24835,7 @@
                               "value": "\"Nine system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, the ring reports records lost, and a read of the boot records from 6 copies 3 and resumes at 9.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1181
+                                "line": 1219
                               }
                             },
                             {
@@ -24708,7 +24846,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1182
+                                "line": 1220
                               }
                             }
                           ]
@@ -24721,7 +24859,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1184
+                            "line": 1222
                           },
                           "children": [
                             {
@@ -24732,7 +24870,7 @@
                               "value": "\"A refusal shall be kept in the refusal ring and a record of every other class in the high-value ring, so that no flood of refusals can overwrite a grant.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1187
+                                "line": 1225
                               }
                             },
                             {
@@ -24743,7 +24881,7 @@
                               "value": "\"One record of each of the six classes: the refusal alone in the refusal ring, the other five in the high-value ring in the order made.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1190
+                                "line": 1228
                               }
                             },
                             {
@@ -24754,7 +24892,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1191
+                                "line": 1229
                               }
                             }
                           ]
@@ -24767,7 +24905,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1193
+                            "line": 1231
                           },
                           "children": [
                             {
@@ -24778,7 +24916,7 @@
                               "value": "\"A job shall be charged, for the fairness of the refusal ring, to the budget its maker gave it: its parent's for a job its members could make themselves, its own otherwise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1196
+                                "line": 1234
                               }
                             },
                             {
@@ -24789,7 +24927,7 @@
                               "value": "\"An anonymous job and one inside it are charged to their unit, a cgroup made in a delegated unit to that unit, and a cgroup root made in a unit to itself: 6 jobs' budgets as given.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1200
+                                "line": 1238
                               }
                             },
                             {
@@ -24800,7 +24938,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1201
+                                "line": 1239
                               }
                             }
                           ]
@@ -24813,7 +24951,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1203
+                            "line": 1241
                           },
                           "children": [
                             {
@@ -24824,7 +24962,7 @@
                               "value": "\"Past 64 refusals charged to one budget in a second, the TSF shall count that budget's further refusals rather than keep them, and write the count once the second has ended, while another budget's refusals and every grant are kept.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1207
+                                "line": 1245
                               }
                             },
                             {
@@ -24835,7 +24973,7 @@
                               "value": "\"104 refusals from a unit's three jobs keep 64 between them and, once the second has ended, one suppressed record counting 40 under the unit; the delegated unit's refusal in the same second is kept, and a grant made before is still read with none lost.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1212
+                                "line": 1250
                               }
                             },
                             {
@@ -24846,7 +24984,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1213
+                                "line": 1251
                               }
                             }
                           ]
@@ -24859,7 +24997,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1215
+                            "line": 1253
                           },
                           "children": [
                             {
@@ -24870,7 +25008,7 @@
                               "value": "\"A budget whose fairness window is taken to make room for another shall have its count written, not dropped.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1218
+                                "line": 1256
                               }
                             },
                             {
@@ -24881,7 +25019,7 @@
                               "value": "\"A budget one over its limit, then 32 more budgets: the first's window is closed and its suppressed record counts 1.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1221
+                                "line": 1259
                               }
                             },
                             {
@@ -24892,7 +25030,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1222
+                                "line": 1260
                               }
                             }
                           ]
@@ -24905,7 +25043,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1224
+                            "line": 1262
                           },
                           "children": [
                             {
@@ -24916,7 +25054,7 @@
                               "value": "\"The boot shall start its audit record with the start-up record of the id reads answer, and record whether its self-checks run, who starts devmgr, the mitigations it was built with and the KASLR state, as bring-up read them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1228
+                                "line": 1266
                               }
                             },
                             {
@@ -24927,7 +25065,7 @@
                               "value": "\"The kernel's boot records begin with the start-up record, its id the one reads answer and its lengths 512 and 4096, and hold the 4 configuration records with bring-up's values; the boot is not yet recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1232
+                                "line": 1270
                               }
                             },
                             {
@@ -24938,7 +25076,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1233
+                                "line": 1271
                               }
                             }
                           ]
@@ -24951,7 +25089,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1235
+                            "line": 1273
                           },
                           "children": [
                             {
@@ -24962,7 +25100,7 @@
                               "value": "\"Each decision the TSF makes at a recording site -- a call its rights refused, a widening refused, a limit's refusal, a process made, a job given for a cgroup, a control channel given, a job killed, a cgroup killed, an OOM kill, a device quiesced, a limit set by handle or by cgroup file, a DMA fault -- shall be recorded with its outcome and the subject that made it, the kernel for the decisions it makes alone.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1242
+                                "line": 1280
                               }
                             },
                             {
@@ -24973,7 +25111,7 @@
                               "value": "\"At the end of a boot with checks, the record holds each of the 12 events the boot's checks provoke, and DMA_FAULT where an IOMMU translates, with the outcome of its class and its subject; none of the OOM kill, the quiesce and the fault names a process; the boot is recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1247
+                                "line": 1285
                               }
                             },
                             {
@@ -24984,7 +25122,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1248
+                                "line": 1286
                               }
                             }
                           ]
@@ -24997,7 +25135,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1250
+                            "line": 1288
                           },
                           "children": [
                             {
@@ -25008,7 +25146,7 @@
                               "value": "\"The audit record shall be read only through the audit handle with READ, which can be neither duplicated nor sent; a read shall copy whole records from a cursor, and a read that copies none or cannot copy them out shall leave the cursor, the buffer and the reader's position where they were.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1255
+                                "line": 1293
                               }
                             },
                             {
@@ -25019,7 +25157,7 @@
                               "value": "\"A handle with pid 1's rights reads the boot records, the start-up record first with the kernel's id; a count of 0 copies nothing and moves nothing; a read into unmapped memory is FAULT and counts nothing read; a handle without READ, a channel end and a ring that does not exist are refused; the handle is not duplicated and not sent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1261
+                                "line": 1299
                               }
                             },
                             {
@@ -25030,7 +25168,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1262
+                                "line": 1300
                               }
                             }
                           ]
@@ -25043,7 +25181,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1264
+                            "line": 1302
                           },
                           "children": [
                             {
@@ -25054,7 +25192,7 @@
                               "value": "\"A boot with init shall keep its audit record on the root volume in a file named by the boot's audit id, holding the start-up record, the configuration, and the decisions only a boot with init makes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1268
+                                "line": 1306
                               }
                             },
                             {
@@ -25065,7 +25203,7 @@
                               "value": "\"svc audit reads back the start-up record with the id init named the file by, the checks' configuration as run, STARTER_GIVEN, READER_GIVEN, DEVMGR_STARTED by pid 1 and ROOT_SWITCHED with pid 1 moved.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1272
+                                "line": 1310
                               }
                             },
                             {
@@ -25076,7 +25214,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1273
+                                "line": 1311
                               }
                             }
                           ]
@@ -25089,7 +25227,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1275
+                            "line": 1313
                           },
                           "children": [
                             {
@@ -25100,7 +25238,7 @@
                               "value": "\"Every record up to a power action shall be in the reader's file or on the console: the kernel shall record the power action last, say how far the reader read, and print every record past that, and a run the ring overwrote as one line.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1279
+                                "line": 1317
                               }
                             },
                             {
@@ -25111,7 +25249,7 @@
                               "value": "\"At test-init's power-off, init's last read is where the kernel saw it stop, and every number from there to the power action is printed as unread or in a lost run.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1282
+                                "line": 1320
                               }
                             },
                             {
@@ -25122,7 +25260,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1283
+                                "line": 1321
                               }
                             }
                           ]
@@ -25135,7 +25273,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1285
+                            "line": 1323
                           },
                           "children": [
                             {
@@ -25146,7 +25284,7 @@
                               "value": "\"A boot that skips its self-checks shall record that it did, where a reader outside it can see.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1287
+                                "line": 1325
                               }
                             },
                             {
@@ -25157,7 +25295,7 @@
                               "value": "\"A boot with ferrix.checks=skip, read back through svc audit, holds the checks' configuration record with value 0.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1290
+                                "line": 1328
                               }
                             },
                             {
@@ -25168,7 +25306,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1291
+                                "line": 1329
                               }
                             }
                           ]
@@ -25181,7 +25319,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1293
+                            "line": 1331
                           },
                           "children": [
                             {
@@ -25192,7 +25330,7 @@
                               "value": "\"An audit record shall be 64 bytes, each field little-endian at a fixed offset, so that a reader decodes what the kernel wrote.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1296
+                                "line": 1334
                               }
                             },
                             {
@@ -25203,7 +25341,7 @@
                               "value": "\"A record of distinct bytes encodes to them in order at the offsets the layout names and decodes back equal.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1298
+                                "line": 1336
                               }
                             },
                             {
@@ -25214,7 +25352,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1299
+                                "line": 1337
                               }
                             }
                           ]
@@ -25228,7 +25366,7 @@
                       "doc": "The safe state and what brings the kernel to it: O.FAILSAFE and ASR-6 (FPT_FLS.1). SAFETY-MANUAL.md §3 defines the safe state.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1303
+                        "line": 1341
                       },
                       "children": [
                         {
@@ -25239,7 +25377,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1307
+                            "line": 1345
                           },
                           "children": [
                             {
@@ -25250,7 +25388,7 @@
                               "value": "\"On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1311
+                                "line": 1349
                               }
                             },
                             {
@@ -25261,7 +25399,7 @@
                               "value": "\"A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1315
+                                "line": 1353
                               }
                             },
                             {
@@ -25272,7 +25410,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1316
+                                "line": 1354
                               }
                             }
                           ]
@@ -25285,7 +25423,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1318
+                            "line": 1356
                           },
                           "children": [
                             {
@@ -25296,7 +25434,7 @@
                               "value": "\"The allocator every kernel stack comes from shall give each an unmapped guard page directly below and above it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1321
+                                "line": 1359
                               }
                             },
                             {
@@ -25307,7 +25445,7 @@
                               "value": "\"A kernel stack allocated, written at its first and last word and freed has the page below and the page above it untranslated, and gives back every frame it took.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1324
+                                "line": 1362
                               }
                             },
                             {
@@ -25318,7 +25456,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1325
+                                "line": 1363
                               }
                             }
                           ]
@@ -25331,7 +25469,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1328
+                            "line": 1366
                           },
                           "children": [
                             {
@@ -25342,7 +25480,7 @@
                               "value": "\"A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1330
+                                "line": 1368
                               }
                             },
                             {
@@ -25353,7 +25491,7 @@
                               "value": "\"A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1333
+                                "line": 1371
                               }
                             },
                             {
@@ -25364,7 +25502,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1334
+                                "line": 1372
                               }
                             }
                           ]
@@ -25377,7 +25515,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1338
+                            "line": 1376
                           },
                           "children": [
                             {
@@ -25388,7 +25526,7 @@
                               "value": "\"Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1341
+                                "line": 1379
                               }
                             },
                             {
@@ -25399,7 +25537,7 @@
                               "value": "\"A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1344
+                                "line": 1382
                               }
                             },
                             {
@@ -25410,7 +25548,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1345
+                                "line": 1383
                               }
                             }
                           ]
@@ -25424,7 +25562,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1349
+                        "line": 1387
                       },
                       "children": [
                         {
@@ -25435,7 +25573,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1365
+                            "line": 1403
                           },
                           "children": [
                             {
@@ -25446,7 +25584,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1369
+                                "line": 1407
                               }
                             },
                             {
@@ -25457,7 +25595,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1376
+                                "line": 1414
                               }
                             },
                             {
@@ -25468,7 +25606,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1377
+                                "line": 1415
                               }
                             }
                           ]
@@ -25481,7 +25619,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1379
+                            "line": 1417
                           },
                           "children": [
                             {
@@ -25492,7 +25630,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1383
+                                "line": 1421
                               }
                             },
                             {
@@ -25503,7 +25641,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1387
+                                "line": 1425
                               }
                             },
                             {
@@ -25514,7 +25652,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1388
+                                "line": 1426
                               }
                             }
                           ]
@@ -25527,7 +25665,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1390
+                            "line": 1428
                           },
                           "children": [
                             {
@@ -25538,7 +25676,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1393
+                                "line": 1431
                               }
                             },
                             {
@@ -25549,7 +25687,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1396
+                                "line": 1434
                               }
                             },
                             {
@@ -25560,7 +25698,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1397
+                                "line": 1435
                               }
                             }
                           ]
@@ -25573,7 +25711,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1399
+                            "line": 1437
                           },
                           "children": [
                             {
@@ -25584,7 +25722,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1403
+                                "line": 1441
                               }
                             },
                             {
@@ -25595,7 +25733,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1407
+                                "line": 1445
                               }
                             },
                             {
@@ -25606,7 +25744,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1408
+                                "line": 1446
                               }
                             }
                           ]
@@ -25619,7 +25757,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1410
+                            "line": 1448
                           },
                           "children": [
                             {
@@ -25630,7 +25768,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1413
+                                "line": 1451
                               }
                             },
                             {
@@ -25641,7 +25779,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1417
+                                "line": 1455
                               }
                             },
                             {
@@ -25652,7 +25790,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1418
+                                "line": 1456
                               }
                             }
                           ]
@@ -25665,7 +25803,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1420
+                            "line": 1458
                           },
                           "children": [
                             {
@@ -25676,7 +25814,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1423
+                                "line": 1461
                               }
                             },
                             {
@@ -25687,7 +25825,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1426
+                                "line": 1464
                               }
                             },
                             {
@@ -25698,7 +25836,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1427
+                                "line": 1465
                               }
                             }
                           ]
@@ -25711,7 +25849,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1429
+                            "line": 1467
                           },
                           "children": [
                             {
@@ -25722,7 +25860,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1432
+                                "line": 1470
                               }
                             },
                             {
@@ -25733,7 +25871,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1436
+                                "line": 1474
                               }
                             },
                             {
@@ -25744,7 +25882,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1437
+                                "line": 1475
                               }
                             }
                           ]
@@ -25757,7 +25895,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1439
+                            "line": 1477
                           },
                           "children": [
                             {
@@ -25768,7 +25906,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1443
+                                "line": 1481
                               }
                             },
                             {
@@ -25779,7 +25917,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1447
+                                "line": 1485
                               }
                             },
                             {
@@ -25790,7 +25928,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1448
+                                "line": 1486
                               }
                             }
                           ]
@@ -31992,10 +32130,10 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::theKillIsScoped",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A user fault refused by a memory limit shall end, with the kill's status, a process of the job whose limit was full or beneath it and none outside it, count the kill there, and retry the fault.\"",
+                  "value": "\"A user fault refused by a memory limit shall first take back clean file cache charged to the job whose limit was full or beneath it and retry the fault, and only when that gave back nothing end, with the kill's status, a process of that job or beneath it and none outside it, count the kill there, and retry the fault.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1306
+                    "line": 1308
                   }
                 },
                 {
@@ -32003,10 +32141,10 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::theKillIsScoped",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A program writing 8 MiB in a job limited to 1 MiB ends by SIGKILL, exactly 1 process killed, while a process with more resident memory in a sibling job lives.\"",
+                  "value": "\"A program writing 8 MiB in a job limited to 1 MiB ends by SIGKILL, exactly 1 process killed, while a process with more resident memory in a sibling job lives; a read of a file past memory.max kills no process where the job's clean cache was room.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1309
+                    "line": 1312
                   }
                 },
                 {
@@ -32014,10 +32152,10 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::theKillIsScoped",
                   "kind": "attribute",
                   "redefines": "parent",
-                  "value": "\"H.QUOTA.6\"",
+                  "value": "(\"H.QUOTA.6\", \"H.QUOTA.12\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1310
+                    "line": 1313
                   }
                 },
                 {
@@ -32028,7 +32166,7 @@
                   "value": "(\"object::oom::user_fault\", \"object::oom::out_of_memory\", \"object::oom::kill_within\", \"object::oom::at_or_above\", \"object::quota::at_limit\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1313
+                    "line": 1316
                   }
                 }
               ]
@@ -32041,7 +32179,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1315
+                "line": 1318
               },
               "children": [
                 {
@@ -32052,7 +32190,7 @@
                   "value": "\"Among the live processes of the full job and the jobs beneath it, kill_within shall choose the one with the most resident pages, and never pid 1.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1318
+                    "line": 1321
                   }
                 },
                 {
@@ -32063,7 +32201,7 @@
                   "value": "\"With three processes of 1, 4 and 2 MiB resident in the full job, the one of 4 MiB is killed; with pid 1 the largest, the next largest is.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1321
+                    "line": 1324
                   }
                 },
                 {
@@ -32074,7 +32212,7 @@
                   "value": "\"H.QUOTA.6\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1322
+                    "line": 1325
                   }
                 },
                 {
@@ -32085,7 +32223,7 @@
                   "value": "(\"object::oom::kill_within\", \"object::oom::at_or_above\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1323
+                    "line": 1326
                   }
                 }
               ]
@@ -32098,7 +32236,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1325
+                "line": 1328
               },
               "children": [
                 {
@@ -32106,10 +32244,10 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::noLimitFullNoKill",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A fault that failed for want of memory with no limit full, or with nothing killable in the full job, shall fail as it would without the OOM kill and kill nothing.\"",
+                  "value": "\"A fault that failed for want of memory with no limit full shall take back clean file cache anywhere and retry if that gave back any, and otherwise, like one with nothing killable in the full job, fail as it would without the OOM kill and kill nothing.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1328
+                    "line": 1333
                   }
                 },
                 {
@@ -32117,10 +32255,10 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::noLimitFullNoKill",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A fault refused with every limit unset kills 0 processes and ends its program with SIGSEGV; a system call's fault there answers EFAULT.\"",
+                  "value": "\"A fault refused with every limit unset and no cache to take back kills 0 processes and ends its program with SIGSEGV; a system call's fault there answers EFAULT.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1331
+                    "line": 1336
                   }
                 },
                 {
@@ -32131,7 +32269,7 @@
                   "value": "\"H.QUOTA.6\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1332
+                    "line": 1337
                   }
                 },
                 {
@@ -32142,7 +32280,7 @@
                   "value": "(\"object::oom::out_of_memory\", \"object::oom::fault\", \"object::oom::kill_within\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1334
+                    "line": 1339
                   }
                 }
               ]
@@ -32155,7 +32293,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1336
+                "line": 1341
               },
               "children": [
                 {
@@ -32166,7 +32304,7 @@
                   "value": "\"A victim that has ended and closed everything, whose address space no live process shares, shall have that space emptied at once rather than at its parent's wait, and a fault that finds a victim still ending shall wait and retry, killing no second process.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1341
+                    "line": 1346
                   }
                 },
                 {
@@ -32177,7 +32315,7 @@
                   "value": "\"Two faults at one full limit while the first victim is ending kill 1 process, and the job's memory use falls by the victim's resident pages before its parent waits.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1344
+                    "line": 1349
                   }
                 },
                 {
@@ -32188,7 +32326,7 @@
                   "value": "\"H.QUOTA.6\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1345
+                    "line": 1350
                   }
                 },
                 {
@@ -32199,7 +32337,406 @@
                   "value": "(\"object::oom::kill_within\", \"object::oom::shared_with_the_living\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1347
+                    "line": 1352
+                  }
+                }
+              ]
+            },
+            {
+              "name": "cpuIsChargedUp",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
+              "kind": "requirement",
+              "shortName": "L.object.106",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1354
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"charge_cpu shall charge the time a task ran to its job and every job above it and to the machine, as user time when the tick that ended the slice interrupted user mode and as system time otherwise, and throttled_until shall report a job whose subtree has used its cpu.max quota this period as throttled until the period ends.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1360
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A program of two counting threads in a job with cpu.max 20000 100000 is held to between a twelfth and two thirds of a processor, its cpu.stat counts at least 3 throttled periods and its user and system time add to its usage, and with cpu.max max it takes more than six tenths.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1365
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.10\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1366
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::cpuIsChargedUp",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::quota::charge_cpu\", \"object::quota::throttled_until\", \"object::quota::refresh_period\", \"object::quota::runtime_left\", \"object::quota::Quota::set_bandwidth\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1369
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFrozenProcessParks",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::aFrozenProcessParks",
+              "kind": "requirement",
+              "shortName": "L.object.107",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1371
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aFrozenProcessParks",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"sync_freeze shall set a process frozen when its job or one above it has cgroup.freeze set, whether the freeze came before the process was made, before it was moved in, or after it was running, and a frozen process shall report is_frozen until its job is thawed, which SIGCONT does not do.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1376
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aFrozenProcessParks",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A program of three threads in a frozen cgroup stops counting and reports frozen through cgroup.events; a fork made in it, a process moved into it and one made by clone3 into it start frozen; SIGCONT leaves it frozen; one moved out of it is not.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1381
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aFrozenProcessParks",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.11\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1382
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aFrozenProcessParks",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::process::Process::sync_freeze\", \"object::process::Process::is_frozen\", \"object::job::Job::freezing\", \"object::job::Job::set_freeze\", \"object::job::Job::note_frozen\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1385
+                  }
+                }
+              ]
+            },
+            {
+              "name": "memoryHighReclaims",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::memoryHighReclaims",
+              "kind": "requirement",
+              "shortName": "L.object.108",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1387
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::memoryHighReclaims",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"throttle shall, for a program that just took a page while its job or one above is over its memory.high, take back clean cache from that job down to the mark, count the crossing in memory.events high in the job whose mark it was and above, and pause a millisecond if that gave back less than the excess.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1392
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::memoryHighReclaims",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A cgroup reading a file twice its memory.high holds no more than the mark afterwards, memory.events counts the crossing, and a second read takes more.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1395
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::memoryHighReclaims",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1396
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::memoryHighReclaims",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::oom::throttle\", \"object::quota::over_high\", \"object::quota::count\", \"object::quota::bump\", \"object::quota::Counter::at\", \"object::job::Job::wake_memory_events\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1399
+                  }
+                }
+              ]
+            },
+            {
+              "name": "reclaimIsScoped",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
+              "kind": "requirement",
+              "shortName": "L.object.109",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1401
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"reclaim shall give back clean cache pages of disk files whose frame is charged to the job it is asked at or beneath it, never a sibling's and never a child's at or under its memory.min, and every page it gave back shall read as its source has it.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1406
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Reclaim at one cgroup leaves a sibling's cached file untouched, spares a child using no more than its memory.min, and what it took reads back as the source has it.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1409
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1410
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::reclaimIsScoped",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"user::cache::reclaim\", \"user::cache::take_from\", \"user::cache::takes\", \"object::quota::protected\", \"user::vmo::Vmo::decommit_range\", \"object::quota::within\", \"object::job::Job::mark\", \"object::quota::Quota::set_mark\", \"object::quota::Mark::at\", \"user::cache::register\", \"user::cache::live\", \"user::vmo::Vmo::reclaimable\", \"user::vmo::Vmo::pick_pages\", \"user::vmo::Vmo::for_each_page\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1417
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aGoneJobStaysGone",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
+              "kind": "requirement",
+              "shortName": "L.object.110",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1419
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"job_ended shall be true for a quota slot from the moment its job goes, though a task still holds the slot, and false again once the slot is claimed anew, so that state kept per slot is not started for a job that has gone.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1423
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A task of a cgroup that was removed under it reads the disk, and the quota slots in use are back to what they were before the cgroup.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1426
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.4\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1427
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::aGoneJobStaysGone",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::quota::job_ended\", \"object::quota::on_job_release\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1428
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theCacheIsCounted",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
+              "kind": "requirement",
+              "shortName": "L.object.111",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1430
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"resident shall count the pages of cached files charged to a job and the jobs beneath it, apart from those of memory filesystems, for memory.stat's file and shmem.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1433
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"memory.stat's file equals the cache that memory.current holds, and its shmem the memory filesystem's.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1435
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1436
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::theCacheIsCounted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"user::cache::resident\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1437
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anEvictedPageIsNoHole",
+              "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
+              "kind": "requirement",
+              "shortName": "L.object.112",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1439
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A page of a disk file that was filled before a private mapping's fault took its lock and was reclaimed since shall not be copied or read as zeros: copy_or_zero shall hand the frame back and ask for the fault to be made again, and read_present shall answer that the page is absent.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1444
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A page reclaim took reads back as the source has it, never as zeros, through a read and through a fault.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1447
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1448
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::OomKill::anEvictedPageIsNoHole",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"user::space::copy_or_zero\", \"user::vmo::Vmo::read_present\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1449
                   }
                 }
               ]
@@ -32213,7 +32750,7 @@
           "doc": "docs/OPAQUE-KERNEL.md §9.2-§9.3a: a job marked at its creation, whose born members' switches skip the predictor invalidation. The customer's decision of 2026-10-01 (docs/BACKLOG.md).",
           "source": {
             "file": "docs/sysml/14-object-requirements.sysml",
-            "line": 1351
+            "line": 1453
           },
           "children": [
             {
@@ -32224,7 +32761,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1356
+                "line": 1458
               },
               "children": [
                 {
@@ -32235,7 +32772,7 @@
                   "value": "\"entered_space shall skip the predictor invalidation at a switch of address space only when the outgoing space's domain, read as it leaves, and the incoming space's are the same and not zero, and shall otherwise decide the barrier as it did before; forget_root shall clear a processor's last domain with its last root.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1362
+                    "line": 1464
                   }
                 },
                 {
@@ -32246,7 +32783,7 @@
                   "value": "\"Two members of one marked job switched both ways on one processor decide 0 barriers; a member and a process of no domain, and members of two marked jobs, decide 2; a switch inside the domain issues no invalidation; and a member installed after a forgotten member's root decides 1 (the `domain` line, cases 1, 2 and 10).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1368
+                    "line": 1470
                   }
                 },
                 {
@@ -32257,7 +32794,7 @@
                   "value": "\"H.TRAP.17\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1369
+                    "line": 1471
                   }
                 },
                 {
@@ -32268,7 +32805,7 @@
                   "value": "(\"arch::speculation::entered_space\", \"arch::speculation::same_domain\", \"arch::speculation::left_space\", \"arch::speculation::entering_space\", \"arch::speculation::forget_root\", \"user::space::AddressSpace::install\", \"user::space::AddressSpace::uninstall\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1374
+                    "line": 1476
                   }
                 }
               ]
@@ -32281,7 +32818,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1376
+                "line": 1478
               },
               "children": [
                 {
@@ -32292,7 +32829,7 @@
                   "value": "\"job_create shall make a job a speculation domain only with JOB_SPECULATION_DOMAIN, only under MANAGE on the parent, and only as it makes the job; it shall refuse any other option bit with INVALID_ARGS, write a DOMAIN audit record for each job it marks and none for a refusal, and make every other job, a child of a marked one included, in no domain.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1382
+                    "line": 1484
                   }
                 },
                 {
@@ -32303,7 +32840,7 @@
                   "value": "\"job_create with the option and a parent handle without MANAGE answers ACCESS_DENIED, with an unknown bit INVALID_ARGS, and neither adds a DOMAIN record; with MANAGE it adds one, naming the new job, its parent and its domain (the `domain` line, case 4).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1387
+                    "line": 1489
                   }
                 },
                 {
@@ -32314,7 +32851,7 @@
                   "value": "(\"H.TRAP.17\", \"H.OBJ.8\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1388
+                    "line": 1490
                   }
                 },
                 {
@@ -32325,7 +32862,7 @@
                   "value": "(\"syscall::native::job_create\", \"object::job::Job::new_child_domain\", \"object::job::Job::new_child_in\", \"object::job::Job::domain\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1391
+                    "line": 1493
                   }
                 }
               ]
@@ -32338,7 +32875,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1393
+                "line": 1495
               },
               "children": [
                 {
@@ -32349,7 +32886,7 @@
                   "value": "\"A process shall be in a speculation domain only if it was made in the marked job, by process_create or by a fork of a member in the same job; its address space shall carry the domain, and a space a process of another domain comes to share shall be in no domain from then on.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1398
+                    "line": 1500
                   }
                 },
                 {
@@ -32360,7 +32897,7 @@
                   "value": "\"A process made in a marked job reports the job's domain, and a member whose space a process of no domain shares decides the barrier both ways with another member (the `domain` line, case 6); a marked job inside a marked job is a domain of its own (case 7); a child job of a marked job is in no domain, a member's fork is a member, and a process moved into a marked job, its fork, and a process that left before its birth are not (cases 9 and 10).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1405
+                    "line": 1507
                   }
                 },
                 {
@@ -32371,7 +32908,7 @@
                   "value": "\"H.TRAP.17\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1406
+                    "line": 1508
                   }
                 },
                 {
@@ -32382,7 +32919,7 @@
                   "value": "(\"object::process::Process::new\", \"object::process::Process::move_charged\", \"user::space::AddressSpace::claim_domain\", \"user::space::AddressSpace::set_birth_domain\", \"object::process::Process::speculation_domain\", \"user::space::AddressSpace::domain\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1412
+                    "line": 1514
                   }
                 }
               ]
@@ -32395,7 +32932,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1414
+                "line": 1516
               },
               "children": [
                 {
@@ -32406,7 +32943,7 @@
                   "value": "\"A member shall leave its speculation domain for good, and its address space with it, when it moves between jobs, and when it stops being dumpable: a set-id execve, a change of credentials, or PR_SET_DUMPABLE; and every processor whose last space was in the domain shall issue the barrier before the leave returns. In hardened builds the leave shall find them two ways, and wait for a grace period: a scan that asks each processor whose last domain is the leaver's, and a local check by which each processor, answering the leave's grace period with interrupts masked, compares its own last domain with the domains being left and issues the barrier itself on a match. A build with the mitigations off has no barrier, and its leave waits for no grace period. Each domain being left shall be published in a slot of its own in a set, sequentially consistent and before the scan and before the grace period's generation is advanced, and the answering processor shall read the generation before the set, so that one that records the domain after the scan has passed it is still found (F-60).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1431
+                    "line": 1533
                   }
                 },
                 {
@@ -32417,7 +32954,7 @@
                   "value": "\"A member moved out of its job, one whose credentials changed and one made not dumpable each decide the barrier both ways with a member left in the domain (the `domain` line, cases 3 and 5); a member that leaves makes this processor and one running a thread in its space each decide the barrier before the leave returns (case 8); and a processor made, by stage 9's hook between the scan and the grace period, to record the domain after the scan has passed it decides the barrier before the leave returns (case 11), which the local check removed fails.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1440
+                    "line": 1542
                   }
                 },
                 {
@@ -32428,7 +32965,7 @@
                   "value": "\"H.TRAP.17\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1441
+                    "line": 1543
                   }
                 },
                 {
@@ -32439,7 +32976,7 @@
                   "value": "(\"object::process::Process::leave_speculation_domain\", \"object::process::Process::leave_speculation_domain_unstarted\", \"arch::speculation::leaving_domain\", \"arch::speculation::serve_wanted_barrier\", \"arch::speculation::answer_leaving\", \"smp::answer_grace_periods\", \"user::space::AddressSpace::leave_domain\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1446
+                    "line": 1548
                   }
                 }
               ]
@@ -32453,7 +32990,7 @@
           "doc": "A published PCI node's configuration space, written by the kernel and, through device_config_write, by its driver: one lock per node, as a type (docs/NVIDIA.md section 12.1).",
           "source": {
             "file": "docs/sysml/14-object-requirements.sysml",
-            "line": 1450
+            "line": 1552
           },
           "children": [
             {
@@ -32464,7 +33001,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1455
+                "line": 1557
               },
               "children": [
                 {
@@ -32475,7 +33012,7 @@
                   "value": "\"Every write to a published node's PCI configuration space, by the kernel or by a driver, shall be made holding the node's one configuration lock, through the one type that holds it; enumeration's writers run at stage 10, before any node is published.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1460
+                    "line": 1562
                   }
                 },
                 {
@@ -32486,7 +33023,7 @@
                   "value": "\"A ConfigWrites is made only by taking the lock, MappedConfig has no write, and bus mastering, an MSI mint and mask, MSI-X's enable and a driver's write go through ConfigWrites. Bus mastering switched on and off on one processor while another makes a driver's configuration writes to the same function, 1,000 rounds, reads back as dma_on says every time (the second config line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1467
+                    "line": 1569
                   }
                 },
                 {
@@ -32497,7 +33034,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.2\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1468
+                    "line": 1570
                   }
                 },
                 {
@@ -32508,7 +33045,7 @@
                   "value": "(\"device::DeviceNode::config_writes\", \"device::DeviceNode::config_writes_mapped\", \"device::DeviceNode::set_bus_master\", \"device::DeviceNode::config_mapping\", \"device::ConfigWrites::write\", \"device::ConfigWrites::inside\", \"device::MsiFunction::mint\", \"device::MsiFunction::set_masked\", \"device::MsixTable::open\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1473
+                    "line": 1575
                   }
                 }
               ]
@@ -32522,7 +33059,7 @@
           "doc": "docs/OPAQUE-KERNEL.md §9.4, items 3 and 4: channel_write_read (0x1013), the inbox's slot it writes into, its answer in registers, and the wait it trusts. Checked through each architecture's own entry by object::write_read_check, the `wrread` line.",
           "source": {
             "file": "docs/sysml/14-object-requirements.sysml",
-            "line": 1477
+            "line": 1579
           },
           "children": [
             {
@@ -32533,7 +33070,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1484
+                "line": 1586
               },
               "children": [
                 {
@@ -32544,7 +33081,7 @@
                   "value": "\"Endpoint::write_small shall refuse a message as Endpoint::write does -- the peer closed, more bytes than three words, the queue full -- and shall otherwise hold a message of at most three words without handles in the peer's slot only while nothing waits there and the inbox's spare has room for it or can be given it, queueing it behind what does, so that the slot always holds the oldest message and a buffer for it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1491
+                    "line": 1593
                   }
                 },
                 {
@@ -32555,7 +33092,7 @@
                   "value": "\"A small message written behind a queued one is read after it, and a send to a closed peer, one past three words and one on a handle without WRITE send nothing (the `wrread` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1494
+                    "line": 1596
                   }
                 },
                 {
@@ -32566,7 +33103,7 @@
                   "value": "\"H.OBJ.10\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1495
+                    "line": 1597
                   }
                 },
                 {
@@ -32577,7 +33114,7 @@
                   "value": "(\"object::channel::Endpoint::write_small\", \"object::channel::Inbox::put_small\", \"object::channel::Inbox::is_empty\", \"object::channel::Small::of\", \"object::channel::Inbox::drain\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1498
+                    "line": 1600
                   }
                 }
               ]
@@ -32590,7 +33127,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1500
+                "line": 1602
               },
               "children": [
                 {
@@ -32601,7 +33138,7 @@
                   "value": "\"Endpoint::read shall take the message held in the slot before any queued, as a message without handles in the inbox's spare, never failing for memory, leave it with its size reported when the caller has too little room, and Endpoint::unread shall put a message back ahead of one the slot has taken since, so that every reader sees the messages in the order written.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1506
+                    "line": 1608
                   }
                 },
                 {
@@ -32612,7 +33149,7 @@
                   "value": "\"A message held in the slot is read before one queued after it; a read with room for 2 bytes of a 5-byte slot message is refused with its size and the next read returns it whole; a message taken from the slot and put back after the slot took another is read first, then the other (the `wrread` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1511
+                    "line": 1613
                   }
                 },
                 {
@@ -32623,7 +33160,7 @@
                   "value": "\"H.OBJ.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1512
+                    "line": 1614
                   }
                 },
                 {
@@ -32634,7 +33171,7 @@
                   "value": "(\"object::channel::Inbox::pop_fitting\", \"object::channel::Inbox::unpop\", \"object::channel::Inbox::head_needs_topology\", \"object::channel::Inbox::take_spare\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1515
+                    "line": 1617
                   }
                 }
               ]
@@ -32647,7 +33184,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1517
+                "line": 1619
               },
               "children": [
                 {
@@ -32658,7 +33195,7 @@
                   "value": "\"Endpoint::read_small shall take the oldest message only if it carries no handles and at most three words, and give its bytes followed by zeros to the width of three words; it shall leave any other message queued and report its size.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1521
+                    "line": 1623
                   }
                 },
                 {
@@ -32669,7 +33206,7 @@
                   "value": "\"A 5-byte message held in the slot and a 7-byte message queued each come back from channel_write_read as their bytes then zeros, and a 40-byte message is refused by a small read and then read whole (the `wrread` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1525
+                    "line": 1627
                   }
                 },
                 {
@@ -32680,7 +33217,7 @@
                   "value": "\"H.OBJ.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1526
+                    "line": 1628
                   }
                 },
                 {
@@ -32691,7 +33228,7 @@
                   "value": "(\"object::channel::Endpoint::read_small\", \"object::channel::Inbox::pop_small\", \"object::channel::Small::of\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1528
+                    "line": 1630
                   }
                 }
               ]
@@ -32704,7 +33241,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1530
+                "line": 1632
               },
               "children": [
                 {
@@ -32715,7 +33252,7 @@
                   "value": "\"channel_write_read shall send its count bytes from its third to fifth argument registers, then answer the next message on the same end with its size in the return register and its words in the second to fourth argument registers, zero past its bytes; a call that fails shall answer its status in the return register alone and leave the second to fourth argument registers as the program set them, on each architecture's entry.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1537
+                    "line": 1639
                   }
                 },
                 {
@@ -32726,7 +33263,7 @@
                   "value": "\"Through the entry, a call that sends 3 bytes and finds a 4-byte answer waiting answers 4 and its words, and the peer reads the 3 bytes then zeros; a closed handle, a count past three words, a send without WRITE, a message too big for registers, and a send and a receive on a closed peer each answer their status with registers 2 to 4 as sent, 6 of 6 (the `wrread` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1543
+                    "line": 1645
                   }
                 },
                 {
@@ -32737,7 +33274,7 @@
                   "value": "(\"H.TRAP.10\", \"H.OBJ.2\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1544
+                    "line": 1646
                   }
                 },
                 {
@@ -32748,7 +33285,7 @@
                   "value": "(\"syscall::native::channel_write_read\", \"syscall::native::dispatch_write_read\", \"syscall::native::send_words\", \"syscall::native::receive_words\", \"syscall::native::read_refusal\", \"syscall::native_call\", \"arch::x86_64::syscall::ferrix_syscall_entry\", \"arch::aarch64::trap::system_call\", \"arch::armv7a::trap::system_call\", \"arch::armv7a::trap::store_words\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1550
+                    "line": 1652
                   }
                 }
               ]
@@ -32761,7 +33298,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1552
+                "line": 1654
               },
               "children": [
                 {
@@ -32772,7 +33309,7 @@
                   "value": "\"channel_write_read's wait shall file no recheck while it is listed on its end's queue, and shall end on each of what it waits for: a message arriving on the end, the peer's close, and its process's end or another thread's execve, each of which wakes it; it shall then answer the message, PEER_CLOSED, or EINTR. The message and the close shall be read from the end's state word and the end or execve from the task's END bit, each ordered against the task's blocked state by a SeqCst fence on each side (L.object.141, L.sched.40).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1561
+                    "line": 1663
                   }
                 },
                 {
@@ -32783,7 +33320,7 @@
                   "value": "\"A thread blocked in channel_write_read and listed on its end's queue is woken within 10 s by a message, which it answers, by its peer's close, which it answers PEER_CLOSED, and by its process's kill, after which its thread ends (the `wrread` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1566
+                    "line": 1668
                   }
                 },
                 {
@@ -32794,7 +33331,7 @@
                   "value": "\"H.OBJ.11\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1567
+                    "line": 1669
                   }
                 },
                 {
@@ -32805,7 +33342,7 @@
                   "value": "(\"object::channel::Endpoint::readable_or_closed\", \"sched::wait::WaitQueue::wait_trusting\", \"sched::wait::WaitQueue::wait_sliced\", \"object::channel::Endpoint::drop\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1570
+                    "line": 1672
                   }
                 }
               ]
@@ -32818,7 +33355,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1572
+                "line": 1674
               },
               "children": [
                 {
@@ -32829,7 +33366,7 @@
                   "value": "\"Under a channel end's inbox lock, its state word's NONEMPTY shall be set exactly when the inbox holds a message, after every operation that changes that -- a write, a small write, a read, a small read, a put-back and the close's drain -- and its PEER_CLOSED shall be set once the peer has closed, after the peer's closed and before the end's waiters are woken.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1578
+                    "line": 1680
                   }
                 },
                 {
@@ -32840,7 +33377,7 @@
                   "value": "\"4096 writes, small writes, reads, small reads and put-backs in a pseudo-random order on one pair leave each end's word equal to its inbox after every one, each operation having crossed the empty boundary once first, and a close is marked in the survivor's (the `chword` line); with the put-back's update removed the check fails after a put-back into an empty inbox.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1584
+                    "line": 1686
                   }
                 },
                 {
@@ -32851,7 +33388,7 @@
                   "value": "\"H.OBJ.11\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1585
+                    "line": 1687
                   }
                 },
                 {
@@ -32862,7 +33399,7 @@
                   "value": "(\"object::channel::Half::note\", \"object::channel::Half::note_peer_closed\", \"object::channel::Half::word\", \"object::channel::Endpoint::read\", \"object::channel::Endpoint::read_small\", \"object::channel::Endpoint::write\", \"object::channel::Endpoint::write_small\", \"object::channel::Endpoint::unread\", \"object::channel::Endpoint::take_unread\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1590
+                    "line": 1692
                   }
                 }
               ]
@@ -32875,7 +33412,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1592
+                "line": 1694
               },
               "children": [
                 {
@@ -32886,7 +33423,7 @@
                   "value": "\"channel_write_read's wait shall read readiness with one load of its end's state word and one of the caller's END bit, without the inbox lock or the personality; and a writer, a put-back and a closer shall make a SeqCst fence after the word's store and before their wake reads a waiter's state, paired with the wait's fence after it stores BLOCKED, so that a waiter listed and not yet blocked either is found blocked or reads the word.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1599
+                    "line": 1701
                   }
                 },
                 {
@@ -32897,7 +33434,7 @@
                   "value": "\"The `wrread` line's message and close cases; with the close's mark removed, the close case's waiter stays blocked and the check fails by name. The loom model of a waiter listed and not yet blocked against a writer, a closer, both, and an end finds no lost wake, and its two controls, the writer without its fence and the closer marking after its wake, each find one (`cargo xtask loom`, src/tests/loom).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1606
+                    "line": 1708
                   }
                 },
                 {
@@ -32908,7 +33445,7 @@
                   "value": "\"H.OBJ.11\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1607
+                    "line": 1709
                   }
                 },
                 {
@@ -32919,7 +33456,7 @@
                   "value": "(\"object::channel::Endpoint::readable_or_closed\", \"syscall::native::receive_words\", \"sched::work::own_end\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1609
+                    "line": 1711
                   }
                 }
               ]
@@ -33060,6 +33597,120 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "aThrottledTaskLeavesForAKill",
+              "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
+              "kind": "requirement",
+              "shortName": "L.sched.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 45
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"throttle_current shall hold a task whose job or one above it has used its cpu.max quota until the period ends, looking every millisecond whether the way back to user mode has a kill, a signal or a stop to deal with, and leaving the wait if so.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 49
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A program in a job with cpu.max 1000 1000000 that has used its millisecond ends within a quarter of a second of its SIGKILL, where waiting out the period takes nine tenths of a second.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 53
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.10\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 54
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::throttle_current\", \"trap::must_attend\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 55
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aQuotaThatComesLateBinds",
+              "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
+              "kind": "requirement",
+              "shortName": "L.sched.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 57
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A cpu.max written for a job, or a task moved beneath one, shall arm the timer of every processor running a task of the job, so that a task alone on its processor, which gets no tick, is cut when its quota is used up.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 61
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A program already running alone on its processor is held to between a twelfth and two thirds of a processor by a cpu.max 20000 100000 written under it, and by being moved beneath one.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 65
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.10\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 66
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::Decisions::aQuotaThatComesLateBinds",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::rearm_timers\", \"sched::rearm_here\", \"sched::set_task_group\", \"sched::note_moved\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 68
+                  }
+                }
+              ]
             }
           ]
         },
@@ -33070,7 +33721,7 @@
           "doc": "src/kernel/src/timer.rs and src/kernel/src/sched/mod.rs: the timer's skipped arm, the clock, and the decisions a channel round trip's wakes defer (docs/OPAQUE-KERNEL.md §9.4, items 1, 2, 3 and 6; the consultant's conditions of 2026-10-02).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 47
+            "line": 72
           },
           "children": [
             {
@@ -33081,7 +33732,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 53
+                "line": 78
               },
               "children": [
                 {
@@ -33092,7 +33743,7 @@
                   "value": "\"timer::after shall keep, for each processor, the clock read after the hardware was armed plus the delay asked for, and shall leave a one-shot armed only when that is no later than the new deadline; otherwise it shall arm for the new one, so that no interrupt asked for is served later than the hardware's own one-tick rounding of a delay shorter than a tick.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 59
+                    "line": 84
                   }
                 },
                 {
@@ -33103,7 +33754,7 @@
                   "value": "\"On the boot processor, a 2 ms one-shot asked for while a 1 s one is armed, and one asked for before a 1 s one, each fire within 200 ms of the 2 ms deadline (the `arm` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 62
+                    "line": 87
                   }
                 },
                 {
@@ -33114,7 +33765,7 @@
                   "value": "\"H.SCHED.5\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 63
+                    "line": 88
                   }
                 },
                 {
@@ -33125,7 +33776,7 @@
                   "value": "(\"timer::after\", \"timer::stop\", \"timer::on_tick\", \"timer::armed_slot\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 65
+                    "line": 90
                   }
                 }
               ]
@@ -33138,7 +33789,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 67
+                "line": 92
               },
               "children": [
                 {
@@ -33149,7 +33800,7 @@
                   "value": "\"now_nanos shall convert the counter to nanoseconds as ticks times 10^9 over the counter's rate, rounded down, exactly, and u64::MAX past what 64 bits hold.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 70
+                    "line": 95
                   }
                 },
                 {
@@ -33160,7 +33811,7 @@
                   "value": "\"At 12 counter rates from 1 Hz to u64::MAX and 10 tick values at each, from 0 to u64::MAX across a second's boundaries and the saturation point, the two-division conversion equals the 128-bit formula (ferrix-vdso's host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 74
+                    "line": 99
                   }
                 },
                 {
@@ -33171,7 +33822,7 @@
                   "value": "\"H.SCHED.9\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 75
+                    "line": 100
                   }
                 },
                 {
@@ -33182,7 +33833,7 @@
                   "value": "(\"timer::now_nanos\", \"timer::ticks_to_nanos\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 76
+                    "line": 101
                   }
                 }
               ]
@@ -33195,7 +33846,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 78
+                "line": 103
               },
               "children": [
                 {
@@ -33206,7 +33857,7 @@
                   "value": "\"A wake made inside a system call shall leave its decision to the call's end (sched::call_left), the next preempt_enable that brings the count to zero, or the next interrupt exit, whichever comes first; and a Sync wake shall arm the waker's processor's timer for its next decision, so that a waker that does not block leaves the woken task waiting at most one slice.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 84
+                    "line": 109
                   }
                 },
                 {
@@ -33217,7 +33868,7 @@
                   "value": "\"Argued in MEMORY-AND-TIMING §2.2c: no check times the deferral, which sits inside H.SCHED.2's bound of one slice plus the timer overruns served.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 87
+                    "line": 112
                   }
                 },
                 {
@@ -33228,7 +33879,7 @@
                   "value": "\"H.SCHED.2\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 88
+                    "line": 113
                   }
                 },
                 {
@@ -33239,7 +33890,7 @@
                   "value": "(\"sched::resched_here\", \"sched::call_entered\", \"sched::call_left\", \"sched::carry_in_call\", \"sched::kick_after_wake\", \"sched::wake_at_home\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 91
+                    "line": 116
                   }
                 }
               ]
@@ -33252,7 +33903,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 93
+                "line": 118
               },
               "children": [
                 {
@@ -33263,7 +33914,7 @@
                   "value": "\"A Sync wake shall move the task it wakes onto the waker's processor only when the task is asleep at its home and in nothing else, its affinity allows the waker's processor, and nothing else is queued there, deciding under both processors' queue locks, and shall otherwise wake it where it is.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 98
+                    "line": 123
                   }
                 },
                 {
@@ -33274,7 +33925,7 @@
                   "value": "\"At two processors or more, a reader blocked in channel_write_read and free to move, woken by a Sync write from another processor, answers every time and is moved in at least one of 8 rounds; a reader pinned to processor 1 woken from processor 0 answers on processor 1 in each of 8 rounds (the `sync` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 103
+                    "line": 128
                   }
                 },
                 {
@@ -33285,7 +33936,7 @@
                   "value": "(\"H.SCHED.4\", \"H.SCHED.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 104
+                    "line": 129
                   }
                 },
                 {
@@ -33296,7 +33947,7 @@
                   "value": "(\"sched::wake_with\", \"sched::wake_onto\", \"sched::may_place\", \"sched::asleep_at_home\", \"sched::task::Task::holds_slots\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 107
+                    "line": 132
                   }
                 }
               ]
@@ -33309,7 +33960,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 109
+                "line": 134
               },
               "children": [
                 {
@@ -33320,7 +33971,7 @@
                   "value": "\"attention_due, asked at every way out to ring 3 on every architecture -- a call's, an interrupt's, a fault's, and the last look of the personality's return_to_user -- with interrupts masked, shall read the running task's pending-work word once, clear STOP and SIGNAL in it if they are set before anything reads what they stand for, and ask the personality's needs_attention when END, STOP, SIGNAL or TRACE was set; FILTERED shall not be read there.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 116
+                    "line": 141
                   }
                 },
                 {
@@ -33331,7 +33982,7 @@
                   "value": "\"A program of three threads stopped by its stop alone, which posts STOP and no signal, has both counting threads park and stay still, and runs again after SIGCONT (stage 7's stop check, its second stop); every boot, test-shell, test-threads, test-vfs and test-init pass with the self-checks on, where L.sched.33's look runs at every clear word.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 122
+                    "line": 147
                   }
                 },
                 {
@@ -33342,7 +33993,7 @@
                   "value": "(\"H.OBJ.9\", \"H.TRAP.4\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 123
+                    "line": 148
                   }
                 },
                 {
@@ -33353,7 +34004,7 @@
                   "value": "(\"trap::attention_due\", \"sched::work::look\", \"sched::work::wants_attention\", \"sched::work::with_running\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 125
+                    "line": 150
                   }
                 }
               ]
@@ -33366,7 +34017,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 127
+                "line": 152
               },
               "children": [
                 {
@@ -33377,7 +34028,7 @@
                   "value": "\"notify shall post its bits to the task's word with a Release read-modify-write before it wakes the task and interrupts its processor; post and post_own shall only set bits; and only the task's own look shall clear any, with an Acquire read-modify-write, and END never.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 132
+                    "line": 157
                   }
                 },
                 {
@@ -33388,7 +34039,7 @@
                   "value": "\"The stop check's second stop, posted by notify's half under the list's lock and woken after it, parks both counting threads; with the post removed the same check fails by name. The loom model of a post against the task's clear and read finds the state read or the bit kept, and its control, the clear after the read, finds neither (`cargo xtask loom`).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 138
+                    "line": 163
                   }
                 },
                 {
@@ -33399,7 +34050,7 @@
                   "value": "(\"H.OBJ.9\", \"H.SCHED.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 139
+                    "line": 164
                   }
                 },
                 {
@@ -33410,7 +34061,7 @@
                   "value": "(\"sched::work::notify\", \"sched::work::wake_posted\", \"sched::work::post\", \"sched::work::post_own\", \"sched::work::has_end\", \"sched::task::Task::work\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 142
+                    "line": 167
                   }
                 }
               ]
@@ -33423,7 +34074,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 144
+                "line": 169
               },
               "children": [
                 {
@@ -33434,7 +34085,7 @@
                   "value": "\"A wake shall read its target's state only under the run-queue lock of the processor that owns the target, after reading which processor that is again under that lock, with no way out before it that reads the state without the lock.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 148
+                    "line": 173
                   }
                 },
                 {
@@ -33445,7 +34096,7 @@
                   "value": "\"At two processors or more, a blocker that holds its own run-queue lock while a poster on another processor reaches its wake, then marks itself blocked and lets the lock go, is woken within 100 ms (the `wakerow` line); with a lock-free exit in wake_at_home the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 153
+                    "line": 178
                   }
                 },
                 {
@@ -33456,7 +34107,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 154
+                    "line": 179
                   }
                 },
                 {
@@ -33467,7 +34118,7 @@
                   "value": "(\"sched::wake_at_home\", \"sched::wake_onto\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 155
+                    "line": 180
                   }
                 }
               ]
@@ -33480,7 +34131,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 157
+                "line": 182
               },
               "children": [
                 {
@@ -33491,7 +34142,7 @@
                   "value": "\"With the self-checks on, attention_due shall ask needs_attention at a clear word too, and audit shall stop the machine with FX-0520 when it answers yes while no poster is between its write and its post and the word is still clear; every poster shall bracket its write and its post in a Posting.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 162
+                    "line": 187
                   }
                 },
                 {
@@ -33502,7 +34153,7 @@
                   "value": "\"Every boot, test-shell, test-threads, test-vfs and test-init reach their marker with the look on; with enter_stop's STOP to the other tasks removed, test-threads stops with FX-0520's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 166
+                    "line": 191
                   }
                 },
                 {
@@ -33513,7 +34164,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 167
+                    "line": 192
                   }
                 },
                 {
@@ -33524,7 +34175,7 @@
                   "value": "(\"sched::work::audit\", \"sched::work::posting\", \"sched::work::set_auditing\", \"sched::work::auditing\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 169
+                    "line": 194
                   }
                 }
               ]
@@ -33537,7 +34188,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 171
+                "line": 196
               },
               "children": [
                 {
@@ -33548,7 +34199,7 @@
                   "value": "\"The hook in notify shall be armed only by stage 9's checks, record which check armed it and the task it watches, be disarmed by that check whatever the check found, and be required disarmed before the boot's marker, with F-60's leave hook, which stops with FX-0908 naming the check if it is not.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 176
+                    "line": 201
                   }
                 },
                 {
@@ -33559,7 +34210,7 @@
                   "value": "\"The `wakerow` line, then the marker; with the check's disarm removed the boot stops with FX-0908's message naming the wake row.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 179
+                    "line": 204
                   }
                 },
                 {
@@ -33570,7 +34221,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 180
+                    "line": 205
                   }
                 },
                 {
@@ -33581,7 +34232,7 @@
                   "value": "(\"sched::work::arm\", \"sched::work::disarm\", \"sched::work::armed_by\", \"sched::work::hook_armed_by\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 182
+                    "line": 207
                   }
                 }
               ]
@@ -33594,7 +34245,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 184
+                "line": 209
               },
               "children": [
                 {
@@ -33605,7 +34256,7 @@
                   "value": "\"end_record shall store the process's end and then, after a SeqCst fence, post END to every task its list holds, waking each and interrupting its processor, with nothing allocated and no task let go under the list's lock; list_task shall list a task before it can run, failing its start with AllocError when the list cannot grow.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 190
+                    "line": 215
                   }
                 },
                 {
@@ -33616,7 +34267,7 @@
                   "value": "\"A program past its cgroup's memory.max is OOM-killed and ends (the `cgroups` line's OOM case, which no signal reaches first); with end_record's post removed it never ends and the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 194
+                    "line": 219
                   }
                 },
                 {
@@ -33627,7 +34278,7 @@
                   "value": "(\"H.OBJ.9\", \"H.QUOTA.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 195
+                    "line": 220
                   }
                 },
                 {
@@ -33638,7 +34289,7 @@
                   "value": "(\"object::process::Process::end_record\", \"object::process::Process::list_task\", \"object::process::Process::post_to_tasks\", \"object::process::Process::with_tasks\", \"object::process::Exit::record\", \"object::process::Process::take_listed\", \"object::process::take_batch\", \"object::process::next_live\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 201
+                    "line": 226
                   }
                 }
               ]
@@ -33651,7 +34302,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 203
+                "line": 228
               },
               "children": [
                 {
@@ -33662,7 +34313,7 @@
                   "value": "\"wake_posted, the wake of every notify and of post_to_tasks, shall make a SeqCst fence after the bits are posted and before the wake reads the task's state, paired with a trusting wait's fence after it stores BLOCKED, so that a wait that reads the bit itself is found blocked or reads it.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 208
+                    "line": 233
                   }
                 },
                 {
@@ -33673,7 +34324,7 @@
                   "value": "\"A thread blocked in channel_write_read is ended by its process's kill (the `wrread` line); with that wait reading no END it stays blocked and the check fails by name. The loom model of an end posted against a waiter listed and not yet blocked finds no lost wake (`cargo xtask loom`).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 213
+                    "line": 238
                   }
                 },
                 {
@@ -33684,7 +34335,7 @@
                   "value": "(\"H.OBJ.9\", \"H.OBJ.11\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 214
+                    "line": 239
                   }
                 },
                 {
@@ -33695,7 +34346,7 @@
                   "value": "\"sched::work::wake_posted\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 215
+                    "line": 240
                   }
                 }
               ]
@@ -33709,7 +34360,7 @@
           "doc": "src/kernel/src/sched/preempt.rs and src/kernel/src/sched/mod.rs: the preemption count every crate::sync::SpinLock raises, kept in each processor's record without a locked operation (docs/OPAQUE-KERNEL.md §9.8, 2b; the consultant's OK IF of 2026-10-02, condition 2).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 219
+            "line": 244
           },
           "children": [
             {
@@ -33720,7 +34371,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 226
+                "line": 251
               },
               "children": [
                 {
@@ -33731,7 +34382,7 @@
                   "value": "\"A preemption-disabling lock, and a raise by hand, shall raise and lower the preemption count and, for a lock, the locks held of the processor its holder runs on, in that processor's record and without a locked operation, so that no update is lost to an interrupt and none lands on another processor's record: on x86-64 in one GS-relative instruction, with every entry that can reach it running on the kernel's GS base; on AArch64 and ARMv7-A with every exception that can take a lock masked; and a report reading another processor's count shall read each of the count and the locks held whole.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 236
+                    "line": 261
                   }
                 },
                 {
@@ -33742,7 +34393,7 @@
                   "value": "\"At two processors or more, two tasks per processor, preempted by the timer and moving between processors, take and let go of a lock 100000 times each with raises by hand among them and move at least once (the `preempt` line). The stress provokes a lost or misplaced update; what detects one is FX-0503's test at the release, which stops the boot when the locks held or the count it lowers is already zero, and, behind it, every processor's count and locks held read zero there by a task that holds nothing. The three atomicity controls (x86-64's record found before the add, the Arm mask removed on aarch64 and on armv7a at two processors) each stop the boot on FX-0503's held-zero message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 248
+                    "line": 273
                   }
                 },
                 {
@@ -33753,7 +34404,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.2\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 249
+                    "line": 274
                   }
                 },
                 {
@@ -33764,7 +34415,7 @@
                   "value": "(\"sched::preempt::raise\", \"sched::preempt::lower\", \"sched::preempt::Preempt::disable\", \"sched::preempt::preempt_disable\", \"sched::preempt::PreemptState::note\", \"sched::preempt::preempt_count\", \"sched::preempt::locks_held\", \"smp::record\", \"arch::percpu::this_cpu_add\", \"arch::x86_64::cpu::gs_xadd\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 254
+                    "line": 279
                   }
                 }
               ]
@@ -33777,7 +34428,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 256
+                "line": 281
               },
               "children": [
                 {
@@ -33788,7 +34439,7 @@
                   "value": "\"The scheduler shall stop the machine (FX-0503), naming the site that last raised the count, when it is asked to switch with its processor's count raised, and when a release finds the count, or for a lock the locks held, already at zero, having put the word back first; a release that brings the count to zero shall make the decision an interrupt deferred, if interrupts are on.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 263
+                    "line": 288
                   }
                 },
                 {
@@ -33799,7 +34450,7 @@
                   "value": "\"The release's cover test refuses a word whose count, or for a lock whose locks held, is zero, and passes one that covers the release (the stage-5 checks). That held-zero test is the detector L.sched.20's stress relies on; the negative controls of a task that sleeps holding a lock and of a release with nothing raised each stop the boot on FX-0503's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 269
+                    "line": 294
                   }
                 },
                 {
@@ -33810,7 +34461,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.2\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 270
+                    "line": 295
                   }
                 },
                 {
@@ -33821,7 +34472,7 @@
                   "value": "(\"sched::preempt::preempt_enable\", \"sched::preempt::Preempt::enable\", \"sched::preempt::enable_from\", \"sched::preempt::unmatched\", \"sched::preempt::covers\", \"sched::preempt::decide_deferred\", \"sched::schedule_from\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 274
+                    "line": 299
                   }
                 }
               ]
@@ -33834,7 +34485,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 276
+                "line": 301
               },
               "children": [
                 {
@@ -33845,7 +34496,7 @@
                   "value": "\"may_block shall answer true only when the scheduler runs, interrupts are on, a task is running, and the count of the processor it runs on, read so that the processor and its count are one processor's (one instruction on x86-64, interrupts masked on Arm), is zero.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 281
+                    "line": 306
                   }
                 },
                 {
@@ -33856,7 +34507,7 @@
                   "value": "\"A task holding nothing may block; holding a preemption-disabling lock, or with the count raised by hand, it may not; once it lets go it may again (the stage-5 checks).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 284
+                    "line": 309
                   }
                 },
                 {
@@ -33867,7 +34518,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 285
+                    "line": 310
                   }
                 },
                 {
@@ -33878,7 +34529,7 @@
                   "value": "(\"sched::may_block\", \"sched::preempt::count_here\", \"arch::percpu::this_cpu_read\", \"arch::x86_64::cpu::read_gs_at\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 287
+                    "line": 312
                   }
                 }
               ]
@@ -33891,7 +34542,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 289
+                "line": 314
               },
               "children": [
                 {
@@ -33902,7 +34553,7 @@
                   "value": "\"A try_lock of a preemption-disabling lock that fails shall leave its processor's count and locks held as it found them, and with interrupts masked shall not switch; one that succeeds shall raise both by one until its guard drops; and ferrix_sync::SpinLock::try_lock_manually shall take no ticket when it fails.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 295
+                    "line": 320
                   }
                 },
                 {
@@ -33913,7 +34564,7 @@
                   "value": "\"With a lock held, a try_lock of it with interrupts on and with them masked leaves the count and the locks held unchanged and, masked, the task's switches unchanged; a try_lock_manually of a held plain lock fails and changes neither; a successful try_lock raises both by one until it drops (the stage-5 checks, and ferrix-sync's host test of try_lock_manually).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 301
+                    "line": 326
                   }
                 },
                 {
@@ -33924,7 +34575,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 302
+                    "line": 327
                   }
                 },
                 {
@@ -33935,7 +34586,7 @@
                   "value": "(\"sched::preempt::Preempt::disable\", \"sched::preempt::Preempt::enable\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 304
+                    "line": 329
                   }
                 }
               ]
@@ -33949,7 +34600,7 @@
           "doc": "src/kernel/src/sched/borrow.rs and src/kernel/src/sched/mod.rs: the running task borrowed from the processor's record (docs/OPAQUE-KERNEL.md §9.8, 2a; the consultant's OK IF of 2026-10-02, condition 1, and Q1).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 308
+            "line": 333
           },
           "children": [
             {
@@ -33960,7 +34611,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 314
+                "line": 339
               },
               "children": [
                 {
@@ -33971,7 +34622,7 @@
                   "value": "\"Whenever interrupts are on, each processor's record shall name, as Arc::as_ptr, the task its run queue's current holds; the scheduler shall write the two together, on that processor with interrupts masked and its queue lock held, at the boot task's adoption, at an idle task's installation and at every switch, and nowhere else.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 320
+                    "line": 345
                   }
                 },
                 {
@@ -33982,7 +34633,7 @@
                   "value": "\"From boot to the end of stage 5, an audit compares the record with the queue's current, read under its lock, once the boot task is adopted, as each processor's idle task first runs, in the incoming context of every switch and at every interrupt exit, and finds no mismatch at any site; and two tasks per processor, yielding to each other, resume after a switch 10000 times, each time with the record naming the queue's current and the task itself (the `borrow` line). Removing the record's write at the adoption, at the idle installation or at the switch stops the boot on that site's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 330
+                    "line": 355
                   }
                 },
                 {
@@ -33993,7 +34644,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 331
+                    "line": 356
                   }
                 },
                 {
@@ -34004,7 +34655,7 @@
                   "value": "(\"sched::set_current\", \"sched::adopt_boot_task\", \"sched::enter_idle\", \"sched::choose_next\", \"sched::borrow::RunningSlot::set\", \"sched::audit_here\", \"sched::borrow::audit\", \"sched::borrow::end_audit\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 335
+                    "line": 360
                   }
                 }
               ]
@@ -34017,7 +34668,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 337
+                "line": 362
               },
               "children": [
                 {
@@ -34028,7 +34679,7 @@
                   "value": "\"with_current shall lend the running task only to a closure, by a reference its result cannot name, read from the processor's record so that the processor and its record are one processor's (one instruction on x86-64, interrupts masked on Arm); current() shall answer the running task as an Arc of the caller's own without taking the run queue's lock; and before the records are kept both shall answer none.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 344
+                    "line": 369
                   }
                 },
                 {
@@ -34039,7 +34690,7 @@
                   "value": "\"Each of the borrow check's 10000 resumptions borrows the running task and finds the task itself, and every audit's borrowed pointer equals the queue's current (the `borrow` line); every boot, shell and bench gate runs on current() made this way.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 349
+                    "line": 374
                   }
                 },
                 {
@@ -34050,7 +34701,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 350
+                    "line": 375
                   }
                 },
                 {
@@ -34061,7 +34712,7 @@
                   "value": "(\"sched::borrow::with_current\", \"sched::borrow::current_arc\", \"sched::borrow::current_ptr\", \"sched::borrow::running\", \"sched::current\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 353
+                    "line": 378
                   }
                 }
               ]
