@@ -18,7 +18,7 @@
 //! here also serves the transmit side, `console::output`, whose ring is this
 //! module's [`Ring`] run the other way.
 
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::BootView;
 use ferrix_sync::IrqSpinLock;
@@ -113,6 +113,23 @@ static INTERRUPT_DRIVEN: AtomicBool = AtomicBool::new(false);
 /// Whoever waits for input: the `console` thread.
 static WAITERS: WaitQueue = WaitQueue::new();
 
+/// The byte an x86-64 interrupt remapping check loops back through the port
+/// and waits for the receive path to read: `0` while no check waits,
+/// [`CHECK_ARMED`] with the byte while one does, [`CHECK_TAKEN`] with the
+/// byte once [`receive`] has read it from the port.
+///
+/// The receive path keeps such a byte out of the ring. In the ring the
+/// `console` thread could take it first -- it drains the ring every 20 ms
+/// once anything has read the console -- and echo it, and the check would
+/// find nothing (FX-1012).
+static CHECK_BYTE: AtomicU16 = AtomicU16::new(0);
+
+/// [`CHECK_BYTE`]'s mark for a byte a check waits for.
+const CHECK_ARMED: u16 = 0x100;
+
+/// [`CHECK_BYTE`]'s mark for a byte the receive path has read.
+const CHECK_TAKEN: u16 = 0x200;
+
 /// What [`check`] established.
 pub(crate) struct Checked {
     /// Bytes the ring held and gave back in order.
@@ -178,7 +195,8 @@ fn on_interrupt(_irq: u32) {
 ///
 /// `take` is called until it has nothing more, so the port is emptied even
 /// when the ring is full: a byte that does not fit is counted in [`overruns`]
-/// rather than left in the port to hold its interrupt asserted.
+/// rather than left in the port to hold its interrupt asserted. The byte a
+/// check waits for ([`arm_check_byte`]) is taken once and not kept.
 fn receive(mut take: impl FnMut() -> Option<u8>) {
     let mut added = false;
     {
@@ -187,6 +205,17 @@ fn receive(mut take: impl FnMut() -> Option<u8>) {
             let Some(byte) = take() else {
                 break;
             };
+            if CHECK_BYTE
+                .compare_exchange(
+                    CHECK_ARMED | u16::from(byte),
+                    CHECK_TAKEN | u16::from(byte),
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                continue;
+            }
             // NOALLOC: a fixed ring, which refuses when full.
             if ring.push(byte) {
                 added = true;
@@ -203,10 +232,29 @@ fn receive(mut take: impl FnMut() -> Option<u8>) {
     }
 }
 
-/// The oldest byte in the ring.
+/// Wait for the receive path to read `byte` from the port, for x86-64's
+/// interrupt remapping checks G3 and R5: from here until
+/// [`disarm_check_byte`], the first `byte` [`receive`] reads is taken
+/// rather than put in the ring, so that it never reaches a reader of the
+/// console. Call before looping `byte` back.
+pub(crate) fn arm_check_byte(byte: u8) {
+    CHECK_BYTE.store(CHECK_ARMED | u16::from(byte), Ordering::Release);
+}
+
+/// Whether the receive path has read `byte` since [`arm_check_byte`].
+pub(crate) fn check_byte_taken(byte: u8) -> bool {
+    CHECK_BYTE.load(Ordering::Acquire) == CHECK_TAKEN | u16::from(byte)
+}
+
+/// Stop waiting for `byte`, and say whether the receive path read it since
+/// [`arm_check_byte`]. A `byte` read after this goes into the ring.
+pub(crate) fn disarm_check_byte(byte: u8) -> bool {
+    CHECK_BYTE.swap(0, Ordering::AcqRel) == CHECK_TAKEN | u16::from(byte)
+}
+
 /// Take `byte` from the front of the ring, if it is there: for x86-64's
-/// check R5, whose looped-back byte must arrive through the port's
-/// interrupt and must not reach a reader of the console.
+/// check R5, whose looped-back byte, delivered only after the check
+/// stopped waiting for it, must not reach a reader of the console.
 pub(crate) fn take_check_byte(byte: u8) -> bool {
     let mut ring = RING.lock();
     if ring.len() == 0 || ring.bytes.get(ring.head).copied() != Some(byte) {

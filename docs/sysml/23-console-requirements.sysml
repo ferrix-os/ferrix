@@ -277,7 +277,8 @@ package FerrixConsoleRequirements {
         requirement <'L.console.20'> theInputRingKeepsOrder : ItemLowLevel {
             attribute :>> statement = "receive shall move what the port gives into the
                 receive ring in order, dropping and counting every byte that finds it
-                full, and pop and has_input shall give the reader those bytes in
+                full, except the one byte an interrupt remapping check armed, which it
+                takes once and keeps out of the ring, and pop and has_input shall give the reader those bytes in
                 order and say without a lock whether any are held.";
             attribute :>> criterion = "4,099 bytes offered to the empty ring come back
                 as the first 4,096 in order, a 4,097th pop finds nothing, has_input

@@ -569,20 +569,24 @@ static PLANTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool:
 /// G3, at bring-up, while the console's line is masked for its conversion,
 /// unless the boot was told to skip its checks: loop a byte back into the
 /// port, whose edge the I/O APIC drops, so that only the service once after
-/// the conversion can read it ([`require_masked_byte_served`]).
+/// the conversion can read it ([`require_masked_byte_served`]). The receive
+/// path is armed for it first, so that it keeps the byte for the check
+/// rather than handing it to the console's reader.
 pub(crate) fn plant_masked_byte(line: &super::LiveLine) {
     if !crate::checks::run() {
         return;
     }
+    crate::console::input::arm_check_byte(MASKED_BYTE);
     (line.loop_back)(MASKED_BYTE);
     PLANTED.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// G3, at bring-up, after the console's line is converted: the byte
-/// [`plant_masked_byte`] planted was read by the service once, into the
-/// console's ring, and is taken out of it again. The service reads the port
-/// whether or not the loopback raised an interrupt, so this holds on a UART
-/// that raises none in loopback too.
+/// [`plant_masked_byte`] planted was read from the port by the service once,
+/// as the receive path, armed for it, says; it never reached the console's
+/// ring, so the `console` thread cannot take it before this looks (FX-1012).
+/// The service reads the port whether or not the loopback raised an
+/// interrupt, so this holds on a UART that raises none in loopback too.
 ///
 /// Halts rather than returning, as every other stage's check does.
 ///
@@ -591,7 +595,7 @@ pub(crate) fn require_masked_byte_served() {
     if !PLANTED.swap(false, core::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    if !crate::console::input::take_check_byte(MASKED_BYTE) {
+    if !crate::console::input::disarm_check_byte(MASKED_BYTE) {
         fatal!(
             catalog::STAGE10_REMAP,
             "a byte the port received while its line was masked was not read by the service \
@@ -606,8 +610,8 @@ static MASKED_BYTE_SERVED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
 
 /// Check R5 (`docs/NVIDIA.md` §12.3), at stage 10 once the console's I/O
-/// APIC line is converted: a byte looped back through the port arrives in
-/// the console's ring through the line's interrupt, now delivered on its
+/// APIC line is converted: a byte looped back through the port is read by
+/// the console's receive path through the line's interrupt, now delivered on its
 /// new vector through its interrupt remapping entry -- its handler is there
 /// alone -- and nothing arrives on the retired vector, which a compatibility
 /// or stale KVM route would deliver on. `None` where no line was converted.
@@ -626,16 +630,17 @@ fn check_console_line() -> Result<Option<alloc::string::String>, &'static str> {
         return Ok(None);
     };
     let retired = super::stray_deliveries().1;
+    // The receive path keeps the byte for this check rather than putting it
+    // in the ring, where the `console` thread could take and echo it first.
+    crate::console::input::arm_check_byte(CONVERTED_BYTE);
     (line.loop_back)(CONVERTED_BYTE);
     let deadline = crate::timer::now_nanos().saturating_add(50_000_000);
-    let mut arrived = false;
-    while crate::timer::now_nanos() <= deadline {
-        if crate::console::input::take_check_byte(CONVERTED_BYTE) {
-            arrived = true;
-            break;
-        }
+    while crate::timer::now_nanos() <= deadline
+        && !crate::console::input::check_byte_taken(CONVERTED_BYTE)
+    {
         core::hint::spin_loop();
     }
+    let arrived = crate::console::input::disarm_check_byte(CONVERTED_BYTE);
     if super::stray_deliveries().1 != retired {
         return Err("the console's line was delivered on its retired vector");
     }

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "5ff9a6c2b555c97c02bed43ec0c67a019311277ab6515241df09ce49faddf55f",
+  "digest": "6ddcb8611302bc1596d417cf92c5d86ac22edee7ad1309e326ee8b2a42621ecf",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -64777,10 +64777,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Input::theInputRingKeepsOrder",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"receive shall move what the port gives into the receive ring in order, dropping and counting every byte that finds it full, and pop and has_input shall give the reader those bytes in order and say without a lock whether any are held.\"",
+                  "value": "\"receive shall move what the port gives into the receive ring in order, dropping and counting every byte that finds it full, except the one byte an interrupt remapping check armed, which it takes once and keeps out of the ring, and pop and has_input shall give the reader those bytes in order and say without a lock whether any are held.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 281
+                    "line": 282
                   }
                 },
                 {
@@ -64791,7 +64791,7 @@
                   "value": "\"4,099 bytes offered to the empty ring come back as the first 4,096 in order, a 4,097th pop finds nothing, has_input says so before and after, and the overrun count rises by exactly 3 (the `input` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 285
+                    "line": 286
                   }
                 },
                 {
@@ -64802,7 +64802,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 286
+                    "line": 287
                   }
                 },
                 {
@@ -64813,7 +64813,7 @@
                   "value": "(\"console::input::receive\", \"console::input::pop\", \"console::input::Ring::push\", \"console::input::Ring::pop\", \"console::input::has_input\", \"console::input::overruns\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 289
+                    "line": 290
                   }
                 }
               ]
@@ -64826,7 +64826,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 291
+                "line": 292
               },
               "children": [
                 {
@@ -64837,7 +64837,7 @@
                   "value": "\"receive shall wake the input's waiters, after it has dropped the ring's lock, whenever it added a byte.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 293
+                    "line": 294
                   }
                 },
                 {
@@ -64848,7 +64848,7 @@
                   "value": "\"A task waiting for input with the ring empty is woken by the first byte the port receives, within the interrupt that took it.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 296
+                    "line": 297
                   }
                 },
                 {
@@ -64859,7 +64859,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 297
+                    "line": 298
                   }
                 },
                 {
@@ -64870,7 +64870,7 @@
                   "value": "(\"console::input::receive\", \"console::input::waiters\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 298
+                    "line": 299
                   }
                 }
               ]
@@ -64883,7 +64883,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 300
+                "line": 301
               },
               "children": [
                 {
@@ -64894,7 +64894,7 @@
                   "value": "\"receive shall take at most 8,192 bytes from the port per call, and on_interrupt shall make at most 68 passes of receiving and transmitting, stopping at the first the port says nothing is pending after.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 304
+                    "line": 305
                   }
                 },
                 {
@@ -64905,7 +64905,7 @@
                   "value": "\"A port that never reports itself empty lets the handler return after 68 passes of at most 8,192 received bytes each; a port with nothing pending after the first pass, after 1.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 307
+                    "line": 308
                   }
                 },
                 {
@@ -64916,7 +64916,7 @@
                   "value": "\"H.SCHED.10\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 308
+                    "line": 309
                   }
                 },
                 {
@@ -64927,7 +64927,7 @@
                   "value": "(\"console::input::on_interrupt\", \"console::input::receive\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 310
+                    "line": 311
                   }
                 }
               ]
@@ -64940,7 +64940,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 312
+                "line": 313
               },
               "children": [
                 {
@@ -64951,7 +64951,7 @@
                   "value": "\"init shall register the port's receive interrupt and mark input and output interrupt-driven before it enables the line; answer None, installing nothing, when the machine gives the port no interrupt this kernel can take; and refuse when the interrupt is already held.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 317
+                    "line": 318
                   }
                 },
                 {
@@ -64962,7 +64962,7 @@
                   "value": "\"On QEMU's x86-64, AArch64 and ARMv7-A machines the `input` line says the port receives by an interrupt; a second init of the same number is refused with nothing changed; a machine whose port has no interrupt leaves input polled.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 321
+                    "line": 322
                   }
                 },
                 {
@@ -64973,7 +64973,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 322
+                    "line": 323
                   }
                 },
                 {
@@ -64984,7 +64984,7 @@
                   "value": "(\"console::input::init\", \"console::output::start\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 323
+                    "line": 324
                   }
                 }
               ]
@@ -64997,7 +64997,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 325
+                "line": 326
               },
               "children": [
                 {
@@ -65008,7 +65008,7 @@
                   "value": "\"read_byte shall take from the receive ring once the receive interrupt is installed, and poll the port only until then.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 328
+                    "line": 329
                   }
                 },
                 {
@@ -65019,7 +65019,7 @@
                   "value": "\"Before init a byte comes through the poll; after it, a byte received by interrupt comes through the ring and the poll is called 0 times.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 331
+                    "line": 332
                   }
                 },
                 {
@@ -65030,7 +65030,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 332
+                    "line": 333
                   }
                 },
                 {
@@ -65041,7 +65041,7 @@
                   "value": "(\"console::input::read_byte\", \"console::input::interrupt_driven\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 334
+                    "line": 335
                   }
                 }
               ]
@@ -65055,7 +65055,7 @@
           "doc": "The kernel log: what it records, what it promises a reader, and what it keeps out.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 338
+            "line": 339
           },
           "children": [
             {
@@ -65066,7 +65066,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 342
+                "line": 343
               },
               "children": [
                 {
@@ -65077,7 +65077,7 @@
                   "value": "\"Ring::record shall claim exactly one place per byte, so that the ring's count of bytes recorded is exact however many writers race.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 345
+                    "line": 346
                   }
                 },
                 {
@@ -65088,7 +65088,7 @@
                   "value": "\"Two writers recording 20,000 bytes each at once, on two processors where there are two, leave the ring's count at exactly 40,000.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 348
+                    "line": 349
                   }
                 },
                 {
@@ -65099,7 +65099,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 349
+                    "line": 350
                   }
                 },
                 {
@@ -65110,7 +65110,7 @@
                   "value": "(\"console::log::Ring::record\", \"console::log::Ring::record_byte\", \"console::log::Ring::slot\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 351
+                    "line": 352
                   }
                 }
               ]
@@ -65123,7 +65123,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 353
+                "line": 354
               },
               "children": [
                 {
@@ -65134,7 +65134,7 @@
                   "value": "\"A ring of N bytes written past its length shall keep its last N - 1 bytes in order, and unread shall count exactly those for a reader at its start.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 356
+                    "line": 357
                   }
                 },
                 {
@@ -65145,7 +65145,7 @@
                   "value": "\"A 64-byte ring given 100 bytes answers unread 63 for a cursor at 0, and its reads from there give the last 63 bytes in order.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 359
+                    "line": 360
                   }
                 },
                 {
@@ -65156,7 +65156,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 360
+                    "line": 361
                   }
                 },
                 {
@@ -65167,7 +65167,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::copy_from\", \"console::log::Ring::slot\", \"console::log::Ring::unread\", \"console::log::Ring::oldest_at\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 363
+                    "line": 364
                   }
                 }
               ]
@@ -65180,7 +65180,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 365
+                "line": 366
               },
               "children": [
                 {
@@ -65191,7 +65191,7 @@
                   "value": "\"read shall move a cursor behind the oldest byte kept up to it and report exactly the bytes it skipped as lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 367
+                    "line": 368
                   }
                 },
                 {
@@ -65202,7 +65202,7 @@
                   "value": "\"A reader at 0 of a 64-byte ring given 100 bytes is told 37 lost; caught up and then 200 bytes behind, it is told 137 lost and given the 63 kept.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 370
+                    "line": 371
                   }
                 },
                 {
@@ -65213,7 +65213,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 371
+                    "line": 372
                   }
                 },
                 {
@@ -65224,7 +65224,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::oldest_at\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 373
+                    "line": 374
                   }
                 }
               ]
@@ -65237,7 +65237,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 375
+                "line": 376
               },
               "children": [
                 {
@@ -65248,7 +65248,7 @@
                   "value": "\"read shall copy no more than the reader's buffer holds and move the cursor past exactly what it copied, so that the next read goes on from there.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 378
+                    "line": 379
                   }
                 },
                 {
@@ -65259,7 +65259,7 @@
                   "value": "\"A 10-byte read with 63 unread leaves 53 unread, and the next read gives those 53 in order with 0 lost and 0 left unread.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 381
+                    "line": 382
                   }
                 },
                 {
@@ -65270,7 +65270,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 382
+                    "line": 383
                   }
                 },
                 {
@@ -65281,7 +65281,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::unread\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 383
+                    "line": 384
                   }
                 }
               ]
@@ -65294,7 +65294,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 385
+                "line": 386
               },
               "children": [
                 {
@@ -65305,7 +65305,7 @@
                   "value": "\"read shall hand a reader only bytes writers recorded, dropping and counting as lost any a writer replaced while they were being copied, so that every byte recorded is either read or counted lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 389
+                    "line": 390
                   }
                 },
                 {
@@ -65316,7 +65316,7 @@
                   "value": "\"While two writers record 20,000 bytes each into a 256-byte ring, a reader reading 97 bytes at a time reads only bytes they wrote, and the bytes it read and was told it lost come to exactly 40,000.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 393
+                    "line": 394
                   }
                 },
                 {
@@ -65327,7 +65327,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 394
+                    "line": 395
                   }
                 },
                 {
@@ -65338,7 +65338,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::copy_from\", \"console::log::Ring::record_byte\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 396
+                    "line": 397
                   }
                 }
               ]
@@ -65351,7 +65351,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 398
+                "line": 399
               },
               "children": [
                 {
@@ -65362,7 +65362,7 @@
                   "value": "\"read shall bring a cursor ahead of the newest byte back to it, copying nothing and reporting nothing lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 400
+                    "line": 401
                   }
                 },
                 {
@@ -65373,7 +65373,7 @@
                   "value": "\"A read at a cursor 1,000 past the ring's count copies 0 bytes, reports 0 lost and leaves the cursor at the count.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 402
+                    "line": 403
                   }
                 },
                 {
@@ -65384,7 +65384,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 403
+                    "line": 404
                   }
                 },
                 {
@@ -65395,7 +65395,7 @@
                   "value": "\"console::log::Ring::read\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 404
+                    "line": 405
                   }
                 }
               ]
@@ -65408,7 +65408,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 406
+                "line": 407
               },
               "children": [
                 {
@@ -65419,7 +65419,7 @@
                   "value": "\"A task's write to the console shall be recorded in the kernel log as the task wrote it, without the CR the port is sent.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 409
+                    "line": 410
                   }
                 },
                 {
@@ -65430,7 +65430,7 @@
                   "value": "\"A task's write of a line is found, byte for byte and with no CR, in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 411
+                    "line": 412
                   }
                 },
                 {
@@ -65441,7 +65441,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 412
+                    "line": 413
                   }
                 },
                 {
@@ -65452,7 +65452,7 @@
                   "value": "(\"console::output::try_queue\", \"console::Writer::bytes\", \"console::Kind::logged\", \"console::log::record\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 414
+                    "line": 415
                   }
                 }
               ]
@@ -65465,7 +65465,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 416
+                "line": 417
               },
               "children": [
                 {
@@ -65476,7 +65476,7 @@
                   "value": "\"write_panicking, asked to log, shall record the line in the kernel log when it writes it under the port's lock.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 418
+                    "line": 419
                   }
                 },
                 {
@@ -65487,7 +65487,7 @@
                   "value": "\"A line written through write_panicking with logging asked for, the panicking flag not set, is found in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 421
+                    "line": 422
                   }
                 },
                 {
@@ -65498,7 +65498,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 422
+                    "line": 423
                   }
                 },
                 {
@@ -65509,7 +65509,7 @@
                   "value": "(\"console::write_panicking\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 423
+                    "line": 424
                   }
                 }
               ]
@@ -65522,7 +65522,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 425
+                "line": 426
               },
               "children": [
                 {
@@ -65533,7 +65533,7 @@
                   "value": "\"write shall record a kernel line in the kernel log as printed, before its newline becomes CRLF.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 427
+                    "line": 428
                   }
                 },
                 {
@@ -65544,7 +65544,7 @@
                   "value": "\"A line printed with println! is found, without a CR, in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 429
+                    "line": 430
                   }
                 },
                 {
@@ -65555,7 +65555,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 430
+                    "line": 431
                   }
                 },
                 {
@@ -65566,7 +65566,7 @@
                   "value": "(\"console::write\", \"console::write_as\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 432
+                    "line": 433
                   }
                 }
               ]
@@ -65579,7 +65579,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 434
+                "line": 435
               },
               "children": [
                 {
@@ -65590,7 +65590,7 @@
                   "value": "\"write_unlogged shall keep its line out of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 436
+                    "line": 437
                   }
                 },
                 {
@@ -65601,7 +65601,7 @@
                   "value": "\"A line sent with println_unlogged! is not in the last 4,096 bytes of the kernel log, read after it was sent.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 438
+                    "line": 439
                   }
                 },
                 {
@@ -65612,7 +65612,7 @@
                   "value": "\"H.BOOT.9\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 439
+                    "line": 440
                   }
                 },
                 {
@@ -65623,7 +65623,7 @@
                   "value": "(\"console::write_unlogged\", \"console::Kind::logged\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 441
+                    "line": 442
                   }
                 }
               ]
@@ -65636,7 +65636,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 443
+                "line": 444
               },
               "children": [
                 {
@@ -65647,7 +65647,7 @@
                   "value": "\"record shall take no lock, allocate nothing and wake no reader, so that a writer recording in any context, a panic's included, is never held up by the log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 446
+                    "line": 447
                   }
                 },
                 {
@@ -65658,7 +65658,7 @@
                   "value": "\"A byte recorded from an interrupt handler, from the idle task and from a failure report written while another processor holds every lock the kernel has is recorded, with 0 heap allocations and 0 wakes.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 450
+                    "line": 451
                   }
                 },
                 {
@@ -65669,7 +65669,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 451
+                    "line": 452
                   }
                 },
                 {
@@ -65680,7 +65680,7 @@
                   "value": "(\"console::log::record\", \"console::log::Ring::record\", \"console::log::Ring::record_byte\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 453
+                    "line": 454
                   }
                 }
               ]
@@ -65694,7 +65694,7 @@
           "doc": "The boot console drawn on the framebuffer firmware left, which a machine whose port is out of reach -- the Pixel 7 -- shows until a panic draws its own screen over it.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 457
+            "line": 458
           },
           "children": [
             {
@@ -65705,7 +65705,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 462
+                "line": 463
               },
               "children": [
                 {
@@ -65716,7 +65716,7 @@
                   "value": "\"screen::start shall draw the console only when the command line holds ferrix.fbcon and there is a framebuffer: clear it, and draw what recent keeps of the lines printed before, from the first whole one.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 466
+                    "line": 467
                   }
                 },
                 {
@@ -65727,7 +65727,7 @@
                   "value": "\"A boot without ferrix.fbcon leaves the framebuffer as firmware left it; one with it shows the boot's earlier lines from a line's start, and every later kernel line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 469
+                    "line": 470
                   }
                 },
                 {
@@ -65738,7 +65738,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 470
+                    "line": 471
                   }
                 },
                 {
@@ -65749,7 +65749,7 @@
                   "value": "(\"console::screen::start\", \"console::screen::put\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 471
+                    "line": 472
                   }
                 }
               ]
@@ -65762,7 +65762,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 473
+                "line": 474
               },
               "children": [
                 {
@@ -65773,7 +65773,7 @@
                   "value": "\"Board::new shall pick the largest glyph scale up to 4 that leaves at least 60 columns, inside the margins and the top inset, and refuse a surface with room for no column or fewer than 2 rows.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 477
+                    "line": 478
                   }
                 },
                 {
@@ -65784,7 +65784,7 @@
                   "value": "\"A 1080-pixel-wide surface gets scale 2 and 65 columns; a 640-pixel one, scale 1; a surface 20 pixels high is refused.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 480
+                    "line": 481
                   }
                 },
                 {
@@ -65795,7 +65795,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 481
+                    "line": 482
                   }
                 },
                 {
@@ -65806,7 +65806,7 @@
                   "value": "\"console::screen::Board::new\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 482
+                    "line": 483
                   }
                 }
               ]
@@ -65819,7 +65819,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 484
+                "line": 485
               },
               "children": [
                 {
@@ -65830,7 +65830,7 @@
                   "value": "\"Board::put shall ignore a CR, start a new row at a newline, advance a tab to the next stop of eight, draw a printable byte and draw anything else as the replacement character, wrapping at the last column and from the bottom row to the top, and keep the row after the newest line blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 489
+                    "line": 490
                   }
                 },
                 {
@@ -65841,7 +65841,7 @@
                   "value": "\"Drawn on a board of 3 rows, a line with a tab, a CR and a byte 0x01 puts its glyphs at the columns the rule gives, the replacement glyph for 0x01, and after a fourth newline the text is on row 1 with row 2 blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 493
+                    "line": 494
                   }
                 },
                 {
@@ -65852,7 +65852,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 494
+                    "line": 495
                   }
                 },
                 {
@@ -65863,7 +65863,7 @@
                   "value": "(\"console::screen::Board::put\", \"console::screen::Board::glyph\", \"console::screen::Board::newline\", \"console::screen::Board::clear_row\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 497
+                    "line": 498
                   }
                 }
               ]
@@ -65876,7 +65876,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 499
+                "line": 500
               },
               "children": [
                 {
@@ -65887,7 +65887,7 @@
                   "value": "\"screen::stop shall stop the screen console for good and wait a bounded time for a draw in flight to finish, and a byte that finds the board taken shall not be drawn.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 502
+                    "line": 503
                   }
                 },
                 {
@@ -65898,7 +65898,7 @@
                   "value": "\"After stop, 0 bytes are drawn; stop called by a processor part way through a draw returns after at most 1,000,000 attempts at the board.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 505
+                    "line": 506
                   }
                 },
                 {
@@ -65909,7 +65909,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 506
+                    "line": 507
                   }
                 },
                 {
@@ -65920,7 +65920,7 @@
                   "value": "(\"console::screen::stop\", \"console::screen::put\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 507
+                    "line": 508
                   }
                 }
               ]
@@ -65934,7 +65934,7 @@
           "doc": "Which console the kernel writes to, where firmware or the loader says. The ports' drivers are the arch slices'.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 511
+            "line": 512
           },
           "children": [
             {
@@ -65945,7 +65945,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 515
+                "line": 516
               },
               "children": [
                 {
@@ -65956,7 +65956,7 @@
                   "value": "\"ramoops_zone shall read the loader's `console=ramoops,<base>,<size>` as a zone only when both numbers are hexadecimal with a 0x prefix, no third field follows, the base is a page's and the size is more than the record's 12-byte header.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 519
+                    "line": 520
                   }
                 },
                 {
@@ -65967,7 +65967,7 @@
                   "value": "\"`ramoops,0x9ff00000,0x40000` is read as the zone at 0x9ff00000 of 0x40000 bytes; a base not a page's, a 12-byte zone, a missing size, a third field, a number without 0x and `ttyAMA0` are each refused: 0 of 6 taken (the AArch64 `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 523
+                    "line": 524
                   }
                 },
                 {
@@ -65978,7 +65978,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 524
+                    "line": 525
                   }
                 },
                 {
@@ -65989,7 +65989,7 @@
                   "value": "\"arch::aarch64::console::ramoops_zone\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 525
+                    "line": 526
                   }
                 }
               ]
@@ -66002,7 +66002,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 527
+                "line": 528
               },
               "children": [
                 {
@@ -66013,7 +66013,7 @@
                   "value": "\"chosen shall take the port a `console=` in the device tree's bootargs names, where the tree has that port with registers; else the port stdout-path names; else the first port the kernel drives that the tree has not turned off.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 531
+                    "line": 532
                   }
                 },
                 {
@@ -66024,7 +66024,7 @@
                   "value": "\"Of 4 trees built for the check, `console=pl011` against a stdout-path naming the USART gives the PL011; a `console=ttyS0` falls through to stdout-path's PL011; no stdout-path gives the first port not disabled; a lone STM32 USART gives it: 4 of 4 (the ARMv7-A `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 536
+                    "line": 537
                   }
                 },
                 {
@@ -66035,7 +66035,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 537
+                    "line": 538
                   }
                 },
                 {
@@ -66046,7 +66046,7 @@
                   "value": "(\"arch::armv7a::console::chosen\", \"arch::armv7a::console::forced\", \"arch::armv7a::console::first_enabled\", \"arch::armv7a::console::Port::of\", \"arch::armv7a::console::Port::named\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 540
+                    "line": 541
                   }
                 }
               ]

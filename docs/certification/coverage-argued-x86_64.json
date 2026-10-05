@@ -222,56 +222,56 @@
     },
     {
       "file": "console/input.rs",
-      "lines": "138",
+      "lines": "155",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "Console input left polled: an x86-64 machine whose MADT gives COM1's line no I/O APIC input, or an Arm machine whose device tree names the port's interrupt in a shape the parser does not follow. Every machine the suite boots names it."
     },
     {
       "file": "console/input.rs",
-      "lines": "268",
+      "lines": "316",
       "category": "failure-path",
       "match": "return Err(\"the input ring was checked after the port could ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "284",
+      "lines": "332",
       "category": "failure-path",
       "match": "return Err(\"the input ring said it was empty with bytes in i",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "287",
+      "lines": "335",
       "category": "failure-path",
       "match": "return Err(\"a wait for input did not return while input was ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "296",
+      "lines": "344",
       "category": "credited-elsewhere",
       "match": "if pop().is_some() {",
       "why": "Run on every boot by console::input::check, whose ring is empty by then: pop is inlined, and this line's only row is on the inlined pop's taking-a-byte path, which runs only when the ring gives back more than it holds -- the failure the next line reports."
     },
     {
       "file": "console/input.rs",
-      "lines": "297",
+      "lines": "345",
       "category": "failure-path",
       "match": "return Err(\"the input ring gave back more bytes than it has ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "300",
+      "lines": "348",
       "category": "failure-path",
       "match": "return Err(\"the input ring said it held input after it was e",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "304",
+      "lines": "352",
       "category": "failure-path",
       "match": "return Err(\"the input ring did not count the bytes it had no",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
