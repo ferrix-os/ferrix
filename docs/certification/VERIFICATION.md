@@ -295,6 +295,25 @@ an argument for the old text is no evidence for the new. The figures stay as
 measured until the next run of the suite, which takes in the new code and
 holds it to the floor.
 
+**A carry nobody made fails the gate (F-62).** The anchors include the
+checks' own reached lines (each `coverage-<arch>.json`'s `verification`
+map, which `TRACEABILITY.md` reads), and those sit mostly in load-ring check
+files. Two landings that touched no item file, devtty (5dddc1981) and
+console-revoke (0f94a6d1a), moved `syscall/check.rs` by 200 lines and
+carried nothing; a later carry from a tree after them kept the stale lines
+as if they were right, and `TRACEABILITY.md` read four verified
+requirements as not reached and one unverified as reached until
+2026-10-05. Two things hold it now. `carry-coverage.py` carries each
+evidence file from the commit that last wrote that file, by default, and
+refuses a `--from` whose kernel is not the one each was written on. And
+`carry-coverage.py --check`, which `gen-coverage-justification.py --check`
+runs in every `check` and `check-docs`, carries each file in memory from
+its own commit to the tree and fails if anything would move: the kernel
+changed since the file was written, and nobody carried it. An edit of a
+`coverage-<arch>.json` by hand still resets that file's base; the
+`verification` maps from before 0498203ca are proved only by the next
+coverage run.
+
 **A line can stop being a statement.** The denominator is the image's
 `is_stmt` rows, so a line whose function the compiler starts inlining, or
 drops, can lose every row: it leaves both counts, neither reached nor

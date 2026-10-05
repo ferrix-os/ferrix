@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -623,6 +624,15 @@ def main() -> int:
     }
 
     if args.check:
+        # The anchors themselves: a kernel change since the evidence was
+        # last written that nobody carried (finding F-62). Every page above
+        # can be current and still name the wrong lines.
+        carried = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "common" / "gen" / "carry-coverage.py"), "--check"],
+            cwd=ROOT,
+        )
+        if carried.returncode:
+            return 1
         stale = [
             path
             for path, rendered in outputs.items()

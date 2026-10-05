@@ -189,7 +189,11 @@ do not need it. The review checks the rules the evidence rests on:
 * every new `unsafe` is traced;
 * every countermeasure has a check with a negative control that shows it
   fired;
-* coverage is carried after the final rebase, with dropped anchors listed.
+* coverage is carried after the final rebase, with dropped anchors listed,
+  by any landing that moves a line the evidence names -- a load-ring check
+  file in a `verification` map included -- and the change's
+  `TRACEABILITY.md` rows that turn reached or not reached are read and
+  explained (finding F-62).
 
 The review is internal, not independent verification in the standards'
 sense (F-27, F-29).

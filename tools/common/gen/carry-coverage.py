@@ -11,8 +11,9 @@ must not drift onto another statement.
 This carries the anchors from the tree the evidence was last written on to the
 working tree, file by file, through a diff:
 
-    python3 tools/common/gen/carry-coverage.py            # from `git merge-base HEAD main`
-    python3 tools/common/gen/carry-coverage.py --from REV
+    python3 tools/common/gen/carry-coverage.py            # from the commit that last wrote the evidence
+    python3 tools/common/gen/carry-coverage.py --from REV  # refused unless REV's kernel is that commit's
+    python3 tools/common/gen/carry-coverage.py --check     # fail if anything was left uncarried
     python3 tools/common/gen/gen-coverage-justification.py   # then regenerate the pages
     python3 tools/common/gen/gen-coverage-justification.py --check
 
@@ -115,9 +116,38 @@ class Carrier:
         return result
 
 
-def carry_residual(carrier, arch, report):
-    path = CERT / f"coverage-residual-{arch}.json"
-    residual = json.loads(path.read_text())
+class Files:
+    """The evidence on disk, read and written in place."""
+
+    def exists(self, name):
+        return (CERT / name).is_file()
+
+    def read(self, name):
+        return (CERT / name).read_text()
+
+    def write(self, name, text):
+        (CERT / name).write_text(text)
+
+
+class Memory(Files):
+    """The evidence as on disk, with writes kept in memory: a dry run."""
+
+    def __init__(self):
+        self.written = {}
+
+    def read(self, name):
+        return self.written[name] if name in self.written else super().read(name)
+
+    def write(self, name, text):
+        self.written[name] = text
+
+    def read_disk(self, name):
+        return super().read(name)
+
+
+def carry_residual(carrier, arch, report, store):
+    evidence = f"coverage-residual-{arch}.json"
+    residual = json.loads(store.read(evidence))
     files = {}
     for name, entry in residual["files"].items():
         new, mapping = carrier.carry(name)
@@ -133,14 +163,14 @@ def carry_residual(carrier, arch, report):
             files[new] = {**entry, "lines": lines}
     residual["files"] = files
     residual["unreached"] = sum(len(entry["lines"]) for entry in files.values())
-    path.write_text(json.dumps(residual, indent=2) + "\n")
+    store.write(evidence, json.dumps(residual, indent=2) + "\n")
 
 
-def carry_arguments(carrier, arch, report):
-    path = CERT / f"coverage-argued-{arch}.json"
-    if not path.is_file():
+def carry_arguments(carrier, arch, report, store):
+    evidence = f"coverage-argued-{arch}.json"
+    if not store.exists(evidence):
         return
-    argued = json.loads(path.read_text())
+    argued = json.loads(store.read(evidence))
     kept = []
     for argument in argued["arguments"]:
         new, mapping = carrier.carry(argument["file"])
@@ -157,12 +187,12 @@ def carry_arguments(carrier, arch, report):
         if moved:
             kept.append({**argument, "file": new, "lines": format_lines(moved)})
     argued["arguments"] = kept
-    path.write_text(json.dumps(argued, indent=2, ensure_ascii=False) + "\n")
+    store.write(evidence, json.dumps(argued, indent=2, ensure_ascii=False) + "\n")
 
 
-def carry_figures(carrier, arch):
-    path = CERT / f"coverage-{arch}.json"
-    figures = json.loads(path.read_text())
+def carry_figures(carrier, arch, store):
+    evidence = f"coverage-{arch}.json"
+    figures = json.loads(store.read(evidence))
     figures["files"] = {carrier.carry(name)[0]: entry for name, entry in figures["files"].items()}
     # The checks' own reached statements (TRACEABILITY.md). A line the change
     # edited is dropped: unmeasured, so never counted as reached.
@@ -175,32 +205,130 @@ def carry_figures(carrier, arch):
                 lines = [mapping[line] for line in lines if line in mapping]
             checks[new] = {**entry, "reached": format_lines(lines)}
         figures["verification"] = dict(sorted(checks.items()))
-    path.write_text(json.dumps(figures, indent=2) + "\n")
+    store.write(evidence, json.dumps(figures, indent=2) + "\n")
+
+
+EVIDENCE = tuple(f"coverage-{kind}{arch}.json" for arch in ARCHES for kind in ("", "residual-", "argued-"))
+
+
+def carry_all(base, store):
+    carrier = Carrier(base)
+    report = []
+    for arch in ARCHES:
+        carry_residual(carrier, arch, report, store)
+        carry_arguments(carrier, arch, report, store)
+        carry_figures(carrier, arch, store)
+    return carrier, report
+
+
+def shallow_boundary():
+    """The commits a shallow clone (CI's) was cut at. Its oldest commit seems
+    to write every file, so what it really wrote cannot be told there."""
+    shallow = Path(git("rev-parse", "--git-path", "shallow").stdout.strip())
+    if not shallow.is_absolute():
+        shallow = ROOT / shallow
+    return set(shallow.read_text().split()) if shallow.is_file() else set()
+
+
+def writers(head="HEAD"):
+    """Each evidence file and the commit that last wrote it. Each file is
+    judged from its own: a later edit of one file by hand moves only that
+    file's base, never another's past a kernel change nobody carried."""
+    return {
+        name: git("log", "-1", "--format=%H", head, "--", f"docs/certification/{name}").stdout.strip()
+        for name in EVIDENCE
+    }
+
+
+def carry_from_writers(store, head="HEAD"):
+    """Carry each evidence file from the commit that last wrote it into
+    `store`. Returns {name: base}, and the report of what was dropped."""
+    bases = writers(head)
+    report = []
+    for base in sorted({b for b in bases.values() if b}):
+        scratch = Memory()
+        _, found = carry_all(base, scratch)
+        mine = {name for name, b in bases.items() if b == base}
+        for name in mine:
+            if name in scratch.written:
+                store.write(name, scratch.written[name])
+        # The report's lines start "<arch> residual" or "<arch> argument".
+        prefixes = tuple(
+            f"{name[len('coverage-residual-'):-5]} residual " if name.startswith("coverage-residual-")
+            else f"{name[len('coverage-argued-'):-5]} argument "
+            for name in mine
+            if name.startswith(("coverage-residual-", "coverage-argued-"))
+        )
+        report += [line for line in found if line.startswith(prefixes)]
+    return bases, report
+
+
+def stale(head="HEAD"):
+    """The evidence files a carry from the commit that last wrote each would
+    change: anchors a later change to the kernel moved and nobody carried
+    (finding F-62). Empty when every anchor is where its statement is, or
+    when the working tree has rewritten the evidence since `head`, which is
+    checked once it is committed. One limit stays: an edit of an evidence
+    file by hand resets that file's own base."""
+    paths = [f"docs/certification/{name}" for name in EVIDENCE]
+    if git("diff", "--quiet", head, "--", *paths, check=False).returncode:
+        return []
+    boundary = shallow_boundary()
+    store = Memory()
+    bases, _ = carry_from_writers(store, head)
+    return [
+        (name, bases[name])
+        for name, text in sorted(store.written.items())
+        if bases[name] and bases[name] not in boundary and text != store.read_disk(name)
+    ]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--from", dest="base", help="the tree the evidence was written on "
-                        "(default: git merge-base HEAD main)")
+                        "(default: for each file, the commit that last wrote it)")
+    parser.add_argument("--check", action="store_true", help="fail if a carry from the commit that "
+                        "last wrote each evidence file would change it; write nothing")
     options = parser.parse_args()
-    base = options.base or git("merge-base", "HEAD", "main").stdout.strip()
-    for arch in ARCHES:
-        for kind in ("", "residual-", "argued-"):
-            name = f"coverage-{kind}{arch}.json"
-            if git("diff", "--quiet", base, "--", f"docs/certification/{name}", check=False).returncode:
-                sys.exit(f"carry-coverage: {name} changed since {base}; carry from the commit that last wrote it")
-    carrier = Carrier(base)
-    report = []
-    for arch in ARCHES:
-        carry_residual(carrier, arch, report)
-        carry_arguments(carrier, arch, report)
-        carry_figures(carrier, arch)
+    if options.check:
+        found = stale()
+        for name, base in found:
+            print(f"carry-coverage: {name}: anchors not carried since {base[:12]}, the commit "
+                  f"that last wrote it", file=sys.stderr)
+        if found:
+            print("carry-coverage: a change moved lines the evidence names; carry them with\n"
+                  "  python3 tools/common/gen/carry-coverage.py", file=sys.stderr)
+            return 1
+        print("carry-coverage: every anchor carried")
+        return 0
+    bases = writers()
+    if options.base:
+        # The evidence names lines of the kernel as it was when each file was
+        # last written. A base with another kernel would carry anchors from
+        # the wrong lines and keep them silently (finding F-62: 61135f4ba
+        # carried from a tree two uncarried landings had already moved).
+        for name, written in bases.items():
+            if git("diff", "--quiet", options.base, "--", f"docs/certification/{name}", check=False).returncode:
+                sys.exit(f"carry-coverage: {name} changed since {options.base}; carry from the commit that last wrote it")
+            if written and git("diff", "--quiet", written, options.base, "--", SRC, check=False).returncode:
+                sys.exit(f"carry-coverage: the kernel at {options.base[:12]} is not the one {name} was last "
+                         f"written on ({written[:12]}); carry from {written[:12]}")
+        carrier, report = carry_all(options.base, Files())
+        changed = sum(1 for _, mapping in carrier.maps.values() if mapping is not None)
+        for line in report:
+            print(line)
+        print(f"carry-coverage: carried from {options.base[:12]}, {changed} file(s) of the evidence changed, "
+              f"{len(report)} anchor(s) dropped as unmeasured")
+        return 0
+    store = Memory()
+    _, report = carry_from_writers(store)
+    for name, text in store.written.items():
+        Files().write(name, text)
     for line in report:
         print(line)
-    changed = sum(1 for _, mapping in carrier.maps.values() if mapping is not None)
-    print(f"carry-coverage: carried from {base[:12]}, {changed} file(s) of the evidence changed, "
-          f"{len(report)} anchor(s) dropped as unmeasured")
-
+    print(f"carry-coverage: carried each evidence file from the commit that last wrote it "
+          f"({len({b for b in bases.values() if b})} base(s)), {len(report)} anchor(s) dropped as unmeasured")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
