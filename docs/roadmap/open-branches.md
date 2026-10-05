@@ -92,9 +92,9 @@ unchanged.
 says so; the others are branches in the gate host's repository, which `git
 fetch --prune origin` does not show.
 
-- `po6/g3` (8b0d8acda, 1 unlanded): FX-1012, the stage 10 G3 fix (G3 and R5
-  take their check byte in the receive path, out of the pump's reach); about
-  to go into a batch.
+- `po6/g3`: FX-1012, the stage 10 G3 fix (G3 and R5 take their check byte
+  in the receive path, out of the pump's reach). **Landed** as a6116e822
+  after this list was written.
 - `l13b` and `l13c` (session po6-l13): origin still has the pre-rebase tips
   (fac927209 with 5 unlanded, 91045526a with 10); the gate host's local
   branches are rebased onto `main` (f08289ef4 with 4, 3f0501d1e with 7).
