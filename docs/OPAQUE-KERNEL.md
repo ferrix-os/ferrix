@@ -3669,6 +3669,42 @@ from a blocking native call", or ADV_ARC argues it as domain separation
 (question 10). VULNERABILITY-ANALYSIS gains an entry: a resume path that
 skips the reset.
 
+**As built (2026-10-05, branch `po6/step3`, ids H.SCHED.12, L.sched.54,
+L.x86_64.152-157).** As designed, with five differences for the review:
+- *The runtime's clobber is on every call.* `trap_words` gains
+  `clobber_abi("sysv64")` instead of a second block `trap_blocking`: the
+  assembly budget stood at 1,606 of 1,610 lines with 3a's three kernel
+  instructions (`stmxcsr`, `fnstcw`, `fldcw`), and a second trap block is 13.
+  Every call through `ferrix_rt` is then compiled as if it lost the vector
+  registers, which costs a program only the compiler's choice to keep a value
+  there across a call that would have kept it. The kernel's contract is still
+  the three numbers (`syscall::vectors_die_in`).
+- *The accessor is checked at boot, not on the host.* The kernel crate has no
+  host tests; stage 9's `check_unsaved_reads_as_initial` builds a state with
+  foreign bytes in its area, keeps only the two words, and reads it through
+  `fxsave`, `avx` and `xstate_bv` as `FpuArea::initial` with its own `MXCSR`
+  and control word; a writer (`fxsave_mut`, `avx_mut`, `set_xstate_bv`) first
+  turns an `unsaved` state into that image (`materialise`).
+- *The wakes are a message, a close and a signal.* A native wait is ended by
+  a message, its peer's close, its process's end and another thread's
+  `execve`, and not by a signal (`NativeCall::ChannelWriteRead`). So the
+  signal case sends `SIGUSR1` while the task waits -- which wakes it, resets
+  it and lets it block again -- and then the message: the handler's frame
+  holds the post-call state, and `rt_sigreturn` puts it back. A kill, of the
+  process or of a sibling, ends the task before it reaches user mode, so no
+  program can read a register after one; it passes through the same restore.
+- *No partial save without `XSAVE`.* The reset is an `XRSTOR` of an empty
+  header; on a processor that saves with `FXSAVE` every switch saves in full,
+  and the `vectors` line says the cases were not run.
+- *PKRU.* `cpu::reset_components` masks `XSTATE_PKRU` out of the reset's
+  requested set, and stage 9 checks that it does and that nothing past x87,
+  SSE and AVX is enabled.
+The mark lives in `UserState`, raised and lowered through
+`sched::with_own_user_state` with interrupts masked; the switch passes
+`previous.is_blocked()` to `save_user_state` on all three architectures (the
+Arm pair ignore it). The checks are `arch/x86_64/switch/check.rs`, with two
+fixtures assembled by GNU `as`; the `vectors` boot line.
+
 #### 3b: the FS and GS bases kept in the task
 
 **What changes.** `save_user_state` reads `FS_BASE` and the program's
@@ -3734,6 +3770,20 @@ the span: the two `rdmsr`s a switch go; the writes stay.
 **Documents.** SPECULATION.md: none. MEMORY-AND-TIMING: none. FINDINGS: none.
 Security Target: FDP_RIP.2 as widened for 3a covers the bases too: a program
 is given its own at every switch.
+
+**As built (2026-10-05, branch `po6/step3`, id L.x86_64.158; L.x86_64.9 and
+.61 changed).** `save_user_state` reads no base MSR; `arch_prctl` writes the
+MSR and the running task's record with interrupts masked (the entry answers
+it before it opens them); `execve`'s `reset_user_state` zeroes the record
+with the MSRs, without which the new image would get the old one's thread
+pointer back at its next switch-in. `UserState::capture`, which is not the
+switch, still reads both MSRs: a fork child and a signal frame take what the
+processor holds. The checks (`fsbase` line): two programs with different bases
+trade one processor 10,000 times each; one loads `USER_DS` and then a null
+selector into `FS` before each yield -- after which its base is zero on both
+vendors, while its record holds its own -- beside a second whose recorded base
+is the same address, which reads its own word at every turn; and the first
+reads its own word again after a `nanosleep`, its recorded base back.
 
 #### The parallel split and the landing order
 

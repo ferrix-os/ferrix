@@ -185,6 +185,62 @@ pub(crate) fn extended_state_components() -> u64 {
     XSAVE_COMPONENTS.load(Ordering::Relaxed)
 }
 
+/// The `PKRU` state component, bit 9 of `XCR0`. Never enabled here (`CR4.PKE`
+/// stays off), and never part of a vector reset if it ever is: its initial
+/// value grants every protection key, so a reset would widen a program's own
+/// protection (`docs/OPAQUE-KERNEL.md` §9.8, 3a). Linux keeps it apart the
+/// same way.
+pub(crate) const XSTATE_PKRU: u64 = 1 << 9;
+
+/// Every state component the switch's vector reset may initialise: the ones
+/// `XCR0` enables, never [`XSTATE_PKRU`]. The reference configuration enables
+/// x87, SSE and AVX only ([`enable_extended_state`]); a component past those
+/// is reviewed before it is enabled, and AMX's would also have to leave out a
+/// component armed in `IA32_XFD`.
+pub(crate) fn reset_components() -> u64 {
+    extended_state_components() & !XSTATE_PKRU
+}
+
+/// The live `MXCSR` and x87 control word, the two parts of the vector state a
+/// blocking native call keeps (`switch::save_user_state`): `stmxcsr` and
+/// `fnstcw`, each a store of a register Rust cannot name to memory.
+///
+/// # Safety
+///
+/// (SYSREG) `CR4.OSFXSR` set, which the switch's `FXSAVE64` and `XSAVE64`
+/// already rely on on every processor that runs programs.
+pub(crate) unsafe fn read_vector_controls() -> (u32, u16) {
+    let mut mxcsr = 0_u32;
+    let mut control = 0_u16;
+    // SAFETY: (SYSREG) two stores to this frame's own words; neither changes
+    // a register.
+    unsafe {
+        asm!(
+            "stmxcsr [{0}]",
+            "fnstcw [{1}]",
+            in(reg) &raw mut mxcsr,
+            in(reg) &raw mut control,
+            options(nostack, preserves_flags),
+        );
+    }
+    (mxcsr, control)
+}
+
+/// Load `control` into the x87 control word: `fldcw`, after a reset whose
+/// `XRSTOR` left the initial `0x037F` there.
+///
+/// # Safety
+///
+/// (SYSREG) The registers must be the running task's, which the switch is about
+/// to resume, and `control` one that task had.
+pub(crate) unsafe fn load_x87_control(control: u16) {
+    // SAFETY: (SYSREG) a load of the x87 control word from this frame's word;
+    // the kernel never uses the x87, so only the resumed program sees it.
+    unsafe {
+        asm!("fldcw [{0}]", in(reg) &raw const control, options(nostack, preserves_flags));
+    }
+}
+
 /// Write `XCR0`, the state components `XSAVE` manages and a program may use.
 ///
 /// # Safety

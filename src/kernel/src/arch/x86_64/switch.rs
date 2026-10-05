@@ -22,6 +22,8 @@ use core::arch::global_asm;
 use super::cpu;
 use super::gdt;
 
+pub(super) mod check;
+
 /// Bytes the switch pushes: six registers and the return address.
 const FRAME_BYTES: u64 = 7 * 8;
 
@@ -127,20 +129,52 @@ pub(crate) unsafe fn prepare_stack(
 /// these, so a trap from ring 3 leaves them as the program had them. Two
 /// programs taking turns need them saved and loaded by the scheduler whenever
 /// it switches between tasks that run user code.
+///
+/// # The FS and GS bases are the record's (`docs/OPAQUE-KERNEL.md` §9.8, 3b)
+///
+/// The two bases are kept here as the truth and never read back from the
+/// MSRs at a switch: `arch_prctl` writes the register and this record
+/// together, `execve` zeroes both, and the switch loads them at every switch
+/// to a task with user state. A program cannot set either base without a
+/// call (`FSGSBASE` stays off), except by loading a selector: a non-null one
+/// takes the descriptor's base, which the restore reloads with the selector;
+/// a null one leaves the record's, as Linux's `save_base_legacy` does. A
+/// program that clears its own base with a null selector on a processor
+/// that clears it gets its recorded base back at its next switch-in, its own
+/// value. The write at every switch is not skipped when it equals what the
+/// processor last held: the consultant's condition 8 found that a skip leaks
+/// across programs on both vendors.
+///
+/// # The vector-state contract (`docs/OPAQUE-KERNEL.md` §9.8, 3a)
+///
+/// Through `channel_write_read`, `object_wait_one` and `port_wait`, the
+/// native calls that block, a program keeps only `MXCSR` and the x87 control
+/// word of its vector state. The entry raises `vectors_dead` for the length
+/// of such a call; a switch away from the task while it is blocked in the
+/// call saves just those two and marks the state `unsaved`; and the switch
+/// back resets every vector register to its initial state with the task's own
+/// two words, whoever switches to it. Only the reset clears the mark.
 #[repr(C, align(64))]
 #[derive(Debug, Clone)]
 pub(crate) struct UserState {
-    /// `FS_BASE`, which `arch_prctl(ARCH_SET_FS)` writes.
+    /// `FS_BASE`, which `arch_prctl(ARCH_SET_FS)` writes: the record the
+    /// switch loads, never reads back.
     thread_pointer: u64,
     /// The program's `GS_BASE`, which sits in `KERNEL_GS_BASE` while the
-    /// kernel runs. Saved so that one program's base, whatever loaded it, is
-    /// not the next one's.
+    /// kernel runs: likewise the record's.
     gs_base: u64,
     /// GDT slots 12 to 14: the thread-local descriptors `set_thread_area`
     /// installed, zero for none.
     tls: [u64; gdt::TLS_SLOTS],
     /// `DS`, `ES`, `FS` and `GS`, as the program left them.
     selectors: [u16; 4],
+    /// Raised by the `SYSCALL` entry for the length of a blocking native
+    /// call, whose contract lets the caller's vector registers go.
+    vectors_dead: bool,
+    /// The area holds only `MXCSR` and the x87 control word, with an empty
+    /// `XSTATE_BV`: the next switch to the task resets the registers, and
+    /// every reader sees the initial state ([`UserState::vectors`]).
+    unsaved: bool,
     /// The x87, SSE and AVX registers, as `XSAVE` or `FXSAVE` wrote them.
     fpu: FpuArea,
 }
@@ -178,11 +212,93 @@ impl UserState {
     ///
     /// (CONTEXT) The registers must be the calling task's own, which they are inside its
     /// own system call.
+    ///
+    /// The bases are read from the MSRs here, not from the running task's
+    /// record: a copy of what the processor holds, outside the switch, which
+    /// is the one place that reads no base (3b).
     pub(crate) unsafe fn capture() -> UserState {
         let mut state = UserState::new();
-        // SAFETY: (CONTEXT) the caller's guarantee.
-        unsafe { save_user_state(&mut state) };
+        // SAFETY: (CONTEXT) the caller's guarantee; the registers are the
+        // running task's and it is not blocked.
+        unsafe { save_user_state(&mut state, false) };
+        // SAFETY: (CONTEXT) reading `FS_BASE` has no side effects.
+        state.thread_pointer = unsafe { super::syscall::thread_pointer() };
+        // SAFETY: (CONTEXT) the kernel side of `swapgs`, where the shadow is the
+        // program's.
+        state.gs_base = unsafe { super::syscall::program_gs_base() };
         state
+    }
+
+    /// Raise or lower the vector-state contract's mark: raised by the
+    /// `SYSCALL` entry for a blocking native call, lowered as the call
+    /// returns (3a). Lowering it does not touch `unsaved`, which only the
+    /// reset clears.
+    pub(super) const fn set_vectors_dead(&mut self, dead: bool) {
+        self.vectors_dead = dead;
+    }
+
+    /// Give the program `fs_base` and `gs_base` in this record, beside the
+    /// MSRs the caller writes: what `execve` does (3b).
+    pub(super) const fn set_bases(&mut self, fs_base: u64, gs_base: u64) {
+        self.thread_pointer = fs_base;
+        self.gs_base = gs_base;
+    }
+
+    /// Keep only `mxcsr` and `control` of the vector state, and mark it
+    /// `unsaved`: what the switch does to a task blocked in a call whose
+    /// contract lets its vector registers go (3a). The area becomes the
+    /// standard form's reset image: `XSTATE_BV` empty, `XCOMP_BV` zero (as
+    /// it always is), and the task's own `MXCSR` and control word in the
+    /// legacy region, which `XRSTOR64` loads `MXCSR` from whatever
+    /// `XSTATE_BV` says (Intel SDM Vol. 1 §13.8.1). The legacy region's other
+    /// bytes are this task's own, from its last full save; no reader sees
+    /// them ([`UserState::vectors`]).
+    pub(super) fn keep_vector_controls(&mut self, mxcsr: u32, control: u16) {
+        let [c0, c1] = control.to_le_bytes();
+        let [m0, m1, m2, m3] = mxcsr.to_le_bytes();
+        let legacy = &mut self.fpu.legacy;
+        legacy[FCW_AT] = c0;
+        legacy[FCW_AT + 1] = c1;
+        legacy[MXCSR_AT] = m0;
+        legacy[MXCSR_AT + 1] = m1;
+        legacy[MXCSR_AT + 2] = m2;
+        legacy[MXCSR_AT + 3] = m3;
+        if let Some(word) = self.fpu.header.first_chunk_mut::<8>() {
+            *word = [0; 8];
+        }
+        self.unsaved = true;
+    }
+
+    /// Whether the area holds only `MXCSR` and the control word, and the
+    /// next switch to the task resets its vector registers.
+    pub(super) const fn is_unsaved(&self) -> bool {
+        self.unsaved
+    }
+
+    /// The task's vector state: the one way any reader looks at a saved area.
+    ///
+    /// A state saved in full answers its own area. An `unsaved` one answers
+    /// the initial state with the task's own `MXCSR` and x87 control word,
+    /// which is what the task will hold when it next runs, never the stale
+    /// bytes the area still has. Today the switch is the only reader of a
+    /// task's saved area, and a signal frame is built from the live registers
+    /// after the reset (`UserState::capture`); a signal frame built from a
+    /// saved area later, a core dump, or a register report that reads another
+    /// task's area reads it through here (the consultant's condition 7). The
+    /// boot's check (`check::check_unsaved_reads_as_initial`) holds it.
+    fn vectors(&self) -> alloc::borrow::Cow<'_, FpuArea> {
+        if !self.unsaved {
+            return alloc::borrow::Cow::Borrowed(&self.fpu);
+        }
+        let legacy = &self.fpu.legacy;
+        let control = u16::from_le_bytes([legacy[FCW_AT], legacy[FCW_AT + 1]]);
+        let mxcsr = u32::from_le_bytes([
+            legacy[MXCSR_AT],
+            legacy[MXCSR_AT + 1],
+            legacy[MXCSR_AT + 2],
+            legacy[MXCSR_AT + 3],
+        ]);
+        alloc::borrow::Cow::Owned(FpuArea::initial(mxcsr, control))
     }
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`
@@ -204,54 +320,35 @@ impl UserState {
     }
 
     /// A program's state before it has run: no thread pointer, and the x87 and
-    /// SSE control words a processor has at reset.
-    ///
-    /// Not all zeros, and the difference is a crash: an all-zero `MXCSR`
-    /// unmasks every SSE exception, so a program's first inexact division
-    /// would take `#XM` instead of rounding. `0x1F80` masks them all, and
-    /// `0x037F` does the same for the x87.
+    /// SSE control words a processor has at reset ([`FpuArea::initial`]).
     pub(crate) const fn new() -> UserState {
-        let mut legacy = [0_u8; 512];
-        let control = 0x037F_u16.to_le_bytes();
-        legacy[0] = control[0];
-        legacy[1] = control[1];
-        let mxcsr = 0x1F80_u32.to_le_bytes();
-        legacy[24] = mxcsr[0];
-        legacy[25] = mxcsr[1];
-        legacy[26] = mxcsr[2];
-        legacy[27] = mxcsr[3];
-        // `XSTATE_BV` names x87 and SSE, so `XRSTOR` loads the control words
-        // above rather than its own initial ones, and leaves AVX out, so it
-        // starts zero.
-        let mut header = [0_u8; 64];
-        header[0] = cpu::XSTATE_X87_SSE as u8;
         UserState {
             thread_pointer: 0,
             gs_base: 0,
             tls: [0; gdt::TLS_SLOTS],
             selectors: [0; 4],
-            fpu: FpuArea {
-                legacy,
-                header,
-                avx: [0; 256],
-            },
+            vectors_dead: false,
+            unsaved: false,
+            fpu: FpuArea::initial(INITIAL_MXCSR, INITIAL_X87_CONTROL),
         }
     }
 
-    /// The 512-byte `FXSAVE` area: what a signal frame carries as `fpstate`.
-    pub(super) const fn fxsave(&self) -> &[u8; 512] {
-        &self.fpu.legacy
+    /// The 512-byte `FXSAVE` area: what a signal frame carries as `fpstate`,
+    /// through [`UserState::vectors`].
+    pub(super) fn fxsave(&self) -> [u8; 512] {
+        self.vectors().legacy
     }
 
     /// The same area, for `rt_sigreturn` to fill from the frame.
-    pub(super) const fn fxsave_mut(&mut self) -> &mut [u8; 512] {
+    pub(super) fn fxsave_mut(&mut self) -> &mut [u8; 512] {
+        self.materialise();
         &mut self.fpu.legacy
     }
 
     /// Which components the area holds, `XSTATE_BV`: a component left out
     /// is in its initial state, all zero for AVX.
     pub(super) fn xstate_bv(&self) -> u64 {
-        self.fpu
+        self.vectors()
             .header
             .first_chunk::<8>()
             .map_or(0, |word| u64::from_le_bytes(*word))
@@ -261,19 +358,77 @@ impl UserState {
     /// not enable, so only those are kept.
     pub(super) fn set_xstate_bv(&mut self, components: u64) {
         let kept = components & cpu::extended_state_components();
+        self.materialise();
         if let Some(word) = self.fpu.header.first_chunk_mut::<8>() {
             *word = kept.to_le_bytes();
         }
     }
 
-    /// The upper halves of the sixteen `YMM` registers.
-    pub(super) const fn avx(&self) -> &[u8; 256] {
-        &self.fpu.avx
+    /// The upper halves of the sixteen `YMM` registers, through
+    /// [`UserState::vectors`].
+    pub(super) fn avx(&self) -> [u8; 256] {
+        self.vectors().avx
     }
 
     /// The same, for `rt_sigreturn` to fill from the frame.
-    pub(super) const fn avx_mut(&mut self) -> &mut [u8; 256] {
+    pub(super) fn avx_mut(&mut self) -> &mut [u8; 256] {
+        self.materialise();
         &mut self.fpu.avx
+    }
+
+    /// Before a writer changes part of the area: an `unsaved` state becomes
+    /// the initial image it reads as, saved in full, so that what is written
+    /// joins what every reader already saw rather than the stale bytes.
+    fn materialise(&mut self) {
+        let initial = match self.vectors() {
+            alloc::borrow::Cow::Owned(initial) => Some(initial),
+            alloc::borrow::Cow::Borrowed(_) => None,
+        };
+        if let Some(initial) = initial {
+            self.fpu = initial;
+            self.unsaved = false;
+        }
+    }
+}
+
+/// Where the x87 control word sits in the legacy region.
+const FCW_AT: usize = 0;
+/// Where `MXCSR` sits in the legacy region.
+const MXCSR_AT: usize = 24;
+/// The x87 control word a processor has at reset, and `XRSTOR`'s initial
+/// state: every x87 exception masked.
+pub(super) const INITIAL_X87_CONTROL: u16 = 0x037F;
+/// The `MXCSR` a processor has at reset: every SSE exception masked.
+pub(super) const INITIAL_MXCSR: u32 = 0x1F80;
+
+impl FpuArea {
+    /// A program's vector state before it has run, with `mxcsr` and
+    /// `control` in place of the reset ones: what [`UserState::new`] starts
+    /// with, and what an `unsaved` state reads as.
+    ///
+    /// Not all zeros, and the difference is a crash: an all-zero `MXCSR`
+    /// unmasks every SSE exception, so a program's first inexact division
+    /// would take `#XM` instead of rounding. `0x1F80` masks them all, and
+    /// `0x037F` does the same for the x87. `XSTATE_BV` names x87 and SSE, so
+    /// `XRSTOR` loads the control words rather than its own initial ones, and
+    /// leaves AVX out, so it starts zero.
+    const fn initial(mxcsr: u32, control: u16) -> FpuArea {
+        let mut legacy = [0_u8; 512];
+        let control = control.to_le_bytes();
+        legacy[FCW_AT] = control[0];
+        legacy[FCW_AT + 1] = control[1];
+        let mxcsr = mxcsr.to_le_bytes();
+        legacy[MXCSR_AT] = mxcsr[0];
+        legacy[MXCSR_AT + 1] = mxcsr[1];
+        legacy[MXCSR_AT + 2] = mxcsr[2];
+        legacy[MXCSR_AT + 3] = mxcsr[3];
+        let mut header = [0_u8; 64];
+        header[0] = cpu::XSTATE_X87_SSE as u8;
+        FpuArea {
+            legacy,
+            header,
+            avx: [0; 256],
+        }
     }
 }
 
@@ -331,32 +486,56 @@ unsafe fn ferrix_fpu_restore(area: *const FpuArea, components: u64) {
 
 /// Store the program state this processor holds into `state`.
 ///
+/// No base MSR is read (3b): the `FS` and `GS` bases are the record's, which
+/// `arch_prctl` and `execve` keep, and a non-null selector, saved here, brings
+/// its descriptor's base back when the restore reloads it.
+///
+/// The vector registers are saved in full, except for a task `blocked` in a
+/// native call whose contract lets them go (`vectors_dead`, 3a): then only
+/// `MXCSR` and the x87 control word are kept, and the state is marked
+/// `unsaved` for the switch back to reset. A task switched out runnable --
+/// preempted, even inside one of those calls -- and one blocked in any other
+/// call keep everything. On a processor without `XSAVE` everything is saved
+/// too, since the reset is an `XRSTOR` of an empty header.
+///
 /// # Safety
 ///
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
-/// with user state to run on this processor.
-pub(crate) unsafe fn save_user_state(state: &mut UserState) {
-    // SAFETY: (CONTEXT) reading `FS_BASE` has no side effects.
-    state.thread_pointer = unsafe { super::syscall::thread_pointer() };
-    // SAFETY: (CONTEXT) the kernel side of `swapgs`, where the shadow is the program's.
-    state.gs_base = unsafe { super::syscall::program_gs_base() };
+/// with user state to run on this processor. `blocked` must say whether that
+/// task is switched out blocked rather than runnable.
+pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.selectors = cpu::read_data_selectors();
     // SAFETY: (CONTEXT) the caller switches tasks with interrupts masked, so these are
     // this processor's slots and the outgoing thread's.
     state.tls = unsafe { gdt::read_tls() };
+    let components = cpu::extended_state_components();
+    if blocked && state.vectors_dead && components != 0 {
+        // SAFETY: (SYSREG) the processor runs programs with SSE, and these
+        // are the outgoing task's registers.
+        let (mxcsr, control) = unsafe { cpu::read_vector_controls() };
+        state.keep_vector_controls(mxcsr, control);
+        return;
+    }
     // SAFETY: (CONTEXT) an area of the standard form's size for the enabled
     // components, 64-byte aligned, which is what `XSAVE64` and `FXSAVE64` write.
-    unsafe { ferrix_fpu_save(&raw mut state.fpu, cpu::extended_state_components()) };
+    unsafe { ferrix_fpu_save(&raw mut state.fpu, components) };
 }
 
 /// Load `state` onto this processor for the task about to run, and point the
 /// ways in from ring 3 at `entry_stack`.
 ///
+/// The bases are written at every switch from the record, never skipped
+/// when they equal what this processor last held (3b, the consultant's
+/// condition 8). A state marked `unsaved` is reset rather than restored, and
+/// the reset is the only thing that clears the mark (3a, condition 7):
+/// every way a task is resumed -- a message, a close, a kill, a signal, a
+/// direct switch or any `choose_next` -- switches to it through here.
+///
 /// # Safety
 ///
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to,
 /// and `entry_stack` the top of its kernel stack.
-pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
+pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64) {
     // SAFETY: (CONTEXT) the caller switches with interrupts masked; the descriptors are
     // ones `set_thread_area` built, or zero.
     unsafe { gdt::write_tls(&state.tls) };
@@ -369,11 +548,45 @@ pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
             state.gs_base,
         );
     }
-    // SAFETY: (CONTEXT) an area this module initialised or `XSAVE64` wrote, so every
-    // reserved bit `XRSTOR64` checks is clear.
-    unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::extended_state_components()) };
+    if state.unsaved {
+        // SAFETY: (CONTEXT) the incoming task's registers, its area the reset
+        // image `keep_vector_controls` left.
+        unsafe { reset_vectors(state) };
+    } else {
+        // SAFETY: (CONTEXT) an area this module initialised or `XSAVE64` wrote, so every
+        // reserved bit `XRSTOR64` checks is clear.
+        unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::extended_state_components()) };
+    }
     // SAFETY: (ENTRY) the caller guarantees the stack.
     unsafe { super::syscall::set_entry_stack(entry_stack) };
+}
+
+/// Reset the vector registers of a task whose state is `unsaved`: every
+/// enabled component to its initial state, with the task's own `MXCSR` and
+/// x87 control word, and clear the mark (3a).
+///
+/// `XRSTOR64` of the area, whose header's `XSTATE_BV` is empty and whose
+/// `XCOMP_BV` is zero (the standard form), with `XCR0`'s enabled set less
+/// `PKRU` requested: each requested component whose `XSTATE_BV` bit is clear
+/// is initialised, so no register keeps what the program that ran before
+/// left in it, and `MXCSR` is loaded from the legacy region because SSE or
+/// AVX is requested (Intel SDM Vol. 1 §13.8.1). The x87's initial control
+/// word is `0x037F`, so the task's own is loaded after when it differs.
+///
+/// # Safety
+///
+/// (CONTEXT) The registers must be the incoming task's, and `state` marked
+/// `unsaved` by [`save_user_state`], whose image `XRSTOR64` accepts.
+unsafe fn reset_vectors(state: &mut UserState) {
+    // SAFETY: (CONTEXT) the caller's guarantee: the image's `MXCSR` is one the
+    // processor held, and its header names no component.
+    unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::reset_components()) };
+    let control = u16::from_le_bytes([state.fpu.legacy[FCW_AT], state.fpu.legacy[FCW_AT + 1]]);
+    if control != INITIAL_X87_CONTROL {
+        // SAFETY: (SYSREG) the incoming task's own control word.
+        unsafe { cpu::load_x87_control(control) };
+    }
+    state.unsaved = false;
 }
 
 /// Put this processor's user state back to a program's starting state: no
@@ -396,6 +609,11 @@ pub(crate) unsafe fn reset_user_state() {
         // SAFETY: (CONTEXT) null selectors always load; the bases are zero, which is
         // valid.
         unsafe { load_selectors(fresh.selectors, &fresh.tls, 0, 0) };
+        // The bases are the record's (3b), so the record is zeroed with the
+        // MSRs: the new image never gets the old one's thread pointer back
+        // at its next switch-in.
+        // SAFETY: (CONTEXT) interrupts masked, inside the running task's own call.
+        let _ = unsafe { crate::sched::with_own_user_state(|state| state.set_bases(0, 0)) };
     });
     // SAFETY: (CONTEXT) an area built by `UserState::new`, whose reserved bits are clear.
     unsafe { ferrix_fpu_restore(&raw const fresh.fpu, cpu::extended_state_components()) };

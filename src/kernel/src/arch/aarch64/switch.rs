@@ -155,7 +155,7 @@ impl UserState {
     pub(crate) unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         // SAFETY: (CONTEXT) the caller's guarantee.
-        unsafe { save_user_state(&mut state) };
+        unsafe { save_user_state(&mut state, false) };
         state
     }
 
@@ -269,13 +269,16 @@ unsafe extern "C" {
     fn ferrix_user_restore(state: *const UserState);
 }
 
-/// Store the program state this processor holds into `state`.
+/// Store the program state this processor holds into `state`, in full:
+/// whether the task leaves `_blocked` matters only to x86-64's vector-state
+/// contract (`docs/OPAQUE-KERNEL.md` §9.8, 3a), which this architecture does
+/// not have.
 ///
 /// # Safety
 ///
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor.
-pub(crate) unsafe fn save_user_state(state: &mut UserState) {
+pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
     // SAFETY: (CONTEXT) `state` is a live, exclusively borrowed `UserState`, whose layout
     // the assembly's offsets are asserted against.
     unsafe { ferrix_user_save(core::ptr::from_mut(state)) };
