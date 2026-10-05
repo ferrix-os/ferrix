@@ -305,6 +305,7 @@ fn emptied(status: &str) -> bool {
 fn sync(components: &[Component]) -> Result<()> {
     for component in components {
         own_objects(component)?;
+        own_line_endings(component)?;
         match state(component)? {
             State::Missing => fetch(component)?,
             State::Behind(_) => {
@@ -432,8 +433,63 @@ fn fetch(component: &Component) -> Result<()> {
     if !has_commit(&dir, pin) {
         let _ = git(&dir, &["fetch", "--quiet", "origin", pin])?;
     }
+    lf_only(&dir)?;
     let _ = git(&dir, &["checkout", "--quiet", "--detach", pin])?;
     own_objects(component)
+}
+
+/// On Windows, keep a checkout's files in LF, as they are in its repository.
+///
+/// This tree's `.gitattributes` says `eol=lf` for everything, but a
+/// component is a repository of its own and does not read it, so a Windows
+/// git with `core.autocrlf=true` wrote every component file with CRLF. The
+/// shell scripts that xtask runs in WSL then stop at their first line
+/// (`/usr/bin/env: 'bash\r': No such file or directory`, ferrousli's
+/// `tools/build-shared.sh` under `run-compositor --everything`), and
+/// `rustfmt` and `check-line-endings.py` disagree with the files.
+fn lf_only(dir: &Path) -> Result<()> {
+    if cfg!(windows) {
+        let _ = git(dir, &["config", "core.autocrlf", "false"])?;
+        let _ = git(dir, &["config", "core.eol", "lf"])?;
+    }
+    Ok(())
+}
+
+/// On Windows, rewrite a clean checkout made before [`lf_only`] with LF.
+/// One with work of its own keeps its files as they are, and says so.
+fn own_line_endings(component: &Component) -> Result<()> {
+    if !cfg!(windows) || component.commit.is_none() {
+        return Ok(());
+    }
+    let dir = checkout(component);
+    if !dir.join(".git").exists()
+        || git(&dir, &["config", "--get", "core.autocrlf"]).is_ok_and(|value| value == "false")
+    {
+        return Ok(());
+    }
+    // Asked before the setting changes: with `autocrlf` on, git reads its
+    // own CRLF files as clean.
+    let clean = git(&dir, &["status", "--porcelain"])?.is_empty();
+    lf_only(&dir)?;
+    if !clean {
+        println!(
+            "components: {} has changes of its own, so its files keep the line \
+             endings they have; commit or drop them and run any xtask command \
+             to have them written with LF",
+            component.name
+        );
+        return Ok(());
+    }
+    println!(
+        "components: writing {}'s files with LF, as its repository has them",
+        component.name
+    );
+    // Git's own recipe for a changed line-ending setting: forget the index,
+    // and write every tracked file again from the commit. Nothing is lost,
+    // since the checkout had no changes.
+    let _ = git(&dir, &["rm", "-r", "-q", "--cached", "."])?;
+    let _ = git(&dir, &["reset", "-q", "--hard"])?;
+    Ok(())
 }
 
 /// On Windows, give a checkout its own copy of the objects it borrows from
