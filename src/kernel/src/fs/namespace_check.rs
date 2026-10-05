@@ -153,7 +153,7 @@ pub(super) fn unmount(
 }
 
 /// `pivot_root(new_root, put_old)`.
-fn pivot_root(
+pub(super) fn pivot_root(
     page: &mut Page<'_>,
     new_root: &[u8],
     put_old: &[u8],

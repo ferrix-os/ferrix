@@ -13,12 +13,16 @@
 //!   in it allowed a `tmpfs` that comes out `nosuid,nodev` whatever it asked
 //!   (M2), and refused `proc`, `devtmpfs`, `sysfs`, `cgroup2` and `btrfs`;
 //! * unable to clear `ro` on the host's tmpfs it was given a copy of, and
-//!   free to add to it (M3); unable to unmount it (M4), or to bind `/`
-//!   without `MS_REC` and so show what it covers;
+//!   free to add to it (M3); unable to unmount it (M4), to bind `/`
+//!   without `MS_REC` and so show what it covers, or to pivot its root to it;
 //! * unable to `MS_REMOUNT` the host's filesystem as a whole, and able to for
 //!   its own tmpfs (N5);
 //! * unable to pin a directory of the first namespace against `rmdir` by
 //!   mounting over it: the first namespace removes it, and the mount goes.
+//!
+//! And no more user namespaces are alive at once than
+//! `/proc/sys/user/max_user_namespaces` says: the next is `ENOSPC`, and one
+//! can be made again once they are let go.
 
 use alloc::format;
 
@@ -29,7 +33,7 @@ use ferrix_linux_abi::types::{
 use ferrix_vfs::Errno;
 
 use crate::fs::mount_check::{Page, Report as Counts, Tally, by_number, page_for};
-use crate::fs::namespace_check::{mount, read_file, unmount, unshare};
+use crate::fs::namespace_check::{mount, pivot_root, read_file, unmount, unshare};
 use crate::syscall::namespace::{CLONE_NEWNS, CLONE_NEWUSER};
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
@@ -80,7 +84,8 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
     let mut page = page_for(&root)?;
     let outcome = set_up(&mut page, &mut tally).and_then(|()| unprivileged(&mut tally, &mut page));
     clean_up(&mut page);
-    outcome.map(|()| counts)
+    outcome.and_then(|()| namespace_limit(&mut tally))?;
+    Ok(counts)
 }
 
 /// The host's tmpfs and the directories.
@@ -258,6 +263,51 @@ fn locked(tally: &mut Tally<'_>, page: &mut Page<'_>) -> Result<(), &'static str
         ),
         Errno::EINVAL,
         "a user namespace bound / without MS_REC over mounts locked to their parents (M4)",
+    )?;
+    // Nor may it make a locked mount its root, which would leave what that
+    // mount covers on the old root's side (Linux's `pivot_root`, `MNT_LOCKED`).
+    tally.refused(
+        pivot_root(page, HOST, HOST)?,
+        Errno::EINVAL,
+        "a user namespace pivoted its root to a mount locked to its parent (M4)",
+    )
+}
+
+/// `/proc/sys/user/max_user_namespaces`'s bound holds: user namespaces are
+/// made until one is `ENOSPC`, no later than the limit, and once they are let
+/// go a new one can be made again.
+fn namespace_limit(tally: &mut Tally<'_>) -> Result<(), &'static str> {
+    let root = process::new_for_check().map_err(|_| "could not make the limit's process")?;
+    // A copy, so that no namespace is made under the credentials' lock.
+    let held = root.with_credentials(|held| held.clone());
+    let mut alive = alloc::vec::Vec::new();
+    let mut refused = None;
+    // One more than the limit: the first namespace is not counted, so even
+    // with no other alive the last of these must be refused.
+    for _ in 0..=userns::MAX_NAMESPACES {
+        match userns::create(&held) {
+            Ok(made) => {
+                alive
+                    .try_reserve(1)
+                    .map_err(|_| "the limit's list of namespaces could not grow")?;
+                alive.push(made);
+            }
+            Err(errno) => {
+                refused = Some(errno);
+                break;
+            }
+        }
+    }
+    let made = u32::try_from(alive.len()).unwrap_or(u32::MAX);
+    tally.report.calls = tally.report.calls.saturating_add(made).saturating_add(1);
+    if refused != Some(Errno::ENOSPC) {
+        return Err("more user namespaces were made than max_user_namespaces allows");
+    }
+    tally.report.refusals += 1;
+    drop(alive);
+    tally.ok(
+        userns::create(&held).map(|_| 0),
+        "a user namespace could not be made after the ones at the limit were let go",
     )
 }
 

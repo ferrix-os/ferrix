@@ -1766,24 +1766,6 @@ impl Namespace {
             .is_some_and(|found| Arc::ptr_eq(found, mount))
     }
 
-    /// Whether every mount of `mount`'s filesystem, in any namespace, is one
-    /// of this namespace's: the filesystem is this namespace's alone, made
-    /// here or copied from nowhere. A plain `MS_REMOUNT` changes the
-    /// filesystem for every mount of it, so a caller that does not own the
-    /// whole of it has no business doing that (`docs/NAMESPACES.md` N5).
-    #[must_use]
-    pub fn sole_filesystem(&self, mount: &Arc<Mount>) -> bool {
-        let here = self
-            .tree
-            .mounts
-            .lock()
-            .values()
-            .filter(|other| Arc::ptr_eq(&other.sb, &mount.sb))
-            .count();
-        // Each mount holds one reference; this call holds none of its own.
-        here > 0 && Arc::strong_count(&mount.sb) == here
-    }
-
     /// Every mount of the table, copied out: the change lock is held, so
     /// the table cannot grow between its size being read and the copy.
     fn snapshot(&self) -> Result<Vec<Arc<Mount>>> {
