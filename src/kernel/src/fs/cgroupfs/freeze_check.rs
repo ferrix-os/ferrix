@@ -18,6 +18,9 @@
 //!   frozen and out of it thawed, a fork made in a frozen cgroup starts
 //!   frozen, and so does a process made in one by `Process::new`, which is
 //!   what `CLONE_INTO_CGROUP` makes its child with;
+//! * a program started in a frozen cgroup runs none of itself until the
+//!   cgroup is thawed; a running program moved into a frozen cgroup parks,
+//!   and moved out of it again runs;
 //! * a write other than `0` or `1` is refused as Linux refuses it.
 
 use alloc::sync::Arc;
@@ -250,8 +253,9 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
     harness.report.made += 1;
     let outcome = freeze_a_program(harness).and_then(|first| {
         let second = kill_a_frozen_program(harness)?;
+        let moved = born_and_moved(harness)?;
         let nested = nested_and_moved(harness)?;
-        Ok(first + second + nested)
+        Ok(first + second + moved + nested)
     });
     let emptied = freeze_check_wait(harness);
     let removed = harness.rmdir(b"/check-fz");
@@ -427,6 +431,77 @@ fn kill_a_frozen_program(harness: &mut Harness) -> Checked<u32> {
         .write(b"/check-fz/cgroup.freeze", b"0\n")
         .map_err(|_| "cgroup.freeze refused a 0")?;
     Ok(1)
+}
+
+/// A program started in a frozen cgroup, and a running one moved into it and
+/// out again: each of its tasks is told to park (`sched::work::STOP`) and is
+/// released, whichever way the freeze reached it.
+///
+/// Verifies: L.object.107
+fn born_and_moved(harness: &mut Harness) -> Checked<u32> {
+    let _ = harness
+        .write(b"/check-fz/cgroup.freeze", b"1\n")
+        .map_err(|_| "cgroup.freeze refused a 1")?;
+    let born = start(harness, b"/check-fz")?;
+    let outside = start(harness, b"")?;
+    let outcome = born_and_moved_checks(harness, &born.process, &outside.process);
+    let _ = harness.write(b"/check-fz/cgroup.freeze", b"0\n");
+    kill::send(&born.process, SIGKILL, Origin::Kernel);
+    kill::send(&outside.process, SIGKILL, Origin::Kernel);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let ended = born.process.wait_for_exit(deadline) == Some(KILLED)
+        && outside.process.wait_for_exit(deadline) == Some(KILLED);
+    let passed = outcome?;
+    if !ended {
+        return Err("freeze check: a program started or moved into a frozen cgroup did not die");
+    }
+    Ok(passed)
+}
+
+/// The checks of [`born_and_moved`], with `/check-fz` frozen.
+fn born_and_moved_checks(harness: &Harness, born: &Process, outside: &Process) -> Checked<u32> {
+    // Started frozen: its first task parks before it runs any of the program.
+    crate::sched::sleep_for(STILL_NANOS);
+    if try_word(born, 0).is_some_and(|count| count != 0)
+        || try_word(born, 4).is_some_and(|count| count != 0)
+    {
+        return Err("a program started in a frozen cgroup ran before it was thawed");
+    }
+    // Running, then moved into the frozen cgroup: it parks.
+    wait_running(outside)?;
+    let listed = alloc::format!("{}\n", outside.pid());
+    let _ = harness
+        .write(b"/check-fz/cgroup.procs", listed.as_bytes())
+        .map_err(|_| "freeze check: a move of a running program into a frozen cgroup failed")?;
+    until(
+        outside,
+        &|| Ok(outside.every_task_blocked()),
+        "a running program moved into a frozen cgroup did not park",
+    )?;
+    let still = counts(outside)?;
+    crate::sched::sleep_for(STILL_NANOS);
+    if counts(outside)? != still {
+        return Err("a running program moved into a frozen cgroup went on counting");
+    }
+    // Moved out again, its threads parked: it runs.
+    let _ = harness
+        .write(b"/cgroup.procs", listed.as_bytes())
+        .map_err(|_| "freeze check: a move of a parked program out of a frozen cgroup failed")?;
+    until(
+        outside,
+        &|| Ok(word(outside, 0)? != still.0 && word(outside, 4)? != still.1),
+        "a parked program moved out of a frozen cgroup did not run again",
+    )?;
+    // And the one started frozen runs once its cgroup is thawed.
+    let _ = harness
+        .write(b"/check-fz/cgroup.freeze", b"0\n")
+        .map_err(|_| "cgroup.freeze refused a 0")?;
+    until(
+        born,
+        &|| running(born),
+        "a program started in a frozen cgroup did not run once it was thawed",
+    )?;
+    Ok(3)
 }
 
 /// A cgroup beneath a frozen one, a move in and out, a fork, and a process

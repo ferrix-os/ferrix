@@ -1625,14 +1625,16 @@ impl Process {
     /// to every task, its threads interrupted as a stop has them, so that
     /// they park; a thawed one has them released.
     ///
-    /// A frozen one is posted to even when the freeze did not change here: a
-    /// move (`Job::adopt`) writes the freeze before this looks, and a
-    /// thread already parked takes the extra post as one more look. The
-    /// caller of a move holds a `sched::work::posting` across both, so
-    /// that the freeze is never written outside one (`sched::work::audit`).
+    /// Both are done even when the freeze did not change here: a move
+    /// (`Job::adopt`) writes the freeze before this looks, so a process moved
+    /// into a frozen cgroup is posted to, and one moved out of it, its threads
+    /// parked, is released. A thread already parked takes an extra post as
+    /// one more look, and a release with nobody parked wakes nobody. The
+    /// caller of a move holds a `sched::work::posting` across both, so that
+    /// the freeze is never written outside one (`sched::work::audit`).
     pub(crate) fn freeze_sync(&self) {
         let posting = sched::work::posting();
-        let (frozen, changed) = self.core().sync_freeze();
+        let (frozen, _changed) = self.core().sync_freeze();
         if frozen {
             self.signalled.wake_all();
             // The caller's own task too, when it is one of this process's
@@ -1641,7 +1643,7 @@ impl Process {
                 sched::work::post_own(sched::work::STOP);
             }
             self.wake_other_tasks(sched::work::STOP);
-        } else if changed {
+        } else {
             self.resumed.wake_all();
         }
         drop(posting);
