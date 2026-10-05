@@ -184,7 +184,10 @@ static MOVES: AtomicU64 = AtomicU64::new(0);
 
 /// A process moved to another job: every running task looks again.
 pub(crate) fn note_moved() {
-    let _ = MOVES.fetch_add(1, Ordering::AcqRel);
+    // After the move has stored the process's new job: a release that
+    // [`regroup_current`]'s `Acquire` load of `MOVES` pairs with, and
+    // `SeqCst` for its fence too (2f).
+    let _ = MOVES.fetch_add(1, Ordering::SeqCst);
     regroup_current();
 }
 
@@ -196,10 +199,28 @@ pub(crate) fn regroup_current() {
     let saved = <arch::Irq as IrqControl>::disable();
     let cpu = this_cpu();
     // The one word most returns read: nothing moved since this task looked.
+    // Two loads, and a store only when they differ (2f): only this processor
+    // writes its `RUNNING_SEEN`, with interrupts masked.
     let seen = cpu
         .and_then(|cpu| RUNNING_SEEN.get()?.get(cpu))
-        .is_none_or(|seen| seen.swap(moves, Ordering::AcqRel) == moves);
+        .is_none_or(|seen| {
+            if seen.load(Ordering::Relaxed) == moves {
+                return true;
+            }
+            seen.store(moves, Ordering::Relaxed);
+            false
+        });
     <arch::Irq as IrqControl>::restore(saved);
+    if !seen {
+        // Message passing (condition 6; the consultant's correction of
+        // 2026-10-05): a move stores the process's job, then increments
+        // `MOVES`, and reads no `RUNNING*` word after; this saw `MOVES`
+        // change and reads the job next. The `Acquire` load above orders
+        // the two; this fence, paired with `note_moved`'s `SeqCst`
+        // increment, is a second order, kept. It runs only when the counts
+        // differ, so the common way out stays a load.
+        core::sync::atomic::fence(Ordering::SeqCst);
+    }
     let task = if seen { None } else { current() };
     let Some(task) = task else {
         return;
@@ -285,6 +306,26 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// processor's look finds the task or the spawn finds the bit -- the same
 /// argument as a sleeping reader against a signalling writer.
 static IDLE: AtomicU64 = AtomicU64::new(0);
+
+/// [`set_idle`] at a switch: written only when `cpu`'s bit is not already
+/// `idle`, which is only at a switch to or from the idle task (2f). A switch
+/// between two tasks finds the bit clear, as the switch that left the idle
+/// task cleared it, and writes nothing; the word's value is at every instant
+/// what it was when every switch wrote it.
+///
+/// Only `cpu` writes its own bit, so the load and the decision are this
+/// processor's own: the idle loop sets and clears it, and the switch. What
+/// goes is the full barrier the read-modify-write made at every switch. No
+/// argument rested on it there: `IDLE`'s protocol is the idle loop's set
+/// before its look and a waker's fence after its enqueue, both unchanged.
+fn set_idle_at_switch(cpu: usize, idle: bool) {
+    let Some(bit) = (cpu < 64).then(|| 1u64 << cpu) else {
+        return;
+    };
+    if (IDLE.load(Ordering::Relaxed) & bit != 0) != idle {
+        set_idle(Some(cpu), idle);
+    }
+}
 
 /// Note that `cpu`'s idle task is, or has stopped, looking.
 fn set_idle(cpu: Option<usize>, idle: bool) {
@@ -1819,11 +1860,17 @@ fn resched_asked(cpu: usize) -> bool {
 }
 
 /// Whether an interrupt asked `cpu` to reschedule, clearing the request.
+///
+/// A load first, and the swap only when it is set (2f): every way out asks,
+/// and most find nothing. A request posted after the load is posted by an
+/// interrupt on this processor, or by a kick whose interrupt is on its way
+/// (`kick` sets the flag before it looks at `KICK_PENDING`), and that
+/// interrupt's exit asks again.
 fn take_resched(cpu: usize) -> bool {
     NEED_RESCHED
         .get()
         .and_then(|flags| flags.get(cpu))
-        .is_some_and(|flag| flag.swap(false, Ordering::AcqRel))
+        .is_some_and(|flag| flag.load(Ordering::Relaxed) && flag.swap(false, Ordering::AcqRel))
 }
 
 /// Whether any processor's idle task is in the middle of freeing a stack.
@@ -2025,8 +2072,6 @@ fn choose_next(
         previous.note_preemption();
     }
     carry_in_call(cpu, &previous, &next);
-    queue.previous = Some(Arc::clone(&previous));
-    set_current(queue, cpu, Arc::clone(&next));
     note_running(cpu, next.id, next.group(), next.moves_seen());
     // Idle to the rest of the machine exactly while the idle task is what
     // runs: cleared here, before any other task can, and set again when the
@@ -2037,8 +2082,8 @@ fn choose_next(
     // the way back because the idle task may have been preempted after
     // setting the mark and before its look, and would otherwise halt
     // unmarked, where a spawn's interrupt never reaches it. See `IDLE`.
-    set_idle(
-        Some(cpu),
+    set_idle_at_switch(
+        cpu,
         queue
             .idle
             .as_ref()
@@ -2046,6 +2091,18 @@ fn choose_next(
     );
     queue.exec_start = now;
     queue.arm_timer(now);
+    // Moved, not cloned (2f): the outgoing task into `previous`, which
+    // `finish_switch` takes, and the pick into `current`. The rest reads both
+    // where the queue holds them.
+    queue.previous = Some(previous);
+    set_current(queue, cpu, next);
+    let (Some(previous), Some(next)) = (queue.previous.as_ref(), queue.current.as_ref()) else {
+        // Both were stored a line above. Were either not there, nothing has
+        // been switched: let the lock go as the no-switch path does.
+        // SAFETY: (SHARED) taken above and not handed to another context.
+        unsafe { lock.force_unlock() };
+        return None;
+    };
     next.note_switch(cpu);
 
     // The address space goes on the processor here, under the run queue lock
@@ -2054,7 +2111,7 @@ fn choose_next(
     // after the switch either, because the incoming context resumes on its own
     // stack and would have to be told to do this before touching anything.
     swap_address_space(previous.address_space(), next.address_space());
-    switch_user_state(&previous, &next);
+    switch_user_state(previous, next);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
     // lock, so nothing else may read or write either saved stack pointer.
