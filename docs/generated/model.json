@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "4bf89b79470374524ee82f343b8f58ad4e21bb89b03c02cd10db1aaa6777bda8",
+  "digest": "5ff9a6c2b555c97c02bed43ec0c67a019311277ab6515241df09ce49faddf55f",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -12195,7 +12195,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 5,
-          "doc": "src/kernel/src/sched/queue.rs: one per CPU, one plain SpinLock taken with interrupts masked and handed across the switch. Tickless: the timer is armed for the end of the running task's slice or the first sleeper's wake-up, whichever is first, and not at all for one task with nothing behind it. Work stealing by an idle processor in Throughput; none in HardRt, because partitioned scheduling is what makes the admission test valid.",
+          "doc": "src/kernel/src/sched/queue.rs: one per CPU, one plain SpinLock taken with interrupts masked and handed across the switch. Tickless: the timer is armed for the end of the running task's slice or the first sleeper's wake-up, whichever is first, and not at all for one task with nothing behind it. Work stealing by an idle processor in Throughput; none in HardRt, because partitioned scheduling is what makes the admission test valid. A processor that is idle too keeps its last waiting task: it has been handed it and kicked, and taking it leaves it to halt again with nothing to wake it while the stealer gathers a whole burst.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
             "line": 301
@@ -12210,7 +12210,7 @@
               "doc": "Shared among whatever is runnable rather than handed to each in full. A fixed slice is also a per-task latency bound: the last of n runnable tasks waits n slices, which at a thousand threads and three milliseconds each is three seconds before the last one is looked at.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 310
+                "line": 313
               }
             },
             {
@@ -12222,7 +12222,7 @@
               "doc": "The floor. Taken to its conclusion the arithmetic asks for slices of nanoseconds and the machine does nothing but switch; below this the period stretches instead. The ratio to the target decides how many runnable tasks it takes before latency has to give, which here is eight.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 317
+                "line": 320
               }
             },
             {
@@ -12232,7 +12232,7 @@
               "type": "LoadAverage",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 324
+                "line": 327
               }
             },
             {
@@ -12242,7 +12242,7 @@
               "type": "EevdfRunQueue",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 325
+                "line": 328
               }
             },
             {
@@ -12256,7 +12256,7 @@
               "multiplicity": "0..1",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 326
+                "line": 329
               }
             },
             {
@@ -12269,7 +12269,7 @@
               "type": "Task",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 327
+                "line": 330
               }
             },
             {
@@ -12283,7 +12283,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 328
+                "line": 331
               }
             },
             {
@@ -12292,7 +12292,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 329
+                "line": 332
               }
             },
             {
@@ -12301,7 +12301,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 330
+                "line": 333
               }
             },
             {
@@ -12310,7 +12310,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 331
+                "line": 334
               }
             },
             {
@@ -12319,7 +12319,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 332
+                "line": 335
               }
             },
             {
@@ -12328,7 +12328,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 333
+                "line": 336
               }
             },
             {
@@ -12337,7 +12337,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 334
+                "line": 337
               }
             }
           ]
@@ -12352,7 +12352,7 @@
           "doc": "src/lib/kernel/sched: entities with weight and virtual runtime; the queue's virtual time is the weight-average; an entity is eligible when its virtual runtime is at or behind it; the pick is the eligible entity with the earliest virtual deadline. The tree is an AVL ordered by deadline, each subtree remembering its minimum virtual runtime, so the pick is one O(log n) walk. Lag stays within one request, which is what the boot test measures.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 337
+            "line": 340
           },
           "children": [
             {
@@ -12363,7 +12363,7 @@
               "value": "1024",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 346
+                "line": 349
               }
             },
             {
@@ -12372,7 +12372,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 347
+                "line": 350
               }
             },
             {
@@ -12381,7 +12381,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 348
+                "line": 351
               }
             },
             {
@@ -12390,7 +12390,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 349
+                "line": 352
               }
             },
             {
@@ -12400,7 +12400,7 @@
               "doc": "For a steal: hand the entity's state to another queue.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 350
+                "line": 353
               }
             }
           ]
@@ -12413,7 +12413,7 @@
           "doc": "One processor as a placement or balancing decision sees it.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 353
+            "line": 356
           },
           "children": [
             {
@@ -12424,7 +12424,7 @@
               "doc": "Entities on its queue, running one included.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 355
+                "line": 358
               }
             },
             {
@@ -12435,7 +12435,7 @@
               "doc": "Its decaying load, in units of a nice-0 task.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 356
+                "line": 359
               }
             },
             {
@@ -12446,7 +12446,7 @@
               "doc": "Nothing runnable, rather than \"running the idle task\": a processor just given a task still has idle current until it next schedules, and a burst would otherwise all pile on behind the first.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 357
+                "line": 360
               }
             }
           ]
@@ -12461,7 +12461,7 @@
           "doc": "src/lib/kernel/sched/balance.rs. A geometric decay with a 33-millisecond half-life, in the shape of Linux's PELT, measuring *weighted demand* rather than occupancy — a processor is either running something or it is not, so \"busy\" saturates at one task and says nothing after that, which leaves a balancer nothing to compare. Four runnable nice-0 tasks read four times one.\n\nCarried with ten bits of extra precision, which is not a detail: each step truncates twice, and without them the loss balances the gain at about 978 of 1024, so a permanently busy processor would report 95% forever and every comparison would be against a ceiling nothing could reach.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 360
+            "line": 363
           },
           "children": [
             {
@@ -12472,7 +12472,7 @@
               "value": "1024",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 374
+                "line": 377
               }
             },
             {
@@ -12483,7 +12483,7 @@
               "value": "1048576",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 375
+                "line": 378
               }
             },
             {
@@ -12494,7 +12494,7 @@
               "value": "32",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 376
+                "line": 379
               }
             },
             {
@@ -12504,7 +12504,7 @@
               "doc": "A level held for an interval, so a caller sampling on ticks and one sampling on switches describe the same history.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 377
+                "line": 380
               }
             },
             {
@@ -12513,7 +12513,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 378
+                "line": 381
               }
             }
           ]
@@ -12528,7 +12528,7 @@
           "doc": "Where a task should run, asked on spawn and folded one processor at a time rather than snapshotted into an array — the array was sized for 256 processors, six kilobytes of a sixteen-kilobyte kernel stack, and the balancing caller asks from inside an interrupt on the stack of whatever it interrupted.\n\nThe order: the preferred processor if it is idle, since nothing beats staying where the caches are; then any idle processor, because idle capacity is waste and this is the case a burst of spawns otherwise queues behind itself; then fewest queued, and only then least loaded.\n\nFewest-queued before least-loaded is not a refinement, it is the fix to a real defect. The count moves the instant a task is placed and is the only thing here that shows a placer the effect of its own last decision; the average is a decaying history that cannot move inside a burst. Ranking on the average first sends every task in a burst to whichever processor has been idle longest. Found on an STM32MP157D-DK1, where a two-task burst on a quiet machine put both on one core.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 381
+            "line": 384
           },
           "children": [
             {
@@ -12537,7 +12537,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 403
+                "line": 406
               }
             },
             {
@@ -12546,7 +12546,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 404
+                "line": 407
               }
             }
           ]
@@ -12561,7 +12561,7 @@
           "doc": "Moving work that is already placed. Stealing by an idle processor covers the case that matters most and costs nothing, because a processor about to idle is not busy. This covers the other: every processor busy, one much busier.\n\nIt pushes as well as pulls, and on a tickless kernel the push is the one that works. A processor alone with one task is never interrupted — arming a timer would buy nothing, which is where tickless comes from — so an under-loaded processor never reaches the balancer to pull anything towards itself. The overloaded one is interrupted constantly, precisely because it has tasks to switch between, so it is the only one awake to notice.\n\nTwo tests, not one, and the second is a brake. The load average is deliberately slow, so moving a task does not change it for tens of milliseconds and a balancer consulting only the average keeps moving more: eight movable tasks were observed moving over a thousand times. The queue count updates instantly, so a difference of at least two is required as well.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 407
+            "line": 410
           },
           "children": [
             {
@@ -12573,7 +12573,7 @@
               "doc": "Half a nice-0 task, because the imbalance moved is half the difference.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 428
+                "line": 431
               }
             },
             {
@@ -12584,7 +12584,7 @@
               "value": "16000000",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 429
+                "line": 432
               }
             },
             {
@@ -12593,7 +12593,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 430
+                "line": 433
               }
             },
             {
@@ -12602,7 +12602,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 431
+                "line": 434
               }
             }
           ]
@@ -12614,7 +12614,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 434
+            "line": 437
           },
           "children": [
             {
@@ -12623,7 +12623,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 435
+                "line": 438
               }
             },
             {
@@ -12632,7 +12632,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 436
+                "line": 439
               }
             },
             {
@@ -12641,7 +12641,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 437
+                "line": 440
               }
             }
           ]
@@ -12653,7 +12653,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 440
+            "line": 443
           },
           "children": [
             {
@@ -12663,7 +12663,7 @@
               "type": "DomainMode",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 441
+                "line": 444
               }
             },
             {
@@ -12674,7 +12674,7 @@
               "multiplicity": "1..*",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 442
+                "line": 445
               }
             },
             {
@@ -12684,7 +12684,7 @@
               "type": "String",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 443
+                "line": 446
               }
             },
             {
@@ -12694,7 +12694,7 @@
               "type": "String",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 444
+                "line": 447
               }
             }
           ]
@@ -12709,7 +12709,7 @@
           "doc": "src/lib/kernel/sched/domain.rs. CPUs are partitioned into domains, each in one of three modes, changeable at runtime. Per domain, not global: a four-core machine runs a HardRt partition on one core and Throughput on the other three, with rustc on the latter. Stage 5 builds one domain holding every CPU (up to 256) in Throughput; the mode is a property of the domain from the first line, the class stack is looked up from the mode, and SoftRt and HardRt are named and refused until stage 14. check_partition requires the domains to cover the online CPUs exactly once.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 447
+            "line": 450
           },
           "children": [
             {
@@ -12723,7 +12723,7 @@
               "multiplicity": "1..*",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 458
+                "line": 461
               }
             },
             {
@@ -12734,7 +12734,7 @@
               "value": "DomainMode::Throughput",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 459
+                "line": 462
               }
             },
             {
@@ -12745,7 +12745,7 @@
               "multiplicity": "1..*",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 460
+                "line": 463
               }
             },
             {
@@ -12758,7 +12758,7 @@
               "type": "DomainLifecycle",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 461
+                "line": 464
               }
             },
             {
@@ -12769,7 +12769,7 @@
               "value": "ModeSpec(mode = DomainMode::Throughput, classes = (SchedClass::Eevdf, SchedClass::Idle), preemption = \"preemption points, deferred for cache locality\", interrupts = \"in context\")",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 463
+                "line": 466
               }
             },
             {
@@ -12780,7 +12780,7 @@
               "value": "ModeSpec(mode = DomainMode::SoftRt, classes = (SchedClass::Fifo, SchedClass::RoundRobin, SchedClass::Eevdf, SchedClass::Idle), preemption = \"fully preemptible kernel, PI mutexes\", interrupts = \"threaded\")",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 464
+                "line": 467
               }
             },
             {
@@ -12791,7 +12791,7 @@
               "value": "ModeSpec(mode = DomainMode::HardRt, classes = (SchedClass::Edf), preemption = \"fully preemptible, bounded sections\", interrupts = \"threaded, bandwidth-reserved\")",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 465
+                "line": 468
               }
             }
           ]
@@ -12803,7 +12803,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 468
+            "line": 471
           },
           "children": [
             {
@@ -12813,7 +12813,7 @@
               "type": "DomainMode",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 469
+                "line": 472
               }
             }
           ]
@@ -12825,7 +12825,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 471
+            "line": 474
           }
         },
         {
@@ -12841,7 +12841,7 @@
           ],
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 473
+            "line": 476
           },
           "children": [
             {
@@ -12850,7 +12850,7 @@
               "kind": "clause",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 478
+                "line": 481
               }
             },
             {
@@ -12859,7 +12859,7 @@
               "kind": "state",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 479
+                "line": 482
               }
             },
             {
@@ -12873,7 +12873,7 @@
               ],
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 483
+                "line": 486
               }
             },
             {
@@ -12883,7 +12883,7 @@
               "doc": "Stop admitting.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 484
+                "line": 487
               }
             },
             {
@@ -12897,7 +12897,7 @@
               ],
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 490
+                "line": 493
               }
             },
             {
@@ -12906,7 +12906,7 @@
               "kind": "state",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 491
+                "line": 494
               },
               "children": [
                 {
@@ -12919,7 +12919,7 @@
                   "doc": "Move tasks whose policy the new mode does not offer; demote with errno what cannot move.",
                   "source": {
                     "file": "docs/sysml/05-scheduling.sysml",
-                    "line": 492
+                    "line": 495
                   }
                 }
               ]
@@ -12934,7 +12934,7 @@
               ],
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 497
+                "line": 500
               }
             },
             {
@@ -12943,7 +12943,7 @@
               "kind": "state",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 498
+                "line": 501
               },
               "children": [
                 {
@@ -12955,7 +12955,7 @@
                   ],
                   "source": {
                     "file": "docs/sysml/05-scheduling.sysml",
-                    "line": 499
+                    "line": 502
                   }
                 }
               ]
@@ -12970,7 +12970,7 @@
               ],
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 501
+                "line": 504
               }
             }
           ]
@@ -12985,7 +12985,7 @@
           "doc": "Not one policy: a class stack per domain. EEVDF rather than CFS for the fair class, because each task gets an actual eligible time and a deadline, so latency has a bound and not only fairness. Tickless: the timer is armed for the next decision.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 504
+            "line": 507
           },
           "children": [
             {
@@ -12996,7 +12996,7 @@
               "multiplicity": "1..*",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 510
+                "line": 513
               }
             },
             {
@@ -13006,7 +13006,7 @@
               "type": "EevdfClass",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 511
+                "line": 514
               }
             },
             {
@@ -13016,7 +13016,7 @@
               "type": "IdleClass",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 512
+                "line": 515
               }
             },
             {
@@ -13028,7 +13028,7 @@
               "doc": "Stage 5 left nothing beyond work stealing by an idle processor; Placement and Balancing above were added after it: src/kernel/src/sched/mod.rs's balance(), at most every 16 milliseconds per processor, pulling and pushing over src/lib/kernel/sched's arithmetic.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 513
+                "line": 516
               }
             },
             {
@@ -13040,7 +13040,7 @@
               "stage": 14,
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 520
+                "line": 523
               }
             },
             {
@@ -13052,7 +13052,7 @@
               "stage": 14,
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 521
+                "line": 524
               }
             },
             {
@@ -13061,7 +13061,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 522
+                "line": 525
               }
             },
             {
@@ -13070,7 +13070,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 523
+                "line": 526
               }
             },
             {
@@ -13082,7 +13082,7 @@
               "doc": "Linux sched_setscheduler: SCHED_FIFO/RR to the soft-RT classes, SCHED_DEADLINE to EDF, SCHED_OTHER/BATCH/IDLE to fair. src/kernel/src/syscall/limits.rs answers it today with the one policy there is a class for: SCHED_OTHER at priority zero is accepted and every other policy is EINVAL, refused rather than accepted and ignored, until stage 14 brings the classes. The nice value is the fair class's weight already.",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 524
+                "line": 527
               }
             },
             {
@@ -13093,7 +13093,7 @@
               "stage": 14,
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 535
+                "line": 538
               }
             }
           ]
@@ -13105,7 +13105,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 538
+            "line": 541
           }
         },
         {
@@ -13116,7 +13116,7 @@
           "doc": "Eligible virtual deadline first. Weight and bandwidth arrive from the cpu cgroup controller at stage 13.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 540
+            "line": 543
           }
         },
         {
@@ -13126,7 +13126,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 544
+            "line": 547
           }
         },
         {
@@ -13137,7 +13137,7 @@
           "doc": "Priorities 1 to 99, with priority-inheritance mutexes and threaded interrupts in SoftRt.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 545
+            "line": 548
           }
         },
         {
@@ -13148,7 +13148,7 @@
           "doc": "Earliest deadline first with constant-bandwidth-server admission control that refuses an unschedulable set instead of missing deadlines. Preallocated pools on the RT path; no dynamic allocation there.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 549
+            "line": 552
           },
           "children": [
             {
@@ -13157,7 +13157,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/05-scheduling.sysml",
-                "line": 554
+                "line": 557
               }
             }
           ]
@@ -13172,7 +13172,7 @@
           "doc": "src/kernel/src/syscall/futex.rs: wait, wake and requeue, plain and with a bitset, with the word read and the waiter listed under one table lock so no wake is lost, and the read under it never faulting. One table. A private futex is keyed by address space and user address; one without FUTEX_PRIVATE_FLAG on a word in a shared region, by the VMO behind it and the word's offset there, so a word two processes map shared is one futex, as on Linux. A thread that ends clears its clear_child_tid word and wakes whoever waits on it. The robust list's head is recorded and never walked, and the priority-inheritance operations and FUTEX_WAKE_OP are ENOSYS.",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
-            "line": 557
+            "line": 560
           }
         }
       ]
