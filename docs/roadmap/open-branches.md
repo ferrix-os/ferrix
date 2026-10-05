@@ -102,7 +102,7 @@ progress 2026-10-05: session po5-red. Batch
 - `test-shell --arch all --init ferrousli`: QEMU ended by signal 15 7.0 s
   into the x86_64 boot (b0-1), six times. Not the host: xtask sent it, after
   a stage 10 panic's echoed 0xF5 ended its reader (po5-sig, 2026-10-05; the
-  row in `docs/BACKLOG.md`'s *Red on `main`*, xtask half on `po5/sigterm`).
+  row in `docs/BACKLOG.md`'s *Red on `main`*, xtask half on `po6/red`).
 - `test-init --arch all`: aarch64 only, "the revoke stage's reader was not
   waiting (state R)" (b0-2), a timing check of console-revoke's under load.
   The same tip's own `test-init --arch aarch64` passed. Owner: console-revoke's
