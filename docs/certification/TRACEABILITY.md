@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 124 | 73 | 51 |
-| Low (`L.*`) | 807 | 536 | 271 |
+| High (`H.*`) | 127 | 76 | 51 |
+| Low (`L.*`) | 816 | 545 | 271 |
 
-1654 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1694 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1656 |
-| Accessors, covered by the requirement they serve | 856 |
+| Named by a low-level requirement | 1696 |
+| Accessors, covered by the requirement they serve | 877 |
 | Check code in a product file | 68 |
-| Named by none | 878 |
+| Named by none | 877 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -130,7 +130,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
-| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.STORE.7` |
+| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.STORE.7` |
 | O.SCRUB | `H.MEM.6` |
 | O.VALIDATE | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.3`, `H.TRAP.5`, `H.TRAP.7`, `H.TRAP.11`, `H.TRAP.12`, `H.TRAP.13`, `H.TRAP.16` |
 | O.WXN | `H.MEM.4`, `H.MEM.5`, `H.MEM.10`, `H.MEM.13`, `H.MEM.18` |
@@ -1619,6 +1619,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/fs/cgroupfs/native_check.rs::check_empty` | kernel | L.object.74 |
 | `src/kernel/src/fs/cgroupfs/oom_check.rs::check_the_kill` | kernel | L.object.80, L.object.100, H.QUOTA.6 |
 | `src/kernel/src/fs/cgroupfs/oom_check.rs::run_watched` | kernel | L.sched.35, L.syscall.20 |
+| `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | kernel | L.object.108, L.object.109, L.object.111, L.object.112, H.QUOTA.12 |
 | `src/kernel/src/fs/check.rs::check_tmpfs_stores_pages` | kernel | L.user.41 |
 | `src/kernel/src/fs/check.rs::fault_in_from_source` | kernel | L.user.37 |
 | `src/kernel/src/fs/kmem_check.rs::run` | kernel | L.object.56, H.QUOTA.7 |

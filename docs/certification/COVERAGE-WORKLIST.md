@@ -78,7 +78,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
 | `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 587-589, 594 |
-| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 181, 220 |
+| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 186, 225 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
 | `object/quota.rs` | `core` | 0 | 1 | 1 | 0 | - |
@@ -145,7 +145,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 731 |
+| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 738 |
 
 ---
 
@@ -169,7 +169,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1078, 1994 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1152, 2068 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
