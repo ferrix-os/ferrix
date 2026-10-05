@@ -169,11 +169,12 @@ certified item.
 `PrivateNetwork=`, a network namespace with only `lo`, up (`docs/INIT.md`
 §4.5), gated by `test-init`'s sandboxing stage.
 
-**Still to do for the init: L13c (2026-10-04, on a branch).**
+**Built for the init (2026-10-05, branch `l13c` on `l13b`): L13c**,
 `SystemCallFilter=` with `SystemCallErrorNumber=` and
-`SystemCallArchitectures=` is `l13c` 91045526a (a local x86-64 `test-init`;
-its controls are not run). Until it lands, a unit asking for it is refused
-with the reason. Next: rebase it on `l13b`, run its controls and batch it.
+`SystemCallArchitectures=`, compiled by init to a seccomp filter per ABI
+over S3 and installed as the child's last step (`docs/INIT.md` §4.5), gated
+by `test-init`'s sandboxing stage on all three architectures, with six
+negative controls fired. With it every key of L13 is carried out.
 
 **Designed (2026-09-23): `docs/INIT.md`.** `/sbin/init` is pid 1 and a
 service manager in one program. Its units are in systemd's syntax, with
