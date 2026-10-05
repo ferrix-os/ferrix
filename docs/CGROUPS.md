@@ -689,11 +689,21 @@ attempt that hits the limit leaves its name's dentry behind, which a sibling
 opening the same name used to settle, and the check now makes each name before
 it removes it.
 
-Negative controls, run on x86-64, each a one-line sabotage that stops the boot
-with the check's own message. Where the sabotage is in a path that may run
-in task context it also prints `NEGATIVE CONTROL <name>` once; the two in the
-scheduler's tick path (`cpu-charge`) and the value-only ones show the message
-alone.
+Negative controls, twenty-three, each a one-line sabotage run through
+`fleet/gate.sh control` on x86-64 (`dentry-keep` on ARMv7-A at `--smp 2`),
+that stops the boot with the check's own message. Where the sabotage is in a
+path that may run in task context it also prints `NEGATIVE CONTROL <name>`
+once; the scheduler's tick path (`cpu-charge`) and the value-only ones show
+the message alone. `freeze-post` and `freeze-born` drop a post of the
+pending-work word (`sched::work`), so with the self-checks on they stop the
+boot with FX-0520's message rather than the check's. `reclaim-hole` needs a
+second, inert edit (a flag the source read looks at), made in a commit of its
+own that never lands; it breaks the refill that a read and a fault share
+(`Fill::sourced`), and shows it through the read path (`Vmo::read_present`).
+The fault path's own half of L.object.112, `copy_or_zero` handing an evicted
+frame back, has no control of its own. Their
+INDEX tags are `po6-cgctl-ctl-<name>` on nazuna (2026-10-05), on the tip
+rebased onto `main` e41489fd7.
 
 | Control | Sabotage | Message |
 |---|---|---|
@@ -702,7 +712,21 @@ alone.
 | io-throttle | the wait for `io.max` is dropped | four reads under io.max rbps=16384 were not spaced out to its rate |
 | io-root | the machine's entry is not charged | the root's io.stat does not count the machine's I/O |
 | io-limit | `io.max` forgets a written `rbps` | io.max does not read back what was written |
+| io-ended | an entry is made for a job that has gone | a disk read by a task of a job that had gone kept the job's quota slot |
 | cpu-throttle | a throttled task is never put to sleep | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
+| cpu-kill | the throttle's wait never looks for a kill | a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL |
 | cpu-charge | the scheduler charges no slice to a job | the root's cpu.stat does not have its six keys and the machine's usage |
+| cpu-rearm-write | a `cpu.max` write arms no processor's timer | a running program was not held to a fifth of a processor by a cpu.max written under it |
+| cpu-rearm-move | a move beneath a `cpu.max` arms no timer | a running program moved beneath a cpu.max was not held to a fifth of a processor |
 | freeze-park | a frozen process does not park | cgroup.events never said frozen 1 for a frozen cgroup |
+| freeze-sigcont | `SIGCONT` thaws the cgroup | SIGCONT thawed a frozen cgroup's process |
+| freeze-post | a process moved into a frozen cgroup is posted no `STOP` | the way back to user mode found its pending-work word clear and something to act on (FX-0520) |
+| freeze-born | a task launched into a frozen cgroup is posted no `STOP` | the way back to user mode found its pending-work word clear and something to act on (FX-0520) |
+| freeze-moved-out | a parked process moved out of a frozen cgroup is not released | a parked program moved out of a frozen cgroup did not run again |
+| park-poll | a parked thread looks again every 5 ms, not every hour | a frozen cgroup's threads were charged processor time while parked |
 | reclaim-none | a reclaim at a job takes nothing | a cgroup over its memory.high was not brought back to it |
+| reclaim-hole | a reclaimed page is not read again from its source | pages reclaim took did not read back as the source has them |
+| resident | a disk file's cached pages are counted as `shmem` | memory.stat's file is not the cache that memory.current holds |
+| reclaim-sibling | a reclaim takes from outside its subtree | a sibling cgroup's pages were reclaimed |
+| reclaim-min | `memory.min` spares nothing | reclaim took pages from a child using no more than its memory.min |
+| dentry-keep | a create the job's memory refused keeps its negative dentry | kmem: objects gone and their heap still charged to their job |
