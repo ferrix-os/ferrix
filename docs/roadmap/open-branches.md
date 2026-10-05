@@ -3,8 +3,9 @@
 Every branch on GitHub that still holds work `main` does not have, as of
 2026-10-01 evening (`main` 7afed6fdc), written at os-5d's wind-down, after
 the product owner's and the certification consultant's; the 2026-10-04
-wind-down's branches are in the section after this introduction. It is where the next
-session starts.
+wind-down's branches are in the sections after this introduction, and
+*2026-10-05: refreshed* says what of them has landed since. It is where the
+next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -31,6 +32,55 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
 
+## 2026-10-05: refreshed
+
+Refreshed by po5-docs on 2026-10-05 against `origin/main` 634c7ed0e, after
+`git fetch --prune origin`, with `git cherry origin/main origin/<branch>` for
+every branch below.
+
+**Landed on the night of 2026-10-04**, each with 0 unlanded on its
+`tonight/` branch (or merged whole):
+
+- S3, `tonight/stage13-s3-on-netns`: 248799bdd through 3e8b759d3;
+- NP, `tonight/np-land`: 7e9a2806f, 4538d75b6 and a18b3fd33 (the one `+` is
+  explained below);
+- L13a, `tonight/l13-init`: 7121c885e through 792858179;
+- `foot-shell` and `tonight/foot-shell`: f55e8ab28;
+- `selfhost-matrix` and `tonight/selfhost-matrix`: tip 77783565a;
+- `selfhost-components`: cb872a732;
+- `po-skill`: 8eac36ec1 and bc0a1b847; `po-cpu-learnings` (67efb9fb1) and
+  `docs-sizing` (634c7ed0e) are merged.
+
+The plain `stage13-s3-on-netns` (2), `l13-init` (2), `np-land` (1) and
+`selfhost-matrix` (2) still count `+` commits, but each is a pre-rebase copy
+of a commit on `main` with the same subject (cd1f71304 is 248799bdd,
+1373cf7ca is 7e9a2806f, 21d67b095 is 792858179, e8b57ed4f is 8a128e024, and
+so on): history now, nothing to land.
+
+**`tonight/np-land`'s single `+`, 240fd2ccc, is a pre-rebase copy of
+7e9a2806f.** Both carry the same message and author date (2026-10-04
+15:59); 240fd2ccc was committed on 67efb9fb1, before S3, and 7e9a2806f is
+the same change rebased onto S3 (parent 3e8b759d3). Their changes are
+identical: `git diff -U0` of each against its parent, with the `index` and
+`@@` lines dropped, is the same for `src/` and for the whole commit. Under
+the default three lines of context they differ only in context S3 added
+(the seccomp row of the stage 13 page, `first_seccomp` in
+`syscall/process.rs`), which is why the patch ids differ and `git cherry`
+counts it. Nothing of NP is unlanded.
+
+**In progress on 2026-10-05:**
+
+- `tonight/land-n6` (2e936ad65, 6 unlanded): carried by session po5-n6.
+- CI's `Test (windows-latest)` red on `main` (night item 5): session po5-gw.
+- `main`'s flaky gates (the two red gates of the night section, the
+  console-revoke reader under load and the QEMU ended from outside): session
+  po5-red.
+- The two held-back fixes (night item 6): branch `po5/docs`, with the
+  consultant's OK for the FINDINGS count (ledger 356-357).
+
+Still work, unchanged: `l13b`, `l13c` (each to rebase now that S3 and L13a
+are on `main`) and `nvidia-n2`.
+
 ## Night of 2026-10-04: start here
 
 Written by os-7c at the customer's wind-down at 22:00 on 2026-10-04, after a
@@ -38,15 +88,15 @@ landing round from 19:50 that a held gate pool (an AOSP build on nazuna,
 20:37-20:52) and a power cut on the Windows PC (about 21:15; nazuna is on a
 UPS) cut short. `main` was 50518ac1d at 22:00. Tonight landed `selfhost-components`
 as cb872a732 (batch 20261004T185433Z), which fixes CI's self-hosting job, and
-`selfhost-matrix` (below, item 2; its tip on `main` is 77783565a). The
-branches' own entries in the sections further down still describe them as
-unlanded.
+`selfhost-matrix` (below, item 2; its tip on `main` is 77783565a); the
+sections further down say so since 2026-10-05.
 Every branch below is on GitHub under `tonight/<name>`, rebased onto
 67efb9fb1 unless it says otherwise, and on nazuna as `os7c-tonight/<name>`;
 each has its worktree under `.claude/worktrees/tonight-<name>`. The
 `tonight/*` branches supersede the branches named in the next section.
 
-**Main's two red gates, both read as the gate pool, not code.** Batch
+**Main's two red gates, both read as the gate pool, not code.** In
+progress 2026-10-05: session po5-red. Batch
 20261004T190141Z ended MAIN-RED on cb872a732:
 
 - `test-shell --arch all --init ferrousli`: QEMU ended by signal 15 from
@@ -83,7 +133,7 @@ In this order:
    for "no sshdt built for x86_64" in its slot. Re-run that gate in a slot
    with sshdt, then the transcript comparison its consultant asks (OK IF,
    ledger 345), then land. selfhost-components merges cleanly with it.
-3. **`tonight/land-n6`** (aac7eef62): batch 20261004T175923Z FAILED it with
+3. **In progress 2026-10-05, session po5-n6.** **`tonight/land-n6`** (aac7eef62): batch 20261004T175923Z FAILED it with
    FX-0871 at every boot (exec loading read 65 of 18437 pages through a
    32-page read-ahead on the writable segment's tail page). The customer
    chose the fix: fill that page alone. 7db4a95f6 does that (consultant OK
@@ -92,14 +142,14 @@ In this order:
    check change and needs the consultant before anything else. `check`
    passed on aac7eef62; the boot, the control and the batch (~/n6-gates.txt,
    11 rows) are owed.
-4. **`po-skill`** (this page's branch): the product owner's role as the
+4. **LANDED 2026-10-04** as 8eac36ec1 and bc0a1b847. **`po-skill`** (this page's branch): the product owner's role as the
    skill `.claude/skills/product-owner/SKILL.md` and the agent
    `.claude/agents/product-owner.md`. Docs only, so it owes `check`; land it
    first tomorrow so the next PO can load it. Owed beside it: a dated
    *Decisions* entry in `docs/BACKLOG.md` for the customer's rule that each
    session briefs its own certification consultant (2026-10-04), and
    AGENTS.md's consultant section, which still describes one standing seat.
-5. **CI's `Test (windows-latest)` is red on `main`** since at least
+5. **In progress 2026-10-05, session po5-gw.** **CI's `Test (windows-latest)` is red on `main`** since at least
    67efb9fb1: `gateway::tests::a_lost_segment_is_sent_again_alone` fails on
    Windows only, with different numbers each run (tests.rs:1096, run
    37229234877, and 1105). Timing-dependent; 900c2e8c6 did not cover it.
@@ -114,7 +164,7 @@ In this order:
    consultant's look; and `src/boot/vendor/google/pixel7/HANDOVER.md` l. 312
    still says the USB driver is "Not started" though it landed 2026-09-26,
    which is Markdown under `src/`, outside the docs-only rule. Land each with
-   its own row.
+   its own row. Both are on branch `po5/docs` since 2026-10-05.
 
 Leftovers on nazuna, to delete by exact name: `~/target-os7c-land-n6`,
 `~/Documents/projects/os/ferrix/target-os7c-l13-init`,
@@ -133,7 +183,10 @@ branch below is on GitHub. Landed that day, through `fleet/batch.sh`
 
 In this order:
 
-1. **`selfhost-components`** first: `main`'s CI job "rustc on Ferrix, and
+Since 2026-10-05: every branch of this list has landed but `land-n6`
+(session po5-n6), `l13b`, `l13c` and `nvidia-n2`.
+
+1. **LANDED** (cb872a732). **`selfhost-components`** first: `main`'s CI job "rustc on Ferrix, and
    Ferrix built on Ferrix" is red until it lands (since 2263225e1, the
    components split). The Windows job's red was a flake, fixed in 900c2e8c6.
 2. The batch that was running at the wind-down, 20261004T135748Z
@@ -166,7 +219,9 @@ Gate pool notes, for whoever runs it:
 
 ### Stage 13 and init's L13 (ferrix-21; handover `~/.local/share/ferrix/l13-coord/HANDOVER.md`)
 
-- `stage13-s3-on-netns` (0527dd365): S3 on main 22384874f. Passed on
+- `stage13-s3-on-netns` (0527dd365; **landed 2026-10-04** from
+  `tonight/stage13-s3-on-netns`, 248799bdd through 3e8b759d3; what follows is
+  as written before): S3 on main 22384874f. Passed on
   6c539b276 before the rebase onto netns: 8 rows and all 19 controls
   (`l13s3f-*`); consultant OK at ledger line 336, B1/B2 closed at 327. On
   0527dd365: k7, k13 and k17 FIRED (`l13s3n2-*`); the full rows were in
@@ -179,14 +234,15 @@ Gate pool notes, for whoever runs it:
   must be listed (`check::spawn_in`), or main's pending-work word panics
   FX-0520. `stage13-s3`, `stage13-s3-onmain` and `stage13-s3-rebase` are
   history.
-- `l13-init` (21d67b095), L13a: NoNewPrivileges=, PrivateTmp= and
+- `l13-init` (21d67b095; **landed 2026-10-04** from `tonight/l13-init`,
+  7121c885e through 792858179), L13a: NoNewPrivileges=, PrivateTmp= and
   ProtectSystem= (INIT.md §4.5). check and test-init on all three arches
   passed on 5748c67fb (`l13init-*`); rebased onto 22384874f; in batch
   20261004T135748Z. Outside the item (ledger line 323). Trap: docs/generated
   conflicts on every rebase; take main's copy, then rerun gen-arch-doc.py.
 - `l13b` (fac927209), PrivateNetwork= (a network namespace with lo up), on
   l13-init. A local x86 test-init passed and the netns and loup controls
-  FIRED; not pool-gated. Next: rebase onto main after l13-init lands, then a
+  FIRED; not pool-gated. Next: rebase onto main (l13-init has landed), then a
   batch with `--profile none`, gate `check` and `test-init --arch all`.
 - `l13c` (91045526a), SystemCallFilter=, SystemCallErrorNumber= and
   SystemCallArchitectures= as per-ABI BPF, on S3 plus l13b. A local x86
@@ -197,7 +253,9 @@ Gate pool notes, for whoever runs it:
 
 ### Authentication phase 2 (ferrix-da)
 
-- `np-land` (403b05626, pushed 2026-10-04; handover
+- `np-land` (403b05626; **landed 2026-10-04** from `tonight/np-land` as
+  7e9a2806f, 4538d75b6 and a18b3fd33; what follows is as written before;
+  handover
   `docs/handover/2026-10-04-np.md` on the branch): NP (`/proc` by
   `ptrace_may_access` with dumpability, and `/proc/<pid>/fdinfo`) landing as
   AUTH P2.1. It is `stage13-fdinfo` rebased onto main 22384874f and squashed
@@ -266,7 +324,8 @@ Gate pool notes, for whoever runs it:
   first: main's CI is red until it lands.** Next: rebase onto main,
   `batch.sh join <session> selfhost-components selfhost-components --gate
   <file: test-selfhost --accel kvm --timeout 1800>`.
-- `foot-shell` (3e5fd3c02, 1 commit): test-foot carries zinc as `/bin/sh`
+- `foot-shell` (3e5fd3c02, 1 commit; **landed 2026-10-04** as f55e8ab28):
+  test-foot carries zinc as `/bin/sh`
   for its foot-check script; before this, the keyboard check from def906ba2
   never ran ("failed to execute: No such file or directory"). Passed
   locally: `foot-typed: ok`, and the control with XKB_DIRECTORIES emptied
@@ -282,7 +341,8 @@ Gate pool notes, for whoever runs it:
 
 ### NVIDIA on the RTX 3060 (ferrix-74)
 
-- `land-n6` (3d6621a64, one squashed commit): resume the NVIDIA landing
+- `land-n6` (3d6621a64, one squashed commit; carried since 2026-10-05 by
+  session po5-n6 from `tonight/land-n6`, 2e936ad65): resume the NVIDIA landing
   here. Vulkan, NVKMS and nvrm as the display core's copying driver
   (displayctl v8 copies flag, `Refusal::Copies`), PIN_CONTIGUOUS, devfs
   inotify, init `.device` units (hyprix.service
@@ -315,17 +375,17 @@ Gate pool notes, for whoever runs it:
 
 | Branch | Last commit | Unlanded | Kind | Tip |
 |---|---|---:|---|---|
-| `stage13-s3-on-netns` | 2026-10-04 | 9 | work | S3: carry the coverage anchors onto network namespaces |
-| `l13-init` | 2026-10-04 | 7 | work | INIT.md: L13a's gate rows, and the audit marker the first one tripped on |
-| `l13b` | 2026-10-04 | 10 | work | INIT.md: L13b, PrivateNetwork=, as built |
-| `l13c` | 2026-10-04 | 22 | work | test-init: filter checks for SystemCallFilter= and its two keys |
-| `np-land` | 2026-10-04 | 2 | work | Handover: NP as AUTH P2.1 at the 2026-10-04 wind-down |
-| `selfhost-matrix` | 2026-10-04 | 17 | landed 2026-10-04 | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
-| `selfhost-components` | 2026-10-04 | 1 | landed 2026-10-04 | test-selfhost: the volume carries the components, and the guest clones none |
-| `foot-shell` | 2026-10-04 | 1 | work | test-foot carries zinc, the /bin/sh its keyboard check is a script for |
-| `land-n6` | 2026-10-04 | 1 | work | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
+| `stage13-s3-on-netns` | 2026-10-04 | 2 | history: landed 2026-10-04 | S3: carry the coverage anchors onto network namespaces |
+| `l13-init` | 2026-10-04 | 2 | history: landed 2026-10-04 | INIT.md: L13a's gate rows, and the audit marker the first one tripped on |
+| `l13b` | 2026-10-04 | 5 | work | INIT.md: L13b, PrivateNetwork=, as built |
+| `l13c` | 2026-10-04 | 10 | work | test-init: filter checks for SystemCallFilter= and its two keys |
+| `np-land` | 2026-10-04 | 1 | history: landed 2026-10-04 | Handover: NP as AUTH P2.1 at the 2026-10-04 wind-down |
+| `selfhost-matrix` | 2026-10-04 | 2 | history: landed 2026-10-04 | Handover: stage 20's matrix and one kernel for every test, at the wind-down |
+| `selfhost-components` | 2026-10-04 | 0 | landed 2026-10-04 | test-selfhost: the volume carries the components, and the guest clones none |
+| `foot-shell` | 2026-10-04 | 0 | landed 2026-10-04 | test-foot carries zinc, the /bin/sh its keyboard check is a script for |
+| `land-n6` | 2026-10-04 | 1 | history: resume from `tonight/land-n6` (6), po5-n6 | NVIDIA on the RTX 3060: Vulkan, NVKMS and the card's own monitor; Chrome renders WebGL there |
 | `nvidia-n2` | 2026-10-04 | 21 | work | Handover update: land-n6 dropped by a docs/generated conflict, input passthrough works, the customer's performance order |
-| `po-cpu-learnings` | 2026-10-04 | 2 | work | AGENTS.md: what the product owner learned about the gate pool; this page |
+| `po-cpu-learnings` | 2026-10-04 | 0 | landed (merged) | AGENTS.md: what the product owner learned about the gate pool; this page |
 
 ## Stage 13: namespaces, cgroups, seccomp
 
@@ -340,15 +400,16 @@ the plain `stage13-<part>` branch of each; the `-presquash`, `-hist`, `-v2`,
   and 18 controls. It holds L.object.106-112, L.sched.3-4 and H.QUOTA.10-12,
   and its landing deletes its entry in
   `tools/common/data/requirement-reservations.json`.
-- `stage13-s3`: resumed as `stage13-s3-on-netns` (*Wind-down 2026-10-04*
-  above); `stage13-s3`, `-onmain` and `-rebase` are history. Then `stage13-s4` (design OK with conditions: an L row, a VA row,
+- `stage13-s3`: resumed as `stage13-s3-on-netns`, which **landed
+  2026-10-04** (248799bdd through 3e8b759d3); `stage13-s3`, `-onmain` and
+  `-rebase` are history. Then `stage13-s4` (design OK with conditions: an L row, a VA row,
   native calls fail closed, a restart-code case), `stage13-s5`, `stage13-s6`.
   `stage13-s3-wip` does not build.
 - `stage13-netns` **landed 2026-10-04** in main 22384874f (batch
   20261004T133714Z), gated on 2428b0d95 (`l13ns-*`; ledger line 333). Next is
   `stage13-timens`, which must rebase onto it.
-- `stage13-fdinfo` (NP) is superseded by `np-land` (*Wind-down 2026-10-04*
-  above, authentication); then `stage13-n5`, then `stage13-bwrap-user`.
+- `stage13-fdinfo` (NP) is superseded by `np-land`, which **landed
+  2026-10-04** as 7e9a2806f; then `stage13-n5`, then `stage13-bwrap-user`.
 - `stage13-container`: the exit criterion as one program, never run.
 - `stage13-timens`'s worktree held its work staged with a conflict in
   `panic/catalog.rs` (FX-0907 beside FX-0910): take both, then regenerate
@@ -356,8 +417,8 @@ the plain `stage13-<part>` branch of each; the `-presquash`, `-hist`, `-v2`,
 
 Every namespace and seccomp branch got the same blocker once:
 `launch::load_native` must give a native child the creator's whole namespace
-set, pid namespace, seccomp chain and `no_new_privs`. netns (landed) and
-`stage13-s3-on-netns` carry it. The consultant's ledger
+set, pid namespace, seccomp chain and `no_new_privs`. netns and S3 (both
+landed) carry it. The consultant's ledger
 is `~/.local/share/ferrix/cert-consultant/reviews.md` on nazuna.
 
 | Branch | Last commit | Unlanded | Kind | Tip |
@@ -692,7 +753,9 @@ surveyed tips): `backup/2026-10-01/os5d/gate-rows`,
 `os-02/smmu`, `os-50/batch3b`, `os-50/batch3c`, `os-50/ci`, `os-50/land`,
 `os-a8/kept-os02-stub-462f7714`, `os-50/wscanf`, `os-12/btop5`,
 `os-50/ferrousli-link-breakers`, `os-50/ferrousli-netdb`,
-`pre-pull-backup-2026-09-13`.
+`pre-pull-backup-2026-09-13`, and since 2026-10-04 `foot-shell`,
+`selfhost-components`, `tonight/foot-shell`, `tonight/l13-init`,
+`tonight/selfhost-matrix` and `tonight/stage13-s3-on-netns`.
 
 ## Not on a branch
 
