@@ -1540,7 +1540,10 @@ owned by a user namespace that did not own the original locks every mount's
 `ro`, `nosuid`, `nodev`, `noexec` and access-time mode, the bottom's too, and
 locks every mount but the bottom to its parent (M3, M4): a remount clearing a locked flag is `EPERM`,
 an unmount or detach of a locked mount alone `EINVAL`, a bind without
-`MS_REC` over locked mounts `EINVAL`. Removing or renaming a name another
+`MS_REC` of a place a locked mount is on `EINVAL` (Linux's
+`has_locked_children`, which looks at the mounts on the source alone),
+`pivot_root` to a locked mount `EINVAL`, and a pivot moves the old root's
+lock to the new root. Removing or renaming a name another
 namespace has a mount on takes that mount off, as Linux does since 3.18, so
 an unprivileged mount pins nothing against its owner.
 A namespace's end writes out each filesystem whose last mount it held; the
@@ -1549,8 +1552,25 @@ sleeping lock does (a debug kernel stops there under a spin lock). The last
 `Arc<Namespace>` goes where a fs context lets it go: `copy_namespace` and
 `setns` drop the displaced one after the context's lock is released, and a
 process's context goes in its release, which runs in task context.
-`/proc/sys/user/max_user_namespaces` reads the limit. The `mountperm` line
+`/proc/sys/user/max_user_namespaces` reads the limit, 4096 alive at once,
+and the next is `ENOSPC`. The `mountperm` line
 (FX-0900) drives every rule as uid 1000 and as the owner of a user namespace,
+makes user namespaces until one is `ENOSPC` and one again once they are let go,
 and the `mounts` line now also shows a bind of a `ro,nosuid,nodev,noexec`
 mount keeping and enforcing each flag (§8's "N2 repeats them on a bind").
 `max_user_namespaces` is read-only; writing it is not supported.
+
+**N5's review (consultant subagent of po6-bwrap, 2026-10-05, on 58dce8be1):
+not yet** (ledger line 378). Met from the pre-review: the plain remount by
+the superblock's owner, the bottom's flags locked, no new per-process state,
+no requirement ids owed. Owed before landing: `busy_or_detach` detaches
+another namespace's mounts before `rename`, `rmdir` or `unlink` is allowed
+and done, and for `rename`'s source too, where Linux detaches after success
+and only the replaced target; the namespace's write-out runs where its last
+reference goes, in the reaper with preemption off, not in `release` as said
+above, and `may_park` is a debug assertion only; a namespace holding two
+binds of a filesystem never writes it out (a host test with a counting
+filesystem and a control); `detach_elsewhere` edits another namespace's table
+without that namespace's change lock; the vulnerability analysis's N5 rows.
+Gated on 58dce8be1: `check` (`po6-bwrap-n5d-check`) and x86_64 under KVM
+(`po6-bwrap-n5d-x86`) passed.
