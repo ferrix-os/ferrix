@@ -134,6 +134,11 @@ struct State {
     requests: Vec<Arc<Request>>,
     /// What the task has yet to write, in order.
     outgoing: VecDeque<Outgoing>,
+    /// How many of `outgoing` are requests: at most [`MAX_OUTSTANDING`],
+    /// whatever the table holds (F-63). A request leaves the table when it
+    /// is answered or abandoned, which may be before the task has written
+    /// it, so the table's count alone does not bound the queue.
+    queued: usize,
     /// Files open, each holding one slot of `outgoing` for its release.
     holding: usize,
 }
@@ -233,11 +238,17 @@ fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, Errno> {
         return Err(status::NO_MEMORY);
     };
     let id = control.id;
-    if STARTING.lock().try_reserve(1).is_err() {
-        CLAIMS.release(node);
-        return Err(status::NO_MEMORY);
+    {
+        // One guard for the room and the push, so no other push takes the
+        // room between them.
+        let mut starting = STARTING.lock();
+        if starting.try_reserve(1).is_err() {
+            drop(starting);
+            CLAIMS.release(node);
+            return Err(status::NO_MEMORY);
+        }
+        starting.push(control);
     }
-    STARTING.lock().push(control);
     if sched::spawn("chardev", run, id, ferrix_sched::NICE_0_WEIGHT).is_err() {
         let _ = take_start(id);
         CLAIMS.release(node);
@@ -268,6 +279,7 @@ fn make_control(
             next_file: 1,
             requests,
             outgoing,
+            queued: 0,
             holding: 0,
         }),
         work: WaitQueue::new(),
@@ -287,12 +299,17 @@ fn run(id: usize) {
     let Some(control) = take_start(id) else {
         return;
     };
-    if CONTROLS.lock().try_reserve(1).is_ok() {
-        CONTROLS.lock().push(Arc::clone(&control));
-        if let Some(publication) = take_up(&control) {
-            serve(&control);
-            unpublish(&control, &publication);
+    let listed = {
+        let mut controls = CONTROLS.lock();
+        let room = controls.try_reserve(1).is_ok();
+        if room {
+            controls.push(Arc::clone(&control));
         }
+        room
+    };
+    if listed && let Some(publication) = take_up(&control) {
+        serve(&control);
+        unpublish(&control, &publication);
     }
     finish(&control);
     CONTROLS.lock().retain(|held| !Arc::ptr_eq(held, &control));
@@ -406,10 +423,25 @@ fn serve(control: &Arc<Control>) {
             Err(_) => return,
         }
         while end.peer_has_room() {
-            let next = control.state.lock().outgoing.pop_front();
+            let next = {
+                let mut state = control.state.lock();
+                let next = state.outgoing.pop_front();
+                if let Some(Outgoing::Request(_)) = next {
+                    state.queued = state.queued.saturating_sub(1);
+                }
+                next
+            };
             let Some(next) = next else {
                 break;
             };
+            // A request answered or abandoned before its turn is not
+            // written: nobody waits for it (F-63).
+            if let Outgoing::Request(request) = &next {
+                let inner = request.inner.lock();
+                if !inner.alive || inner.answer.is_some() {
+                    continue;
+                }
+            }
             let wire = match &next {
                 Outgoing::Request(request) => request.wire,
                 Outgoing::Release { file, minor } => Wire {
@@ -450,6 +482,7 @@ fn finish(control: &Arc<Control>) {
     control.gone.store(true, Ordering::Release);
     let (requests, outgoing) = {
         let mut state = control.state.lock();
+        state.queued = 0;
         (
             core::mem::take(&mut state.requests),
             core::mem::take(&mut state.outgoing),
@@ -513,17 +546,18 @@ pub(crate) fn hold_release(control: &Control) -> Result<(), Errno> {
 
 /// Queue the release of `file`, whose slot [`hold_release`] took.
 pub(crate) fn queue_release(control: &Control, file: u64, minor: u16) {
-    if control.is_gone() {
+    {
+        // Gone is read under the guard: `finish` sets it before it takes
+        // the lock to empty the queue, so a release pushed here is never
+        // pushed into the emptied queue, which has no room left.
         let mut state = control.state.lock();
-        state.holding = state.holding.saturating_sub(1);
-        return;
+        if control.is_gone() {
+            state.holding = state.holding.saturating_sub(1);
+            return;
+        }
+        // NOALLOC: the slot `hold_release` reserved.
+        state.outgoing.push_back(Outgoing::Release { file, minor });
     }
-    // NOALLOC: the slot `hold_release` reserved.
-    control
-        .state
-        .lock()
-        .outgoing
-        .push_back(Outgoing::Release { file, minor });
     control.work.wake_all();
 }
 
@@ -551,6 +585,21 @@ pub(crate) fn call(
     cmd: u32,
     arg: u64,
 ) -> Result<usize, Errno> {
+    let request = admit(control, client, op, file, minor, cmd, arg)?;
+    await_answer(control, &request, client)
+}
+
+/// Take a request in: in the table and queued for the task, or `EBUSY`
+/// with [`MAX_OUTSTANDING`] outstanding or queued (F-63).
+fn admit(
+    control: &Arc<Control>,
+    client: &Arc<Process>,
+    op: Op,
+    file: u64,
+    minor: u16,
+    cmd: u32,
+    arg: u64,
+) -> Result<Arc<Request>, Errno> {
     let (euid, egid) = client
         .with_credentials(|credentials| (credentials.user.effective, credentials.group.effective));
     let request = {
@@ -558,7 +607,7 @@ pub(crate) fn call(
         if control.is_gone() {
             return Err(Errno::ENODEV);
         }
-        if state.requests.len() >= MAX_OUTSTANDING {
+        if state.requests.len() >= MAX_OUTSTANDING || state.queued >= MAX_OUTSTANDING {
             return Err(Errno::EBUSY);
         }
         let id = state.next_request;
@@ -584,15 +633,27 @@ pub(crate) fn call(
             waiters: WaitQueue::new(),
         })
         .map_err(|_| Errno::ENOMEM)?;
-        // NOALLOC: both reserved for MAX_OUTSTANDING when the control was
-        // made, and the table holds fewer.
+        // NOALLOC: both reserved when the control was made: the table for
+        // MAX_OUTSTANDING, which it holds fewer than, and the queue for
+        // MAX_OUTSTANDING requests and a release per open file, of which
+        // `queued` counts the requests (F-63).
         state.requests.push(Arc::clone(&request));
         state
             .outgoing
             .push_back(Outgoing::Request(Arc::clone(&request)));
+        state.queued += 1;
         request
     };
     control.work.wake_all();
+    Ok(request)
+}
+
+/// Wait for `request`'s answer, or abandon it on a signal.
+fn await_answer(
+    control: &Control,
+    request: &Arc<Request>,
+    client: &Process,
+) -> Result<usize, Errno> {
     let _ = request.waiters.wait_until_deadline(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
@@ -602,10 +663,10 @@ pub(crate) fn call(
         // A reply from one driver thread may come while another is still
         // copying for the request: the program's call returns only once no
         // copy can touch its memory (N4; the consultant's L1, ledger 297).
-        drain(&request);
+        drain(request);
         return answer;
     }
-    abandon(control, &request);
+    abandon(control, request);
     Err(Errno::EINTR)
 }
 
@@ -629,8 +690,18 @@ fn abandon(control: &Control, request: &Arc<Request>) {
         {
             let _ = state.requests.remove(at);
         }
+        // Not yet written, it never will be: out of the queue, so a driver
+        // that stops reading cannot make the queue outgrow its room (F-63).
+        let queued = state
+            .outgoing
+            .iter()
+            .position(|held| matches!(held, Outgoing::Request(held) if Arc::ptr_eq(held, request)));
+        if let Some(at) = queued {
+            let _ = state.outgoing.remove(at);
+            state.queued = state.queued.saturating_sub(1);
+        }
     }
-    drain(request);
+    drain(request); // and any copy in flight for it (N4)
 }
 
 // ---------------------------------------------------------------------------
@@ -759,17 +830,22 @@ fn copy(caller: &dyn Host, registers: &[u64; 6], way: Way) -> Result<usize, Errn
         inner.copying = inner.copying.saturating_add(1);
     }
     let moved = copy_chunks(caller, &request, way, client_at, buffer, length);
+    copy_done(&request);
+    moved.map(|()| 0)
+}
+
+/// One copy for `request` is over: wake the program if it was waiting for
+/// the last one, on either way out of its call, its request answered or
+/// abandoned (N4).
+fn copy_done(request: &Request) {
     let drained = {
         let mut inner = request.inner.lock();
         inner.copying = inner.copying.saturating_sub(1);
-        // The program waits for this on either way out of its call: its
-        // request answered, or abandoned (N4).
         inner.copying == 0 && (!inner.alive || inner.answer.is_some())
     };
     if drained {
         request.waiters.wake_all();
     }
-    moved.map(|()| 0)
 }
 
 /// Move `length` bytes chunk by chunk, re-checking between chunks that the
