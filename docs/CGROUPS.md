@@ -703,7 +703,9 @@ own that never lands; it breaks the refill that a read and a fault share
 The fault path's own half of L.object.112, `copy_or_zero` handing an evicted
 frame back, has no control of its own. Their
 INDEX tags are `po6-cgctl-ctl-<name>` on nazuna (2026-10-05), on the tip
-rebased onto `main` e41489fd7.
+rebased onto `main` 3349682db: cf400dff2 for most, 17acf31dc for
+reclaim-sibling and the four other reclaim lines, after the reclaim check
+changed (below).
 
 | Control | Sabotage | Message |
 |---|---|---|
@@ -730,3 +732,19 @@ rebased onto `main` e41489fd7.
 | reclaim-sibling | a reclaim takes from outside its subtree | a sibling cgroup's pages were reclaimed |
 | reclaim-min | `memory.min` spares nothing | reclaim took pages from a child using no more than its memory.min |
 | dentry-keep | a create the job's memory refused keeps its negative dentry | kmem: objects gone and their heap still charged to their job |
+
+**Where it stands (2026-10-05).** The controllers were built on 2026-09-30
+and waited for their gate and controls at the 2026-10-01 wind-down. Rebased
+onto `main` on 2026-10-05, they met main's pending-work word (`sched::work`):
+the way back to user mode asks the personality only when a bit is posted, so
+`freeze_sync` now posts `STOP` to a frozen process's tasks, `tell_a_new_task`
+to a task launched into one, and the `cgroup.procs` write holds a posting
+across the move. The consultant's follow-up found that a parked process moved
+out of a frozen cgroup was not released (the move writes the freeze before
+`freeze_sync` looks); it is now, and the `freeze` line starts a program in a
+frozen cgroup, moves a running one in and a parked one out, and requires each
+to park or run. reclaim-sibling had never fired, because the limited cgroup's
+file was made first and met every want before a reclaim past its scope reached
+the sibling's: the sibling's file is now made first, and asked about right
+after each read. The check's lower `cpu.max` bound is a twelfth of a
+processor, as the requirements say.
