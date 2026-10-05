@@ -2670,6 +2670,29 @@ pub(crate) static DIAG_EVALS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static DIAG_MINE: AtomicU64 = AtomicU64::new(0);
 pub(crate) static DIAG_OTHER: AtomicU64 = AtomicU64::new(0);
 
+/// DIAG: what one processor's fair queue holds: up to four names with
+/// (running, state), how many in all, whether the idle task is current,
+/// and its IDLE bit.
+pub(crate) fn diag_queue(cpu: usize) -> ([(&'static str, bool, u32); 4], usize, bool, bool) {
+    let mut names = [("-", false, 0u32); 4];
+    let mut count = 0usize;
+    let Some(queues) = QUEUES.get() else { return (names, 0, false, false) };
+    let Some(lock) = queues.get(cpu) else { return (names, 0, false, false) };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let queue = lock.lock();
+    queue.fair.for_each(|view| {
+        if let Some(slot) = names.get_mut(count) {
+            *slot = (view.payload.name, view.running, view.payload.state() as u32);
+        }
+        count += 1;
+    });
+    let running_idle = queue.is_running_idle();
+    drop(queue);
+    let bit = IDLE.load(Ordering::SeqCst) & (1 << cpu) != 0;
+    <arch::Irq as IrqControl>::restore(saved);
+    (names, count, running_idle, bit)
+}
+
 /// DIAG: one processor's switches and stolen-in count, and whether it reads idle.
 pub(crate) fn diag_cpu(cpu: usize) -> (u64, u64, u64, bool) {
     let Some(queues) = QUEUES.get() else { return (0, 0, 0, false) };

@@ -126,6 +126,7 @@ fn wait_finished(count: u64, what: &'static str) -> Result<(), &'static str> {
 /// moved that way and slept on, the 2 rounds in 400 stayed 1. The moves
 /// the scheduler makes are counted as before; the checker only stops
 /// spinning once a task has seen itself on another processor.
+#[allow(dead_code)]
 fn wait_moving(count: u64, online: usize) -> Result<(), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let mut from = 0;
@@ -309,6 +310,8 @@ fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> R
     for (cpu, slot) in before.iter_mut().enumerate() { *slot = super::diag_cpu(cpu); }
     START_AT.store(crate::timer::now_nanos(), Ordering::Release);
     let evals0 = super::DIAG_EVALS.load(Ordering::Relaxed);
+    let mut queues_before = [([("-", false, 0u32); 4], 0usize, false, false); 4];
+    for (cpu, slot) in queues_before.iter_mut().enumerate() { *slot = super::diag_queue(cpu); }
     let started = crate::timer::now_nanos();
     FINISHED.store(0, Ordering::Release);
     MOVES.store(0, Ordering::Release);
@@ -330,7 +333,7 @@ fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> R
     let spawned_ms100 = (crate::timer::now_nanos() - started) / 100_000;
     let mut idle_after_spawn = [false; 4];
     for (cpu, slot) in idle_after_spawn.iter_mut().enumerate() { *slot = super::diag_cpu(cpu).3; }
-    wait_moving(tasks as u64, online)?;
+    wait_finished(tasks as u64, "a task of the moving lock check never finished")?;
 
     for (index, task) in running.iter().enumerate() {
         if let Some(slot) = ended_on.get_mut(index) { *slot = task.cpu() as u8; }
@@ -357,6 +360,12 @@ fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> R
 
     let moves = MOVES.load(Ordering::Acquire);
     let ms = crate::timer::now_nanos().saturating_sub(started) / 1_000_000;
+    if round % 100 == 0 {
+        for cpu in 0..4 {
+            let q = super::diag_queue(cpu);
+            crate::console::println!("  DIAG    r{round} after cpu{cpu}: {} on fair {:?}, idle task current {}, IDLE bit {}", q.1, q.0, q.2, q.3);
+        }
+    }
     if moves < 10 || round % 50 == 0 {
         crate::console::println!(
             "  DIAG r{round} {tasks} tasks, {moves} moves, {ms} ms, steals {} balanced {} placed {} spawned {:?} ended {:?}",
@@ -383,6 +392,9 @@ fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> R
                 super::DIAG_EVALS.load(Ordering::Relaxed) - evals0,
                 mine >> 32, mine & 0xFFFF_FFFF, other >> 40, (other >> 32) & 1, other & 0xFFFF_FFFF,
             );
+            for (cpu, q) in queues_before.iter().enumerate() {
+                crate::console::println!("  DIAG    before spawn cpu{cpu}: {} on fair {:?}, idle task current {}, IDLE bit {}", q.1, q.0, q.2, q.3);
+            }
             crate::console::println!(
                 "  DIAG    spawning took {spawned_ms100} x0.1ms; idle after spawn {:?}; first (cpu, x0.1ms) {:?}; per cpu (switches, in, out) {:?}",
                 idle_after_spawn, first, per,
