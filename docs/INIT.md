@@ -1146,7 +1146,7 @@ the system people will actually use.
 | L11 | done, 2026-09-26, by ferrix-55b with T0 | "Give the restart policy a crate of its own that allocates nothing"; "Restart drivers by the service manager's policy, and report how they died" |
 | L12 | done, 2026-09-27, as built in §7.3 | "Let pid 1 start devmgr, through a starter the kernel gives it" |
 | L13a | built 2026-10-04 on branch `l13-init`, gating (below) | |
-| L13b | built 2026-10-04 on branch `l13b`, over the batch with network namespaces | |
+| L13b | built 2026-10-04 on branch `l13b`, rebased onto `main` and gated 2026-10-05 (below) | |
 | L13c | waits for seccomp's S3 | |
 
 All of L1 to L12's 81 points are spent. L11 put `devmgr` on the restart
@@ -1156,8 +1156,8 @@ counts the init done at L11 (2026-09-26). L12 (2026-09-27) has pid 1 start
 `devmgr` through a starter under `ferrix.devmgr=init`, which every image
 that boots init now sets. `sshd` runs under socket activation in L9's gate
 since 2026-09-27. L13a, the sandboxing keys that need only mount namespaces and
-`prctl`, is built (2026-10-04); L13b and L13c wait for network namespaces and
-seccomp.
+`prctl`, is built (2026-10-04); L13b, `PrivateNetwork=`, is built over
+network namespaces, and L13c's filters over seccomp's S3.
 
 **L1, as built (5 points).** `src/lib/init/svc` is on `main`: `no_std` with
 `alloc`, `forbid(unsafe_code)`, 52 host tests, a Miri step in CI and in
@@ -1821,8 +1821,17 @@ the new check; its two negative controls, booted once each on x86-64 (logs
   kept as `l13b-ctl-loup-1-revoke-flake.out`. Booted again
   (`l13b-r2-ctl-loup.out`) it failed on its own line alone.
 
+On 2026-10-05 (po6-l13) `l13b` was rebased onto `main` fcc5f43e0, where
+L13a had landed: its three own commits, the code without a conflict, the
+roadmap paragraph merged by hand and the generated model pages taken from
+`main` and regenerated. The rows ran through the gate pool on 934032a34:
+`check` (`po6-l13-b-check`) and `test-init` on x86_64, aarch64 and armv7a
+as runs of their own (`po6-l13-b-x86`, `-a64`, `-arm`), all passed; both
+controls ran again as `gate.sh control` on x86-64 and FIRED on their own
+lines (`po6-l13-b-ctl-netns`, `po6-l13-b-ctl-loup`; logs in
+`~/.local/share/ferrix/logs/queue/`).
+
 **What the next session does first.** Nothing of L1 to L12 is left. L13c
-waits for seccomp's S3 (branch `stage13-s3-on-netns`); §4.5 says what it
-changes. `docs/AUTH.md`'s P0 to P0c are done: a native
+is on branch `l13c`, over `l13b`; §4.5 says what it changes. `docs/AUTH.md`'s P0 to P0c are done: a native
 process runs as its maker, a native service as its `User=`, and a
 delegated cgroup's limits stay its delegator's.
