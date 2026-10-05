@@ -1621,20 +1621,30 @@ impl Process {
     }
 
     /// Look at its cgroup's freeze again: after it was made, moved, or its
-    /// cgroup's `cgroup.freeze` changed. A newly frozen process has its
-    /// threads interrupted as a stop has, so that they park; a thawed one
-    /// has them released.
+    /// cgroup's `cgroup.freeze` changed. A frozen process has `sched::work::STOP` posted
+    /// to every task, its threads interrupted as a stop has them, so that
+    /// they park; a thawed one has them released.
+    ///
+    /// A frozen one is posted to even when the freeze did not change here: a
+    /// move (`Job::adopt`) writes the freeze before this looks, and a
+    /// thread already parked takes the extra post as one more look. The
+    /// caller of a move holds a `sched::work::posting` across both, so
+    /// that the freeze is never written outside one (`sched::work::audit`).
     pub(crate) fn freeze_sync(&self) {
+        let posting = sched::work::posting();
         let (frozen, changed) = self.core().sync_freeze();
-        if !changed {
-            return;
-        }
         if frozen {
             self.signalled.wake_all();
-            self.wake_other_tasks();
-        } else {
+            // The caller's own task too, when it is one of this process's
+            // threads (`echo $$ > cgroup.procs`): it parks on its way back.
+            if thread::current_of(self).is_some() {
+                sched::work::post_own(sched::work::STOP);
+            }
+            self.wake_other_tasks(sched::work::STOP);
+        } else if changed {
             self.resumed.wake_all();
         }
+        drop(posting);
     }
 
     /// A thread of it is parked by a freeze.
@@ -2283,7 +2293,8 @@ pub(crate) fn start_thread(
 /// Tell `task`, just launched and already listed, what was posted for its
 /// process before it was listed: an end the core recorded, whose walk did not
 /// find it; a thread replacing the program, which waits for it to leave; and a
-/// signal pending for the process that its thread does not block. Each is
+/// signal pending for the process that its thread does not block; and a
+/// stop or a frozen cgroup, which it parks for. Each is
 /// read after the listing, and each poster writes before it walks the list
 /// under the same lock, so one of the two sees the other.
 fn tell_a_new_task(process: &Process, task: &Arc<Task>) {
@@ -2291,6 +2302,11 @@ fn tell_a_new_task(process: &Process, task: &Arc<Task>) {
         && !sched::work::has_end(task)
     {
         sched::work::notify(task, sched::work::END);
+    }
+    // Born into a frozen cgroup, or into a stopped process: it parks before
+    // it runs any of the program.
+    if process.must_park() {
+        sched::work::notify(task, sched::work::STOP);
     }
     if thread::of_task(task).is_some_and(|thread| {
         thread.with_signals(|shared, own| super::signal::needs_attention(shared, own))

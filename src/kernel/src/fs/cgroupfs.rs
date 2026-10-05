@@ -1084,10 +1084,15 @@ fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
         return Err(Errno::ENOENT);
     }
     attach_permissions(&opener.who, &left, job, &opener.shared)?;
+    // The move writes the process's freeze, which its threads read on their
+    // way back to user mode: counted as a post from before that write until
+    // `freeze_sync` has posted (`sched::work::audit`).
+    let posting = crate::sched::work::posting();
     job.adopt(&process).map_err(move_errno)?;
     // Frozen with the cgroup it went into, thawed from the one it left; and
     // either may now be frozen, or no longer, as a whole.
     process.freeze_sync();
+    drop(posting);
     settle_frozen(&left);
     settle_frozen(job);
     Ok(())
