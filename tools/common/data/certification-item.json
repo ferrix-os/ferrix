@@ -217,7 +217,6 @@
         "platform/google/gs201/usb.rs",
         "platform/st/stm32mp1.rs",
         "platform/st/stm32mp1/**",
-        "render/**",
         "syscall/attributes.rs",
         "syscall/check.rs",
         "syscall/compat.rs",

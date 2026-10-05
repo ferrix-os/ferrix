@@ -199,6 +199,18 @@ def classify(manifest: dict, files: list[str]) -> tuple[dict[str, str], list[str
     return ring_of, unclassified, ambiguous
 
 
+def stale_members(manifest: dict, files: list[str]) -> list[tuple[str, str]]:
+    """(ring, pattern) for each ring member that matches no kernel file. A
+    pattern left behind by a move classifies nothing today and would silently
+    classify whatever is next created under its name."""
+    return [
+        (name, pattern)
+        for name, ring in manifest["rings"].items()
+        for pattern in ring["members"]
+        if not any(matches(pattern, rel) for rel in files)
+    ]
+
+
 # --- the module tree ---------------------------------------------------------
 
 ModPath = tuple[str, ...]
@@ -993,6 +1005,10 @@ def self_test() -> list[str]:
     if modules.get(("sys", "inline")) is None or modules[("sys", "inline")].file != "sys/mod.rs":
         failures.append("resolver: inline module sys::inline not placed in sys/mod.rs")
     failures += _crate_self_test()
+    rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
+    stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
+    if stale != [("load", "render/**")]:
+        failures.append(f"stale members: got {stale}, expected [('load', 'render/**')]")
     return failures
 
 
@@ -1110,6 +1126,19 @@ def main() -> int:
         )
         for rel, hits in ambiguous:
             print(f"    {rel}: {', '.join(hits)}", file=sys.stderr)
+        status = 1
+
+    stale = stale_members(manifest, files)
+    if stale:
+        print(
+            f"item-boundary: {len(stale)} ring member(s) match no kernel file.\n"
+            f"  Remove each from {MANIFEST.relative_to(ROOT)}, or name the file it\n"
+            f"  meant: a pattern nothing matches would classify the next file\n"
+            f"  made under its name without anybody deciding it:",
+            file=sys.stderr,
+        )
+        for ring, pattern in stale:
+            print(f"    {ring}: {pattern}", file=sys.stderr)
         status = 1
 
     modules, edges, problems = measure(manifest, ring_of)
