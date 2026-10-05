@@ -54,6 +54,7 @@ use crate::sync::SpinLock;
 /// reclaim builds.
 const BATCH: usize = 32;
 
+pub(crate) static LOST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// Every object made for a file, weakly.
 static CACHE: SpinLock<Vec<Weak<Vmo>>> = SpinLock::new(Vec::new());
 
