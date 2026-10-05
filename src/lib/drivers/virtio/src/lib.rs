@@ -833,8 +833,22 @@ impl<M: QueueMemory> SplitQueue<M> {
     ///
     /// Reads the device's `used.flags`. Skipping the notification is an
     /// optimisation the device offered; notifying anyway is always correct.
+    ///
+    /// # Ordering
+    ///
+    /// [`QueueMemory::barrier`] runs first, between the `avail.idx` store
+    /// that published the chain and this load of `used.flags`. The device
+    /// does the mirror image -- clears `USED_F_NO_NOTIFY`, fences, and reads
+    /// `avail.idx` once more before it sleeps -- and each side's fence is
+    /// what keeps both from missing the other. Without this one, x86 lets
+    /// the load pass the store still in the store buffer: the driver reads
+    /// the flag the device is just clearing and skips the notification,
+    /// the device reads the index from before the publish and sleeps, and
+    /// the chain sits in the available ring until something else notifies.
+    /// Linux's `virtqueue_kick_prepare` fences here for the same reason.
     #[must_use]
     pub fn device_wants_notification(&self) -> bool {
+        self.memory.barrier();
         self.memory.read_u16(self.layout.used_flags()) & USED_F_NO_NOTIFY == 0
     }
 
@@ -1211,8 +1225,13 @@ impl<M: QueueMemory> SplitQueueDevice<M> {
     }
 
     /// Whether the driver wants an interrupt when a chain completes.
+    ///
+    /// [`QueueMemory::barrier`] runs first, between the `used.idx` store of
+    /// [`SplitQueueDevice::complete`] and this load, for the reason
+    /// [`SplitQueue::device_wants_notification`] gives from the other side.
     #[must_use]
     pub fn driver_wants_interrupt(&self) -> bool {
+        self.memory.barrier();
         self.memory.read_u16(self.layout.available_flags()) & AVAIL_F_NO_INTERRUPT == 0
     }
 
