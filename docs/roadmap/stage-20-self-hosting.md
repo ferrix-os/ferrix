@@ -188,6 +188,15 @@ evening; S-0, CI green, is the first bullet above. A guess is marked.
   and misses 23 of 153 distinct builds, the ones a test makes after a boot
   (negative variants, later boots' programs); those tests are to build every
   variant before their first boot (approved by the product owner).
+  Done on `po5/s2-plan`: `test-audio`, `test-badapple`, `test-compositor`,
+  `test-display`, `test-input`, `test-procfs` and `test-threads` build every
+  variant before their first boot, each later boot building its own again as
+  cargo saying it is current. A plan run of the matrix on that tree
+  (`~/.local/share/ferrix/selfhost-matrix/po5-s2-after` against
+  `po5-s2-before`) records 162 distinct builds against 139, the 23 missing
+  ones all among them and none lost. What a compositor boot carries only when
+  the machine has it, the user's own desktop for `fuzzel-user` and
+  `everything-desktop`, is still built by those boots alone.
 * **S-3, the whole 188-build x86-64 plan made on Ferrix, 8** (a guess).
 * **S-4, the script apps' toolchain, 8** (a guess). Mesa (vkgears) wants
   Python's mako and glslang, btop LLVM's C++ runtime.
