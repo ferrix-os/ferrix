@@ -817,19 +817,19 @@ slot for its release (`hold_release`, `ENOMEM` on failure), so queuing a
 release allocates nothing and cannot fail (N8). A request is one fallible
 allocation (`ENOMEM`); the 257th outstanding request is `EBUSY`.
 
-**The queue's bound does not hold today (F-63, reserved 2026-10-05, ledger
-361).** An abandoned request leaves the request table but stays in the
-queue for the driver, which is written only while the driver's channel has
-room. So with a driver that stops reading, clients that are signalled and
-call again keep 256 requests outstanding while the abandoned ones pile up in
-the queue, past its 256 entries and the releases held. The queue's
-`push_back` in `call` is then an allocation that cannot report failure, under
-the control's spin lock, and can run until the kernel stops. The nodes are
-`0666`. It is open on every image that runs `nvrm`, which is `run-nvidia`'s
-alone, and has been since N1e. The fix takes abandoned requests out of the
-queue, or skips them, or counts them at admission, with a boot self-check
-and a negative control (N12, N13); until then this section's bound on the
-queue is the intended one, not the built one. The global lists are bounded by what they list: `STARTING` and
+**The queue's bound (F-63, closed 2026-10-05).** A request leaves the
+table when it is answered or abandoned, which may be before the control's
+task has written it to the driver, so the table's count alone does not
+bound the queue. The control counts the requests in its queue (`queued`),
+and admission refuses `EBUSY` while either count is at 256. An abandoned
+request still queued is taken out of the queue at once (a search of at most
+256 requests and the releases held, under the lock), and the task skips a
+request answered or abandoned before its turn. So the queue holds at most
+256 requests and one release per open file, the room reserved for it, and
+its `push_back` never allocates. Stage 10's chardev check drives a driver
+that reads nothing through rounds of requests abandoned, and answered
+before their turn, and requires the bound; its controls are in F-63.
+The global lists are bounded by what they list: `STARTING` and
 `CONTROLS` hold one entry per control, at most one per device, and
 `PUBLISHED` one per published minor, unique system-wide and at most 256
 (minors 0 to 255, at most eight a HELLO). A copy's bounce buffer is one
@@ -843,10 +843,11 @@ reservation under the control's `state`, and the lists' room under
 `PUBLISHED`, `CONTROLS` and `STARTING`.
 
 * A control's `state`: a request's admission (the count, the id, one
-  allocation, two pushes into reserved room), a reply's or an abandonment's
-  lookup by binary search over at most 256 ids, and its removal, which
-  moves at most 255 pointers; a release's push; an open's reservation,
-  which may allocate.
+  allocation, two pushes into reserved room), a reply's or an
+  abandonment's lookup by binary search over at most 256 ids, and its
+  removal, which moves at most 255 pointers; an abandonment's search of the
+  queue, at most 256 requests and the releases held; a release's push; an
+  open's reservation, which may allocate.
 * A request's `inner`: a handful of loads and stores (`alive`, `answer`,
   the count of copies in flight).
 * `CONTROLS`: a reply's or copy's search for the control whose driver end

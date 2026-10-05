@@ -1525,15 +1525,19 @@ and took the recommended answer for D2, D3 and D5.
     image but `run-nvidia`'s. A reply arriving while a copy is in flight
     was found in that review and fixed before landing: the program's call
     returns only once no copy for it is running (L1). **Owed** before N2
-    lands, or before `nvrm` goes into any other image (BACKLOG): ledger
-    294's N10's code half (F-63), N12 and N13 (plus a control for L1), N5's
+    lands, or before `nvrm` goes into any other image (BACKLOG): N5's
     switch when fault windows land, ledger 293's D1–D10, and a
     `test-nvidia-smi` gate. N10's text, the core's bounds, is in
     `docs/certification/MEMORY-AND-TIMING.md` §2.2k, and N15's remainder,
     what is deferred, in §4.4 (2026-10-05). Writing N10 found the queue to
-    `nvrm` unbounded (F-63, reserved, ledger 361): an abandoned request
-    stays queued while a new one is admitted. N10 stays owed until the
-    code holds the bound.
+    `nvrm` unbounded (F-63, ledger 361): an abandoned request stayed
+    queued while a new one was admitted. N10's code half, N12 and N13 are
+    done (2026-10-05, po5-c1 and po6-c1): abandoned requests leave the
+    queue and admission counts it, so the bound holds (F-63, closed), and
+    stage 10's chardev self-check (`interfaces/chardev/check.rs`) plays a
+    fake driver through the HELLO rules, a round trip with copies, the
+    copies refused, the drains (N4, L1), the 257th request and the queue's
+    bound, and driver death, with nine gate controls that each fired.
 
 ## 11. CUDA (N5)
 
