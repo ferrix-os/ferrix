@@ -244,8 +244,11 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u64> {
 fn all(harness: &mut Harness) -> Checked<u64> {
     let limited = Group::make(harness, b"/check-r")?;
     let sibling = Group::make(harness, b"/check-rs")?;
-    let (file_a, _) = file(PAGES)?;
+    // The sibling's file first: a reclaim walks the objects in the order
+    // they were made, so its pages come before the limited cgroup's own and a
+    // reclaim that reached outside its scope would take them before any.
     let (file_b, source_b) = file(SIBLING_PAGES)?;
+    let (file_a, _) = file(PAGES)?;
     let memory_b = VmoStorage
         .allocate()
         .map_err(|_| "reclaim check: no tmpfs store")?;
