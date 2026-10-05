@@ -16,10 +16,11 @@
 //! clones the missing ones ([`ensure`]), so a fresh clone or worktree builds
 //! with no extra step. The clone borrows its objects from a mirror under
 //! `~/.local/share/ferrix/components` (or `$FERRIX_COMPONENTS`), which makes
-//! a checkout in a new worktree a matter of seconds. A checkout that is
-//! that is clean and behind its pin is moved to it; one with work of its own
-//! -- other commits, or uncommitted changes -- is used as it is and never
-//! moved. `cargo xtask components` says which each one is, and
+//! a checkout in a new worktree a matter of seconds; on Windows the objects
+//! are then copied in, so that git in WSL can read the checkout too. A
+//! checkout that is clean and behind its pin is moved to it; one with work
+//! of its own -- other commits, or uncommitted changes -- is used as it is
+//! and never moved. `cargo xtask components` says which each one is, and
 //! `pin-components` writes the commit of every clean checkout that moved
 //! past its pin back to the manifest.
 
@@ -303,6 +304,7 @@ fn emptied(status: &str) -> bool {
 /// Move every checkout that is behind its pin, or missing, to the pin.
 fn sync(components: &[Component]) -> Result<()> {
     for component in components {
+        own_objects(component)?;
         match state(component)? {
             State::Missing => fetch(component)?,
             State::Behind(_) => {
@@ -431,7 +433,40 @@ fn fetch(component: &Component) -> Result<()> {
         let _ = git(&dir, &["fetch", "--quiet", "origin", pin])?;
     }
     let _ = git(&dir, &["checkout", "--quiet", "--detach", pin])?;
-    Ok(())
+    own_objects(component)
+}
+
+/// On Windows, give a checkout its own copy of the objects it borrows from
+/// the mirror, as `git clone --dissociate` does.
+///
+/// The borrowing is a path in `.git/objects/info/alternates`, and Windows'
+/// git writes it as `C:/Users/...`. The same checkout is also read by git
+/// in WSL (`/mnt/f/...`) when xtask builds there, and that git cannot
+/// resolve a drive-letter path: every command in the checkout then fails
+/// with "unable to normalize alternate object path" and "bad object HEAD".
+/// A path both can read does not exist when the checkout and the mirror are
+/// on different drives, so on Windows the objects are copied instead. A
+/// checkout made before this keeps working: the next xtask command copies
+/// its objects the same way.
+fn own_objects(component: &Component) -> Result<()> {
+    if !cfg!(windows) || component.commit.is_none() {
+        return Ok(());
+    }
+    let dir = checkout(component);
+    let alternates = dir.join(".git/objects/info/alternates");
+    if !alternates.exists() {
+        return Ok(());
+    }
+    println!(
+        "components: copying {}'s objects from the mirror into its checkout, \
+         so that git in WSL can read it",
+        component.name
+    );
+    // `-a` without `-l` packs what the alternates lend too, so the pack
+    // stands on its own once the alternates file is gone.
+    let _ = git(&dir, &["repack", "-a", "-d", "-q"])?;
+    fs::remove_file(&alternates)
+        .map_err(|error| Error::new(format!("{}: {error}", alternates.display())))
 }
 
 /// The bare mirror a component's clones borrow from, made or brought up to
