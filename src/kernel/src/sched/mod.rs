@@ -2198,7 +2198,9 @@ fn finish_switch() {
 /// Only an idle processor steals, and only from a queue with something
 /// waiting rather than merely something running: taking the task another
 /// processor is running is not possible, and taking its last waiting one is
-/// exactly the work it is about to do itself.
+/// exactly the work it is about to do itself. From a processor that is idle
+/// too -- one that has been handed work and kicked, and has not yet woken --
+/// the last waiting task is never taken ([`steal_from`]).
 fn steal_work() -> bool {
     let Some(domain) = DOMAIN.get().filter(|domain| domain.mode().steals_work()) else {
         return false;
@@ -2383,7 +2385,20 @@ fn steal_from(me: usize, victim: usize) -> bool {
         (&mut *second_queue, &mut *first_queue)
     };
 
-    let moved = match theirs_queue.steal_candidate(me) {
+    // **An idle victim keeps its last waiting task.** A processor running
+    // its idle task with one task queued has been handed it and kicked
+    // (`spawn_on`, `kick_after_wake`, `balance`), and that task is what it
+    // runs the moment it wakes. Taken from it, the work it was woken for is
+    // gone when it looks, it halts again with nothing to wake it, and the
+    // stealer -- a spawner that went to sleep right after a burst of spawns,
+    // before the processors it placed them on had woken -- ends up with the
+    // whole burst. That is what stage 5's moving lock check saw on a loaded
+    // host (all eight of its tasks on the checker's processor for the whole
+    // check, three processors halted; 2026-10-04, 77783565a): waking a
+    // halted processor takes the host, or a deep idle state, longer than an
+    // idle processor's look at the other queues.
+    let keeps_its_last = theirs_queue.is_running_idle() && theirs_queue.waiting() <= 1;
+    let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
         Some(id) => match theirs_queue.release(id) {
             Some((task, state)) => {
                 task.store_entity_state(state);

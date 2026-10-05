@@ -306,7 +306,10 @@ package FerrixScheduling {
              * the first sleeper's wake-up, whichever is first, and not at all
              * for one task with nothing behind it. Work stealing by an idle
              * processor in Throughput; none in HardRt, because partitioned
-             * scheduling is what makes the admission test valid. */
+             * scheduling is what makes the admission test valid. A processor
+             * that is idle too keeps its last waiting task: it has been handed
+             * it and kicked, and taking it leaves it to halt again with
+             * nothing to wake it while the stealer gathers a whole burst. */
         attribute targetLatencyNanos : Natural = 3000000 {
             doc /* Shared among whatever is runnable rather than handed to each
                  * in full. A fixed slice is also a per-task latency bound: the
