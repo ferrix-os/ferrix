@@ -7,6 +7,23 @@
 //! Each call's arguments are listed on its [`NativeCall`] variant in register
 //! order. `*u64` means a pointer to a 64-bit value in the caller's memory, for
 //! the reason the crate documentation gives.
+//!
+//! # The vector-state contract (x86-64)
+//!
+//! Three calls, the native calls that block, are declared to destroy the
+//! caller's vector registers: [`NativeCall::ChannelWriteRead`],
+//! [`NativeCall::ObjectWaitOne`] and [`NativeCall::PortWait`]. Through any of
+//! them, made with `SYSCALL`, the caller must assume that every register the
+//! System V AMD64 ABI makes caller-saved is lost, as across a function call:
+//! `XMM0` to `XMM15`, the upper halves of `YMM0` to `YMM15`, and the x87 data
+//! registers. It keeps the two that ABI makes callee-saved: `MXCSR` and the
+//! x87 control word. What it finds instead is either its own values or every
+//! register's initial state, never a value another program left. No Linux
+//! number is affected, nor is `int $0x80`, nor any other architecture: on
+//! AArch64 and ARMv7-A every call keeps the whole vector state.
+//! `docs/OPAQUE-KERNEL.md` §9.8, 3a, gives the design; a program that keeps a
+//! value in a vector register across one of the three loses it, and harms
+//! only itself.
 
 /// The first native number.
 pub const FIRST: usize = 0x1000;
@@ -171,6 +188,9 @@ pub enum NativeCall {
     /// asserted at that moment. The deadline is absolute, in `CLOCK_MONOTONIC`
     /// nanoseconds; a null pointer waits forever, and a null `observed` is
     /// not written. Needs `WAIT`.
+    ///
+    /// On x86-64 it destroys the caller-saved vector registers, keeping
+    /// `MXCSR` and the x87 control word (the module's vector-state contract).
     ObjectWaitOne,
     /// `(handle, port, signals, key: *u64)`. Queue one packet on `port`, with
     /// `key`, the next time any of `signals` is asserted — at once, if one
@@ -201,6 +221,9 @@ pub enum NativeCall {
     /// for, before it waits. The end of the caller's process, or another
     /// thread's `execve`, ends the wait with `EINTR`; a signal does not, as it
     /// ends no native wait. Needs `WRITE` to send and `READ` to receive.
+    ///
+    /// On x86-64 it destroys the caller-saved vector registers, keeping
+    /// `MXCSR` and the x87 control word (the module's vector-state contract).
     ChannelWriteRead,
     /// `()` → handle. Make a port.
     PortCreate,
@@ -208,6 +231,9 @@ pub enum NativeCall {
     PortQueue,
     /// `(port, deadline: *u64, packet: *PortPacket)`. Take the next packet,
     /// waiting for one up to the deadline. Needs `READ`.
+    ///
+    /// On x86-64 it destroys the caller-saved vector registers, keeping
+    /// `MXCSR` and the x87 control word (the module's vector-state contract).
     PortWait,
     /// `(port, flags)` → descriptor. A Linux file descriptor on the port,
     /// which `poll`, `select` and `epoll` report readable (`POLLIN`,
