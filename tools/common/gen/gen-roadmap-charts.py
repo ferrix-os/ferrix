@@ -70,9 +70,14 @@ REMAINING = [
     ("NVIDIA N5, CUDA", 52, "added"),
     # Sized 2026-10-04 evening, by three sizing agents; ranges 40-75, 30-50
     # and 130-210. Most milestones are guesses.
-    ("Stage 20, self-hosting", 50, "added"),
+    ("Stage 20, self-hosting", 45, "added"),
     ("Pixel 7, the USB driver's rest", 37, "added"),
     ("Certification findings, in-repository work", 165, "added"),
+    # Added 2026-10-05 at the customer's question; a first guess (D1-D5).
+    ("Live driver update", 26, "added"),
+    # OPAQUE-KERNEL.md §9.5/§9.7, what is left at 2026-10-05: 2f and the exact
+    # bench, step 3 without PCIDs, step 4's 39-59, step 5; range 60-90.
+    ("IPC round trip to seL4's figure", 70, "added"),
 ]
 # The queue's order (customer, 2026-10-04): built rows first, those that only
 # need landing ("unlanded"), then every other sized row, smallest points first
@@ -137,6 +142,8 @@ ACTIVE = [
     ("NVIDIA N2 to N6, unlanded", D(2026, 10, 3), ["NVIDIA N2 to N4"]),
     ("Init L13b and L13c", D(2026, 10, 4), ["Stage 15, init L13b and L13c"]),
     ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest"]),
+    ("IPC round trip (steps 1, 2a-2e landed)", D(2026, 10, 1),
+     ["IPC round trip to seL4's figure"]),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"

@@ -69,6 +69,8 @@ sizes them.
 | ~~Stage 16, `rustc`~~ *exit met 2026-09-22* | ~~*the goal* ≈ 40~~ 8 spent | done |
 | Stage 20, self-hosting | 45 left (range 40-75; S-0, CI green, and S-2, plan mode complete, are met): S-1 FX-0001 under load 8 (3-13, a guess), S-3 the whole 188-build x86-64 plan on Ferrix 8, S-4 the script apps' toolchain 8, S-5 Arm toolchains in the guest 6, S-6 replay all 57 rows from the Ferrix store 8, S-7 the weekly CI workflow 5, S-8 the exit record 2 (S-8 firm, the rest guesses); not counted: if "three architectures" means the compiler runs on ARMv7-A Ferrix, 13 or more | in progress: the x86-64 image builds on Ferrix and boots (2026-09-23); the AArch64 image builds on Ferrix on the Pixel 7 and boots (2026-10-03); every build of the matrix recorded, Ferrix making them stops on FX-0001 (2026-09-24); 2026-10-04, on `main`: one kernel for every test, each test's init program and script in the initramfs under `.ferrix/init/` (the plan falls from 271 builds to 188), a 57-row matrix, and a plan mode that records builds without booting (`selfhost-matrix`); the volume carries the components and the guest clones none, which fixes CI's "rustc on Ferrix, and Ferrix built on Ferrix" job (`selfhost-components`, cb872a732; CI's job has passed on `main` since 77783565a); 2026-10-05, on `main` (ce133294c, a3b240c6b): the plan is complete, `test-threads`, `test-procfs`, `test-display`, `test-input`, `test-audio`, `test-badapple` and `test-compositor` build every variant before their first boot (162 distinct builds against 139); owed: a weekly CI job, and the apps and Arm C programs built by Ferrix |
 | Chrome on the STM32MP157D-DK1 (`docs/CHROME.md` §10) | ≈ 45–55 | not started |
+| Live driver updates: a new driver version without a reboot. `devmgr` starts a driver it restarts from a new, verified image instead of the initramfs copy, and goes back to the old one if the new one does not publish (the customer's question, 2026-10-05; `docs/DEVMGR.md` §4) | 26, a first guess: D1 a new image's way into `devmgr` (every driver image comes from the initramfs today) 8, D2 the update command and the rollback 5, D3 the image's verification and the certification review 5, D4 `test-restart --update` for each kind with its negative controls 5, D5 requirements and docs 3; the kinds `devmgr` does not restart today (the serial port, the USB host, the GC400 engine, the USB gadget, a GPU under `nvrm`) and `devmgr`'s own restart (`docs/INIT.md` L12) are outside it | not started; what it builds on, restarting a display, sound, network, input or disk driver with its device's state kept, is done (T0, 2026-09-27, `cargo xtask test-restart`) |
+| The native channel round trip as fast as seL4's, 440 ns on nazuna with matched protections (`docs/OPAQUE-KERNEL.md` §9.5 to §9.9, the customer, 2026-10-02) | 70 left, range 60-90 (§9.5 and §9.7's estimates): 2f and the exact `bench-ipc` about 10, step 3 without PCIDs 7-11, step 4's fast path 39-59, step 5 5-11; step 3's PCIDs (10-13, nazuna has none) and step 4b are outside it | under way: step 1, F-60's fix and 2a to 2e on `main`, 2,556 ns p50 inside a domain with every mitigation on (37 us before step 1); 2026-10-05: `bench-exact` and 2f (session po6-ipcA) and steps 3a and 3b (po6-ipcB) in progress; `step4-prep` waits for review (`docs/handover/2026-10-03-ipc.md`) |
 
 ## Burndown
 
@@ -79,8 +81,8 @@ rest 6), Chrome on the DK1 50, stage 14 40, dmabuf and virgl
 48, stage 22's 28 (bubblewrap's rest 5, and a guess of 23 for what the Steam
 client's launch and games still find missing), and NVIDIA's N2 to N4 64 (done
 but unlanded, so still in scope) and N5, CUDA, 52, and the three rows that had no size until the evening of
-2026-10-04: stage 20 50, what remains of the Pixel's USB work 37, and the
-certification's work inside the repository 165 -- **≈ 612 points**. The
+2026-10-04: stage 20 50, now 45 with S-2 landed on 2026-10-05, what remains of the Pixel's USB work 37, and the
+certification's work inside the repository 165, and two rows added on 2026-10-05: live driver updates 26 and the channel round trip's rest 70 -- **≈ 703 points**. The
 unsized rows (the rest of stage 21, the audio server, Chrome's GPU
 compositing, the desktop clients' programs) and the certification's ring-0
 interference work (90-160) are outside it, so the chart shows when the *sized* work ends, not when the
@@ -101,6 +103,9 @@ held, and the count of what happened to the 442 says why:
 | sized scope after the day's landings | 360 |
 | added by sizing three rows that had none (stage 20 50, the Pixel's USB rest 37, the certification's repository work 165), 2026-10-04 evening | + 252 |
 | sized scope on 2026-10-04, evening | 612 |
+| came off it by landings on 2026-10-05 (stage 20's S-2) | − 5 |
+| added on 2026-10-05 (live driver updates 26, a first guess; the channel round trip's rest 70, which had no row) | + 96 |
+| sized scope on 2026-10-05 | 703 |
 
 1. **The rate counted work outside the scope.** About 900 points landed in
    those eight days, but ≈ 695 of them were sized afterwards from `git log`:
@@ -125,7 +130,7 @@ added, so a moved date reads as "scope grew" rather than "it slipped".
 Getting the date earlier than that means putting sessions on the idle rows,
 or taking them out of the plan, and landing the built work first.
 
-![Burndown: 612 sized points remaining from 2026-10-04, done 11-04 at 20 a day (what came off the 09-26 scope) or 10-15 at 56 a day; below it, points landed per day from 09-14 to 10-04, about 2,100 in total](../img/burndown.svg)
+![Burndown: 703 sized points remaining from 2026-10-04 (612, then 2026-10-05's rows), done 11-09 at 20 a day (what came off the 09-26 scope) or 10-17 at 56 a day; below it, points landed per day from 09-14 to 10-04, about 2,100 in total](../img/burndown.svg)
 
 In the upper chart the forecast is the shallower line, 20 a day: what came
 off the fixed 09-26 scope from 09-27 to 10-04. The steeper line, 56 a day, is
@@ -160,7 +165,7 @@ the big ones, Chrome on the DK1 and CUDA, come last. Each in-progress row has
 two parts after today: a faint bar for its wait in the queue, then a light
 dashed bar for its work, so 6 points looks like 6 points and 16 like 16.
 
-![Gantt: done work from 2026-09-13 to 10-04, ten streams in progress, and the sized remainder as one queue at 20 points a day ending 11-04, five idle rows hollow, and each in-progress row's wait in the queue and then its work](../img/gantt.svg)
+![Gantt: done work from 2026-09-13 to 10-04, eleven streams in progress, and the sized remainder as one queue at 20 points a day ending 11-09, five idle rows hollow, and each in-progress row's wait in the queue and then its work](../img/gantt.svg)
 
 Both charts are drawn by `tools/common/gen/gen-roadmap-charts.py`, which holds their
 numbers; change them there when the table or the velocity count changes, and

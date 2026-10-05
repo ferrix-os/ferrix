@@ -1,225 +1,241 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="1322" viewBox="0 0 1040 1322" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2328">
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="1388" viewBox="0 0 1040 1388" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2328">
 <title>Ferrix Gantt</title>
-<rect width="1040" height="1322" fill="#ffffff"/>
+<rect width="1040" height="1388" fill="#ffffff"/>
 <text x="24.0" y="28.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">Ferrix: done, in progress, and a forecast</text>
 <text x="24.0" y="46.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">The forecast is one queue at 20 points a day, built rows first, then shortest first: the size of the work, not a plan; hollow rows have no session on them</text>
 <text x="24.0" y="60.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">In progress: solid is done; the faint bar is the wait for the queue below (built rows first, then shortest first), the light dashed bar the work itself; a dotted bar to the edge is unsized work</text>
-<line x1="310.0" y1="82.0" x2="310.0" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<text x="312.0" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-13</text>
-<line x1="321.1" y1="82.0" x2="321.1" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="332.3" y1="82.0" x2="332.3" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="334.3" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-15</text>
-<line x1="343.4" y1="82.0" x2="343.4" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="354.5" y1="82.0" x2="354.5" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="356.5" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-17</text>
-<line x1="365.7" y1="82.0" x2="365.7" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="376.8" y1="82.0" x2="376.8" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="378.8" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-19</text>
-<line x1="387.9" y1="82.0" x2="387.9" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<line x1="399.1" y1="82.0" x2="399.1" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="401.1" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-21</text>
-<line x1="410.2" y1="82.0" x2="410.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="421.3" y1="82.0" x2="421.3" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="423.3" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-23</text>
-<line x1="432.5" y1="82.0" x2="432.5" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="443.6" y1="82.0" x2="443.6" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="445.6" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-25</text>
-<line x1="454.7" y1="82.0" x2="454.7" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="465.8" y1="82.0" x2="465.8" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<text x="467.8" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-27</text>
-<line x1="477.0" y1="82.0" x2="477.0" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="488.1" y1="82.0" x2="488.1" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="490.1" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-29</text>
-<line x1="499.2" y1="82.0" x2="499.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="510.4" y1="82.0" x2="510.4" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="512.4" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-01</text>
-<line x1="521.5" y1="82.0" x2="521.5" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="532.6" y1="82.0" x2="532.6" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="534.6" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-03</text>
-<line x1="543.8" y1="82.0" x2="543.8" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<line x1="554.9" y1="82.0" x2="554.9" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="556.9" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-05</text>
-<line x1="566.0" y1="82.0" x2="566.0" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="577.2" y1="82.0" x2="577.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="579.2" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
-<line x1="588.3" y1="82.0" x2="588.3" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="599.4" y1="82.0" x2="599.4" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="601.4" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-09</text>
-<line x1="610.6" y1="82.0" x2="610.6" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="621.7" y1="82.0" x2="621.7" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<text x="623.7" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-11</text>
-<line x1="632.8" y1="82.0" x2="632.8" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="644.0" y1="82.0" x2="644.0" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="646.0" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-13</text>
-<line x1="655.1" y1="82.0" x2="655.1" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="666.2" y1="82.0" x2="666.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="668.2" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-15</text>
-<line x1="677.4" y1="82.0" x2="677.4" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="688.5" y1="82.0" x2="688.5" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="690.5" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-17</text>
-<line x1="699.6" y1="82.0" x2="699.6" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<line x1="710.8" y1="82.0" x2="710.8" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="712.8" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-19</text>
-<line x1="721.9" y1="82.0" x2="721.9" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="733.0" y1="82.0" x2="733.0" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="735.0" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-21</text>
-<line x1="744.2" y1="82.0" x2="744.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="755.3" y1="82.0" x2="755.3" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="757.3" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-23</text>
-<line x1="766.4" y1="82.0" x2="766.4" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="777.5" y1="82.0" x2="777.5" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<text x="779.5" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-25</text>
-<line x1="788.7" y1="82.0" x2="788.7" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="799.8" y1="82.0" x2="799.8" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="801.8" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-27</text>
-<line x1="810.9" y1="82.0" x2="810.9" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="822.1" y1="82.0" x2="822.1" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="824.1" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-29</text>
-<line x1="833.2" y1="82.0" x2="833.2" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="844.3" y1="82.0" x2="844.3" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="846.3" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-31</text>
-<line x1="855.5" y1="82.0" x2="855.5" y2="1282.0" stroke="#afb8c1" stroke-width="1"/>
-<line x1="866.6" y1="82.0" x2="866.6" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="868.6" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-02</text>
-<line x1="877.7" y1="82.0" x2="877.7" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="888.9" y1="82.0" x2="888.9" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="890.9" y="1298.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-04</text>
-<line x1="900.0" y1="82.0" x2="900.0" y2="1282.0" stroke="#d8dee4" stroke-width="1"/>
-<line x1="554.9" y1="76.0" x2="554.9" y2="1282.0" stroke="#cf222e" stroke-width="1.5" stroke-dasharray="4 3"/>
-<text x="554.9" y="72.0" text-anchor="middle" font-size="12" fill="#cf222e" font-weight="bold">today, 10-04</text>
+<line x1="310.0" y1="82.0" x2="310.0" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<text x="312.0" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-13</text>
+<line x1="320.2" y1="82.0" x2="320.2" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="330.3" y1="82.0" x2="330.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="332.3" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-15</text>
+<line x1="340.5" y1="82.0" x2="340.5" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="350.7" y1="82.0" x2="350.7" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="352.7" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-17</text>
+<line x1="360.9" y1="82.0" x2="360.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="371.0" y1="82.0" x2="371.0" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="373.0" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-19</text>
+<line x1="381.2" y1="82.0" x2="381.2" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<line x1="391.4" y1="82.0" x2="391.4" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="393.4" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-21</text>
+<line x1="401.6" y1="82.0" x2="401.6" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="411.7" y1="82.0" x2="411.7" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="413.7" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-23</text>
+<line x1="421.9" y1="82.0" x2="421.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="432.1" y1="82.0" x2="432.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="434.1" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-25</text>
+<line x1="442.2" y1="82.0" x2="442.2" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="452.4" y1="82.0" x2="452.4" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<text x="454.4" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-27</text>
+<line x1="462.6" y1="82.0" x2="462.6" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="472.8" y1="82.0" x2="472.8" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="474.8" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">09-29</text>
+<line x1="482.9" y1="82.0" x2="482.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="493.1" y1="82.0" x2="493.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="495.1" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-01</text>
+<line x1="503.3" y1="82.0" x2="503.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="513.4" y1="82.0" x2="513.4" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="515.4" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-03</text>
+<line x1="523.6" y1="82.0" x2="523.6" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<line x1="533.8" y1="82.0" x2="533.8" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="535.8" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-05</text>
+<line x1="544.0" y1="82.0" x2="544.0" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="554.1" y1="82.0" x2="554.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="556.1" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<line x1="564.3" y1="82.0" x2="564.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="574.5" y1="82.0" x2="574.5" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="576.5" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-09</text>
+<line x1="584.7" y1="82.0" x2="584.7" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="594.8" y1="82.0" x2="594.8" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<text x="596.8" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-11</text>
+<line x1="605.0" y1="82.0" x2="605.0" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="615.2" y1="82.0" x2="615.2" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="617.2" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-13</text>
+<line x1="625.3" y1="82.0" x2="625.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="635.5" y1="82.0" x2="635.5" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="637.5" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-15</text>
+<line x1="645.7" y1="82.0" x2="645.7" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="655.9" y1="82.0" x2="655.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="657.9" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-17</text>
+<line x1="666.0" y1="82.0" x2="666.0" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<line x1="676.2" y1="82.0" x2="676.2" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="678.2" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-19</text>
+<line x1="686.4" y1="82.0" x2="686.4" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="696.6" y1="82.0" x2="696.6" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="698.6" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-21</text>
+<line x1="706.7" y1="82.0" x2="706.7" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="716.9" y1="82.0" x2="716.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="718.9" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-23</text>
+<line x1="727.1" y1="82.0" x2="727.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="737.2" y1="82.0" x2="737.2" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<text x="739.2" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-25</text>
+<line x1="747.4" y1="82.0" x2="747.4" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="757.6" y1="82.0" x2="757.6" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="759.6" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-27</text>
+<line x1="767.8" y1="82.0" x2="767.8" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="777.9" y1="82.0" x2="777.9" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="779.9" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-29</text>
+<line x1="788.1" y1="82.0" x2="788.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="798.3" y1="82.0" x2="798.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="800.3" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">10-31</text>
+<line x1="808.4" y1="82.0" x2="808.4" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<line x1="818.6" y1="82.0" x2="818.6" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="820.6" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-02</text>
+<line x1="828.8" y1="82.0" x2="828.8" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="839.0" y1="82.0" x2="839.0" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="841.0" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-04</text>
+<line x1="849.1" y1="82.0" x2="849.1" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="859.3" y1="82.0" x2="859.3" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="861.3" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-06</text>
+<line x1="869.5" y1="82.0" x2="869.5" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="879.7" y1="82.0" x2="879.7" y2="1348.0" stroke="#afb8c1" stroke-width="1"/>
+<text x="881.7" y="1364.0" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">11-08</text>
+<line x1="889.8" y1="82.0" x2="889.8" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="900.0" y1="82.0" x2="900.0" y2="1348.0" stroke="#d8dee4" stroke-width="1"/>
+<line x1="533.8" y1="76.0" x2="533.8" y2="1348.0" stroke="#cf222e" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="533.8" y="72.0" text-anchor="middle" font-size="12" fill="#cf222e" font-weight="bold">today, 10-04</text>
 <text x="24.0" y="103.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">Done</text>
 <text x="300.0" y="127.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stages 7 to 11, ring-3 disk</text>
-<rect x="310.0" y="116.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="310.0" y="116.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="149.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Networking (50)</text>
-<rect x="332.3" y="138.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="330.3" y="138.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="171.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stages 17 and 18 (170)</text>
-<rect x="343.4" y="160.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="340.5" y="160.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="193.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">GPU path A (52)</text>
-<rect x="365.7" y="182.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="360.9" y="182.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="215.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Dynamic linking, Arm port (73)</text>
-<rect x="387.9" y="204.0" width="44.5" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="381.2" y="204.0" width="40.7" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="237.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 12, btrfs write (60)</text>
-<rect x="399.1" y="226.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="391.4" y="226.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="259.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 16, rustc</text>
-<rect x="410.2" y="248.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="401.6" y="248.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="281.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Cursor plane (13)</text>
-<rect x="421.3" y="270.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="411.7" y="270.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="303.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">sysfs, device queue, Chrome</text>
-<rect x="432.5" y="292.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="421.9" y="292.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="325.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Init L1 to L11 (69)</text>
-<rect x="432.5" y="314.0" width="33.4" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="421.9" y="314.0" width="30.5" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="347.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">cgroups P1, M1, S1 (28)</text>
-<rect x="454.7" y="336.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="442.2" y="336.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="369.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Chrome: zygote, speed, ferrousli</text>
-<rect x="454.7" y="358.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="442.2" y="358.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="391.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Audio, alsa-lib, pulsed (45)</text>
-<rect x="454.7" y="380.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="442.2" y="380.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="413.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">i386 ABI I1 to I4 (42)</text>
-<rect x="465.8" y="402.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="452.4" y="402.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="435.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Authentication P1, P2 (desktop as a user)</text>
-<rect x="465.8" y="424.0" width="89.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="452.4" y="424.0" width="81.4" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="457.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Installer MVP</text>
-<rect x="477.0" y="446.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="462.6" y="446.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="479.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">yserver, the X server (36)</text>
-<rect x="477.0" y="468.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="462.6" y="468.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="501.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Mount namespaces N1 to N3 (19)</text>
-<rect x="477.0" y="490.0" width="33.4" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="462.6" y="490.0" width="30.5" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="523.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Claude Code on Ferrix</text>
-<rect x="488.1" y="512.0" width="33.4" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="472.8" y="512.0" width="30.5" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="545.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Speculation domain, round trip</text>
-<rect x="510.4" y="534.0" width="33.4" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="493.1" y="534.0" width="30.5" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="567.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Network namespaces</text>
-<rect x="510.4" y="556.0" width="44.5" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="493.1" y="556.0" width="40.7" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="589.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">btrfs in the certified item</text>
-<rect x="521.5" y="578.0" width="11.1" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="503.3" y="578.0" width="10.2" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="611.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N0 and N1 (60)</text>
-<rect x="521.5" y="600.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="503.3" y="600.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="300.0" y="633.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Components and apps in repositories</text>
-<rect x="532.6" y="622.0" width="22.3" height="14.0" rx="2" fill="#8c959f"/>
+<rect x="513.4" y="622.0" width="20.3" height="14.0" rx="2" fill="#8c959f"/>
 <text x="24.0" y="661.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">In progress</text>
 <text x="300.0" y="685.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 19, the rest</text>
-<rect x="354.5" y="674.0" width="200.4" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="674.0" width="61.2" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="616.1" y="674.0" width="4.5" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<rect x="620.6" y="674.0" width="4.5" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="631.0" y="685.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">16 pts left, ~10-12</text>
+<rect x="350.7" y="674.0" width="183.1" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="674.0" width="55.9" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="589.7" y="674.0" width="4.1" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<rect x="593.8" y="674.0" width="4.1" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="603.9" y="685.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">16 pts left, ~10-12</text>
 <text x="300.0" y="707.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 20, self-hosting</text>
-<rect x="410.2" y="696.0" width="144.7" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="696.0" width="192.0" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="746.9" y="696.0" width="27.8" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="780.8" y="707.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">50 pts left, ~10-25</text>
+<rect x="401.6" y="696.0" width="132.2" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="696.0" width="138.9" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="672.6" y="696.0" width="22.9" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="701.5" y="707.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">45 pts left, ~10-21</text>
 <text x="300.0" y="729.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 13: the controllers (S3 landed)</text>
-<rect x="421.3" y="718.0" width="133.6" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="718.0" width="2.8" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="557.7" y="718.0" width="16.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="580.4" y="729.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">30 pts left, ~10-07</text>
+<rect x="411.7" y="718.0" width="122.1" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="718.0" width="2.5" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="536.3" y="718.0" width="15.3" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="557.6" y="729.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">30 pts left, ~10-07</text>
 <text x="300.0" y="751.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Gears (50 of 71)</text>
-<rect x="432.5" y="740.0" width="122.5" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="740.0" width="70.1" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="625.0" y="740.0" width="11.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="642.7" y="751.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">21 pts left, ~10-13</text>
+<rect x="421.9" y="740.0" width="111.9" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="740.0" width="64.1" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="597.9" y="740.0" width="10.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="614.6" y="751.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">21 pts left, ~10-13</text>
 <text x="300.0" y="773.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Certification findings</text>
-<rect x="443.6" y="762.0" width="111.3" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="762.0" width="248.8" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="803.7" y="762.0" width="91.8" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="901.5" y="773.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">165 pts left, ~11-05</text>
+<rect x="432.1" y="762.0" width="101.7" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="762.0" width="273.6" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="807.4" y="762.0" width="83.9" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="897.4" y="773.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">165 pts left, ~11-10</text>
 <text x="300.0" y="795.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Pixel 7: USB beyond the console driver</text>
-<rect x="454.7" y="784.0" width="100.2" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="784.0" width="94.6" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="649.5" y="784.0" width="20.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="676.1" y="795.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">37 pts left, ~10-16</text>
+<rect x="442.2" y="784.0" width="91.6" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="784.0" width="99.7" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="633.5" y="784.0" width="18.8" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="658.3" y="795.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">37 pts left, ~10-17</text>
 <text x="300.0" y="817.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Steam: the game step</text>
-<rect x="499.2" y="806.0" width="55.7" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="806.0" width="55.1" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="610.0" y="806.0" width="3.0" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<rect x="636.7" y="806.0" width="12.8" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="655.5" y="817.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">28 pts left, ~10-14</text>
-<text x="300.0" y="839.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N2 to N6, unlanded</text>
-<rect x="532.6" y="828.0" width="22.3" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="828.0" width="19.5" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="574.4" y="828.0" width="35.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="616.0" y="839.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">64 pts left, ~10-10</text>
-<text x="300.0" y="861.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Init L13b and L13c</text>
-<rect x="543.8" y="850.0" width="11.1" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="850.0" width="3.0" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="563.7" y="861.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">5 pts left, ~10-06</text>
-<text x="300.0" y="883.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Auth P2, the rest (P2.1 landed)</text>
-<rect x="543.8" y="872.0" width="11.1" height="14.0" rx="2" fill="#0969da"/>
-<rect x="554.9" y="872.0" width="57.9" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
-<rect x="612.8" y="872.0" width="3.3" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
-<text x="622.1" y="883.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">6 pts left, ~10-11</text>
-<text x="24.0" y="911.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">Forecast, 20 a day, one queue</text>
-<text x="300.0" y="935.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 15, init L13b and L13c (5, added, unlanded)</text>
-<rect x="554.9" y="924.0" width="3.0" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="957.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 13, the controllers' rest (30, unlanded)</text>
-<rect x="557.7" y="946.0" width="16.7" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="979.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N2 to N4 (64, added, unlanded)</text>
-<rect x="574.4" y="968.0" width="35.6" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1001.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 22, bubblewrap's rest (5)</text>
-<rect x="610.0" y="990.0" width="3.0" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1023.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 15, auth's rest (6)</text>
-<rect x="612.8" y="1012.0" width="3.3" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1045.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Client pages as texture backing (8, idle)</text>
-<rect x="616.1" y="1034.0" width="4.5" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1067.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Second pass and xray (8)</text>
-<rect x="620.6" y="1056.0" width="4.5" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1089.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">GC400, the rest (21, idle)</text>
-<rect x="625.0" y="1078.0" width="11.7" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1111.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 22, the rest (guess) (23)</text>
-<rect x="636.7" y="1100.0" width="12.8" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1133.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Pixel 7, the USB driver's rest (37, added)</text>
-<rect x="649.5" y="1122.0" width="20.6" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1155.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 14, real-time (40, idle)</text>
-<rect x="670.1" y="1144.0" width="22.3" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1177.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">dmabuf and virgl (48, idle)</text>
-<rect x="692.4" y="1166.0" width="26.7" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1199.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Chrome on the DK1 (50, idle)</text>
-<rect x="719.1" y="1188.0" width="27.8" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1221.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 20, self-hosting (50, added)</text>
-<rect x="746.9" y="1210.0" width="27.8" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1243.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N5, CUDA (52, added)</text>
-<rect x="774.8" y="1232.0" width="28.9" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="300.0" y="1265.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Certification findings, in-repository work (165, added)</text>
-<rect x="803.7" y="1254.0" width="91.8" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
-<text x="901.5" y="1265.0" text-anchor="start" font-size="12" fill="#0969da" font-weight="bold">11-04</text>
+<rect x="482.9" y="806.0" width="50.9" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="806.0" width="50.4" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="584.1" y="806.0" width="3.0" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<rect x="608.6" y="806.0" width="11.7" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="626.3" y="817.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">28 pts left, ~10-14</text>
+<text x="300.0" y="839.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">IPC round trip (steps 1, 2a-2e landed)</text>
+<rect x="493.1" y="828.0" width="40.7" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="828.0" width="238.0" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="771.8" y="828.0" width="35.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="813.4" y="839.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">70 pts left, ~11-01</text>
+<text x="300.0" y="861.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N2 to N6, unlanded</text>
+<rect x="513.4" y="850.0" width="20.3" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="850.0" width="17.8" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="551.6" y="850.0" width="32.6" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="590.1" y="861.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">64 pts left, ~10-10</text>
+<text x="300.0" y="883.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Init L13b and L13c</text>
+<rect x="523.6" y="872.0" width="10.2" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="872.0" width="3.0" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="542.3" y="883.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">5 pts left, ~10-06</text>
+<text x="300.0" y="905.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Auth P2, the rest (P2.1 landed)</text>
+<rect x="523.6" y="894.0" width="10.2" height="14.0" rx="2" fill="#0969da"/>
+<rect x="533.8" y="894.0" width="52.9" height="14.0" rx="2" fill="#eef6fd" stroke="#b6d4f2" stroke-width="1" stroke-dasharray="1 3"/>
+<rect x="586.7" y="894.0" width="3.1" height="14.0" rx="2" fill="#b6e3ff" stroke="#0969da" stroke-width="1" stroke-dasharray="4 2"/>
+<text x="595.7" y="905.0" text-anchor="start" font-size="11" fill="#0969da" font-weight="normal">6 pts left, ~10-11</text>
+<text x="24.0" y="933.0" text-anchor="start" font-size="13" fill="#1f2328" font-weight="bold">Forecast, 20 a day, one queue</text>
+<text x="300.0" y="957.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 15, init L13b and L13c (5, added, unlanded)</text>
+<rect x="533.8" y="946.0" width="3.0" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="979.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 13, the controllers' rest (30, unlanded)</text>
+<rect x="536.3" y="968.0" width="15.3" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1001.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N2 to N4 (64, added, unlanded)</text>
+<rect x="551.6" y="990.0" width="32.6" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1023.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 22, bubblewrap's rest (5)</text>
+<rect x="584.1" y="1012.0" width="3.0" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1045.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 15, auth's rest (6)</text>
+<rect x="586.7" y="1034.0" width="3.1" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1067.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Client pages as texture backing (8, idle)</text>
+<rect x="589.7" y="1056.0" width="4.1" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1089.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Second pass and xray (8)</text>
+<rect x="593.8" y="1078.0" width="4.1" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1111.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">GC400, the rest (21, idle)</text>
+<rect x="597.9" y="1100.0" width="10.7" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1133.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 22, the rest (guess) (23)</text>
+<rect x="608.6" y="1122.0" width="11.7" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1155.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Live driver update (26, added)</text>
+<rect x="620.3" y="1144.0" width="13.2" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1177.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Pixel 7, the USB driver's rest (37, added)</text>
+<rect x="633.5" y="1166.0" width="18.8" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1199.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 14, real-time (40, idle)</text>
+<rect x="652.3" y="1188.0" width="20.3" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1221.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Stage 20, self-hosting (45, added)</text>
+<rect x="672.6" y="1210.0" width="22.9" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1243.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">dmabuf and virgl (48, idle)</text>
+<rect x="695.5" y="1232.0" width="24.4" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1265.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Chrome on the DK1 (50, idle)</text>
+<rect x="719.9" y="1254.0" width="25.4" height="14.0" rx="2" fill="#ffffff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1287.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">NVIDIA N5, CUDA (52, added)</text>
+<rect x="745.4" y="1276.0" width="26.4" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1309.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">IPC round trip to seL4's figure (70, added)</text>
+<rect x="771.8" y="1298.0" width="35.6" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="300.0" y="1331.0" text-anchor="end" font-size="12" fill="#1f2328" font-weight="normal">Certification findings, in-repository work (165, added)</text>
+<rect x="807.4" y="1320.0" width="83.9" height="14.0" rx="2" fill="#54aeff" stroke="#0969da" stroke-width="1" stroke-dasharray="3 2"/>
+<text x="897.4" y="1331.0" text-anchor="start" font-size="12" fill="#0969da" font-weight="bold">11-09</text>
 </svg>
