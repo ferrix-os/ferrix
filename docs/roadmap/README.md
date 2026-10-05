@@ -20,27 +20,34 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 
 **In progress**
 
-- **Stage 13:** cgroups with pids, memory, OOM kill and CPU weight. Of the
-  namespaces, per-mount flags (N1) and binds (N2) are in, and mount
-  namespaces (N3) are next; seccomp is left.
-- **Stage 15:** the init is done (L1 to L12): `/sbin/init` boots every image,
-  starts `devmgr` and runs the desktop as a service; logins go through `authd`
-  (`docs/AUTH.md` phase 1), and hyprlock's lock over it is parked on a branch.
+- **Stage 13:** cgroups with pids, memory, OOM kill and CPU weight. The
+  mount, user, UTS, IPC, cgroup, pid and network namespaces are in, and so
+  are seccomp's filters (S3, 2026-10-04). The cgroup controllers (reclaim,
+  freezing, `cpu.max`, `io`) are built and gated, and wait for the
+  certification consultant's review, not landed.
+- **Stage 15:** the init is done (L1 to L12), and its sandboxing keys are
+  half in: L13a (`NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=`) and L13b
+  (`PrivateNetwork=`, 2026-10-05). L13c, `SystemCallFilter=`, is built and
+  waits to land. `/sbin/init` boots every image, starts `devmgr` and runs the
+  desktop as a service; logins go through `authd` (`docs/AUTH.md` phases 1 and
+  2 but for K-C), hyprlock's lock over it included.
 - **Stage 19:** the desktop composites on the GPU, and yserver, an X server
   in Rust, shows X windows on it; client pages as texture backing and the
-  second-pass effects are left. waybar, fuzzel and hypridle, rewritten in
-  Rust, run the customer's own config on `run-compositor --everything`;
-  hyprlock is parked on a branch.
+  second-pass effects are left. waybar, fuzzel, hypridle and hyprlock,
+  rewritten in Rust, run the customer's own config on `run-compositor
+  --everything` (a fix to that command's X11 link is on a branch, not landed).
 - **Stage 20:** Ferrix builds its own x86-64 image, and since 2026-10-03 its
   own AArch64 image on Arm hardware: inside Ferrix on a Pixel 7, in crosvm.
+  Its matrix's plan mode is complete since 2026-10-05 (S-2).
 - **Stage 22 (Steam):** sound plays through `/dev/snd` and a PulseAudio-protocol
   server, Chrome plays video with sound, 32-bit x86 programs run, and Valve's
   `steamcmd` logs in to Steam. The Steam client draws its sign-in window
   through yserver (2026-09-29), with launch-side workarounds
   (`docs/STEAM.md`).
 - **The channel round trip, toward seL4 (440 ns):** 2,556 ns with every
-  mitigation on, from 37 us; step 1 and 2a to 2e are in, 2f to step 5 are
-  left (`docs/OPAQUE-KERNEL.md` §9.9).
+  mitigation on, from 37 us; step 1, 2a to 2e and the exact `bench-ipc` are
+  in; 2f and steps 3a and 3b are built on branches, step 4's groundwork waits
+  for review, and step 5 is left (`docs/OPAQUE-KERNEL.md` §9.9).
 - **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28).
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library.
@@ -54,14 +61,18 @@ them; what is red, parked and waiting is in
 
 **Not started**
 
-- Stage 14 (real-time) and stage 21 (bare metal with a GPU of Ferrix's own).
+- Stage 14 (real-time).
+
+**Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
+RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
+booting with `nvidia-smi`, are on `main`.
 
 ## Forecast
 
-- About **442 sized points** were left on 2026-09-26, the last count.
-  Since then stage 19's X server (40 of them), sound's alsa-lib and the
-  32-bit ABI's I2 to I4 have landed; the forecast is recounted in
-  [Status](status.md) at the next velocity count.
+- About **647 sized points** were left on 2026-10-05, the last count, at
+  the forecast rate of 20 a day: they end on 2026-11-07 (2026-10-17 at 56 a
+  day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
+  recount and what moved it are in [Status](status.md).
 - Unsized work (self-hosting, bare metal, most of Steam) is not in any date.
 
 ## Details
@@ -113,7 +124,7 @@ single file across.
 | 18 | [The compositor](stage-18-compositor.md) | ✓ done | 96 points, spent |
 | 19 | [Hyprland fidelity, and the GPU](stage-19-hyprland-fidelity-gpu.md) | ◐ in progress | 178 points, about 16 left |
 | 20 | [Self-hosting](stage-20-self-hosting.md) | ◐ in progress |  |
-| 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ○ planned | unsized, over 100 points |
+| 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ◐ in progress | unsized, over 100 points |
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |

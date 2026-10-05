@@ -176,19 +176,21 @@ Still to do, in order:
   four boots' transcripts equal `main`'s apart from the `inputs` line and
   the sizes. Both were met before the landing: the consultant's ledger line
   349 and the `os7c-late` transcripts.
-The rest of the stage is 50 points (range 40-75), sized on 2026-10-04's
-evening; S-0, CI green, is the first bullet above. A guess is marked.
+The rest of the stage was 50 points (range 40-75), sized on 2026-10-04's
+evening, and is 45 since S-2 landed on 2026-10-05; S-0, CI green, is the
+first bullet above and is met too. A guess is marked.
 
 * **S-1, FX-0001 under a loaded host, 8** (3 to 13, a guess). A shootdown
   wait on x86-64 still ends when the host runs the waiter and not the
   processor waited for (it also fired at a load of 13 on 2026-09-30); Arm
   invalidates in hardware and never waits. The 2026-10-04 plan run never
   reached its kernel builds, so it is untested whether the plan now finishes.
-* **S-2, plan mode made complete, 5** (firm). It stops a row at its first boot
-  and misses 23 of 153 distinct builds, the ones a test makes after a boot
-  (negative variants, later boots' programs); those tests are to build every
-  variant before their first boot (approved by the product owner).
-  Done on `po5/s2-plan`: `test-audio`, `test-badapple`, `test-compositor`,
+* **S-2, plan mode made complete, 5** (firm), **done 2026-10-05** (ce133294c,
+  a3b240c6b, on `main`). Plan mode stops a row at its first boot and missed
+  23 of 153 distinct builds, the ones a test makes after a boot (negative
+  variants, later boots' programs); those tests now build every variant
+  before their first boot (approved by the product owner).
+  Landed: `test-audio`, `test-badapple`, `test-compositor`,
   `test-display`, `test-input`, `test-procfs` and `test-threads` build every
   variant before their first boot, each later boot building its own again as
   cargo saying it is current. A plan run of the matrix on that tree

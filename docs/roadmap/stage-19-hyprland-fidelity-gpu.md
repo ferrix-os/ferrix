@@ -1466,6 +1466,18 @@ evidence is:
 * a plugin loaded from `plugin = /bin/plug`, adding a dispatcher a keybind
   presses.
 
+**2026-10-05 review.** Nothing in this stage's scope landed since the review
+below: about 16 of the 178 are still left (client pages 8, the second pass,
+`precise_mouse_move` and `xray` about 8). Two things around it. The customer's
+`run-compositor --everything` fails on `main`: the volume's X11 link met the
+xkb placeholder (FX-0801, a kernel panic "entry 739 errno 39"), and the fix is
+on `po6/everything-x11` (38a16e7b8, with two Windows component-checkout fixes),
+not landed. And `test-compositor`'s frame budget failed two batches on 2026-10-05
+under 27 to 28 concurrent gates on emulated Arm (armv7a 14.1 s against 10 s,
+aarch64 7.4 s against 5 s; logs `batch-20261005T174424Z-1` and
+`batch-20261005T182136Z-8`); it is the load flake `docs/BACKLOG.md` already records for the
+compositor's frame budget, and this day's sightings are not in it yet.
+
 **Where the points stand (reviewed 2026-09-30).** The X server is done: it
 is yserver, a Rust X11 server with a rootless Wayland backend of Ferrix's
 own, 36 points against the 40 guessed for XWayland here (`docs/YSERVER.md`,

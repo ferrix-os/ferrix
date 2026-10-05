@@ -5,8 +5,8 @@ Every branch on GitHub that still holds work `main` does not have, as of
 the product owner's and the certification consultant's; the 2026-10-04
 wind-down's branches are in the sections after this introduction, and
 *2026-10-05: refreshed* and *2026-10-05, evening: refreshed* say what of them
-has landed since, and which branches origin no longer has. It is where the
-next session starts.
+has landed since, and which branches origin no longer has; *2026-10-05,
+wind-down* is the newest word. It is where the next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -32,6 +32,46 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-05, wind-down
+
+Written by po6-steward3 at the 2026-10-05 wind-down against `origin/main`
+cf30aa08f, with `git cherry origin/main origin/<branch>`. Where it differs
+from the two sections below, this one is newer.
+
+**Landed since the evening section (e3e15bc7f), all on `main`:**
+
+- the forecast and the reservation of steps 3a and 3b's ids (e41489fd7), and
+  `open-branches` refreshed (e82805c14, f4cbaaa7f);
+- FX-1012: `po6/g3`, a6116e822;
+- batch 20261005T170400Z, as 3349682db: L13b (`l13b`, b909a18e7 through
+  90dbef5cc), the stage 10 seam panic (`po6/seam`, 1e113bb31 and 3f0e56b2b),
+  the Windows gateway's peek (`po6/gw2`, e321befc4) and `bench-ipc` made exact
+  (`bench-exact`, f192d6baa as 3349682db);
+- `land-n6`, NVIDIA N2 to N6's screen, as a84992dc5 (batch 20261005T190105Z,
+  b136ac7d4 and the commits around it); `po6/land-n6` counts 0 unlanded now;
+- the `--everything` fixes, `po6/everything-x11`, as 0d7520d82, 1752580c1 and
+  cf30aa08f, on the customer's decision without a batch.
+
+**In flight, not landed.** All of these are on origin as `po6/*`, pushed at
+the wind-down without a force; the old origin names (`l13c`, `land-n6`,
+`stage13-*`) keep their pre-rebase tips and are history.
+
+| Branch | Tip | Based on | State |
+|---|---|---|---|
+| `po6/cgctl` | 69fe7b51c | 3349682db | the cgroup controllers (stage 13, 30 points); 23 controls fired, gates passed; owed: the consultant's look at the D1 fix and four new controls |
+| `po6/cgctl-n6` | c4e2b8f9d | 3349682db (it carries `land-n6`) | the same work with coverage carried; no gate run yet; the one to rebase now that `land-n6` has landed |
+| `po6/l13c` | aed1c3fa0 | 3349682db | init L13c, `SystemCallFilter=`; batch 20261005T184633Z failed it on `test-vfs --arch x86_64 --init ferrousli` (the cgroup applet's `rmdir`, "Resource busy"; `main` and `main` plus `land-n6` passed); next: rerun that gate on the branch alone, then rejoin |
+| `po6/step2f` | df5411820 | 3349682db | the channel round trip's 2f: `check` passed, 4 controls fired, bench 2417 ns against `main`'s 2536 to 2566; the consultant: OK if C1 to C6, ledger 382; next: rebase, regenerate, carry coverage, join |
+| `po6/step3` | 4a8b8dfee | 3349682db | steps 3a and 3b, WIP: `check` and the x86-64 KVM boot passed; owed: control c5, the TCG, AArch64 and ARMv7-A boots, `bench-ipc --alternate`, the consultant; one batch for both |
+| `po6/step4-prep` | fe424cd81 | 527201573 | step 4's groundwork (the park protocol's loom model, `ferrix.fastpath`, the equivalence cases); waits for review |
+| `po6/n5` | 511c1bdaf | e41489fd7 | N5, unprivileged mounting; parked by the customer; the consultant has not cleared it (ledger 378: B1 mounts detached before the rename check, B2 the namespace write-out under `preempt_disable`) |
+| `po6/bwrap-user` | 09e9c9c74 | e41489fd7 | `test-bwrap` as uid 1000; parked with N5; the two together are re-sized from 5 to 16 points |
+
+Still on the gate host, not on origin: `po6/seam-diag*` and `po5/red-diag`
+(diagnostics, never land) and the worktrees and target directories the
+handover lists for removal by exact name. `nvidia-n2` (N3b, half written, its
+tip does not build) is the development branch for what follows `land-n6`.
 
 ## 2026-10-05, evening: refreshed
 

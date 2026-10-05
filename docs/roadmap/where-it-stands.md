@@ -1,6 +1,6 @@
 # Where it stands, in full
 
-*Reviewed 2026-09-30.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-05, to `main` cf30aa08f.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -46,8 +46,12 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   2's six pieces (2a to 2e) are on `main`, each reviewed by the certification
   consultant: a native round trip inside a domain is 2,556 ns with every
   mitigation on, down from 37 us. Redox, measured the same way, takes 1,965
-  ns with no speculative defence. Left: 2f (on a branch), step 3, step 4's
-  direct switch and fast path, step 5 and step 4b; the handover is
+  ns with no speculative defence. `bench-ipc` is exact since 2026-10-05
+  (a fenced counter, sorted samples, one pinned processor, alternation;
+  3349682db). Left: 2f (gated, on `po6/step2f`, waiting for the consultant's
+  conditions), step 3 (3a and 3b, work in progress on `po6/step3`), step 4's
+  direct switch and fast path (its groundwork on `po6/step4-prep` waits for
+  review), step 5 and step 4b; the handover is
   `docs/handover/2026-10-03-ipc.md`.
 
 * **Steam signs in and shows its store** on the `--everything` desktop,
@@ -109,21 +113,22 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   whose kernel panics now also asks QEMU where every processor is
   (`panic-registers.txt`), for FX-0001, seen twice there.
 * **NVIDIA's own driver drives the RTX 3060's monitor** (2026-10-03 and
-  -04, stage 21, `docs/NVIDIA.md`). Done, but not on `main`:
+  -04, stage 21, `docs/NVIDIA.md`; on `main` since 2026-10-05, `land-n6`,
+  a84992dc5):
   * Chrome's WebGL renders on the card, through ANGLE on NVIDIA's Vulkan.
   * The desktop runs on the customer's TV on the 3060's HDMI port, with
     NVKMS inside `nvrm` and `nvrm` as the display core's copying driver.
   * The customer drives it with a dedicated keyboard and mouse.
 
-  It runs at 44–53 fps, with software compositing. `land-n6` is ready to
-  land after a rebase (consultant ledger 318). Next, in the customer's
-  order:
+  It runs at 44–53 fps, with software compositing. The conditions the
+  landing left are BACKLOG rows O1 to O6 (consultant ledger 318). Next, in
+  the customer's order:
   1. dmabufs for Chrome's GPU compositing (N3b, half built on
      `nvidia-n2`);
   2. a hardware cursor;
   3. measuring page loads.
 
-  Already on `main` (2026-10-05): the chardev core's queue to `nvrm` is
+  Also on `main` (2026-10-05): the chardev core's queue to `nvrm` is
   held to its room (F-63, closed), and stage 10's chardev self-check, with a
   fake driver, requires it and the HELLO rules, copies and drains (N10's
   code half, N12, N13; FX-1013). N5's switch, D1 to D10 and
@@ -143,9 +148,16 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   are not yet, and no driver's graceful STOP is reachable yet.
 
 **Red on `main`** (`docs/BACKLOG.md`, *Red on `main`*): on 2026-10-05
-x86-64's stage 10 still panics with FX-1012 in about one boot in 27 to 160
-(`iommu/check.rs` G3 racing the console's pump thread; not fixed, a row for
-interrupt remapping's owner). Fixed and on `main` (0ece8826e's batch):
+`main` had two stage 10 panics, both fixed. FX-1012, one boot in 27 to 160
+(`iommu/check.rs` G3 racing the console's pump thread, which had ended 340 of
+a night's 9,234 boots as "QEMU killed"): G3 and R5 take their check byte in
+the receive path, out of the pump's reach (a6116e822). The seam panic: the block ring's
+index was read byte by byte on the driver side, so a reader could see half a
+`u32`; the accessors are single accesses now and the virtio notify has a fence
+(1e113bb31, 3f0e56b2b). The net ring has the same flaw and is unowned, 3 points.
+The Windows gateway test lost a guest's frame when a timed receive raced a
+datagram; the gateway waits by peek now (e321befc4). Fixed and on `main`
+(0ece8826e's batch):
 `test-init --arch all` failing on the revoke reader, on prompts typed too
 early and on `su`'s half-read password, and stage 5's moving lock check
 panicking because an idle processor could take another idle one's last
@@ -270,8 +282,9 @@ a getty, and powers the machine off, on all three architectures (`cargo xtask
 test-init`). `run` and the desktop boot it, and the compositor is its service.
 Since 2026-10-04 a unit can be sandboxed with L13a's `NoNewPrivileges=`,
 `PrivateTmp=` and `ProtectSystem=` (1e1f2543a, `docs/INIT.md` §4.5);
-L13b's `PrivateNetwork=` and L13c's `SystemCallFilter=` are on branches
-`l13b` and `l13c`. `test-init` types each password once, when its prompt is
+L13b's `PrivateNetwork=` landed on 2026-10-05 (3349682db); L13c's
+`SystemCallFilter=` is built on branch `po6/l13c` and waits to land (its batch
+failed one `test-vfs` cgroup `rmdir` that `main` passes, cause not known). `test-init` types each password once, when its prompt is
 on the console (`ferrix-auth-client` flushes before it shows the prompt), and
 judges the revoke reader on one look (2026-10-05).
 
@@ -359,7 +372,7 @@ for its keyboard check; before that the check never ran.
 
 Stage 21 is bare metal with a card of Ferrix's own. NVIDIA's driver
 already draws the desktop and Chrome's WebGL on the RTX 3060's own
-monitor, through libvirt (unlanded, `land-n6`; see its page). Stage 22 is
+monitor, through libvirt (on `main` since 2026-10-05; see its page). Stage 22 is
 Steam,
 whose 32-bit x86 ABI is under way (`docs/I386.md`): I1 to I4 are on `main`
 (32-bit programs, their threads, signals and fork, Alpine's and Debian's i386

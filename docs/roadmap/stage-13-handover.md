@@ -33,6 +33,12 @@ each chain; a later branch in a chain sits on the earlier one.
 
 ### cgroup controllers
 
+**2026-10-05:** po6-cgctl carried this on as `po6/cgctl` (69fe7b51c on
+`main`'s 3349682db) and `po6/cgctl-n6` (c4e2b8f9d on `land-n6`), both on
+origin: 23 controls FIRED, the gate rows passed, finding D1 fixed. Owed: the
+consultant's look at the D1 fix and the four new controls, then the batch. The
+row below is the 2026-10-01 state it started from.
+
 | Branch | Tip | Worktree | State | To land it |
 |---|---|---|---|---|
 | `stage13-cgctl` | 670b4c49a | `cgctl` | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller. Every gate row PASSED on 89c2f911a (INDEX `cs-*`, x86_64 under kvm and the release build included). Controls FIRED: io-charge, io-parent, io-throttle, io-root, io-limit, io-ended, cpu-throttle, reclaim-hole. | Run the 11 controls not run (cpu-kill, cpu-charge, cpu-rearm-write, cpu-rearm-move, freeze-park, freeze-sigcont, park-poll, reclaim-none, reclaim-sibling, reclaim-min, dentry-keep on armv7a); reclaim-sibling has never shown its own message. Update CGROUPS.md §14's control table. Have the consultant see the `cpu.max` bound widened from two fifths to two thirds of a processor. Delete its entry from `tools/common/data/requirement-reservations.json` in the commit carrying L.object.106-112, L.sched.3-4, H.QUOTA.10-12. Nazuna worktree `os-cg-wt` and side refs `os-cgctl/*` are kept for this. |

@@ -831,6 +831,27 @@ it: 2026-10-04 is a half day, and nearly all of it is sized from commit
 messages. The roadmap's charts (`tools/common/gen/gen-roadmap-charts.py`) are
 redrawn from it.
 
+### Update, 2026-10-05
+
+Counted from 67efb9fb1 (the 2026-10-04 count) to `main`'s cf30aa08f, by the
+same rule, over the one calendar day 2026-10-05: a landing counts at the
+estimate written before its work started, and what had none is sized
+afterwards from `git log`, in clusters. Work that is built but not on `main`
+-- the cgroup controllers, L13c, 2f, steps 3a and 3b, N5 and bubblewrap's
+user-namespace gate -- is not counted until it lands.
+
+| day | estimated before | sized afterwards | what |
+|---|---|---|---|
+| 2026-10-05 | 86 | ≈ 29 | estimated: NVIDIA's N2 to N4, landed as `land-n6` (a84992dc5, batch 20261005T190105Z), 64; stage 20's S-2, plan mode complete, 5; FX-1012, the stage 10 G3 and R5 race with the console's pump, 6; the stage 10 seam panic, the block ring's byte-wise `u32` on the driver side, 4; the Windows gateway's peek, 4; `bench-ipc` made exact 1; init's L13b, 2 of L13's 10; afterwards: the certification's C1 work (the re-carried anchors, the item boundary, N1e's text, F-62) ≈ 8, the gateway's retransmission-timer fix ≈ 4, F-63 and the chardev self-check N12 ≈ 4, the red batch (`test-init`'s answers, `xtask`'s lossy serial reader, `sched::steal_from` ending stage 5's moving-lock panic, `su`) ≈ 5, the `--everything` fixes (the X11 link against the xkb placeholder, component checkouts on Windows) ≈ 3, the docs-steward agent, the forecast and the docs rounds ≈ 3, and the product owner's docs and skill ≈ 2 |
+
+So **≈ 115 on 2026-10-05**, 86 of them estimated before the work started. The
+running total is **≈ 2,214 points in 22 calendar days, ≈ 101 a day** (2,099
+to 10-04, and 115), or ≈ 1,264 (≈ 57 a day) counting only what had an estimate
+(1,178 and 86). The sizes afterwards (the 29) are the same kind of guess as
+before. 2026-10-05 is a full day, and 64 of its 86 estimated points are one
+landing that was built on the two days before. The roadmap's charts are redrawn
+from it, and the forecast's scope, 647 points, is in `docs/roadmap/status.md`.
+
 ---
 
 ## Decisions
