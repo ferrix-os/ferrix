@@ -46,10 +46,19 @@ impl Guest {
 
     /// The same, with `forwards` listened on.
     fn start_with(forwards: &[Forward]) -> crate::Result<Guest> {
+        Guest::start_retransmitting(forwards, super::tcp::RETRANSMIT)
+    }
+
+    /// The same, with TCP's retransmission timer at `retransmit`.
+    fn start_retransmitting(forwards: &[Forward], retransmit: Duration) -> crate::Result<Guest> {
         // A resolver named, so no test asks the host for its own: on Windows
         // that is a PowerShell per gateway, and twenty of them at once starve
         // the other tests' sockets.
-        let gateway = Gateway::start(Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)), forwards)?;
+        let gateway = Gateway::start_retransmitting(
+            Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
+            forwards,
+            retransmit,
+        )?;
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
         socket.connect(gateway.address())?;
         socket.set_read_timeout(Some(PATIENCE))?;
@@ -1059,55 +1068,62 @@ fn a_held_download(
 /// again is what overran the guest's buffers into the next loss.
 #[test]
 fn a_lost_segment_is_sent_again_alone() {
-    let guest = Guest::start();
+    // The retransmission timer is the other way a segment goes again, with
+    // everything in flight behind it, and at 20 ms it runs out whenever this
+    // thread or the gateway's goes unscheduled that long between the
+    // acknowledgment of the first segment and the third duplicate: on
+    // Windows' 15.6 ms timer tick it did, on most CI runs from 2026-10-04,
+    // and on Linux under load. Out of the way, nothing the gateway sends
+    // twice is anything but the duplicates' answer, for as long as this test
+    // cares to watch.
+    let guest = Guest::start_retransmitting(&[], Duration::MAX).unwrap();
     let (mut stream, _server) = a_long_download(&guest, 40_011);
-    let quiet = Duration::from_millis(5);
     let (first, len) = stream.data_within(PATIENCE).expect("the download starts");
-    // The rest of what is in flight, and where what has been sent ends.
-    let mut sent = first.wrapping_add(len as u32);
-    let drain = |stream: &mut Stream<'_>, sent: &mut u32| {
-        while let Some((sequence, len)) = stream.data_within(quiet) {
-            let end = sequence.wrapping_add(len as u32);
-            if end.wrapping_sub(*sent) < 1 << 31 {
-                *sent = end;
-            }
-        }
-    };
-    drain(&mut stream, &mut sent);
+    // Where what has been sent ends. Everything until the duplicates is new
+    // data, in order and once each.
+    let lost = first.wrapping_add(len as u32);
+    let mut sent = lost;
+    while sent == lost {
+        let (sequence, len) = stream
+            .data_within(PATIENCE)
+            .expect("the segment to lose is sent");
+        assert_eq!(
+            sequence, sent,
+            "the download goes in order, each segment once"
+        );
+        sent = sequence.wrapping_add(len as u32);
+    }
 
     // The first segment arrives, and the second is lost: acknowledge the
     // first, then say so three more times.
-    let lost = first.wrapping_add(len as u32);
     stream.expected = lost;
     stream.send(Flags::ACK, &[]);
-    drain(&mut stream, &mut sent);
-    // Before the duplicates, not after: the gateway restarts its timer when
-    // the third reaches it, and a test thread descheduled between sending it
-    // and reading the clock would let that timer fire inside the window and
-    // its rewind be taken for a resend of everything.
-    let asked = std::time::Instant::now();
     for _ in 0..3 {
         stream.send(Flags::ACK, &[]);
     }
 
-    let (again, _) = stream
-        .data_within(PATIENCE)
-        .expect("the lost segment comes again");
-    assert_eq!(again, lost, "the segment sent again is the one asked for");
-    // New data may follow it: the host's bytes can reach the gateway after
-    // the first burst, as they do on Windows. What must not come is anything
-    // sent before, until the retransmission timer, restarted by the third
-    // duplicate, could have rewound it.
-    while let Some((sequence, len)) = stream.data_within(quiet) {
-        if asked.elapsed() >= super::tcp::RETRANSMIT {
-            break;
+    // New data may come before and after it, whatever the gateway sent or
+    // read from the host before the duplicates reached it, and goes on from
+    // where the data so far ended. Anything else is a segment sent again,
+    // and only the lost one may be, once.
+    let mut again = false;
+    while let Some((sequence, len)) = stream.data_within(if again { SILENCE } else { PATIENCE }) {
+        if sequence == sent {
+            sent = sequence.wrapping_add(len as u32);
+            continue;
         }
         assert!(
-            sequence.wrapping_sub(sent) < 1 << 31,
+            !again,
             "and nothing else sent before: the segments behind it were not lost, \
              but {sequence}+{len} came again (sent up to {sent})"
         );
+        assert_eq!(
+            sequence, lost,
+            "the segment sent again is the one asked for"
+        );
+        again = true;
     }
+    assert!(again, "the lost segment comes again");
 }
 
 #[test]

@@ -266,6 +266,8 @@ pub(super) struct Connection {
     mss: usize,
     /// When something was last sent, for the retransmission timer.
     sent_at: Instant,
+    /// How long the timer runs: [`RETRANSMIT`], from the gateway's `Core`.
+    retransmit: Duration,
     /// How many acknowledgments in a row repeated `snd_una`.
     duplicate_acks: u32,
     /// The segment at `snd_una` is owed again, and only that one: three
@@ -279,7 +281,7 @@ pub(super) struct Connection {
 impl Connection {
     /// A connection in the state a SYN leaves it: numbered, with no host
     /// connection yet.
-    fn new(segment: &wire::Segment<'_>, iss: u32) -> Connection {
+    fn new(segment: &wire::Segment<'_>, iss: u32, retransmit: Duration) -> Connection {
         let offered = segment.header.options.mss.map_or(MIN_SEGMENT, usize::from);
         let now = Instant::now();
         Connection {
@@ -300,6 +302,7 @@ impl Connection {
             inbound: Vec::new(),
             mss: offered.clamp(MIN_SEGMENT, MAX_SEGMENT),
             sent_at: now,
+            retransmit,
             duplicate_acks: 0,
             resend_first: false,
             heard_at: now,
@@ -308,7 +311,12 @@ impl Connection {
 
     /// A forwarded connection: the host's `stream` accepted, and the SYN that
     /// opens the guest's half put in `out`.
-    fn dialing(stream: TcpStream, iss: u32, out: &mut Vec<Outgoing>) -> Connection {
+    fn dialing(
+        stream: TcpStream,
+        iss: u32,
+        retransmit: Duration,
+        out: &mut Vec<Outgoing>,
+    ) -> Connection {
         let now = Instant::now();
         let mut connection = Connection {
             state: State::Dialing,
@@ -328,6 +336,7 @@ impl Connection {
             inbound: Vec::new(),
             mss: MIN_SEGMENT,
             sent_at: now,
+            retransmit,
             duplicate_acks: 0,
             resend_first: false,
             heard_at: now,
@@ -686,7 +695,7 @@ impl Connection {
     /// [`Connection::push_next`] then walks the same bytes, and the FIN after
     /// them, in the same order and with the same sequence numbers.
     fn expire_retransmit(&mut self) {
-        if self.snd_nxt == self.snd_una || self.sent_at.elapsed() < RETRANSMIT {
+        if self.snd_nxt == self.snd_una || self.sent_at.elapsed() < self.retransmit {
             return;
         }
         self.snd_nxt = self.snd_una;
@@ -807,7 +816,9 @@ impl Core {
         }
         let iss = self.next_iss;
         self.next_iss = self.next_iss.wrapping_add(ISS_STRIDE);
-        let _ = self.tcp.insert(key, Connection::new(segment, iss));
+        let _ = self
+            .tcp
+            .insert(key, Connection::new(segment, iss, self.retransmit));
         self.start_connect(key);
     }
 
@@ -887,9 +898,10 @@ impl Core {
         let iss = self.next_iss;
         self.next_iss = self.next_iss.wrapping_add(ISS_STRIDE);
         let mut out = Vec::new();
-        let _ = self
-            .tcp
-            .insert(key, Connection::dialing(stream, iss, &mut out));
+        let _ = self.tcp.insert(
+            key,
+            Connection::dialing(stream, iss, self.retransmit, &mut out),
+        );
         bump(&self.counters.tcp_forwarded);
         for segment in &out {
             let _ = self.send_outgoing(&key, segment);

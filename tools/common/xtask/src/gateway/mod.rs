@@ -303,7 +303,20 @@ impl Gateway {
     /// else holds is an error the run stops on, rather than a forward that
     /// silently leads nowhere.
     pub(crate) fn start(resolver: Option<SocketAddrV4>, forwards: &[Forward]) -> Result<Gateway> {
-        let core = Core::bind(resolver, forwards)?;
+        Gateway::start_retransmitting(resolver, forwards, tcp::RETRANSMIT)
+    }
+
+    /// [`Gateway::start`], with TCP's retransmission timer at `retransmit`
+    /// rather than [`tcp::RETRANSMIT`]. A test of what the duplicate
+    /// acknowledgments alone send puts the timer out of its way with this:
+    /// at 20 ms it runs out whenever the test's thread or this one goes
+    /// unscheduled that long, and sends everything in flight again.
+    fn start_retransmitting(
+        resolver: Option<SocketAddrV4>,
+        forwards: &[Forward],
+        retransmit: Duration,
+    ) -> Result<Gateway> {
+        let core = Core::bind(resolver, forwards, retransmit)?;
         let address = match core.socket.local_addr()? {
             SocketAddr::V4(address) => address,
             SocketAddr::V6(_) => {
@@ -422,13 +435,20 @@ struct Core {
     pings: icmp::Forwarder,
     /// The initial send sequence number the next connection takes.
     next_iss: u32,
+    /// How long a TCP connection waits for an acknowledgment before sending
+    /// everything unacknowledged again: [`tcp::RETRANSMIT`] but in tests.
+    retransmit: Duration,
     /// What has happened.
     counters: Arc<Counters>,
 }
 
 impl Core {
     /// Bind the host socket and prepare the tables.
-    fn bind(resolver: Option<SocketAddrV4>, forwards: &[Forward]) -> Result<Core> {
+    fn bind(
+        resolver: Option<SocketAddrV4>,
+        forwards: &[Forward],
+        retransmit: Duration,
+    ) -> Result<Core> {
         let listeners = forwards
             .iter()
             .map(|&forward| tcp::Listener::bind(forward))
@@ -460,6 +480,7 @@ impl Core {
             // guessing a sequence number is not a threat that exists. A fixed
             // start also makes one captured run comparable with the next.
             next_iss: 0x1000_0000,
+            retransmit,
             counters: Arc::new(Counters::default()),
         })
     }
