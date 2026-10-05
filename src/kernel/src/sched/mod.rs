@@ -2291,6 +2291,15 @@ fn balance() {
     }
     <arch::Irq as IrqControl>::restore(saved);
 
+    if me == 0 {
+        let _ = DIAG_EVALS.fetch_add(1, Ordering::Relaxed);
+        let mine_load = queues.first().map(|lock| { let saved = <arch::Irq as IrqControl>::disable(); let s = lock.lock().snapshot(); <arch::Irq as IrqControl>::restore(saved); s });
+        let other = queues.get(1).map(|lock| { let saved = <arch::Irq as IrqControl>::disable(); let s = lock.lock().snapshot(); <arch::Irq as IrqControl>::restore(saved); s });
+        if let (Some(m), Some(o)) = (mine_load, other) {
+            DIAG_MINE.store(((m.queued as u64) << 32) | m.average, Ordering::Relaxed);
+            DIAG_OTHER.store(((o.queued as u64) << 40) | (u64::from(o.idle) << 32) | o.average, Ordering::Relaxed);
+        }
+    }
     // Pull first: if somebody is busier than this processor, take from them.
     if let Some(victim) = folded.pull_from() {
         let _ = pull(me, victim);
@@ -2655,6 +2664,22 @@ pub(crate) struct Summary {
     pub(crate) worst_lag: u64,
     /// Tasks on the queues, running ones included.
     pub(crate) tasks: usize,
+}
+
+pub(crate) static DIAG_EVALS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static DIAG_MINE: AtomicU64 = AtomicU64::new(0);
+pub(crate) static DIAG_OTHER: AtomicU64 = AtomicU64::new(0);
+
+/// DIAG: one processor's switches and stolen-in count, and whether it reads idle.
+pub(crate) fn diag_cpu(cpu: usize) -> (u64, u64, u64, bool) {
+    let Some(queues) = QUEUES.get() else { return (0, 0, 0, false) };
+    let Some(lock) = queues.get(cpu) else { return (0, 0, 0, false) };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let queue = lock.lock();
+    let out = (queue.stats.switches, queue.stats.stolen_in, queue.stats.stolen_out, IDLE.load(Ordering::SeqCst) & (1 << cpu) != 0);
+    drop(queue);
+    <arch::Irq as IrqControl>::restore(saved);
+    out
 }
 
 /// Add up what every processor's scheduling has done.

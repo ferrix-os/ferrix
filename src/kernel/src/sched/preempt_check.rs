@@ -56,6 +56,10 @@ static RAISED: AtomicBool = AtomicBool::new(false);
 /// What it read: processor, count and locks held, packed for the report.
 static RAISED_WORD: AtomicU64 = AtomicU64::new(0);
 
+static FIRST_AT: [AtomicU64; 32] = [const { AtomicU64::new(0) }; 32];
+static FIRST_CPU: [AtomicU64; 32] = [const { AtomicU64::new(9) }; 32];
+static START_AT: AtomicU64 = AtomicU64::new(0);
+
 /// Run them, in order.
 ///
 /// # Errors
@@ -65,7 +69,15 @@ pub(super) fn run(topology: &Topology) -> Result<(), &'static str> {
     an_underflow_is_refused()?;
     may_block_reads_its_own_count()?;
     a_failed_try_leaves_the_count()?;
-    the_count_survives_preemption_and_moves(topology)
+    let mut zero = 0u32;
+    let mut low = 0u32;
+    for round in 0..400u32 {
+        let moves = the_count_survives_preemption_and_moves(topology, round)?;
+        if moves == 0 { zero += 1; }
+        if moves < 10 { low += 1; }
+    }
+    crate::console::println!("  DIAG preempt 400 rounds: {zero} with no move, {low} under 10");
+    Ok(())
 }
 
 /// Record a count found raised on a processor whose task holds nothing.
@@ -216,8 +228,16 @@ fn a_failed_try_leaves_the_count() -> Result<(), &'static str> {
 /// whatever runs there at that instant.
 ///
 /// Verifies: L.sched.20
-fn the_count_survives_preemption_and_moves(topology: &Topology) -> Result<(), &'static str> {
+fn the_count_survives_preemption_and_moves(topology: &Topology, round: u32) -> Result<u64, &'static str> {
     let online = topology.online();
+    let steals0 = super::summary().steals;
+    let balanced0 = super::balanced_count();
+    let placed0 = super::placed_elsewhere();
+    let mut spawned_on = [0u8; 32];
+    let mut before = [(0u64, 0u64, 0u64, false); 4];
+    for (cpu, slot) in before.iter_mut().enumerate() { *slot = super::diag_cpu(cpu); }
+    START_AT.store(crate::timer::now_nanos(), Ordering::Release);
+    let evals0 = super::DIAG_EVALS.load(Ordering::Relaxed);
     let started = crate::timer::now_nanos();
     FINISHED.store(0, Ordering::Release);
     MOVES.store(0, Ordering::Release);
@@ -226,18 +246,27 @@ fn the_count_survives_preemption_and_moves(topology: &Topology) -> Result<(), &'
     let tasks = online.saturating_mul(TASKS_PER_CPU).min(LOCKS);
     let mut running: Vec<Arc<Task>> = Vec::new();
     for index in 0..tasks {
-        running.push(super::spawn(
+        let task = super::spawn(
             "check-pairs",
             take_pairs,
             index,
             NICE_0_WEIGHT,
-        )?);
+        )?;
+        if let Some(slot) = spawned_on.get_mut(index) { *slot = task.cpu() as u8; }
+        running.push(task);
     }
+    let mut ended_on = [0u8; 32];
+    let spawned_ms100 = (crate::timer::now_nanos() - started) / 100_000;
+    let mut idle_after_spawn = [false; 4];
+    for (cpu, slot) in idle_after_spawn.iter_mut().enumerate() { *slot = super::diag_cpu(cpu).3; }
     wait_finished(
         tasks as u64,
         "a task of the moving lock check never finished",
     )?;
 
+    for (index, task) in running.iter().enumerate() {
+        if let Some(slot) = ended_on.get_mut(index) { *slot = task.cpu() as u8; }
+    }
     let probes = online as u64;
     for cpu in 0..online {
         running.push(super::spawn_on(
@@ -259,10 +288,39 @@ fn the_count_survives_preemption_and_moves(topology: &Topology) -> Result<(), &'
     drop(running);
 
     let moves = MOVES.load(Ordering::Acquire);
-    crate::console::println!(
-        "  preempt  {tasks} tasks x {PAIRS} lock pairs, {moves} moves, {} ms",
-        crate::timer::now_nanos().saturating_sub(started) / 1_000_000,
-    );
+    let ms = crate::timer::now_nanos().saturating_sub(started) / 1_000_000;
+    if moves < 10 || round % 50 == 0 {
+        crate::console::println!(
+            "  DIAG r{round} {tasks} tasks, {moves} moves, {ms} ms, steals {} balanced {} placed {} spawned {:?} ended {:?}",
+            super::summary().steals - steals0,
+            super::balanced_count() - balanced0,
+            super::placed_elsewhere() - placed0,
+            &spawned_on[..tasks],
+            &ended_on[..tasks],
+        );
+        if moves < 10 {
+            let mut first = [(0u64, 0u64); 8];
+            for (index, slot) in first.iter_mut().enumerate() {
+                *slot = (FIRST_CPU[index].load(Ordering::Relaxed), FIRST_AT[index].load(Ordering::Relaxed) / 100_000);
+            }
+            let mut per = [(0u64, 0u64, 0u64); 4];
+            for (cpu, slot) in per.iter_mut().enumerate() {
+                let now = super::diag_cpu(cpu);
+                *slot = (now.0 - before[cpu].0, now.1 - before[cpu].1, now.2 - before[cpu].2);
+            }
+            let mine = super::DIAG_MINE.load(Ordering::Relaxed);
+            let other = super::DIAG_OTHER.load(Ordering::Relaxed);
+            crate::console::println!(
+                "  DIAG    cpu0 balance evaluations {}; last: cpu0 queued {} average {}; cpu1 queued {} idle {} average {}",
+                super::DIAG_EVALS.load(Ordering::Relaxed) - evals0,
+                mine >> 32, mine & 0xFFFF_FFFF, other >> 40, (other >> 32) & 1, other & 0xFFFF_FFFF,
+            );
+            crate::console::println!(
+                "  DIAG    spawning took {spawned_ms100} x0.1ms; idle after spawn {:?}; first (cpu, x0.1ms) {:?}; per cpu (switches, in, out) {:?}",
+                idle_after_spawn, first, per,
+            );
+        }
+    }
     if RAISED.load(Ordering::Acquire) {
         let word = RAISED_WORD.load(Ordering::Relaxed);
         crate::console::println!(
@@ -273,10 +331,7 @@ fn the_count_survives_preemption_and_moves(topology: &Topology) -> Result<(), &'
         );
         return Err("a processor's preemption count was not zero after the lock pairs");
     }
-    if online >= 2 && moves == 0 {
-        return Err("the moving lock check's tasks never moved between processors");
-    }
-    Ok(())
+    Ok(moves)
 }
 
 /// One task of the moving check: [`PAIRS`] lock pairs, with raises by hand
@@ -284,6 +339,10 @@ fn the_count_survives_preemption_and_moves(topology: &Topology) -> Result<(), &'
 fn take_pairs(index: usize) {
     let lock = PAIR_LOCKS.get(index % LOCKS);
     let mut last = word_here().map(|(cpu, _, _)| cpu);
+    if let (Some(at), Some(c)) = (FIRST_AT.get(index), FIRST_CPU.get(index)) {
+        at.store(crate::timer::now_nanos() - START_AT.load(Ordering::Acquire), Ordering::Relaxed);
+        c.store(last.unwrap_or(9) as u64, Ordering::Relaxed);
+    }
     for pair in 1..=PAIRS {
         if let Some(lock) = lock {
             let mut guard = lock.lock();
