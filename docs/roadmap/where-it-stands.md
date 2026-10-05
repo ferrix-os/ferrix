@@ -122,6 +122,12 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
      `nvidia-n2`);
   2. a hardware cursor;
   3. measuring page loads.
+
+  Already on `main` (2026-10-05): the chardev core's queue to `nvrm` is
+  held to its room (F-63, closed), and stage 10's chardev self-check, with a
+  fake driver, requires it and the HELLO rules, copies and drains (N10's
+  code half, N12, N13; FX-1013). N5's switch, D1 to D10 and
+  `test-nvidia-smi` stay owed.
 * **Sound** is done: alsa-lib (U1) and `pulsed`, a PulseAudio-protocol
   server Chrome plays through on the desktop (U2a to U2d, 2026-09-27).
 * **Windows**: the desktop runs under WHPX with the TSC as its clock
@@ -136,8 +142,17 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   device has reset; virtio-input and virtio-blk are on it, seven drivers
   are not yet, and no driver's graceful STOP is reachable yet.
 
-**Red on `main`** (`docs/BACKLOG.md`, *Red on `main`*): nothing open; the
-submap boot's row is done. Four flake rows gained sightings or were filed
+**Red on `main`** (`docs/BACKLOG.md`, *Red on `main`*): on 2026-10-05
+x86-64's stage 10 still panics with FX-1012 in about one boot in 27 to 160
+(`iommu/check.rs` G3 racing the console's pump thread; not fixed, a row for
+interrupt remapping's owner). Fixed and on `main` (0ece8826e's batch):
+`test-init --arch all` failing on the revoke reader, on prompts typed too
+early and on `su`'s half-read password, and stage 5's moving lock check
+panicking because an idle processor could take another idle one's last
+waiting task (`sched::steal_from` now leaves it that task); `xtask`'s serial
+reader, which sent the "QEMU signal 15" after a stage 10 panic, decodes
+lossily. H.SCHED.1's idle-kick rule has no requirement yet. As of 2026-09-30
+the submap boot's row is done. Four flake rows gained sightings or were filed
 on 2026-09-30, each with its log: FX-0001 (twice, at the submap boot's
 `L`), the compositor's frame budget under load (x86-64 and ARMv7-A), the
 audit self-check's FX-0309, and the semaphore check's "a waiter returned
@@ -256,7 +271,9 @@ test-init`). `run` and the desktop boot it, and the compositor is its service.
 Since 2026-10-04 a unit can be sandboxed with L13a's `NoNewPrivileges=`,
 `PrivateTmp=` and `ProtectSystem=` (1e1f2543a, `docs/INIT.md` §4.5);
 L13b's `PrivateNetwork=` and L13c's `SystemCallFilter=` are on branches
-`l13b` and `l13c`.
+`l13b` and `l13c`. `test-init` types each password once, when its prompt is
+on the console (`ferrix-auth-client` flushes before it shows the prompt), and
+judges the revoke reader on one look (2026-10-05).
 
 Stage 15's authentication (`docs/AUTH.md`, approved by the customer on
 2026-09-26) has phase 1 done and most of phase 2. Phase 1: its kernel fix,
@@ -363,11 +380,12 @@ allocation, side-channel defences with KASLR, and job quotas. On 2026-09-27
 it closed F-21b with an audit record of the TSF's own decisions, claimed in the
 Security Target; measured the certified item's statement coverage at 90.1%,
 89.9% and 84.5% on x86-64, AArch64 and ARMv7-A; and traced 602 low-level
-requirements, 396 of them verified by a named check. Its register stands at 15
-findings open and 39 closed, of 54. On 2026-10-05 the register filed and
-closed F-62, a carry of the coverage evidence that nobody made: the gate now
-fails on it, and the anchors two landings had skipped were carried again. It
-stands at 16 open and 47 closed, of 63. CI on `main` is green again (run
+requirements, 396 of them verified by a named check. On 2026-10-05 the
+register filed and closed F-62, a carry of the coverage evidence that nobody made: the gate now
+fails on it, and the anchors two landings had skipped were carried again; it filed and
+closed F-63 too, the queue from the chardev core to `nvrm` able to grow
+without bound, which abandoned requests now leave and admission counts. The
+register stands at 16 open and 48 closed, of 64. CI on `main` is green again (run
 37331100176, after a rerun of a flaky job), after the Windows gateway test
 `a_lost_segment_is_sent_again_alone` stopped racing the gateway's timer
 (39e520e31); another gateway test, `resets_a_connection_to_a_port_nothing_listens_on`,
