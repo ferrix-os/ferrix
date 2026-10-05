@@ -33,13 +33,6 @@
       "purpose": "NVIDIA C3-K, the kernel's fault windows (docs/NVIDIA.md §11.4, the consultant's OK IF of 2026-10-02): window regions, forwarded faults and their wait, kernel copies that never wait, refused partial operations, the mapping count and UNMAPPED, break-before-make entries, revoke, server death, insert checks and holds, answers only from the server handle; a server-inserted frame unreachable before its hold goes, and a client waiting on a server only by its own mapping"
     },
     {
-      "ids": ["L.sched.50-53", "L.object.160-163"],
-      "owner": "ipc-step2 session A",
-      "branch": "step2f",
-      "date": "2026-10-03",
-      "purpose": "OPAQUE-KERNEL.md §9.8 step 2f (the consultant's OK IF of 2026-10-02, condition 6 and Q7): IDLE written only when a processor's idle state changes, the regroup word's fence pair, the switch's per-processor words without a read-modify-write; quota::effective in 64-bit arithmetic equal to the 128-bit formula, and every entity weight a job or task can be given below 2^32"
-    },
-    {
       "ids": ["L.x86_64.150-151"],
       "owner": "step2b",
       "branch": "step4-prep",

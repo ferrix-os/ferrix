@@ -704,26 +704,36 @@ pub(crate) fn adjust(index: u32, delta: i64) {
 
 /// The weight a task of weight `base` in `index` runs at: `base` times, at
 /// each level from `index` up, that job's weight over its load.
+///
+/// The arithmetic is `ferrix_sched::carried_weight`'s, in 64 bits, which is
+/// the 128-bit formula's exactly while every entity weight is below 2^32
+/// (the assertion below): a task's base is a `u32`, and a job's is
+/// `cpu.weight` clamped to [`MAX_WEIGHT`] and scaled to task units.
 pub(crate) fn effective(index: u32, base: u32) -> u32 {
-    let mut weight = u128::from(base);
-    // What the level below adds to this one's load, which the load is never
-    // taken to be less than: a task or job not yet counted, or counted a
-    // moment late, must not be scaled up by a load that leaves it out.
-    let mut below = i64::from(base);
     let mut at = index;
-    while let Some(slot) = slot(at) {
-        let load = slot.load.load(Ordering::Acquire).max(below).max(1);
-        let own = slot.entity_weight();
-        weight = weight.saturating_mul(u128::try_from(own).unwrap_or(1))
-            / u128::try_from(load).unwrap_or(1);
-        below = own;
+    let levels = core::iter::from_fn(|| {
+        let slot = slot(at)?;
+        // What the level below adds to this one's load, which the load is
+        // never taken to be less than, is applied in `carried_weight`: a
+        // task or job not yet counted, or counted a moment late, must not be
+        // scaled up by a load that leaves it out.
+        let load = slot.load.load(Ordering::Acquire);
+        let own = u32::try_from(slot.entity_weight()).unwrap_or(1);
         at = slot.parent.load(Ordering::Acquire);
-    }
-    let clamped = u64::try_from(weight)
-        .unwrap_or(MAX_EFFECTIVE)
-        .clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+        Some((own, load))
+    });
+    let clamped = ferrix_sched::carried_weight(base, levels).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
     u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
 }
+
+/// Every entity weight a job can be given fits a `u32`: the largest
+/// `cpu.weight`, [`MAX_WEIGHT`], in task units. What makes
+/// [`effective`]'s 64-bit arithmetic exact; a task's own weight is a `u32`
+/// already. Checked when the kernel is built.
+const _: () = assert!(
+    (MAX_WEIGHT as u64) * (NICE_0_WEIGHT as u64) / (DEFAULT_WEIGHT as u64) <= u32::MAX as u64,
+    "a job's largest entity weight must fit a u32 for effective's 64-bit arithmetic"
+);
 
 /// The load of `index`, for a check.
 pub(crate) fn load(index: u32) -> i64 {
