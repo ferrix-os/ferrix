@@ -1357,6 +1357,7 @@ fn console_revoke(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
                  p=$(cat /tmp/revoke-reader); \
                  svc scope --unit revoke-reader.scope $p && : > /tmp/revoke-moved; \
                  until case \"$(cat /proc/$p/stat)\" in *revoke-reader*|*'(sh)'*) false;; *') S '*) true;; *) false;; esac; do :; done; \
+                 r=0; i=0; while [ $i -lt 300 ]; do case \"$(cat /proc/$p/stat)\" in *') R '*) r=$((r+1));; esac; i=$((i+1)); done; m=diag; echo \"$m-rlooks $r of 300\"; \
                  m=revoke; echo \"$m-reader $(cat /proc/$p/stat)\"; exit\n";
     match ask(at, start, "revoke-reader ")? {
         Some(line) => {
