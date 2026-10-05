@@ -238,7 +238,10 @@ from the components split (2263225e1, 2026-10-03), because the guest
 tried to clone the component repositories with no network; the volume now
 carries the components and the guest clones none (`selfhost-components`,
 cb872a732); CI's job has passed on `main` since, from 77783565a (run
-37229234877) on.
+37229234877) on. The plan is complete since 2026-10-05 (S-2, ce133294c and
+a3b240c6b): the tests that made builds after their first boot, which plan mode
+refuses, now build every variant before it, and a plan run records 162
+distinct builds against 139.
 
 Dynamic linking is done: Debian's glibc busybox runs on its own `ld-linux`,
 and on ferrousli's loader and `libc.so.6` in glibc's place, on all three
@@ -361,7 +364,14 @@ it closed F-21b with an audit record of the TSF's own decisions, claimed in the
 Security Target; measured the certified item's statement coverage at 90.1%,
 89.9% and 84.5% on x86-64, AArch64 and ARMv7-A; and traced 602 low-level
 requirements, 396 of them verified by a named check. Its register stands at 15
-findings open and 39 closed, of 54.
+findings open and 39 closed, of 54. On 2026-10-05 the register filed and
+closed F-62, a carry of the coverage evidence that nobody made: the gate now
+fails on it, and the anchors two landings had skipped were carried again. It
+stands at 16 open and 47 closed, of 63. CI on `main` is green again (run
+37331100176, after a rerun of a flaky job), after the Windows gateway test
+`a_lost_segment_is_sent_again_alone` stopped racing the gateway's timer
+(39e520e31); another gateway test, `resets_a_connection_to_a_port_nothing_listens_on`,
+flaked once on Windows and has a row in `docs/BACKLOG.md`.
 
 Stage 17's display iteration is done: `/dev/dri/card0` served by a ring-3
 virtio-gpu driver, with `cargo xtask test-display` requiring a compositor's
