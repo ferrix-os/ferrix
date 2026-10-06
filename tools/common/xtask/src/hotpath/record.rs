@@ -359,6 +359,18 @@ pub(crate) fn write(root: &Path, record: &Value) -> Result<PathBuf> {
     Ok(file)
 }
 
+/// `path` with the home directory `home` written `~`, so that no user name
+/// reaches a record (`docs/HOTPATHS.md` §5, privacy).
+pub(crate) fn without_home(path: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    match path.strip_prefix(home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_owned(),
+    }
+}
+
 /// The first `count` characters of a hex hash.
 fn short(text: &str, count: usize) -> &str {
     text.get(..count).unwrap_or(text)
@@ -552,6 +564,23 @@ mod tests {
         assert_eq!(ratio.get("median"), Some(&Value::Int(958)), "2300/2400");
         assert_eq!(ratio.get("most"), Some(&Value::Int(1119)), "2716/2427");
         assert_eq!(summary(&here, &[]).get("ratio_milli"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn a_log_under_home_loses_the_user_name() {
+        assert_eq!(
+            without_home("/home/ann/logs/a.log", "/home/ann"),
+            "~/logs/a.log"
+        );
+        assert_eq!(
+            without_home("/home/ann/logs/a.log", "/home/ann/"),
+            "~/logs/a.log"
+        );
+        assert_eq!(
+            without_home("/home/annie/a.log", "/home/ann"),
+            "/home/annie/a.log"
+        );
+        assert_eq!(without_home("/srv/a.log", ""), "/srv/a.log");
     }
 
     #[test]
