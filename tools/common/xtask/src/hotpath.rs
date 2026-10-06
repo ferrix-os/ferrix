@@ -148,7 +148,11 @@ pub(crate) fn check_paths(root: &std::path::Path) -> Vec<String> {
         problems.push("docs/hotpaths holds no hot path".to_owned());
     }
     for file in files {
-        let id = file.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned();
+        let id = file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_owned();
         let mut say = |what: String| problems.push(format!("docs/hotpaths/{id}.json: {what}"));
         let data = match Value::parse(&std::fs::read_to_string(&file).unwrap_or_default()) {
             Ok(data) => data,
@@ -187,7 +191,10 @@ pub(crate) fn check_paths(root: &std::path::Path) -> Vec<String> {
         for attempt in tried {
             let field = |key: &str| attempt.get(key).and_then(Value::as_str).unwrap_or_default();
             if !matches!(field("evidence"), "measured" | "guessed" | "argued") {
-                say(format!("attempt `{}`: evidence is not measured, guessed or argued", field("id")));
+                say(format!(
+                    "attempt `{}`: evidence is not measured, guessed or argued",
+                    field("id")
+                ));
             }
             for key in ["id", "arch", "what", "status", "effect", "source"] {
                 if field(key).is_empty() {

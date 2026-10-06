@@ -79,7 +79,10 @@ fn write_record(args: &Args, rounds: u32, boots: Vec<Boot>, reference: Reference
         rounds
     };
     let configuration = record::ipc_configuration(args, rounds, args.alternate.as_deref());
-    let log = std::env::var("FERRIX_HOTPATH_LOG").ok();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let log = std::env::var("FERRIX_HOTPATH_LOG")
+        .ok()
+        .map(|log| record::without_home(&log, &home));
     let measurement = Measurement {
         path: HOT_PATH.0,
         prefix: HOT_PATH.1,
