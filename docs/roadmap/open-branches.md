@@ -619,9 +619,14 @@ customer's call.
   test-ipc-equiv`, passing on the general path, with the cases that need
   threads, signals, affinity or 3a printed as owed. No fast-path code. Not
   reviewed; §9.7 on the branch says what it holds.
-- Not started: 3a (the vector-state contract) and 3b (FS and GS kept in the
-  task, the write-skip dropped), with the consultant's conditions 7 and 8 in
-  §9.8; step 4's fast path itself, which needs 2f and 3a; step 5; step 4b.
+- `po6/step3` (session po7-ipcB, worktree `.claude/worktrees/po6-step3`):
+  3a (the vector-state contract) and 3b (FS and GS kept in the task, the
+  write skip dropped), one commit on `bench-exact`, with the consultant's
+  conditions 7 and 8 met as §9.8's *As built* paragraphs say. Its gates and
+  controls passed and fired on the branch (§9.9's update of 2026-10-06);
+  owed: the rebase onto 2f once 2f lands, `check` again, then one batch.
+- Not started: step 4's fast path itself, which needs 2f and 3a; step 5;
+  step 4b.
 
 Older branches of this work: `os-ipc/zircon-trip` is landed in substance (its
 six commits went in as step 1), and `os-ipc/prof` and `os-ipc/prof2` are

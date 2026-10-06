@@ -510,6 +510,14 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             {
                 return;
             }
+            // A native call that blocks lets the caller's vector registers go
+            // for its length (`docs/OPAQUE-KERNEL.md` §9.8, 3a): the mark tells
+            // the switch so, and is lowered as the call returns, before
+            // anything on the way out can block in a call that keeps them.
+            let blocking = vectors_die_in(args.number);
+            if blocking {
+                mark_vectors_dead(true);
+            }
             // Open while the call is served: a call may block, and one that spins
             // waiting for input must not keep the processor from switching away.
             // `SFMASK` closed them on entry, and they are closed again before the
@@ -518,6 +526,9 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             let regs = UserRegs::Syscall(*frame);
             let outcome = crate::trap::system_call(&args, Some(&regs));
             super::disable_interrupts();
+            if blocking {
+                mark_vectors_dead(false);
+            }
             outcome
         }
     };
@@ -547,6 +558,26 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
         (path.return_to_user)(&mut context);
         context.store_syscall(frame);
     }
+}
+
+/// Whether `number` is one of the three native calls declared to destroy the
+/// caller's vector registers, as across a function call: `channel_write_read`,
+/// `object_wait_one` and `port_wait`, the native calls that block (3a). By
+/// number, on this entry alone: no Linux number, and nothing through
+/// `int $0x80`.
+pub(super) const fn vectors_die_in(number: usize) -> bool {
+    use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
+    matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)
+}
+
+/// Raise or lower the running task's `vectors_dead` mark.
+///
+/// Called by the entry with interrupts masked: before it opens them for the
+/// call, and after it closes them again.
+fn mark_vectors_dead(dead: bool) {
+    // SAFETY: (CONTEXT) interrupts are masked on this processor at both calls,
+    // in the running task's own system call.
+    let _ = unsafe { crate::sched::with_own_user_state(|state| state.set_vectors_dead(dead)) };
 }
 
 /// What the entry makes of a number before the dispatcher sees it.
@@ -690,6 +721,13 @@ fn arch_prctl(code: u64, value: u64) -> isize {
             // SAFETY: (CONTEXT) a canonical user address, written to this processor's
             // `FS_BASE`; it changes only how user accesses resolve.
             unsafe { set_thread_pointer(value) };
+            // And to the running task's record, which the switch loads and
+            // never reads back (3b). The entry answers this call before it
+            // opens interrupts, so no switch comes between the two writes.
+            // SAFETY: (CONTEXT) interrupts masked, in the running task's own call.
+            let _ = unsafe {
+                crate::sched::with_own_user_state(|state| state.set_thread_pointer(value))
+            };
             0
         }
         // Everything else, `ARCH_GET_FS` included. Reading the thread pointer

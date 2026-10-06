@@ -214,6 +214,19 @@ package FerrixSchedRequirements {
             attribute :>> parent = ("H.OBJ.9", "H.OBJ.11");
             attribute :>> unit = "sched::work::wake_posted";
         }
+        requirement <'L.sched.54'> everyResumeGoesThroughTheRestore : ItemLowLevel {
+            attribute :>> statement = "Every switch to a task with user state shall
+                restore it through switch_user_state, which shall tell the save
+                whether the outgoing task leaves blocked, so that a state saved only
+                in part is reset before the task runs, on every path that resumes
+                it; the reset alone clears the mark.";
+            attribute :>> criterion = "A program blocked in a native call is woken
+                by a message, by its peer's close and by a message with a signal
+                pending, each through its own path to choose_next, and reads the
+                reset state each time (the `vectors` line).";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("sched::switch_user_state", "sched::with_own_user_state");
+        }
     }
 
     package Preemption {

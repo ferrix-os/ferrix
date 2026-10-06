@@ -3669,6 +3669,42 @@ from a blocking native call", or ADV_ARC argues it as domain separation
 (question 10). VULNERABILITY-ANALYSIS gains an entry: a resume path that
 skips the reset.
 
+**As built (2026-10-05, branch `po6/step3`, ids H.SCHED.12, L.sched.54,
+L.x86_64.152-157).** As designed, with five differences for the review:
+- *The runtime's clobber is on every call.* `trap_words` gains
+  `clobber_abi("sysv64")` instead of a second block `trap_blocking`: the
+  assembly budget stood at 1,606 of 1,610 lines with 3a's three kernel
+  instructions (`stmxcsr`, `fnstcw`, `fldcw`), and a second trap block is 13.
+  Every call through `ferrix_rt` is then compiled as if it lost the vector
+  registers, which costs a program only the compiler's choice to keep a value
+  there across a call that would have kept it. The kernel's contract is still
+  the three numbers (`syscall::vectors_die_in`).
+- *The accessor is checked at boot, not on the host.* The kernel crate has no
+  host tests; stage 9's `check_unsaved_reads_as_initial` builds a state with
+  foreign bytes in its area, keeps only the two words, and reads it through
+  `fxsave`, `avx` and `xstate_bv` as `FpuArea::initial` with its own `MXCSR`
+  and control word; a writer (`fxsave_mut`, `avx_mut`, `set_xstate_bv`) first
+  turns an `unsaved` state into that image (`materialise`).
+- *The wakes are a message, a close and a signal.* A native wait is ended by
+  a message, its peer's close, its process's end and another thread's
+  `execve`, and not by a signal (`NativeCall::ChannelWriteRead`). So the
+  signal case sends `SIGUSR1` while the task waits -- which wakes it, resets
+  it and lets it block again -- and then the message: the handler's frame
+  holds the post-call state, and `rt_sigreturn` puts it back. A kill, of the
+  process or of a sibling, ends the task before it reaches user mode, so no
+  program can read a register after one; it passes through the same restore.
+- *No partial save without `XSAVE`.* The reset is an `XRSTOR` of an empty
+  header; on a processor that saves with `FXSAVE` every switch saves in full,
+  and the `vectors` line says the cases were not run.
+- *PKRU.* `cpu::reset_components` masks `XSTATE_PKRU` out of the reset's
+  requested set, and stage 9 checks that it does and that nothing past x87,
+  SSE and AVX is enabled.
+The mark lives in `UserState`, raised and lowered through
+`sched::with_own_user_state` with interrupts masked; the switch passes
+`previous.is_blocked()` to `save_user_state` on all three architectures (the
+Arm pair ignore it). The checks are `arch/x86_64/switch/check.rs`, with two
+fixtures assembled by GNU `as`; the `vectors` boot line.
+
 #### 3b: the FS and GS bases kept in the task
 
 **What changes.** `save_user_state` reads `FS_BASE` and the program's
@@ -3734,6 +3770,51 @@ the span: the two `rdmsr`s a switch go; the writes stay.
 **Documents.** SPECULATION.md: none. MEMORY-AND-TIMING: none. FINDINGS: none.
 Security Target: FDP_RIP.2 as widened for 3a covers the bases too: a program
 is given its own at every switch.
+
+**As built (2026-10-05, branch `po6/step3`, id L.x86_64.158; L.x86_64.9 and
+.61 changed).** `save_user_state` reads no base MSR; `arch_prctl` writes the
+MSR and the running task's record with interrupts masked (the entry answers
+it before it opens them); `execve`'s `reset_user_state` zeroes the record
+with the MSRs, without which the new image would get the old one's thread
+pointer back at its next switch-in. `UserState::capture`, which is not the
+switch, still reads both MSRs: a fork child and a signal frame take what the
+processor holds. The checks (`fsbase` line): two programs with different bases
+trade one processor 10,000 times each; one loads `USER_DS` and then a null
+selector into `FS` before each yield -- after which its base is zero on both
+vendors, while its record holds its own -- beside a second whose recorded base
+is the same address, which reads its own word at every turn; and the first
+reads its own word again after a `nanosleep`, its recorded base back.
+
+**The controls (2026-10-05 and -06, on 4a8b8dfee, x86-64 under KVM; logs
+`~/.local/share/ferrix/logs/queue/po6-ipcB-s3-<name>.log` on nazuna), each
+FIRED with the text named:**
+- `c1-1`, 3a check 1: the reset skipped on a resume (`state.unsaved =
+  false` for `reset_vectors`): "read another program's vector registers".
+- `c2-1`, 3a check 2: every blocked task treated as `unsaved` (the
+  `vectors_dead` test dropped): "lost its vector registers to a reset".
+- `c3-1`, 3a check 3: the mark not lowered at the call's return: "the mark
+  outlived its call".
+- `c4-1`, 3b's first check: the restore skips every `FS` write: "did not
+  each read their own FS base".
+- `c6-1`, Linux's rule: the switch reads `FS_BASE` again on the way out:
+  "did not get its recorded base back".
+- `c5-3`, condition 8, the write skip restored as one "last written" word:
+  fires in the trading check, "did not each read their own FS base", which
+  runs first.
+- `c8-2`, condition 8 alone: the draft's skip, one "last written" base per
+  processor kept by every `FS_BASE` write (`set_thread_pointer`), on a side
+  ref (`po7-ipcB/c8-base`, 1c5d1f6ca) that differs from 4a8b8dfee only in
+  not running the trading check, so the condition-8 case runs first; the
+  side ref unchanged PASSED (`c8base-1`), with the skip it FIRED: "a program
+  whose recorded FS base equals the one last written ran on the base another
+  program left". The same skip on 4a8b8dfee (`c8-1`) fires in the trading
+  check instead. Why: nazuna's Ryzen 9 9900X clears the base when a null
+  selector is loaded (AMD's `NullSelectorClearsBase`, CPUID `0x8000_0021`
+  `EAX` bit 6, reads 1 on the host; Intel clears it too), and the
+  switch itself loads the incoming task's null `FS` before it writes the
+  base, so on this processor any skipped write leaves the base zero whatever
+  the programs do. The condition-8 case is the one that would catch the skip
+  alone on a processor that keeps the base.
 
 #### The parallel split and the landing order
 
@@ -4006,3 +4087,22 @@ path, step 5 and step 4b are not started.
 
 The session's account, with every landing and every decision, is
 `docs/handover/2026-10-03-ipc.md`.
+
+**Update 2026-10-06 (po7-ipcB): 3a and 3b built, branch `po6/step3`.**
+`bench-exact` is on `main` (3349682db). 3a and 3b are one commit on it, as
+§9.8's *As built* paragraphs say, with every row, check and control there.
+Gated on that commit, x86-64 under KVM unless named, logs
+`~/.local/share/ferrix/logs/queue/po6-ipcB-s3-<name>.log` on nazuna: `check`
+(`check-5`), the boots on x86-64 under KVM and TCG (`kvm-4` ran on 6dcb56b6a,
+which differs from 4a8b8dfee only in where one `cfg_attr` stands in
+`sched/mod.rs` and in coverage data; the KVM boots of `thr-x86-1`,
+`shell-fl-1` and `bench-2` ran on 4a8b8dfee itself), AArch64, ARMv7-A and
+ARMv7-A at `--smp 2` (`kvm-4`, `tcg-1`, `a64-1`, `a32-1`, `a32s2-1`),
+`test-threads` on all three (`thr-x86-1`, `thr-a64-1`, `thr-a32-1`) and
+`test-shell --init ferrousli` (`shell-fl-1`), all PASSED; the seven controls
+FIRED. `bench-ipc --release --accel kvm --smp 1 --alternate main --rounds 5`
+(`bench-2`): `domain-call` p50 2,397 ns against 2,546 ns on `main`, five
+rounds turn about, ratio 0.945 (0.941 to 0.949), 149 ns a round trip, below
+§9.8's guess for the two together (0.22 to 0.34 us). It lands after 2f,
+rebased onto it, in one batch: 2f changes the signature of `sched/mod.rs`'s
+`switch_user_state`, which 3a passes `is_blocked()` through.

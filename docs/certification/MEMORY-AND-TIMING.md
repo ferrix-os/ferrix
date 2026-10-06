@@ -586,6 +586,18 @@ part of the switch a domain changes (SPECULATION.md §3). The p99 is three to
 four times the p50 on a shared host. These are measurements of one
 configuration, not a bound.
 
+**From step 3 on (OPAQUE-KERNEL.md §9.8, 3a and 3b), a figure runs with the
+vector-state contract.** A task switched away blocked in `channel_write_read`,
+`object_wait_one` or `port_wait` keeps only `MXCSR` and the x87 control word
+and is given the initial vector state back, and the switch reads no `FS` base
+MSR. Every round-trip figure from that commit on is of that configuration,
+and says so beside it. Its first, with the exact `bench-ipc` (sorted samples,
+one pinned processor, `--alternate` turn about), x86-64 under KVM on nazuna,
+one processor, `--mitigations on`, in one speculation domain: `domain-call`
+p50 2,397 ns against 2,546 ns without step 3, five rounds, ratio 0.945
+(`~/.local/share/ferrix/logs/queue/po6-ipcB-s3-bench-2.log` on nazuna, on
+4a8b8dfee; §9.9 carries the figure retaken on the landed base).
+
 Two decisions the round trip's wakes defer are bounded, though no check
 times them (L.sched.7). A wake made inside a system call asks for no timer:
 the decision it wants is made when the call ends (`sched::call_left`), at

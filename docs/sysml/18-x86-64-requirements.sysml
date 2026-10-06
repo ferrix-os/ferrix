@@ -159,24 +159,34 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::load_user_gs");
         }
         requirement <'L.x86_64.9'> fsGsBaseTravelsWithTask : ItemLowLevel {
-            attribute :>> statement = "save_user_state shall save FS_BASE and the
-                program's GS base, and restore_user_state shall restore each where
-                the thread's FS or GS selector is null.";
-            attribute :>> criterion = "Two 64-bit programs pinned to one processor,
-                each with its own ARCH_SET_FS and ARCH_SET_GS base, read their own
-                words through %fs and %gs N times across sched_yield: 0 foreign
-                reads.";
+            doc /* The GS half of 3b (OPAQUE-KERNEL.md §9.8), in a row of its own
+                and unverified (the consultant's condition (a), ledger 387): no
+                call sets a 64-bit program's GS base (arch_prctl answers ARCH_SET_GS
+                with EINVAL), so every record is zero and no case can tell a written
+                zero from a kept one; on the gate host a null selector load clears
+                the base besides. The FS half is L.x86_64.61 and L.x86_64.158. */
+            attribute :>> statement = "A task's program GS base shall be its
+                UserState's record, zeroed by execve beside the MSR and never read
+                back at a switch, and restore_user_state shall write it at every
+                switch to a task with user state whose GS selector is null.";
+            attribute :>> criterion = "A 64-bit program with a null GS selector,
+                pinned to one processor with an i386 program whose GS selector is a
+                thread-local entry, reads its recorded GS base through %gs after
+                each of N sched_yields: 0 foreign reads.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::switch::save_user_state",
                 "arch::x86_64::switch::restore_user_state",
-                "arch::x86_64::switch::load_selectors");
+                "arch::x86_64::switch::load_selectors",
+                "arch::x86_64::switch::UserState::set_bases");
         }
         requirement <'L.x86_64.10'> fpuStateTravelsWithTask : ItemLowLevel {
             attribute :>> statement = "save_user_state shall save the outgoing
                 task's x87 and SSE state, and its AVX state where
                 enable_extended_state enabled it, with XSAVE64 of the enabled
                 components, or FXSAVE64 without XSAVE; restore_user_state shall
-                restore the incoming task's with XRSTOR64, or FXRSTOR64.";
+                restore the incoming task's with XRSTOR64, or FXRSTOR64; except for a
+                task blocked in a call of the vector-state contract (L.x86_64.153,
+                L.x86_64.155).";
             attribute :>> criterion = "Two programs pinned to one processor, each
                 holding distinct XMM values, YMM upper halves where AVX is enabled,
                 and MXCSR and x87 control words across N sched_yields, read back
@@ -209,6 +219,115 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::switch::reset_user_state",
                 "arch::x86_64::switch::UserState::new");
+        }
+        requirement <'L.x86_64.152'> theEntryMarksTheThreeBlockingCalls : ItemLowLevel {
+            attribute :>> statement = "ferrix_syscall_entry shall raise the running
+                task's vectors_dead mark before it serves channel_write_read,
+                object_wait_one or port_wait, and lower it as the call returns,
+                before the way out; no other number shall raise it.";
+            attribute :>> criterion = "Exactly the three numbers of the native range
+                and of Linux's first 1,024 raise the mark (the `vectors` line); a
+                program woken from channel_write_read keeps its vector registers
+                across a nanosleep after it, and with the lowering removed it reads
+                them reset and the check fails by name.";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("arch::x86_64::syscall::ferrix_syscall_entry",
+                "arch::x86_64::syscall::vectors_die_in",
+                "arch::x86_64::syscall::mark_vectors_dead");
+        }
+        requirement <'L.x86_64.153'> aBlockedNativeCallKeepsOnlyItsControls : ItemLowLevel {
+            attribute :>> statement = "save_user_state shall, for a task switched out
+                blocked with vectors_dead raised on a processor that saves with
+                XSAVE, store only MXCSR and the x87 control word, in the standard
+                form's legacy region with XSTATE_BV empty, and mark the state
+                unsaved.";
+            attribute :>> criterion = "A program blocked in channel_write_read or
+                object_wait_one, with every vector register its pattern while a
+                second program on its processor fills them with another, reads back
+                the initial state with its own MXCSR and control word after a
+                message, its peer's close and a message with a signal pending (the
+                `vectors` line).";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("arch::x86_64::switch::save_user_state",
+                "arch::x86_64::switch::UserState::keep_vector_controls",
+                "arch::x86_64::cpu::read_vector_controls");
+        }
+        requirement <'L.x86_64.154'> aRunnableTaskIsSavedWhole : ItemLowLevel {
+            attribute :>> statement = "save_user_state shall save the whole vector
+                state of a task switched out runnable, or blocked in any call but the
+                three, and restore_user_state shall restore it whole.";
+            attribute :>> criterion = "A program blocked in a Linux nanosleep, and
+                one preempted in user mode, beside a second program filling every
+                vector register, read back their own pattern, MXCSR and control word
+                (the `vectors` line); with every blocked task treated as unsaved the
+                nanosleep case reads them reset and the check fails by name.";
+            attribute :>> parent = ("H.SCHED.8", "H.SCHED.12");
+            attribute :>> unit = ("arch::x86_64::switch::save_user_state",
+                "arch::x86_64::switch::restore_user_state");
+        }
+        requirement <'L.x86_64.155'> anUnsavedStateIsReset : ItemLowLevel {
+            attribute :>> statement = "restore_user_state shall, for a state marked
+                unsaved, XRSTOR64 the area with an empty XSTATE_BV and XCR0's enabled
+                components less PKRU requested, which initialises every one and loads
+                the task's own MXCSR, then load the task's x87 control word where it
+                is not 0x037F, and clear the mark; nothing else shall clear it.";
+            attribute :>> criterion = "The three wakes of the `vectors` line read
+                neither program's pattern; with the reset skipped and the mark
+                cleared the first reads the second program's and the check fails by
+                name.";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("arch::x86_64::switch::restore_user_state",
+                "arch::x86_64::switch::reset_vectors", "arch::x86_64::cpu::load_x87_control");
+        }
+        requirement <'L.x86_64.156'> anUnsavedStateReadsAsInitial : ItemLowLevel {
+            attribute :>> statement = "Every reader of a task's saved vector area
+                shall read it through UserState::vectors, which shall answer an
+                unsaved state as the initial state with the task's own MXCSR and x87
+                control word, except two that never meet an unsaved state:
+                restore_user_state's full restore, which runs only where the state
+                is not unsaved, and load_fpu, whose state rt_sigreturn captured in
+                full; a writer shall first make it that state.";
+            attribute :>> criterion = "A state whose area holds other bytes, kept
+                with keep_vector_controls, reads as FpuArea::initial with its own
+                MXCSR and control word through fxsave, avx and xstate_bv, and still
+                does after a writer takes it (the `vectors` line).";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("arch::x86_64::switch::UserState::vectors",
+                "arch::x86_64::switch::UserState::fxsave", "arch::x86_64::switch::UserState::avx",
+                "arch::x86_64::switch::UserState::xstate_bv",
+                "arch::x86_64::switch::UserState::fxsave_mut",
+                "arch::x86_64::switch::UserState::avx_mut",
+                "arch::x86_64::switch::UserState::materialise",
+                "arch::x86_64::switch::FpuArea::initial");
+        }
+        requirement <'L.x86_64.157'> pkruIsNeverReset : ItemLowLevel {
+            attribute :>> statement = "The vector reset's requested components shall
+                never include PKRU, and no state component past x87, SSE and AVX
+                shall be enabled for it.";
+            attribute :>> criterion = "reset_components holds no PKRU bit and the
+                enabled components are within x87, SSE and AVX, at every boot (the
+                `vectors` line).";
+            attribute :>> parent = "H.SCHED.12";
+            attribute :>> unit = ("arch::x86_64::cpu::reset_components",
+                "arch::x86_64::cpu::enable_extended_state");
+        }
+        requirement <'L.x86_64.158'> theBasesAreWrittenAtEverySwitch : ItemLowLevel {
+            attribute :>> statement = "restore_user_state shall write the incoming
+                task's recorded FS base where its FS selector is null at every
+                switch to a task with user state, never skipping a write equal to
+                what the processor last held, and save_user_state shall read no FS
+                base MSR.";
+            attribute :>> criterion = "Two programs with different FS bases trade one
+                processor 10,000 times each, each reading its own word (the `fsbase`
+                line); a program that loads USER_DS and then a null selector into FS
+                before each yield has its record equal to the base its processor
+                last wrote while the base it holds is zero, and a second whose
+                recorded base equals that record reads its own word at every turn; with the write skipped where it equals the last one written,
+                the second ends with SIGSEGV and the check fails by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::x86_64::switch::restore_user_state",
+                "arch::x86_64::switch::load_selectors",
+                "arch::x86_64::switch::save_user_state");
         }
         requirement <'L.x86_64.13'> sigreturnLoadsFpu : ItemLowLevel {
             attribute :>> statement = "load_fpu shall load the x87 and SSE registers
@@ -888,14 +1007,19 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.61'> threadPointerPerTask : ItemLowLevel {
             attribute :>> statement = "arch_prctl(ARCH_SET_FS) with a user address
-                shall set this processor's FS base, and save_user_state and
-                restore_user_state shall save and restore each task's FS base and
-                its program GS base where its selector is null.";
+                shall set this processor's FS base and the running task's recorded
+                one, with interrupts masked, and restore_user_state shall load each
+                task's recorded FS base where its FS selector is null; a base a null
+                selector cleared comes back as recorded.";
             attribute :>> criterion = "Two 64-bit programs pinned to one processor
-                each set a distinct FS base and GS base and read their own words
-                through %fs and %gs N times across sched_yield: 0 foreign reads.";
+                each set a distinct FS base and read their own words through %fs
+                10,000 times across sched_yield, and one that clears its base with
+                USER_DS and a null selector reads its own word again after a
+                nanosleep (the `fsbase` line); with the save reading FS_BASE again,
+                that read faults and the check fails by name.";
             attribute :>> parent = "H.SCHED.8";
-            attribute :>> unit = ("arch::x86_64::syscall::set_thread_pointer",
+            attribute :>> unit = ("arch::x86_64::syscall::arch_prctl",
+                "arch::x86_64::syscall::set_thread_pointer",
                 "arch::x86_64::syscall::thread_pointer",
                 "arch::x86_64::switch::save_user_state",
                 "arch::x86_64::switch::load_selectors");
