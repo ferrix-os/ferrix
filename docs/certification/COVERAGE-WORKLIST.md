@@ -41,6 +41,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | Landing | Architectures | Dropped by the carry | Owed |
 |---|---|---|---|
+| OPAQUE-KERNEL.md §9.7, step 4's groundwork: ferrix.fastpath (branch step4-prep) | x86_64, aarch64, armv7a | carried from 527201573, no anchor dropped. | Measure and test or argue the new lines on every architecture: fastpath.rs whole (init and its four readings, on, report and its three wordings), checks::init's call of it and its report on a boot that skips the checks, and stages_check::check_native_objects' report. A boot with ferrix.fastpath=on and one with a value not understood reach the arms test-boot does not. |
 | OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new and edited lines on every architecture: sched/mod.rs's set_idle_at_switch (both outcomes: the bit already as wanted, and changed), take_resched's load before its swap (both outcomes), regroup_current's compare by two loads, its store and the fence when the counts differ, note_moved's SeqCst increment, and choose_next's moves into previous and current with the let-else that unlocks when either is absent (defensive: both were stored the line above); arch/speculation.rs's entered_space loads and stores and count_here; object/quota.rs's effective through ferrix_sched::carried_weight; and the check code, sched/check.rs's a_running_processor_is_not_idle_across_switches and switch_and_look, and object/quota_check.rs's check_the_weight bound. |
 | po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new lines on every architecture: sched/mod.rs steal_from's keeps_its_last, both outcomes -- a victim running its idle task with one waiting task kept, and one with two or more, or a busy victim, stolen from. |
 | NVIDIA.md N2-N6, Vulkan, NVKMS, the 3060's monitor and PIN_CONTIGUOUS (branch land-n6 from nvidia-n2; the consultant's land-ahead verdict, ledger 318, condition L3) | x86_64, aarch64, armv7a | carried from be2ec8395: 9 anchors dropped as unmeasured, syscall/native.rs 2283-2284 and 2286-2287 on x86_64, aarch64 and armv7a (vmo_pin's PIN_COHERENT flush, absent-hardware, now coherent_for_device), each with its argument. | Measure and test or argue the new lines on every architecture: syscall/native.rs contiguous_pin, coherent_for_device, dma_flags, run_status, budget_allows and is_one_run, and vmo_pin's PIN_CONTIGUOUS branch; mm.rs allocate_user_run; user/vmo.rs Vmo::commit_run, Vmo::give_back_run, Pages::insert_run and Pages::take_ours; user/space.rs map_window_typed's combining branch; interfaces/display/mod.rs accept's Refusal::Copies and the copying driver's rights; fs/devfs.rs announce; interfaces/chardev/mod.rs mmap forwarding (map_reply, Apertures, publishes_for); fs/procfs and fs/sysfs's nvidia files; syscall/load.rs's boundary pages and zero_tails, with the single-page fill it asks for first (user/space.rs fill_file_page_alone and fill_file_pages, user/vmo.rs Vmo::fill_one_page, fs/pages.rs Fill::fill_one). |
@@ -79,7 +80,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
-| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 587-589, 594 |
+| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 614-616, 621 |
 | `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 181, 220 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
@@ -92,9 +93,9 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
-| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 686, 689, 692, 699 |
+| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 751, 754, 757, 764 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 318, 700, 709 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1461-1462 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1466-1467 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 336 |
 
 ---
@@ -103,7 +104,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2171 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2354 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---
@@ -131,7 +132,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 297, 679, 1245 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 305, 687, 1253 |
 
 ---
 
@@ -171,7 +172,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1119, 2041 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1151, 2079 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
@@ -180,7 +181,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1326 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1331 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

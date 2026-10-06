@@ -246,6 +246,10 @@ pub struct Refused<T> {
     pub reason: SchedError,
 }
 
+/// A running entity taken off its queue: its identifier, its data, what it
+/// carries away and its slot, as [`RunQueue::remove_curr`] answers it.
+pub type Left<T> = (u64, T, EntityState, Slot<T>);
+
 /// One entity, while it is on a queue.
 #[derive(Debug)]
 pub(crate) struct Entity<T> {
@@ -652,7 +656,7 @@ impl<T> RunQueue<T> {
         state: EntityState,
         slot: Slot<T>,
         slice_after: u64,
-    ) -> Result<Option<(u64, T, EntityState, Slot<T>)>, Refused<T>> {
+    ) -> Result<Option<Left<T>>, Refused<T>> {
         if !self.tree.is_empty() || self.curr.is_none() || slice_after == 0 {
             self.enqueue(id, payload, state, slot)?;
             let _ = self.set_slice_ns(slice_after);

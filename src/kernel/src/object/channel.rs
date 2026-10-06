@@ -999,7 +999,7 @@ impl Endpoint {
             if inbox
                 .parked
                 .as_ref()
-                .is_some_and(|parked| core::ptr::eq(&**parked, task))
+                .is_some_and(|parked| core::ptr::eq(Arc::as_ptr(parked), task))
             {
                 inbox.parked.take()
             } else {

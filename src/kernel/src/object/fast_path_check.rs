@@ -75,6 +75,35 @@ pub(crate) struct Report {
     pub(crate) trips: u64,
 }
 
+/// Run every case and print the boot line.
+///
+/// # Errors
+///
+/// As [`run`].
+pub(crate) fn run_and_report() -> Result<(), &'static str> {
+    let fast = run()?;
+    if arch::FAST_WRITE_READ {
+        crate::console::println!(
+            "  fastcase {} cases of the fast path's tests answered as the general path answers \
+             them{}, every waiter within {} s; the fast path {}: {} trips taken",
+            fast.cases,
+            if fast.two_processors {
+                ", one across two processors"
+            } else {
+                ""
+            },
+            WOKEN_WITHIN_NANOS / 1_000_000_000,
+            if fast.on { "on" } else { "off" },
+            fast.trips
+        );
+    } else {
+        crate::console::println!(
+            "  fastcase not checked: the fast path is x86-64's; no fast path counter moved"
+        );
+    }
+    Ok(())
+}
+
 /// Run every case.
 ///
 /// # Errors
@@ -107,7 +136,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         }
     }
     let after = direct::counts();
-    report.trips = after[Count::Trip as usize].wrapping_sub(before[Count::Trip as usize]);
+    let trips = |counts: &[u64]| counts.get(Count::Trip as usize).copied().unwrap_or(0);
+    report.trips = trips(&after).wrapping_sub(trips(&before));
     if !on && after != before {
         return Err("a fast path counter moved on a boot without the fast path");
     }
@@ -117,7 +147,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 /// How a case's counter moved, for one that must reach a test with the
 /// fast path on.
 fn moved(before: &[u64], what: Count) -> u64 {
-    direct::counts()[what as usize].wrapping_sub(before[what as usize])
+    let at = |counts: &[u64]| counts.get(what as usize).copied().unwrap_or(0);
+    at(&direct::counts()).wrapping_sub(at(before))
 }
 
 /// Make the call on `handle` through the entry, sending `count` bytes of

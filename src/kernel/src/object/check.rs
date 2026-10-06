@@ -229,26 +229,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             "  sync     not checked: one processor, nowhere to move a reader to"
         );
     }
-    let fast = object::fast_path_check::run()?;
-    if crate::arch::FAST_WRITE_READ {
-        crate::console::println!(
-            "  fastcase {} cases of the fast path's tests answered as the general path answers \
-             them{}, every waiter within {} s; the fast path {}: {} trips taken",
-            fast.cases,
-            if fast.two_processors {
-                ", one across two processors"
-            } else {
-                ""
-            },
-            10,
-            if fast.on { "on" } else { "off" },
-            fast.trips
-        );
-    } else {
-        crate::console::println!(
-            "  fastcase not checked: the fast path is x86-64's; no fast path counter moved"
-        );
-    }
+    object::fast_path_check::run_and_report()?;
     check_a_job_kill_takes_down_a_process_tree(&mut after)?;
     check_a_long_chain_of_jobs_is_freed_without_recursion()?;
     check_a_job_counts_its_members()?;

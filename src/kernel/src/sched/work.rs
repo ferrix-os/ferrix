@@ -178,6 +178,10 @@ pub(crate) fn look() -> u32 {
 /// look (`docs/OPAQUE-KERNEL.md` §9.7, part 2), which takes the general way
 /// out, where [`look`] clears and reads, whenever any bit is set. Zero where
 /// nothing runs. With interrupts masked.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
 pub(crate) fn peek() -> u32 {
     super::with_current(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
 }

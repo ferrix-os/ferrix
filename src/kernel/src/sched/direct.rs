@@ -207,10 +207,9 @@ impl Direct {
     ) {
         let now = self.now;
         let queue = self.queue();
-        let idle = queue
-            .idle
-            .as_ref()
-            .is_some_and(|idle| core::ptr::eq(&**idle, caller) || Arc::ptr_eq(idle, &peer));
+        let idle = queue.idle.as_ref().is_some_and(|idle| {
+            core::ptr::eq(Arc::as_ptr(idle), caller) || Arc::ptr_eq(idle, &peer)
+        });
         if idle {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_IDLE_TASK,
@@ -277,8 +276,9 @@ impl Direct {
                 "the direct switch's queue lost the tasks it was given"
             );
         };
-        // The lock goes with the switch, to the context switched to.
-        core::mem::forget(self);
+        // The lock goes with the switch, to the context switched to: this
+        // `Direct`'s drop, which would let it go, never runs.
+        let _ = core::mem::ManuallyDrop::new(self);
         // SAFETY: (CONTEXT) as `pick_and_switch`'s: `save` is this context's
         // own slot and `resume` a stack pointer this module saved, and this
         // processor holds the run queue's lock until `finish_switch`.

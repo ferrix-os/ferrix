@@ -375,6 +375,10 @@ pub(crate) fn filter_quiet() -> bool {
 
 /// What step 4's fast path made of a `channel_write_read`
 /// (`docs/OPAQUE-KERNEL.md` §9.7, part 2).
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Fast {
     /// A test failed, and nothing changed: the entry goes on as for any
