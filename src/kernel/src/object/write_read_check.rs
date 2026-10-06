@@ -560,10 +560,11 @@ fn check_a_wait_is_ended_by(ending: Ending) -> Result<(), &'static str> {
     let woken_before = own.waiters().waits_ended_by_a_wake();
     let task = spawn_in(&process, "write_read waiter", wait_in_the_process, None)?;
 
-    // Listed on the end's queue: blocked, or at its last look before it
-    // blocks. Either way only a wake ends the wait from here.
+    // Listed on the end's queue, or parked by the fast path's receive half:
+    // blocked, or at its last look before it blocks. Either way only a wake
+    // ends the wait from here.
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while own.waiters().listed() == 0 {
+    while !own.reader_waiting() {
         if task.is_dead() || crate::timer::now_nanos() >= deadline {
             return Err("wait: the write_read check's waiter never waited");
         }
@@ -686,7 +687,7 @@ fn wake_from(
     writer_for: impl Fn(usize) -> usize,
 ) -> Result<(usize, usize), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while own.waiters().listed() == 0 {
+    while !own.reader_waiting() {
         if reader.is_dead() || crate::timer::now_nanos() >= deadline {
             return Err("sync: the reader never waited");
         }

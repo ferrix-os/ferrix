@@ -415,12 +415,19 @@ impl CpuQueue {
     /// (finding F-23). A task without its slot is already queued somewhere,
     /// which the callers' `is_queued` checks rule out; it is left alone.
     pub(crate) fn insert(&mut self, task: &Arc<Task>) {
+        self.insert_at(task, None);
+    }
+
+    /// [`CpuQueue::insert`], charging the running task up to `now` when it
+    /// is given, so that a caller that has read the clock once reads it no
+    /// more: the direct switch's `hand_over`.
+    pub(crate) fn insert_at(&mut self, task: &Arc<Task>, now: Option<u64>) {
         let Some(slot) = task.take_run_slot() else {
             super::note_missing_slot();
             return;
         };
         if self.current.is_some() {
-            self.account(crate::timer::now_nanos());
+            self.account(now.unwrap_or_else(crate::timer::now_nanos));
         }
         // A task new to any queue is counted in its job's load here, once;
         // one woken was counted as it became runnable. Its weight is its
@@ -607,6 +614,42 @@ impl CpuQueue {
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
         self.fair.should_preempt()
+    }
+
+    /// Whether a sleeper's time has come by `now`: whether
+    /// [`CpuQueue::wake_sleepers`] at `now` would find an entry to take. The
+    /// direct switch declines when one has, rather than wake it, so that a
+    /// declined attempt leaves the queue as it found it (T12,
+    /// `docs/OPAQUE-KERNEL.md` §9.7).
+    pub(crate) fn sleeper_due(&self, now: u64) -> bool {
+        self.sleepers.first_due().is_some_and(|at| at <= now)
+    }
+
+    /// The direct switch's queue operation (`docs/OPAQUE-KERNEL.md` §9.7,
+    /// part 1): `peer`, made runnable by its caller, joins this queue while
+    /// the running task still runs, `between` runs (the running task is set
+    /// blocked there), the running task leaves the fair class, and the pick
+    /// is made. Exactly the general path's sequence -- the wake's
+    /// [`CpuQueue::insert`], then `choose_next`'s `account`,
+    /// `detach_current` and `pick_next` -- with every clock read at `now`,
+    /// on a queue with nothing waiting and no sleeper due, so the pick can
+    /// only be `peer`. Answers the pick.
+    ///
+    /// Composed from those functions, not written again: what the queue's
+    /// quantities come out as is what they come out as on the general path,
+    /// because it is the general path's code.
+    pub(crate) fn hand_over(
+        &mut self,
+        peer: &Arc<Task>,
+        now: u64,
+        between: impl FnOnce(),
+    ) -> Option<Arc<Task>> {
+        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+        self.insert_at(peer, Some(now));
+        between();
+        self.account(now);
+        self.detach_current();
+        self.pick_next()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.

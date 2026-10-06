@@ -157,6 +157,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // a program's own filter is the personality's policy, so the core holds a
     // pointer to it and nothing more (`docs/SECCOMP.md` §3.3).
     trap::set_syscall_filter(syscall::seccomp::check);
+    // With the one question the fast path asks of it, before the filter it
+    // runs ahead of: whether the filter would look at this call at all.
+    trap::set_filter_quiet(syscall::seccomp::quiet);
     println!("  traps    vectors installed");
 
     let stats = bring_up_memory(view);

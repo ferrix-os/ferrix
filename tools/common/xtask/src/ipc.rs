@@ -67,12 +67,20 @@ fn run_once(args: &Args) -> Result<Vec<String>> {
         let natives = native::build(arch, args.release)?;
         let carried = shell::carried_for(arch, &program, args)?;
         let initramfs = initramfs::build(None, &natives, None, &carried)?;
-        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
+        // `--kernel-option ferrix.fastpath=on` measures the fast path
+        // (`docs/OPAQUE-KERNEL.md` §9.7); the counts line says which path the
+        // trips took.
+        let cmdline = crate::image_cmdline(args);
+        let image =
+            fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
         let host = Host::before(args.pin.as_deref());
         let lines = qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)?;
         println!("  {arch}: {}", host.after());
         let mut finished = false;
-        for line in lines.iter().filter(|line| line.contains("ipc-bench")) {
+        for line in lines
+            .iter()
+            .filter(|line| line.contains("ipc-bench") || line.contains("fastpath"))
+        {
             println!("  {arch}: {}", line.trim());
             finished |= line.contains("ipc-bench: exit 0");
             all.push(line.trim().to_owned());
