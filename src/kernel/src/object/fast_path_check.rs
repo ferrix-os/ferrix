@@ -41,6 +41,7 @@ use ferrix_seccomp::SeccompData;
 use super::Object;
 use super::channel::Endpoint;
 use super::job::KILLED_STATUS;
+use super::process::Host as _;
 use crate::arch;
 use crate::sched::Task;
 use crate::sched::direct::{self, Count};
@@ -95,7 +96,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             check_a_parked_caller_woken_by(ending, on)?;
         }
         check_a_spinner_keeps_its_share(on)?;
-        report.cases = 8;
+        check_the_barriers_in_a_domain_and_across_two(on)?;
+        report.cases = 9;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
             report.cases += 1;
@@ -147,7 +149,22 @@ fn refused(status: Errno) -> isize {
 
 /// A check process holding `end` as a handle, and the handle.
 fn holding(end: &Arc<Endpoint>) -> Result<(Arc<Process>, Handle), &'static str> {
+    holding_in(end, None)
+}
+
+/// [`holding`], the process moved into `job` before it runs when one is
+/// given, as `process_create` places one.
+fn holding_in(
+    end: &Arc<Endpoint>,
+    job: Option<&Arc<super::job::Job>>,
+) -> Result<(Arc<Process>, Handle), &'static str> {
     let process = process::new_for_check().map_err(|_| "no process for the fast path check")?;
+    if let Some(job) = job {
+        process
+            .core()
+            .move_new_to(job)
+            .map_err(|_| "a job refused the fast path check's process")?;
+    }
     let handle = process
         .with_handles(|table| table.insert(Object::Channel(Arc::clone(end)), Rights::CHANNEL))
         .map_err(|_| "no room in the fast path check's table")?;
@@ -198,7 +215,16 @@ fn echo_in_the_process(_argument: usize) {
 
 /// Start an echo on `end`, pinned to `cpu`, and wait until it waits.
 fn start_echo(end: &Arc<Endpoint>, cpu: usize) -> Result<(Arc<Process>, Arc<Task>), &'static str> {
-    let (process, handle) = holding(end)?;
+    start_echo_in(end, cpu, None)
+}
+
+/// [`start_echo`], in `job` when one is given.
+fn start_echo_in(
+    end: &Arc<Endpoint>,
+    cpu: usize,
+    job: Option<&Arc<super::job::Job>>,
+) -> Result<(Arc<Process>, Arc<Task>), &'static str> {
+    let (process, handle) = holding_in(end, job)?;
     *ECHO.lock() = Some(handle);
     let task = spawn_in(&process, "fast path echo", echo_in_the_process, Some(cpu))?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
@@ -241,10 +267,21 @@ fn trips_in_the_process(_argument: usize) {
 /// Make `trips` trips from a caller pinned to `cpu` against an echo pinned to
 /// `echo_cpu`, and answer the echo's task once both have ended.
 fn trips_between(cpu: usize, echo_cpu: usize, trips: u64) -> Result<Arc<Task>, &'static str> {
+    trips_between_in(cpu, echo_cpu, trips, [None, None])
+}
+
+/// [`trips_between`], the echo and the caller in the jobs `jobs` names, in
+/// that order, where it names them.
+fn trips_between_in(
+    cpu: usize,
+    echo_cpu: usize,
+    trips: u64,
+    jobs: [Option<&Arc<super::job::Job>>; 2],
+) -> Result<Arc<Task>, &'static str> {
     let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
-    let (_echo_process, echo) = start_echo(&theirs, echo_cpu)?;
+    let (_echo_process, echo) = start_echo_in(&theirs, echo_cpu, jobs[0])?;
     drop(theirs);
-    let (caller_process, handle) = holding(&mine)?;
+    let (caller_process, handle) = holding_in(&mine, jobs[1])?;
     drop(mine);
     *CALLED.lock() = None;
     *CALLER.lock() = Some((handle, trips));
@@ -734,6 +771,61 @@ fn attempt_a_parked_caller(ending: Ending) -> Result<(), &'static str> {
             Ending::Close => "continuation: a parked caller woken by its peer's close did not answer PEER_CLOSED",
             Ending::Kill => "continuation: a parked caller woken by its kill did not answer EINTR",
         });
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Case 13: the barrier decisions
+// ---------------------------------------------------------------------------
+
+/// Case 13 (part 4): the same trips, between two programs of one speculation
+/// domain and between two of two domains, make the barrier decisions the
+/// switch makes on either path, because both switch through
+/// `AddressSpace::install`: inside the domain each switch refills the
+/// return stack and issues no `IBPB`, across two each switch issues one.
+/// The few switches of the programs' own start and end, to and from the
+/// idle task, are allowed for.
+fn check_the_barriers_in_a_domain_and_across_two(on: bool) -> Result<(), &'static str> {
+    if !arch::HARDENED {
+        return Ok(());
+    }
+    let before = direct::counts();
+    let cpu = trip_processor();
+    let tree = super::job::Job::new_root().map_err(|_| "no memory for case 13's jobs")?;
+    let one = tree
+        .new_child_domain()
+        .map_err(|_| "case 13: a job refused a marked child")?;
+    let other = tree
+        .new_child_domain()
+        .map_err(|_| "case 13: a job refused a second marked child")?;
+    // Allowed for the start and the end of the two programs.
+    const SLACK: u64 = 8;
+    let decided = || arch::barrier_decisions_on(cpu);
+    let refilled = || arch::refills_in_domain_on(cpu);
+    let (decided_before, refilled_before) = (decided(), refilled());
+    let _ = trips_between_in(cpu, cpu, TRIPS, [Some(&one), Some(&one)])?;
+    let (decided_in, refilled_in) = (
+        decided().wrapping_sub(decided_before),
+        refilled().wrapping_sub(refilled_before),
+    );
+    if decided_in > SLACK || refilled_in < 2 * TRIPS {
+        crate::console::println!(
+            "  fastpath case 13: in a domain {decided_in} barriers decided, {refilled_in} refills"
+        );
+        return Err("case 13: trips inside one speculation domain made barrier decisions a switch inside it does not");
+    }
+    let decided_before = decided();
+    let _ = trips_between_in(cpu, cpu, TRIPS, [Some(&one), Some(&other)])?;
+    let decided_across = decided().wrapping_sub(decided_before);
+    if decided_across < 2 * TRIPS {
+        crate::console::println!(
+            "  fastpath case 13: across two domains {decided_across} barriers decided"
+        );
+        return Err("case 13: trips across two speculation domains skipped a barrier a switch between them makes");
+    }
+    if on && moved(&before, Count::Trip) == 0 && crate::smp::count() >= 2 {
+        return Err("case 13: no trip of the barrier case was handed over directly");
     }
     Ok(())
 }
