@@ -220,6 +220,9 @@ pub(crate) struct Args {
     /// `--against-redox`: `bench-ipc` alternates with the Redox image in
     /// `~/.local/share/ferrix/redox-bench`.
     pub(crate) against_redox: bool,
+    /// `--record`: `bench-ipc` files its result under
+    /// `docs/hotpaths/results/` (`docs/HOTPATHS.md` §6).
+    pub(crate) record: bool,
     /// `--pin`, the host processors (`taskset -c`'s list) QEMU runs on.
     /// `bench-ipc` pins to 11 unless given another, or `none`.
     pub(crate) pin: Option<String>,
@@ -552,7 +555,12 @@ impl Args {
     fn named(&mut self, flag: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
         if matches!(
             flag,
-            "--alternate" | "--rounds" | "--pin" | "--against-sel4" | "--against-redox"
+            "--alternate"
+                | "--rounds"
+                | "--pin"
+                | "--against-sel4"
+                | "--against-redox"
+                | "--record"
         ) {
             return self.bench(flag, items);
         }
@@ -744,7 +752,7 @@ impl Args {
                 "--seeds" | "--jobs" => args.counts(&item, &mut items)?,
                 "--accel" | "--since" | "--moved" | "--alternate" | "--rounds" | "--pin"
                 | "--against-sel4" | "--against-redox" => args.named(&item, &mut items)?,
-                "--to" | "--stage" => args.named(&item, &mut items)?,
+                "--to" | "--stage" | "--record" => args.named(&item, &mut items)?,
                 "--port" => args.port = Some(value(&mut items, "--port")?),
                 "--init" => args.init = Some(value(&mut items, "--init")?),
                 "--init-path" => args.init_path = Some(init_path(&mut items)?),
@@ -882,13 +890,14 @@ fn number<T: std::str::FromStr>(items: &mut impl Iterator<Item = String>, key: &
 
 impl Args {
     /// `bench-ipc`'s own flags: `--alternate`, `--rounds`, `--against-sel4`,
-    /// `--against-redox` and `--pin`.
+    /// `--against-redox`, `--record` and `--pin`.
     fn bench(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
         match key {
             "--alternate" => self.alternate = Some(value(items, key)?),
             "--rounds" => self.rounds = Some(count(items, key)?),
             "--against-sel4" => self.against_sel4 = true,
             "--against-redox" => self.against_redox = true,
+            "--record" => self.record = true,
             _ => self.pin = Some(value(items, key)?),
         }
         Ok(())
