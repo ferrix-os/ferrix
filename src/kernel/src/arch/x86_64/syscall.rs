@@ -483,6 +483,39 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
+    let profiled = frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ;
+    let floor = frame.rax as usize == ferrix_native_abi::nr::OBJECT_WAIT_ONE;
+    if floor {
+        crate::sched::prof::floor(false);
+    } else {
+        crate::sched::prof::switched();
+    }
+    if profiled {
+        let root: u64;
+        // SAFETY: PROFILE ONLY: reading CR3.
+        unsafe { core::arch::asm!("mov {0}, cr3", out(reg) root, options(nostack, nomem)) };
+        crate::sched::prof::entry_rip(root);
+        crate::sched::prof::stamp(crate::sched::prof::Point::Entry);
+    }
+    entry_inner(frame);
+    if profiled && crate::sched::prof::EXTRA_FLUSH {
+        let root: u64;
+        // SAFETY: PROFILE ONLY: reload CR3 with itself.
+        unsafe {
+            core::arch::asm!("mov {0}, cr3", "mov cr3, {0}", out(reg) root, options(nostack));
+        }
+        let _ = root;
+    }
+    if profiled {
+        crate::sched::prof::stamp(crate::sched::prof::Point::Exit);
+    }
+    if floor {
+        crate::sched::prof::floor(true);
+    }
+}
+
+/// PROFILE ONLY: the entry's body, so that every way out is stamped.
+fn entry_inner(frame: &mut SyscallFrame) {
     // Step 4's fast path for `channel_write_read`, on a boot that registered
     // one (`ferrix.fastpath=on`, T1): first, before the filter, which its own
     // T2 stands in for, and with interrupts still masked. Every entry measure
@@ -533,6 +566,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             {
                 return;
             }
+            crate::sched::prof::stamp(crate::sched::prof::Point::EFilter);
             // A native call that blocks lets the caller's vector registers go
             // for its length (`docs/OPAQUE-KERNEL.md` §9.8, 3a): the mark tells
             // the switch so, and is lowered as the call returns, before
@@ -541,12 +575,14 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             if blocking {
                 mark_vectors_dead(true);
             }
+            crate::sched::prof::stamp(crate::sched::prof::Point::EMark);
             // Open while the call is served: a call may block, and one that spins
             // waiting for input must not keep the processor from switching away.
             // `SFMASK` closed them on entry, and they are closed again before the
             // frame is restored, because the way out swaps `GS` on a live stack.
             super::enable_interrupts();
             let regs = UserRegs::Syscall(*frame);
+            crate::sched::prof::stamp(crate::sched::prof::Point::ESti);
             let outcome = crate::trap::system_call(&args, Some(&regs));
             super::disable_interrupts();
             if blocking {

@@ -640,6 +640,7 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
         "  init     {} KiB program built in, starting {how}",
         inputs.program.len() / 1024
     );
+    crate::sched::prof::reset();
 
     let name = args.first().copied().unwrap_or(b"");
     // A built-in program may be dynamically linked too, as a distribution's
@@ -665,6 +666,7 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
     match status {
         Ok(status) => {
             crate::fastpath::report_counts();
+            crate::sched::prof::print();
             println!("  init     the shell exited with {status}");
         }
         Err(problem) => println!("  init     the shell could not be started: {problem}"),

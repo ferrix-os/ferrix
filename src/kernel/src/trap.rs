@@ -426,6 +426,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
     if regs.is_some() {
         crate::sched::call_entered();
     }
+    crate::sched::prof::stamp(crate::sched::prof::Point::ECallEntered);
     let outcome = match SYSCALL_ENTRY.get() {
         Some(entry) => entry(args, regs),
         None => Outcome::Return(Errno::ENOSYS.as_return_value()),
@@ -436,6 +437,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
         crate::sched::regroup_current();
         crate::sched::call_left();
     }
+    crate::sched::prof::stamp(crate::sched::prof::Point::Left);
     outcome
 }
 

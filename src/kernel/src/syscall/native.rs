@@ -833,11 +833,13 @@ pub(crate) fn dispatch_write_read(
         &args.args,
         &plain,
     );
+    crate::sched::prof::stamp(crate::sched::prof::Point::Recorded);
     answered
 }
 
 /// [`dispatch_write_read`]'s answer, before the audit record.
 fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3]), Errno> {
+    crate::sched::prof::stamp(crate::sched::prof::Point::Dispatched);
     let process = caller.core();
     // A 32-bit program's all-ones register is `usize::MAX` there too.
     let count = usize::try_from(a[1]).unwrap_or(nr::WRITE_READ_NOTHING);
@@ -848,6 +850,7 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
         Rights::READ
     };
     let endpoint = process.with_handles(|table| channel_in(table, handle(a[0]), needed))?;
+    crate::sched::prof::stamp(crate::sched::prof::Point::LookedUp);
     if sending {
         send_words(&endpoint, count, a)?;
     }
@@ -913,7 +916,13 @@ fn send_words(endpoint: &Endpoint, count: usize, a: &[u64; 6]) -> Result<(), Err
 /// answer its size and its words, the bytes after it zero.
 fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
     loop {
-        match endpoint.read_small() {
+        let small = endpoint.read_small();
+        crate::sched::prof::stamp(if small.is_ok() {
+            crate::sched::prof::Point::Read
+        } else {
+            crate::sched::prof::Point::ReadEmpty
+        });
+        match small {
             Ok(small) => return Ok((small.len, words_of(&small.bytes, small.len))),
             Err(ReadError::Empty) => {}
             Err(refused) => return Err(read_refusal(refused)),

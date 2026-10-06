@@ -542,6 +542,7 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
     // SAFETY: (CONTEXT) the caller switches with interrupts masked; the descriptors are
     // ones `set_thread_area` built, or zero.
     unsafe { gdt::write_tls(&state.tls) };
+    crate::sched::prof::stamp(crate::sched::prof::Point::RTls);
     // SAFETY: (CONTEXT) each selector checked loadable against the slots just written.
     unsafe {
         load_selectors(
@@ -560,6 +561,7 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
         // reserved bit `XRSTOR64` checks is clear.
         unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::extended_state_components()) };
     }
+    crate::sched::prof::stamp(crate::sched::prof::Point::RVec);
     // SAFETY: (ENTRY) the caller guarantees the stack.
     unsafe { super::syscall::set_entry_stack(entry_stack) };
 }
@@ -713,17 +715,21 @@ unsafe fn load_selectors(
     let [ds, es, fs, gs] = selectors.map(|selector| gdt::loadable(selector, tls));
     // SAFETY: (CONTEXT) each selector null or loadable, as `gdt::loadable` checked.
     unsafe { cpu::load_data_selectors(ds, es, fs) };
+    crate::sched::prof::stamp(crate::sched::prof::Point::RSel);
     if fs == 0 {
         // SAFETY: (CONTEXT) a user address the program set, or zero.
         unsafe { super::syscall::set_thread_pointer(fs_base) };
     }
+    crate::sched::prof::stamp(crate::sched::prof::Point::RFs);
     // SAFETY: (CONTEXT) as for the other three.
     unsafe { cpu::load_user_gs(gs) };
+    crate::sched::prof::stamp(crate::sched::prof::Point::RGs);
     if gs == 0 {
         // SAFETY: (CONTEXT) the program's own base, into the shadow it lives in while
         // the kernel runs.
         unsafe { super::syscall::set_program_gs_base(gs_base) };
     }
+    crate::sched::prof::stamp(crate::sched::prof::Point::RGsBase);
 }
 
 /// Load `selectors` -- `DS`, `ES`, `FS`, `GS` -- as a program's own, each
