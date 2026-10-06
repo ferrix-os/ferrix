@@ -1,0 +1,20 @@
+% Table 1: one direction of the round trip, ns, net of the stamps.
+% Source: docs/OPAQUE-KERNEL.md §9.10 ("The budget against 400"),
+% logs ~/.local/share/ferrix/logs/po7-ipcM/prof-7.log, prof-8.log.
+% "after step 5" is a budget, not a measurement.
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Piece & now & step 4 & step 5 & seL4 \\
+\midrule
+\texttt{SYSCALL}/\texttt{SYSRET}, stub, loop & 60--85 & same & same & $\sim$40 \\
+user TLB refill after \texttt{CR3} & 50--100 & same & 20--40 & $\sim$20 \\
+\texttt{CR3} write, no PCID & 90--113 & same & same & $\sim$90 \\
+return-stack refill & 12--26 & same & 0 & 20 \\
+software, entry to exit & $\sim$650 & 50--110 & 35--60 & $\sim$50 \\
+user state & 240--275 & same & 15--30 & $\sim$0 \\
+\texttt{switch\_to} and tail & 10--15 & 5 & 5 & -- \\
+\midrule
+\textbf{a direction} & $\sim$1,130 & 560--700 & 210--260 & 220 \\
+\textbf{a round trip} & 2,257 & 1.1--1.4 µs & 420--520 & 440 \\
+\bottomrule
+\end{tabular}

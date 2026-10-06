@@ -1,0 +1,13 @@
+% Table 2: each step, ABAB against its parent (median ratio of p50s, spread).
+% Sources: research-plan.md M7-M12 and the logs named there.
+\begin{tabular}{@{}llrl@{}}
+\toprule
+Step & tree & ratio & spread, rounds \\
+\midrule
+2f & 445d09420 & 0.949 & 0.942--0.957, 5 \\
+3a, 3b & a1d456820 & 0.942 & 0.930--1.124, 5 \\
+ERAPS\textsuperscript{b} & po7/step5 & 0.979 & 0.787--1.136, 6 \\
+\texttt{VZEROALL}\textsuperscript{b} & po7/step5-vec & 0.958 & 0.950--1.171, 6 \\
+fast path on/off\textsuperscript{b} & po7/step4 & 0.78 & 1,318--1,558 vs 1,697--2,147 ns, 7 \\
+\bottomrule
+\end{tabular}
