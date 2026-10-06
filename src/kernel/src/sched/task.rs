@@ -492,6 +492,21 @@ impl Task {
         <arch::Irq as IrqControl>::restore(saved);
     }
 
+    /// [`Task::set_state`] for a change whose old state the caller knows and
+    /// no one else can change meanwhile, with interrupts masked: a store and
+    /// the job's load, no read-modify-write of the state and no second mask.
+    /// The direct switch's, under the run-queue lock every waker of either
+    /// task takes, for the peer asleep (`BLOCKED`) and the caller running
+    /// (`RUNNABLE`).
+    pub(crate) fn set_state_from(&self, before: u8, state: u8) {
+        self.state.store(state, Ordering::Release);
+        if before != RUNNABLE && state == RUNNABLE {
+            self.join_group();
+        } else if before == RUNNABLE && state != RUNNABLE {
+            self.leave_group();
+        }
+    }
+
     /// The job whose processor share it runs in, or `quota::NONE`.
     pub(crate) fn group(&self) -> u32 {
         group_of(self.group.load(Ordering::Acquire))
