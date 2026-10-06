@@ -190,9 +190,10 @@ impl Direct {
     /// # Asserted
     ///
     /// A4: neither task is this processor's idle task. A1: the peer is
-    /// asleep at home -- blocked, neither running here nor queued, holding
-    /// both its slots: T11 and T12 leave no way for a parked task to be
-    /// otherwise. Each stops the machine with its code.
+    /// asleep at home -- blocked, neither running here nor queued; `begin`
+    /// tested that it holds both its slots -- and T11 and T12 leave no way
+    /// for a parked task to be otherwise. Each stops the machine with its
+    /// code.
     ///
     pub(crate) fn hand_over(
         &mut self,
@@ -216,7 +217,9 @@ impl Direct {
             .current
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, peer));
-        if running || peer.is_queued() || peer.state() != BLOCKED || !peer.holds_slots() {
+        // Its slots were tested under this lock hold (T11, `begin`), and
+        // only a holder of a queue's lock moves them.
+        if running || peer.is_queued() || peer.state() != BLOCKED {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "a parked task about to be handed a reply was running or queued (A1): task {}",
@@ -317,7 +320,7 @@ pub(crate) mod prof {
     static LAST: AtomicU64 = AtomicU64::new(0);
     static SUM: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
     static HITS: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
-    pub(crate) const ENABLED: bool = true;
+    pub(crate) const ENABLED: bool = false;
     static IN_DOMAIN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
     pub(crate) fn entry() {
         if !ENABLED {
