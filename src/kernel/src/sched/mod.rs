@@ -582,6 +582,14 @@ pub(crate) fn set_in_call_masked(in_call: bool) {
     }
 }
 
+/// Whether this processor's running task is inside a system call, for the
+/// fast path's check: see [`IN_CALL`].
+pub(crate) fn in_call_here() -> bool {
+    this_cpu()
+        .and_then(|cpu| IN_CALL.get(cpu))
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+}
+
 /// The running task is leaving a system call: make the decision a wake made
 /// during it asked for, as an interrupt's exit would.
 pub(crate) fn call_left() {

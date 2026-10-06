@@ -996,11 +996,23 @@ fn park_for_reply(endpoint: &Endpoint) -> Parked {
 /// [`Fast::Tail`]: crate::trap::Fast::Tail
 /// [`Fast::Done`]: crate::trap::Fast::Done
 pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
+    // Its first act, as `trap::system_call`'s is: the frame tail or the
+    // continuation lowers it. A decline lowers it here, since a declined
+    // call need not reach `system_call` -- the filter may answer it, and
+    // the entry then leaves without `call_left` -- and `system_call`
+    // raises it again for itself (`L.object.169`).
+    crate::sched::set_in_call_masked(true);
+    let fast = fast_write_read_raised(a);
+    if matches!(fast, crate::trap::Fast::Declined) {
+        crate::sched::set_in_call_masked(false);
+    }
+    fast
+}
+
+/// [`fast_write_read`] once it has raised `IN_CALL`.
+fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::sched::direct::{self, Count};
     use crate::trap::Fast;
-    // Its first act, as `trap::system_call`'s is: the frame tail or the
-    // continuation lowers it.
-    crate::sched::set_in_call_masked(true);
     // T2: nothing would filter the call.
     if !crate::trap::filter_quiet() {
         direct::count(Count::T2);

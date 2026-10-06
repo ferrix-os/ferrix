@@ -1703,12 +1703,13 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.169'> theFastPathLooksAsTheGeneralPathDoes : ItemLowLevel {
             attribute :>> statement = "fast_write_read shall decline, having changed
-                nothing but its counts and IN_CALL, unless the filter would let the
+                nothing but its counts, unless the filter would let the
                 call through unlooked at (T2), it sends at most 24 bytes (T3), and the
                 handle table's lock is free and channel_in finds an endpoint with
                 READ and WRITE (T4, T5).";
             attribute :>> criterion = "Stage 9's case 11 is refused with the filter's
-                errno with the fast path on; ipc-equiv's case 12 answers every
+                errno with the fast path on, and comes back with IN_CALL down whether
+                refused or allowed; ipc-equiv's case 12 answers every
                 refusal as the general path does, with its audit records.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::fast_write_read",
