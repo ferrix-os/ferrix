@@ -555,7 +555,12 @@ impl Args {
     fn named(&mut self, flag: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
         if matches!(
             flag,
-            "--alternate" | "--rounds" | "--pin" | "--against-sel4" | "--against-redox" | "--record"
+            "--alternate"
+                | "--rounds"
+                | "--pin"
+                | "--against-sel4"
+                | "--against-redox"
+                | "--record"
         ) {
             return self.bench(flag, items);
         }
@@ -746,10 +751,8 @@ impl Args {
                 "--smp" | "--memory" | "--timeout" => args.machine(&item, &mut items)?,
                 "--seeds" | "--jobs" => args.counts(&item, &mut items)?,
                 "--accel" | "--since" | "--moved" | "--alternate" | "--rounds" | "--pin"
-                | "--against-sel4" | "--against-redox" | "--record" => {
-                    args.named(&item, &mut items)?;
-                }
-                "--to" | "--stage" => args.named(&item, &mut items)?,
+                | "--against-sel4" | "--against-redox" => args.named(&item, &mut items)?,
+                "--to" | "--stage" | "--record" => args.named(&item, &mut items)?,
                 "--port" => args.port = Some(value(&mut items, "--port")?),
                 "--init" => args.init = Some(value(&mut items, "--init")?),
                 "--init-path" => args.init_path = Some(init_path(&mut items)?),

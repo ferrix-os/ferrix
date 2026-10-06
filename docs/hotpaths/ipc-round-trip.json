@@ -1,0 +1,113 @@
+{
+  "schema": "ferrix-hotpath/1",
+  "id": "ipc-round-trip",
+  "title": "The native channel round trip: channel_write_read (0x1013) to a waiting echo server and back",
+  "skill": ".claude/skills/optimize-ipc-round-trip/SKILL.md",
+  "spec": "docs/HOTPATHS.md",
+  "history": [
+    "docs/OPAQUE-KERNEL.md#9-the-channel-round-trip-and-speculation-domains-2026-10-01-os-c7",
+    "docs/handover/2026-10-03-ipc.md"
+  ],
+  "as_of": {
+    "date": "2026-10-06",
+    "main": "a1d456820",
+    "note": "3a and 3b on main; step 4 on po7/step4, ERAPS on po7/step5, VZEROALL on po7/step5-vec, the budget on po7/ipc-budget (all unlanded)"
+  },
+  "definition": {
+    "entry": "the client's SYSCALL of channel_write_read (0x1013) in ferrix_rt's x86-64 stub",
+    "exit": "the client's next instruction after SYSRET with the server's echo in its return registers",
+    "direction": "one side's entry into 0x1013 to the other side's return from its own 0x1013; a round trip is two directions",
+    "files": [
+      "src/user/system/native/ipc-bench/src/main.rs",
+      "src/user/system/native/rt/src/arch/x86_64.rs",
+      "src/user/system/native/rt/src/arch/aarch64.rs",
+      "src/user/system/native/rt/src/arch/armv7a.rs",
+      "src/kernel/src/arch/x86_64/syscall.rs",
+      "src/kernel/src/arch/x86_64/switch.rs",
+      "src/kernel/src/arch/x86_64/cpu.rs",
+      "src/kernel/src/arch/x86_64/speculation.rs",
+      "src/kernel/src/arch/aarch64/trap.rs",
+      "src/kernel/src/arch/aarch64/switch.rs",
+      "src/kernel/src/arch/aarch64/cpu.rs",
+      "src/kernel/src/arch/aarch64/speculation.rs",
+      "src/kernel/src/arch/armv7a/trap.rs",
+      "src/kernel/src/arch/armv7a/switch.rs",
+      "src/kernel/src/arch/armv7a/cpu.rs",
+      "src/kernel/src/arch/armv7a/speculation.rs",
+      "src/kernel/src/arch/speculation.rs",
+      "src/kernel/src/syscall/native.rs",
+      "src/kernel/src/object/channel.rs",
+      "src/kernel/src/sched/mod.rs",
+      "src/kernel/src/sched/wait.rs",
+      "src/kernel/src/sched/preempt.rs",
+      "src/kernel/src/sched/borrow.rs",
+      "src/kernel/src/user/space.rs",
+      "src/lib/kernel/sched",
+      "src/tests/loom",
+      "tools/common/xtask/src/ipc.rs"
+    ]
+  },
+  "figure": {
+    "command": "cargo xtask bench-ipc --release --accel kvm --smp 1 --arch x86_64 --init ~/.local/share/ferrix/busybox/{arch}/bin/busybox.static",
+    "ab_command": "cargo xtask bench-ipc --release --accel kvm --smp 1 --arch x86_64 --init ~/.local/share/ferrix/busybox/{arch}/bin/busybox.static --alternate main --rounds 5 --record",
+    "line": "domain-call",
+    "statistic": "p50",
+    "unit": "ns",
+    "gated": "matched: every mitigation on, both programs in one speculation domain, against seL4 with the same protections (customer, 2026-10-02)",
+    "reported_not_gated": ["--mitigations off", "call (outside a domain, with the switch barrier)", "IBPB at every switch on both kernels"],
+    "target": "under 400 ns p50 matched on nazuna (customer, 2026-10-06); seL4 matched is 440 ns, 400-410 without its refill",
+    "pin": "host processor 11 (bench-ipc's default where the host has more than 12)"
+  },
+  "budget_source": "docs/OPAQUE-KERNEL.md 9.10 on branch po7/ipc-budget (d6da351a9), timing build po7/prof, logs ~/.local/share/ferrix/logs/po7-ipcM/prof-7.log, prof-8.log, prof-9.log",
+  "budget": [
+    {"piece": "SYSCALL/SYSRET, the stub, ring 3's loop", "now_ns": "60-85", "after_step4": "same", "after_step5": "same", "target": "45", "sel4": "~40", "evidence": "measured"},
+    {"piece": "user TLB refill after CR3", "now_ns": "50-100", "after_step4": "same", "after_step5": "20-40", "target": "20", "sel4": "~20", "evidence": "measured"},
+    {"piece": "CR3 write, no PCID", "now_ns": "90-113", "after_step4": "same", "after_step5": "same", "target": "90", "sel4": "~90", "evidence": "measured"},
+    {"piece": "return-stack refill", "now_ns": "12-26", "after_step4": "same", "after_step5": "0 (ERAPS)", "target": "0", "sel4": "20", "evidence": "measured"},
+    {"piece": "software, entry to exit, scheduler included", "now_ns": "~650", "after_step4": "50-110", "after_step5": "35-60", "target": "35", "sel4": "~50", "evidence": "measured now, guessed after"},
+    {"piece": "user state (selectors, bases, vector reset)", "now_ns": "240-275", "after_step4": "same", "after_step5": "15-30", "target": "15", "sel4": "~0", "evidence": "measured now, guessed after"},
+    {"piece": "switch_to and its tail", "now_ns": "10-15", "after_step4": "5", "after_step5": "5", "target": "5", "sel4": "-", "evidence": "measured now, guessed after"},
+    {"piece": "a direction", "now_ns": "~1,130", "after_step4": "~560-700", "after_step5": "~210-260", "target": "200", "sel4": "220", "evidence": "measured now, guessed after"}
+  ],
+  "tried": [
+    {"id": "step1", "arch": "all", "what": "bench-ipc, timer and decision at a call's end, sync wake, channel_write_read (0x1013), the clock, deferred decision", "status": "landed d750fd452", "effect": "37 us -> 3,021 ns", "evidence": "measured", "source": "OPAQUE-KERNEL 9.4, 9.9"},
+    {"id": "segment-skip-v1", "arch": "x86_64", "what": "skip segment, descriptor and base writes equal to what the switch's save read (15ae15cc3)", "status": "dropped", "effect": "no measurable difference at the time (histogram p50, 233 ns steps)", "evidence": "measured", "source": "OPAQUE-KERNEL 9.4 item 5; 9.8 answer 12 'does not come back'"},
+    {"id": "xsaveopt", "arch": "x86_64", "what": "XSAVEOPT for the vector save (a1379b25b)", "status": "dropped", "effect": "no difference", "evidence": "measured", "source": "OPAQUE-KERNEL 9.4"},
+    {"id": "2a", "arch": "all", "what": "the running task borrowed from the processor's record, no run-queue lock, no Arc clone", "status": "landed a70d90039", "effect": "below bench resolution at the time", "evidence": "measured", "source": "handover 2026-10-03"},
+    {"id": "2b", "arch": "all", "what": "preemption count in the processor's record without a locked operation", "status": "landed 8c4fb59e4", "effect": "-465 ns a round trip", "evidence": "measured", "source": "OPAQUE-KERNEL 9.9"},
+    {"id": "2c", "arch": "all", "what": "pending-work word, one look on the way back to user mode; 65-signal cap", "status": "landed 3abcf0c98", "effect": "below bench resolution at the time", "evidence": "measured", "source": "handover 2026-10-03"},
+    {"id": "2d", "arch": "all", "what": "a native call decoded once, no Linux table", "status": "landed d9c1b9f37", "effect": "not separately measured", "evidence": "argued", "source": "handover 2026-10-03"},
+    {"id": "2e", "arch": "all", "what": "the channel's wait from one state word with fences (loom model)", "status": "landed a305c35c3", "effect": "-230 ns; 2,556 against 2,789 alternated", "evidence": "measured", "source": "OPAQUE-KERNEL 9.9, handover table"},
+    {"id": "2f", "arch": "all", "what": "no global or locked writes in the switch", "status": "landed 445d09420", "effect": "2,427 against 2,536 ns, ratio 0.957 (0.953-0.961), 5 ABAB rounds, load 2-4", "evidence": "measured", "source": "OPAQUE-KERNEL 9.9; ledger 2026-10-06"},
+    {"id": "3a", "arch": "x86_64 (contract is native ABI, all)", "what": "vector-state contract: blocking native calls destroy vector registers; reset by XRSTOR of an empty header", "status": "landed with 3b (61ae2dcaf rebased)", "effect": "3a+3b: 2,287 against 2,427 ns, ratio 0.942 (0.930-1.124)", "evidence": "measured", "source": "OPAQUE-KERNEL 9.9; ledger 2026-10-06 conditions (a)-(i)"},
+    {"id": "3b", "arch": "x86_64", "what": "FS and GS bases kept in the task, no rdmsr at save; read-skip only, write-skip dropped (condition 8: a per-processor last-written record leaks by vendor)", "status": "landed with 3a", "effect": "see 3a", "evidence": "measured", "source": "OPAQUE-KERNEL 9.8 condition 8"},
+    {"id": "pcid", "arch": "x86_64", "what": "PCIDs with generations, CR3 no-flush (step 3)", "status": "blocked", "effect": "est. most of 90-113 ns CR3 plus 50-100 ns refill a direction on hardware with PCID", "evidence": "guessed", "source": "OPAQUE-KERNEL 9.6: nazuna has no PCID (CPUID 1 ECX[17] clear); seL4 with KernelSupportPCID refuses to boot there"},
+    {"id": "ibpb-cost", "arch": "x86_64", "what": "IBPB at every switch (outside a domain)", "status": "fact", "effect": "~230 ns a switch under KVM on nazuna, not the 2 us first assumed", "evidence": "measured", "source": "OPAQUE-KERNEL 9.6"},
+    {"id": "step4", "arch": "x86_64 first", "what": "direct switch (hand_over) and the 0x1013 fast path (park, frame tail), ferrix.fastpath boot switch", "status": "branch po7/step4", "effect": "1,328 ns fast path on against 1,700 off; ~400-450 ns software a direction, ~30 locked operations", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10 on po7/ipc-budget; logs po7-step4/abab-*.txt"},
+    {"id": "eraps", "arch": "x86_64 (AMD Zen 5)", "what": "skip the in-domain return-stack refill where CPUID 0x8000_0021 EAX[24] and CR4.PCIDE clear; +eraps in the gate's model", "status": "branch po7/step5 (529f32d51), consultant OK, may land", "effect": "-50 to -100 ns a round trip, alternated against main", "evidence": "measured", "source": "ledger 2026-10-06 (C1)-(C6)"},
+    {"id": "vzeroall-reset", "arch": "x86_64", "what": "3a's reset by VZEROALL + LDMXCSR, x87 XRSTOR only when XINUSE says in use; +xgetbv1 under KVM", "status": "branch po7/step5-vec (340596560, 243d35239)", "effect": "-100 to -140 ns a round trip; XRSTOR ~70 ns whatever it restores, VZEROALL path 15 ns", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10; ledger (V1)-(V7), (W1)-(W3)"},
+    {"id": "segment-skip-v2", "arch": "x86_64", "what": "DS/ES loads skipped exactly 0 to 0, compared with the processor's own registers in the same switch (Linux __switch_to's rule)", "status": "reopened narrowly under (S1)-(S7); a12485d7a/f71585ad1 on po7/step4 skips FS/GS too and does not meet S3-S5, S7", "effect": "-140 to -160 ns a direction for all four selectors (profile); 43 ns vs 140-180 with the skip on po7/step4", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10; ledger 2026-10-06 S1-S7 and the advisory read"},
+    {"id": "account-split", "arch": "all", "what": "the charge on a switch: follow_group_share's effective_weight recomputed at every charge", "status": "finding", "effect": "account 120-134 ns = load 5 + update_curr 42 + follow_group_share 85; the direct switch's charge must not go through it (po7/step4 measures 30 ns)", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10 (prof-9.log)"},
+    {"id": "timer-rearm", "arch": "x86_64", "what": "arm_timer reprograms the local APIC (an exit) on 10-20% of directions", "status": "finding", "effect": "most of why domain-call p90 is 10-19 us and its mean 2.5-3.5x its p50", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10"},
+    {"id": "fewer-user-pages", "arch": "all", "what": "stub and loop on one code page; stack top, message and TLS on one data page; 2 MiB pages for native text", "status": "not started", "effect": "-30 to -60 ns a direction", "evidence": "guessed", "source": "OPAQUE-KERNEL 9.6, 9.10"},
+    {"id": "global-shared-text", "arch": "x86_64", "what": "global user pages for the runtime's shared read-only text", "status": "not started; isolation change, consultant design first; gives up ASLR for that text", "effect": "part of the TLB refill", "evidence": "guessed", "source": "OPAQUE-KERNEL 9.6"},
+    {"id": "fsgsbase", "arch": "x86_64", "what": "FSGSBASE in the gate's model, with the entry's handling of a user-written GS base", "status": "not started; a design of its own", "effect": "-10 to -20 ns (two base writes ~15)", "evidence": "guessed", "source": "OPAQUE-KERNEL 9.6, 9.10"},
+    {"id": "not-pursued", "arch": "x86_64", "what": "PKU instead of separate spaces; segment-limited small spaces (long mode has no limits, no LMSLE); SVM ASIDs (they tag VMs)", "status": "rejected", "effect": "-", "evidence": "argued", "source": "OPAQUE-KERNEL 9.6"},
+    {"id": "redox-compare", "arch": "x86_64", "what": "Redox 0.9.0 scheme round trip measured the same way", "status": "fact", "effect": "1,965 ns with no speculative defence", "evidence": "measured", "source": "OPAQUE-KERNEL 9.6a"}
+  ],
+  "requirements": [
+    "FDP_RIP.2 widened (customer 2026-10-02): the register state a program is given at every switch",
+    "A2 (OPAQUE-KERNEL 9.3a): the return-stack refill at every switch of address space; ERAPS replaces it only under its review",
+    "9.7's eleven conditions for step 4 (effect list, entry hardening, continuation, pending-work word, locks, T13, vector state, filtered flag, loom model, throttle/freeze, T13 hook)",
+    "9.8's conditions 1-8 for 2a-2f, 3a, 3b; F-60's (a)-(d)",
+    "L.x86_64.32, .126 (refill/ERAPS), .155, .156, .158, .61, .9 (3a/3b), L.sched.50-53, L.object.116, H.SCHED.13, H.OBJ.18 (step 4 rows on po7/step4)"
+  ],
+  "never_traded": [
+    "the matched configuration: every mitigation on; a figure taken with fewer defences than seL4's matched build is not the figure",
+    "the return-stack refill (A2) except where the processor provably empties it (ERAPS, its own review)",
+    "the switch barrier between programs not in one speculation domain",
+    "FDP_RIP.2: no register of one program reaches another, vector, MXCSR, x87, XINUSE, selectors, bases",
+    "the general path's observable results: the fast path is a tested equivalence of it, off in the certified configuration (ferrix.fastpath) for the first release",
+    "one landing, one consultant review; requirement ids reserved before rows are written"
+  ]
+}
