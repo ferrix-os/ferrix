@@ -540,6 +540,7 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
     // ones `set_thread_area` built, or zero.
     unsafe { gdt::write_tls(&state.tls) };
     // SAFETY: (CONTEXT) each selector checked loadable against the slots just written.
+    crate::sched::direct::prof::dmark(25);
     unsafe {
         load_selectors(
             state.selectors,
@@ -548,6 +549,7 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
             state.gs_base,
         );
     }
+    crate::sched::direct::prof::dmark(26);
     if state.unsaved {
         // SAFETY: (CONTEXT) the incoming task's registers, its area the reset
         // image `keep_vector_controls` left.
@@ -557,8 +559,10 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
         // reserved bit `XRSTOR64` checks is clear.
         unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::extended_state_components()) };
     }
+    crate::sched::direct::prof::dmark(27);
     // SAFETY: (ENTRY) the caller guarantees the stack.
     unsafe { super::syscall::set_entry_stack(entry_stack) };
+    crate::sched::direct::prof::dmark(28);
 }
 
 /// Reset the vector registers of a task whose state is `unsaved`: every
@@ -634,14 +638,25 @@ unsafe fn load_selectors(
     gs_base: u64,
 ) {
     let [ds, es, fs, gs] = selectors.map(|selector| gdt::loadable(selector, tls));
-    // SAFETY: (CONTEXT) each selector null or loadable, as `gdt::loadable` checked.
-    unsafe { cpu::load_data_selectors(ds, es, fs) };
+    // A null selector loaded over a null one changes nothing a program sees
+    // once the bases are written below, so those loads are left out: a
+    // native program has none but null, and four loads and two `swapgs` were
+    // a quarter of a round trip's switch (`docs/OPAQUE-KERNEL.md` §9.7, part
+    // 7). Any other selector is loaded, the same one again included, since
+    // its descriptor may be a thread-local slot just written.
+    let [held_ds, held_es, held_fs, held_gs] = cpu::read_data_selectors();
+    if (ds, es, fs) != (0, 0, 0) || (held_ds, held_es, held_fs) != (0, 0, 0) {
+        // SAFETY: (CONTEXT) each selector null or loadable, as `gdt::loadable` checked.
+        unsafe { cpu::load_data_selectors(ds, es, fs) };
+    }
     if fs == 0 {
         // SAFETY: (CONTEXT) a user address the program set, or zero.
         unsafe { super::syscall::set_thread_pointer(fs_base) };
     }
-    // SAFETY: (CONTEXT) as for the other three.
-    unsafe { cpu::load_user_gs(gs) };
+    if gs != 0 || held_gs != 0 {
+        // SAFETY: (CONTEXT) as for the other three.
+        unsafe { cpu::load_user_gs(gs) };
+    }
     if gs == 0 {
         // SAFETY: (CONTEXT) the program's own base, into the shadow it lives in while
         // the kernel runs.

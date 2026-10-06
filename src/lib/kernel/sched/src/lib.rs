@@ -316,16 +316,56 @@ pub struct RunQueue<T> {
 }
 
 /// A real duration as the virtual time an entity of `weight` accrues in it.
+///
+/// In 64 bits when the product fits, and not at all for the unit weight: the
+/// quotient is the 128-bit one either way (`docs/OPAQUE-KERNEL.md` §9.7,
+/// part 7; the host tests hold every caller to it). A 128-bit division is a
+/// call into the compiler's runtime, and a switch made several.
 fn to_virtual(real_ns: u64, weight: u32) -> u64 {
-    let scaled = u128::from(real_ns) * u128::from(NICE_0_WEIGHT) / u128::from(weight.max(1));
+    if weight == NICE_0_WEIGHT {
+        return real_ns;
+    }
+    let weight = u64::from(weight.max(1));
+    if let Some(product) = real_ns.checked_mul(u64::from(NICE_0_WEIGHT)) {
+        return product / weight;
+    }
+    let scaled = u128::from(real_ns) * u128::from(NICE_0_WEIGHT) / u128::from(weight);
     u64::try_from(scaled).unwrap_or(u64::MAX)
 }
 
 /// A virtual duration as the real time it takes an entity of `weight` to
-/// accrue it.
+/// accrue it. In 64 bits when the product fits, as [`to_virtual`].
 fn to_real(virtual_ns: u64, weight: u32) -> u64 {
+    if weight == NICE_0_WEIGHT {
+        return virtual_ns;
+    }
+    if let Some(product) = virtual_ns.checked_mul(u64::from(weight)) {
+        return product / u64::from(NICE_0_WEIGHT);
+    }
     let scaled = u128::from(virtual_ns) * u128::from(weight) / u128::from(NICE_0_WEIGHT);
     u64::try_from(scaled).unwrap_or(u64::MAX)
+}
+
+/// `numerator.div_euclid(denominator)` for a positive denominator, in 64
+/// bits when both fit: the same quotient (see [`to_virtual`]).
+fn floor_div(numerator: i128, denominator: i128) -> i128 {
+    if let (Ok(numerator), Ok(denominator)) = (i64::try_from(numerator), i64::try_from(denominator))
+        && denominator > 0
+    {
+        return i128::from(numerator.div_euclid(denominator));
+    }
+    numerator.div_euclid(denominator)
+}
+
+/// `numerator / denominator`, truncating, for a positive denominator, in 64
+/// bits when both fit: the same quotient (see [`to_virtual`]).
+fn truncating_div(numerator: i128, denominator: i128) -> i128 {
+    if let (Ok(numerator), Ok(denominator)) = (i64::try_from(numerator), i64::try_from(denominator))
+        && denominator > 0
+    {
+        return i128::from(numerator / denominator);
+    }
+    numerator / denominator
 }
 
 impl<T> RunQueue<T> {
@@ -427,7 +467,7 @@ impl<T> RunQueue<T> {
         if self.load == 0 {
             return self.zero;
         }
-        let offset = self.sum.div_euclid(i128::from(self.load));
+        let offset = floor_div(self.sum, i128::from(self.load));
         self.zero.wrapping_add(offset as i64 as u64)
     }
 
@@ -453,7 +493,7 @@ impl<T> RunQueue<T> {
             return 0;
         }
         let owed = self.sum - self.relative(vruntime) * i128::from(self.load);
-        owed.div_euclid(i128::from(self.load)) as i64
+        floor_div(owed, i128::from(self.load)) as i64
     }
 
     /// The virtual length of one slice, for an entity of `weight`.
@@ -560,7 +600,7 @@ impl<T> RunQueue<T> {
             return lag;
         }
         let total = i128::from(self.load) + i128::from(state.weight);
-        (i128::from(lag) * total / i128::from(self.load)) as i64
+        truncating_div(i128::from(lag) * total, i128::from(self.load)) as i64
     }
 
     /// Choose what runs next, and make it the running entity.
@@ -574,6 +614,101 @@ impl<T> RunQueue<T> {
         let node = self.tree.remove(key)?;
         let chosen = self.curr.insert(node);
         chosen.entity.payload.as_ref()
+    }
+
+    /// The direct switch's step (`docs/OPAQUE-KERNEL.md` §9.7, part 1): `id`
+    /// arrives and runs, and the running entity leaves, on a queue where
+    /// nothing waits. Exactly [`RunQueue::enqueue`] of `id`, then
+    /// [`RunQueue::set_slice_ns`] to `slice_after` (the slice the caller's
+    /// queue rescales to once `id` is on it), then [`RunQueue::remove_curr`]
+    /// and [`RunQueue::pick_next`] -- every quantity of the queue, of the
+    /// arriving entity and of the leaving one bit for bit as those calls
+    /// leave them, which the host test holds it to -- without the tree they
+    /// go through: with nothing waiting the pick can only be `id`. Answers
+    /// the leaving entity's parts, as [`RunQueue::remove_curr`] does.
+    ///
+    /// On a queue with something waiting, or nothing running, it is those
+    /// calls themselves.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::enqueue`], with nothing changed.
+    pub fn hand_over(
+        &mut self,
+        id: u64,
+        payload: T,
+        state: EntityState,
+        slot: Slot<T>,
+        slice_after: u64,
+    ) -> Result<Option<(u64, T, EntityState, Slot<T>)>, Refused<T>> {
+        if !self.tree.is_empty() || self.curr.is_none() || slice_after == 0 {
+            self.enqueue(id, payload, state, slot)?;
+            let _ = self.set_slice_ns(slice_after);
+            let left = self.remove_curr();
+            let _ = self.pick_next();
+            return Ok(left);
+        }
+        if state.weight == 0 {
+            return Err(Refused {
+                payload,
+                slot,
+                reason: SchedError::ZeroWeight,
+            });
+        }
+        if self.curr.as_ref().is_some_and(|curr| curr.entity.id == id) {
+            return Err(Refused {
+                payload,
+                slot,
+                reason: SchedError::Duplicate(id),
+            });
+        }
+        // `enqueue`: placed by the lag it brings, counted, and the base moved
+        // to the virtual time.
+        let lag = self.placement_lag(state);
+        let vruntime = self.avg_vruntime().wrapping_sub(lag as u64);
+        let deadline = vruntime.wrapping_add(self.vslice(state.weight));
+        self.add_load(vruntime, state.weight);
+        self.normalize();
+        // `set_slice_ns`.
+        self.config.slice_ns = slice_after;
+        // `remove_curr`: the leaving entity's lag, measured while it is still
+        // counted, then uncounted. Only the arrival is left, so `normalize`
+        // puts the base at its virtual runtime and the sum at nothing, which
+        // is written down rather than divided out.
+        let Some(mut leaving) = self.curr.take() else {
+            return Ok(None);
+        };
+        let entity = &leaving.entity;
+        let limit = self.lag_limit(entity.weight);
+        let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
+        let (left_id, weight, sum_exec) = (entity.id, entity.weight, entity.sum_exec);
+        self.load -= u64::from(weight);
+        self.zero = vruntime;
+        self.sum = 0;
+        // `pick_next`: the arrival, the only entity, runs.
+        let Slot(mut node) = slot;
+        node.entity = Entity {
+            id,
+            weight: state.weight,
+            vruntime,
+            deadline,
+            sum_exec: state.sum_exec,
+            payload: Some(payload),
+        };
+        self.curr = Some(node);
+        let Some(payload) = leaving.entity.payload.take() else {
+            return Ok(None);
+        };
+        Ok(Some((
+            left_id,
+            payload,
+            EntityState {
+                weight,
+                vlag,
+                sum_exec,
+            },
+            Slot(leaving),
+        )))
     }
 
     /// The eligible entity with the earliest deadline.
@@ -835,7 +970,10 @@ impl<T> RunQueue<T> {
     /// what this keeps right between the two.
     fn reweigh(&mut self, vruntime: u64, was: u32, weight: u32) -> (u64, u64) {
         let virtual_time = self.avg_vruntime();
-        let owed = i128::from(self.lag_at(vruntime)) * i128::from(was) / i128::from(weight);
+        let owed = truncating_div(
+            i128::from(self.lag_at(vruntime)) * i128::from(was),
+            i128::from(weight),
+        );
         let owed = i64::try_from(owed).unwrap_or(if owed < 0 { i64::MIN } else { i64::MAX });
         let at = virtual_time.wrapping_sub(owed as u64);
         self.sub_load(vruntime, was);

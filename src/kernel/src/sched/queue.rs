@@ -629,27 +629,66 @@ impl CpuQueue {
     /// part 1): `peer`, made runnable by its caller, joins this queue while
     /// the running task still runs, `between` runs (the running task is set
     /// blocked there), the running task leaves the fair class, and the pick
-    /// is made. Exactly the general path's sequence -- the wake's
+    /// is made. The general path's sequence -- the wake's
     /// [`CpuQueue::insert`], then `choose_next`'s `account`,
     /// `detach_current` and `pick_next` -- with every clock read at `now`,
     /// on a queue with nothing waiting and no sleeper due, so the pick can
     /// only be `peer`. Answers the pick.
     ///
-    /// Composed from those functions, not written again: what the queue's
-    /// quantities come out as is what they come out as on the general path,
-    /// because it is the general path's code.
+    /// `insert`'s charge and the weight it gives `peer` are its own code;
+    /// the fair class's part is `RunQueue::hand_over`, which the host test
+    /// holds to `enqueue`, the rescale, `remove_curr` and `pick_next` bit for
+    /// bit. `choose_next`'s second `account`, at the same `now`, changes
+    /// nothing and is not made.
     pub(crate) fn hand_over(
         &mut self,
         peer: &Arc<Task>,
         now: u64,
         between: impl FnOnce(),
     ) -> Option<Arc<Task>> {
-        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-        self.insert_at(peer, Some(now));
+        let Some(slot) = peer.take_run_slot() else {
+            super::note_missing_slot();
+            return None;
+        };
+        super::direct::prof::dmark(29);
+        if self.current.is_some() {
+            self.account(now);
+        }
+        super::direct::prof::dmark(16);
+        // As `insert`: counted in its job (it already is, made runnable),
+        // and weighed by its job's share as things stand, the caller still
+        // counted.
+        peer.join_group();
+        peer.set_weight(peer.effective_weight());
+        super::direct::prof::dmark(17);
         between();
-        self.account(now);
-        self.detach_current();
-        self.pick_next()
+        super::direct::prof::dmark(18);
+        // `rescale_slice` as `insert` makes it, with the peer counted.
+        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
+        match self.fair.hand_over(
+            peer.id,
+            Arc::clone(peer),
+            peer.entity_state(),
+            slot,
+            slice_after,
+        ) {
+            Ok(left) => {
+                peer.set_queued(true);
+                if let Some((_, task, state, slot)) = left {
+                    task.return_run_slot(slot);
+                    task.store_entity_state(state);
+                    task.set_queued(false);
+                }
+            }
+            Err(refused) => {
+                // A duplicate or a weight of zero, neither of which this
+                // kernel makes: as `insert` refuses.
+                peer.return_run_slot(refused.slot);
+                return None;
+            }
+        }
+        super::direct::prof::dmark(19);
+        self.fair.current().cloned()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.
