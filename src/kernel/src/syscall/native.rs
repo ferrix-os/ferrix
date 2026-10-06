@@ -1022,34 +1022,37 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     };
     // T4 and T5: the general lookup, with its clamp, the type and the rights,
     // on a table whose lock is free. A refusal is the general path's to
-    // answer and audit.
-    let Some(caller) = crate::sched::current() else {
+    // answer and audit. The caller is the processor record's borrow, good
+    // across the park: the task is not freed while its own code runs.
+    crate::sched::with_current(|caller| {
+        let endpoint = caller.thread().and_then(|thread| {
+            thread
+                .process()
+                .core()
+                .try_with_handles(|table| {
+                    channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
+                })
+                .flatten()
+        });
+        let Some(endpoint) = endpoint else {
+            direct::count(Count::T4);
+            return Fast::Declined;
+        };
+        if let Err(declined) = endpoint.send_direct(caller, count, reply_words(count, a)) {
+            direct::count(declined);
+            return Fast::Declined;
+        }
+        // Running again: a commit handed over a reply, or something else
+        // woke the park.
+        if let Some((count, words)) = caller.take_reply() {
+            return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
+        }
+        Fast::Done(continue_general(&endpoint, caller, a))
+    })
+    .unwrap_or_else(|| {
         direct::count(Count::T4);
-        return Fast::Declined;
-    };
-    let endpoint = caller.thread().and_then(|thread| {
-        thread
-            .process()
-            .core()
-            .try_with_handles(|table| {
-                channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
-            })
-            .flatten()
-    });
-    let Some(endpoint) = endpoint else {
-        direct::count(Count::T4);
-        return Fast::Declined;
-    };
-    if let Err(declined) = endpoint.send_direct(&caller, count, reply_words(count, a)) {
-        direct::count(declined);
-        return Fast::Declined;
-    }
-    // Running again: a commit handed over a reply, or something else woke
-    // the park.
-    if let Some((count, words)) = caller.take_reply() {
-        return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
-    }
-    Fast::Done(continue_general(&endpoint, &caller, a))
+        Fast::Declined
+    })
 }
 
 /// The general continuation (`docs/OPAQUE-KERNEL.md` §9.7, part 2,
@@ -1060,7 +1063,7 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
 /// `dispatch_write_read` makes it, and the way back as `trap::system_call`
 /// makes it. Returns with interrupts masked again.
 #[cfg(target_arch = "x86_64")]
-fn continue_general(endpoint: &Endpoint, caller: &Arc<crate::sched::Task>, a: &[u64; 6]) -> crate::trap::Outcome {
+fn continue_general(endpoint: &Endpoint, caller: &crate::sched::Task, a: &[u64; 6]) -> crate::trap::Outcome {
     arch::enable_interrupts();
     if !crate::sched::may_block() {
         crate::panic::fatal!(
