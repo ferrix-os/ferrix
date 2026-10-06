@@ -92,6 +92,9 @@ defence at all **(measured, §9.6a)**.
    median ratio and its spread. Use your own `CARGO_TARGET_DIR`. Quote the
    ratio, its spread, the rounds and the load, e.g. "2,287 against 2,427 ns,
    0.942 (0.930 to 1.124), 5 rounds, load 2 to 4".
+   An A/A run (the same kernel both sides) read 0.996, spread 0.996 to
+   1.004, over 3 rounds **(measured, 2026-10-06, the `aa-noise` entry)**:
+   a ratio inside about 1% of 1.000 is not a change.
 4. **Pinned, one vCPU.** `bench-ipc` defaults to `--smp 1` and pins QEMU to
    host core 11 (where seL4 and Redox were measured) on hosts with more than
    12 processors.
