@@ -282,8 +282,10 @@ impl Direct {
         // SAFETY: (CONTEXT) as `pick_and_switch`'s: `save` is this context's
         // own slot and `resume` a stack pointer this module saved, and this
         // processor holds the run queue's lock until `finish_switch`.
+        crate::sched::fprof::stamp(6);
         unsafe { arch::switch_to(save, resume) };
         finish_switch();
+        crate::sched::fprof::stamp(7);
     }
 }
 

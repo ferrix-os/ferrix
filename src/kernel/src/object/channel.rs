@@ -967,7 +967,9 @@ impl Endpoint {
             Side::Second => (second, first),
         };
         let reader = sendable(own, &own_inbox, peer, &peer_inbox)?;
+        crate::sched::fprof::stamp(3);
         let mut switch = direct::begin(caller, reader)?;
+        crate::sched::fprof::stamp(4);
         // The commit, which cannot fail from here.
         let Some(reader) = peer_inbox.parked.take() else {
             return Err(Count::T9);
@@ -980,6 +982,7 @@ impl Endpoint {
         drop(peer_inbox);
         drop(own_inbox);
         direct::count(Count::Trip);
+        crate::sched::fprof::stamp(5);
         switch.switch();
         Ok(())
     }

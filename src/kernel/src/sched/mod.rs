@@ -43,6 +43,7 @@ mod borrow;
 mod borrow_check;
 mod check;
 pub(crate) mod direct;
+pub(crate) mod fprof;
 mod preempt;
 mod preempt_check;
 mod queue;
