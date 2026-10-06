@@ -635,8 +635,13 @@ impl Task {
 
     /// Swap in whether it is inside a system call, for the switch that takes
     /// it off its processor, and answer what it was: see `sched::IN_CALL`.
+    ///
+    /// A load and a store: only `carry_in_call` reads or writes it, under the
+    /// lock of the queue that owns the task.
     pub(crate) fn swap_in_call(&self, in_call: bool) -> bool {
-        self.in_call.swap(in_call, Ordering::Relaxed)
+        let was = self.in_call.load(Ordering::Relaxed);
+        self.in_call.store(in_call, Ordering::Relaxed);
+        was
     }
 
     /// What it carries between queues.
@@ -715,7 +720,14 @@ impl Task {
     }
 
     /// Take its wake-up time, leaving it not sleeping.
+    ///
+    /// A load first, and the swap only when one is there: most takes find
+    /// none, and a deadline stored after the load is one the swap would have
+    /// missed too, had it come first.
     pub(crate) fn take_sleep_deadline(&self) -> Option<u64> {
+        if self.sleep_until.load(Ordering::Relaxed) == 0 {
+            return None;
+        }
         match self.sleep_until.swap(0, Ordering::Relaxed) {
             0 => None,
             deadline => Some(deadline),
