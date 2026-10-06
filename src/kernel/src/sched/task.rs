@@ -147,6 +147,13 @@ pub(crate) struct Task {
     /// module, set by a poster after the state it stands for and cleared by
     /// the task itself before it reads that state.
     work: AtomicU32,
+    /// The reply cell of step 4's fast path (`docs/OPAQUE-KERNEL.md` §9.7,
+    /// part 2): a message handed to it while it was parked in
+    /// `channel_write_read`. The length with [`REPLY_FULL`] in the first
+    /// word, the three words after. Filled only by the commit that hands the
+    /// processor to it, under its home's run-queue lock while it is asleep;
+    /// emptied only by itself, once a switch under that lock has resumed it.
+    reply: [AtomicU64; 4],
     /// The node a run queue holds it in, while no run queue does.
     ///
     /// Lent to a queue as the task is queued and handed back as it leaves,
@@ -157,6 +164,9 @@ pub(crate) struct Task {
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     sleep_slot: SpinLock<Option<TaskSlot>>,
 }
+
+/// A full reply cell's mark, in its first word beside the length.
+const REPLY_FULL: u64 = 1 << 63;
 
 /// The node a queue, a sleeper set or the reaper holds a task in.
 pub(crate) type TaskSlot = Slot<Arc<Task>>;
@@ -311,6 +321,7 @@ impl Task {
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
+            reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SpinLock::new(Some(run_slot)),
             sleep_slot: SpinLock::new(Some(sleep_slot)),
         })
@@ -364,6 +375,7 @@ impl Task {
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
+            reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SpinLock::new(Some(run_slot)),
             sleep_slot: SpinLock::new(Some(sleep_slot)),
         })
@@ -389,6 +401,36 @@ impl Task {
     /// Have back the slot a sleeper set or the reaper held this task in.
     pub(crate) fn return_sleep_slot(&self, slot: TaskSlot) {
         *self.sleep_slot.lock() = Some(slot);
+    }
+
+    /// Hand it a reply of `len` bytes in `words`, the bytes past `len`
+    /// already zero: the fast path's commit, under its home's run-queue lock
+    /// while it is asleep there. The lock's hand-over at the switch to it is
+    /// what orders these stores before its own reads.
+    pub(crate) fn fill_reply(&self, len: usize, words: [u64; 3]) {
+        for (cell, word) in self.reply.iter().skip(1).zip(words) {
+            cell.store(word, Ordering::Relaxed);
+        }
+        if let Some(first) = self.reply.first() {
+            first.store(REPLY_FULL | len as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// The reply it was handed, emptying the cell: by the task itself, as it
+    /// resumes in `channel_write_read`. `None` when it was woken some other
+    /// way.
+    pub(crate) fn take_reply(&self) -> Option<(usize, [u64; 3])> {
+        let first = self.reply.first()?;
+        let head = first.load(Ordering::Relaxed);
+        if head & REPLY_FULL == 0 {
+            return None;
+        }
+        first.store(0, Ordering::Relaxed);
+        let mut words = [0_u64; 3];
+        for (word, cell) in words.iter_mut().zip(self.reply.iter().skip(1)) {
+            *word = cell.load(Ordering::Relaxed);
+        }
+        Some(((head & !REPLY_FULL) as usize, words))
     }
 
     /// What it runs, if it has not started yet.

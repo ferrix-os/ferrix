@@ -854,18 +854,52 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
     receive_words(&endpoint)
 }
 
-/// `channel_write_read`'s write: `count` bytes of the words in the third to
-/// fifth argument registers, as they would lie in memory.
-fn send_words(endpoint: &Endpoint, count: usize, a: &[u64; 6]) -> Result<(), Errno> {
-    if count > nr::CHANNEL_WRITE_READ_BYTES {
-        return Err(status::TOO_BIG);
-    }
+/// The bytes `channel_write_read` sends: the words in the third to fifth
+/// argument registers, as they would lie in memory. The general write takes
+/// the first `count`; the fast path's commit sends them as words, the bytes
+/// past `count` zeroed ([`reply_words`]).
+fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
     let mut bytes = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
     for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(&a[2..5]) {
         // The word as the program held it: a `usize` in its registers,
         // the low half of the register on a 32-bit processor.
         chunk.copy_from_slice(&(*word as usize).to_ne_bytes());
     }
+    bytes
+}
+
+/// The words a reader of `count` bytes of `bytes` is answered with, the
+/// bytes after `count` zero: what [`receive_words`] makes of a message held
+/// in the slot, whose bytes past its length `Small::of` left zero.
+fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
+    let mut held = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
+    if let (Some(to), Some(from)) = (held.get_mut(..count), bytes.get(..count)) {
+        to.copy_from_slice(from);
+    }
+    let mut words = [0_u64; 3];
+    for (word, chunk) in words.iter_mut().zip(held.chunks_exact(size_of::<usize>())) {
+        let mut raw = [0_u8; size_of::<usize>()];
+        raw.copy_from_slice(chunk);
+        *word = usize::from_ne_bytes(raw) as u64;
+    }
+    words
+}
+
+/// The words the fast path's commit puts in the reader's reply cell for a
+/// send of `count` bytes from `a`'s registers: the general path's write then
+/// read, without the inbox between.
+#[cfg(target_arch = "x86_64")]
+fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
+    words_of(&sent_bytes(a), count)
+}
+
+/// `channel_write_read`'s write: `count` bytes of the words in the third to
+/// fifth argument registers, as they would lie in memory.
+fn send_words(endpoint: &Endpoint, count: usize, a: &[u64; 6]) -> Result<(), Errno> {
+    if count > nr::CHANNEL_WRITE_READ_BYTES {
+        return Err(status::TOO_BIG);
+    }
+    let bytes = sent_bytes(a);
     endpoint
         .write_small(bytes.get(..count).unwrap_or_default())
         .map_err(|failure| match failure {
@@ -881,20 +915,26 @@ fn send_words(endpoint: &Endpoint, count: usize, a: &[u64; 6]) -> Result<(), Err
 fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
     loop {
         match endpoint.read_small() {
-            Ok(small) => {
-                let mut words = [0_u64; 3];
-                for (word, chunk) in words
-                    .iter_mut()
-                    .zip(small.bytes.chunks_exact(size_of::<usize>()))
-                {
-                    let mut raw = [0_u8; size_of::<usize>()];
-                    raw.copy_from_slice(chunk);
-                    *word = usize::from_ne_bytes(raw) as u64;
-                }
-                return Ok((small.len, words));
-            }
+            Ok(small) => return Ok((small.len, words_of(&small.bytes, small.len))),
             Err(ReadError::Empty) => {}
             Err(refused) => return Err(read_refusal(refused)),
+        }
+        // The fast path's receive half (`docs/OPAQUE-KERNEL.md` §9.7, part
+        // 2), on a boot that has the fast path: park, so that a fast writer
+        // can hand the next message over directly. Declined, it waits below
+        // as before; woken without a reply, it carries on as after that wait.
+        #[cfg(target_arch = "x86_64")]
+        if crate::trap::fast_write_read().is_some() {
+            match park_for_reply(endpoint) {
+                Parked::Replied(answer) => return Ok(answer),
+                Parked::Woken => {
+                    if crate::sched::work::own_end() {
+                        return Err(Errno::EINTR);
+                    }
+                    continue;
+                }
+                Parked::Declined => {}
+            }
         }
         // Trusting the queue: a message and the peer's close both wake it,
         // and its process's end wakes the task. Two loads (2e): the end's
@@ -907,6 +947,148 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
             return Err(Errno::EINTR);
         }
     }
+}
+
+/// What the receive half made of a wait.
+#[cfg(target_arch = "x86_64")]
+enum Parked {
+    /// It could not park: the general wait runs.
+    Declined,
+    /// A commit handed it this reply.
+    Replied((usize, [u64; 3])),
+    /// It was woken some other way, or found its process ending at its last
+    /// look, and is off its record.
+    Woken,
+}
+
+/// The receive half alone (`docs/OPAQUE-KERNEL.md` §9.7, part 2): park the
+/// running task on `endpoint`'s side, make the last look at `END` after a
+/// `SeqCst` fence, and block through the general `schedule`, with
+/// interrupts on as the general wait blocks. Woken by a commit, it takes its
+/// reply; by anything else, it leaves its record and goes on as after the
+/// general wait.
+#[cfg(target_arch = "x86_64")]
+fn park_for_reply(endpoint: &Endpoint) -> Parked {
+    let Some(task) = crate::sched::current() else {
+        return Parked::Declined;
+    };
+    if !endpoint.park(&task) {
+        return Parked::Declined;
+    }
+    if crate::sched::direct::block_parked(&task)
+        && let Some(answer) = task.take_reply()
+    {
+        return Parked::Replied(answer);
+    }
+    endpoint.unpark(&task);
+    Parked::Woken
+}
+
+/// Step 4's fast path for `channel_write_read` (`docs/OPAQUE-KERNEL.md`
+/// §9.7, part 2), registered with the core's `SYSCALL` entry only when
+/// `ferrix.fastpath=on` (`fastpath.rs`): `a` is the call's six argument
+/// registers. With interrupts masked from the entry, before the filter.
+///
+/// A send of at most 24 bytes to a reader parked on the other end, on a
+/// processor with nothing else to run, is handed to the reader directly and
+/// the processor with it (`Endpoint::send_direct`); every other call
+/// declines, having changed nothing, and goes the general way. The caller is
+/// parked meanwhile, and its call goes on when it runs again: with the reply
+/// a later commit handed it, by the frame tail ([`Fast::Tail`]); or, woken
+/// some other way, by the general continuation ([`Fast::Done`]).
+///
+/// [`Fast::Tail`]: crate::trap::Fast::Tail
+/// [`Fast::Done`]: crate::trap::Fast::Done
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
+    use crate::sched::direct::{self, Count};
+    use crate::trap::Fast;
+    // Its first act, as `trap::system_call`'s is: the frame tail or the
+    // continuation lowers it.
+    crate::sched::call_entered();
+    // T2: nothing would filter the call.
+    if !crate::trap::filter_quiet() {
+        direct::count(Count::T2);
+        return Fast::Declined;
+    }
+    // T3: a send of at most 24 bytes; a receive-only call is served by the
+    // receive half on the general path.
+    let Some(count) = usize::try_from(a[1])
+        .ok()
+        .filter(|&count| count <= nr::CHANNEL_WRITE_READ_BYTES)
+    else {
+        direct::count(Count::T3);
+        return Fast::Declined;
+    };
+    // T4 and T5: the general lookup, with its clamp, the type and the rights,
+    // on a table whose lock is free. A refusal is the general path's to
+    // answer and audit.
+    let Some(caller) = crate::sched::current() else {
+        direct::count(Count::T4);
+        return Fast::Declined;
+    };
+    let endpoint = caller.thread().and_then(|thread| {
+        thread
+            .process()
+            .core()
+            .try_with_handles(|table| {
+                channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
+            })
+            .flatten()
+    });
+    let Some(endpoint) = endpoint else {
+        direct::count(Count::T4);
+        return Fast::Declined;
+    };
+    if let Err(declined) = endpoint.send_direct(&caller, count, reply_words(count, a)) {
+        direct::count(declined);
+        return Fast::Declined;
+    }
+    // Running again: a commit handed over a reply, or something else woke
+    // the park.
+    if let Some((count, words)) = caller.take_reply() {
+        return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
+    }
+    Fast::Done(continue_general(&endpoint, &caller, a))
+}
+
+/// The general continuation (`docs/OPAQUE-KERNEL.md` §9.7, part 2,
+/// condition 3): a caller the fast path parked, woken without a reply,
+/// carries on where `receive_words` carries on after its wait, with the
+/// call's own arguments `a` -- interrupts opened first and the
+/// `may_block` check made, then off its record, the call's end as
+/// `dispatch_write_read` makes it, and the way back as `trap::system_call`
+/// makes it. Returns with interrupts masked again.
+#[cfg(target_arch = "x86_64")]
+fn continue_general(endpoint: &Endpoint, caller: &Arc<crate::sched::Task>, a: &[u64; 6]) -> crate::trap::Outcome {
+    arch::enable_interrupts();
+    if !crate::sched::may_block() {
+        crate::panic::fatal!(
+            crate::panic::catalog::FAST_PATH_CONTINUATION_MASKED,
+            "the fast path's general continuation was reached where its task may not block"
+        );
+    }
+    endpoint.unpark(caller);
+    let answered = if crate::sched::work::own_end() {
+        Err(Errno::EINTR)
+    } else {
+        receive_words(endpoint)
+    };
+    if let Some(thread) = caller.thread() {
+        let plain = answered.map(|(count, _)| count);
+        record_call(
+            NativeCall::ChannelWriteRead,
+            nr::CHANNEL_WRITE_READ,
+            thread.process().core(),
+            a,
+            &plain,
+        );
+    }
+    let outcome = crate::syscall::write_read_outcome(answered);
+    crate::sched::regroup_current();
+    crate::sched::call_left();
+    arch::disable_interrupts();
+    outcome
 }
 
 /// The status a read that took nothing answers.
