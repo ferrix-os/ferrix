@@ -1589,7 +1589,8 @@ pub(super) struct SkippedArm {
 /// before any other processor or the scheduler arms a timer, so every tick
 /// counted is this processor's. Each one-shot must fire within
 /// [`ARRIVAL_NANOS`] of its 2 ms deadline; one the skip wrongly left waits
-/// for the 1 s one.
+/// for the 1 s one. Then one deadline asked for twice is written once, and
+/// a stop after it fired writes nothing ([`one_deadline_twice`]).
 ///
 /// Verifies: L.sched.5
 pub(super) fn check_a_skipped_arm() -> Result<SkippedArm, &'static str> {
@@ -1602,10 +1603,44 @@ pub(super) fn check_a_skipped_arm() -> Result<SkippedArm, &'static str> {
     let before_long = short_fires_in_time(&[SHORT_ARM_NANOS, LONG_ARM_NANOS]).ok_or(
         "a 1 s one-shot asked for while a 2 ms one was armed kept the 2 ms one from firing",
     )?;
+    let writes = one_deadline_twice()?;
+    if writes != 1 {
+        crate::console::println!(
+            "  arm      one deadline asked for twice, fired and stopped: {writes} writes, 1 wanted"
+        );
+        return Err(
+            "a deadline asked for twice was written twice, or a fired one-shot was stopped again",
+        );
+    }
     Ok(SkippedArm {
         after_long,
         before_long,
     })
+}
+
+/// The same 2 ms deadline asked for twice, from one clock reading, as the
+/// scheduler asks for a sleeper's at every decision; waited for; then the
+/// timer stopped. One write is wanted: the arm. The second request is
+/// served by the armed one-shot (`timer::REQUESTED`) and the stop finds a
+/// one-shot that fired, with nothing left to stop. Answers this
+/// processor's timer writes meanwhile.
+fn one_deadline_twice() -> Result<u64, &'static str> {
+    let before = timer::ticks();
+    let writes = timer::writes_here();
+    let saved = <arch::Irq as ferrix_sync::IrqControl>::disable();
+    let start = timer::now_nanos();
+    timer::after_from(SHORT_ARM_NANOS, start);
+    timer::after_from(SHORT_ARM_NANOS, start);
+    <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
+    let give_up = start.saturating_add(LONG_ARM_NANOS + ARRIVAL_NANOS);
+    while timer::ticks() == before && timer::now_nanos() < give_up {
+        arch::wait_for_interrupt();
+    }
+    if timer::ticks() == before {
+        return Err("a 2 ms one-shot asked for twice did not fire");
+    }
+    timer::stop();
+    Ok(timer::writes_here().wrapping_sub(writes))
 }
 
 /// Ask for each of `arms` in order, then wait for the first tick: the
@@ -1614,9 +1649,14 @@ pub(super) fn check_a_skipped_arm() -> Result<SkippedArm, &'static str> {
 fn short_fires_in_time(arms: &[u64]) -> Option<u64> {
     let before = timer::ticks();
     let start = timer::now_nanos();
+    // Masked, as `timer::after` is called: a tick between an arm and the
+    // bound it keeps would leave the bound over a quiet timer, and every
+    // later arm on this processor skipped.
+    let saved = <arch::Irq as ferrix_sync::IrqControl>::disable();
     for nanos in arms {
         timer::after(*nanos);
     }
+    <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
     let give_up = start.saturating_add(LONG_ARM_NANOS + ARRIVAL_NANOS);
     while timer::ticks() == before && timer::now_nanos() < give_up {
         arch::wait_for_interrupt();

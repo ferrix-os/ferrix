@@ -51,18 +51,23 @@ package FerrixSchedRequirements {
              * 2, 3 and 6; the consultant's conditions of 2026-10-02). */
 
         requirement <'L.sched.5'> aSkippedArmIsNeverLate : ItemLowLevel {
-            attribute :>> statement = "timer::after shall keep, for each
-                processor, the clock read after the hardware was armed plus the
-                delay asked for, and shall leave a one-shot armed only when that is
-                no later than the new deadline; otherwise it shall arm for the new
-                one, so that no interrupt asked for is served later than the
-                hardware's own one-tick rounding of a delay shorter than a tick.";
+            attribute :>> statement = "timer::after and timer::after_from shall
+                keep, for each processor, the clock read after the hardware was
+                armed plus the delay asked for, and the deadline that arm was
+                asked for; they shall leave a one-shot armed only when either is
+                no later than the new deadline, and otherwise arm for the new one,
+                so that no interrupt asked for is served later than the hardware's
+                own one-tick rounding of a delay shorter than a tick plus the time
+                the armed one-shot's own write took. timer::stop shall disarm a
+                periodic timer and leave a one-shot to fire.";
             attribute :>> criterion = "On the boot processor, a 2 ms one-shot asked
                 for while a 1 s one is armed, and one asked for before a 1 s one,
-                each fire within 200 ms of the 2 ms deadline (the `arm` line).";
+                each fire within 200 ms of the 2 ms deadline (the `arm` line); and
+                one 2 ms deadline asked for twice from one clock reading, fired and
+                then stopped, writes the timer once.";
             attribute :>> parent = "H.SCHED.5";
-            attribute :>> unit = ("timer::after", "timer::stop", "timer::on_tick",
-                "timer::armed_slot");
+            attribute :>> unit = ("timer::after", "timer::after_from", "timer::stop",
+                "timer::on_tick", "timer::armed_slot");
         }
         requirement <'L.sched.6'> theClockIsTheWideFormula : ItemLowLevel {
             attribute :>> statement = "now_nanos shall convert the counter to
