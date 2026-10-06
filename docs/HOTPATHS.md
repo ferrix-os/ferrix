@@ -222,7 +222,10 @@ its `configuration`, and it sits under its own path and hash. A record moved
 or edited by hand fails it.
 
 Records are committed on the branch with the change they measure, and land
-with it.
+with it. A rebase or squash rewrites the commit a record names, so before one
+keep the measured commit reachable with a side ref
+(`<session>/measured-<commit>`), or measure again on the final tip; the
+landing's report says which.
 
 ## 7. Publishing (design only; the customer decides)
 
