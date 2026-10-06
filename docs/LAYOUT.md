@@ -200,6 +200,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `docs/roadmap/`, `docs/sysml/`, `docs/certification/`, `docs/generated/` | The roadmap, the SysML model, the certification evidence, and what is generated from them. |
 | `docs/vendor/<vendor>/<device>/` | Notes on one board or phone. |
 | `docs/brand/`, `docs/marketing/` | The brand kit and the press copy. |
+| `docs/research/<topic>/` | A research paper in preparation: its plan, prior art with a BibTeX file, and its skeleton. Markdown and BibTeX only, so it builds with nothing new. |
 | `docs/website/` | The public website at https://ferrix-os.github.io/. Its own repository, ferrix-os/ferrix-os.github.io, which deploys it, checked out here at its pin (`components.toml`). |
 
 ## Not in the repository
