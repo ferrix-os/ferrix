@@ -299,7 +299,7 @@ static HOOK_TARGET: AtomicU64 = AtomicU64::new(0);
 /// was left armed.
 const HOOKED_BY: &[&str] = &[
     "the wake row (sched::work::check)",
-    "the fast path's last look (object::write_read_check, case 14)",
+    "the fast path's last look (object::fast_path_check, case 14)",
 ];
 
 /// The wake row's check, as [`HOOK`] records it.

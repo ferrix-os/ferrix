@@ -128,7 +128,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         }
         check_a_spinner_keeps_its_share(on)?;
         check_the_barriers_in_a_domain_and_across_two(on)?;
-        report.cases = 9;
+        check_a_queued_write_takes_the_park()?;
+        report.cases = 10;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
             report.cases += 1;
@@ -951,6 +952,89 @@ fn check_the_barriers_in_a_domain_and_across_two(on: bool) -> Result<(), &'stati
     }
     if on && moved(&before, Count::Trip) == 0 && crate::smp::count() >= 2 {
         return Err("case 13: no trip of the barrier case was handed over directly");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// A2: a queued write takes the park
+// ---------------------------------------------------------------------------
+
+/// The twice-reader's end.
+static TWICE: SpinLock<Option<Handle>> = SpinLock::new(None);
+/// What its two receive-only calls answered.
+static TWICE_READ: SpinLock<[Option<Answer>; 2]> = SpinLock::new([None, None]);
+
+/// Two receive-only calls, each recorded.
+fn read_twice_in_the_process(_argument: usize) {
+    let taken = *TWICE.lock();
+    if let Some(handle) = taken {
+        for slot in 0..2 {
+            let answer = call(handle, nr::WRITE_READ_NOTHING, [0; 3]);
+            if let Some(read) = TWICE_READ.lock().get_mut(slot) {
+                *read = Some(answer);
+            }
+        }
+    }
+    process::exit_current(0)
+}
+
+/// A2's case: a reader parked by the receive half is sent a message by a
+/// queued write (`Endpoint::write`, not `write_small`), and at once a
+/// second message by a sender beside it whose call the fast path may take.
+/// The queued write takes the park record, as every general writer does,
+/// so the second message waits behind the first and the reader reads both,
+/// in order. A queued write that left the record would leave a reader
+/// parked beside a message, which the fast send stops the machine on (A2).
+///
+/// Verifies: `L.object.165`, `L.object.166`
+fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
+    let cpu = trip_processor();
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+    let (reader, handle) = holding(&mine)?;
+    *TWICE_READ.lock() = [None, None];
+    *TWICE.lock() = Some(handle);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let task = spawn_in(
+        &reader,
+        "fast path twice",
+        read_twice_in_the_process,
+        Some(cpu),
+    )?;
+    wait_until(deadline, "A2's case: the reader never waited", || {
+        mine.reader_waiting()
+    })?;
+    theirs
+        .write(b"q".to_vec(), 0, || {
+            Ok::<alloc::vec::Vec<super::Transfer>, core::convert::Infallible>(alloc::vec::Vec::new())
+        })
+        .map_err(|_| "A2's case: the check could not queue its message")?;
+    let (sender, sender_handle) = holding(&theirs)?;
+    *SENT.lock() = None;
+    *SENDER.lock() = Some(sender_handle);
+    let _sending = spawn_in(&sender, "fast path sender", send_in_the_process, Some(cpu))?;
+    let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
+    wait_dead(
+        &task,
+        bound,
+        "A2's case: the reader was not answered twice within the bound",
+    )?;
+    process::kill(&sender, KILLED_STATUS);
+    drop(sender);
+    drop(reader);
+    drop(theirs);
+    drop(mine);
+    let read = *TWICE_READ.lock();
+    if read
+        != [
+            Some((1, [u64::from(b'q'), 0, 0])),
+            Some((1, [u64::from(b'x'), 0, 0])),
+        ]
+    {
+        return Err(
+            "A2's case: a reader sent a queued message and then another did not read both in order",
+        );
     }
     Ok(())
 }
