@@ -586,6 +586,10 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             run_vector_case(wake)?;
             report.kept += 1;
         }
+        for wake in [Wake::Message, Wake::Signal] {
+            run_sending_vector_case(wake)?;
+            report.reset += 1;
+        }
     }
     report.traded = check_programs_trade_their_fs_bases()?;
     check_a_cleared_base_comes_back_and_leaks_nowhere()?;
@@ -994,4 +998,132 @@ fn fs_program(mode: u8, base: u64, magic: u64) -> Result<Arc<Process>, &'static 
     patch(&mut code, 24, &(gdt::USER_DATA | 3).to_le_bytes())?;
     patch(&mut code, 28, &FS_ROUNDS.to_le_bytes())?;
     load(b"/fs-base", &code)
+}
+
+// ---------------------------------------------------------------------------
+// Step 4's case 15: a caller the fast path parked, resumed by the general path
+// ---------------------------------------------------------------------------
+
+/// Where the fixture's `movq $-1, %rsi` sits -- `channel_write_read`'s count,
+/// sending nothing -- which the sending variant patches to a count of zero.
+const COUNT_AT: usize = 250;
+
+/// The reader on the other end of a sending vector case, handed its handle.
+static FAST_READER: crate::sync::SpinLock<Option<Handle>> = crate::sync::SpinLock::new(None);
+
+/// The reader: two receive-only calls, the second held until its process is
+/// killed, so that its end stays open while the victim waits.
+fn read_twice(_argument: usize) {
+    let taken = FAST_READER.lock().take();
+    if let Some(handle) = taken {
+        for _ in 0..2 {
+            let _ = super::super::syscall::check::drive_native_words(
+                ferrix_native_abi::nr::CHANNEL_WRITE_READ,
+                [
+                    u64::from(handle.0),
+                    ferrix_native_abi::nr::WRITE_READ_NOTHING as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            );
+        }
+    }
+    process::exit_current(0)
+}
+
+/// Step 4's case 15 (`docs/OPAQUE-KERNEL.md` §9.7, condition 7): the victim
+/// *sends* (a count of zero, patched into the fixture) to a reader parked on
+/// the other end, so that with the fast path on its send is handed over
+/// directly and the victim parked by the fast path, not by the receive half.
+/// The other program fills the registers beside it, and the victim is woken
+/// by the general path -- a message written by the check, or `SIGUSR1` and
+/// then the message -- and must read back the initial state, as every case
+/// above. Made again, a few times at most, until a direct hand-over carried
+/// the send, on a boot with the fast path and two processors; once
+/// otherwise.
+///
+/// Verifies: `L.x86_64.155`
+fn run_sending_vector_case(wake: Wake) -> Result<(), &'static str> {
+    use crate::sched::direct::{Count, counts};
+    // On one processor the check's own task is runnable beside the victim as
+    // it starts -- the victim's arrival preempts it -- so the victim's send
+    // finds a task waiting and goes the general way (T12): there the case is
+    // made once, holding the general path to the reset.
+    let fast = crate::trap::fast_write_read().is_some() && crate::smp::count() >= 2;
+    for _ in 0..6 {
+        let before = counts()[Count::Trip as usize];
+        send_then_wake(wake)?;
+        if !fast || counts()[Count::Trip as usize] != before {
+            return Ok(());
+        }
+    }
+    Err("case 15: no sending vector program's send was handed over by the fast path")
+}
+
+/// One try of [`run_sending_vector_case`].
+fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
+    let here = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let count = crate::smp::count();
+    let cpu = if count >= 2 { (here + 1) % count } else { here };
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let (mine, theirs) = Endpoint::pair().map_err(|_| "could not make a channel")?;
+    let mut code = VECTOR_PROGRAM.to_vec();
+    let victim = {
+        if code.get(COUNT_AT..COUNT_AT + 7) != Some(&[0x48, 0xc7, 0xc6, 0xff, 0xff, 0xff, 0xff][..]) {
+            return Err("case 15: the vector program's count is not where its layout says");
+        }
+        patch(&mut code, COUNT_AT + 3, &0_u32.to_le_bytes())?;
+        patch(&mut code, 4, &[wake.mode()])?;
+        patch(&mut code, 8, &BOOTSTRAP.0.to_le_bytes())?;
+        patch(&mut code, 12, &VICTIM_MXCSR.to_le_bytes())?;
+        patch(&mut code, 16, &VICTIM_CONTROL.to_le_bytes())?;
+        patch(&mut code, 24, &VICTIM_PATTERN.to_le_bytes())?;
+        patch(&mut code, 32, &OTHER_PATTERN.to_le_bytes())?;
+        load(b"/vectors", &code)?
+    };
+    let placed = victim
+        .with_handles(|table| table.insert(Object::Channel(mine), Rights::CHANNEL))
+        .map_err(|_| "no room for the vector program's channel")?;
+    if placed != BOOTSTRAP {
+        return Err("a fresh process's first handle is not the one the vector program was built for");
+    }
+    let reader = process::new_for_check().map_err(|_| "no process for case 15's reader")?;
+    let handle = reader
+        .with_handles(|table| table.insert(Object::Channel(Arc::clone(&theirs)), Rights::CHANNEL))
+        .map_err(|_| "no room for case 15's reader")?;
+    *FAST_READER.lock() = Some(handle);
+    let _reader_task = crate::syscall::check::spawn_in(&reader, "case 15 reader", read_twice, Some(cpu))?;
+    wait_until(deadline, "case 15: the reader never waited", || theirs.reader_waiting())?;
+    let victim_task = process::start_on(&victim, Some(cpu))
+        .map_err(|_| "the vector program could not be started")?;
+    wait_until(deadline, "case 15: the vector program never blocked in its call", || {
+        victim_task.is_blocked() && theirs.reader_waiting()
+    })?;
+    let other = vector_program(b'b', OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?;
+    let other_task = process::start_on(&other, Some(cpu))
+        .map_err(|_| "the program that fills the vector registers could not be started")?;
+    // Alone on its processor once the victim is parked, it is switched to
+    // once and yields to nobody: run, then given time to set its pattern.
+    wait_until(deadline, "the program that fills the vector registers never ran", || {
+        other_task.switches() >= 1
+    })?;
+    crate::sched::sleep_for(10_000_000);
+    if wake == Wake::Signal {
+        crate::syscall::kill::send(&victim, SIGUSR1, Origin::Kernel);
+        crate::sched::sleep_for(5_000_000);
+    }
+    theirs
+        .write_small(b"vectors!")
+        .map_err(|_| "case 15: the check could not write the message that wakes the vector program")?;
+    let status = victim.wait_for_exit(deadline);
+    process::kill(&other, KILLED_STATUS);
+    let _ = other.wait_for_exit(deadline);
+    process::kill(&reader, KILLED_STATUS);
+    let _ = reader.wait_for_exit(deadline);
+    drop(theirs);
+    vector_verdict(status)
 }

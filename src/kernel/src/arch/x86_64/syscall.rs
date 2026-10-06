@@ -483,6 +483,29 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
+    // Step 4's fast path for `channel_write_read`, on a boot that registered
+    // one (`ferrix.fastpath=on`, T1): first, before the filter, which its own
+    // T2 stands in for, and with interrupts still masked. Every entry measure
+    // has run in the stub by here (`docs/OPAQUE-KERNEL.md` §9.7, condition
+    // 2). A declined call goes on below as any other.
+    if frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ
+        && let Some(fast) = crate::trap::fast_write_read()
+    {
+        // The call blocks, and lets the vector registers go across it (3a).
+        mark_vectors_dead(true);
+        let args = [
+            frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
+        ];
+        match fast(&args) {
+            crate::trap::Fast::Declined => mark_vectors_dead(false),
+            crate::trap::Fast::Tail(outcome) => return frame_tail(frame, outcome),
+            crate::trap::Fast::Done(outcome) => {
+                mark_vectors_dead(false);
+                return leave(frame, outcome);
+            }
+        }
+    }
+
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
         number: frame.rax as usize,
@@ -532,7 +555,58 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             outcome
         }
     };
+    leave(frame, outcome);
+}
 
+/// The fast path's frame tail (`docs/OPAQUE-KERNEL.md` §9.7, part 2): the
+/// reply a commit handed this task goes into its frame, in the four
+/// registers `Outcome::ReturnWords` writes. With nothing due -- no
+/// pending work, no decision asked of this processor, no move between jobs,
+/// nothing that may filter it -- the call ends here, `IN_CALL` lowered, and
+/// the stub's own exit runs. Otherwise the general branch: interrupts
+/// opened, the `may_block` check, the call's way back as `trap::system_call`
+/// makes it, and the entry's way out. With interrupts masked.
+fn frame_tail(frame: &mut SyscallFrame, outcome: Outcome) {
+    if crate::sched::nothing_due_here() && crate::trap::filter_quiet() {
+        crate::sched::call_left();
+        mark_vectors_dead(false);
+        write_outcome(frame, outcome);
+        return;
+    }
+    super::enable_interrupts();
+    if !crate::sched::may_block() {
+        crate::panic::fatal!(
+            crate::panic::catalog::FAST_PATH_CONTINUATION_MASKED,
+            "the fast path's frame tail took its general branch where its task may not block"
+        );
+    }
+    crate::sched::regroup_current();
+    crate::sched::call_left();
+    super::disable_interrupts();
+    mark_vectors_dead(false);
+    leave(frame, outcome);
+}
+
+/// Write `outcome` into the frame, then the way back to user mode's look:
+/// how every `SYSCALL` leaves the kernel but the frame tail's quiet one.
+fn leave(frame: &mut SyscallFrame, outcome: Outcome) {
+    write_outcome(frame, outcome);
+
+    // On the way back: a process ended from outside ends here, a stopped one
+    // waits, and a signal with a handler is delivered by pointing the frame at
+    // it. See `crate::syscall::deliver`.
+    if let Some(path) = crate::trap::return_path()
+        && crate::trap::attention_due(path)
+    {
+        let mut context = super::signal::UserContext::from_syscall(frame);
+        (path.return_to_user)(&mut context);
+        context.store_syscall(frame);
+    }
+}
+
+/// Put a call's answer into its frame, where `SYSRET`'s way out restores
+/// the registers from.
+fn write_outcome(frame: &mut SyscallFrame, outcome: Outcome) {
     match outcome {
         Outcome::Return(value) => {
             frame.rax = value as u64;
@@ -546,17 +620,6 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
             frame.r10 = words[2];
         }
         Outcome::Enter { entry, stack, abi } => enter_program(frame, entry, stack, abi),
-    }
-
-    // On the way back: a process ended from outside ends here, a stopped one
-    // waits, and a signal with a handler is delivered by pointing the frame at
-    // it. See `crate::syscall::deliver`.
-    if let Some(path) = crate::trap::return_path()
-        && crate::trap::attention_due(path)
-    {
-        let mut context = super::signal::UserContext::from_syscall(frame);
-        (path.return_to_user)(&mut context);
-        context.store_syscall(frame);
     }
 }
 
