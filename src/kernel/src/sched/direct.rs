@@ -232,7 +232,8 @@ impl Direct {
         // is over, as the wake at home ends it.
         let _ = queue.remove_sleeper(peer.id);
         let _ = peer.take_sleep_deadline();
-        peer.set_state(RUNNABLE);
+        // Asleep, as A1 has just asserted, and every waker needs this lock.
+        peer.set_state_from(BLOCKED, RUNNABLE);
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
         let next = queue.hand_over(peer, now, block_caller);
@@ -309,4 +310,10 @@ pub(crate) fn block_parked(task: &Task) -> bool {
 /// under its half's lock.
 pub(crate) fn set_blocked(task: &Task) {
     task.set_state(BLOCKED);
+}
+
+/// [`set_blocked`] for the direct switch's caller, which runs here under the
+/// run-queue lock with interrupts masked: see `Task::set_state_from`.
+pub(crate) fn set_running_blocked(task: &Task) {
+    task.set_state_from(RUNNABLE, BLOCKED);
 }

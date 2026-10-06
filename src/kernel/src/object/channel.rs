@@ -404,6 +404,11 @@ struct Half {
     /// `inbox`'s lock, which is what serialises a registration against the
     /// change it waits for.
     observers: SpinLock<Observers>,
+    /// Whether a port registration has ever been made on this side: set
+    /// under `inbox`'s lock with the registration and never cleared, for the
+    /// fast path's T10 to read under that lock instead of taking
+    /// `observers`'s. A side once observed declines the fast path for good.
+    observed: AtomicBool,
     /// Whether this side's [`Endpoint`] has gone. Set once, under `inbox`'s
     /// lock as the queue is emptied, and never cleared.
     closed: AtomicBool,
@@ -431,6 +436,7 @@ impl Half {
             inbox: SpinLock::new(Inbox::new()),
             waiters: WaitQueue::new(),
             observers: SpinLock::new(Observers::new()),
+            observed: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             state: AtomicU8::new(0),
         }
@@ -865,6 +871,7 @@ impl Endpoint {
             observer.fire(asserted);
             return Ok(());
         }
+        own.observed.store(true, Ordering::Release);
         let registered = register(&mut own.observers.lock(), observer);
         drop(inbox);
         registered
@@ -985,11 +992,8 @@ impl Endpoint {
             );
         }
         // T10: nobody else would be told of this message.
-        let quiet = peer
-            .observers
-            .try_lock()
-            .is_some_and(|observers| observers.is_empty())
-            && peer.waiters.try_listed() == Some(0);
+        let quiet =
+            !peer.observed.load(Ordering::Acquire) && peer.waiters.listed_now() == 0;
         if !quiet {
             return Err(Count::T10);
         }
@@ -1000,7 +1004,7 @@ impl Endpoint {
         };
         reader.fill_reply(len, words);
         switch.hand_over(caller, reader, |parked| {
-            direct::set_blocked(&parked);
+            direct::set_running_blocked(&parked);
             own_inbox.parked = Some(parked);
         });
         drop(peer_inbox);
