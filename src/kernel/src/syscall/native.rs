@@ -1005,7 +1005,7 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::trap::Fast;
     // Its first act, as `trap::system_call`'s is: the frame tail or the
     // continuation lowers it.
-    crate::sched::call_entered();
+    crate::sched::set_in_call_masked(true);
     // T2: nothing would filter the call.
     if !crate::trap::filter_quiet() {
         direct::count(Count::T2);

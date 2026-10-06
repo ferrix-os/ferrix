@@ -229,8 +229,9 @@ impl Direct {
             );
         }
         // A parked task files no deadline, but whatever sleep it once meant
-        // is over, as the wake at home ends it.
-        let _ = queue.remove_sleeper(peer.id);
+        // is over, as the wake at home ends it. It is in no sleeper set to
+        // be taken out of: it holds its sleep slot (T11), which a set keeps
+        // while it holds the task.
         let _ = peer.take_sleep_deadline();
         // Asleep, as A1 has just asserted, and every waker needs this lock.
         peer.set_state_from(BLOCKED, RUNNABLE);
