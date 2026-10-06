@@ -372,6 +372,7 @@ impl AddressSpace {
         let cpu = this_logical_cpu();
         // NOALLOC: a `CpuMask` is a fixed bitmap; joining sets a bit.
         self.cpus.join(cpu);
+        crate::sched::prof::stamp(crate::sched::prof::Point::Domain);
         // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
         // on it and the kernel is reachable through it on the architecture
         // that needs that; the caller guarantees it outlives the installation.

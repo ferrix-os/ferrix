@@ -172,6 +172,7 @@ pub(crate) fn dispatch(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Out
 /// type is named to find it.
 fn native_call(args: &SyscallArgs) -> Outcome {
     let task = sched::current();
+    crate::sched::prof::stamp(crate::sched::prof::Point::ECurrent);
     let caller = task
         .as_deref()
         .and_then(sched::Task::thread)

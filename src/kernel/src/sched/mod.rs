@@ -47,6 +47,7 @@ mod preempt_check;
 mod queue;
 mod task;
 pub(crate) mod trip;
+pub(crate) mod prof;
 mod wait;
 pub(crate) mod work;
 
@@ -1552,6 +1553,7 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
         let saved = <arch::Irq as IrqControl>::disable();
         let placed = this_cpu().map(|here| wake_onto(task, here));
         <arch::Irq as IrqControl>::restore(saved);
+        prof::stamp(prof::Point::WOnto);
         if matches!(placed, Some(Placed::Moved | Placed::NotBlocked)) {
             return;
         }
@@ -1720,6 +1722,7 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             queue.insert(task);
         }
+        prof::stamp(prof::Point::WInserted);
         kick_cpu = kick_after_wake(&mut queue, cpu, defer && here == Some(cpu));
         break;
     }
@@ -2008,7 +2011,9 @@ fn pick_and_switch(interrupted_user: bool) {
     // lock, which keeps every other processor off both until `finish_switch`
     // releases it.
     unsafe { arch::switch_to(save, resume) };
+    prof::stamp(prof::Point::Switched);
     finish_switch();
+    prof::stamp(prof::Point::Finished);
 }
 
 /// Choose what runs next, leaving the queue's lock held and returning where
@@ -2022,10 +2027,15 @@ fn choose_next(
     // SAFETY: (SHARED) released below when nothing is switched, and otherwise by the
     // context this switches to, in `finish_switch`.
     let queue = unsafe { lock.lock_manually() };
+    prof::stamp(prof::Point::Locked);
+    prof::switched();
 
     let now = crate::timer::now_nanos();
+    prof::stamp(prof::Point::ANow);
     queue.account(now);
+    prof::stamp(prof::Point::AAccount);
     queue.wake_sleepers(now);
+    prof::stamp(prof::Point::Accounted);
 
     let previous = queue.current.clone();
     if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
@@ -2045,6 +2055,7 @@ fn choose_next(
     }
 
     let next = queue.pick_next();
+    prof::stamp(prof::Point::Picked);
     if queue.stats.measuring {
         queue.note_pick(now);
     }
@@ -2110,7 +2121,9 @@ fn choose_next(
     // two stack pointers and whose whole job is register operations -- and not
     // after the switch either, because the incoming context resumes on its own
     // stack and would have to be told to do this before touching anything.
+    prof::stamp(prof::Point::Booked);
     swap_address_space(previous.address_space(), next.address_space());
+    prof::stamp(prof::Point::Spaced);
     switch_user_state(previous, next);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
@@ -2207,6 +2220,7 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
             unsafe { arch::save_user_state(state, previous.is_blocked()) };
         }
     }
+    prof::stamp(prof::Point::Saved);
     // SAFETY: (SHARED) as above, for `next`.
     if let Some(state) = unsafe { next.user_state() } {
         let entry_stack = next.stack_top().unwrap_or(0);
@@ -2216,6 +2230,7 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
         // stack is its own and mapped for as long as the queue holds it.
         unsafe { arch::restore_user_state(state, entry_stack) };
     }
+    prof::stamp(prof::Point::Restored);
 }
 
 #[cfg_attr(

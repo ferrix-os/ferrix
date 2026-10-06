@@ -1505,9 +1505,11 @@ pub(crate) unsafe fn install_user_root(root: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the root carries the kernel's half, which
     // is what maps the code and stack this returns onto.
     unsafe { cpu::write_cr3(root) };
+    crate::sched::prof::stamp(crate::sched::prof::Point::Cr3);
     // `IBPB` and a return stack refill, if this is another program's space
     // than the one this processor last ran. See `speculation`.
     crate::arch::speculation::entered_space(root);
+    crate::sched::prof::stamp(crate::sched::prof::Point::Barrier);
 }
 
 /// Go back to translating nothing but the kernel's own tables.

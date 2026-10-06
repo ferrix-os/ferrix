@@ -290,6 +290,7 @@ pub(crate) fn entered_space(root: u64) {
 /// Issue the switch barrier on processor `cpu`, which is this one, and count
 /// it: the decision, and the invalidation if the processor has one.
 fn issue_barrier(cpu: usize) {
+    crate::sched::prof::taint();
     if let Some(decided) = BARRIER_DECISIONS.get(cpu) {
         count_here(decided);
     }

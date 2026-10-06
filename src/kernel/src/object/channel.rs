@@ -704,8 +704,10 @@ impl Endpoint {
         if fired {
             deliver(|| peer.observers.lock().next_fired());
         }
+        crate::sched::prof::stamp(crate::sched::prof::Point::Written);
         fence(Ordering::SeqCst);
         peer.waiters.wake_all_with(crate::sched::Wake::Sync);
+        crate::sched::prof::stamp(crate::sched::prof::Point::Woken);
         Ok(())
     }
 

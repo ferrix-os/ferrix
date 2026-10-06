@@ -268,6 +268,7 @@ impl WaitQueue {
                 }
                 return true;
             }
+            super::prof::stamp(super::prof::Point::Listed);
             super::block();
             // Running again, so not filed anywhere: whatever deadline is left
             // belongs to no sleep and must not reach the next switch.
@@ -283,6 +284,7 @@ impl WaitQueue {
             // timer, and the condition coming true.
             drained = !self.unqueue(task.id);
             super::trip::slept(self, drained);
+            super::prof::stamp(super::prof::Point::Unblocked);
         }
     }
 
@@ -411,6 +413,7 @@ impl WaitQueue {
                 core::mem::take(&mut *waiters)
             }
         };
+        super::prof::stamp(super::prof::Point::WDrained);
         for task in few.iter().flatten().chain(&many) {
             super::wake_with(task, how);
         }
