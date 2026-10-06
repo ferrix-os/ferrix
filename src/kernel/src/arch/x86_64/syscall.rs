@@ -568,7 +568,9 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
 /// makes it, and the entry's way out. With interrupts masked.
 fn frame_tail(frame: &mut SyscallFrame, outcome: Outcome) {
     if crate::sched::nothing_due_here() && crate::trap::filter_quiet() {
-        crate::sched::call_left();
+        // No decision was asked of this processor (`nothing_due_here`), so
+        // `call_left`'s is not made: its flag alone.
+        crate::sched::set_in_call_masked(false);
         mark_vectors_dead(false);
         write_outcome(frame, outcome);
         return;
