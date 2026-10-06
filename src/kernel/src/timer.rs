@@ -126,9 +126,9 @@ const PROCESSORS: usize = 256;
 ///
 /// A request is also skipped when the deadline the armed one-shot was
 /// written for ([`REQUESTED`]) is no later than its own. Such a request may
-/// be served after its deadline, by at most the time the armed one's own
-/// write took: exactly as late as the request that wrote it already is, so
-/// a skip makes no request later than an arm would have made the first.
+/// be served late by up to the time from the clock reading that deadline
+/// came from to the end of its write (for `after_from`, the decision's): as
+/// late as the request that wrote it already is, and no later.
 static ARMED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
 
 /// The deadline each processor's armed one-shot was asked for, on
@@ -143,8 +143,8 @@ static ARMED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS
 /// the hardware again: an exit at every switch of a round trip while any
 /// task slept on the processor. A request no earlier than the one the
 /// armed one-shot was written for is served by that one-shot exactly as
-/// well as the first request was -- late by at most that write's time, as
-/// the first is (see [`ARMED`]) -- so it is skipped too.
+/// well as the first request was -- late by what the first is late by (see
+/// [`ARMED`]) -- so it is skipped too.
 static REQUESTED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
 
 /// How many times this module has written each processor's timer for a
@@ -270,11 +270,11 @@ pub(crate) fn stop() {
     // for at every switch makes no read-modify-write here.
     let periodic =
         INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
-    // A one-shot that is not armed -- one that fired, which leaves the
-    // hardware quiet (`timer_disarm_fired`), or one never armed -- has
-    // nothing to stop: writing it again was two exits at every switch to a
-    // processor with nothing waiting, which is every switch of a round trip.
-    // Without a slot to say so, it is stopped as before.
+    // A one-shot is left alone, armed or not: one that fired leaves the
+    // hardware quiet (`timer_disarm_fired`), one never armed was not written,
+    // and one armed costs one early decision. Writing it was two exits at
+    // every switch to a processor with nothing waiting, which is every switch
+    // of a round trip. Without a slot to say so, it is stopped as before.
     if periodic || armed_slot().is_none() {
         if let Some(slot) = armed_slot() {
             slot.store(0, Ordering::Relaxed);

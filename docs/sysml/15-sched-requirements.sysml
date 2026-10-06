@@ -58,7 +58,8 @@ package FerrixSchedRequirements {
                 no later than the new deadline, and otherwise arm for the new one,
                 so that no interrupt asked for is served later than the hardware's
                 own one-tick rounding of a delay shorter than a tick plus the time
-                the armed one-shot's own write took. timer::stop shall disarm a
+                from the clock reading the armed one-shot's deadline was taken from
+                to the end of its write. timer::stop shall disarm a
                 periodic timer and leave a one-shot to fire.";
             attribute :>> criterion = "On the boot processor, a 2 ms one-shot asked
                 for while a 1 s one is armed, and one asked for before a 1 s one,

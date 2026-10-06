@@ -2710,8 +2710,10 @@ send back:
       the arm's own write, and wrote the local APIC again: an exit at every
       switch while any task slept on the processor. `timer::after_from`
       keeps the deadline the one-shot was asked for (`REQUESTED`) and skips
-      a request no earlier than it, which may then be served late by at most
-      the armed one's own write, as the request that wrote it already is;
+      a request no earlier than it, which may then be served late by up to
+      the time from the armed one's clock reading to the end of its write
+      (for `after_from`, the decision's), as the request that wrote it
+      already is;
       `timer::stop` leaves a one-shot alone, armed or fired, and stops only a
       periodic timer. On both paths. L.sched.5 states both, and stage 3's
       skipped-arm check counts the module's timer writes (`timer::WRITES`):
