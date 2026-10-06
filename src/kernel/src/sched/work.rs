@@ -323,7 +323,19 @@ pub(crate) fn fast_path_hook(caller: &Task) {
 }
 
 /// Arm the hook for `check`, watching `target`. Stage 9's checks only.
+///
+/// The hook is one static for every check that hooks the wake, so a check
+/// that arms it while another still holds it would overwrite that one, and
+/// the next disarm would hide a hook left armed from the boot's check after
+/// stage 9: that stops the machine here instead (FX-0908).
 pub(crate) fn arm(check: usize, target: &Task) {
+    if let Some(holder) = hook_armed_by() {
+        crate::panic::fatal!(
+            crate::panic::catalog::CHECK_HOOK_LEFT_ARMED,
+            "a check's hook was still armed when another check armed it: {holder}, in \
+             sched::work's hook"
+        );
+    }
     HOOK_TARGET.store(target.id, Ordering::Release);
     HOOK.store(check + 1, Ordering::Release);
 }
