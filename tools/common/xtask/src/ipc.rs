@@ -10,6 +10,7 @@
 //! sleep) and the trip, in nanoseconds.
 
 use crate::args::Args;
+use crate::hotpath::record::{self, Boot, Measurement, Reference};
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, shell};
 
 /// What the shell runs.
@@ -24,7 +25,8 @@ const PIN: &str = "11";
 
 /// Boot, run the benchmark, and print its lines; with `--alternate`,
 /// `--against-sel4` or `--against-redox`, take turns with the other side
-/// `--rounds` times and print the ratio.
+/// `--rounds` times and print the ratio. With `--record`, file the result
+/// under `docs/hotpaths/results/ipc-round-trip/` (`docs/HOTPATHS.md` §6).
 ///
 /// One processor unless `--smp` says otherwise, and QEMU pinned to host
 /// processor [`PIN`] unless `--pin` names others or `none`; each run prints
@@ -44,18 +46,58 @@ pub(crate) fn bench_ipc(args: &Args) -> Result<()> {
         args.pin = Some(PIN.to_owned());
     }
     let rounds = args.rounds.unwrap_or(3);
-    if let Some(reference) = args.alternate.clone() {
-        return alternate(&args, &reference, rounds);
+    let (boots, reference) = if let Some(reference) = args.alternate.clone() {
+        alternate(&args, &reference, rounds)?
+    } else if args.against_sel4 || args.against_redox {
+        against(&args, rounds)?
+    } else {
+        (vec![run_once(&args)?], Reference::None)
+    };
+    if args.record {
+        write_record(&args, rounds, boots, reference)?;
     }
-    if args.against_sel4 || args.against_redox {
-        return against(&args, rounds);
-    }
-    let _ = run_once(&args)?;
+    Ok(())
+}
+
+/// The hot path `bench-ipc` measures, its line prefix and its figure.
+const HOT_PATH: (&str, &str, &str) = ("ipc-round-trip", "ipc-bench", "domain-call");
+
+/// `--record`: the fingerprint of this host and of the x86-64 guest, and
+/// the record, written and named. The log is `FERRIX_HOTPATH_LOG` if set:
+/// `bench-ipc` does not know where its own output is kept.
+fn write_record(args: &Args, rounds: u32, boots: Vec<Boot>, reference: Reference) -> Result<()> {
+    let arch = args.arches()?.into_iter().next().unwrap_or(crate::paths::Arch::X86_64);
+    let fingerprint = crate::hotpath::Fingerprint::of_this_host(arch, args)?;
+    let root = crate::paths::workspace_root();
+    let rounds = if matches!(reference, Reference::None) { 1 } else { rounds };
+    let configuration = record::ipc_configuration(args, rounds, args.alternate.as_deref());
+    let log = std::env::var("FERRIX_HOTPATH_LOG").ok();
+    let measurement = Measurement {
+        path: HOT_PATH.0,
+        prefix: HOT_PATH.1,
+        figure: HOT_PATH.2,
+        boots,
+        reference,
+    };
+    let value = record::value(
+        &measurement,
+        &fingerprint,
+        configuration,
+        record::ferrix_commit(&root)?,
+        &record::utc_now(),
+        log.as_deref(),
+    );
+    let file = record::write(&root, &value)?;
+    println!(
+        "  bench-ipc --record: {} (hardware {})",
+        file.strip_prefix(&root).unwrap_or(&file).display(),
+        fingerprint.hw_hash
+    );
     Ok(())
 }
 
 /// One boot of this tree's benchmark, its lines printed and answered.
-fn run_once(args: &Args) -> Result<Vec<String>> {
+fn run_once(args: &Args) -> Result<Boot> {
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new("bench-ipc needs --init, a static busybox for each architecture")
     })?;
@@ -70,18 +112,22 @@ fn run_once(args: &Args) -> Result<Vec<String>> {
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
         let host = Host::before(args.pin.as_deref());
         let lines = qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)?;
-        println!("  {arch}: {}", host.after());
+        let host = format!("  {arch}: {}", host.after());
+        println!("{host}");
+        all.push(host);
         let mut finished = false;
-        for line in lines.iter().filter(|line| line.contains("ipc-bench")) {
-            println!("  {arch}: {}", line.trim());
-            finished |= line.contains("ipc-bench: exit 0");
+        for line in &lines {
+            if line.contains("ipc-bench") {
+                println!("  {arch}: {}", line.trim());
+                finished |= line.contains("ipc-bench: exit 0");
+            }
             all.push(line.trim().to_owned());
         }
         if !finished {
             return Err(Error::new(format!("{arch}: ipc-bench did not finish")));
         }
     }
-    Ok(all)
+    Ok(Boot { lines: all })
 }
 
 /// The value of `key=` in the first of `lines` that holds `what`, as a
@@ -105,7 +151,7 @@ fn shown(figure: Option<u64>) -> String {
 /// benchmarks turn about `rounds` times, this tree first. The other tree's
 /// xtask may know no `--pin`, so it runs under `taskset` itself, after one
 /// unpinned run that builds it and is not counted.
-fn alternate(args: &Args, reference: &str, rounds: u32) -> Result<()> {
+fn alternate(args: &Args, reference: &str, rounds: u32) -> Result<(Vec<Boot>, Reference)> {
     let root = crate::paths::workspace_root();
     let sha = git_output(&root, &["rev-parse", "--short=12", reference])?;
     let tree = root
@@ -120,9 +166,10 @@ fn alternate(args: &Args, reference: &str, rounds: u32) -> Result<()> {
     println!("  bench-ipc --alternate {reference} ({sha}): building it, one run not counted");
     let _ = other_tree(args, &tree, reference, false)?;
     let mut pairs = Vec::new();
+    let (mut boots, mut others) = (Vec::new(), Vec::new());
     for round in 1..=rounds {
-        let mine = run_once(args)?;
-        let theirs = other_tree(args, &tree, reference, true)?;
+        let mine = run_once(args)?.lines;
+        let theirs = other_tree(args, &tree, reference, true)?.lines;
         let here = field(&mine, "domain-call", "p50");
         let there = field(&theirs, "domain-call", "p50");
         println!(
@@ -136,19 +183,27 @@ fn alternate(args: &Args, reference: &str, rounds: u32) -> Result<()> {
         if let (Some(here), Some(there)) = (here, there) {
             pairs.push((here, there));
         }
+        boots.push(Boot { lines: mine });
+        others.push(Boot { lines: theirs });
     }
     ratio("here", reference, &pairs);
-    Ok(())
+    let commit = git_output(&root, &["rev-parse", &sha])?;
+    let reference = Reference::Tree {
+        name: reference.to_owned(),
+        commit,
+        boots: others,
+    };
+    Ok((boots, reference))
 }
 
 /// One run of `tree`'s own `bench-ipc`, pinned by `taskset` when `pinned`:
-/// its `ipc-bench` lines.
+/// every line it printed.
 fn other_tree(
     args: &Args,
     tree: &std::path::Path,
     reference: &str,
     pinned: bool,
-) -> Result<Vec<String>> {
+) -> Result<Boot> {
     let mut command = match args.pin.as_deref().filter(|_| pinned) {
         Some(cpus) => {
             let mut taskset = std::process::Command::new("taskset");
@@ -181,17 +236,16 @@ fn other_tree(
         .output()
         .map_err(|error| Error::new(format!("could not run {reference}'s bench-ipc: {error}")))?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<String> = text
-        .lines()
-        .filter(|line| line.contains("ipc-bench"))
-        .map(|line| line.trim().to_owned())
-        .collect();
-    if !output.status.success() || !lines.iter().any(|line| line.contains("exit 0")) {
+    let lines: Vec<String> = text.lines().map(|line| line.trim().to_owned()).collect();
+    let finished = lines
+        .iter()
+        .any(|line| line.contains("ipc-bench") && line.contains("exit 0"));
+    if !output.status.success() || !finished {
         return Err(Error::new(format!(
             "{reference}'s bench-ipc did not finish"
         )));
     }
-    Ok(lines)
+    Ok(Boot { lines })
 }
 
 /// `--against-sel4` and `--against-redox`: this tree's domain-call against
@@ -199,7 +253,7 @@ fn other_tree(
 /// figure was measured with, under the gate's CPU model on host processor
 /// [`PIN`]: `run.sh` in `~/.local/share/ferrix/sel4`, `run.py` in
 /// `~/.local/share/ferrix/redox-bench`. What is missing says so.
-fn against(args: &Args, rounds: u32) -> Result<()> {
+fn against(args: &Args, rounds: u32) -> Result<(Vec<Boot>, Reference)> {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
@@ -209,8 +263,9 @@ fn against(args: &Args, rounds: u32) -> Result<()> {
         let _ = redox_round_trip(&share.join("redox-bench"))?;
     }
     let mut pairs = Vec::new();
+    let (mut boots, mut figures) = (Vec::new(), Vec::new());
     for round in 1..=rounds {
-        let mine = run_once(args)?;
+        let mine = run_once(args)?.lines;
         let theirs = sel4_round_trip(&share.join("sel4"), round)?;
         let here = field(&mine, "domain-call", "p50");
         println!(
@@ -220,9 +275,15 @@ fn against(args: &Args, rounds: u32) -> Result<()> {
         if let Some(here) = here {
             pairs.push((here, theirs));
         }
+        boots.push(Boot { lines: mine });
+        figures.push(theirs);
     }
     ratio("Ferrix", other, &pairs);
-    Ok(())
+    let reference = Reference::Kernel {
+        name: "seL4 matched-nopcid (run.sh)".to_owned(),
+        p50_ns: figures,
+    };
+    Ok((boots, reference))
 }
 
 /// seL4's `Call`/`ReplyRecv` round trip, p50 in nanoseconds, the median of
