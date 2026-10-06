@@ -30,6 +30,13 @@ use crate::console::println;
 
 mod check;
 
+/// `CPUID` `0x8000_0021` `EAX` bit 24: ERAPS. AMD's APM vol. 3, and Linux's
+/// `X86_FEATURE_ERAPS`.
+const ERAPS_BIT: u32 = 24;
+/// `CR4.PCIDE`: a `CR3` write may then keep translations, and ERAPS empties
+/// the predictor only at one that flushes.
+const CR4_PCIDE: u64 = 1 << 17;
+
 /// `IA32_SPEC_CTRL`: IBRS, STIBP and SSBD.
 const IA32_SPEC_CTRL: u32 = 0x48;
 /// `IA32_PRED_CMD`: writing [`PRED_CMD_IBPB`] empties the indirect predictors.
@@ -106,6 +113,9 @@ struct Offered {
     amd_ssb_no: bool,
     /// AMD: automatic IBRS.
     auto_ibrs: bool,
+    /// AMD: ERAPS, the return address predictor emptied by a `CR3` write
+    /// that flushes the TLB.
+    eraps: bool,
     /// Intel: `VERW` clears the buffers MDS reads.
     md_clear: bool,
     /// `IA32_ARCH_CAPABILITIES`, or zero where it does not exist.
@@ -163,6 +173,7 @@ fn offered() -> Offered {
         virt_ssbd: bit(amd8, 25),
         amd_ssb_no: bit(amd8, 26),
         auto_ibrs: bit(amd21, 8),
+        eraps: bit(amd21, ERAPS_BIT),
         md_clear: bit(leaf7, 10),
         capabilities,
     }
@@ -219,6 +230,9 @@ impl Plan {
         }
         if offered.ibpb {
             plan.defences = plan.defences.with(Defences::SWITCH_BARRIER);
+        }
+        if eraps_empties_on_switch(offered) {
+            plan.defences = plan.defences.with(Defences::ERAPS);
         }
         if mds_exposed(offered) {
             plan.defences = plan.defences.with(Defences::BUFFERS_CLEARED);
@@ -549,6 +563,7 @@ pub(crate) fn init() {
         plan.defences.contains(Defences::SWITCH_BARRIER),
         Ordering::Relaxed,
     );
+    ERAPS_EMPTIES.store(plan.defences.contains(Defences::ERAPS), Ordering::Relaxed);
     CLEAR_CPU_BUFFERS.store(
         u8::from(plan.defences.contains(Defences::BUFFERS_CLEARED)),
         Ordering::Relaxed,
@@ -682,8 +697,36 @@ pub(crate) fn switch_barrier(_cpu: usize) -> bool {
 /// §9.3a, A2). The refill stays because it costs a few hundred cycles and
 /// nothing then has to be argued about what else it protects.
 pub(crate) fn switch_barrier_in_domain(_cpu: usize) -> bool {
+    if ERAPS_EMPTIES.load(Ordering::Relaxed) {
+        // The `CR3` write just made emptied the return address predictor:
+        // ERAPS, where `CR4.PCIDE` is clear so that every write flushes
+        // (`eraps_empties_on_switch`). Nothing is refilled, and nothing is
+        // counted as a refill.
+        return false;
+    }
     fill_return_stack();
     HARDENED
+}
+
+/// Whether a `CR3` write on this machine empties the return address
+/// predictor: decided at boot from the boot processor's `CPUID`, and read
+/// by every in-domain switch.
+static ERAPS_EMPTIES: AtomicBool = AtomicBool::new(false);
+
+/// Whether ERAPS stands in for the in-domain refill: a hardened build, a
+/// processor that offers ERAPS, and `CR4.PCIDE` clear, so that every `CR3`
+/// write the switch makes is one that flushes the TLB, which is the write
+/// ERAPS empties the predictor at. Every processor runs with the boot
+/// processor's `CR4` bits.
+fn eraps_empties_on_switch(offered: &Offered) -> bool {
+    HARDENED && offered.eraps && cpu::read_cr4() & CR4_PCIDE == 0
+}
+
+/// [`crate::arch::speculation::refill_wanted_in_domain`]: in a hardened
+/// build, unless `CPUID` itself, read again here, says ERAPS and `CR4.PCIDE`
+/// is clear.
+pub(crate) fn refill_wanted_in_domain() -> bool {
+    REFILL_IN_DOMAIN && !eraps_empties_on_switch(&offered())
 }
 
 /// Whether [`switch_barrier_in_domain`] refills the return stack: in a

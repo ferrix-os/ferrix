@@ -895,7 +895,7 @@
     "arch/speculation.rs": {
       "ring": "core",
       "lines": [
-        162
+        168
       ]
     },
     "arch/aarch64/mod.rs": {

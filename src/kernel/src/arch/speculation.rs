@@ -96,11 +96,16 @@ impl Defences {
     pub(crate) const BUFFERS_CLEARED: Defences = Defences(1 << 10);
     /// `AArch64`: the branch history overwritten on every entry from EL0.
     pub(crate) const BHB_LOOP: Defences = Defences(1 << 11);
+    /// x86-64: AMD's ERAPS, which empties the return address predictor at
+    /// every `CR3` write that flushes the TLB, so a switch of address space
+    /// inside one speculation domain needs no software refill
+    /// (`docs/OPAQUE-KERNEL.md` §9.10).
+    pub(crate) const ERAPS: Defences = Defences(1 << 12);
     /// A defence was written and did not read back: the boot check fails.
     pub(crate) const READ_BACK_FAILED: Defences = Defences(1 << 30);
 
     /// Every defence, with the name a boot log gives it.
-    const NAMES: [(Defences, &'static str); 12] = [
+    const NAMES: [(Defences, &'static str); 13] = [
         (Defences::CLAMPED_INDICES, "clamped indices"),
         (Defences::SWAPGS_FENCE, "SWAPGS fence"),
         (Defences::ENTRY_REGISTERS_CLEARED, "entry registers cleared"),
@@ -113,6 +118,7 @@ impl Defences {
         (Defences::RSB_FILL, "RSB fill on switch"),
         (Defences::BUFFERS_CLEARED, "VERW on exit"),
         (Defences::BHB_LOOP, "BHB loop on entry"),
+        (Defences::ERAPS, "ERAPS empties the RSB on switch"),
     ];
 
     /// Whether every defence in `other` is in this set.
@@ -325,9 +331,15 @@ pub(crate) fn refills_in_domain_on(logical: usize) -> u64 {
         .map_or(0, |refilled| refilled.load(Ordering::Relaxed))
 }
 
-/// Whether a switch inside a speculation domain still refills the return
-/// stack on this architecture, for the check: x86-64's does.
-pub(crate) const REFILL_IN_DOMAIN: bool = machine::REFILL_IN_DOMAIN;
+/// Whether a switch inside a speculation domain on this processor must refill
+/// the return stack in software: the architecture's own refill, less where the
+/// processor's own `CR3` write empties the predictor (x86-64's ERAPS). Read
+/// from the processor by the check itself, not from the plan the switch
+/// follows, so that a switch that skipped the refill where it should not
+/// have is seen.
+pub(crate) fn refill_wanted_in_domain() -> bool {
+    machine::refill_wanted_in_domain()
+}
 
 /// Processors asked to issue the barrier at once, by [`leaving_domain`].
 static BARRIER_WANTED: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];

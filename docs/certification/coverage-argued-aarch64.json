@@ -246,7 +246,7 @@
     },
     {
       "file": "arch/speculation.rs",
-      "lines": "162",
+      "lines": "168",
       "category": "other-architecture",
       "match": "f.write_str(\"none\")?;",
       "why": "`none` names an empty set of defences, which only a `--mitigations off` build records: on AArch64 every processor's plan in the certified build starts from the index clamp. That build is another configuration, not the one certified."

@@ -443,13 +443,21 @@ fn check_in_domain_path(first: &Process, second: &Process) -> Result<(), &'stati
     if done.issued != 0 {
         return Err("case 1: a switch inside one domain issued the predictor invalidation");
     }
-    let wanted = if arch::REFILL_IN_DOMAIN { 2 } else { 0 };
+    // None where the processor's own `CR3` write empties the return stack
+    // (x86-64's ERAPS), which the check asks the processor about itself.
+    let wanted = if arch::refill_wanted_in_domain() {
+        2
+    } else {
+        0
+    };
     if done.refilled != wanted {
         crate::console::println!(
             "  domain   case 1: {} of 2 switches inside one domain refilled the return stack, {wanted} wanted",
             done.refilled
         );
-        return Err("case 1: a switch inside one domain did not refill the return stack");
+        return Err(
+            "case 1: switches inside one domain refilled the return stack other than CPUID asks",
+        );
     }
     Ok(())
 }

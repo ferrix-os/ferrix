@@ -211,7 +211,7 @@
     },
     {
       "file": "arch/speculation.rs",
-      "lines": "162",
+      "lines": "168",
       "category": "other-architecture",
       "match": "f.write_str(\"none\")?;",
       "why": "`none` names an empty set of defences, which only a `--mitigations off` build records: on ARMv7-A every processor's plan in the certified build holds the index clamp, a Cortex-A7's as well (`speculation defences: clamped indices`). That build is another configuration, not the one certified."

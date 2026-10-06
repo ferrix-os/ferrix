@@ -12,14 +12,14 @@
   "arguments": [
     {
       "file": "arch/speculation.rs",
-      "lines": "126",
+      "lines": "132",
       "category": "absent-hardware",
       "match": "Defences(self.0 | other.0)",
       "why": "`with`'s only rows in the image are in `Plan::for_processor`'s arms for a speculation control the processor offers -- enhanced, automatic or always-on IBRS, STIBP, SSBD, IBPB. QEMU's TCG emulates none of them (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl`), and `x86_cpu` asks for them only under a hypervisor. The same arms run under KVM: gate 6 on the AMD reference host prints `speculation defences: ..., AutoIBRS, STIBP, SSBD, predictor barrier on switch, ...`. The unconditional defences are folded into a constant and carry no row."
     },
     {
       "file": "arch/speculation.rs",
-      "lines": "162",
+      "lines": "168",
       "category": "other-architecture",
       "match": "f.write_str(\"none\")?;",
       "why": "`none` names an empty set of defences, which only a `--mitigations off` build records: on x86-64 every processor's plan in the certified build starts from the index clamps, the SWAPGS fence, the cleared entry registers and the RSB fill (`Plan::for_processor`, `x86_64/speculation.rs`), and no architecture's certified plan is empty -- ARMv7-A's and AArch64's hold the index clamp on every core, a Cortex-A7's included. That build is another configuration, not the one certified."
@@ -145,14 +145,14 @@
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "208, 213, 610, 616, 618, 627",
+      "lines": "219, 224, 625, 631, 633, 642",
       "category": "absent-hardware",
       "match": "plan.spec_ctrl |= SPEC_CTRL_STIBP;",
       "why": "STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`."
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "624",
+      "lines": "639",
       "category": "absent-hardware",
       "match": "held &= unsafe { cpu::read_msr(AMD_VIRT_SPEC_CTRL) }",
       "why": "AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination."

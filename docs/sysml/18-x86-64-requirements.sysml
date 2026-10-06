@@ -583,15 +583,18 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.126'> refillKeptInsideADomain : ItemLowLevel {
             attribute :>> statement = "switch_barrier_in_domain shall, in a hardened
-                build, refill the return stack with 32 entries and issue no IBPB:
-                inside one speculation domain only the predictor invalidation is
-                left out.";
+                build, issue no IBPB, and refill the return stack with 32 entries
+                unless CPUID 0x8000_0021 EAX bit 24 (ERAPS) is set and CR4.PCIDE is
+                clear.";
             attribute :>> criterion = "Switches between two members of one marked
                 job decide no barrier (the `domain` line, case 1), and the hardened
-                build's return-stack refill runs at each of them.";
+                build's return-stack refill runs at each of them, or at none of them
+                where CPUID, read by the check itself, says ERAPS with CR4.PCIDE
+                clear.";
             attribute :>> parent = "H.TRAP.17";
             attribute :>> unit = ("arch::x86_64::speculation::switch_barrier_in_domain",
-                "arch::x86_64::speculation::fill_return_stack");
+                "arch::x86_64::speculation::fill_return_stack",
+                "arch::x86_64::speculation::eraps_empties_on_switch");
         }
         requirement <'L.x86_64.127'> patEntryOneWriteCombining : ItemLowLevel {
             attribute :>> statement = "Every processor shall program IA32_PAT with
@@ -616,8 +619,9 @@ package FerrixX8664Requirements {
                 IBRS; STIBP unless enhanced IBRS; SSBD unless the processor reports
                 it is not affected; the IBPB barrier where IBPB is offered; VERW on
                 exit only for an Intel processor with MD_CLEAR and without MDS_NO;
-                and offered shall decode those bits from CPUID and
-                IA32_ARCH_CAPABILITIES.";
+                ERAPS in place of the in-domain refill only where CPUID 0x8000_0021
+                EAX bit 24 is set and CR4.PCIDE is clear; and offered shall decode
+                those bits from CPUID and IA32_ARCH_CAPABILITIES.";
             attribute :>> criterion = "For each row of a table of CPUID and
                 capability words, the plan's defences and MSR values are the
                 expected set.";

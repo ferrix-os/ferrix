@@ -1952,7 +1952,12 @@ pub(crate) fn x86_cpu(accelerator: &str) -> String {
     } else {
         ""
     };
-    format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}")
+    // ERAPS under KVM, which offers it where the host has it (Zen 5) and
+    // otherwise drops it with a warning: a `CR3` write that empties the
+    // return address predictor, which the switch inside a speculation domain
+    // then needs no software refill for (`docs/OPAQUE-KERNEL.md` §9.10).
+    let eraps = if accelerator == "kvm" { ",+eraps" } else { "" };
+    format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}{eraps}")
 }
 
 /// [`x86_cpu`] for the QEMU at `binary`: under TCG before QEMU 9.1, without

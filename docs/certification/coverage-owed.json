@@ -9,6 +9,14 @@
     "re-claimed for the code named here."
   ],
   "owed": [
+ {
+  "landing": "po7-ipcM step 5, ERAPS in place of the in-domain return-stack refill (branch po7/step5; the consultant's OK IF of 2026-10-06, po7-ipcM's consultant, condition C5)",
+  "architectures": [
+   "x86_64"
+  ],
+  "dropped": "carried from the evidence's own commits, no anchor dropped.",
+  "what": "Absent hardware under the coverage run: x86_64 coverage is measured under TCG, which offers no ERAPS. arch/x86_64/speculation.rs switch_barrier_in_domain's `return false` and Plan::for_processor's and eraps_empties_on_switch's true outcome are reached on the reference host's KVM boot (test-boot --arch x86_64 --accel kvm, gate tag po7-ipcM-eraps3-kvm, whose defences line names ERAPS) and by control c2. Measure them under KVM or argue them as absent-hardware rows."
+ },
     {
       "landing": "OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f)",
       "architectures": [

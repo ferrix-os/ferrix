@@ -118,7 +118,7 @@ processor, read back on each (`arch/x86_64/speculation.rs`).
 |---|---|---|---|
 | Spectre v1 | clamps (§2); `lfence` after the conditional `swapgs` on interrupt entry; a program's registers zeroed on `SYSCALL` entry and on every trap from ring 3 | always | Intel SA-00088, CVE-2019-1125 (SWAPGS) |
 | Spectre v2, program → kernel | enhanced IBRS (Intel, `IBRS_ALL`), else AutoIBRS (AMD, `EFER.AIBRSE`), else IBRS on AMD parts that say it may be left on (`CPUID 0x8000_0008.EBX[16]`) | whichever the processor offers | Intel *Speculative Execution Side Channel Mitigations*; AMD *Software Techniques for Managing Speculation* |
-| Spectre v2, program → program | `IBPB` and a 32-entry return stack refill when a processor switches to another program's address space; between two programs of one speculation domain (a job marked at its creation, `docs/OPAQUE-KERNEL.md` §9) the refill alone, without `IBPB`; `STIBP` unless enhanced IBRS already covers the sibling thread; the program → kernel rows unchanged by the domain. The decision is made from per-processor words (the root, the outgoing and incoming domains, the counts) that each processor reads and writes by plain loads and stores with interrupts masked, with no locked operation (`docs/OPAQUE-KERNEL.md` §9.8, 2f) | `IBPB`/`STIBP` where offered; the refill always | as above; the refill also covers SpectreRSB |
+| Spectre v2, program → program | `IBPB` and a 32-entry return stack refill when a processor switches to another program's address space; between two programs of one speculation domain (a job marked at its creation, `docs/OPAQUE-KERNEL.md` §9) the refill alone, without `IBPB`; `STIBP` unless enhanced IBRS already covers the sibling thread; the program → kernel rows unchanged by the domain. The decision is made from per-processor words (the root, the outgoing and incoming domains, the counts) that each processor reads and writes by plain loads and stores with interrupts masked, with no locked operation (`docs/OPAQUE-KERNEL.md` §9.8, 2f) | `IBPB`/`STIBP` where offered; the refill always, or inside a domain ERAPS's own emptying where offered with `CR4.PCIDE` clear | as above; the refill also covers SpectreRSB |
 | Speculative store bypass | `SSBD`, through `IA32_SPEC_CTRL` or AMD's `VIRT_SPEC_CTRL` | unless `SSB_NO` | Intel SA-00115, AMD SSBD whitepaper |
 | MDS | `VERW` on every return to ring 3 | Intel, `MD_CLEAR`, no `MDS_NO` | Intel SA-00233 |
 | Meltdown, L1TF | **none** — reported | — | §6 |
@@ -147,7 +147,30 @@ architecture.** Each processor also records the domain of the space it last
 ran, read as that space left it, and `entered_space` skips the predictor
 invalidation when the incoming space is in the same, non-zero domain: `IBPB`
 here, `ARCH_WORKAROUND_1` on AArch64 (§4), `BPIALL` or `ICIALLU` on ARMv7-A
-(§5). The return-stack refill stays at every switch. A program enters the
+(§5). The return stack is emptied at every switch: by the refill, or, on an
+x86-64 processor that offers ERAPS with `CR4.PCIDE` clear, by the `CR3` write
+itself, which then empties the return address predictor in hardware, so the
+software refill is left out inside a domain (the switch between domains keeps
+it beside `IBPB`). Why that gives the protection the refill gave (§9.3a's A2),
+an argument and not a check, since no boot can see the predictor:
+- AMD's APM vol. 2 (as quoted in the KVM ERAPS series, v6, 2025-11) has the
+  predictor cleared at every `MOV CR3`, every `INVPCID` but type 0, and every
+  implicit TLB invalidation. Ferrix's `install_user_root` is a plain
+  `MOV CR3` with no PCID, and the skip is taken only with `CR4.PCIDE` clear,
+  which is stricter than the APM asks.
+- Under KVM with nested paging the guest's `MOV CR3` is not intercepted and
+  runs on the hardware. KVM offers ERAPS to a guest only where it virtualises
+  it (Linux 6.20 and later; the reference host runs 7.0).
+- The kernel's own returns after the write now run on an emptied predictor
+  rather than on the refill's harmless entries. An empty predictor predicts no
+  attacker-placed target, and ring 0's indirect prediction is covered by
+  AutoIBRS (above). AMD states ERAPS as the replacement for the software CALL
+  sequence.
+- The KVM 6.20 notes announce an APM change that narrows when hardware must
+  clear the predictor. `docs/BACKLOG.md` has a row to re-read the APM once it
+  is published.
+The domain check's case 1 re-reads `CPUID` and `CR4` itself and wants the
+refill exactly where this rule wants it. A program enters the
 kernel through its own calls, faults and interrupts with no switch in between,
 so no defence of the kernel can lean on the switch barrier, and every program
 → kernel row above stands as it is (`docs/OPAQUE-KERNEL.md` §9.3a, A2). The
