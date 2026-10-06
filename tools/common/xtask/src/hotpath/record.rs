@@ -72,8 +72,13 @@ impl Boot {
     pub(crate) fn kernel_view(&self) -> Vec<String> {
         let mut seen = Vec::new();
         for line in &self.lines {
-            let text = line.split_once("| ").map_or(line.as_str(), |(_, text)| text).trim();
-            let Some(rest) = text.strip_prefix("cpu ") else { continue };
+            let text = line
+                .split_once("| ")
+                .map_or(line.as_str(), |(_, text)| text)
+                .trim();
+            let Some(rest) = text.strip_prefix("cpu ") else {
+                continue;
+            };
             let statement = format!("cpu {}", rest.trim());
             if statement.contains(':') && !seen.contains(&statement) {
                 seen.push(statement);
@@ -139,12 +144,19 @@ pub(crate) fn value(
     let here = p50s(&measurement.boots, measurement.prefix, measurement.figure);
     let (reference, theirs) = match &measurement.reference {
         Reference::None => (Value::Null, Vec::new()),
-        Reference::Tree { name, commit, boots } => (
+        Reference::Tree {
+            name,
+            commit,
+            boots,
+        } => (
             Value::object([
                 ("kind", Value::str("ferrix tree")),
                 ("ref", Value::str(name)),
                 ("commit", Value::str(commit)),
-                ("runs", Value::List(boots.iter().map(|b| run(b, measurement.prefix)).collect())),
+                (
+                    "runs",
+                    Value::List(boots.iter().map(|b| run(b, measurement.prefix)).collect()),
+                ),
             ]),
             p50s(boots, measurement.prefix, measurement.figure),
         ),
@@ -152,12 +164,19 @@ pub(crate) fn value(
             Value::object([
                 ("kind", Value::str("other kernel")),
                 ("name", Value::str(name)),
-                ("p50_ns", Value::List(p50_ns.iter().map(|&n| Value::int(n)).collect())),
+                (
+                    "p50_ns",
+                    Value::List(p50_ns.iter().map(|&n| Value::int(n)).collect()),
+                ),
             ]),
             p50_ns.iter().map(|&n| Some(n)).collect(),
         ),
     };
-    let kernel_view = measurement.boots.first().map(Boot::kernel_view).unwrap_or_default();
+    let kernel_view = measurement
+        .boots
+        .first()
+        .map(Boot::kernel_view)
+        .unwrap_or_default();
     Value::object([
         ("schema", Value::str(RESULT_SCHEMA)),
         ("path", Value::str(measurement.path)),
@@ -174,12 +193,18 @@ pub(crate) fn value(
         ("cpu_hash", Value::str(&fingerprint.cpu_hash)),
         ("hardware", fingerprint.value.clone()),
         ("ferrix", ferrix),
-        ("configuration_hash", Value::str(super::hash(&configuration))),
+        (
+            "configuration_hash",
+            Value::str(super::hash(&configuration)),
+        ),
         ("configuration", configuration),
         ("runs", Value::List(runs)),
         ("reference", reference),
         ("summary", summary(&here, &theirs)),
-        ("kernel_view", Value::List(kernel_view.into_iter().map(Value::Str).collect())),
+        (
+            "kernel_view",
+            Value::List(kernel_view.into_iter().map(Value::Str).collect()),
+        ),
         ("log", log.map_or(Value::Null, Value::str)),
         ("taken", Value::str(taken)),
     ])
@@ -220,7 +245,11 @@ fn summary(here: &[Option<u64>], there: &[Option<u64>]) -> Value {
     ratios.sort_unstable();
     let mut theirs: Vec<u64> = there.iter().flatten().copied().collect();
     theirs.sort_unstable();
-    let median = |sorted: &[u64]| sorted.get(sorted.len() / 2).map_or(Value::Null, |&n| Value::int(n));
+    let median = |sorted: &[u64]| {
+        sorted
+            .get(sorted.len() / 2)
+            .map_or(Value::Null, |&n| Value::int(n))
+    };
     Value::object([
         ("rounds", Value::int(here.len())),
         ("p50_ns_median", median(&mine)),
@@ -232,8 +261,14 @@ fn summary(here: &[Option<u64>], there: &[Option<u64>]) -> Value {
             } else {
                 Value::object([
                     ("median", median(&ratios)),
-                    ("least", ratios.first().map_or(Value::Null, |&n| Value::int(n))),
-                    ("most", ratios.last().map_or(Value::Null, |&n| Value::int(n))),
+                    (
+                        "least",
+                        ratios.first().map_or(Value::Null, |&n| Value::int(n)),
+                    ),
+                    (
+                        "most",
+                        ratios.last().map_or(Value::Null, |&n| Value::int(n)),
+                    ),
                 ])
             },
         ),
@@ -251,13 +286,20 @@ pub(crate) fn ipc_configuration(args: &Args, rounds: u32, alternate: Option<&str
     Value::object([
         ("command", Value::str("bench-ipc")),
         ("release", Value::Bool(args.release)),
-        ("accel", args.accel.as_deref().map_or(Value::Null, Value::str)),
+        (
+            "accel",
+            args.accel.as_deref().map_or(Value::Null, Value::str),
+        ),
         ("smp", Value::int(args.smp)),
         ("memory_mib", Value::int(args.memory)),
         ("pin", Value::str(args.pin.as_deref().unwrap_or("none"))),
         (
             "mitigations",
-            Value::str(if args.mitigations == Mitigations::Off { "off" } else { "on" }),
+            Value::str(if args.mitigations == Mitigations::Off {
+                "off"
+            } else {
+                "on"
+            }),
         ),
         (
             "kernel_options",
@@ -336,11 +378,16 @@ fn utc(seconds: u64) -> String {
     let days = i64::try_from(seconds / 86_400).unwrap_or(0) + 719_468;
     let era = days / 146_097;
     let day_of_era = days - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let shifted_month = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
-    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 };
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     let rest = seconds % 86_400;
     format!(
@@ -360,7 +407,11 @@ pub(crate) fn check_results(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     collect_json(&root.join(RESULTS), &mut files);
     for file in files {
-        let shown = file.strip_prefix(root).unwrap_or(&file).display().to_string();
+        let shown = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
         let text = std::fs::read_to_string(&file).unwrap_or_default();
         let record = match Value::parse(&text) {
             Ok(record) => record,
@@ -369,7 +420,11 @@ pub(crate) fn check_results(root: &Path) -> Vec<String> {
                 continue;
             }
         };
-        problems.extend(check_record(&record, &file).into_iter().map(|p| format!("{shown}: {p}")));
+        problems.extend(
+            check_record(&record, &file)
+                .into_iter()
+                .map(|p| format!("{shown}: {p}")),
+        );
     }
     problems
 }
@@ -391,8 +446,14 @@ fn check_record(record: &Value, file: &Path) -> Vec<String> {
         problems.push("configuration_hash is not the SHA-256 of its configuration".to_owned());
     }
     let mut parents = file.ancestors().skip(1);
-    let directory = parents.next().and_then(Path::file_name).and_then(|n| n.to_str());
-    let path = parents.next().and_then(Path::file_name).and_then(|n| n.to_str());
+    let directory = parents
+        .next()
+        .and_then(Path::file_name)
+        .and_then(|n| n.to_str());
+    let path = parents
+        .next()
+        .and_then(Path::file_name)
+        .and_then(|n| n.to_str());
     if directory != Some(short(text("hw_hash"), super::SHORT)) {
         problems.push("filed under another hardware hash than its own".to_owned());
     }
@@ -441,7 +502,9 @@ mod tests {
             format!("  x86_64: ipc-bench domain-call n=20000 min=1 p50={domain_p50} p90=1 p99=1 mean=1"),
             "  x86_64: ipc-bench: exit 0".to_owned(),
         ];
-        Boot { lines: lines.to_vec() }
+        Boot {
+            lines: lines.to_vec(),
+        }
     }
 
     #[test]
@@ -450,9 +513,20 @@ mod tests {
         let stats = boot.stats("ipc-bench");
         let domain = stats.get("domain-call").unwrap();
         assert_eq!(domain.get("p50"), Some(&Value::Int(3046)));
-        assert_eq!(domain.get("min"), Some(&Value::Int(2736)), "the first line of a name wins");
-        assert_eq!(stats.get("floor").unwrap().get("mean"), Some(&Value::Int(407)));
-        assert_eq!(stats.get("exit"), None, "`ipc-bench: exit 0` is no statistic");
+        assert_eq!(
+            domain.get("min"),
+            Some(&Value::Int(2736)),
+            "the first line of a name wins"
+        );
+        assert_eq!(
+            stats.get("floor").unwrap().get("mean"),
+            Some(&Value::Int(407))
+        );
+        assert_eq!(
+            stats.get("exit"),
+            None,
+            "`ipc-bench: exit 0` is no statistic"
+        );
         assert_eq!(
             boot.host(),
             Value::str("host load 1.30 before, 1.27 after, SMT sibling cpu23 0% busy")
@@ -503,14 +577,29 @@ mod tests {
                 boots: vec![boot(2427), boot(2400)],
             },
         };
-        let ferrix = Value::object([("commit", Value::str("a1d456820abc")), ("dirty", Value::Bool(false))]);
+        let ferrix = Value::object([
+            ("commit", Value::str("a1d456820abc")),
+            ("dirty", Value::Bool(false)),
+        ]);
         let configuration = ipc_configuration(&Args::default(), 2, Some("main"));
-        let record = value(&measurement, &fingerprint, configuration, ferrix, "2026-10-06T10:44:14Z", None);
+        let record = value(
+            &measurement,
+            &fingerprint,
+            configuration,
+            ferrix,
+            "2026-10-06T10:44:14Z",
+            None,
+        );
         let file = write(&root, &record).unwrap();
         let name = file.file_name().unwrap().to_str().unwrap();
         assert!(name.starts_with("20261006T104414Z-a1d456820abc-"), "{name}");
         assert_eq!(
-            file.parent().unwrap().file_name().unwrap().to_str().unwrap(),
+            file.parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
             fingerprint.short()
         );
         assert_eq!(check_results(&root), Vec::<String>::new());
@@ -522,11 +611,23 @@ mod tests {
 
         let moved = root.join(RESULTS).join("ipc-round-trip/000000000000");
         std::fs::create_dir_all(&moved).unwrap();
-        let tampered = std::fs::read_to_string(&file).unwrap().replace("\"p50\": 2287", "\"p50\": 2286");
-        std::fs::write(moved.join("x.json"), tampered.replace("\"smp\": 0", "\"smp\": 1")).unwrap();
+        let tampered = std::fs::read_to_string(&file)
+            .unwrap()
+            .replace("\"p50\": 2287", "\"p50\": 2286");
+        std::fs::write(
+            moved.join("x.json"),
+            tampered.replace("\"smp\": 0", "\"smp\": 1"),
+        )
+        .unwrap();
         let problems = check_results(&root);
-        assert!(problems.iter().any(|p| p.contains("another hardware hash")), "{problems:?}");
-        assert!(problems.iter().any(|p| p.contains("configuration_hash")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("another hardware hash")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("configuration_hash")),
+            "{problems:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

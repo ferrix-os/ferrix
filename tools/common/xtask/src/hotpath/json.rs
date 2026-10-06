@@ -110,7 +110,13 @@ impl Value {
             }
             Value::Str(text) => write_string(out, text),
             Value::List(items) => {
-                write_sequence(out, ('[', ']'), items.iter().map(|v| (None, v)), indent, depth);
+                write_sequence(
+                    out,
+                    ('[', ']'),
+                    items.iter().map(|v| (None, v)),
+                    indent,
+                    depth,
+                );
             }
             Value::Object(members) => {
                 let pairs = members.iter().map(|(k, v)| (Some(k.as_str()), v));
@@ -256,10 +262,7 @@ impl Parser<'_> {
     }
 
     /// An array or an object, within [`MAX_DEPTH`].
-    fn nested(
-        &mut self,
-        read: fn(&mut Self) -> Result<Value>,
-    ) -> Result<Value> {
+    fn nested(&mut self, read: fn(&mut Self) -> Result<Value>) -> Result<Value> {
         if self.depth == MAX_DEPTH {
             return Err(self.error("nested too deep"));
         }
@@ -446,7 +449,11 @@ mod tests {
         let one = Value::parse(r#"{"z":{"q":-5,"p":"é"},"a":[]}"#).unwrap();
         let two = Value::parse("{\n  \"a\": [ ],\n  \"z\": {\"p\": \"é\", \"q\": -5}\n}").unwrap();
         assert_eq!(one, two, "the same value parsed from two layouts");
-        assert_eq!(one.canonical(), two.canonical(), "and so one canonical text");
+        assert_eq!(
+            one.canonical(),
+            two.canonical(),
+            "and so one canonical text"
+        );
     }
 
     #[test]
@@ -465,7 +472,11 @@ mod tests {
     fn strings_escape_only_what_json_must() {
         let value = Value::str("a\"b\\c\nd\u{1}é/");
         assert_eq!(value.canonical(), "\"a\\\"b\\\\c\\nd\\u0001é/\"");
-        assert_eq!(Value::parse(&value.canonical()).unwrap(), value, "round trip");
+        assert_eq!(
+            Value::parse(&value.canonical()).unwrap(),
+            value,
+            "round trip"
+        );
         assert_eq!(
             Value::parse(r#""😀""#).unwrap(),
             Value::str("\u{1F600}"),
@@ -500,6 +511,9 @@ mod tests {
             assert!(Value::parse(refused).is_err(), "{refused:?} refused");
         }
         let deep = "[".repeat(MAX_DEPTH + 1) + &"]".repeat(MAX_DEPTH + 1);
-        assert!(Value::parse(&deep).is_err(), "nesting past the limit refused");
+        assert!(
+            Value::parse(&deep).is_err(),
+            "nesting past the limit refused"
+        );
     }
 }

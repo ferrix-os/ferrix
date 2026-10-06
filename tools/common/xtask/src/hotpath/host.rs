@@ -157,9 +157,19 @@ impl Facts {
     /// The fingerprint's `host` object.
     pub(crate) fn describe(&self) -> Value {
         let (cpu, features, tlb, virtualised) = if self.cpuid.is_empty() {
-            (self.cpu_from_cpuinfo(), self.features_from_cpuinfo(), Value::Null, self.hypervisor_from_cpuinfo())
+            (
+                self.cpu_from_cpuinfo(),
+                self.features_from_cpuinfo(),
+                Value::Null,
+                self.hypervisor_from_cpuinfo(),
+            )
         } else {
-            (self.cpu_from_cpuid(), self.features_from_cpuid(), self.tlb(), self.hypervisor_from_cpuid())
+            (
+                self.cpu_from_cpuid(),
+                self.features_from_cpuid(),
+                self.tlb(),
+                self.hypervisor_from_cpuid(),
+            )
         };
         Value::object([
             ("arch", Value::str(&self.arch)),
@@ -183,7 +193,10 @@ impl Facts {
 
     /// One leaf's registers, zero where it was not read.
     fn leaf(&self, leaf: u32, subleaf: u32) -> Registers {
-        self.cpuid.get(&(leaf, subleaf)).copied().unwrap_or_default()
+        self.cpuid
+            .get(&(leaf, subleaf))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Vendor, family, model and stepping by CPUID, the brand string, and
@@ -232,15 +245,19 @@ impl Facts {
     fn features_from_cpuid(&self) -> Value {
         let max_basic = self.leaf(0, 0)[EAX];
         let max_extended = self.leaf(0x8000_0000, 0)[EAX];
-        Value::object(X86_FEATURES.iter().map(|&(name, leaf, subleaf, register, bit)| {
-            let in_range = if leaf >= 0x8000_0000 {
-                leaf <= max_extended
-            } else {
-                leaf <= max_basic
-            };
-            let word = self.leaf(leaf, subleaf).get(register).copied().unwrap_or(0);
-            (name, Value::Bool(in_range && word >> bit & 1 == 1))
-        }))
+        Value::object(
+            X86_FEATURES
+                .iter()
+                .map(|&(name, leaf, subleaf, register, bit)| {
+                    let in_range = if leaf >= 0x8000_0000 {
+                        leaf <= max_extended
+                    } else {
+                        leaf <= max_basic
+                    };
+                    let word = self.leaf(leaf, subleaf).get(register).copied().unwrap_or(0);
+                    (name, Value::Bool(in_range && word >> bit & 1 == 1))
+                }),
+        )
     }
 
     /// The TLBs: AMD's leaves decoded (4 KiB and 2 MiB pages, each level),
@@ -281,7 +298,15 @@ impl Facts {
             .map(|((_, subleaf), words)| {
                 Value::object([
                     ("subleaf", Value::int(*subleaf)),
-                    ("words", Value::List(words.iter().map(|w| Value::str(format!("{w:#010x}"))).collect())),
+                    (
+                        "words",
+                        Value::List(
+                            words
+                                .iter()
+                                .map(|w| Value::str(format!("{w:#010x}")))
+                                .collect(),
+                        ),
+                    ),
                 ])
             })
             .collect();
@@ -303,7 +328,9 @@ impl Facts {
 
     /// An Arm (or other) host's processor, from the fields Linux names.
     fn cpu_from_cpuinfo(&self) -> Value {
-        let field = |name: &str| cpuinfo_field(&self.cpuinfo, name).map_or(Value::Null, |v| Value::str(squeeze(v)));
+        let field = |name: &str| {
+            cpuinfo_field(&self.cpuinfo, name).map_or(Value::Null, |v| Value::str(squeeze(v)))
+        };
         Value::object([
             ("implementer", field("CPU implementer")),
             ("architecture", field("CPU architecture")),
@@ -369,8 +396,14 @@ impl Facts {
                 };
                 Value::object([
                     ("level", number("level")),
-                    ("type", Value::str(cache.get("type").map_or("", |t| t.trim()))),
-                    ("size_kib", cache.get("size").map_or(Value::Null, |size| kib(size))),
+                    (
+                        "type",
+                        Value::str(cache.get("type").map_or("", |t| t.trim())),
+                    ),
+                    (
+                        "size_kib",
+                        cache.get("size").map_or(Value::Null, |size| kib(size)),
+                    ),
                     ("ways", number("ways_of_associativity")),
                     ("line", number("coherency_line_size")),
                     ("sets", number("number_of_sets")),
@@ -508,7 +541,7 @@ pub(crate) mod tests {
 
     /// nazuna's CPUID as read on 2026-10-06 (Ryzen 9 9900X, Zen 5, microcode
     /// 0xb404035), the leaves a fingerprint reads; the brand string is in
-    /// 0x8000_0002..4, and the caches are its sysfs.
+    /// `0x8000_0002..=0x8000_0004`, and the caches are its sysfs.
     pub(crate) fn nazuna() -> Facts {
         let mut cpuid = BTreeMap::new();
         let brand = *b"AMD Ryzen 9 9900X 12-Core Processor            \0";
@@ -517,7 +550,10 @@ pub(crate) mod tests {
         };
         for (index, leaf) in (0x8000_0002..=0x8000_0004u32).enumerate() {
             let at = index * 16;
-            let _ = cpuid.insert((leaf, 0), [word(at), word(at + 4), word(at + 8), word(at + 12)]);
+            let _ = cpuid.insert(
+                (leaf, 0),
+                [word(at), word(at + 4), word(at + 8), word(at + 12)],
+            );
         }
         for (key, words) in [
             ((0, 0), [0x10, 0x6874_7541, 0x444D_4163, 0x6974_6E65]),
@@ -525,10 +561,19 @@ pub(crate) mod tests {
             ((7, 0), [0x1, 0xF1BF_97AB, 0x1940_5FDE, 0x1000_0110]),
             ((7, 1), [0x30, 0, 0, 0]),
             ((0xD, 1), [0xF, 0x9B0, 0x1800, 0]),
-            ((0x8000_0000, 0), [0x8000_0028, 0x6874_7541, 0x444D_4163, 0x6974_6E65]),
+            (
+                (0x8000_0000, 0),
+                [0x8000_0028, 0x6874_7541, 0x444D_4163, 0x6974_6E65],
+            ),
             ((0x8000_0001, 0), [0x00B4_0F40, 0, 0x75C2_37FF, 0x2FD3_FBFF]),
-            ((0x8000_0005, 0), [0xFF60_FF40, 0xFF60_FF40, 0x300C_0140, 0x2008_0140]),
-            ((0x8000_0006, 0), [0x4080_2040, 0x6080_4040, 0x0400_8140, 0x0200_9140]),
+            (
+                (0x8000_0005, 0),
+                [0xFF60_FF40, 0xFF60_FF40, 0x300C_0140, 0x2008_0140],
+            ),
+            (
+                (0x8000_0006, 0),
+                [0x4080_2040, 0x6080_4040, 0x0400_8140, 0x0200_9140],
+            ),
             ((0x8000_0007, 0), [0, 0x3B, 0, 0x6799]),
             ((0x8000_0008, 0), [0x3030, 0x791E_F257, 0x5017, 0x0001_0000]),
             ((0x8000_0021, 0), [0x593F_FFCF, 0x0008_0382, 0, 0]),
@@ -565,10 +610,13 @@ pub(crate) mod tests {
             siblings: "0,12".to_owned(),
             packages: vec!["0".to_owned(); 24],
             kernel: "7.0.0-29-generic".to_owned(),
-            vulnerabilities: [("meltdown", "Not affected"), ("spectre_v2", "Mitigation: Enhanced / Automatic IBRS")]
-                .into_iter()
-                .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                .collect(),
+            vulnerabilities: [
+                ("meltdown", "Not affected"),
+                ("spectre_v2", "Mitigation: Enhanced / Automatic IBRS"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
         }
     }
 
@@ -656,7 +704,10 @@ pub(crate) mod tests {
         for secret in ["deadbeef", "BCM2835", "c03111", "Raspberry"] {
             assert!(!text.contains(secret), "{secret} leaked into {text}");
         }
-        assert!(text.contains("\"part\":\"0xd44\""), "the part is kept: {text}");
+        assert!(
+            text.contains("\"part\":\"0xd44\""),
+            "the part is kept: {text}"
+        );
         assert!(text.contains("0x41:0xd05"), "every distinct part: {text}");
         assert!(text.contains("\"asimd\":true"), "features kept: {text}");
     }

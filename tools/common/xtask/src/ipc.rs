@@ -66,10 +66,18 @@ const HOT_PATH: (&str, &str, &str) = ("ipc-round-trip", "ipc-bench", "domain-cal
 /// the record, written and named. The log is `FERRIX_HOTPATH_LOG` if set:
 /// `bench-ipc` does not know where its own output is kept.
 fn write_record(args: &Args, rounds: u32, boots: Vec<Boot>, reference: Reference) -> Result<()> {
-    let arch = args.arches()?.into_iter().next().unwrap_or(crate::paths::Arch::X86_64);
+    let arch = args
+        .arches()?
+        .into_iter()
+        .next()
+        .unwrap_or(crate::paths::Arch::X86_64);
     let fingerprint = crate::hotpath::Fingerprint::of_this_host(arch, args)?;
     let root = crate::paths::workspace_root();
-    let rounds = if matches!(reference, Reference::None) { 1 } else { rounds };
+    let rounds = if matches!(reference, Reference::None) {
+        1
+    } else {
+        rounds
+    };
     let configuration = record::ipc_configuration(args, rounds, args.alternate.as_deref());
     let log = std::env::var("FERRIX_HOTPATH_LOG").ok();
     let measurement = Measurement {
@@ -198,12 +206,7 @@ fn alternate(args: &Args, reference: &str, rounds: u32) -> Result<(Vec<Boot>, Re
 
 /// One run of `tree`'s own `bench-ipc`, pinned by `taskset` when `pinned`:
 /// every line it printed.
-fn other_tree(
-    args: &Args,
-    tree: &std::path::Path,
-    reference: &str,
-    pinned: bool,
-) -> Result<Boot> {
+fn other_tree(args: &Args, tree: &std::path::Path, reference: &str, pinned: bool) -> Result<Boot> {
     let mut command = match args.pin.as_deref().filter(|_| pinned) {
         Some(cpus) => {
             let mut taskset = std::process::Command::new("taskset");

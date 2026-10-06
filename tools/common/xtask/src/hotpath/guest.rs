@@ -74,7 +74,9 @@ const X86_IDENTITY: &[&str] = &["vendor", "family", "model", "stepping", "model-
 /// the guest's processor is still a fingerprint, and a different one.
 pub(crate) fn describe(arch: Arch, binary: Option<&Path>, accelerator: &str, model: &str) -> Value {
     let version = binary.and_then(version_line);
-    let (qemu, package) = version.as_deref().map_or((Value::Null, Value::Null), split_version);
+    let (qemu, package) = version
+        .as_deref()
+        .map_or((Value::Null, Value::Null), split_version);
     let cpu = binary.and_then(|binary| probe(arch, binary, accelerator, model));
     Value::object([
         ("arch", Value::str(arch.name())),
@@ -82,7 +84,10 @@ pub(crate) fn describe(arch: Arch, binary: Option<&Path>, accelerator: &str, mod
         ("qemu", qemu),
         ("qemu_package", package),
         ("cpu_model", Value::str(model)),
-        ("probe", Value::str(if cpu.is_some() { "qom-get" } else { "none" })),
+        (
+            "probe",
+            Value::str(if cpu.is_some() { "qom-get" } else { "none" }),
+        ),
         ("cpu", cpu.unwrap_or(Value::Null)),
     ])
 }
@@ -187,10 +192,13 @@ fn x86_cpu(answers: &std::collections::BTreeMap<String, Value>) -> Value {
         Some(other) => other.clone(),
         None => Value::Null,
     };
-    let features = X86_PROPERTIES.iter().filter_map(|&(name, property)| match answers.get(property) {
-        Some(Value::Bool(present)) => Some((name, Value::Bool(*present))),
-        _ => None,
-    });
+    let features =
+        X86_PROPERTIES
+            .iter()
+            .filter_map(|&(name, property)| match answers.get(property) {
+                Some(Value::Bool(present)) => Some((name, Value::Bool(*present))),
+                _ => None,
+            });
     Value::object([
         ("vendor", identity("vendor")),
         ("family", identity("family")),
@@ -231,16 +239,25 @@ mod tests {
         let features = cpu.get("features").unwrap();
         assert_eq!(features.get("pcid"), Some(&Value::Bool(false)));
         assert_eq!(features.get("eraps"), Some(&Value::Bool(true)));
-        assert_eq!(features.get("fred"), None, "a property QEMU lacks is left out");
+        assert_eq!(
+            features.get("fred"),
+            None,
+            "a property QEMU lacks is left out"
+        );
         assert_eq!(cpu.get("family"), Some(&Value::Int(15)));
-        assert_eq!(cpu.get("brand"), Some(&Value::str("QEMU Virtual CPU version 2.5+")));
+        assert_eq!(
+            cpu.get("brand"),
+            Some(&Value::str("QEMU Virtual CPU version 2.5+"))
+        );
         assert_eq!(cpu.get("vendor"), Some(&Value::Null));
     }
 
     #[test]
     fn every_property_has_a_host_name() {
         for (name, _) in X86_PROPERTIES {
-            let on_host = super::super::host::X86_FEATURES.iter().any(|f| f.0 == *name);
+            let on_host = super::super::host::X86_FEATURES
+                .iter()
+                .any(|f| f.0 == *name);
             assert!(
                 on_host || *name == "rdctl_no",
                 "{name}: a guest feature the host table does not read"
