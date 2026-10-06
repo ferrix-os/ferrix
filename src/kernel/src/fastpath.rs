@@ -90,6 +90,7 @@ pub(crate) fn report() {
 /// say which path it measured. Printed as the shell exits; no program reads
 /// them.
 pub(crate) fn report_counts() {
+    crate::sched::direct::prof::report();
     let [trips, parks, t2, t3, t4, halves, t6, t7, t8, t9, t10, queue, t11, t12, t13] =
         crate::sched::direct::counts();
     println!(

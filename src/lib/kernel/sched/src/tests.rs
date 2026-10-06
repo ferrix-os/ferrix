@@ -1535,3 +1535,165 @@ fn the_carried_weight_is_the_wide_formula() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The direct switch's hand-over (docs/OPAQUE-KERNEL.md §9.7, part 1)
+// ---------------------------------------------------------------------------
+
+/// A queue running one entity, `11`, made from the same draws each time it
+/// is called with a copy of `rng`: base, weight, lag brought, time run.
+fn running_one(rng: &mut Rng) -> RunQueue<u64> {
+    let mut queue = queue();
+    // Virtual time near the counter's wrap, a third of the time.
+    queue.zero = match rng.below(3) {
+        0 => u64::MAX - rng.below(SLICE * 4),
+        1 => rng.below(SLICE * 4),
+        _ => rng.next(),
+    };
+    let weight = drawn_weight(rng);
+    let vlag = drawn_lag(rng, weight);
+    let sum_exec = rng.next() >> 8;
+    queue
+        .enqueue(11, 11, EntityState { weight, vlag, sum_exec }, slot())
+        .unwrap();
+    let _ = queue.pick_next();
+    let _ = queue.update_curr(rng.below(SLICE * 3));
+    let _ = queue.set_slice_ns(SLICE / (1 + rng.below(8)));
+    queue
+}
+
+/// A weight: the boundaries a third of the time, else any nice level's or
+/// any value.
+fn drawn_weight(rng: &mut Rng) -> u32 {
+    match rng.below(4) {
+        0 => [1, 15, NICE_0_WEIGHT, 88761, u32::MAX >> 8][rng.below(5) as usize],
+        1 => weight_of_nice(rng.below(40) as i32 - 20).unwrap(),
+        _ => 1 + (rng.next() % 200_000) as u32,
+    }
+}
+
+/// A lag brought: zero, at the clamp, past it either way, or anything.
+fn drawn_lag(rng: &mut Rng, weight: u32) -> i64 {
+    let limit = i64::try_from(to_virtual(SLICE, weight).saturating_mul(2)).unwrap_or(i64::MAX);
+    match rng.below(5) {
+        0 => 0,
+        1 => limit,
+        2 => -limit.saturating_mul(3),
+        3 => limit.saturating_add(1 + rng.below(1000) as i64),
+        _ => (rng.next() as i64) >> (rng.below(40) + 20),
+    }
+}
+
+/// Every quantity two queues hold, compared.
+#[track_caller]
+fn same_queue(a: &RunQueue<u64>, b: &RunQueue<u64>, case: u64) {
+    assert_eq!(a.zero, b.zero, "case {case}: the base");
+    assert_eq!(a.sum, b.sum, "case {case}: the weighted sum");
+    assert_eq!(a.load, b.load, "case {case}: the load");
+    assert_eq!(a.config, b.config, "case {case}: the slice");
+    assert_eq!(a.tree.len(), b.tree.len(), "case {case}: the waiting");
+    let (ca, cb) = (a.curr.as_ref().unwrap(), b.curr.as_ref().unwrap());
+    let (ea, eb) = (&ca.entity, &cb.entity);
+    assert_eq!(
+        (ea.id, ea.weight, ea.vruntime, ea.deadline, ea.sum_exec, ea.payload),
+        (eb.id, eb.weight, eb.vruntime, eb.deadline, eb.sum_exec, eb.payload),
+        "case {case}: the running entity"
+    );
+}
+
+/// `hand_over` is the general sequence -- `enqueue`, the rescale,
+/// `remove_curr`, `pick_next` -- on a queue with one entity running and
+/// nothing waiting: random states, weights and lags at and past the clamp,
+/// virtual times either side of the wrap, every field compared.
+///
+/// Verifies: the direct switch's queue step (OPAQUE-KERNEL.md §9.7 part 1)
+#[test]
+fn hand_over_is_the_general_sequence() {
+    let mut rng = Rng(0xD1EC_7_5_1_7C4);
+    for case in 0..200_000 {
+        let seed = rng.next() | 1;
+        let mut general = running_one(&mut Rng(seed));
+        let mut direct = running_one(&mut Rng(seed));
+        same_queue(&general, &direct, case);
+        let weight = drawn_weight(&mut rng);
+        let arriving = EntityState {
+            weight,
+            vlag: drawn_lag(&mut rng, weight),
+            sum_exec: rng.next() >> 8,
+        };
+        let slice_after = slice_for(SLICE, SLICE / 8, 2 + rng.below(2) as usize);
+
+        general.enqueue(22, 22, arriving, slot()).unwrap();
+        general.set_slice_ns(slice_after).unwrap();
+        let left_general = general.remove_curr().unwrap();
+        assert_eq!(general.pick_next(), Some(&22));
+
+        let left_direct = direct
+            .hand_over(22, 22, arriving, slot(), slice_after)
+            .unwrap()
+            .unwrap();
+
+        same_queue(&general, &direct, case);
+        assert_eq!(
+            (left_general.0, left_general.1, left_general.2),
+            (left_direct.0, left_direct.1, left_direct.2),
+            "case {case}: the leaving entity"
+        );
+        check(&direct);
+    }
+}
+
+/// Refused as `enqueue` refuses, with nothing changed: a weight of zero, and
+/// the running entity's own name.
+#[test]
+fn hand_over_refuses_as_enqueue_does() {
+    let mut queue = running_one(&mut Rng(7));
+    let refused = queue
+        .hand_over(22, 22, EntityState::new(0), slot(), SLICE)
+        .unwrap_err();
+    assert_eq!(refused.reason, SchedError::ZeroWeight);
+    let refused = queue
+        .hand_over(11, 11, EntityState::new(NICE_0_WEIGHT), slot(), SLICE)
+        .unwrap_err();
+    assert_eq!(refused.reason, SchedError::Duplicate(11));
+    assert_eq!(queue.current_id(), Some(11));
+    check(&queue);
+}
+
+/// The 64-bit shortcuts of the wide arithmetic answer what the 128-bit
+/// formulas answer, at random and at every boundary they switch at.
+#[test]
+fn the_narrow_arithmetic_is_the_wide_arithmetic() {
+    let wide_virtual = |real: u64, weight: u32| {
+        u64::try_from(
+            u128::from(real) * u128::from(NICE_0_WEIGHT) / u128::from(weight.max(1)),
+        )
+        .unwrap_or(u64::MAX)
+    };
+    let wide_real = |virt: u64, weight: u32| {
+        u64::try_from(u128::from(virt) * u128::from(weight) / u128::from(NICE_0_WEIGHT))
+            .unwrap_or(u64::MAX)
+    };
+    let mut rng = Rng(0xA11_0F_7E_5);
+    let edges = [0, 1, 1023, 1024, (1 << 54) - 1, 1 << 54, (1 << 54) + 1, u64::MAX / 2, u64::MAX];
+    for case in 0..1_000_000_u64 {
+        let value = if case % 4 == 0 {
+            edges[(case / 4 % edges.len() as u64) as usize]
+        } else {
+            rng.next() >> rng.below(64)
+        };
+        let weight = match case % 3 {
+            0 => drawn_weight(&mut rng),
+            1 => [0, 1, NICE_0_WEIGHT, u32::MAX][rng.below(4) as usize],
+            _ => rng.next() as u32,
+        };
+        assert_eq!(to_virtual(value, weight), wide_virtual(value, weight), "{value} {weight}");
+        assert_eq!(to_real(value, weight), wide_real(value, weight), "{value} {weight}");
+        let numerator = i128::from(rng.next() as i64) * if case % 5 == 0 { 1 << 60 } else { 1 };
+        let numerator = if case % 7 == 0 { i128::from(i64::MIN) } else { numerator };
+        let denominator = 1 + i128::from(rng.next() >> rng.below(64));
+        let denominator = if case % 11 == 0 { i128::from(i64::MAX) + 1 } else { denominator };
+        assert_eq!(floor_div(numerator, denominator), numerator.div_euclid(denominator));
+        assert_eq!(truncating_div(numerator, denominator), numerator / denominator);
+    }
+}

@@ -125,6 +125,21 @@ const PROCESSORS: usize = 256;
 /// under a hypervisor -- and a skip late by as much.
 static ARMED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
 
+/// The deadline each processor's armed one-shot was asked for, on
+/// [`now_nanos`]'s timescale: what [`ARMED`]'s bound was written for, a
+/// little earlier than it by the write's own time. Meaningful only while
+/// [`ARMED`] is not zero.
+///
+/// **Why it is kept.** A sleeper's deadline is asked for again at every
+/// decision, as the same instant. Its arm's bound is read after the write,
+/// so it is later than the deadline by the write's time, and the second
+/// request, for the same instant, found the bound later than it and wrote
+/// the hardware again: an exit at every switch of a round trip while any
+/// task slept on the processor. A request no earlier than the one the
+/// armed one-shot was written for is served by that one-shot exactly as
+/// well as the first request was, so it is skipped too.
+static REQUESTED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+
 /// This processor's slot in [`ARMED`], once processors have records.
 fn armed_slot() -> Option<&'static AtomicU64> {
     crate::smp::this_cpu().and_then(|cpu| ARMED.get(cpu.logical))
@@ -143,12 +158,21 @@ pub(crate) fn after(nanos: u64) {
     };
     let wanted = now_nanos().saturating_add(nanos).max(1);
     let armed = slot.load(Ordering::Relaxed);
-    if !periodic && armed != 0 && armed <= wanted {
+    let requested = crate::smp::this_cpu()
+        .and_then(|cpu| REQUESTED.get(cpu.logical))
+        .map_or(u64::MAX, |requested| requested.load(Ordering::Relaxed));
+    if !periodic && armed != 0 && (armed <= wanted || requested <= wanted) {
+        crate::sched::direct::prof::count(20);
         return;
     }
+    crate::sched::direct::prof::count(21);
+    if armed == 0 { crate::sched::direct::prof::count(22); }
     arch::timer_arm(nanos);
     // After the arm, so that what is kept bounds the interrupt from above.
     slot.store(now_nanos().saturating_add(nanos).max(1), Ordering::Relaxed);
+    if let Some(requested) = crate::smp::this_cpu().and_then(|cpu| REQUESTED.get(cpu.logical)) {
+        requested.store(wanted, Ordering::Relaxed);
+    }
 }
 
 /// Fire the timer interrupt every `nanos` until [`stop`].
@@ -203,7 +227,13 @@ fn arm_at(deadline: u64) {
 /// goes quiet. A periodic timer, which would fire for ever, is stopped.
 pub(crate) fn stop() {
     let periodic = INTERVAL.swap(0, Ordering::Relaxed) != 0;
-    if periodic || armed_slot().is_none_or(|slot| slot.load(Ordering::Relaxed) == 0) {
+    // A one-shot that is not armed -- one that fired, which leaves the
+    // hardware quiet (`timer_disarm_fired`), or one never armed -- has
+    // nothing to stop: writing it again was two exits at every switch to a
+    // processor with nothing waiting, which is every switch of a round trip.
+    // Without a slot to say so, it is stopped as before.
+    crate::sched::direct::prof::count(23);
+    if periodic || armed_slot().is_none() {
         if let Some(slot) = armed_slot() {
             slot.store(0, Ordering::Relaxed);
         }
