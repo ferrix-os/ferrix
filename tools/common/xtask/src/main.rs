@@ -100,6 +100,7 @@ mod flash;
 mod fuzzel;
 mod gate_rows;
 mod gateway;
+mod hotpath;
 mod init;
 mod init_file;
 mod initramfs;
@@ -242,6 +243,8 @@ COMMANDS:
                   service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean
     bench-ipc     Boot --init's shell and time a channel round trip between two native processes
                   (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds
+    hw-fingerprint  Print this host's and --arch's guest's canonical hardware description and its SHA-256, the key
+                  hot-path results are filed by (docs/HOTPATHS.md)
     bench-seam    Boot a stock Linux kernel on the same QEMU machine and time a 4 KiB O_DIRECT read of the pattern disk at depths 1 and 32: the in-kernel reference for the seam boot line (tools/common/fetch/fetch-linux-reference.sh first)
     test-auth     Boot init with authd, type at the shell its getty gives, and require each refusal of
                   docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
@@ -515,6 +518,8 @@ OPTIONS:
     --alternate <REF>                    bench-ipc: build REF in a tree of its own and time the two
                                          turn about, --rounds times (3)
     --against-sel4, --against-redox      bench-ipc: alternate with the seL4 or Redox image
+    --record                             bench-ipc: file the result under docs/hotpaths/results/
+                                         (docs/HOTPATHS.md; the log's path from FERRIX_HOTPATH_LOG)
     --pin <CPUS>                         QEMU on these host processors (taskset -c); bench-ipc
                                          pins to 11 by default, `none` for no pin
     --stage <DIR>                        flash: write the card's files into DIR instead, to copy by hand
@@ -638,6 +643,7 @@ fn run() -> Result<()> {
         "test-auth" => auth::test_auth(&args),
         "test-restart" => restart::test_restart(&args),
         "bench-seam" | "bench-ipc" => bench(command, &args),
+        "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "test-install" => installer::test_install(&args),
         "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
