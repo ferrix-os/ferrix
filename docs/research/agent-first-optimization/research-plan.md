@@ -5,6 +5,9 @@ names the log or section it comes from; a figure with no source is marked
 *owed*. Paths under `~/` are on nazuna, the development host (AMD Ryzen 9
 9900X, Zen 5, 12 cores, 24 threads).
 
+Section signs (§9.1 to §9.10) refer to `docs/OPAQUE-KERNEL.md` on `main`
+(§9.10 since ccf72dd94).
+
 Companion files: [paper.md](paper.md) (the skeleton and the claim list),
 [related-work.md](related-work.md) and [references.bib](references.bib).
 

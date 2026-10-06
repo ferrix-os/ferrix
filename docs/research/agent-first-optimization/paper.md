@@ -58,11 +58,11 @@ reviewed every change to the kernel and found defects the gates did not.
    hardware-specific; (iv) the process data: what it cost and what the
    review caught. One figure: the waterfall (F1).
 2. **Background.** Why IPC cost decided the microkernel debate
-   \cite{liedtke1993improving, liedtke1995construction, haertig1997performance,
+   \cite{liedtke1993improving, liedtke1995construction, hartig1997performance,
    chen1993impact}; seL4's fast path and its verification
    \cite{klein2009sel4, heiser2016l4}; Spectre-era barrier costs on switches
    \cite{kocher2019spectre, lipp2018meltdown, ren2019analysis}; recent hardware
-   proposals \cite{mi2019skybridge, du2019xpc, gu2020underbridge,
+   proposals \cite{mi2019skybridge, du2019xpc, gu2020harmonizing,
    vilanova2017dipc}. Ferrix in one paragraph: native channels, jobs,
    speculation domains, the certified item.
 3. **The method.**

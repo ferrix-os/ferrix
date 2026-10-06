@@ -1,0 +1,799 @@
+% References for the agent-first optimization paper (draft, 2026-10-06).
+%
+% Verification, done 2026-10-06 by session po7-paper and two subagents:
+% each DOI below resolved at doi.org (a 302 to the publisher) and its
+% metadata was read from Crossref, which publishers register (ACM's
+% pages refused automated reads); arXiv entries were read from the arXiv
+% API; USENIX, PMLR and NeurIPS entries from the proceedings pages.
+% A `note` field starting "UNVERIFIED" names any field that rests on a
+% secondary source only. Numbers quoted in related-work.md come from the
+% abstract or the page named there; none is from memory.
+
+% ---------------------------------------------------------------- L4, IPC
+
+@inproceedings{liedtke1993improving,
+  author    = {Jochen Liedtke},
+  title     = {Improving {IPC} by Kernel Design},
+  booktitle = {Proceedings of the 14th ACM Symposium on Operating Systems Principles (SOSP '93)},
+  pages     = {175--188},
+  year      = {1993},
+  publisher = {ACM},
+  doi       = {10.1145/168619.168633}
+}
+
+@inproceedings{liedtke1995construction,
+  author    = {Jochen Liedtke},
+  title     = {On $\mu$-Kernel Construction},
+  booktitle = {Proceedings of the 15th ACM Symposium on Operating Systems Principles (SOSP '95)},
+  pages     = {237--250},
+  year      = {1995},
+  publisher = {ACM},
+  doi       = {10.1145/224056.224075}
+}
+
+@inproceedings{hartig1997performance,
+  author    = {Hermann H{\"a}rtig and Michael Hohmuth and Jochen Liedtke and Sebastian Sch{\"o}nberg and Jean Wolter},
+  title     = {The Performance of $\mu$-Kernel-Based Systems},
+  booktitle = {Proceedings of the 16th ACM Symposium on Operating Systems Principles (SOSP '97)},
+  pages     = {66--77},
+  year      = {1997},
+  publisher = {ACM},
+  doi       = {10.1145/268998.266660}
+}
+
+@inproceedings{elphinstone2013l3,
+  author    = {Kevin Elphinstone and Gernot Heiser},
+  title     = {From {L3} to {seL4}: What Have We Learnt in 20 Years of {L4} Microkernels?},
+  booktitle = {Proceedings of the 24th ACM Symposium on Operating Systems Principles (SOSP '13)},
+  pages     = {133--150},
+  year      = {2013},
+  publisher = {ACM},
+  doi       = {10.1145/2517349.2522720}
+}
+
+@article{heiser2016l4,
+  author  = {Gernot Heiser and Kevin Elphinstone},
+  title   = {{L4} Microkernels: The Lessons from 20 Years of Research and Deployment},
+  journal = {ACM Transactions on Computer Systems},
+  volume  = {34},
+  number  = {1},
+  pages   = {1--29},
+  year    = {2016},
+  doi     = {10.1145/2893177},
+  note    = {UNVERIFIED: the subtitle; Crossref stores the title as "L4 Microkernels" only}
+}
+
+@inproceedings{klein2009sel4,
+  author    = {Gerwin Klein and Kevin Elphinstone and Gernot Heiser and June Andronick and David Cock and Philip Derrin and Dhammika Elkaduwe and Kai Engelhardt and Rafal Kolanski and Michael Norrish and Thomas Sewell and Harvey Tuch and Simon Winwood},
+  title     = {{seL4}: Formal Verification of an {OS} Kernel},
+  booktitle = {Proceedings of the ACM SIGOPS 22nd Symposium on Operating Systems Principles (SOSP '09)},
+  pages     = {207--220},
+  year      = {2009},
+  publisher = {ACM},
+  doi       = {10.1145/1629575.1629596}
+}
+
+@article{klein2014comprehensive,
+  author  = {Gerwin Klein and June Andronick and Kevin Elphinstone and Toby Murray and Thomas Sewell and Rafal Kolanski and Gernot Heiser},
+  title   = {Comprehensive Formal Verification of an {OS} Microkernel},
+  journal = {ACM Transactions on Computer Systems},
+  volume  = {32},
+  number  = {1},
+  pages   = {1--70},
+  year    = {2014},
+  doi     = {10.1145/2560537}
+}
+
+@misc{sel4perf,
+  author       = {{seL4 Foundation}},
+  title        = {Performance},
+  howpublished = {\url{https://sel4.systems/performance.html}},
+  note         = {Generated 2026-09-22 for sel4bench-manifest f1b98e62; accessed 2026-10-06. The page is regenerated; cite the date and hash}
+}
+
+@techreport{heiser2020sel4wp,
+  author      = {Gernot Heiser},
+  title       = {The {seL4} Microkernel -- An Introduction},
+  institution = {The seL4 Foundation},
+  type        = {White paper},
+  year        = {2020},
+  note        = {Revision 1.4.1 of 2026-07-17, \url{https://sel4.systems/About/seL4-whitepaper.pdf}}
+}
+
+@inproceedings{chen1993impact,
+  author    = {J. Bradley Chen and Brian N. Bershad},
+  title     = {The Impact of Operating System Structure on Memory System Performance},
+  booktitle = {Proceedings of the 14th ACM Symposium on Operating Systems Principles (SOSP '93)},
+  pages     = {120--133},
+  year      = {1993},
+  publisher = {ACM},
+  doi       = {10.1145/168619.168629}
+}
+
+@inproceedings{accetta1986mach,
+  author    = {Mike Accetta and Robert Baron and William Bolosky and David Golub and Richard Rashid and Avadis Tevanian and Michael Young},
+  title     = {Mach: A New Kernel Foundation for {UNIX} Development},
+  booktitle = {Proceedings of the USENIX Summer Conference},
+  pages     = {93--112},
+  year      = {1986},
+  note      = {UNVERIFIED: pages and location (Atlanta), from secondary bibliographies only; no DOI exists}
+}
+
+@article{bershad1990lrpc,
+  author  = {Brian N. Bershad and Thomas E. Anderson and Edward D. Lazowska and Henry M. Levy},
+  title   = {Lightweight Remote Procedure Call},
+  journal = {ACM Transactions on Computer Systems},
+  volume  = {8},
+  number  = {1},
+  pages   = {37--55},
+  year    = {1990},
+  doi     = {10.1145/77648.77650}
+}
+
+@techreport{hohmuth1998fiasco,
+  author      = {Michael Hohmuth},
+  title       = {The {Fiasco} Kernel: Requirements Definition},
+  institution = {Dresden University of Technology},
+  number      = {TUD-FI98-12},
+  year        = {1998},
+  note        = {Listed on the archived TU Dresden Fiasco documentation page; UNVERIFIED: the report itself was not opened}
+}
+
+@inproceedings{hohmuth2001pragmatic,
+  author    = {Michael Hohmuth and Hermann H{\"a}rtig},
+  title     = {Pragmatic Nonblocking Synchronization for Real-Time Systems},
+  booktitle = {Proceedings of the 2001 USENIX Annual Technical Conference},
+  year      = {2001},
+  url       = {https://www.usenix.org/legacy/publications/library/proceedings/usenix01/hohmuth.html},
+  note      = {UNVERIFIED: pages}
+}
+
+@inproceedings{lackorzynski2009taming,
+  author    = {Adam Lackorzynski and Alexander Warg},
+  title     = {Taming Subsystems: Capabilities as Universal Resource Access Control in {L4}},
+  booktitle = {Proceedings of the Second Workshop on Isolation and Integration in Embedded Systems (IIES '09)},
+  pages     = {25--30},
+  year      = {2009},
+  publisher = {ACM},
+  doi       = {10.1145/1519130.1519135}
+}
+
+@inproceedings{steinberg2010nova,
+  author    = {Udo Steinberg and Bernhard Kauer},
+  title     = {{NOVA}: A Microhypervisor-Based Secure Virtualization Architecture},
+  booktitle = {Proceedings of the 5th European Conference on Computer Systems (EuroSys '10)},
+  pages     = {209--222},
+  year      = {2010},
+  publisher = {ACM},
+  doi       = {10.1145/1755913.1755935}
+}
+
+@misc{fuchsia_zircon,
+  title        = {Zircon},
+  howpublished = {\url{https://fuchsia.dev/fuchsia-src/concepts/kernel}},
+  note         = {Fuchsia documentation, accessed 2026-10-06; channel\_call: \url{https://fuchsia.dev/fuchsia-src/reference/syscalls/channel_call}}
+}
+
+@misc{fuchsia_microbenchmarks,
+  title        = {Fuchsia Microbenchmarks},
+  howpublished = {\url{https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/src/tests/microbenchmarks/README.md}},
+  note         = {Source-tree README, accessed 2026-10-06}
+}
+
+@misc{redox,
+  title        = {Redox {OS}},
+  howpublished = {\url{https://www.redox-os.org/}},
+  note         = {and the Redox book, \url{https://doc.redox-os.org/book/}; accessed 2026-10-06; no peer-reviewed paper found}
+}
+
+@inproceedings{mi2019skybridge,
+  author    = {Zeyu Mi and Dingji Li and Zihan Yang and Xinran Wang and Haibo Chen},
+  title     = {{SkyBridge}: Fast and Secure Inter-Process Communication for Microkernels},
+  booktitle = {Proceedings of the Fourteenth EuroSys Conference 2019 (EuroSys '19)},
+  pages     = {1--15},
+  year      = {2019},
+  publisher = {ACM},
+  doi       = {10.1145/3302424.3303946}
+}
+
+@inproceedings{du2019xpc,
+  author    = {Dong Du and Zhichao Hua and Yubin Xia and Binyu Zang and Haibo Chen},
+  title     = {{XPC}: Architectural Support for Secure and Efficient Cross Process Call},
+  booktitle = {Proceedings of the 46th International Symposium on Computer Architecture (ISCA '19)},
+  pages     = {671--684},
+  year      = {2019},
+  publisher = {ACM},
+  doi       = {10.1145/3307650.3322218}
+}
+
+@inproceedings{gu2020harmonizing,
+  author    = {Jinyu Gu and Xinyue Wu and Wentai Li and Nian Liu and Zeyu Mi and Yubin Xia and Haibo Chen},
+  title     = {Harmonizing Performance and Isolation in Microkernels with Efficient Intra-kernel Isolation and Communication},
+  booktitle = {2020 USENIX Annual Technical Conference (USENIX ATC 20)},
+  pages     = {401--417},
+  year      = {2020},
+  url       = {https://www.usenix.org/conference/atc20/presentation/gu}
+}
+
+@inproceedings{vilanova2017dipc,
+  author    = {Llu{\'\i}s Vilanova and Marc Jord{\`a} and Nacho Navarro and Yoav Etsion and Mateo Valero},
+  title     = {Direct Inter-Process Communication ({dIPC}): Repurposing the {CODOMs} Architecture to Accelerate {IPC}},
+  booktitle = {Proceedings of the Twelfth European Conference on Computer Systems (EuroSys '17)},
+  pages     = {16--31},
+  year      = {2017},
+  publisher = {ACM},
+  doi       = {10.1145/3064176.3064197}
+}
+
+@inproceedings{chen2024hongmeng,
+  author    = {Haibo Chen and Xie Miao and Ning Jia and Nan Wang and Yu Li and Nian Liu and Yutao Liu and Fei Wang and Qiang Huang and Kun Li and Hongyang Yang and Hui Wang and Jie Yin and Yu Peng and Fengwei Xu},
+  title     = {Microkernel Goes General: Performance and Compatibility in the {HongMeng} Production Microkernel},
+  booktitle = {18th USENIX Symposium on Operating Systems Design and Implementation (OSDI 24)},
+  pages     = {465--485},
+  year      = {2024},
+  url       = {https://www.usenix.org/conference/osdi24/presentation/chen-haibo}
+}
+
+@inproceedings{boos2020theseus,
+  author    = {Kevin Boos and Namitha Liyanage and Ramla Ijaz and Lin Zhong},
+  title     = {Theseus: an Experiment in Operating System Structure and State Management},
+  booktitle = {14th USENIX Symposium on Operating Systems Design and Implementation (OSDI 20)},
+  pages     = {1--19},
+  year      = {2020},
+  url       = {https://www.usenix.org/conference/osdi20/presentation/boos}
+}
+
+@inproceedings{narayanan2020redleaf,
+  author    = {Vikram Narayanan and Tianjiao Huang and David Detweiler and Dan Appel and Zhaofeng Li and Gerd Zellweger and Anton Burtsev},
+  title     = {{RedLeaf}: Isolation and Communication in a Safe Operating System},
+  booktitle = {14th USENIX Symposium on Operating Systems Design and Implementation (OSDI 20)},
+  pages     = {21--39},
+  year      = {2020},
+  url       = {https://www.usenix.org/conference/osdi20/presentation/narayanan-vikram}
+}
+
+@inproceedings{levy2017tock,
+  author    = {Amit Levy and Bradford Campbell and Branden Ghena and Daniel B. Giffin and Pat Pannuto and Prabal Dutta and Philip Levis},
+  title     = {Multiprogramming a 64kB Computer Safely and Efficiently},
+  booktitle = {Proceedings of the 26th Symposium on Operating Systems Principles (SOSP '17)},
+  pages     = {234--251},
+  year      = {2017},
+  publisher = {ACM},
+  doi       = {10.1145/3132747.3132786}
+}
+
+% ------------------------------------------------- speculation, mitigations
+
+@inproceedings{kocher2019spectre,
+  author    = {Paul Kocher and Jann Horn and Anders Fogh and Daniel Genkin and Daniel Gruss and Werner Haas and Mike Hamburg and Moritz Lipp and Stefan Mangard and Thomas Prescher and Michael Schwarz and Yuval Yarom},
+  title     = {Spectre Attacks: Exploiting Speculative Execution},
+  booktitle = {2019 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {1--19},
+  year      = {2019},
+  doi       = {10.1109/SP.2019.00002}
+}
+
+@inproceedings{lipp2018meltdown,
+  author    = {Moritz Lipp and Michael Schwarz and Daniel Gruss and Thomas Prescher and Werner Haas and Anders Fogh and Jann Horn and Stefan Mangard and Paul Kocher and Daniel Genkin and Yuval Yarom and Mike Hamburg},
+  title     = {Meltdown: Reading Kernel Memory from User Space},
+  booktitle = {27th USENIX Security Symposium (USENIX Security 18)},
+  pages     = {973--990},
+  year      = {2018},
+  url       = {https://www.usenix.org/conference/usenixsecurity18/presentation/lipp}
+}
+
+@inproceedings{gruss2017kaslr,
+  author    = {Daniel Gruss and Moritz Lipp and Michael Schwarz and Richard Fellner and Cl{\'e}mentine Maurice and Stefan Mangard},
+  title     = {{KASLR} is Dead: Long Live {KASLR}},
+  booktitle = {Engineering Secure Software and Systems (ESSoS 2017)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {10379},
+  pages     = {161--176},
+  year      = {2017},
+  publisher = {Springer},
+  doi       = {10.1007/978-3-319-62105-0_11},
+  note      = {UNVERIFIED: the LNCS volume number, from a search result}
+}
+
+@inproceedings{ren2019analysis,
+  author    = {Xiang (Jenny) Ren and Kirk Rodrigues and Luyuan Chen and Camilo Vega and Michael Stumm and Ding Yuan},
+  title     = {An Analysis of Performance Evolution of {Linux}'s Core Operations},
+  booktitle = {Proceedings of the 27th ACM Symposium on Operating Systems Principles (SOSP '19)},
+  pages     = {554--569},
+  year      = {2019},
+  publisher = {ACM},
+  doi       = {10.1145/3341301.3359640}
+}
+
+@misc{linuxpti,
+  title        = {Page Table Isolation ({PTI})},
+  howpublished = {\url{https://docs.kernel.org/arch/x86/pti.html}},
+  note         = {Linux kernel documentation, accessed 2026-10-06}
+}
+
+@misc{gregg2018kpti,
+  author       = {Brendan Gregg},
+  title        = {{KPTI/KAISER} Meltdown Initial Performance Regressions},
+  howpublished = {\url{https://www.brendangregg.com/blog/2018-02-09/kpti-kaiser-meltdown-performance.html}},
+  year         = {2018},
+  note         = {Blog post, not peer reviewed}
+}
+
+@manual{amd2023apm2,
+  title  = {{AMD64} Architecture Programmer's Manual, Volume 2: System Programming},
+  organization = {Advanced Micro Devices},
+  number = {24593},
+  note   = {Rev. 3.41, June 2023, §3.1.7 (EFER, Automatic IBRS Enable). UNVERIFIED: read only as cited in a Linux kernel patch posting; the manual itself and its URL were not opened. No public AMD document for ERAPS was found}
+}
+
+% ------------------------------------------- specialization, extensibility
+
+@inproceedings{massalin1989threads,
+  author    = {Henry Massalin and Calton Pu},
+  title     = {Threads and Input/Output in the {Synthesis} Kernel},
+  booktitle = {Proceedings of the Twelfth ACM Symposium on Operating Systems Principles (SOSP '89)},
+  pages     = {191--201},
+  year      = {1989},
+  publisher = {ACM},
+  doi       = {10.1145/74850.74869},
+  note      = {The ACM record spells the title "kernal"}
+}
+
+@article{pu1988synthesis,
+  author  = {Calton Pu and Henry Massalin and John Ioannidis},
+  title   = {The {Synthesis} Kernel},
+  journal = {Computing Systems},
+  volume  = {1},
+  number  = {1},
+  pages   = {11--32},
+  year    = {1988},
+  publisher = {USENIX Association},
+  note    = {UNVERIFIED: volume, issue and pages, from USENIX's index via search; the scan was not opened}
+}
+
+@phdthesis{massalin1992synthesis,
+  author = {Henry Massalin},
+  title  = {Synthesis: An Efficient Implementation of Fundamental Operating System Services},
+  school = {Columbia University},
+  year   = {1992}
+}
+
+@inproceedings{engler1995exokernel,
+  author    = {Dawson R. Engler and M. Frans Kaashoek and James {O'Toole Jr.}},
+  title     = {Exokernel: An Operating System Architecture for Application-Level Resource Management},
+  booktitle = {Proceedings of the Fifteenth ACM Symposium on Operating Systems Principles (SOSP '95)},
+  pages     = {251--266},
+  year      = {1995},
+  publisher = {ACM},
+  doi       = {10.1145/224056.224076}
+}
+
+@inproceedings{kaashoek1997application,
+  author    = {M. Frans Kaashoek and Dawson R. Engler and Gregory R. Ganger and H{\'e}ctor M. Brice{\~n}o and Russell Hunt and David Mazi{\`e}res and Thomas Pinckney and Robert Grimm and John Jannotti and Kenneth Mackenzie},
+  title     = {Application Performance and Flexibility on Exokernel Systems},
+  booktitle = {Proceedings of the Sixteenth ACM Symposium on Operating Systems Principles (SOSP '97)},
+  pages     = {52--65},
+  year      = {1997},
+  publisher = {ACM},
+  doi       = {10.1145/268998.266644}
+}
+
+@inproceedings{porter2011rethinking,
+  author    = {Donald E. Porter and Silas Boyd-Wickizer and Jon Howell and Reuben Olinsky and Galen C. Hunt},
+  title     = {Rethinking the Library {OS} from the Top Down},
+  booktitle = {Proceedings of the Sixteenth International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS XVI)},
+  pages     = {291--304},
+  year      = {2011},
+  publisher = {ACM},
+  doi       = {10.1145/1950365.1950399}
+}
+
+@inproceedings{madhavapeddy2013unikernels,
+  author    = {Anil Madhavapeddy and Richard Mortier and Charalampos Rotsos and David Scott and Balraj Singh and Thomas Gazagnaire and Steven Smith and Steven Hand and Jon Crowcroft},
+  title     = {Unikernels: Library Operating Systems for the Cloud},
+  booktitle = {Proceedings of the Eighteenth International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS '13)},
+  pages     = {461--472},
+  year      = {2013},
+  publisher = {ACM},
+  doi       = {10.1145/2451116.2451167}
+}
+
+@inproceedings{bershad1995spin,
+  author    = {Brian N. Bershad and Stefan Savage and Przemys{\l}aw Pardyak and Emin G{\"u}n Sirer and Marc E. Fiuczynski and David Becker and Craig Chambers and Susan Eggers},
+  title     = {Extensibility, Safety and Performance in the {SPIN} Operating System},
+  booktitle = {Proceedings of the Fifteenth ACM Symposium on Operating Systems Principles (SOSP '95)},
+  pages     = {267--283},
+  year      = {1995},
+  publisher = {ACM},
+  doi       = {10.1145/224056.224077},
+  note      = {Crossref gives initials only; full first names not checked against the PDF}
+}
+
+@inproceedings{pu1995optimistic,
+  author    = {Calton Pu and Tito Autrey and Andrew Black and Charles Consel and Crispin Cowan and Jon Inouye and Lakshmi Kethana and Jonathan Walpole and Ke Zhang},
+  title     = {Optimistic Incremental Specialization: Streamlining a Commercial Operating System},
+  booktitle = {Proceedings of the Fifteenth ACM Symposium on Operating Systems Principles (SOSP '95)},
+  pages     = {314--321},
+  year      = {1995},
+  publisher = {ACM},
+  doi       = {10.1145/224056.224080},
+  note      = {Crossref gives initials only; full first names not checked against the PDF}
+}
+
+@article{mcnamee2001specialization,
+  author  = {Dylan McNamee and Jonathan Walpole and Calton Pu and Crispin Cowan and Charles Krasic and Ashvin Goel and Perry Wagle and Charles Consel and Gilles Muller and Renauld Marlet},
+  title   = {Specialization Tools and Techniques for Systematic Optimization of System Software},
+  journal = {ACM Transactions on Computer Systems},
+  volume  = {19},
+  number  = {2},
+  pages   = {217--251},
+  year    = {2001},
+  doi     = {10.1145/377769.377778}
+}
+
+% ------------------------------------------------------------- autotuning
+
+@inproceedings{whaley1998atlas,
+  author    = {R. Clint Whaley and Jack J. Dongarra},
+  title     = {Automatically Tuned Linear Algebra Software},
+  booktitle = {Proceedings of the 1998 ACM/IEEE Conference on Supercomputing (SC '98)},
+  pages     = {38},
+  year      = {1998},
+  publisher = {IEEE},
+  doi       = {10.1109/SC.1998.10004}
+}
+
+@article{whaley2001automated,
+  author  = {R. Clint Whaley and Antoine Petitet and Jack J. Dongarra},
+  title   = {Automated Empirical Optimizations of Software and the {ATLAS} Project},
+  journal = {Parallel Computing},
+  volume  = {27},
+  number  = {1--2},
+  pages   = {3--35},
+  year    = {2001},
+  doi     = {10.1016/S0167-8191(00)00087-9}
+}
+
+@inproceedings{frigo1998fftw,
+  author    = {Matteo Frigo and Steven G. Johnson},
+  title     = {{FFTW}: An Adaptive Software Architecture for the {FFT}},
+  booktitle = {Proceedings of the 1998 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP '98)},
+  volume    = {3},
+  pages     = {1381--1384},
+  year      = {1998},
+  doi       = {10.1109/ICASSP.1998.681704}
+}
+
+@article{frigo2005fftw3,
+  author  = {Matteo Frigo and Steven G. Johnson},
+  title   = {The Design and Implementation of {FFTW3}},
+  journal = {Proceedings of the IEEE},
+  volume  = {93},
+  number  = {2},
+  pages   = {216--231},
+  year    = {2005},
+  doi     = {10.1109/JPROC.2004.840301}
+}
+
+@inproceedings{bilmes1997phipac,
+  author    = {Jeff Bilmes and Krste Asanovi{\'c} and Chee-Whye Chin and James Demmel},
+  title     = {Optimizing Matrix Multiply Using {PHiPAC}: A Portable, High-Performance, {ANSI C} Coding Methodology},
+  booktitle = {Proceedings of the 11th International Conference on Supercomputing (ICS '97)},
+  pages     = {340--347},
+  year      = {1997},
+  publisher = {ACM},
+  doi       = {10.1145/263580.263662}
+}
+
+@inproceedings{ansel2014opentuner,
+  author    = {Jason Ansel and Shoaib Kamil and Kalyan Veeramachaneni and Jonathan Ragan-Kelley and Jeffrey Bosboom and Una-May O'Reilly and Saman Amarasinghe},
+  title     = {{OpenTuner}: An Extensible Framework for Program Autotuning},
+  booktitle = {Proceedings of the 23rd International Conference on Parallel Architectures and Compilation (PACT '14)},
+  pages     = {303--316},
+  year      = {2014},
+  publisher = {ACM},
+  doi       = {10.1145/2628071.2628092}
+}
+
+% ---------------------------------------------------- superoptimization
+
+@inproceedings{massalin1987superoptimizer,
+  author    = {Henry Massalin},
+  title     = {Superoptimizer: A Look at the Smallest Program},
+  booktitle = {Proceedings of the Second International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS II)},
+  pages     = {122--126},
+  year      = {1987},
+  publisher = {ACM},
+  doi       = {10.1145/36206.36194}
+}
+
+@inproceedings{schkufza2013stochastic,
+  author    = {Eric Schkufza and Rahul Sharma and Alex Aiken},
+  title     = {Stochastic Superoptimization},
+  booktitle = {Proceedings of the Eighteenth International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS '13)},
+  pages     = {305--316},
+  year      = {2013},
+  publisher = {ACM},
+  doi       = {10.1145/2451116.2451150}
+}
+
+@misc{sasnauskas2017souper,
+  author        = {Raimondas Sasnauskas and Yang Chen and Peter Collingbourne and Jeroen Ketema and Gratian Lup and Jubi Taneja and John Regehr},
+  title         = {Souper: A Synthesizing Superoptimizer},
+  year          = {2017},
+  eprint        = {1711.04422},
+  archivePrefix = {arXiv}
+}
+
+% -------------------------------------------------------- PGO and layout
+
+@inproceedings{pettis1990profile,
+  author    = {Karl Pettis and Robert C. Hansen},
+  title     = {Profile Guided Code Positioning},
+  booktitle = {Proceedings of the ACM SIGPLAN 1990 Conference on Programming Language Design and Implementation (PLDI '90)},
+  pages     = {16--27},
+  year      = {1990},
+  publisher = {ACM},
+  doi       = {10.1145/93542.93550}
+}
+
+@inproceedings{chen2016autofdo,
+  author    = {Dehao Chen and David Xinliang Li and Tipp Moseley},
+  title     = {{AutoFDO}: Automatic Feedback-Directed Optimization for Warehouse-Scale Applications},
+  booktitle = {Proceedings of the 2016 International Symposium on Code Generation and Optimization (CGO '16)},
+  pages     = {12--23},
+  year      = {2016},
+  publisher = {ACM},
+  doi       = {10.1145/2854038.2854044}
+}
+
+@inproceedings{panchenko2019bolt,
+  author    = {Maksim Panchenko and Rafael Auler and Bill Nell and Guilherme Ottoni},
+  title     = {{BOLT}: A Practical Binary Optimizer for Data Centers and Beyond},
+  booktitle = {Proceedings of the 2019 IEEE/ACM International Symposium on Code Generation and Optimization (CGO)},
+  pages     = {2--14},
+  year      = {2019},
+  doi       = {10.1109/CGO.2019.8661201}
+}
+
+@inproceedings{shen2023propeller,
+  author    = {Han Shen and Krzysztof Pszeniczny and Rahman Lavaee and Snehasish Kumar and Sriraman Tallam and Xinliang David Li},
+  title     = {Propeller: A Profile Guided, Relinking Optimizer for Warehouse-Scale Applications},
+  booktitle = {Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (ASPLOS '23)},
+  pages     = {617--631},
+  year      = {2023},
+  publisher = {ACM},
+  doi       = {10.1145/3575693.3575727}
+}
+
+% --------------------------------------------------------- ML for systems
+
+@inproceedings{kraska2018case,
+  author    = {Tim Kraska and Alex Beutel and Ed H. Chi and Jeffrey Dean and Neoklis Polyzotis},
+  title     = {The Case for Learned Index Structures},
+  booktitle = {Proceedings of the 2018 International Conference on Management of Data (SIGMOD '18)},
+  pages     = {489--504},
+  year      = {2018},
+  publisher = {ACM},
+  doi       = {10.1145/3183713.3196909}
+}
+
+@inproceedings{mao2019learning,
+  author    = {Hongzi Mao and Malte Schwarzkopf and Shaileshh Bojja Venkatakrishnan and Zili Meng and Mohammad Alizadeh},
+  title     = {Learning Scheduling Algorithms for Data Processing Clusters},
+  booktitle = {Proceedings of the ACM Special Interest Group on Data Communication (SIGCOMM '19)},
+  pages     = {270--288},
+  year      = {2019},
+  publisher = {ACM},
+  doi       = {10.1145/3341302.3342080}
+}
+
+@inproceedings{mirhoseini2017device,
+  author    = {Azalia Mirhoseini and Hieu Pham and Quoc V. Le and Benoit Steiner and Rasmus Larsen and Yuefeng Zhou and Naveen Kumar and Mohammad Norouzi and Samy Bengio and Jeff Dean},
+  title     = {Device Placement Optimization with Reinforcement Learning},
+  booktitle = {Proceedings of the 34th International Conference on Machine Learning (ICML)},
+  series    = {PMLR},
+  volume    = {70},
+  pages     = {2430--2439},
+  year      = {2017},
+  url       = {https://proceedings.mlr.press/v70/mirhoseini17a.html}
+}
+
+@misc{trofin2021mlgo,
+  author        = {Mircea Trofin and Yundi Qian and Eugene Brevdo and Zinan Lin and Krzysztof Choromanski and David Li},
+  title         = {{MLGO}: a Machine Learning Guided Compiler Optimizations Framework},
+  year          = {2021},
+  eprint        = {2101.04808},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{chen2018tvm,
+  author    = {Tianqi Chen and Thierry Moreau and Ziheng Jiang and Lianmin Zheng and Eddie Yan and Haichen Shen and Meghan Cowan and Leyuan Wang and Yuwei Hu and Luis Ceze and Carlos Guestrin and Arvind Krishnamurthy},
+  title     = {{TVM}: An Automated End-to-End Optimizing Compiler for Deep Learning},
+  booktitle = {13th USENIX Symposium on Operating Systems Design and Implementation (OSDI 18)},
+  pages     = {578--594},
+  year      = {2018},
+  url       = {https://www.usenix.org/conference/osdi18/presentation/chen}
+}
+
+@inproceedings{zheng2020ansor,
+  author    = {Lianmin Zheng and Chengfan Jia and Minmin Sun and Zhao Wu and Cody Hao Yu and Ameer Haj-Ali and Yida Wang and Jun Yang and Danyang Zhuo and Koushik Sen and Joseph E. Gonzalez and Ion Stoica},
+  title     = {Ansor: Generating High-Performance Tensor Programs for Deep Learning},
+  booktitle = {14th USENIX Symposium on Operating Systems Design and Implementation (OSDI 20)},
+  pages     = {863--879},
+  year      = {2020},
+  url       = {https://www.usenix.org/conference/osdi20/presentation/zheng}
+}
+
+% ------------------------------------------- LLMs and agents for code
+
+@article{mankowitz2023faster,
+  author  = {Daniel J. Mankowitz and Andrea Michi and Anton Zhernov and Marco Gelmi and Marco Selvi and Cosmin Paduraru and Edouard Leurent and Shariq Iqbal and Jean-Baptiste Lespiau and Alex Ahern and Thomas K{\"o}ppe and Kevin Millikin and Stephen Gaffney and Sophie Elster and Jackson Broshear and Chris Gamble and Kieran Milan and Robert Tung and Minjae Hwang and Taylan Cemgil and Mohammadamin Barekatain and Yujia Li and Amol Mandhane and Thomas Hubert and Julian Schrittwieser and Demis Hassabis and Pushmeet Kohli and Martin Riedmiller and Oriol Vinyals and David Silver},
+  title   = {Faster Sorting Algorithms Discovered Using Deep Reinforcement Learning},
+  journal = {Nature},
+  volume  = {618},
+  pages   = {257--263},
+  year    = {2023},
+  doi     = {10.1038/s41586-023-06004-9}
+}
+
+@misc{novikov2025alphaevolve,
+  author        = {Alexander Novikov and Ng{\^a}n V{\~u} and Marvin Eisenberger and Emilien Dupont and Po-Sen Huang and Adam Zsolt Wagner and Sergey Shirobokov and Borislav Kozlovskii and Francisco J. R. Ruiz and Abbas Mehrabian and M. Pawan Kumar and Abigail See and Swarat Chaudhuri and George Holland and Alex Davies and Sebastian Nowozin and Pushmeet Kohli and Matej Balog},
+  title         = {{AlphaEvolve}: A coding agent for scientific and algorithmic discovery},
+  year          = {2025},
+  eprint        = {2506.13131},
+  archivePrefix = {arXiv}
+}
+
+@misc{deepmind2025alphaevolveblog,
+  author       = {{Google DeepMind}},
+  title        = {{AlphaEvolve}: A {Gemini}-powered coding agent for designing advanced algorithms},
+  howpublished = {\url{https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/}},
+  year         = {2025},
+  note         = {Blog post, 14 May 2025; source of the Borg and Gemini-kernel figures}
+}
+
+@inproceedings{ouyang2025kernelbench,
+  author    = {Anne Ouyang and Simon Guo and Simran Arora and Alex L. Zhang and William Hu and Christopher R{\'e} and Azalia Mirhoseini},
+  title     = {{KernelBench}: Can {LLMs} Write Efficient {GPU} Kernels?},
+  booktitle = {Proceedings of the 42nd International Conference on Machine Learning (ICML)},
+  series    = {PMLR},
+  volume    = {267},
+  pages     = {47356--47415},
+  year      = {2025},
+  url       = {https://proceedings.mlr.press/v267/ouyang25a.html}
+}
+
+@misc{chen2025nvidiadeepseek,
+  author       = {Terry Chen and Bing Xu and Kirthi Devleker},
+  title        = {Automating {GPU} Kernel Generation with {DeepSeek-R1} and Inference Time Scaling},
+  howpublished = {NVIDIA Technical Blog, \url{https://developer.nvidia.com/blog/automating-gpu-kernel-generation-with-deepseek-r1-and-inference-time-scaling/}},
+  year         = {2025},
+  note         = {12 February 2025; not peer reviewed}
+}
+
+@misc{baronio2025kevin,
+  author        = {Carlo Baronio and Pietro Marsella and Ben Pan and Simon Guo and Silas Alberti},
+  title         = {Kevin: Multi-Turn {RL} for Generating {CUDA} Kernels},
+  year          = {2025},
+  eprint        = {2507.11948},
+  archivePrefix = {arXiv}
+}
+
+@misc{li2025cudal1,
+  author        = {Xiaoya Li and Albert Wang and Guoyin Wang and Jiwei Li and Chris Shum},
+  title         = {{CUDA-L1}: Improving {CUDA} Optimization via Contrastive Reinforcement Learning},
+  year          = {2025},
+  eprint        = {2507.14111},
+  archivePrefix = {arXiv},
+  note          = {UNVERIFIED: the ICLR 2026 acceptance the arXiv comment states}
+}
+
+@misc{lange2025robust,
+  author        = {Robert Tjarko Lange and Qi Sun and Aaditya Prasad and Maxence Faldor and Yujin Tang and David Ha},
+  title         = {Towards Robust Agentic {CUDA} Kernel Benchmarking, Verification, and Optimization},
+  year          = {2025},
+  eprint        = {2509.14279},
+  archivePrefix = {arXiv},
+  note          = {Follow-up to Sakana AI's "The AI CUDA Engineer" (February 2025), whose first results were withdrawn after its evaluation was found exploitable; the original report's URL now returns 404}
+}
+
+@misc{cummins2023large,
+  author        = {Chris Cummins and Volker Seeker and Dejan Grubisic and Mostafa Elhoushi and Youwei Liang and Baptiste Rozi{\`e}re and Jonas Gehring and Fabian Gloeckle and Kim Hazelwood and Gabriel Synnaeve and Hugh Leather},
+  title         = {Large Language Models for Compiler Optimization},
+  year          = {2023},
+  eprint        = {2309.07062},
+  archivePrefix = {arXiv}
+}
+
+@misc{cummins2024meta,
+  author        = {Chris Cummins and Volker Seeker and Dejan Grubisic and Baptiste Rozi{\`e}re and Jonas Gehring and Gabriel Synnaeve and Hugh Leather},
+  title         = {Meta Large Language Model Compiler: Foundation Models of Compiler Optimization},
+  year          = {2024},
+  eprint        = {2407.02524},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{yang2024sweagent,
+  author    = {John Yang and Carlos E. Jimenez and Alexander Wettig and Kilian Lieret and Shunyu Yao and Karthik Narasimhan and Ofir Press},
+  title     = {{SWE-agent}: Agent-Computer Interfaces Enable Automated Software Engineering},
+  booktitle = {Advances in Neural Information Processing Systems 37 (NeurIPS 2024)},
+  year      = {2024},
+  url       = {https://proceedings.neurips.cc/paper_files/paper/2024/hash/5a7c947568c1b1328ccc5230172e1e7c-Abstract-Conference.html},
+  note      = {UNVERIFIED: pages}
+}
+
+@inproceedings{jimenez2024swebench,
+  author    = {Carlos E. Jimenez and John Yang and Alexander Wettig and Shunyu Yao and Kexin Pei and Ofir Press and Karthik Narasimhan},
+  title     = {{SWE-bench}: Can Language Models Resolve Real-World {GitHub} Issues?},
+  booktitle = {The Twelfth International Conference on Learning Representations (ICLR)},
+  year      = {2024},
+  url       = {https://openreview.net/forum?id=VTF8yNQM66}
+}
+
+@inproceedings{shypula2024learning,
+  author    = {Alexander Shypula and Aman Madaan and Yimeng Zeng and Uri Alon and Jacob Gardner and Milad Hashemi and Graham Neubig and Parthasarathy Ranganathan and Osbert Bastani and Amir Yazdanbakhsh},
+  title     = {Learning Performance-Improving Code Edits},
+  booktitle = {The Twelfth International Conference on Learning Representations (ICLR)},
+  year      = {2024},
+  note      = {arXiv:2302.07867}
+}
+
+@misc{he2025sweperf,
+  author        = {Xinyi He and Qian Liu and Mingzhe Du and Lin Yan and Zhijie Fan and Yiming Huang and Yin Zheng and Zejian Yuan and Zejun Ma},
+  title         = {{SWE-Perf}: Can Language Models Optimize Code Performance on Real-World Repositories?},
+  year          = {2025},
+  eprint        = {2507.12415},
+  archivePrefix = {arXiv},
+  note          = {UNVERIFIED: the ICML 2026 acceptance the arXiv comment states}
+}
+
+@inproceedings{waghjale2024ecco,
+  author    = {Siddhant Waghjale and Vishruth Veerendranath and Zora Zhiruo Wang and Daniel Fried},
+  title     = {{ECCO}: Can We Improve Model-Generated Code Efficiency Without Sacrificing Functional Correctness?},
+  booktitle = {Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2024},
+  note      = {arXiv:2407.14044. UNVERIFIED: ACL Anthology pages and DOI}
+}
+
+% ----------------------------------------------- LLMs and OS kernels
+
+@inproceedings{chen2024autoos,
+  author    = {Huilai Chen and Yuanbo Wen and Limin Cheng and Shouxu Kuang and Yumeng Liu and Weijia Li and Ling Li and Rui Zhang and Xinkai Song and Wei Li and Qi Guo and Yunji Chen},
+  title     = {{AutoOS}: Make Your {OS} More Powerful by Exploiting Large Language Models},
+  booktitle = {Proceedings of the 41st International Conference on Machine Learning (ICML)},
+  series    = {PMLR},
+  volume    = {235},
+  pages     = {7511--7525},
+  year      = {2024},
+  url       = {https://proceedings.mlr.press/v235/chen24at.html}
+}
+
+@inproceedings{zheng2024kgent,
+  author    = {Yusheng Zheng and Yiwei Yang and Maolin Chen and Andrew Quinn},
+  title     = {Kgent: Kernel Extensions Large Language Model Agent},
+  booktitle = {Proceedings of the ACM SIGCOMM 2024 Workshop on eBPF and Kernel Extensions (eBPF '24)},
+  pages     = {30--36},
+  year      = {2024},
+  publisher = {ACM},
+  doi       = {10.1145/3672197.3673434}
+}
+
+@misc{zheng2025agenticos,
+  author        = {Yusheng Zheng and Yanpeng Hu and Wei Zhang and Andi Quinn},
+  title         = {Towards Agentic {OS}: An {LLM} Agent Framework for {Linux} Schedulers},
+  year          = {2025},
+  eprint        = {2509.01245},
+  archivePrefix = {arXiv},
+  note          = {arXiv journal-ref: MLforSystem 2025. UNVERIFIED: the exact workshop}
+}
+
+@inproceedings{yang2025kernelgpt,
+  author    = {Chenyuan Yang and Zijie Zhao and Lingming Zhang},
+  title     = {{KernelGPT}: Enhanced Kernel Fuzzing via Large Language Models},
+  booktitle = {Proceedings of the 30th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (ASPLOS '25)},
+  pages     = {560--573},
+  year      = {2025},
+  publisher = {ACM},
+  doi       = {10.1145/3676641.3716022}
+}
