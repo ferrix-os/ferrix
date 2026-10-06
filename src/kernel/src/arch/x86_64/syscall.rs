@@ -483,6 +483,18 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 /// it just built on this processor's kernel stack.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
+    let profiled = frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ;
+    if profiled {
+        crate::sched::fprof::stamp(0);
+    }
+    entry_inner(frame);
+    if profiled {
+        crate::sched::fprof::stamp(9);
+    }
+}
+
+/// PROFILE ONLY: the entry's body, so that every way out is stamped.
+fn entry_inner(frame: &mut SyscallFrame) {
     // Step 4's fast path for `channel_write_read`, on a boot that registered
     // one (`ferrix.fastpath=on`, T1): first, before the filter, which its own
     // T2 stands in for, and with interrupts still masked. Every entry measure

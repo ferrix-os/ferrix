@@ -1018,6 +1018,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
         direct::count(Count::T2);
         return Fast::Declined;
     }
+    crate::sched::fprof::stamp(1);
     // T3: a send of at most 24 bytes; a receive-only call is served by the
     // receive half on the general path.
     let Some(count) = usize::try_from(a[1])
@@ -1045,6 +1046,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
             direct::count(Count::T4);
             return Fast::Declined;
         };
+        crate::sched::fprof::stamp(2);
         if let Err(declined) = endpoint.send_direct(caller, count, reply_words(count, a)) {
             direct::count(declined);
             return Fast::Declined;
@@ -1052,6 +1054,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
         // Running again: a commit handed over a reply, or something else
         // woke the park.
         if let Some((count, words)) = caller.take_reply() {
+            crate::sched::fprof::stamp(8);
             return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
         }
         Fast::Done(continue_general(&endpoint, caller, a))
