@@ -151,9 +151,8 @@ struct Inbox {
     /// whose reply a fast writer may put in its reply cell. Set only while
     /// the inbox is empty and the task blocked, under this lock; taken by a
     /// fast commit, by any general write or close, which then wakes it, and
-    /// by the task as it leaves its call. x86-64 only, where the fast path
-    /// is: elsewhere nothing parks.
-    #[cfg(target_arch = "x86_64")]
+    /// by the task as it leaves its call. Set only where the fast path is
+    /// (`arch::FAST_WRITE_READ`): elsewhere nothing parks.
     parked: Option<Arc<Task>>,
 }
 
@@ -164,7 +163,6 @@ impl Inbox {
             small: None,
             spare: Vec::new(),
             queue: MessageQueue::new(LIMITS),
-            #[cfg(target_arch = "x86_64")]
             parked: None,
         }
     }
@@ -173,14 +171,7 @@ impl Inbox {
     /// close to wake once it has let the lock go: the general path's one
     /// new test (part 2). Always `None` where nothing parks.
     fn take_parked(&mut self) -> Option<Arc<Task>> {
-        #[cfg(target_arch = "x86_64")]
-        {
-            self.parked.take()
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            None
-        }
+        self.parked.take()
     }
 
     /// Whether nothing is waiting.
@@ -589,11 +580,10 @@ impl Endpoint {
             let refused = inbox.push(Message { bytes, handles }).err();
             peer.note(&inbox);
             let fired = refused.is_none() && trigger(&mut peer.observers.lock(), Signals::READABLE);
-            let parked = if refused.is_none() {
-                inbox.take_parked()
-            } else {
-                None
-            };
+            // A parked reader is woken whatever became of the write: one
+            // refused (which the checks above make unreachable) wakes it
+            // for nothing, and it parks again.
+            let parked = inbox.take_parked();
             (refused, fired, parked)
         };
         // Size and room checked, and the room made, above under the same
@@ -881,7 +871,6 @@ impl Endpoint {
     /// by the fast path's receive half (`docs/OPAQUE-KERNEL.md` §9.7). For
     /// the checks, which wake a reader once it waits.
     pub(crate) fn reader_waiting(&self) -> bool {
-        #[cfg(target_arch = "x86_64")]
         if self.own().inbox.lock().parked.is_some() {
             return true;
         }
@@ -929,7 +918,6 @@ fn wake_parked(parked: Option<Arc<Task>>, queue: &WaitQueue, how: crate::sched::
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 impl Endpoint {
     /// The fast path's send half and the direct switch
     /// (`docs/OPAQUE-KERNEL.md` §9.7, part 2): deliver `len` bytes in
@@ -967,36 +955,7 @@ impl Endpoint {
             Side::First => (first, second),
             Side::Second => (second, first),
         };
-        // T6, T7, T8: the caller could park on its own side.
-        if !own_inbox.is_empty() {
-            return Err(Count::T6);
-        }
-        if own_inbox.parked.is_some() {
-            return Err(Count::T7);
-        }
-        if own.word() & PEER_CLOSED != 0 {
-            return Err(Count::T8);
-        }
-        // T9: a reader is parked on the peer's side.
-        let Some(reader) = peer_inbox.parked.as_ref() else {
-            return Err(Count::T9);
-        };
-        // A2: a record is set only beside an empty inbox, and every writer
-        // that fills one takes it; the parked reader's call holds its end
-        // open.
-        if !peer_inbox.is_empty() || peer.is_closed() {
-            crate::panic::fatal!(
-                crate::panic::catalog::FAST_PATH_PARK_BROKEN,
-                "a reader was parked beside a message or on a closed end (A2): task {}",
-                reader.id
-            );
-        }
-        // T10: nobody else would be told of this message.
-        let quiet =
-            !peer.observed.load(Ordering::Acquire) && peer.waiters.listed_now() == 0;
-        if !quiet {
-            return Err(Count::T10);
-        }
+        let reader = sendable(own, &own_inbox, peer, &peer_inbox)?;
         let mut switch = direct::begin(caller, reader)?;
         // The commit, which cannot fail from here.
         let Some(reader) = peer_inbox.parked.take() else {
@@ -1049,6 +1008,49 @@ impl Endpoint {
         };
         drop(taken);
     }
+}
+
+/// The send half's tests under the two halves' locks
+/// (`docs/OPAQUE-KERNEL.md` §9.7, part 2): the caller could park on its own
+/// side -- its inbox empty (T6), nothing parked there (T7), its peer open
+/// (T8) -- and a reader is parked on the peer's side (T9) with nobody else
+/// to be told of the message (T10). Answers the reader. A record beside a
+/// message or on a closed end stops the machine (A2, FX-0531).
+fn sendable<'a>(
+    own: &Half,
+    own_inbox: &Inbox,
+    peer: &Half,
+    peer_inbox: &'a Inbox,
+) -> Result<&'a Arc<Task>, crate::sched::direct::Count> {
+    use crate::sched::direct::Count;
+    if !own_inbox.is_empty() {
+        return Err(Count::T6);
+    }
+    if own_inbox.parked.is_some() {
+        return Err(Count::T7);
+    }
+    if own.word() & PEER_CLOSED != 0 {
+        return Err(Count::T8);
+    }
+    let Some(reader) = peer_inbox.parked.as_ref() else {
+        return Err(Count::T9);
+    };
+    // A2: a record is set only beside an empty inbox, and every writer that
+    // fills one takes it; the parked reader's call holds its end open.
+    if !peer_inbox.is_empty() || peer.is_closed() {
+        crate::panic::fatal!(
+            crate::panic::catalog::FAST_PATH_PARK_BROKEN,
+            "a reader was parked beside a message or on a closed end (A2): task {}",
+            reader.id
+        );
+    }
+    // T10, read under the peer's inbox lock: no port registration was ever
+    // made on its side (set under that lock) and nobody is listed on its
+    // queue.
+    if peer.observed.load(Ordering::Acquire) || peer.waiters.listed_now() != 0 {
+        return Err(Count::T10);
+    }
+    Ok(reader)
 }
 
 /// Whether sending `carried` through `writer` would close a cycle.

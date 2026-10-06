@@ -56,8 +56,7 @@ pub(crate) fn init(view: &BootView<'_>) {
     };
     ON_AT_BOOT.store(read == READ_ON, Ordering::Relaxed);
     READ.store(read, Ordering::Relaxed);
-    #[cfg(target_arch = "x86_64")]
-    if read == READ_ON {
+    if read == READ_ON && crate::arch::FAST_WRITE_READ {
         crate::trap::set_fast_write_read(crate::syscall::native::fast_write_read);
     }
 }
@@ -77,7 +76,7 @@ pub(crate) fn report() {
         READ_OTHER => "ferrix.fastpath's value was not understood and is ignored",
         _ => "by default",
     };
-    let built = if cfg!(target_arch = "x86_64") {
+    let built = if crate::arch::FAST_WRITE_READ {
         "taken from x86-64's SYSCALL entry"
     } else {
         "x86-64 only, so every call here takes the general path"
@@ -90,8 +89,23 @@ pub(crate) fn report() {
 /// say which path it measured. Printed as the shell exits; no program reads
 /// them.
 pub(crate) fn report_counts() {
-    let [trips, parks, t2, t3, t4, halves, t6, t7, t8, t9, t10, queue, t11, t12, t13] =
-        crate::sched::direct::counts();
+    let [
+        trips,
+        parks,
+        t2,
+        t3,
+        t4,
+        halves,
+        t6,
+        t7,
+        t8,
+        t9,
+        t10,
+        queue,
+        t11,
+        t12,
+        t13,
+    ] = crate::sched::direct::counts();
     println!(
         "  fastpath counts: trips={trips} parks={parks} declined T2={t2} T3={t3} T4={t4} \
          halves={halves} T6={t6} T7={t7} T8={t8} T9={t9} T10={t10} queue={queue} T11={t11} \

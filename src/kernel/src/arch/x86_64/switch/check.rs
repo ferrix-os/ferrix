@@ -1073,7 +1073,8 @@ fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
     let (mine, theirs) = Endpoint::pair().map_err(|_| "could not make a channel")?;
     let mut code = VECTOR_PROGRAM.to_vec();
     let victim = {
-        if code.get(COUNT_AT..COUNT_AT + 7) != Some(&[0x48, 0xc7, 0xc6, 0xff, 0xff, 0xff, 0xff][..]) {
+        if code.get(COUNT_AT..COUNT_AT + 7) != Some(&[0x48, 0xc7, 0xc6, 0xff, 0xff, 0xff, 0xff][..])
+        {
             return Err("case 15: the vector program's count is not where its layout says");
         }
         patch(&mut code, COUNT_AT + 3, &0_u32.to_le_bytes())?;
@@ -1089,36 +1090,45 @@ fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
         .with_handles(|table| table.insert(Object::Channel(mine), Rights::CHANNEL))
         .map_err(|_| "no room for the vector program's channel")?;
     if placed != BOOTSTRAP {
-        return Err("a fresh process's first handle is not the one the vector program was built for");
+        return Err(
+            "a fresh process's first handle is not the one the vector program was built for",
+        );
     }
     let reader = process::new_for_check().map_err(|_| "no process for case 15's reader")?;
     let handle = reader
         .with_handles(|table| table.insert(Object::Channel(Arc::clone(&theirs)), Rights::CHANNEL))
         .map_err(|_| "no room for case 15's reader")?;
     *FAST_READER.lock() = Some(handle);
-    let _reader_task = crate::syscall::check::spawn_in(&reader, "case 15 reader", read_twice, Some(cpu))?;
-    wait_until(deadline, "case 15: the reader never waited", || theirs.reader_waiting())?;
+    let _reader_task =
+        crate::syscall::check::spawn_in(&reader, "case 15 reader", read_twice, Some(cpu))?;
+    wait_until(deadline, "case 15: the reader never waited", || {
+        theirs.reader_waiting()
+    })?;
     let victim_task = process::start_on(&victim, Some(cpu))
         .map_err(|_| "the vector program could not be started")?;
-    wait_until(deadline, "case 15: the vector program never blocked in its call", || {
-        victim_task.is_blocked() && theirs.reader_waiting()
-    })?;
+    wait_until(
+        deadline,
+        "case 15: the vector program never blocked in its call",
+        || victim_task.is_blocked() && theirs.reader_waiting(),
+    )?;
     let other = vector_program(b'b', OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?;
     let other_task = process::start_on(&other, Some(cpu))
         .map_err(|_| "the program that fills the vector registers could not be started")?;
     // Alone on its processor once the victim is parked, it is switched to
     // once and yields to nobody: run, then given time to set its pattern.
-    wait_until(deadline, "the program that fills the vector registers never ran", || {
-        other_task.switches() >= 1
-    })?;
+    wait_until(
+        deadline,
+        "the program that fills the vector registers never ran",
+        || other_task.switches() >= 1,
+    )?;
     crate::sched::sleep_for(10_000_000);
     if wake == Wake::Signal {
         crate::syscall::kill::send(&victim, SIGUSR1, Origin::Kernel);
         crate::sched::sleep_for(5_000_000);
     }
-    theirs
-        .write_small(b"vectors!")
-        .map_err(|_| "case 15: the check could not write the message that wakes the vector program")?;
+    theirs.write_small(b"vectors!").map_err(
+        |_| "case 15: the check could not write the message that wakes the vector program",
+    )?;
     let status = victim.wait_for_exit(deadline);
     process::kill(&other, KILLED_STATUS);
     let _ = other.wait_for_exit(deadline);

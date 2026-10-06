@@ -230,12 +230,16 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         );
     }
     let fast = object::fast_path_check::run()?;
-    if cfg!(target_arch = "x86_64") {
+    if crate::arch::FAST_WRITE_READ {
         crate::console::println!(
             "  fastcase {} cases of the fast path's tests answered as the general path answers \
              them{}, every waiter within {} s; the fast path {}: {} trips taken",
             fast.cases,
-            if fast.two_processors { ", one across two processors" } else { "" },
+            if fast.two_processors {
+                ", one across two processors"
+            } else {
+                ""
+            },
             10,
             if fast.on { "on" } else { "off" },
             fast.trips

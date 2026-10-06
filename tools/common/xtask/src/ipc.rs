@@ -71,8 +71,7 @@ fn run_once(args: &Args) -> Result<Vec<String>> {
         // (`docs/OPAQUE-KERNEL.md` §9.7); the counts line says which path the
         // trips took.
         let cmdline = crate::image_cmdline(args);
-        let image =
-            fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
         let host = Host::before(args.pin.as_deref());
         let lines = qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)?;
         println!("  {arch}: {}", host.after());
@@ -437,7 +436,8 @@ const FASTPATH_LINE: &str = "ipc fast path for channel_write_read:";
 ///
 /// No `--init`; a build or boot that fails; a boot whose stage-9 line names
 /// the wrong path; a transcript that did not finish; two that differ.
-/// Verifies: `L.x86_64.150`
+/// Verifies: `L.x86_64.150`, `L.x86_64.159`, `L.x86_64.160`, `L.sched.59`
+/// Verifies: `L.sched.61`, `L.object.167`, `L.object.170`, `H.OBJ.18`
 pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new("test-ipc-equiv needs --init, a static busybox for each architecture")

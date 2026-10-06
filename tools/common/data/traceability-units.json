@@ -33,6 +33,7 @@
     "vmap"
   ],
   "check_code_in_product": {
+    "object::channel::Endpoint::reader_waiting": "Whether a reader waits on an end, listed on its queue or parked by the fast path (docs/OPAQUE-KERNEL.md §9.7): only the stage-9 checks that must wake a reader once it waits ask it (write_read_check, fast_path_check, the vector check's case 15). It reads the inbox's park record, which is private to channel.rs, so it stays beside it.",
     "arch::aarch64::check_exception_entry": "The architecture's answer to the generic boot's exception-entry check: nothing to check here, since no exception finds the kernel on a program's stack. Part of the arch interface every architecture provides.",
     "arch::aarch64::check_distributor": "The architecture's entry to the GICv2 distributor check (arch/arm_common/gicv2/check.rs, F-50), which main.rs calls through the arch interface every architecture provides; it runs the check on a GICv2 and says it did not run on a GICv3.",
     "arch::aarch64::check_machine": "The architecture's entry to its machine check (arch/aarch64/check.rs), which main.rs calls through the arch interface every architecture provides; it runs the check and nothing else.",
