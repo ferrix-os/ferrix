@@ -63,7 +63,7 @@ the wind-down without a force; the old origin names (`l13c`, `land-n6`,
 | `po6/cgctl-n6` | c4e2b8f9d | 3349682db (it carries `land-n6`) | the same work with coverage carried; no gate run yet; the one to rebase now that `land-n6` has landed |
 | `po6/l13c` | aed1c3fa0 | 3349682db | init L13c, `SystemCallFilter=`; batch 20261005T184633Z failed it on `test-vfs --arch x86_64 --init ferrousli` (the cgroup applet's `rmdir`, "Resource busy"; `main` and `main` plus `land-n6` passed); next: rerun that gate on the branch alone, then rejoin |
 | `po6/step2f` | df5411820 | 3349682db | the channel round trip's 2f: `check` passed, 4 controls fired, bench 2417 ns against `main`'s 2536 to 2566; the consultant: OK if C1 to C6, ledger 382; next: rebase, regenerate, carry coverage, join |
-| `po6/step3` | 4a8b8dfee | 3349682db | steps 3a and 3b, WIP: `check` and the x86-64 KVM boot passed; owed: control c5, the TCG, AArch64 and ARMv7-A boots, `bench-ipc --alternate`, the consultant; one batch for both |
+| `po6/step3` | one commit | 445d09420 (2f) | steps 3a and 3b: every boot, `test-threads`, `test-shell --init ferrousli` and seven controls passed or fired, `check` passed after the rebase, bench 2287 ns against `main`'s 2427; the consultant: ledger 387; lands through a batch |
 | `po6/step4-prep` | fe424cd81 | 527201573 | step 4's groundwork (the park protocol's loom model, `ferrix.fastpath`, the equivalence cases); waits for review |
 | `po6/n5` | 511c1bdaf | e41489fd7 | N5, unprivileged mounting; parked by the customer; the consultant has not cleared it (ledger 378: B1 mounts detached before the rename check, B2 the namespace write-out under `preempt_disable`) |
 | `po6/bwrap-user` | 09e9c9c74 | e41489fd7 | `test-bwrap` as uid 1000; parked with N5; the two together are re-sized from 5 to 16 points |
@@ -619,9 +619,14 @@ customer's call.
   test-ipc-equiv`, passing on the general path, with the cases that need
   threads, signals, affinity or 3a printed as owed. No fast-path code. Not
   reviewed; §9.7 on the branch says what it holds.
-- Not started: 3a (the vector-state contract) and 3b (FS and GS kept in the
-  task, the write-skip dropped), with the consultant's conditions 7 and 8 in
-  §9.8; step 4's fast path itself, which needs 2f and 3a; step 5; step 4b.
+- `po6/step3` (session po7-ipcB, worktree `.claude/worktrees/po6-step3`):
+  3a (the vector-state contract) and 3b (FS and GS kept in the task, the
+  write skip dropped), one commit on 2f, with the consultant's conditions
+  7 and 8 met as §9.8's *As built* paragraphs say. Its gates and controls
+  passed and fired on the branch (§9.9's update of 2026-10-06); it lands
+  through a batch run.
+- Not started: step 4's fast path itself, which needs 2f and 3a; step 5;
+  step 4b.
 
 Older branches of this work: `os-ipc/zircon-trip` is landed in substance (its
 six commits went in as step 1), and `os-ipc/prof` and `os-ipc/prof2` are

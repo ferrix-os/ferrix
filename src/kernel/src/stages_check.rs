@@ -99,6 +99,11 @@ pub(super) fn check_programs() {
     // driver.
     check_native_objects();
 
+    // What the switch gives a program back after a blocking native call,
+    // and the FS base kept in the task: programs on the native calls just
+    // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
+    check_switch_state();
+
     // Finding F-23's negative control: allocations made to fail under the
     // native calls stage 9 just proved, and the kernel required to carry on.
     check_allocation_failure();
@@ -1043,6 +1048,19 @@ pub(super) fn check_native_objects() {
          {} never started, ended with their last handle",
         report.spawned, report.abandoned,
     );
+}
+
+/// Stage 9: the vector registers of a task resumed from a blocking native
+/// call, and the `FS` base a switch gives a program (x86-64).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_switch_state() {
+    if let Err(problem) = arch::check_switch_state() {
+        fatal!(
+            catalog::STAGE9_OBJECTS,
+            "stage 9 switch-state self-check failed: {problem}"
+        );
+    }
 }
 
 /// Stage 9: allocation failure, injected under the native calls, survived

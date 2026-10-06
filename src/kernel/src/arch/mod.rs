@@ -124,6 +124,18 @@ pub(crate) const fn write_combining_processors() -> Option<usize> {
     None
 }
 
+// What the switch gives a program back, checked in ring 3: x86-64's vector-
+// state contract and its FS base kept in the task (docs/OPAQUE-KERNEL.md
+// §9.8, 3a and 3b), which the Arm architectures do not have.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::check_switch_state;
+
+/// No vector-state contract and no segment bases: nothing to check here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn check_switch_state() -> Result<(), &'static str> {
+    Ok(())
+}
+
 // A signal return page, for an architecture without a vDSO its programs
 // could read: ARMv7-A's (`syscall::sigpage`, F-48).
 #[cfg(target_arch = "arm")]

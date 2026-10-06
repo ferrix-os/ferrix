@@ -397,14 +397,14 @@ fn write_fp_area(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
 /// carries the same bytes after its `fsave` environment (`compat`).
 fn fp_area(state: &UserState) -> Result<FrameBytes, BadFrame> {
     let mut area = FrameBytes::zeroed(fp_area_bytes())?;
-    area.put(0, state.fxsave())?;
+    area.put(0, &state.fxsave())?;
     if frame_has_xstate() {
         area.put_u32(SW_MAGIC1, FP_XSTATE_MAGIC1)?;
         area.put_u32(SW_EXTENDED_SIZE, (XSTATE_BYTES + 4) as u32)?;
         area.put_u64(SW_XFEATURES, cpu::extended_state_components())?;
         area.put_u32(SW_XSTATE_SIZE, XSTATE_BYTES as u32)?;
         area.put_u64(XSTATE_BV, state.xstate_bv())?;
-        area.put(AVX_AT, state.avx())?;
+        area.put(AVX_AT, &state.avx())?;
         area.put_u32(XSTATE_BYTES, FP_XSTATE_MAGIC2)?;
     } else {
         area.put_u32(SW_MAGIC1, 0)?;
@@ -549,7 +549,7 @@ fn restore_fpu(space: &AddressSpace, at: u64) -> Result<(), BadFrame> {
     // its own; captured only to learn `MXCSR_MASK` and to carry the area.
     let mut state = unsafe { UserState::capture() };
     let mut live = FrameBytes::zeroed(FXSAVE_BYTES)?;
-    live.put(0, state.fxsave())?;
+    live.put(0, &state.fxsave())?;
     let mask = match live.u32_at(MXCSR_MASK)? {
         0 => DEFAULT_MXCSR_MASK,
         mask => mask,

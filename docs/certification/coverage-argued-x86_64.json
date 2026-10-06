@@ -75,28 +75,28 @@
     },
     {
       "file": "arch/x86_64/cpu.rs",
-      "lines": "699, 705",
+      "lines": "755, 761",
       "category": "defensive",
       "match": "let empty = [0_u8; 10];",
       "why": "The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "147",
+      "lines": "179",
       "category": "failure-path",
       "match": "}",
       "why": "The closing brace of `check_exception_entry` is only the early return of a `?`, when the NMI, breakpoint or saved-register check has failed; the passing path leaves by the tail jump to `trap::check::run` (objdump of the measured image: `pop %rbp; ret` under line 140, `pop %rbp; jmp trap::check::run` under 139). A failed check stops the boot with `STAGE3_TRAPS`."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1564, 1566",
+      "lines": "1596, 1598",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1627",
+      "lines": "1659",
       "category": "failure-path",
       "match": "cpu::hlt();",
       "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
@@ -1118,77 +1118,77 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2790-2791",
+      "lines": "2832-2833",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2795",
+      "lines": "2837",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2800-2801",
+      "lines": "2842-2843",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2804-2805",
+      "lines": "2846-2847",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2809",
+      "lines": "2851",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2812-2813",
+      "lines": "2854-2855",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2818",
+      "lines": "2860",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2822",
+      "lines": "2864",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2829",
+      "lines": "2871",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2834",
+      "lines": "2876",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2844",
+      "lines": "2886",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."

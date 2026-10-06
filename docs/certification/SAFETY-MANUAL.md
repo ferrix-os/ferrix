@@ -476,6 +476,17 @@ controls, the unpacker made to create the entries on a tmpfs-root boot
 integrator shall use `ferrix-vfs` as this tree builds it, or show the same of
 the unpacker it uses.
 
+### AoU-25 — a native program keeps no vector register live across a blocking native call (x86-64)
+On x86-64, `channel_write_read`, `object_wait_one` and `port_wait` made with
+`SYSCALL` destroy every vector register the System V AMD64 ABI makes
+caller-saved, keeping `MXCSR` and the x87 control word (H.SCHED.12;
+`ferrix_native_abi::nr`, *The vector-state contract*). A program resumed from
+one finds those registers in their initial state, never another program's
+values. The native runtime (`ferrix_rt`) declares the loss on its trap, so
+code built on it keeps no value there; a program that issues these calls by
+other means shall declare the same clobbers, or it loses the values it kept,
+which harms only itself. No Linux call and no other architecture is affected.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —
