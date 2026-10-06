@@ -1633,4 +1633,95 @@ package FerrixObjectRequirements {
                 "syscall::native::receive_words", "sched::work::own_end");
         }
     }
+
+    package FastPath {
+        doc /* src/kernel/src/object/channel.rs and src/kernel/src/syscall/native.rs:
+             * channel_write_read's fast path, its park and its continuation
+             * (docs/OPAQUE-KERNEL.md §9.7, parts 2 and 3). x86-64 only. */
+
+        requirement <'L.object.164'> aParkIsSetBesideAnEmptyInbox : ItemLowLevel {
+            attribute :>> statement = "A park record shall be set only while its
+                side's inbox is empty, nothing else is parked there and the peer has
+                not closed, with its task set blocked in the same hold of the inbox
+                lock; the receive half then makes a SeqCst fence and looks at END
+                before it blocks.";
+            attribute :>> criterion = "Case 4's two readers are both answered (the
+                `fastcase` line); the loom model park.rs and its controls.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("object::channel::Endpoint::park",
+                "syscall::native::park_for_reply", "sched::direct::block_parked",
+                "sched::direct::set_blocked");
+        }
+        requirement <'L.object.165'> aGeneralWriterWakesThePark : ItemLowLevel {
+            attribute :>> statement = "A write, write_small, unread or close that
+                changes an inbox shall take its park record under the inbox lock and
+                wake the parked task after letting the lock go, counting the wait as
+                ended by a wake.";
+            attribute :>> criterion = "write_read_check's waits and the continuation's
+                message and close cases end within the bound with the fast path on;
+                with the take left out the loom control strands a reader.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("object::channel::Inbox::take_parked",
+                "object::channel::wake_parked", "sched::wait::WaitQueue::note_ended_by_a_wake");
+        }
+        requirement <'L.object.166'> theSendHalfDeclinesOrCommits : ItemLowLevel {
+            attribute :>> statement = "send_direct shall take the two halves' inbox
+                locks only if free, the first side's before the second's, decline
+                unless the caller's inbox is empty (T6), nothing is parked on its side
+                (T7), its peer is open (T8), a reader is parked on the peer's side
+                (T9) and the peer's side has no observers and no waiters (T10), stop
+                the machine with FX-0531 for a record beside a message or on a
+                closed end (A2), and otherwise fill the reader's reply cell, park
+                the caller and hand the processor over.";
+            attribute :>> criterion = "ipc-equiv's cases 3, 5, 8 and 12, and stage 9's
+                case 4, reach T6 to T10 with the fast path on and get the general
+                path's results; each test's control fails its case.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = "object::channel::Endpoint::send_direct";
+        }
+        requirement <'L.object.167'> theReplyIsZeroPastItsCount : ItemLowLevel {
+            attribute :>> statement = "The words a commit hands over shall be the
+                count's bytes of the sent words, the bytes past the count zero.";
+            attribute :>> criterion = "ipc-equiv's case 1 with the fast path on.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("syscall::native::reply_words", "syscall::native::words_of",
+                "syscall::native::sent_bytes");
+        }
+        requirement <'L.object.168'> theContinuationIsTheGeneralPath : ItemLowLevel {
+            attribute :>> statement = "A caller the fast path parked and woken without
+                a reply shall open interrupts, stop with FX-0533 if it may not block,
+                leave its record, answer EINTR if END is posted or carry on as
+                receive_words does, write the call's audit record as
+                dispatch_write_read does, and run regroup_current and call_left.";
+            attribute :>> criterion = "The continuation's cases by a message, its
+                peer's close and its kill answer the message, PEER_CLOSED and EINTR
+                (the `fastcase` line).";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("syscall::native::continue_general",
+                "object::channel::Endpoint::unpark");
+        }
+        requirement <'L.object.169'> theFastPathLooksAsTheGeneralPathDoes : ItemLowLevel {
+            attribute :>> statement = "fast_write_read shall decline, having changed
+                nothing but its counts and IN_CALL, unless the filter would let the
+                call through unlooked at (T2), it sends at most 24 bytes (T3), and the
+                handle table's lock is free and channel_in finds an endpoint with
+                READ and WRITE (T4, T5).";
+            attribute :>> criterion = "Stage 9's case 11 is refused with the filter's
+                errno with the fast path on; ipc-equiv's case 12 answers every
+                refusal as the general path does, with its audit records.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("syscall::native::fast_write_read",
+                "object::process::Process::try_with_handles", "trap::filter_quiet",
+                "trap::set_filter_quiet");
+        }
+        requirement <'L.object.170'> theWayOutsAreShared : ItemLowLevel {
+            attribute :>> statement = "channel_write_read's answer shall go into the
+                program's registers through write_read_outcome on the general path,
+                the frame tail and the continuation alike.";
+            attribute :>> criterion = "ipc-equiv's transcripts are the same on both
+                boots.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = "syscall::write_read_outcome";
+        }
+    }
 }
