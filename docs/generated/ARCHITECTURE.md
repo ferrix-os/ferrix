@@ -119,7 +119,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 133 packages, 6418 elements, 215 relations. Model digest `a0bf88deae8aacf9`.
+26 files, 135 packages, 6518 elements, 215 relations. Model digest `2785e27b6301029f`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -276,8 +276,9 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.15` | A slot whose generations are all used shall be retired, so that no handle value is ever issued twice. | After every generation of one slot has been issued and closed, the next handle comes from another slot, and 0 of the values issued before it are issued again or resolve. | `O.CAPABILITY, ASR-3` |
 | `H.OBJ.16` | The peer of a destroyed channel end shall observe PEER_CLOSED from the moment the close returns, and what the destroyed end held shall be freed. | After one end of a channel holding a queued VMO is closed, a read and a write on the survivor are refused PEER_CLOSED, 2 of 2, and 0 frames are leaked. | `O.CAPABILITY, O.QUOTA` |
 | `H.OBJ.17` | A port registration shall queue exactly one packet, with its key and the asserted signals it asked for, when one of them is first asserted, at once if one already is. | A registration does not fire before its signal, fires once on the message that asserts it and not on a second, fires at once for a state already true, and fires when the peer closes for PEER_CLOSED, each packet with its key. | `G.7, O.CAPABILITY` |
+| `H.OBJ.18` | Every result of channel_write_read answered by the fast path shall be a result the general path gives in the same circumstances, and the fast path shall bypass no filter, audit record or speculation barrier. x86-64 only, behind ferrix.fastpath. | ipc-equiv's transcripts with the fast path on and off are the same line for line, with trips taken on and no counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path cases hold both boots to the general path's results (the `fastcase` line); a filtered call is refused with the filter's errno. | `G.7, O.CAPABILITY` |
 
-17 requirements.
+18 requirements.
 
 ### Scheduling
 
@@ -3961,6 +3962,13 @@ flowchart LR
 | `L.object.132` | `aTrustingWaitIsWokenByWhatEndsIt` | — | — | — |
 | `L.object.140` | `anEndsWordIsItsInbox` | — | — | — |
 | `L.object.141` | `aWakerFencesTheWordBeforeItsWake` | — | — | — |
+| `L.object.164` | `aParkIsSetBesideAnEmptyInbox` | — | — | — |
+| `L.object.165` | `aGeneralWriterWakesThePark` | — | — | — |
+| `L.object.166` | `theSendHalfDeclinesOrCommits` | — | — | — |
+| `L.object.167` | `theReplyIsZeroPastItsCount` | — | — | — |
+| `L.object.168` | `theContinuationIsTheGeneralPath` | — | — | — |
+| `L.object.169` | `theFastPathLooksAsTheGeneralPathDoes` | — | — | — |
+| `L.object.170` | `theWayOutsAreShared` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.5` | `aSkippedArmIsNeverLate` | — | — | — |
@@ -3984,6 +3992,14 @@ flowchart LR
 | `L.sched.50` | `theIdleBitChangesOnlyWithTheIdleTask` | — | — | — |
 | `L.sched.51` | `aCountedMoveIsReadWithItsJob` | — | — | — |
 | `L.sched.52` | `aWayOutSwapsOnlyItsOwnPostedRequest` | — | — | — |
+| `L.sched.55` | `handOverIsTheGeneralSequence` | — | — | — |
+| `L.sched.56` | `onlyWhenNothingElseCouldBePicked` | — | — | — |
+| `L.sched.57` | `theTailIsChooseNexts` | — | — | — |
+| `L.sched.58` | `theAssertsStopTheMachine` | — | — | — |
+| `L.sched.59` | `theReplyCellIsTheTasksOwn` | — | — | — |
+| `L.sched.60` | `theFrameTailLooksAtEverything` | — | — | — |
+| `L.sched.61` | `theCountsAreTheKernels` | — | — | — |
+| `L.sched.62` | `theLastLooksHook` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
@@ -4233,6 +4249,8 @@ flowchart LR
 | `L.x86_64.156` | `anUnsavedStateReadsAsInitial` | — | — | — |
 | `L.x86_64.157` | `pkruIsNeverReset` | — | — | — |
 | `L.x86_64.158` | `theBasesAreWrittenAtEverySwitch` | — | — | — |
+| `L.x86_64.159` | `theFastPathIsEnteredFromSyscallOnly` | — | — | — |
+| `L.x86_64.160` | `theFrameTailWritesFourRegisters` | — | — | — |
 | `L.x86_64.13` | `sigreturnLoadsFpu` | — | — | — |
 | `L.x86_64.14` | `compatEntryHasUserData` | — | — | — |
 | `L.x86_64.15` | `handlerEnteredWithUserData` | — | — | — |
@@ -4297,6 +4315,7 @@ flowchart LR
 | `L.x86_64.124` | `theFilterIsAskedBeforeAnyAnswerOfTheEntrys` | — | — | — |
 | `L.x86_64.125` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.x86_64.140` | `theEntrySortsANumberOnce` | — | — | — |
+| `L.x86_64.150` | `theFastPathSwitchIsReadOnce` | — | — | — |
 | `L.x86_64.72` | `int80IsAnI386Call` | — | — | — |
 | `L.x86_64.73` | `i386SignalsDeliveredOnTheWayBack` | — | — | — |
 | `L.x86_64.74` | `aForeignImageIsRefused` | — | — | — |

@@ -44,6 +44,11 @@ pub(crate) const ARCH: Arch = Arch::X86_64;
 /// Which `struct stat` the stat calls fill in: x86-64's own, 144 bytes, from
 /// `arch/x86/include/uapi/asm/stat.h`. x86-64 kept the layout it grew rather
 /// than adopting the generic one, so this is not the AArch64 answer.
+/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
+/// path for `channel_write_read` when one is registered
+/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
+pub(crate) const FAST_WRITE_READ: bool = true;
+
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Legacy;
 
 /// x86-64's `struct epoll_event`, 12 bytes: `EPOLL_PACKED` in

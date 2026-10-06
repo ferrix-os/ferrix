@@ -344,6 +344,76 @@ pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outc
     }
 }
 
+/// Whether the registered filter would let every call of the running task
+/// through without looking at it: what the fast path tests first (T2,
+/// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before
+/// [`filter_system_call`]. Registered by the personality beside its filter,
+/// as `set_syscall_filter` is; a filter registered without one is never
+/// quiet, and with no filter registered every call is.
+pub(crate) type FilterQuiet = fn() -> bool;
+
+/// The registered [`FilterQuiet`].
+static FILTER_QUIET: Once<FilterQuiet> = Once::new();
+
+/// Say with `quiet` when the registered filter lets calls through unlooked
+/// at. The first registration stands; `main.rs` makes it beside the
+/// filter's, before anything can enter user mode.
+pub(crate) fn set_filter_quiet(quiet: FilterQuiet) {
+    let _ = FILTER_QUIET.call_once(|| quiet);
+}
+
+/// Whether the registered filter would let the running task's calls through
+/// without looking: see [`FilterQuiet`]. With interrupts masked, as the
+/// entry holds them.
+pub(crate) fn filter_quiet() -> bool {
+    match (SYSCALL_FILTER.get(), FILTER_QUIET.get()) {
+        (None, _) => true,
+        (Some(_), Some(quiet)) => quiet(),
+        (Some(_), None) => false,
+    }
+}
+
+/// What step 4's fast path made of a `channel_write_read`
+/// (`docs/OPAQUE-KERNEL.md` §9.7, part 2).
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Fast {
+    /// A test failed, and nothing changed: the entry goes on as for any
+    /// call, from the filter.
+    Declined,
+    /// Answered with a reply another commit handed over: the frame tail
+    /// writes it and leaves by the stub's own exit, or by the general way out
+    /// when work is due.
+    Tail(Outcome),
+    /// Answered by the general continuation, which has run the call's way
+    /// back as `system_call` does (`regroup_current`, `call_left`): the entry
+    /// writes it and makes its way out.
+    Done(Outcome),
+}
+
+/// The fast path, given the call's six argument registers. Entered from
+/// x86-64's `SYSCALL` entry alone, with interrupts masked, before the
+/// filter; returns with them masked.
+pub(crate) type FastWriteRead = fn(&[u64; 6]) -> Fast;
+
+/// The registered fast path: set at boot only when `ferrix.fastpath=on`
+/// (`fastpath.rs`), so that an unset slot is the switch off (T1).
+static FAST_WRITE_READ: Once<FastWriteRead> = Once::new();
+
+/// Take `channel_write_read` through `fast` from now on. Registered once,
+/// before the first program, and only on a boot that asks for it.
+pub(crate) fn set_fast_write_read(fast: FastWriteRead) {
+    let _ = FAST_WRITE_READ.call_once(|| fast);
+}
+
+/// The registered fast path, if this boot has one.
+pub(crate) fn fast_write_read() -> Option<FastWriteRead> {
+    FAST_WRITE_READ.get().copied()
+}
+
 /// Answer one system call: what every architecture's system call path calls,
 /// with the registers it read.
 ///

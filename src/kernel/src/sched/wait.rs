@@ -18,7 +18,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sync::IrqSpinLock;
 
@@ -87,6 +87,12 @@ pub(crate) struct WaitQueue {
     /// it, and failed the signalfd check (FX-0884) once in a loaded control of
     /// twenty `test-shell` runs on 2026-09-26.
     woken: AtomicU32,
+    /// How many tasks are listed, stored under the list's lock whenever the
+    /// list changes: what the fast path's T10 reads without taking the lock
+    /// (`docs/OPAQUE-KERNEL.md` §9.7, "as built"). A reader without the lock
+    /// may see a listing a moment late, which it takes as a waiter that
+    /// listed itself after its look.
+    count: AtomicUsize,
     /// How many times [`WaitQueue::wake_all`] has run, whether or not anyone
     /// was waiting: a number that moves whenever what the queue waits for may
     /// have changed, which is what `epoll`'s edge-triggered mode reads as an
@@ -109,6 +115,7 @@ impl WaitQueue {
         WaitQueue {
             waiters: IrqSpinLock::new(Vec::new()),
             woken: AtomicU32::new(0),
+            count: AtomicUsize::new(0),
             wakes: AtomicU64::new(0),
         }
     }
@@ -235,7 +242,12 @@ impl WaitQueue {
             // then as it would be anyway (finding F-23). A wait that trusts
             // its wakes files no deadline while it is listed, and a recheck's
             // when it could not be.
-            let listed = fallible::try_push(&mut self.waiters.lock(), Arc::clone(&task)).is_ok();
+            let listed = {
+                let mut waiters = self.waiters.lock();
+                let listed = fallible::try_push(&mut waiters, Arc::clone(&task)).is_ok();
+                self.count.store(waiters.len(), Ordering::Release);
+                listed
+            };
             let wake_at = if listed || wake_at != u64::MAX {
                 wake_at
             } else {
@@ -330,7 +342,9 @@ impl WaitQueue {
             // `wait_until_deadline`: that queue's wake is missed and the
             // recheck finds what it would have said.
             for queue in queues {
-                let _ = fallible::try_push(&mut queue.waiters.lock(), Arc::clone(&task));
+                let mut waiters = queue.waiters.lock();
+                let _ = fallible::try_push(&mut waiters, Arc::clone(&task));
+                queue.count.store(waiters.len(), Ordering::Release);
             }
             task.set_state(BLOCKED);
             if ready() {
@@ -360,6 +374,7 @@ impl WaitQueue {
         let mut waiters = self.waiters.lock();
         let listed = waiters.len();
         waiters.retain(|waiter| waiter.id != id);
+        self.count.store(waiters.len(), Ordering::Release);
         waiters.len() != listed
     }
 
@@ -373,6 +388,20 @@ impl WaitQueue {
     /// onto the queue before the wake, not guess it from how long it gave it.
     pub(crate) fn listed(&self) -> usize {
         self.waiters.lock().len()
+    }
+
+    /// Count a wait on this queue's object ended by a wake that did not go
+    /// through the list: a reader parked by the fast path, which a general
+    /// write or close took off its record and woke
+    /// (`docs/OPAQUE-KERNEL.md` §9.7).
+    pub(crate) fn note_ended_by_a_wake(&self) {
+        let _ = self.woken.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many tasks are listed, read without the list's lock: the fast
+    /// path's T10 (`docs/OPAQUE-KERNEL.md` §9.7). See the field.
+    pub(crate) fn listed_now(&self) -> usize {
+        self.count.load(Ordering::Acquire)
     }
 
     /// How many times the queue has been woken: see the field.
@@ -402,14 +431,16 @@ impl WaitQueue {
         let mut few: [Option<Arc<Task>>; WAKE_BATCH] = [const { None }; WAKE_BATCH];
         let many = {
             let mut waiters = self.waiters.lock();
-            if waiters.len() <= WAKE_BATCH {
+            let taken = if waiters.len() <= WAKE_BATCH {
                 for (slot, task) in few.iter_mut().zip(waiters.drain(..)) {
                     *slot = Some(task);
                 }
                 Vec::new()
             } else {
                 core::mem::take(&mut *waiters)
-            }
+            };
+            self.count.store(0, Ordering::Release);
+            taken
         };
         for task in few.iter().flatten().chain(&many) {
             super::wake_with(task, how);

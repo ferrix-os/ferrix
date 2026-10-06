@@ -415,12 +415,19 @@ impl CpuQueue {
     /// (finding F-23). A task without its slot is already queued somewhere,
     /// which the callers' `is_queued` checks rule out; it is left alone.
     pub(crate) fn insert(&mut self, task: &Arc<Task>) {
+        self.insert_at(task, None);
+    }
+
+    /// [`CpuQueue::insert`], charging the running task up to `now` when it
+    /// is given, so that a caller that has read the clock once reads it no
+    /// more: the direct switch's `hand_over`.
+    pub(crate) fn insert_at(&mut self, task: &Arc<Task>, now: Option<u64>) {
         let Some(slot) = task.take_run_slot() else {
             super::note_missing_slot();
             return;
         };
         if self.current.is_some() {
-            self.account(crate::timer::now_nanos());
+            self.account(now.unwrap_or_else(crate::timer::now_nanos));
         }
         // A task new to any queue is counted in its job's load here, once;
         // one woken was counted as it became runnable. Its weight is its
@@ -553,7 +560,7 @@ impl CpuQueue {
             .map(|left| now.saturating_add(left));
 
         match [sleeper, slice].into_iter().flatten().min() {
-            Some(at) => crate::timer::after(at.saturating_sub(now).max(MIN_ARM_NS)),
+            Some(at) => crate::timer::after_from(at.saturating_sub(now).max(MIN_ARM_NS), now),
             None => crate::timer::stop(),
         }
     }
@@ -607,6 +614,77 @@ impl CpuQueue {
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
         self.fair.should_preempt()
+    }
+
+    /// Whether a sleeper's time has come by `now`: whether
+    /// [`CpuQueue::wake_sleepers`] at `now` would find an entry to take. The
+    /// direct switch declines when one has, rather than wake it, so that a
+    /// declined attempt leaves the queue as it found it (T12,
+    /// `docs/OPAQUE-KERNEL.md` §9.7).
+    pub(crate) fn sleeper_due(&self, now: u64) -> bool {
+        self.sleepers.first_due().is_some_and(|at| at <= now)
+    }
+
+    /// The direct switch's queue operation (`docs/OPAQUE-KERNEL.md` §9.7,
+    /// part 1): `peer`, made runnable by its caller, joins this queue while
+    /// the running task still runs, `between` runs (the running task is set
+    /// blocked there), the running task leaves the fair class, and the pick
+    /// is made. The general path's sequence -- the wake's
+    /// [`CpuQueue::insert`], then `choose_next`'s `account`,
+    /// `detach_current` and `pick_next` -- with every clock read at `now`,
+    /// on a queue with nothing waiting and no sleeper due, so the pick can
+    /// only be `peer`. Answers the pick.
+    ///
+    /// `insert`'s charge and the weight it gives `peer` are its own code;
+    /// the fair class's part is `RunQueue::hand_over`, which the host test
+    /// holds to `enqueue`, the rescale, `remove_curr` and `pick_next` bit for
+    /// bit. `choose_next`'s second `account`, at the same `now`, changes
+    /// nothing and is not made.
+    pub(crate) fn hand_over(
+        &mut self,
+        peer: Arc<Task>,
+        now: u64,
+        between: impl FnOnce(Arc<Task>),
+    ) -> Option<Arc<Task>> {
+        let Some(slot) = peer.take_run_slot() else {
+            super::note_missing_slot();
+            return None;
+        };
+        if self.current.is_some() {
+            self.account(now);
+        }
+        // As `insert`: counted in its job (it already is, made runnable),
+        // and weighed by its job's share as things stand, the caller still
+        // counted.
+        peer.join_group();
+        peer.set_weight(peer.effective_weight());
+        // `rescale_slice` as `insert` makes it, with the peer counted.
+        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
+        let (id, state) = (peer.id, peer.entity_state());
+        // The peer's own reference goes into the queue, and the caller's
+        // comes out of it into `between`: moved, not counted up and down.
+        match self.fair.hand_over(id, peer, state, slot, slice_after) {
+            Ok(left) => {
+                if let Some(next) = self.fair.current() {
+                    next.set_queued(true);
+                }
+                if let Some((_, task, state, slot)) = left {
+                    task.return_run_slot(slot);
+                    task.store_entity_state(state);
+                    task.set_queued(false);
+                    // The caller set blocked and parked, its job's load let
+                    // go after the peer's weight was taken with it counted.
+                    between(task);
+                }
+            }
+            Err(refused) => {
+                // A duplicate or a weight of zero, neither of which this
+                // kernel makes: as `insert` refuses.
+                refused.payload.return_run_slot(refused.slot);
+                return None;
+            }
+        }
+        self.fair.current().cloned()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.

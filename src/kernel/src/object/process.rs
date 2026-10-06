@@ -444,6 +444,14 @@ impl Process {
         change(&mut self.handles.lock())
     }
 
+    /// [`Process::with_handles`] for a look that may not wait: `look` runs
+    /// on the table if its lock is free right now, and `None` otherwise. The
+    /// fast path's lookup (`docs/OPAQUE-KERNEL.md` §9.7, T4), which waits on
+    /// no lock.
+    pub(crate) fn try_with_handles<R>(&self, look: impl FnOnce(&HandleTable) -> R) -> Option<R> {
+        self.handles.try_lock().map(|table| look(&table))
+    }
+
     /// The job it is in: its cgroup.
     pub(crate) fn job(&self) -> Arc<Job> {
         Arc::clone(&self.membership.lock())

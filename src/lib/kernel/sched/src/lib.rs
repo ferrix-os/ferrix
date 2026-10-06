@@ -246,6 +246,10 @@ pub struct Refused<T> {
     pub reason: SchedError,
 }
 
+/// A running entity taken off its queue: its identifier, its data, what it
+/// carries away and its slot, as [`RunQueue::remove_curr`] answers it.
+pub type Left<T> = (u64, T, EntityState, Slot<T>);
+
 /// One entity, while it is on a queue.
 #[derive(Debug)]
 pub(crate) struct Entity<T> {
@@ -528,6 +532,18 @@ impl<T> RunQueue<T> {
             self.sum = 0;
             return;
         }
+        // One entity, running, and nothing waiting: the virtual time is its
+        // virtual runtime, which is what the division below comes to, written
+        // down (`docs/OPAQUE-KERNEL.md` §9.7, part 7: every charge of a task
+        // alone on its queue, and every direct switch, makes this one).
+        if self.tree.is_empty()
+            && let Some(curr) = self.curr.as_ref().map(|node| &node.entity)
+            && self.load == u64::from(curr.weight)
+        {
+            self.zero = curr.vruntime;
+            self.sum = 0;
+            return;
+        }
         let target = self.avg_vruntime();
         let shift = self.relative(target);
         self.sum -= shift * i128::from(self.load);
@@ -614,6 +630,101 @@ impl<T> RunQueue<T> {
         let node = self.tree.remove(key)?;
         let chosen = self.curr.insert(node);
         chosen.entity.payload.as_ref()
+    }
+
+    /// The direct switch's step (`docs/OPAQUE-KERNEL.md` §9.7, part 1): `id`
+    /// arrives and runs, and the running entity leaves, on a queue where
+    /// nothing waits. Exactly [`RunQueue::enqueue`] of `id`, then
+    /// [`RunQueue::set_slice_ns`] to `slice_after` (the slice the caller's
+    /// queue rescales to once `id` is on it), then [`RunQueue::remove_curr`]
+    /// and [`RunQueue::pick_next`] -- every quantity of the queue, of the
+    /// arriving entity and of the leaving one bit for bit as those calls
+    /// leave them, which the host test holds it to -- without the tree they
+    /// go through: with nothing waiting the pick can only be `id`. Answers
+    /// the leaving entity's parts, as [`RunQueue::remove_curr`] does.
+    ///
+    /// On a queue with something waiting, or nothing running, it is those
+    /// calls themselves.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::enqueue`], with nothing changed.
+    pub fn hand_over(
+        &mut self,
+        id: u64,
+        payload: T,
+        state: EntityState,
+        slot: Slot<T>,
+        slice_after: u64,
+    ) -> Result<Option<Left<T>>, Refused<T>> {
+        if !self.tree.is_empty() || self.curr.is_none() || slice_after == 0 {
+            self.enqueue(id, payload, state, slot)?;
+            let _ = self.set_slice_ns(slice_after);
+            let left = self.remove_curr();
+            let _ = self.pick_next();
+            return Ok(left);
+        }
+        if state.weight == 0 {
+            return Err(Refused {
+                payload,
+                slot,
+                reason: SchedError::ZeroWeight,
+            });
+        }
+        if self.curr.as_ref().is_some_and(|curr| curr.entity.id == id) {
+            return Err(Refused {
+                payload,
+                slot,
+                reason: SchedError::Duplicate(id),
+            });
+        }
+        // `enqueue`: placed by the lag it brings, counted, and the base moved
+        // to the virtual time.
+        let lag = self.placement_lag(state);
+        let vruntime = self.avg_vruntime().wrapping_sub(lag as u64);
+        let deadline = vruntime.wrapping_add(self.vslice(state.weight));
+        self.add_load(vruntime, state.weight);
+        self.normalize();
+        // `set_slice_ns`.
+        self.config.slice_ns = slice_after;
+        // `remove_curr`: the leaving entity's lag, measured while it is still
+        // counted, then uncounted. Only the arrival is left, so `normalize`
+        // puts the base at its virtual runtime and the sum at nothing, which
+        // is written down rather than divided out.
+        let Some(mut leaving) = self.curr.take() else {
+            return Ok(None);
+        };
+        let entity = &leaving.entity;
+        let limit = self.lag_limit(entity.weight);
+        let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
+        let (left_id, weight, sum_exec) = (entity.id, entity.weight, entity.sum_exec);
+        self.load -= u64::from(weight);
+        self.zero = vruntime;
+        self.sum = 0;
+        // `pick_next`: the arrival, the only entity, runs.
+        let Slot(mut node) = slot;
+        node.entity = Entity {
+            id,
+            weight: state.weight,
+            vruntime,
+            deadline,
+            sum_exec: state.sum_exec,
+            payload: Some(payload),
+        };
+        self.curr = Some(node);
+        let Some(payload) = leaving.entity.payload.take() else {
+            return Ok(None);
+        };
+        Ok(Some((
+            left_id,
+            payload,
+            EntityState {
+                weight,
+                vlag,
+                sum_exec,
+            },
+            Slot(leaving),
+        )))
     }
 
     /// The eligible entity with the earliest deadline.

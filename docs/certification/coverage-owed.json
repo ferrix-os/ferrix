@@ -18,6 +18,16 @@
   "what": "Absent hardware under the coverage run: x86_64 coverage is measured under TCG, which offers no ERAPS. arch/x86_64/speculation.rs switch_barrier_in_domain's `return false` and Plan::for_processor's and eraps_empties_on_switch's true outcome are reached on the reference host's KVM boot (test-boot --arch x86_64 --accel kvm, gate tag po7-ipcM-eraps3-kvm, whose defences line names ERAPS) and by control c2. Measure them under KVM or argue them as absent-hardware rows."
  },
     {
+      "landing": "OPAQUE-KERNEL.md §9.7 step 4, the direct switch and the fast path for channel_write_read (branch po7/step4)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "carried from the evidence's own commits, no anchor dropped.",
+      "what": "Measure and test or argue the new and edited lines on every architecture: sched/direct.rs whole (begin, Direct::hand_over and switch, count, counts, block_parked, set_blocked, set_running_blocked), sched/mod.rs switch_chosen, require_preemption_on, nothing_due_here, set_in_call_masked; sched/queue.rs hand_over, insert_at, sleeper_due; sched/task.rs fill_reply, take_reply, set_state_from, holds_sleep_slot and the load-and-store statistics; sched/work.rs peek and fast_path_hook; sched/wait.rs's listed count; object/channel.rs the park record, take_parked and wake_parked in write, write_small, unread and the close, send_direct, sendable, park, unpark; syscall/native.rs fast_write_read, continue_general, park_for_reply, reply_words; arch/x86_64/syscall.rs frame_tail, leave, write_outcome; trap.rs filter_quiet, fast_write_read; timer.rs after_from, REQUESTED and stop; fastpath.rs's registration and report_counts. On AArch64 and ARMv7-A the record is never set and the fast path never registered (arch::FAST_WRITE_READ false): argued, not reached. The check code: object/fast_path_check.rs and the vector check's sending variant."
+    },
+    {
       "landing": "OPAQUE-KERNEL.md §9.7, step 4's groundwork: ferrix.fastpath (branch step4-prep)",
       "architectures": [
         "x86_64",

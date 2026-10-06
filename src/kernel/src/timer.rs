@@ -151,25 +151,36 @@ fn armed_slot() -> Option<&'static AtomicU64> {
 /// Called with interrupts masked on the processor whose timer it arms, as the
 /// scheduler calls it.
 pub(crate) fn after(nanos: u64) {
-    let periodic = INTERVAL.swap(0, Ordering::Relaxed) != 0;
-    let Some(slot) = armed_slot() else {
+    after_from(nanos, now_nanos());
+}
+
+/// [`after`], for a caller that read the clock at `now` a moment ago: the
+/// scheduler, which reads it once a decision. The deadline asked for is
+/// taken from `now`, so it is no later than [`after`]'s would be, and a skip
+/// it allows is never late; the bound kept after an arm is still read after
+/// the write.
+pub(crate) fn after_from(nanos: u64, now: u64) {
+    // A load first, and the swap only for a periodic timer: a one-shot asked
+    // for at every switch makes no read-modify-write here.
+    let periodic =
+        INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
+    let Some(cpu) = crate::smp::this_cpu().map(|cpu| cpu.logical) else {
         arch::timer_arm(nanos);
         return;
     };
-    let wanted = now_nanos().saturating_add(nanos).max(1);
+    let (Some(slot), Some(requested)) = (ARMED.get(cpu), REQUESTED.get(cpu)) else {
+        arch::timer_arm(nanos);
+        return;
+    };
+    let wanted = now.saturating_add(nanos).max(1);
     let armed = slot.load(Ordering::Relaxed);
-    let requested = crate::smp::this_cpu()
-        .and_then(|cpu| REQUESTED.get(cpu.logical))
-        .map_or(u64::MAX, |requested| requested.load(Ordering::Relaxed));
-    if !periodic && armed != 0 && (armed <= wanted || requested <= wanted) {
+    if !periodic && armed != 0 && (armed <= wanted || requested.load(Ordering::Relaxed) <= wanted) {
         return;
     }
     arch::timer_arm(nanos);
     // After the arm, so that what is kept bounds the interrupt from above.
     slot.store(now_nanos().saturating_add(nanos).max(1), Ordering::Relaxed);
-    if let Some(requested) = crate::smp::this_cpu().and_then(|cpu| REQUESTED.get(cpu.logical)) {
-        requested.store(wanted, Ordering::Relaxed);
-    }
+    requested.store(wanted, Ordering::Relaxed);
 }
 
 /// Fire the timer interrupt every `nanos` until [`stop`].
@@ -223,7 +234,10 @@ fn arm_at(deadline: u64) {
 /// where stopping it is an exit under a hypervisor every time a processor
 /// goes quiet. A periodic timer, which would fire for ever, is stopped.
 pub(crate) fn stop() {
-    let periodic = INTERVAL.swap(0, Ordering::Relaxed) != 0;
+    // A load first, and the swap only for a periodic timer: a one-shot asked
+    // for at every switch makes no read-modify-write here.
+    let periodic =
+        INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
     // A one-shot that is not armed -- one that fired, which leaves the
     // hardware quiet (`timer_disarm_fired`), or one never armed -- has
     // nothing to stop: writing it again was two exits at every switch to a
