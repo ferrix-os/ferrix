@@ -626,6 +626,13 @@ impl Task {
         self.run_slot.lock().is_some() && self.sleep_slot.lock().is_some()
     }
 
+    /// Whether it holds its sleep slot: no sleeper set or reaper's list
+    /// holds it. The direct switch's half of [`Task::holds_slots`]; its run
+    /// slot is held exactly while it is not queued, which it asserts.
+    pub(crate) fn holds_sleep_slot(&self) -> bool {
+        self.sleep_slot.lock().is_some()
+    }
+
     /// Swap in whether it is inside a system call, for the switch that takes
     /// it off its processor, and answer what it was: see `sched::IN_CALL`.
     pub(crate) fn swap_in_call(&self, in_call: bool) -> bool {
@@ -659,8 +666,12 @@ impl Task {
     }
 
     /// Charge it for time on a CPU.
+    ///
+    /// A load and a store: only the run queue that owns it charges it, under
+    /// that queue's lock, and readers take one load.
     pub(crate) fn add_runtime(&self, nanos: u64) {
-        let _ = self.sum_exec.fetch_add(nanos, Ordering::Relaxed);
+        let total = self.sum_exec.load(Ordering::Relaxed).wrapping_add(nanos);
+        self.sum_exec.store(total, Ordering::Relaxed);
     }
 
     /// Real nanoseconds it has run for, up to when it was last charged: the
@@ -712,10 +723,18 @@ impl Task {
     }
 
     /// Note that it is about to run on `cpu`.
+    ///
+    /// Loads and stores: only the processor switching to it writes either,
+    /// under the lock of the queue that owns it, and readers take one load.
     pub(crate) fn note_switch(&self, cpu: usize) {
-        let _ = self.switches.fetch_add(1, Ordering::Relaxed);
+        let switches = self.switches.load(Ordering::Relaxed).wrapping_add(1);
+        self.switches.store(switches, Ordering::Relaxed);
         if cpu < 64 {
-            let _ = self.cpus_run_on.fetch_or(1 << cpu, Ordering::Relaxed);
+            let bit = 1 << cpu;
+            let ran = self.cpus_run_on.load(Ordering::Relaxed);
+            if ran & bit == 0 {
+                self.cpus_run_on.store(ran | bit, Ordering::Relaxed);
+            }
         }
     }
 

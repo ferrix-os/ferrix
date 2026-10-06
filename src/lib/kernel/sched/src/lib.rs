@@ -528,6 +528,18 @@ impl<T> RunQueue<T> {
             self.sum = 0;
             return;
         }
+        // One entity, running, and nothing waiting: the virtual time is its
+        // virtual runtime, which is what the division below comes to, written
+        // down (`docs/OPAQUE-KERNEL.md` §9.7, part 7: every charge of a task
+        // alone on its queue, and every direct switch, makes this one).
+        if self.tree.is_empty()
+            && let Some(curr) = self.curr.as_ref().map(|node| &node.entity)
+            && self.load == u64::from(curr.weight)
+        {
+            self.zero = curr.vruntime;
+            self.sum = 0;
+            return;
+        }
         let target = self.avg_vruntime();
         let shift = self.relative(target);
         self.sum -= shift * i128::from(self.load);
