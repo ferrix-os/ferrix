@@ -414,4 +414,100 @@ package FerrixSchedRequirements {
             attribute :>> unit = "sched::take_resched";
         }
     }
+
+    package DirectSwitch {
+        doc /* src/kernel/src/sched/direct.rs, sched/queue.rs and
+             * src/lib/kernel/sched: the direct switch of channel_write_read's fast
+             * path (docs/OPAQUE-KERNEL.md §9.7, part 1). */
+
+        requirement <'L.sched.55'> handOverIsTheGeneralSequence : ItemLowLevel {
+            attribute :>> statement = "CpuQueue::hand_over shall charge the running
+                task and weigh the arriving one as insert does, at one clock reading,
+                and RunQueue::hand_over shall leave the queue, the arriving entity
+                and the leaving entity's state exactly as enqueue, set_slice_ns,
+                remove_curr and pick_next leave them on a queue with one entity
+                running and nothing waiting.";
+            attribute :>> criterion = "hand_over_is_the_general_sequence: 200,000
+                random queues, weights and lags at and past the clamp, virtual times
+                either side of the wrap, every field compared; its control changes
+                one field of the result and fails.";
+            attribute :>> parent = "H.SCHED.13";
+            attribute :>> unit = ("sched::queue::CpuQueue::hand_over",
+                "sched::queue::CpuQueue::insert_at");
+        }
+        requirement <'L.sched.56'> onlyWhenNothingElseCouldBePicked : ItemLowLevel {
+            attribute :>> statement = "direct::begin shall take this processor's
+                run-queue lock only if it is free, and decline unless the task to
+                switch to has this processor as its home and holds both its slots
+                (T11), nothing waits in the fair class and no sleeper is due (T12),
+                and neither task has END posted (T13), leaving the queue unchanged
+                when it declines.";
+            attribute :>> criterion = "Stage 9's cases 9, 10 and 14 reach T11, T12
+                and T13 with the fast path on and get the general path's results;
+                each test's control fails its case (the `fastcase` line).";
+            attribute :>> parent = "H.SCHED.13";
+            attribute :>> unit = ("sched::direct::begin",
+                "sched::queue::CpuQueue::sleeper_due");
+        }
+        requirement <'L.sched.57'> theTailIsChooseNexts : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall make FX-0503's check
+                and then the switch through switch_chosen, the tail choose_next
+                makes after its pick, switch_to and finish_switch.";
+            attribute :>> criterion = "choose_next and Direct::switch both call
+                switch_chosen (review); every boot runs choose_next through it, and
+                the fast path's trips through Direct::switch (the counts line).";
+            attribute :>> parent = "H.SCHED.13";
+            attribute :>> unit = ("sched::switch_chosen", "sched::direct::Direct::switch",
+                "sched::require_preemption_on");
+        }
+        requirement <'L.sched.58'> theAssertsStopTheMachine : ItemLowLevel {
+            attribute :>> statement = "Direct::hand_over shall stop the machine with
+                FX-0532 when either task is the processor's idle task (A4), and with
+                FX-0530 when the task handed over to is running here, queued, not
+                blocked, or not the pick (A1).";
+            attribute :>> criterion = "A record planted on a running task stops the
+                machine with FX-0530 (the A1 control).";
+            attribute :>> parent = "H.SCHED.13";
+            attribute :>> unit = "sched::direct::Direct::hand_over";
+        }
+        requirement <'L.sched.59'> theReplyCellIsTheTasksOwn : ItemLowLevel {
+            attribute :>> statement = "A task's reply cell shall be filled only by the
+                commit that hands the processor to it, under its home's run-queue
+                lock while it is asleep, and emptied only by the task itself.";
+            attribute :>> criterion = "ipc-equiv's case 1 and 2 with the fast path
+                on: every length 0 to 24 and 1,000 trips in order.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("sched::task::Task::fill_reply",
+                "sched::task::Task::take_reply");
+        }
+        requirement <'L.sched.60'> theFrameTailLooksAtEverything : ItemLowLevel {
+            attribute :>> statement = "nothing_due_here shall answer true only when
+                the running task's pending-work word is clear, no decision is asked
+                of this processor and no move between jobs is unseen.";
+            attribute :>> criterion = "Case 14, the continuation's kill and case 15's
+                signal leave through the general branch and act on their bit.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("sched::nothing_due_here", "sched::work::peek");
+        }
+        requirement <'L.sched.61'> theCountsAreTheKernels : ItemLowLevel {
+            attribute :>> statement = "The fast path shall count its trips, parks and
+                each test's declines per processor, readable by no program, printed
+                as the shell exits.";
+            attribute :>> criterion = "test-ipc-equiv requires trips with the fast
+                path on and every count zero with it off.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("sched::direct::count", "sched::direct::counts",
+                "fastpath::report_counts");
+        }
+        requirement <'L.sched.62'> theLastLooksHook : ItemLowLevel {
+            attribute :>> statement = "The fast path's hook before T13 shall post END
+                to the caller only while stage 9's case 14 has armed it on that task,
+                and cost one load otherwise; a boot with it armed after stage 9 stops
+                with FX-0908.";
+            attribute :>> criterion = "Case 14 answers EINTR within the bound; with
+                T13 removed it stays blocked past it (the T13 control).";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = "sched::work::fast_path_hook";
+        }
+    }
 }
