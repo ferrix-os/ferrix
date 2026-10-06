@@ -434,6 +434,13 @@ impl Observers {
         }
     }
 
+    /// Whether nothing is registered and nothing fired waits to be
+    /// delivered: the fast path's T10 (`docs/OPAQUE-KERNEL.md` §9.7), for a
+    /// change it makes without triggering anyone.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.listed.is_empty() && self.firing.is_empty()
+    }
+
     /// Take one fired registration to deliver.
     pub(crate) fn next_fired(&mut self) -> Option<(Observer, Signals)> {
         self.firing.pop()
