@@ -18,11 +18,12 @@ Every figure below is marked **(measured)**, with where, or **(guessed)**,
 or **(argued)** where it follows from a document rather than a run. Do not
 quote a guessed figure as a result; measure it.
 
-State on 2026-10-06: `main` a1d456820 has step 1, 2a to 2f and 3a/3b. On
-branches, not landed: step 4 (`po7/step4`), ERAPS (`po7/step5`, consultant
-OK, may land), the `VZEROALL` reset (`po7/step5-vec`), the budget
-(`po7/ipc-budget`, §9.10 draft), the timing build (`po7/prof`, never
-lands). Read them with `git show <branch>:<path>`; do not edit them.
+State on 2026-10-06: `main` ccf72dd94 has step 1, 2a to 2f, 3a/3b and
+§9.10's budget. On branches, not landed: step 4 (`po7/step4`), ERAPS
+(`po7/step5`, consultant OK, may land), the `VZEROALL` reset
+(`po7/step5-vec`), the timing build (`po7/prof`, never lands). Read them
+with `git show <branch>:<path>`; do not edit them. Check `git log main`
+first: this list ages by the hour.
 
 ## 1. The path
 

@@ -10,8 +10,8 @@
   ],
   "as_of": {
     "date": "2026-10-06",
-    "main": "a1d456820",
-    "note": "3a and 3b on main; step 4 on po7/step4, ERAPS on po7/step5, VZEROALL on po7/step5-vec, the budget on po7/ipc-budget (all unlanded)"
+    "main": "ccf72dd94",
+    "note": "3a and 3b on main; step 4 on po7/step4, ERAPS on po7/step5, VZEROALL on po7/step5-vec (all unlanded); the budget, 9.10, on main since ccf72dd94"
   },
   "definition": {
     "entry": "the client's SYSCALL of channel_write_read (0x1013) in ferrix_rt's x86-64 stub",
@@ -58,7 +58,7 @@
     "target": "under 400 ns p50 matched on nazuna (customer, 2026-10-06); seL4 matched is 440 ns, 400-410 without its refill",
     "pin": "host processor 11 (bench-ipc's default where the host has more than 12)"
   },
-  "budget_source": "docs/OPAQUE-KERNEL.md 9.10 on branch po7/ipc-budget (d6da351a9), timing build po7/prof, logs ~/.local/share/ferrix/logs/po7-ipcM/prof-7.log, prof-8.log, prof-9.log",
+  "budget_source": "docs/OPAQUE-KERNEL.md 9.10 (main ccf72dd94), timing build po7/prof, logs ~/.local/share/ferrix/logs/po7-ipcM/prof-7.log, prof-8.log, prof-9.log",
   "budget": [
     {"piece": "SYSCALL/SYSRET, the stub, ring 3's loop", "now_ns": "60-85", "after_step4": "same", "after_step5": "same", "target": "45", "sel4": "~40", "evidence": "measured"},
     {"piece": "user TLB refill after CR3", "now_ns": "50-100", "after_step4": "same", "after_step5": "20-40", "target": "20", "sel4": "~20", "evidence": "measured"},
@@ -83,7 +83,7 @@
     {"id": "3b", "arch": "x86_64", "what": "FS and GS bases kept in the task, no rdmsr at save; read-skip only, write-skip dropped (condition 8: a per-processor last-written record leaks by vendor)", "status": "landed with 3a", "effect": "see 3a", "evidence": "measured", "source": "OPAQUE-KERNEL 9.8 condition 8"},
     {"id": "pcid", "arch": "x86_64", "what": "PCIDs with generations, CR3 no-flush (step 3)", "status": "blocked", "effect": "est. most of 90-113 ns CR3 plus 50-100 ns refill a direction on hardware with PCID", "evidence": "guessed", "source": "OPAQUE-KERNEL 9.6: nazuna has no PCID (CPUID 1 ECX[17] clear); seL4 with KernelSupportPCID refuses to boot there"},
     {"id": "ibpb-cost", "arch": "x86_64", "what": "IBPB at every switch (outside a domain)", "status": "fact", "effect": "~230 ns a switch under KVM on nazuna, not the 2 us first assumed", "evidence": "measured", "source": "OPAQUE-KERNEL 9.6"},
-    {"id": "step4", "arch": "x86_64 first", "what": "direct switch (hand_over) and the 0x1013 fast path (park, frame tail), ferrix.fastpath boot switch", "status": "branch po7/step4", "effect": "1,328 ns fast path on against 1,700 off; ~400-450 ns software a direction, ~30 locked operations", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10 on po7/ipc-budget; logs po7-step4/abab-*.txt"},
+    {"id": "step4", "arch": "x86_64 first", "what": "direct switch (hand_over) and the 0x1013 fast path (park, frame tail), ferrix.fastpath boot switch", "status": "branch po7/step4", "effect": "1,328 ns fast path on against 1,700 off; ~400-450 ns software a direction, ~30 locked operations", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10; logs po7-step4/abab-*.txt"},
     {"id": "eraps", "arch": "x86_64 (AMD Zen 5)", "what": "skip the in-domain return-stack refill where CPUID 0x8000_0021 EAX[24] and CR4.PCIDE clear; +eraps in the gate's model", "status": "branch po7/step5 (529f32d51), consultant OK, may land", "effect": "-50 to -100 ns a round trip, alternated against main", "evidence": "measured", "source": "ledger 2026-10-06 (C1)-(C6)"},
     {"id": "vzeroall-reset", "arch": "x86_64", "what": "3a's reset by VZEROALL + LDMXCSR, x87 XRSTOR only when XINUSE says in use; +xgetbv1 under KVM", "status": "branch po7/step5-vec (340596560, 243d35239)", "effect": "-100 to -140 ns a round trip; XRSTOR ~70 ns whatever it restores, VZEROALL path 15 ns", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10; ledger (V1)-(V7), (W1)-(W3)"},
     {"id": "segment-skip-v2", "arch": "x86_64", "what": "DS/ES loads skipped exactly 0 to 0, compared with the processor's own registers in the same switch (Linux __switch_to's rule)", "status": "reopened narrowly under (S1)-(S7); a12485d7a/f71585ad1 on po7/step4 skips FS/GS too and does not meet S3-S5, S7", "effect": "-140 to -160 ns a direction for all four selectors (profile); 43 ns vs 140-180 with the skip on po7/step4", "evidence": "measured", "source": "OPAQUE-KERNEL 9.10; ledger 2026-10-06 S1-S7 and the advisory read"},
