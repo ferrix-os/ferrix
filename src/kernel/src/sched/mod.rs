@@ -568,6 +568,16 @@ pub(crate) fn call_entered() {
     <arch::Irq as IrqControl>::restore(saved);
 }
 
+/// [`call_entered`] and [`call_left`]'s flag alone, for a caller with
+/// interrupts masked that has looked at the reschedule flag itself: the fast
+/// path's entry and its frame tail's quiet exit (`nothing_due_here`), which
+/// need neither a second mask nor the decision.
+pub(crate) fn set_in_call_masked(in_call: bool) {
+    if let Some(flag) = this_cpu().and_then(|cpu| IN_CALL.get(cpu)) {
+        flag.store(in_call, Ordering::Relaxed);
+    }
+}
+
 /// The running task is leaving a system call: make the decision a wake made
 /// during it asked for, as an interrupt's exit would.
 pub(crate) fn call_left() {

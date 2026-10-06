@@ -560,7 +560,7 @@ impl CpuQueue {
             .map(|left| now.saturating_add(left));
 
         match [sleeper, slice].into_iter().flatten().min() {
-            Some(at) => crate::timer::after(at.saturating_sub(now).max(MIN_ARM_NS)),
+            Some(at) => crate::timer::after_from(at.saturating_sub(now).max(MIN_ARM_NS), now),
             None => crate::timer::stop(),
         }
     }
