@@ -24,11 +24,12 @@ const NAMES: [&str; N] = [
 ];
 const WIDTH: u64 = 4;
 const BUCKETS: usize = 4096;
-const SPLIT: u64 = 4096;
 const CLASSES: usize = 2;
-const CLASS_NAMES: [&str; CLASSES] = ["domain trips (switch < 4096 ticks)", "cross-domain trips"];
+const CLASS_NAMES: [&str; CLASSES] = ["domain trips (no barrier decided)", "cross-domain trips (a barrier decided)"];
 
 static LAST: AtomicU64 = AtomicU64::new(0);
+/// Barrier decisions on processor 0 when the direction reached point 5.
+static DECIDED: AtomicU64 = AtomicU64::new(0);
 static LAST_POINT: AtomicU64 = AtomicU64::new(u64::MAX);
 static CUR: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
 static MASK: AtomicU64 = AtomicU64::new(0);
@@ -60,7 +61,9 @@ pub(crate) fn stamp(i: usize) {
         MASK.store(mask, Relaxed);
         if i == N - 1 {
             if mask == (1 << N) - 1 {
-                let class = usize::from(CUR[6].load(Relaxed) >= SPLIT);
+                let class = usize::from(
+                    crate::arch::barrier_decisions_on(0) != DECIDED.load(Relaxed),
+                );
                 add(&DIRS[class], 1);
                 for k in 0..N {
                     let d = CUR[k].load(Relaxed);
@@ -74,6 +77,9 @@ pub(crate) fn stamp(i: usize) {
         }
     } else {
         MASK.store(0, Relaxed);
+    }
+    if i == 5 {
+        DECIDED.store(crate::arch::barrier_decisions_on(0), Relaxed);
     }
     LAST_POINT.store(i as u64, Relaxed);
     LAST.store(tsc(), Relaxed);
