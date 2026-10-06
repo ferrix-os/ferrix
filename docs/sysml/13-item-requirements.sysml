@@ -439,6 +439,18 @@ package FerrixItemRequirements {
                 peer closes for PEER_CLOSED, each packet with its key.";
             attribute :>> parent = ("G.7", "O.CAPABILITY");
         }
+        requirement <'H.OBJ.18'> theFastPathIsTheGeneralPath : ItemHighLevel {
+            attribute :>> statement = "Every result of channel_write_read answered by
+                the fast path shall be a result the general path gives in the same
+                circumstances, and the fast path shall bypass no filter, audit record
+                or speculation barrier. x86-64 only, behind ferrix.fastpath.";
+            attribute :>> criterion = "ipc-equiv's transcripts with the fast path on
+                and off are the same line for line, with trips taken on and no
+                counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path
+                cases hold both boots to the general path's results (the `fastcase`
+                line); a filtered call is refused with the filter's errno.";
+            attribute :>> parent = ("G.7", "O.CAPABILITY");
+        }
     }
 
     package Scheduling {
@@ -573,6 +585,19 @@ package FerrixItemRequirements {
                 message with a signal pending; blocked in a Linux call, preempted,
                 or past the woken call, it reads its own (the `vectors` line).";
             attribute :>> parent = ("O.ISOLATE", "G.1");
+        }
+        requirement <'H.SCHED.13'> theDirectSwitchIsThePick : ItemHighLevel {
+            attribute :>> statement = "A switch channel_write_read's fast path makes
+                without the run queue's pick shall leave every scheduling quantity as
+                the pick would leave it, and shall be made only when the pick could
+                choose nothing else: the task switched to asleep at home on this
+                processor, nothing else waiting and no sleeper due.";
+            attribute :>> criterion = "RunQueue::hand_over equals enqueue, the
+                rescale, remove_curr and pick_next field for field on 200,000 random
+                queues (the ferrix-sched host test); a spinner beside the trips keeps
+                its share, and an echo pinned to another processor never runs on the
+                caller's (the `fastcase` line).";
+            attribute :>> parent = ("G.1", "ASR-8");
         }
     }
 

@@ -42,6 +42,7 @@
 mod borrow;
 mod borrow_check;
 mod check;
+pub(crate) mod direct;
 mod preempt;
 mod preempt_check;
 mod queue;
@@ -237,6 +238,31 @@ pub(crate) fn regroup_current() {
     }
     // Only its own drop gives the last reference back, in task context.
     drop(task);
+}
+
+/// The frame tail's look (`docs/OPAQUE-KERNEL.md` §9.7, part 2): with
+/// interrupts masked, whether the running task leaves its call with nothing
+/// for the way out to do -- no bit in its pending-work word, no decision
+/// asked of this processor, and no move between jobs since it last looked.
+/// When any is there, the tail takes the general way out instead, which
+/// reads each again and acts on it.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
+pub(crate) fn nothing_due_here() -> bool {
+    let Some(cpu) = this_cpu() else {
+        return false;
+    };
+    if resched_asked(cpu) {
+        return false;
+    }
+    let moves = MOVES.load(Ordering::Acquire);
+    let moved = RUNNING_SEEN
+        .get()
+        .and_then(|seen| seen.get(cpu))
+        .is_some_and(|seen| seen.load(Ordering::Relaxed) != moves);
+    !moved && !work::wants_attention(work::peek())
 }
 
 /// Run the calling task in `index`'s share, and charge what it does to it:
@@ -544,6 +570,24 @@ pub(crate) fn call_entered() {
         flag.store(true, Ordering::Relaxed);
     }
     <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// [`call_entered`] and [`call_left`]'s flag alone, for a caller with
+/// interrupts masked that has looked at the reschedule flag itself: the fast
+/// path's entry and its frame tail's quiet exit (`nothing_due_here`), which
+/// need neither a second mask nor the decision.
+pub(crate) fn set_in_call_masked(in_call: bool) {
+    if let Some(flag) = this_cpu().and_then(|cpu| IN_CALL.get(cpu)) {
+        flag.store(in_call, Ordering::Relaxed);
+    }
+}
+
+/// Whether this processor's running task is inside a system call, for the
+/// fast path's check: see [`IN_CALL`].
+pub(crate) fn in_call_here() -> bool {
+    this_cpu()
+        .and_then(|cpu| IN_CALL.get(cpu))
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
 }
 
 /// The running task is leaving a system call: make the decision a wake made
@@ -1972,11 +2016,19 @@ fn schedule() {
 /// preemption if it is switched out still runnable.
 fn schedule_from(interrupted_user: bool) {
     let saved = <arch::Irq as IrqControl>::disable();
-    // A switch with the count raised is a holder of a preemption-disabling
-    // lock going to sleep, which the count cannot survive: see `preempt`.
-    if let Some(cpu) = this_cpu()
-        && preempt_count(cpu) > 0
-    {
+    if let Some(cpu) = this_cpu() {
+        require_preemption_on(cpu);
+    }
+    pick_and_switch(interrupted_user);
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// A switch with the count raised is a holder of a preemption-disabling lock
+/// going to sleep, which the count cannot survive: see `preempt`. Stops the
+/// machine there (FX-0503). Made before every switch: `schedule_from`'s,
+/// and the direct switch's (A3).
+fn require_preemption_on(cpu: usize) {
+    if preempt_count(cpu) > 0 {
         let site = preempt_site(cpu);
         crate::panic::fatal!(
             crate::panic::catalog::SCHEDULE_WITH_PREEMPTION_HELD,
@@ -1987,8 +2039,6 @@ fn schedule_from(interrupted_user: bool) {
             site.map_or(0, core::panic::Location::line),
         );
     }
-    pick_and_switch(interrupted_user);
-    <arch::Irq as IrqControl>::restore(saved);
 }
 
 /// With interrupts masked: decide, and switch if the decision changed
@@ -2063,7 +2113,6 @@ fn choose_next(
     }
 
     let (previous, next) = (previous?, next?);
-    queue.stats.switches += 1;
     // Still runnable, cut off in its own code by an interrupt, and yet
     // leaving: a preemption of a user program, the one thing a check about
     // taking turns can count. Not a switch made on the way out of a system
@@ -2071,6 +2120,38 @@ fn choose_next(
     if interrupted_user && previous.state() == RUNNABLE {
         previous.note_preemption();
     }
+    // `previous` is the clone of `queue.current` taken above; the queue's own
+    // reference goes as `switch_chosen` stores the pick in its place.
+    switch_chosen(lock, cpu, previous, next, now)
+}
+
+/// Everything a switch does once the task to run is chosen, in this order:
+/// the switch count, `IN_CALL` carried, the processor's record of what it
+/// runs, its idle bit, the charge's start, the timer, the queue's `previous`
+/// and `current`, the incoming task's switch count, the address space and the
+/// user state. Returns where to save the outgoing context and what to
+/// resume, with `queue`'s lock still held for the switch to hand over;
+/// `None`, with nothing switched and `lock` let go, only if the queue did
+/// not hold the two tasks it had just been given.
+///
+/// The one tail of every switch: [`choose_next`]'s, after its pick, and the
+/// direct switch's, after `hand_over` (`docs/OPAQUE-KERNEL.md` §9.7, part 1),
+/// so that the two cannot drift.
+///
+/// With interrupts masked, `queue`'s lock held and `cpu` this processor;
+/// `previous` is the task this processor runs, `next` another.
+fn switch_chosen(
+    lock: &'static SpinLock<CpuQueue>,
+    cpu: usize,
+    previous: Arc<Task>,
+    next: Arc<Task>,
+    now: u64,
+) -> Option<(*mut u64, u64)> {
+    // SAFETY: (SHARED) the caller holds `lock` (`choose_next`'s
+    // `lock_manually`, the direct switch's `try_lock_manually`), and this
+    // is the only reference into it until the switch hands it over.
+    let queue = unsafe { lock.locked_data() };
+    queue.stats.switches += 1;
     carry_in_call(cpu, &previous, &next);
     note_running(cpu, next.id, next.group(), next.moves_seen());
     // Idle to the rest of the machine exactly while the idle task is what
@@ -2099,7 +2180,7 @@ fn choose_next(
     let (Some(previous), Some(next)) = (queue.previous.as_ref(), queue.current.as_ref()) else {
         // Both were stored a line above. Were either not there, nothing has
         // been switched: let the lock go as the no-switch path does.
-        // SAFETY: (SHARED) taken above and not handed to another context.
+        // SAFETY: (SHARED) held by this context, and not handed over.
         unsafe { lock.force_unlock() };
         return None;
     };

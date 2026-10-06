@@ -52,6 +52,11 @@ pub(crate) const ARCH: Arch = Arch::AArch64;
 /// Which `struct stat` the stat calls fill in: the generic one, 128 bytes,
 /// from `include/uapi/asm-generic/stat.h`, as on every architecture added
 /// after 2011.
+/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
+/// path for `channel_write_read` when one is registered
+/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
+pub(crate) const FAST_WRITE_READ: bool = false;
+
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Generic;
 
 /// AArch64's `struct epoll_event`, 16 bytes: not packed, so `data` is

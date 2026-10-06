@@ -55,6 +55,10 @@ Causes are listed most likely first.
 | [FX-0505](#fx-0505) | the kernel log lost track of what it keeps |
 | [FX-0506](#fx-0506) | the preemption count would start before every processor has its record |
 | [FX-0520](#fx-0520) | the way back to user mode had work no bit of the task's word announced |
+| [FX-0530](#fx-0530) | the fast path's direct switch found its parked task awake (A1) |
+| [FX-0531](#fx-0531) | a reader was parked beside a message or on a closed end (A2) |
+| [FX-0532](#fx-0532) | the fast path's direct switch involved the idle task (A4) |
+| [FX-0533](#fx-0533) | the fast path went the general way with interrupts masked or a lock held |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1036,6 +1040,80 @@ until something else brought the task back through the kernel.
 See: src/kernel/src/sched/work.rs; src/kernel/src/trap.rs attention_due;
 src/kernel/src/syscall/deliver.rs needs_attention; docs/OPAQUE-KERNEL.md §9.8
 2c.
+
+<a id="fx-0530"></a>
+
+## FX-0530 — the fast path's direct switch found its parked task awake (A1)
+
+`channel_write_read`'s fast path hands the processor straight to a task parked
+on the other end of the channel, skipping the run queue's pick
+(`docs/OPAQUE-KERNEL.md` §9.7). It may do so only to a task asleep at home on
+this processor: blocked, switched out, in no queue, holding both its slots. The
+tests before the commit leave no way for a parked task to be otherwise -- one
+woken is runnable, so it is queued here, which T12 sees, or on another
+processor, which T11 sees -- so this is asserted rather than tested, and the
+machine stops: the pick would otherwise have switched to a task already running
+somewhere, or left a queued one behind.
+
+1. A path made a parked task runnable without taking its park record and without
+   putting it on a queue, or moved it without its run queue's lock.
+2. The park record was set on a task that was not blocked, or left set after the
+   task left its call.
+3. The run queue's pick on a queue with nothing waiting chose something other
+   than the task just put on it.
+
+See: src/kernel/src/sched/direct.rs; src/kernel/src/object/channel.rs
+send_direct; docs/OPAQUE-KERNEL.md §9.7 part 2.
+
+<a id="fx-0531"></a>
+
+## FX-0531 — a reader was parked beside a message or on a closed end (A2)
+
+A task parks on a channel end in `channel_write_read` only while that end's
+inbox is empty, and every writer that fills the inbox takes the park record
+under the same lock and wakes the task; the parked task's own call holds its end
+open. A record found beside a message, or on a closed end, means a writer left
+the record, and the fast path would answer the reader with a message that
+overtakes the one already waiting (`docs/OPAQUE-KERNEL.md` §9.7, A2).
+
+1. A path that puts a message into an inbox -- a write, `write_small`, `unread`
+   -- does not take the park record under the inbox lock.
+2. A park was made without the inbox lock, or with something already waiting.
+
+See: src/kernel/src/object/channel.rs; docs/OPAQUE-KERNEL.md §9.7 part 2.
+
+<a id="fx-0532"></a>
+
+## FX-0532 — the fast path's direct switch involved the idle task (A4)
+
+Both tasks of a direct switch are programs blocked in `channel_write_read`, so
+neither can be a processor's idle task, which has no user half and makes no
+system call. One that is would have the switch charge, block or park the task
+the processor falls back to (`docs/OPAQUE-KERNEL.md` §9.7, A4).
+
+1. A park record named the idle task, or the running task was the idle task
+   making a native call.
+
+See: src/kernel/src/sched/direct.rs; docs/OPAQUE-KERNEL.md §9.7 part 1.
+
+<a id="fx-0533"></a>
+
+## FX-0533 — the fast path went the general way with interrupts masked or a lock held
+
+A task resumed from its park in `channel_write_read`'s fast path without a
+reply, or with work for the way out, carries on through the general path, which
+may block and take sleeping locks. It opens interrupts first, as the `SYSCALL`
+entry does before the dispatch, and checks that it may block
+(`sched::may_block`); this stop means it may not, so the general path would run
+masked or under a spin lock (`docs/OPAQUE-KERNEL.md` §9.7, condition 3).
+
+1. The continuation or the frame tail's general branch was entered without
+   opening interrupts.
+2. A lock taken by the fast path was not let go before its switch or its
+   decline.
+
+See: src/kernel/src/syscall/native.rs fast_write_read;
+src/kernel/src/arch/x86_64/syscall.rs; docs/OPAQUE-KERNEL.md §9.7 part 2.
 
 <a id="fx-0601"></a>
 
