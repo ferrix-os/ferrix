@@ -409,6 +409,10 @@ fn git_output(root: &std::path::Path, arguments: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// The line the kernel prints its fast path counts on as the shell exits
+/// (`fastpath::report_counts`), trips first.
+const COUNTS_LINE: &str = "fastpath counts:";
+
 /// What the shell runs for `test-ipc-equiv`.
 const EQUIV_SCRIPT: &str = r#"/sbin/ipc-equiv
 "#;
@@ -425,9 +429,9 @@ const FASTPATH_LINE: &str = "ipc fast path for channel_write_read:";
 /// `ipc-equiv: exit 0`, and the two x86-64 transcripts must be the same line
 /// for line.
 ///
-/// The fast path is not built yet, so `on` takes the general path too, and
-/// the comparison shows the cases are deterministic on it: the runner is
-/// ready for when the fast path exists.
+/// The kernel's counts of the fast path, printed as the shell exits, must
+/// show trips taken on the boot with it on and nothing at all moved on a
+/// boot with it off: a comparison of two general paths would pass as well.
 ///
 /// # Errors
 ///
@@ -476,6 +480,28 @@ pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
                 .collect();
             for line in &transcript {
                 println!("  {arch} fastpath={setting}: {line}");
+            }
+            let counts = lines
+                .iter()
+                .find_map(|line| line.get(line.find(COUNTS_LINE)?..))
+                .ok_or_else(|| Error::new(format!("{arch}: no fast path counts line")))?
+                .trim()
+                .to_owned();
+            println!("  {arch} fastpath={setting}: {counts}");
+            let numbers: Vec<u64> = counts
+                .split_whitespace()
+                .filter_map(|word| word.split_once('=')?.1.parse().ok())
+                .collect();
+            let trips = numbers.first().copied().unwrap_or(0);
+            if *setting == "on" && trips == 0 {
+                return Err(Error::new(format!(
+                    "{arch}: ferrix.fastpath=on took no trip through the fast path"
+                )));
+            }
+            if *setting == "off" && numbers.iter().any(|&count| count != 0) {
+                return Err(Error::new(format!(
+                    "{arch}: a fast path counter moved with ferrix.fastpath=off: {counts}"
+                )));
             }
             if !transcript.iter().any(|line| line == "ipc-equiv: exit 0") {
                 return Err(Error::new(format!(
