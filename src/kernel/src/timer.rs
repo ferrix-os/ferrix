@@ -151,7 +151,9 @@ fn armed_slot() -> Option<&'static AtomicU64> {
 /// Called with interrupts masked on the processor whose timer it arms, as the
 /// scheduler calls it.
 pub(crate) fn after(nanos: u64) {
-    let periodic = INTERVAL.swap(0, Ordering::Relaxed) != 0;
+    // A load first, and the swap only for a periodic timer: a one-shot asked
+    // for at every switch makes no read-modify-write here.
+    let periodic = INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
     let Some(slot) = armed_slot() else {
         arch::timer_arm(nanos);
         return;
@@ -223,7 +225,9 @@ fn arm_at(deadline: u64) {
 /// where stopping it is an exit under a hypervisor every time a processor
 /// goes quiet. A periodic timer, which would fire for ever, is stopped.
 pub(crate) fn stop() {
-    let periodic = INTERVAL.swap(0, Ordering::Relaxed) != 0;
+    // A load first, and the swap only for a periodic timer: a one-shot asked
+    // for at every switch makes no read-modify-write here.
+    let periodic = INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
     // A one-shot that is not armed -- one that fired, which leaves the
     // hardware quiet (`timer_disarm_fired`), or one never armed -- has
     // nothing to stop: writing it again was two exits at every switch to a
