@@ -4113,3 +4113,131 @@ domain, read 11,066 and 14,922 ns here in rounds 1 and 3 against about
 6,200 ns at `main`, and 6,002 to 6,142 ns in the other three: taken as host
 noise, to be retaken before step 4 cites it. Before the rebase, against `main`
 without 2f (`bench-2`, on 4a8b8dfee): 2,397 against 2,546 ns, 0.945.
+
+### 9.10 The budget for under 400 ns (draft, 2026-10-06, po7-ipcM)
+
+The customer's target since 2026-10-06 is a native channel round trip
+**under 400 ns p50, matched**: every mitigation on, both programs in one
+speculation domain, `cargo xtask bench-ipc --release --accel kvm --smp 1`,
+`domain-call`, fast path on. That is 200 ns a direction. This section says
+where one direction spends its time today, what step 4 removes, what is
+left after it, and whether 400 is reachable on nazuna. Nothing in it is a
+design. Each step-5 means it names still goes through its own review.
+
+**How it was measured.** The timing build `os-ipc/prof2` was refreshed
+onto `main` de0eb7b32 plus `step2f` and `po6/step3` (3a, 3b), as branch
+`po7/prof` (d0a378f75, never lands). It stamps the TSC at 40 points of
+one direction: from one side's entry into `channel_write_read`, through
+the write, the wake, the block, the switch and the other side's return,
+to that side's next entry. Only a direction whose stamps came in exactly
+that order is counted, and only if no `IBPB` was issued in it. So timer
+switches, the general trip and the cross-domain `call` run all drop out,
+and so does the direction after each count, whose caches the count
+disturbs. About 20,800 directions are counted a run. The stamp's own cost
+(7 to 9 ns, measured at reset) is subtracted from each span. The guest
+TSC moves in steps of 44 ticks (10 ns), so a span is quoted as the mean of
+its samples up to its p90. The spans add up to the direction: 1,209 to
+1,300 ns net, against the 1,130 ns half of the uninstrumented `domain-call`
+p50 of 2,257 ns on the same tree. Host load was 1 to 6 with the SMT
+sibling idle. The logs are `~/.local/share/ferrix/logs/po7-ipcM/prof-*.log`
+on nazuna. `prof-7.log` and `prof-8.log` are the figures below.
+
+**One direction today** (ns, net of stamps):
+
+| Span | ns |
+|---|---|
+| ring 3, `SYSRET`, `SYSCALL`, the stub: the client's side / the server's | 167–180 / 117–129 |
+| the same for a native call that does not switch (the floor loop) | 61–86 |
+| entry to `channel_write_read`: filter, early decode, vector mark, `sti`, `call_entered`, `current()`, thread and process | 58–62 |
+| the handle lookup | 20–22 |
+| `write_small` | 28–41 |
+| the wake: drain 1–7, `wake_onto` 0–5, home lock and EEVDF insert 170–201, the timer kick 16 (p50) | 190–230 |
+| `read_small` (empty), the wait's list and mark | 21–52 |
+| the decision: lock 0–3, `now_nanos` 11–12, `account` 120–134, sleepers 0–4, detach and pick 69–75, bookkeeping and `arm_timer` 10–12 (p50) | 215–240 |
+| `install`: domain and mask 0–4, **`CR3` 90–113**, refill 12–26, rest 0–4 | 105–145 |
+| user state: save 0–2, TLS 0–1, **`DS`/`ES`/`FS` loads 105–118**, `FS` base 12–15, **`GS` load 35–43**, `GS` base 12–13, **vector reset (`XRSTOR`) 71–79**, entry stack 4 | 240–275 |
+| `switch_to`, `finish_switch` | 10–15 |
+| unblock, `read_small`, `record_call`, `regroup` and `call_left` | 44–72 |
+| exit: the frame, the pending-work look | 45–67 |
+
+Two figures come from the difference between the rows. *The user TLB
+refill:* the client's side of ring 3 is 167 to 180 ns after a switch,
+against 61 to 86 ns for the same loop with no switch, so a `CR3` write costs
+about 50 to 100 ns of misses in ring 3 a direction, on top of the 90 to 113
+of the write. *The timer:* `arm_timer` is a skip at p50, but on 10 to 20%
+of directions it reprograms the local APIC timer, which is an exit. That is
+most of why `domain-call`'s p90 is 10 to 19 us and its mean 2.5 to 3.5
+times its p50.
+
+**The budget against 400.**
+
+| Piece, a direction | now | after step 4 | after step 5 | 200 ns target | seL4 matched |
+|---|---|---|---|---|---|
+| `SYSCALL`/`SYSRET`, the stub, ring 3's own loop | 60–85 | same | same | 45 | ~40 |
+| user TLB refill after `CR3` | 50–100 | same | 20–40 | 20 | ~20 |
+| `CR3` write, no PCID | 90–113 | same | same | 90 | ~90 |
+| return-stack refill | 12–26 | same | 0 (ERAPS) | 0 | 20 |
+| software: entry to exit, scheduler included | ~650 | 50–110 | 35–60 | 35 | ~50 |
+| user state | 240–275 | same | 15–30 | 15 | ~0 |
+| `switch_to` and its tail | 10–15 | 5 | 5 | 5 | — |
+| **a direction** | **~1,130** | **~560–700** | **~210–260** | **200** | **220** |
+| **a round trip** | **2,257** | **1.1–1.4 us** | **420–520** | **400** | **440** |
+
+*Step 4* (§9.7 part 7's 80 to 115 ns of software) removes the dispatch,
+the queue, the EEVDF insert, `account`, the pick and the general wake and
+wait. Its part 7 also assumed user state at 12 to 20 ns. That holds only
+after step 5: step 4 does not change `restore_user_state`, which measures
+240 to 275. Two of part 7's figures read low against this profile. The
+handle lookup measures 20 ns, not 8 to 12. And `hand_over`'s charge costs
+120 ns or more if it goes through `CpuQueue::account`, so the direct switch
+needs a charge of its own, a subtraction and a store.
+
+*Step 5's means*, each with its estimated saving a direction:
+- **Vector reset by `VZEROALL`** (about −60). The gate's model enables x87,
+  SSE and AVX only. `VZEROALL` clears `YMM0` to `YMM15`, and an `XRSTOR`
+  of the x87 component runs only when `XINUSE` (`XGETBV` 1) says it is in
+  use. 3a's contract and condition 7 stand. This changes only the
+  mechanism of the reset, and needs the consultant.
+- **ERAPS in place of the refill** (−12 to −26). It needs `+eraps` in the
+  gate's model and the consultant (§9.7 question 12).
+- **The selector loads skipped null to null** (−140 to −160, the largest).
+  3b's review closed this ("§9.4 item 5's segment skip does not come back
+  in any form"). §9.4 item 5 had measured no difference, but this profile
+  measures it as the largest single item after the scheduler. A narrower
+  form may answer condition 8's leak: `DS` and `ES` only, compared with the
+  selectors the same switch's save read from the processor, never with a
+  per-processor record, with `FS` and `GS` bases written at every switch as
+  now. It is for the consultant to reopen or not.
+- **Fewer user pages a trip** (−30 to −60): the runtime's stub and the
+  loop on one code page, and the stack top, message and TLS on one data
+  page; 2 MiB pages for native text. **Global pages for the runtime's
+  shared text** are a design of their own (§9.6).
+- **FSGSBASE** (about −15 for the two base writes), with the entry's
+  handling of a user-written `GS` base. It is a design of its own.
+- Step 4's own residue: the lookup without the table lock, a park without
+  an `Arc`, and the records' layout.
+
+**Is under 400 reachable on nazuna?** Not with confidence. After steps 4 and
+5 the estimate is 420 to 520 ns, with about 380 if every piece lands at
+its best. The floor that no software change moves is about 200 ns a round
+trip: two `CR3` writes without PCID (180 to 225) and two hardware entries
+and exits. Under 400 then needs all of these at once:
+- step 4 at the low end of its estimate (60 ns of software a direction or
+  less);
+- ERAPS;
+- the `VZEROALL` reset;
+- the selector skip;
+- each side touching no more than about two user pages.
+
+Without the selector skip, add about 300 ns a round trip. On hardware with
+PCID the `CR3` write and most of the refill go (step 3's PCIDs), and 400 is
+comfortably within reach.
+
+**How seL4 gets 440 with the same protections** (§9.6): 130 ns a
+direction for the switch (`CR3`, a user TLB of a page or two, its 20 ns
+refill), and about 90 ns of entry and software. It switches no segment
+state and, with the FPU off in sel4bench, no vector state. Its fast path
+never enters a scheduler queue. Without its refill it measures 400 to 410
+ns here, which is the figure Ferrix with ERAPS is really compared with.
+Being under 400 means doing a direction in less software and fewer user
+TLB misses than seL4, with the vector and segment state seL4 does not have.
