@@ -117,12 +117,18 @@ const PROCESSORS: usize = 256;
 /// local APIC's at the write of its initial count, the generic timer's from
 /// the counter value its comparator was computed from -- and is the delay
 /// rounded down to whole timer ticks, so it fires no later than the bound.
-/// A request is skipped only when that bound is no later than its own
-/// deadline, so a skipped request is never served late: the one exception
-/// is the hardware's own, a delay shorter than one timer tick, which every
-/// arm rounds up to one tick whether or not anything is skipped. Read before
-/// the write, the bound could be early by the time the write took -- an exit
-/// under a hypervisor -- and a skip late by as much.
+/// A request is skipped when that bound is no later than its own deadline,
+/// and then it is never served late: the one exception is the hardware's
+/// own, a delay shorter than one timer tick, which every arm rounds up to
+/// one tick whether or not anything is skipped. Read before the write, the
+/// bound could be early by the time the write took -- an exit under a
+/// hypervisor -- and a skip late by as much.
+///
+/// A request is also skipped when the deadline the armed one-shot was
+/// written for ([`REQUESTED`]) is no later than its own. Such a request may
+/// be served after its deadline, by at most the time the armed one's own
+/// write took: exactly as late as the request that wrote it already is, so
+/// a skip makes no request later than an arm would have made the first.
 static ARMED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
 
 /// The deadline each processor's armed one-shot was asked for, on
@@ -137,8 +143,32 @@ static ARMED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS
 /// the hardware again: an exit at every switch of a round trip while any
 /// task slept on the processor. A request no earlier than the one the
 /// armed one-shot was written for is served by that one-shot exactly as
-/// well as the first request was, so it is skipped too.
+/// well as the first request was -- late by at most that write's time, as
+/// the first is (see [`ARMED`]) -- so it is skipped too.
 static REQUESTED: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+
+/// How many times this module has written each processor's timer for a
+/// one-shot or stopped it: [`after_from`]'s arms and [`stop`]'s disarms,
+/// the writes its skips exist to save. Counted by a load and a store, with
+/// interrupts masked on that processor, which alone writes its own count.
+static WRITES: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+
+/// Count one write of this processor's timer in [`WRITES`].
+fn count_write() {
+    if let Some(writes) = crate::smp::this_cpu().and_then(|cpu| WRITES.get(cpu.logical)) {
+        writes.store(
+            writes.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+/// This processor's count in [`WRITES`], for the skipped-arm check.
+pub(crate) fn writes_here() -> u64 {
+    crate::smp::this_cpu()
+        .and_then(|cpu| WRITES.get(cpu.logical))
+        .map_or(0, |writes| writes.load(Ordering::Relaxed))
+}
 
 /// This processor's slot in [`ARMED`], once processors have records.
 fn armed_slot() -> Option<&'static AtomicU64> {
@@ -157,8 +187,9 @@ pub(crate) fn after(nanos: u64) {
 /// [`after`], for a caller that read the clock at `now` a moment ago: the
 /// scheduler, which reads it once a decision. The deadline asked for is
 /// taken from `now`, so it is no later than [`after`]'s would be, and a skip
-/// it allows is never late; the bound kept after an arm is still read after
-/// the write.
+/// it allows is no later than [`after`]'s would be (see [`ARMED`] for how
+/// late that is); the bound kept after an arm is still read after the
+/// write.
 pub(crate) fn after_from(nanos: u64, now: u64) {
     // A load first, and the swap only for a periodic timer: a one-shot asked
     // for at every switch makes no read-modify-write here.
@@ -178,6 +209,7 @@ pub(crate) fn after_from(nanos: u64, now: u64) {
         return;
     }
     arch::timer_arm(nanos);
+    count_write();
     // After the arm, so that what is kept bounds the interrupt from above.
     slot.store(now_nanos().saturating_add(nanos).max(1), Ordering::Relaxed);
     requested.store(wanted, Ordering::Relaxed);
@@ -248,6 +280,7 @@ pub(crate) fn stop() {
             slot.store(0, Ordering::Relaxed);
         }
         arch::timer_disarm();
+        count_write();
     }
 }
 
