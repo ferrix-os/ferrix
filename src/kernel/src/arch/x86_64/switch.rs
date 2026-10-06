@@ -582,7 +582,30 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
 unsafe fn reset_vectors(state: &mut UserState) {
     // SAFETY: (CONTEXT) the caller's guarantee: the image's `MXCSR` is one the
     // processor held, and its header names no component.
-    unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::reset_components()) };
+    // PROFILE ONLY: which part of the reset costs what (po7-ipcM).
+    match option_env!("PO7_VEC") {
+        Some("split") => unsafe {
+            ferrix_fpu_restore(&raw const state.fpu, 0b001);
+            ferrix_fpu_restore(&raw const state.fpu, 0b110);
+        },
+        Some("sseavx") => unsafe {
+            ferrix_fpu_restore(&raw const state.fpu, 0b110);
+            if core::arch::x86_64::_xgetbv(1) & 1 != 0 {
+                ferrix_fpu_restore(&raw const state.fpu, 0b001);
+            }
+        },
+        Some("vzx") => unsafe {
+            let mxcsr = u32::from_le_bytes([state.fpu.legacy[24], state.fpu.legacy[25], state.fpu.legacy[26], state.fpu.legacy[27]]);
+            core::arch::asm!("vzeroall", "ldmxcsr [{0}]", in(reg) &raw const mxcsr, out("xmm0") _, out("xmm1") _, out("xmm2") _, out("xmm3") _,
+                out("xmm4") _, out("xmm5") _, out("xmm6") _, out("xmm7") _, out("xmm8") _,
+                out("xmm9") _, out("xmm10") _, out("xmm11") _, out("xmm12") _, out("xmm13") _,
+                out("xmm14") _, out("xmm15") _, options(nostack));
+            if core::arch::x86_64::_xgetbv(1) & 1 != 0 {
+                ferrix_fpu_restore(&raw const state.fpu, 0b001);
+            }
+        },
+        _ => unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::reset_components()) },
+    }
     let control = u16::from_le_bytes([state.fpu.legacy[FCW_AT], state.fpu.legacy[FCW_AT + 1]]);
     if control != INITIAL_X87_CONTROL {
         // SAFETY: (SYSREG) the incoming task's own control word.
