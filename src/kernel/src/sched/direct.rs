@@ -153,7 +153,9 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
     // slots. A parked task files no deadline, but one woken early from an
     // earlier sleep and moved may have left its sleep slot in a sleeper set
     // elsewhere (state 3 of `wake_with`), which only that set gives back.
-    if peer.cpu() != cpu || !peer.holds_slots() {
+    // Its run slot is held exactly while no queue holds it, which A1 asserts
+    // (`is_queued`, set and cleared with the slot under the queue's lock).
+    if peer.cpu() != cpu || !peer.holds_sleep_slot() {
         return Err(Count::T11);
     }
     // T12: nothing waits in the fair class, and no sleeper is due, so that
@@ -197,16 +199,16 @@ impl Direct {
     ///
     pub(crate) fn hand_over(
         &mut self,
-        caller: &Arc<Task>,
-        peer: &Arc<Task>,
-        block_caller: impl FnOnce(),
+        caller: &Task,
+        peer: Arc<Task>,
+        block_caller: impl FnOnce(Arc<Task>),
     ) {
         let now = self.now;
         let queue = self.queue();
         let idle = queue
             .idle
             .as_ref()
-            .is_some_and(|idle| Arc::ptr_eq(idle, caller) || Arc::ptr_eq(idle, peer));
+            .is_some_and(|idle| core::ptr::eq(&**idle, caller) || Arc::ptr_eq(idle, &peer));
         if idle {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_IDLE_TASK,
@@ -216,7 +218,7 @@ impl Direct {
         let running = queue
             .current
             .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, peer));
+            .is_some_and(|current| Arc::ptr_eq(current, &peer));
         // Its slots were tested under this lock hold (T11, `begin`), and
         // only a holder of a queue's lock moves them.
         if running || peer.is_queued() || peer.state() != BLOCKED {
@@ -231,12 +233,14 @@ impl Direct {
         let _ = queue.remove_sleeper(peer.id);
         let _ = peer.take_sleep_deadline();
         peer.set_state(RUNNABLE);
+        let id = peer.id;
+        let pointer = Arc::as_ptr(&peer);
         let next = queue.hand_over(peer, now, block_caller);
-        if !next.as_ref().is_some_and(|next| Arc::ptr_eq(next, peer)) {
+        if !next.as_ref().is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer)) {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "the direct switch's pick was not the parked task it handed over to (A1): task {}",
-                peer.id
+                id
             );
         }
         if queue.stats.measuring {
