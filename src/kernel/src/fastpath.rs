@@ -9,9 +9,10 @@
 //! release (the customer's call of 2026-10-02), and development builds and
 //! the perf rows turn it on with `ferrix.fastpath=on`.
 //!
-//! No fast path exists yet. Until it does, `on` is recorded and printed and
-//! changes nothing: every call takes the general path either way, which the
-//! stage-9 line says.
+//! `on` registers the fast path (`syscall::native::fast_write_read`) with the
+//! core's `SYSCALL` entry, which takes it only while one is registered: so
+//! off is an empty slot, and the switch is T1. x86-64 only; elsewhere `on` is
+//! recorded and printed, and every call takes the general path.
 //!
 //! Read as `ferrix.checks` is (`checks.rs`): from the loader's command line
 //! first, then the device tree's `/chosen/bootargs`. A value other than the
@@ -55,6 +56,9 @@ pub(crate) fn init(view: &BootView<'_>) {
     };
     ON_AT_BOOT.store(read == READ_ON, Ordering::Relaxed);
     READ.store(read, Ordering::Relaxed);
+    if read == READ_ON && crate::arch::FAST_WRITE_READ {
+        crate::trap::set_fast_write_read(crate::syscall::native::fast_write_read);
+    }
 }
 
 /// Whether the fast path is on for this boot: false unless [`init`] read
@@ -72,8 +76,39 @@ pub(crate) fn report() {
         READ_OTHER => "ferrix.fastpath's value was not understood and is ignored",
         _ => "by default",
     };
+    let built = if crate::arch::FAST_WRITE_READ {
+        "taken from x86-64's SYSCALL entry"
+    } else {
+        "x86-64 only, so every call here takes the general path"
+    };
+    println!("  fastpath ipc fast path for channel_write_read: {state} ({how}); {built}");
+}
+
+/// What the fast path did on this boot: its trips, its parks and each test's
+/// declines (`sched::direct`'s counts), for the figure a benchmark prints to
+/// say which path it measured. Printed as the shell exits; no program reads
+/// them.
+pub(crate) fn report_counts() {
+    let [
+        trips,
+        parks,
+        t2,
+        t3,
+        t4,
+        halves,
+        t6,
+        t7,
+        t8,
+        t9,
+        t10,
+        queue,
+        t11,
+        t12,
+        t13,
+    ] = crate::sched::direct::counts();
     println!(
-        "  fastpath ipc fast path for channel_write_read: {state} ({how}); no fast path is built \
-         yet, so every call takes the general path"
+        "  fastpath counts: trips={trips} parks={parks} declined T2={t2} T3={t3} T4={t4} \
+         halves={halves} T6={t6} T7={t7} T8={t8} T9={t9} T10={t10} queue={queue} T11={t11} \
+         T12={t12} T13={t13}"
     );
 }

@@ -174,6 +174,18 @@ pub(crate) fn look() -> u32 {
     .unwrap_or(0)
 }
 
+/// The running task's word as it stands, clearing nothing: the frame tail's
+/// look (`docs/OPAQUE-KERNEL.md` §9.7, part 2), which takes the general way
+/// out, where [`look`] clears and reads, whenever any bit is set. Zero where
+/// nothing runs. With interrupts masked.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
+pub(crate) fn peek() -> u32 {
+    super::with_current(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
+}
+
 /// Whether a word [`look`] answered asks the way out to act.
 pub(crate) const fn wants_attention(word: u32) -> bool {
     word & ATTENTION != 0
@@ -285,13 +297,45 @@ static HOOK_TARGET: AtomicU64 = AtomicU64::new(0);
 
 /// The checks that may arm the hook, by name, for the message that says one
 /// was left armed.
-const HOOKED_BY: &[&str] = &["the wake row (sched::work::check)"];
+const HOOKED_BY: &[&str] = &[
+    "the wake row (sched::work::check)",
+    "the fast path's last look (object::fast_path_check, case 14)",
+];
 
 /// The wake row's check, as [`HOOK`] records it.
 pub(crate) const HOOK_WAKE_ROW: usize = 0;
 
+/// Step 4's case 14, as [`HOOK`] records it: the fast path posts `END` to
+/// its caller just before its last look (`docs/OPAQUE-KERNEL.md` §9.7, T13's
+/// window, condition 11).
+pub(crate) const HOOK_LAST_LOOK: usize = 1;
+
+/// The fast path's hook, called just before T13's last look: with case 14's
+/// check armed and `caller` its target, post `END` to it, as a kill landing
+/// in that window would. Unarmed, one load.
+pub(crate) fn fast_path_hook(caller: &Task) {
+    if HOOK.load(Ordering::Acquire) != HOOK_LAST_LOOK + 1 {
+        return;
+    }
+    if HOOK_TARGET.load(Ordering::Acquire) == caller.id {
+        post(caller, END);
+    }
+}
+
 /// Arm the hook for `check`, watching `target`. Stage 9's checks only.
+///
+/// The hook is one static for every check that hooks the wake, so a check
+/// that arms it while another still holds it would overwrite that one, and
+/// the next disarm would hide a hook left armed from the boot's check after
+/// stage 9: that stops the machine here instead (FX-0908).
 pub(crate) fn arm(check: usize, target: &Task) {
+    if let Some(holder) = hook_armed_by() {
+        crate::panic::fatal!(
+            crate::panic::catalog::CHECK_HOOK_LEFT_ARMED,
+            "a check's hook was still armed when another check armed it: {holder}, in \
+             sched::work's hook"
+        );
+    }
     HOOK_TARGET.store(target.id, Ordering::Release);
     HOOK.store(check + 1, Ordering::Release);
 }

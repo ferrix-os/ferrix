@@ -26,6 +26,7 @@ pub(crate) mod check;
 pub(crate) mod device_copy_check;
 pub(crate) mod domain_check;
 pub(crate) mod edge_check;
+pub(crate) mod fast_path_check;
 pub(crate) mod format_check;
 pub(crate) mod interrupt;
 pub(crate) mod io_mapping;

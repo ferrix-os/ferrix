@@ -147,6 +147,13 @@ pub(crate) struct Task {
     /// module, set by a poster after the state it stands for and cleared by
     /// the task itself before it reads that state.
     work: AtomicU32,
+    /// The reply cell of step 4's fast path (`docs/OPAQUE-KERNEL.md` §9.7,
+    /// part 2): a message handed to it while it was parked in
+    /// `channel_write_read`. The length with [`REPLY_FULL`] in the first
+    /// word, the three words after. Filled only by the commit that hands the
+    /// processor to it, under its home's run-queue lock while it is asleep;
+    /// emptied only by itself, once a switch under that lock has resumed it.
+    reply: [AtomicU64; 4],
     /// The node a run queue holds it in, while no run queue does.
     ///
     /// Lent to a queue as the task is queued and handed back as it leaves,
@@ -157,6 +164,9 @@ pub(crate) struct Task {
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     sleep_slot: SpinLock<Option<TaskSlot>>,
 }
+
+/// A full reply cell's mark, in its first word beside the length.
+const REPLY_FULL: u64 = 1 << 63;
 
 /// The node a queue, a sleeper set or the reaper holds a task in.
 pub(crate) type TaskSlot = Slot<Arc<Task>>;
@@ -311,6 +321,7 @@ impl Task {
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
+            reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SpinLock::new(Some(run_slot)),
             sleep_slot: SpinLock::new(Some(sleep_slot)),
         })
@@ -364,6 +375,7 @@ impl Task {
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
+            reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SpinLock::new(Some(run_slot)),
             sleep_slot: SpinLock::new(Some(sleep_slot)),
         })
@@ -389,6 +401,36 @@ impl Task {
     /// Have back the slot a sleeper set or the reaper held this task in.
     pub(crate) fn return_sleep_slot(&self, slot: TaskSlot) {
         *self.sleep_slot.lock() = Some(slot);
+    }
+
+    /// Hand it a reply of `len` bytes in `words`, the bytes past `len`
+    /// already zero: the fast path's commit, under its home's run-queue lock
+    /// while it is asleep there. The lock's hand-over at the switch to it is
+    /// what orders these stores before its own reads.
+    pub(crate) fn fill_reply(&self, len: usize, words: [u64; 3]) {
+        for (cell, word) in self.reply.iter().skip(1).zip(words) {
+            cell.store(word, Ordering::Relaxed);
+        }
+        if let Some(first) = self.reply.first() {
+            first.store(REPLY_FULL | len as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// The reply it was handed, emptying the cell: by the task itself, as it
+    /// resumes in `channel_write_read`. `None` when it was woken some other
+    /// way.
+    pub(crate) fn take_reply(&self) -> Option<(usize, [u64; 3])> {
+        let first = self.reply.first()?;
+        let head = first.load(Ordering::Relaxed);
+        if head & REPLY_FULL == 0 {
+            return None;
+        }
+        first.store(0, Ordering::Relaxed);
+        let mut words = [0_u64; 3];
+        for (word, cell) in words.iter_mut().zip(self.reply.iter().skip(1)) {
+            *word = cell.load(Ordering::Relaxed);
+        }
+        Some(((head & !REPLY_FULL) as usize, words))
     }
 
     /// What it runs, if it has not started yet.
@@ -448,6 +490,21 @@ impl Task {
             self.leave_group();
         }
         <arch::Irq as IrqControl>::restore(saved);
+    }
+
+    /// [`Task::set_state`] for a change whose old state the caller knows and
+    /// no one else can change meanwhile, with interrupts masked: a store and
+    /// the job's load, no read-modify-write of the state and no second mask.
+    /// The direct switch's, under the run-queue lock every waker of either
+    /// task takes, for the peer asleep (`BLOCKED`) and the caller running
+    /// (`RUNNABLE`).
+    pub(crate) fn set_state_from(&self, before: u8, state: u8) {
+        self.state.store(state, Ordering::Release);
+        if before != RUNNABLE && state == RUNNABLE {
+            self.join_group();
+        } else if before == RUNNABLE && state != RUNNABLE {
+            self.leave_group();
+        }
     }
 
     /// The job whose processor share it runs in, or `quota::NONE`.
@@ -584,10 +641,22 @@ impl Task {
         self.run_slot.lock().is_some() && self.sleep_slot.lock().is_some()
     }
 
+    /// Whether it holds its sleep slot: no sleeper set or reaper's list
+    /// holds it. The direct switch's half of [`Task::holds_slots`]; its run
+    /// slot is held exactly while it is not queued, which it asserts.
+    pub(crate) fn holds_sleep_slot(&self) -> bool {
+        self.sleep_slot.lock().is_some()
+    }
+
     /// Swap in whether it is inside a system call, for the switch that takes
     /// it off its processor, and answer what it was: see `sched::IN_CALL`.
+    ///
+    /// A load and a store: only `carry_in_call` reads or writes it, under the
+    /// lock of the queue that owns the task.
     pub(crate) fn swap_in_call(&self, in_call: bool) -> bool {
-        self.in_call.swap(in_call, Ordering::Relaxed)
+        let was = self.in_call.load(Ordering::Relaxed);
+        self.in_call.store(in_call, Ordering::Relaxed);
+        was
     }
 
     /// What it carries between queues.
@@ -617,8 +686,12 @@ impl Task {
     }
 
     /// Charge it for time on a CPU.
+    ///
+    /// A load and a store: only the run queue that owns it charges it, under
+    /// that queue's lock, and readers take one load.
     pub(crate) fn add_runtime(&self, nanos: u64) {
-        let _ = self.sum_exec.fetch_add(nanos, Ordering::Relaxed);
+        let total = self.sum_exec.load(Ordering::Relaxed).wrapping_add(nanos);
+        self.sum_exec.store(total, Ordering::Relaxed);
     }
 
     /// Real nanoseconds it has run for, up to when it was last charged: the
@@ -662,7 +735,14 @@ impl Task {
     }
 
     /// Take its wake-up time, leaving it not sleeping.
+    ///
+    /// A load first, and the swap only when one is there: most takes find
+    /// none, and a deadline stored after the load is one the swap would have
+    /// missed too, had it come first.
     pub(crate) fn take_sleep_deadline(&self) -> Option<u64> {
+        if self.sleep_until.load(Ordering::Relaxed) == 0 {
+            return None;
+        }
         match self.sleep_until.swap(0, Ordering::Relaxed) {
             0 => None,
             deadline => Some(deadline),
@@ -670,10 +750,18 @@ impl Task {
     }
 
     /// Note that it is about to run on `cpu`.
+    ///
+    /// Loads and stores: only the processor switching to it writes either,
+    /// under the lock of the queue that owns it, and readers take one load.
     pub(crate) fn note_switch(&self, cpu: usize) {
-        let _ = self.switches.fetch_add(1, Ordering::Relaxed);
+        let switches = self.switches.load(Ordering::Relaxed).wrapping_add(1);
+        self.switches.store(switches, Ordering::Relaxed);
         if cpu < 64 {
-            let _ = self.cpus_run_on.fetch_or(1 << cpu, Ordering::Relaxed);
+            let bit = 1 << cpu;
+            let ran = self.cpus_run_on.load(Ordering::Relaxed);
+            if ran & bit == 0 {
+                self.cpus_run_on.store(ran | bit, Ordering::Relaxed);
+            }
         }
     }
 

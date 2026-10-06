@@ -118,6 +118,22 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 }
 
 /// The kernel proper.
+/// What answers the core's system call entries, registered with it: the
+/// way in likewise is the core's, and the dispatcher is the item's. What a
+/// Linux call does is the personality's, composed with the dispatcher here,
+/// at compile time, so that it costs no second indirect call. And the look
+/// every call gets first, at all four entries, before the early answers the
+/// entries keep and before the native range is split off: a program's own
+/// filter is the personality's policy, so the core holds a pointer to it and
+/// nothing more (`docs/SECCOMP.md` §3.3), with the one question the fast
+/// path asks of it before running ahead of it: whether the filter would look
+/// at a call at all (`docs/OPAQUE-KERNEL.md` §9.7, T2).
+fn register_system_calls() {
+    trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
+    trap::set_syscall_filter(syscall::seccomp::check);
+    trap::set_filter_quiet(syscall::seccomp::quiet);
+}
+
 fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     println!();
     println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
@@ -147,16 +163,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // (`crate::trap::ReturnPath`). Registered here because the first user
     // program is a boot check below, not init.
     syscall::deliver::install();
-    // The way in likewise: the core's system call path answers through
-    // whatever is registered with it, and the dispatcher is the item's. What
-    // a Linux call does is the personality's, composed with the dispatcher
-    // here, at compile time, so that it costs no second indirect call.
-    trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
-    // And the look every call gets first, at all four entries, before the
-    // early answers the entries keep and before the native range is split off:
-    // a program's own filter is the personality's policy, so the core holds a
-    // pointer to it and nothing more (`docs/SECCOMP.md` §3.3).
-    trap::set_syscall_filter(syscall::seccomp::check);
+    register_system_calls();
     println!("  traps    vectors installed");
 
     let stats = bring_up_memory(view);

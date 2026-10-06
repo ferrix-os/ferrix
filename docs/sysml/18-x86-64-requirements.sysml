@@ -334,6 +334,29 @@ package FerrixX8664Requirements {
                 "arch::x86_64::switch::load_selectors",
                 "arch::x86_64::switch::save_user_state");
         }
+        requirement <'L.x86_64.159'> theFastPathIsEnteredFromSyscallOnly : ItemLowLevel {
+            attribute :>> statement = "ferrix_syscall_entry shall call the fast path
+                only for 0x1013 and only when one is registered, which fastpath::init
+                does for ferrix.fastpath=on alone; before the filter and with
+                interrupts masked, after every entry measure the stub makes; raising
+                the vector mark first and lowering it on a decline.";
+            attribute :>> criterion = "Booted with the fast path off, no counter
+                moves; on, trips are taken (test-ipc-equiv).";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("trap::fast_write_read", "trap::set_fast_write_read");
+        }
+        requirement <'L.x86_64.160'> theFrameTailWritesFourRegisters : ItemLowLevel {
+            attribute :>> statement = "frame_tail shall write the reply into RAX, RSI,
+                RDX and R10 and no other register, and leave by the stub's exit only
+                with nothing due and the filter quiet, otherwise opening interrupts,
+                stopping with FX-0533 where the task may not block, and running
+                regroup_current, call_left and the way out.";
+            attribute :>> criterion = "ipc-equiv's cases 1 and 2 with the fast path
+                on; case 14 and the continuation's kill leave by the general branch.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("arch::x86_64::syscall::frame_tail",
+                "arch::x86_64::syscall::write_outcome", "arch::x86_64::syscall::leave");
+        }
         requirement <'L.x86_64.13'> sigreturnLoadsFpu : ItemLowLevel {
             attribute :>> statement = "load_fpu shall load the x87 and SSE registers
                 from the state rt_sigreturn filled from the frame.";
