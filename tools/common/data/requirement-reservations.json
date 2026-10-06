@@ -31,13 +31,6 @@
       "branch": "nvidia-c3k",
       "date": "2026-10-02",
       "purpose": "NVIDIA C3-K, the kernel's fault windows (docs/NVIDIA.md §11.4, the consultant's OK IF of 2026-10-02): window regions, forwarded faults and their wait, kernel copies that never wait, refused partial operations, the mapping count and UNMAPPED, break-before-make entries, revoke, server death, insert checks and holds, answers only from the server handle; a server-inserted frame unreachable before its hold goes, and a client waiting on a server only by its own mapping"
-    },
-    {
-      "ids": ["H.SCHED.13", "H.OBJ.18", "L.sched.55-62", "L.object.164-172", "L.x86_64.159-166"],
-      "owner": "po7-ipc4",
-      "branch": "po7/step4",
-      "date": "2026-10-06",
-      "purpose": "OPAQUE-KERNEL.md §9.7 step 4, the direct switch and the fast path for channel_write_read (part 8's rows): the direct switch's equality with the pick and its asserts, the park record and reply cell, the general writers' take, the continuation, the frame tail, the entry and its tests, the T13 hook"
     }
   ]
 }

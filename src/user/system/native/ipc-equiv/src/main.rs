@@ -40,6 +40,10 @@ use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::native::{Deadline, Error, Object, OwnedHandle, Signals};
 use ferrix_rt::{Bootstrap, Kernel};
 
+/// The most bytes `channel_write_read` carries: three of this processor's
+/// words.
+const MOST: usize = ferrix_native_abi::nr::CHANNEL_WRITE_READ_BYTES;
+
 ferrix_rt::entry!(main);
 
 /// Where this program is, to start a copy of it.
@@ -273,16 +277,17 @@ impl core::fmt::Debug for Printable<'_> {
     }
 }
 
-/// Case 1: an echo of every length from 0 to 24 bytes comes back as sent,
-/// with the bytes past its length zero.
+/// Case 1: an echo of every length from 0 to [`MOST`] bytes -- 24 on a
+/// 64-bit processor, 12 on a 32-bit one -- comes back as sent, with the
+/// bytes past its length zero.
 fn echo_every_length(place: &Place) -> Result<(), i32> {
     let server = place.server_in(None)?;
-    let mut sent = [0_u8; 24];
+    let mut sent = [0_u8; MOST];
     for (at, byte) in sent.iter_mut().enumerate() {
         *byte = if at == 0 { b'E' } else { 0x80 | at as u8 };
     }
     let mut good = 0;
-    for len in 0..=24 {
+    for len in 0..=MOST {
         let message = sent.get(..len).unwrap_or_default();
         let back = server.channel.write_read(Some(message)).map_err(|_| 10)?;
         let bytes = back.bytes();
@@ -294,8 +299,9 @@ fn echo_every_length(place: &Place) -> Result<(), i32> {
         }
     }
     say(format_args!(
-        "ipc-equiv case 1 echo of every length 0 to 24: {good} of 25 came back as sent, \
-         the rest of the words zero"
+        "ipc-equiv case 1 echo of every length 0 to {MOST}: {good} of {} came back as sent, \
+         the rest of the words zero",
+        MOST + 1
     ));
     Ok(())
 }
@@ -411,7 +417,7 @@ fn a_port_observing(place: &Place) -> Result<(), i32> {
 /// without READ.
 fn the_refusals() -> Result<(), i32> {
     let (mine, peer) = channel::create(Kernel).map_err(|_| 17)?;
-    let too_many = answer(mine.write_read_unchecked(25, [0; 3]));
+    let too_many = answer(mine.write_read_unchecked(MOST + 1, [0; 3]));
 
     let (gone, _other) = channel::create(Kernel).map_err(|_| 17)?;
     let raw = gone.into_owned().into_raw();
@@ -437,8 +443,9 @@ fn the_refusals() -> Result<(), i32> {
     let no_read = answer(write_only.write_read(Some(b"E")));
     drop(peer);
     say(format_args!(
-        "ipc-equiv case 12 refusals: a count of 25 {}, a closed handle {}, a VMO {}, without \
+        "ipc-equiv case 12 refusals: a count of {} {}, a closed handle {}, a VMO {}, without \
          WRITE {}, without READ {}",
+        MOST + 1,
         too_many.text(),
         closed.text(),
         wrong.text(),

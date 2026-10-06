@@ -229,6 +229,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             "  sync     not checked: one processor, nowhere to move a reader to"
         );
     }
+    object::fast_path_check::run_and_report()?;
     check_a_job_kill_takes_down_a_process_tree(&mut after)?;
     check_a_long_chain_of_jobs_is_freed_without_recursion()?;
     check_a_job_counts_its_members()?;
