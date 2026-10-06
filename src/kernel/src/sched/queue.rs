@@ -263,6 +263,7 @@ impl CpuQueue {
     /// what widens the fairness bound on a real machine.
     pub(crate) fn account(&mut self, now: u64) {
         self.account_load(now);
+        super::prof::stamp_soft(super::prof::Point::ALoad);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
@@ -286,6 +287,7 @@ impl CpuQueue {
                 self.stats.overrun_total = self.stats.overrun_total.saturating_add(overrun);
             }
         }
+        super::prof::stamp_soft(super::prof::Point::ACurr);
         self.follow_group_share();
         if self.stats.measuring {
             self.measure();

@@ -55,6 +55,10 @@ pub(crate) enum Point {
     Locked,
     /// choose: now_nanos
     ANow,
+    /// account: load accumulate
+    ALoad,
+    /// account: runtime and update_curr
+    ACurr,
     /// choose: account
     AAccount,
     /// choose: wake_sleepers
@@ -108,7 +112,7 @@ pub(crate) enum Point {
 pub(crate) const EXTRA_FLUSH: bool = option_env!("PO7_EXTRA_FLUSH").is_some();
 
 /// How many points.
-const POINTS: usize = 40;
+const POINTS: usize = 42;
 
 /// Names for the print, in order.
 const NAMES: [&str; POINTS] = [
@@ -129,7 +133,9 @@ const NAMES: [&str; POINTS] = [
     "wait: list+block mark",
     "schedule+rq lock",
     "choose: now_nanos",
-    "choose: account",
+    "account: load accumulate",
+    "account: runtime+update_curr",
+    "account: group share+measure",
     "choose: wake_sleepers",
     "detach+pick",
     "bookkeeping+arm_timer",
@@ -250,6 +256,15 @@ pub(crate) fn stamp(point: Point) {
         return;
     }
     stamp_at(point as usize, tsc());
+}
+
+/// [`stamp`], only where `point` is the next one expected: for a function
+/// that other paths call too.
+#[inline(always)]
+pub(crate) fn stamp_soft(point: Point) {
+    if ON.load(Ordering::Relaxed) && NEXT.load(Ordering::Relaxed) == point as usize {
+        stamp_at(point as usize, tsc());
+    }
 }
 
 /// [`stamp`], out of line.
