@@ -1083,6 +1083,85 @@ pub(crate) static ATTENTION_WITHOUT_WORK: Explanation = Explanation {
           src/kernel/src/syscall/deliver.rs needs_attention; docs/OPAQUE-KERNEL.md §9.8 2c",
 };
 
+/// For `sched::direct`, when the direct switch of step 4's fast path finds
+/// the task it hands over to running, queued or not holding its slots.
+pub(crate) static FAST_PATH_NOT_ASLEEP: Explanation = Explanation {
+    code: "FX-0530",
+    title: "the fast path's direct switch found its parked task awake (A1)",
+    meaning: "`channel_write_read`'s fast path hands the processor straight to a task parked \
+              on the other end of the channel, skipping the run queue's pick \
+              (`docs/OPAQUE-KERNEL.md` §9.7). It may do so only to a task asleep at home on \
+              this processor: blocked, switched out, in no queue, holding both its slots. The \
+              tests before the commit leave no way for a parked task to be otherwise -- one \
+              woken is runnable, so it is queued here, which T12 sees, or on another \
+              processor, which T11 sees -- so this is asserted rather than tested, and the \
+              machine stops: the pick would otherwise have switched to a task already \
+              running somewhere, or left a queued one behind.",
+    causes: &[
+        "A path made a parked task runnable without taking its park record and without \
+         putting it on a queue, or moved it without its run queue's lock.",
+        "The park record was set on a task that was not blocked, or left set after the \
+         task left its call.",
+        "The run queue's pick on a queue with nothing waiting chose something other than \
+         the task just put on it.",
+    ],
+    see: "src/kernel/src/sched/direct.rs; src/kernel/src/object/channel.rs send_direct; \
+          docs/OPAQUE-KERNEL.md §9.7 part 2",
+};
+
+/// For `object::channel::Endpoint::send_direct`, when a reader is parked
+/// beside a message or on a closed end.
+pub(crate) static FAST_PATH_PARK_BROKEN: Explanation = Explanation {
+    code: "FX-0531",
+    title: "a reader was parked beside a message or on a closed end (A2)",
+    meaning: "A task parks on a channel end in `channel_write_read` only while that end's \
+              inbox is empty, and every writer that fills the inbox takes the park record \
+              under the same lock and wakes the task; the parked task's own call holds its \
+              end open. A record found beside a message, or on a closed end, means a writer \
+              left the record, and the fast path would answer the reader with a message \
+              that overtakes the one already waiting (`docs/OPAQUE-KERNEL.md` §9.7, A2).",
+    causes: &[
+        "A path that puts a message into an inbox -- a write, `write_small`, `unread` -- \
+         does not take the park record under the inbox lock.",
+        "A park was made without the inbox lock, or with something already waiting.",
+    ],
+    see: "src/kernel/src/object/channel.rs; docs/OPAQUE-KERNEL.md §9.7 part 2",
+};
+
+/// For `sched::direct`, when the direct switch is asked to switch from or to
+/// the idle task.
+pub(crate) static FAST_PATH_IDLE_TASK: Explanation = Explanation {
+    code: "FX-0532",
+    title: "the fast path's direct switch involved the idle task (A4)",
+    meaning: "Both tasks of a direct switch are programs blocked in `channel_write_read`, \
+              so neither can be a processor's idle task, which has no user half and makes no \
+              system call. One that is would have the switch charge, block or park the task \
+              the processor falls back to (`docs/OPAQUE-KERNEL.md` §9.7, A4).",
+    causes: &["A park record named the idle task, or the running task was the idle task \
+               making a native call."],
+    see: "src/kernel/src/sched/direct.rs; docs/OPAQUE-KERNEL.md §9.7 part 1",
+};
+
+/// For the fast path's general continuation, when it is reached where a
+/// task may not block.
+pub(crate) static FAST_PATH_CONTINUATION_MASKED: Explanation = Explanation {
+    code: "FX-0533",
+    title: "the fast path went the general way with interrupts masked or a lock held",
+    meaning: "A task resumed from its park in `channel_write_read`'s fast path without a \
+              reply, or with work for the way out, carries on through the general path, \
+              which may block and take sleeping locks. It opens interrupts first, as the \
+              `SYSCALL` entry does before the dispatch, and checks that it may block \
+              (`sched::may_block`); this stop means it may not, so the general path would run \
+              masked or under a spin lock (`docs/OPAQUE-KERNEL.md` §9.7, condition 3).",
+    causes: &[
+        "The continuation or the frame tail's general branch was entered without opening \
+         interrupts.",
+        "A lock taken by the fast path was not let go before its switch or its decline.",
+    ],
+    see: "src/kernel/src/syscall/native.rs fast_write_read; \
+          src/kernel/src/arch/x86_64/syscall.rs; docs/OPAQUE-KERNEL.md §9.7 part 2",
+};
+
 /// For `sched::schedule`, when asked to switch with the preemption count
 /// raised.
 pub(crate) static SCHEDULE_WITH_PREEMPTION_HELD: Explanation = Explanation {
@@ -3103,6 +3182,10 @@ pub(crate) static ALL: &[&Explanation] = &[
     &CONSOLE_LOG,
     &PREEMPT_COUNT_WITHOUT_RECORD,
     &ATTENTION_WITHOUT_WORK,
+    &FAST_PATH_NOT_ASLEEP,
+    &FAST_PATH_PARK_BROKEN,
+    &FAST_PATH_IDLE_TASK,
+    &FAST_PATH_CONTINUATION_MASKED,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

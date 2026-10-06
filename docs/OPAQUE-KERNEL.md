@@ -2590,6 +2590,143 @@ Groundwork that needs neither 2a nor session A's files, built on branch
   the kernel's come as stage-9 cases with the fast path; the rest need a
   native thread, signal or affinity call first.
 
+#### Step 4 as built (2026-10-06, po7-ipc4): the code, and where it differs from parts 1 to 8
+
+Built on branch `po7/step4`, on `main` with 2f (`step2f`), 3a and 3b
+(`po6/step3`) and `step4-prep` beneath it. Behind `ferrix.fastpath=on`,
+x86-64 only. **For the consultant's code review; nothing here has landed.**
+
+**Where the code is.**
+- `src/kernel/src/sched/direct.rs`: the direct switch. `begin` takes this
+  processor's run-queue lock by `try_lock_manually` and makes T11 to T13;
+  `Direct::hand_over` asserts A1 and A4 and makes the queue step;
+  `Direct::switch` makes A3 (FX-0503's check, `require_preemption_on`, split
+  out of `schedule_from`), `switch_chosen`, `switch_to` and `finish_switch`.
+  The decline counters are here too.
+- `src/kernel/src/sched/mod.rs`: `switch_chosen`, split out of `choose_next`
+  as part 1 says, and `nothing_due_here`, the frame tail's look.
+- `src/kernel/src/sched/queue.rs`: `CpuQueue::hand_over`, `insert_at`,
+  `sleeper_due`. `src/lib/kernel/sched`: `RunQueue::hand_over`, with its
+  host test against `enqueue`, the rescale, `remove_curr` and `pick_next`.
+- `src/kernel/src/sched/task.rs`: the reply cell (`fill_reply`, `take_reply`).
+- `src/kernel/src/object/channel.rs`: the park record (`Inbox::parked`,
+  x86-64 only), the general writers' take (`write`, `write_small`,
+  `unread`, the close), `Endpoint::send_direct` (the send half, T6 to T10,
+  the commit), `park` and `unpark` (the receive half).
+- `src/kernel/src/syscall/native.rs`: `fast_write_read` (T2 to T5, the
+  lookup, the continuation's choice), `continue_general` (condition 3),
+  `park_for_reply` (the receive half in `receive_words`).
+- `src/kernel/src/arch/x86_64/syscall.rs`: the entry's call of the fast
+  path, `frame_tail`, and the entry's way out split into `leave` and
+  `write_outcome`, which the general path and both continuations share.
+- `src/kernel/src/trap.rs`: the `Fast` answer, the fast path's registration
+  slot (T1) and the filter's quiet predicate (T2).
+- Checks: `src/kernel/src/object/fast_path_check.rs` (stage 9: cases 4, 9,
+  10, 11, 13, 14 and the general continuation by a message, a close and a
+  kill), case 15 in `src/kernel/src/arch/x86_64/switch/check.rs` (3a's vector
+  check, its sending variant), and `cargo xtask test-ipc-equiv`, which now
+  also requires trips on the boot with the fast path on and every counter at
+  zero on the one with it off.
+
+**What differs from parts 1 to 8**, each for the consultant to accept or
+send back:
+1. **The receive half runs on the general path.** The fast entry handles the
+   full trip only: a send of at most 24 bytes to a parked reader. Every
+   other call declines to the general path, and there `receive_words` makes
+   the receive half before its wait (`park_for_reply`): T6 to T8 under the
+   caller's half lock, the record and `BLOCKED` in that hold, the `SeqCst`
+   fence, the last look at `END`, the general `schedule()` -- part 2's
+   receive half and the order condition 1 asks, with interrupts on, as
+   `wait_trusting`'s block is made. A task parked there resumes inside the
+   general path, so only a task parked by its own send's commit needs the
+   general continuation. Part 2's flow -- the send half declining into a
+   general send, then the receive half -- is what results; it is reached
+   through the general dispatch instead of from the fast entry.
+2. **T2 is the filter's own answer.** Seccomp filters exist on `main` now
+   (`syscall::seccomp::check`, a thread's `filtered` flag), so T2 is not
+   "no probe armed" alone. The personality registers beside its filter a
+   predicate, `seccomp::quiet`, which the core reads through
+   `trap::filter_quiet`: no probe armed, and either no thread was ever
+   filtered or the running one is not -- the reads `check` makes, in its
+   order, so the two agree on any call. A filter registered without the
+   predicate is never quiet. The frame tail reads it again, and takes the
+   general branch when it is not quiet. Condition 8's flag on `Process`,
+   with its `TSYNC` and tracer rows, stays owed by the landings that bring
+   them.
+3. **T1 is a registration.** `fastpath::init` registers the fast path with
+   the core's entry only for `ferrix.fastpath=on` (`trap::set_fast_write_read`,
+   a `Once`); the entry tests the slot, so off is an empty slot.
+4. **T11 includes the slots.** A parked task files no deadline, but one
+   woken early from an earlier sleep and moved may still have its sleep slot
+   in a sleeper set elsewhere, state 3 of `wake_with`. Part 1's A1 would stop
+   the machine there. So "holds both its slots" is tested under the
+   run-queue lock with T11 (and declines as T11), and A1 asserts the rest:
+   blocked, not running here, not queued.
+5. **T12 declines on a sleeper due.** Part 1 says the test is made after
+   `wake_sleepers(now)`. Waking them and then declining would leave the
+   queue changed by a declined attempt. T12 is "nothing waits, and no
+   sleeper's time has come by `now`" instead, which is the same condition
+   on every queue where the wake would have moved nothing, and declines
+   where it would have.
+6. **`hand_over`'s pieces.** `CpuQueue::hand_over` is `insert`'s charge at
+   `now`, its weight for the peer (`effective_weight`, computed while the
+   caller is still counted in its job, the general path's order), then the
+   caller blocked and parked (`between`), then `RunQueue::hand_over`, which
+   the host test holds bit for bit to `enqueue`, `set_slice_ns` to the
+   rescaled slice, `remove_curr` and `pick_next` on a queue with one entity
+   running and nothing waiting (200,000 random states, weights and lags at
+   and past the clamp, virtual times either side of the wrap). The second
+   `account` of `choose_next`, at the same `now`, changes nothing and is
+   not made.
+7. **The half locks are held through `hand_over`.** Part 2's commit lets
+   them go before `hand_over`; here they go after it, before
+   `switch_chosen`. No lock is nested that was not already: the run-queue
+   lock was taken under them for T11 to T13.
+8. **The counters.** Per processor, each a load and a store with
+   interrupts masked (no locked operation on the trip). Two counts beyond
+   T1 to T13: a half's lock held (`halves`) and this processor's run queue
+   held (`queue`); and `parks`. Printed by the kernel as the shell exits
+   (`fastpath counts: ...`), which `bench-ipc` and `test-ipc-equiv` print
+   with their figures.
+9. **The frame tail's quiet exit makes no audit.** With the self-checks on,
+   the general way out asks the personality anyway when the pending-work
+   word is clear (FX-0520's audit). The tail's quiet exit, taken only with
+   every bit clear, does not; the general branch and every other way out
+   still do.
+10. **A general writer's take is counted as a wake.** It wakes the parked
+    task with the same `Wake` its queue's waiters get, and counts the wait
+    as one a wake ended on that queue (`waits_ended_by_a_wake`), so that
+    statistic no longer differs between the paths (part 2a, row 27).
+11. **Outside §9.7, found by measuring.** Each is a commit of its own, so it
+    can be taken or dropped apart:
+    - *The timer re-armed at every switch.* A sleeper's deadline asked for
+      again at the next decision found the armed bound later than it by
+      the arm's own write, and wrote the local APIC again: an exit at every
+      switch while any task slept on the processor. `timer::after` keeps
+      the deadline the one-shot was asked for and skips a request no earlier
+      than it; `timer::stop` leaves a one-shot that is not armed alone. On
+      both paths.
+    - *Null selectors loaded over null ones.* The switch's restore leaves
+      `DS`, `ES`, `FS` and `GS` alone when both the selector it would load
+      and the one the processor holds are null; the bases are still written
+      at every switch. **This reopens 3b's condition 8** (§9.8: "§9.4 item
+      5's segment skip does not come back in any form"), and §9.10 lists it
+      under step 5. It is the consultant's to reopen or not.
+    - *The scheduler's 128-bit divisions.* `ferrix_sched` divides in 64 bits
+      when the operands fit, and not at all for the unit weight, with a host
+      test against the 128-bit formulas at every boundary. On both paths.
+12. **The cases.** Cases 4, 9, 10, 11, 13 and 14 are stage-9 cases made by
+    check processes' threads driving the entry, as `write_read_check` is,
+    rather than `ipc-equiv`'s native programs, which have no threads,
+    affinity or signals: each is held to the general path's result on both
+    boots, and to having reached its test with the fast path on. Case 7 (a
+    signal during the wait) is case 15's `SIGUSR1` variant and 3a's own
+    signal case. Cases 5c and 6c (another thread's close and `execve`) are
+    not made; the continuation's close and kill cases stand nearest. Case
+    10's control fires as FX-0530 (the pick not the peer) rather than as a
+    share below the bound, because with T12 removed the queue step falls
+    back to the composed calls and the pick can choose the spinner.
+
 ### 9.8 Steps 2 and 3: the designs (draft for the consultant)
 
 **Reviewed (2026-10-02): OK IF.** 2d is OK to build; 2a, 2b, 2c, 2e, 2f and

@@ -663,7 +663,10 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
         bootstrap: next_bootstrap(),
     });
     match status {
-        Ok(status) => println!("  init     the shell exited with {status}"),
+        Ok(status) => {
+            crate::fastpath::report_counts();
+            println!("  init     the shell exited with {status}");
+        }
         Err(problem) => println!("  init     the shell could not be started: {problem}"),
     }
 }

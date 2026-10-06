@@ -180,15 +180,22 @@ fn native_call(args: &SyscallArgs) -> Outcome {
     if args.number == ferrix_native_abi::nr::CHANNEL_WRITE_READ
         && let Some(caller) = caller
     {
-        return match native::dispatch_write_read(args, caller) {
-            Ok((count, words)) => Outcome::ReturnWords {
-                value: errno::encode(Ok(count)),
-                words,
-            },
-            Err(refused) => Outcome::Return(errno::encode(Err(refused))),
-        };
+        return write_read_outcome(native::dispatch_write_read(args, caller));
     }
     Outcome::Return(errno::encode(native::dispatch(args, caller)))
+}
+
+/// What `channel_write_read`'s answer leaves in the program's registers:
+/// the count and the words, or the refusal. The general path's, and the
+/// fast path's frame tail and continuation's (`docs/OPAQUE-KERNEL.md` §9.7).
+pub(crate) fn write_read_outcome(answered: Result<(usize, [u64; 3]), Errno>) -> Outcome {
+    match answered {
+        Ok((count, words)) => Outcome::ReturnWords {
+            value: errno::encode(Ok(count)),
+            words,
+        },
+        Err(refused) => Outcome::Return(errno::encode(Err(refused))),
+    }
 }
 
 /// How many more calls answered `ENOSYS` may be reported. See

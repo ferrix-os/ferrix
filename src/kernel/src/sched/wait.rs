@@ -375,6 +375,21 @@ impl WaitQueue {
         self.waiters.lock().len()
     }
 
+    /// Count a wait on this queue's object ended by a wake that did not go
+    /// through the list: a reader parked by the fast path, which a general
+    /// write or close took off its record and woke
+    /// (`docs/OPAQUE-KERNEL.md` §9.7).
+    pub(crate) fn note_ended_by_a_wake(&self) {
+        let _ = self.woken.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many tasks are listed, if the list's lock is free right now: the
+    /// fast path's T10 (`docs/OPAQUE-KERNEL.md` §9.7), which waits on no
+    /// lock and declines when this one is held.
+    pub(crate) fn try_listed(&self) -> Option<usize> {
+        self.waiters.try_lock().map(|waiters| waiters.len())
+    }
+
     /// How many times the queue has been woken: see the field.
     pub(crate) fn wakes(&self) -> u64 {
         self.wakes.load(Ordering::Relaxed)
