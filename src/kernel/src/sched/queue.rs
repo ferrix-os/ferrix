@@ -642,9 +642,9 @@ impl CpuQueue {
     /// nothing and is not made.
     pub(crate) fn hand_over(
         &mut self,
-        peer: &Arc<Task>,
+        peer: Arc<Task>,
         now: u64,
-        between: impl FnOnce(),
+        between: impl FnOnce(Arc<Task>),
     ) -> Option<Arc<Task>> {
         let Some(slot) = peer.take_run_slot() else {
             super::note_missing_slot();
@@ -658,28 +658,29 @@ impl CpuQueue {
         // counted.
         peer.join_group();
         peer.set_weight(peer.effective_weight());
-        between();
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
-        match self.fair.hand_over(
-            peer.id,
-            Arc::clone(peer),
-            peer.entity_state(),
-            slot,
-            slice_after,
-        ) {
+        let (id, state) = (peer.id, peer.entity_state());
+        // The peer's own reference goes into the queue, and the caller's
+        // comes out of it into `between`: moved, not counted up and down.
+        match self.fair.hand_over(id, peer, state, slot, slice_after) {
             Ok(left) => {
-                peer.set_queued(true);
+                if let Some(next) = self.fair.current() {
+                    next.set_queued(true);
+                }
                 if let Some((_, task, state, slot)) = left {
                     task.return_run_slot(slot);
                     task.store_entity_state(state);
                     task.set_queued(false);
+                    // The caller set blocked and parked, its job's load let
+                    // go after the peer's weight was taken with it counted.
+                    between(task);
                 }
             }
             Err(refused) => {
                 // A duplicate or a weight of zero, neither of which this
                 // kernel makes: as `insert` refuses.
-                peer.return_run_slot(refused.slot);
+                refused.payload.return_run_slot(refused.slot);
                 return None;
             }
         }

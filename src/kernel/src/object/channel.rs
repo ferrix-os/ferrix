@@ -944,7 +944,7 @@ impl Endpoint {
     /// changed: the general path runs the call from its start.
     pub(crate) fn send_direct(
         &self,
-        caller: &Arc<Task>,
+        caller: &Task,
         len: usize,
         words: [u64; 3],
     ) -> Result<(), crate::sched::direct::Count> {
@@ -999,13 +999,12 @@ impl Endpoint {
             return Err(Count::T9);
         };
         reader.fill_reply(len, words);
-        switch.hand_over(caller, &reader, || {
-            direct::set_blocked(caller);
-            own_inbox.parked = Some(Arc::clone(caller));
+        switch.hand_over(caller, reader, |parked| {
+            direct::set_blocked(&parked);
+            own_inbox.parked = Some(parked);
         });
         drop(peer_inbox);
         drop(own_inbox);
-        drop(reader);
         direct::count(Count::Trip);
         switch.switch();
         Ok(())
