@@ -1020,7 +1020,6 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
         direct::count(Count::T3);
         return Fast::Declined;
     };
-    crate::sched::direct::prof::mark(1);
     // T4 and T5: the general lookup, with its clamp, the type and the rights,
     // on a table whose lock is free. A refusal is the general path's to
     // answer and audit.
@@ -1041,14 +1040,12 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
         direct::count(Count::T4);
         return Fast::Declined;
     };
-    crate::sched::direct::prof::mark(2);
     if let Err(declined) = endpoint.send_direct(&caller, count, reply_words(count, a)) {
         direct::count(declined);
         return Fast::Declined;
     }
     // Running again: a commit handed over a reply, or something else woke
     // the park.
-    crate::sched::direct::prof::mark(8);
     if let Some((count, words)) = caller.take_reply() {
         return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
     }

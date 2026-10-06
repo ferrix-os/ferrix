@@ -650,19 +650,15 @@ impl CpuQueue {
             super::note_missing_slot();
             return None;
         };
-        super::direct::prof::dmark(29);
         if self.current.is_some() {
             self.account(now);
         }
-        super::direct::prof::dmark(16);
         // As `insert`: counted in its job (it already is, made runnable),
         // and weighed by its job's share as things stand, the caller still
         // counted.
         peer.join_group();
         peer.set_weight(peer.effective_weight());
-        super::direct::prof::dmark(17);
         between();
-        super::direct::prof::dmark(18);
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
         match self.fair.hand_over(
@@ -687,7 +683,6 @@ impl CpuQueue {
                 return None;
             }
         }
-        super::direct::prof::dmark(19);
         self.fair.current().cloned()
     }
 

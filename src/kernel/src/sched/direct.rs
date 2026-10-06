@@ -230,9 +230,7 @@ impl Direct {
         // is over, as the wake at home ends it.
         let _ = queue.remove_sleeper(peer.id);
         let _ = peer.take_sleep_deadline();
-        prof::dmark(9);
         peer.set_state(RUNNABLE);
-        prof::dmark(15);
         let next = queue.hand_over(peer, now, block_caller);
         if !next.as_ref().is_some_and(|next| Arc::ptr_eq(next, peer)) {
             crate::panic::fatal!(
@@ -270,13 +268,10 @@ impl Direct {
         };
         // The lock goes with the switch, to the context switched to.
         core::mem::forget(self);
-        prof::mark(6);
-        prof::active(false);
         // SAFETY: (CONTEXT) as `pick_and_switch`'s: `save` is this context's
         // own slot and `resume` a stack pointer this module saved, and this
         // processor holds the run queue's lock until `finish_switch`.
         unsafe { arch::switch_to(save, resume) };
-        prof::mark(7);
         finish_switch();
     }
 }
@@ -310,66 +305,4 @@ pub(crate) fn block_parked(task: &Task) -> bool {
 /// under its half's lock.
 pub(crate) fn set_blocked(task: &Task) {
     task.set_state(BLOCKED);
-}
-
-// PROFILE, not for landing: spans of the fast path in TSC ticks.
-#[cfg(target_arch = "x86_64")]
-pub(crate) mod prof {
-    use core::sync::atomic::{AtomicU64, Ordering};
-    const N: usize = 32;
-    static LAST: AtomicU64 = AtomicU64::new(0);
-    static SUM: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
-    static HITS: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
-    pub(crate) const ENABLED: bool = false;
-    static IN_DOMAIN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-    pub(crate) fn entry() {
-        if !ENABLED {
-            return;
-        }
-        let d = super::super::with_current(|t| t.address_space().is_some_and(|s| s.domain() != 0)).unwrap_or(false);
-        IN_DOMAIN.store(d, Ordering::Relaxed);
-        mark(0);
-    }
-    pub(crate) fn mark(i: usize) {
-        if !ENABLED || !IN_DOMAIN.load(Ordering::Relaxed) {
-            return;
-        }
-        // SAFETY: rdtsc has no side effects.
-        let now = unsafe { core::arch::x86_64::_rdtsc() };
-        let last = LAST.swap(now, Ordering::Relaxed);
-        if i < N && last != 0 {
-            let d = now.wrapping_sub(last);
-            if d < 100_000 {
-                let _ = SUM[i].fetch_add(d, Ordering::Relaxed);
-                let _ = HITS[i].fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-    static ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-    pub(crate) fn active(on: bool) {
-        ACTIVE.store(on, Ordering::Relaxed);
-    }
-    pub(crate) fn dmark(i: usize) {
-        if ACTIVE.load(Ordering::Relaxed) {
-            mark(i);
-        }
-    }
-    pub(crate) fn count(i: usize) {
-        if !ENABLED {
-            return;
-        }
-        if ACTIVE.load(Ordering::Relaxed) {
-            let _ = HITS[i].fetch_add(1, Ordering::Relaxed);
-        }
-    }
-    pub(crate) fn report() {
-        for i in 1..N {
-            let h = HITS[i].load(Ordering::Relaxed);
-            if h != 0 && SUM[i].load(Ordering::Relaxed) == 0 {
-                crate::console::println!("  prof count {i}: {h}");
-            } else if h != 0 {
-                crate::console::println!("  prof {i}: {} ticks avg over {h}", SUM[i].load(Ordering::Relaxed) / h);
-            }
-        }
-    }
 }

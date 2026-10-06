@@ -162,11 +162,8 @@ pub(crate) fn after(nanos: u64) {
         .and_then(|cpu| REQUESTED.get(cpu.logical))
         .map_or(u64::MAX, |requested| requested.load(Ordering::Relaxed));
     if !periodic && armed != 0 && (armed <= wanted || requested <= wanted) {
-        crate::sched::direct::prof::count(20);
         return;
     }
-    crate::sched::direct::prof::count(21);
-    if armed == 0 { crate::sched::direct::prof::count(22); }
     arch::timer_arm(nanos);
     // After the arm, so that what is kept bounds the interrupt from above.
     slot.store(now_nanos().saturating_add(nanos).max(1), Ordering::Relaxed);
@@ -232,7 +229,6 @@ pub(crate) fn stop() {
     // nothing to stop: writing it again was two exits at every switch to a
     // processor with nothing waiting, which is every switch of a round trip.
     // Without a slot to say so, it is stopped as before.
-    crate::sched::direct::prof::count(23);
     if periodic || armed_slot().is_none() {
         if let Some(slot) = armed_slot() {
             slot.store(0, Ordering::Relaxed);

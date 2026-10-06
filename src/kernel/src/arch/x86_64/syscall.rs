@@ -491,7 +491,6 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     if frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ
         && let Some(fast) = crate::trap::fast_write_read()
     {
-        crate::sched::direct::prof::entry();
         // The call blocks, and lets the vector registers go across it (3a).
         mark_vectors_dead(true);
         let args = [
@@ -499,11 +498,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
         ];
         match fast(&args) {
             crate::trap::Fast::Declined => mark_vectors_dead(false),
-            crate::trap::Fast::Tail(outcome) => {
-                frame_tail(frame, outcome);
-                crate::sched::direct::prof::mark(10);
-                return;
-            }
+            crate::trap::Fast::Tail(outcome) => return frame_tail(frame, outcome),
             crate::trap::Fast::Done(outcome) => {
                 mark_vectors_dead(false);
                 return leave(frame, outcome);

@@ -540,7 +540,6 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
     // ones `set_thread_area` built, or zero.
     unsafe { gdt::write_tls(&state.tls) };
     // SAFETY: (CONTEXT) each selector checked loadable against the slots just written.
-    crate::sched::direct::prof::dmark(25);
     unsafe {
         load_selectors(
             state.selectors,
@@ -549,7 +548,6 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
             state.gs_base,
         );
     }
-    crate::sched::direct::prof::dmark(26);
     if state.unsaved {
         // SAFETY: (CONTEXT) the incoming task's registers, its area the reset
         // image `keep_vector_controls` left.
@@ -559,10 +557,8 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
         // reserved bit `XRSTOR64` checks is clear.
         unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::extended_state_components()) };
     }
-    crate::sched::direct::prof::dmark(27);
     // SAFETY: (ENTRY) the caller guarantees the stack.
     unsafe { super::syscall::set_entry_stack(entry_stack) };
-    crate::sched::direct::prof::dmark(28);
 }
 
 /// Reset the vector registers of a task whose state is `unsaved`: every

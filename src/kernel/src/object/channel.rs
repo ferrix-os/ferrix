@@ -993,10 +993,7 @@ impl Endpoint {
         if !quiet {
             return Err(Count::T10);
         }
-        crate::sched::direct::prof::mark(3);
         let mut switch = direct::begin(caller, reader)?;
-        crate::sched::direct::prof::mark(4);
-        crate::sched::direct::prof::active(true);
         // The commit, which cannot fail from here.
         let Some(reader) = peer_inbox.parked.take() else {
             return Err(Count::T9);
@@ -1006,12 +1003,10 @@ impl Endpoint {
             direct::set_blocked(caller);
             own_inbox.parked = Some(Arc::clone(caller));
         });
-        crate::sched::direct::prof::dmark(30);
         drop(peer_inbox);
         drop(own_inbox);
         drop(reader);
         direct::count(Count::Trip);
-        crate::sched::direct::prof::mark(5);
         switch.switch();
         Ok(())
     }
