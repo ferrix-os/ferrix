@@ -577,6 +577,10 @@ fn allow_write_read(_data: &SeccompData) -> Verdict {
     Verdict::Continue
 }
 
+/// Whether `IN_CALL` was still raised when the filtered call came back.
+static FILTERED_IN_CALL: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
 /// One call under the probe, armed on this thread for it alone.
 fn filtered_in_the_process(_argument: usize) {
     let taken = FILTERED.lock().take();
@@ -587,15 +591,20 @@ fn filtered_in_the_process(_argument: usize) {
             allow_write_read
         });
         let answer = call(handle, 1, [u64::from(b'f'), 0, 0]);
+        // Read before anything else enters a call on this thread.
+        let in_call = crate::sched::in_call_here();
         crate::syscall::seccomp::disarm_probe();
         *FILTERED_ANSWER.lock() = Some(answer);
+        FILTERED_IN_CALL.store(in_call, core::sync::atomic::Ordering::Release);
     }
     process::exit_current(0)
 }
 
 /// Case 11 (T2): with the probe armed to refuse it, the call answers the
 /// probe's `EPERM` and the echo parked on the other end is not answered; with
-/// it armed to allow it, the call is answered by the echo.
+/// it armed to allow it, the call is answered by the echo. Either way the
+/// caller is out of its call when it comes back: a decline leaves `IN_CALL`
+/// down.
 /// Verifies: `L.object.169`
 fn check_a_filtered_call(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
@@ -623,6 +632,9 @@ fn check_a_filtered_call(on: bool) -> Result<(), &'static str> {
             "case 11: the filtered caller never finished",
         )?;
         let answer = FILTERED_ANSWER.lock().take();
+        if FILTERED_IN_CALL.swap(false, core::sync::atomic::Ordering::Acquire) {
+            return Err("case 11: a filtered call came back with IN_CALL still raised");
+        }
         if refuse {
             if answer.map(|answer| answer.0) != Some(Errno::EPERM.as_return_value()) {
                 return Err("case 11: a call the filter refuses was not refused with its errno");
@@ -688,7 +700,9 @@ fn check_an_end_in_the_last_looks_window(on: bool) -> Result<(), &'static str> {
         }
         if moved(&before, Count::T13) != 0 {
             if answer.is_some_and(|answer| answer.0 != Errno::EINTR.as_return_value()) {
-                return Err("case 14: a call with an end posted in T13's window did not answer EINTR");
+                return Err(
+                    "case 14: a call with an end posted in T13's window did not answer EINTR",
+                );
             }
             return Ok(());
         }
@@ -946,7 +960,11 @@ fn check_the_barriers_in_a_domain_and_across_two(on: bool) -> Result<(), &'stati
         refilled().wrapping_sub(refilled_before),
     );
     // With ERAPS, a switch inside a domain refills nothing (§9.10).
-    let refills_wanted = if arch::refill_wanted_in_domain() { 2 * TRIPS } else { 0 };
+    let refills_wanted = if arch::refill_wanted_in_domain() {
+        2 * TRIPS
+    } else {
+        0
+    };
     if decided_in > SLACK || refilled_in < refills_wanted {
         crate::console::println!(
             "  fastpath case 13: in a domain {decided_in} barriers decided, {refilled_in} refills"
