@@ -4241,3 +4241,46 @@ never enters a scheduler queue. Without its refill it measures 400 to 410
 ns here, which is the figure Ferrix with ERAPS is really compared with.
 Being under 400 means doing a direction in less software and fewer user
 TLB misses than seL4, with the vector and segment state seL4 does not have.
+
+**Measured since the draft (2026-10-06).**
+- *`account`'s 120 to 134 ns*, split by the timing build (`prof-9.log`):
+  - load accumulate: 5 ns;
+  - the runtime and `update_curr`: 42 ns;
+  - `follow_group_share`: 85 ns, mostly `effective_weight` recomputed at
+    every charge.
+
+  The direct switch's charge must not go through `follow_group_share`.
+  Step 4's own profile (po7-ipc4) puts its charge at 30 ns.
+- *The vector reset.* An `XRSTOR` costs about 70 ns here whatever it
+  restores:
+  - the whole area: 77 ns;
+  - the same split into x87 and SSE+AVX: 134 ns;
+  - SSE+AVX only, with x87 by `XINUSE`: 72 ns;
+  - `VZEROALL` and `LDMXCSR`, with x87 by `XINUSE`: 15 ns.
+
+  Built on `po7/step5-vec` (stacked on `po6/step3`, 340596560): -100 to
+  -140 ns a round trip, alternated against `po6/step3`.
+- *ERAPS*, built on `po7/step5` (529f32d51, on `main` 445d09420): -50 to
+  -100 ns a round trip, alternated against `main`.
+- *Step 4's fast path* (po7-ipc4, on `po7/step4`): 1,328 ns p50 against
+  1,700 ns with it off. That is 400 to 450 ns of software a direction,
+  spread over about 30 locked operations. Its selectors and base writes read
+  43 ns, with that branch's own null-to-null selector skip, against this
+  profile's 140 to 180 ns without it.
+- *The consultant's verdicts* (po7-ipcM's consultant, ledger 2026-10-06):
+  - ERAPS: OK IF C1 to C6, met on 529f32d51.
+  - The `DS`/`ES` skip: reopened narrowly under S1 to S7. Only `DS` and
+    `ES`, both exactly 0, compared with the processor's own registers read
+    in the same switch, `FS` and `GS` as 3b has them, with four stage-9
+    cases and their controls.
+  - The `VZEROALL` reset: may be built under V1 to V7. It is built, and
+    its five controls fired.
+
+**The budget, restated with what is built.** A direction is now about:
+- 1,000 to 1,100 ns on the general path, with 2f, 3a/3b, ERAPS and
+  `VZEROALL`;
+- about 600 ns with step 4's fast path;
+- about 200 to 250 ns, if step 4's 400 to 450 ns of software comes down to
+  seL4's 50 to 90 and the `DS`/`ES` skip lands.
+
+The conclusion stands: under 400 ns needs every item at once.
