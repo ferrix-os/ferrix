@@ -2172,7 +2172,9 @@ fn switch_chosen(
             .is_some_and(|idle| Arc::ptr_eq(idle, &next)),
     );
     queue.exec_start = now;
+    crate::sched::fprof::stamp(6);
     queue.arm_timer(now);
+    crate::sched::fprof::stamp(7);
     // Moved, not cloned (2f): the outgoing task into `previous`, which
     // `finish_switch` takes, and the pick into `current`. The rest reads both
     // where the queue holds them.
@@ -2186,6 +2188,7 @@ fn switch_chosen(
         return None;
     };
     next.note_switch(cpu);
+    crate::sched::fprof::stamp(8);
 
     // The address space goes on the processor here, under the run queue lock
     // and before the registers move. Not inside `arch::switch_to`, which takes
@@ -2193,7 +2196,9 @@ fn switch_chosen(
     // after the switch either, because the incoming context resumes on its own
     // stack and would have to be told to do this before touching anything.
     swap_address_space(previous.address_space(), next.address_space());
+    crate::sched::fprof::stamp(9);
     switch_user_state(previous, next);
+    crate::sched::fprof::stamp(10);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
     // lock, so nothing else may read or write either saved stack pointer.
