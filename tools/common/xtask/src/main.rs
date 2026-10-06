@@ -905,7 +905,7 @@ fn test_net(args: &Args) -> Result<()> {
 /// that file in the image, `nokaslr` under `--gdb`, so that the kernel runs
 /// where the ELF a debugger reads its symbols from says it does, and each
 /// `--kernel-option` after those.
-fn image_cmdline(args: &Args) -> Option<String> {
+pub(crate) fn image_cmdline(args: &Args) -> Option<String> {
     let mut options = Vec::new();
     if args.gdb {
         options.push("nokaslr".to_owned());

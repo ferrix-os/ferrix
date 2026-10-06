@@ -316,6 +316,23 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     }
 }
 
+/// Whether [`check`] would let every call of the running task through
+/// without judging it: no probe armed, and no thread ever filtered or the
+/// running one not. What the core's fast path asks first (T2,
+/// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before [`check`]; the same
+/// reads `check` makes, in the same order, so the two agree on any call.
+/// With interrupts masked; takes no lock and no reference.
+pub(crate) fn quiet() -> bool {
+    if PROBE_TASK.load(Ordering::Acquire) != 0 {
+        return false;
+    }
+    if !EVER_FILTERED.load(Ordering::Acquire) {
+        return true;
+    }
+    sched::with_current(|task| thread::of_task(task).is_none_or(|thread| !thread.is_filtered()))
+        .unwrap_or(true)
+}
+
 /// Judge the call `args` describes for `thread`, which may be any thread, not
 /// only the running one: what [`check`] does, less the interrupts and the
 /// ending of a thread, so that a boot check can ask what a thread it holds
