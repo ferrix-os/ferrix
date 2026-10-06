@@ -9,7 +9,7 @@
 
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
 
-pub(crate) const N: usize = 15;
+pub(crate) const N: usize = 19;
 const NAMES: [&str; N] = [
     "ring 3 + SYSRET + SYSCALL + stub (since last exit)",
     "fast entry: IN_CALL, T2 filter_quiet",
@@ -21,7 +21,11 @@ const NAMES: [&str; N] = [
     "sc: arm_timer",
     "sc: previous, set_current, note_switch",
     "sc: swap_address_space (domain, CR3, refill)",
-    "sc: switch_user_state (segments, bases, vectors)",
+    "us: save_user_state (outgoing)",
+    "us: write_tls",
+    "us: load_selectors (DS/ES/FS/GS, bases)",
+    "us: vectors (reset or XRSTOR)",
+    "us: entry stack, return",
     "sc: return to Direct::switch",
     "switch_to + finish_switch (now the peer)",
     "peer: back up to take_reply",
