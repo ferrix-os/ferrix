@@ -41,6 +41,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | Landing | Architectures | Dropped by the carry | Owed |
 |---|---|---|---|
+| po7-ipcM step 5, the vector reset by VZEROALL and the x87 by XINUSE (branch po7/step5-vec; po7-ipcM's consultant, design verdict of 2026-10-06, V6, and code verdict W1-W3) | x86_64 | carried from the evidence's own commits, no anchor dropped. | arch/x86_64/switch.rs reset_vectors's fast form and cpu.rs zero_vectors and x87_in_use: the x87-left branch (X87_LEFT) is reached only where XGETBV 1 is offered, the KVM boot (QEMU's TCG reports every component in use, and the gate's TCG model does not offer it), so measure it under KVM or argue it as absent hardware; reset_vectors's fallback XRSTOR of every component is unreachable in the reference configuration (XCR0 x87, SSE and AVX exactly) and gets an argued row, not a BACKLOG row. |
 | po7-ipcM step 5, ERAPS in place of the in-domain return-stack refill (branch po7/step5; the consultant's OK IF of 2026-10-06, po7-ipcM's consultant, condition C5) | x86_64 | carried from the evidence's own commits, no anchor dropped. | Absent hardware under the coverage run: x86_64 coverage is measured under TCG, which offers no ERAPS. arch/x86_64/speculation.rs switch_barrier_in_domain's `return false` and Plan::for_processor's and eraps_empties_on_switch's true outcome are reached on the reference host's KVM boot (test-boot --arch x86_64 --accel kvm, gate tag po7-ipcM-eraps3-kvm, whose defences line names ERAPS) and by control c2. Measure them under KVM or argue them as absent-hardware rows. |
 | OPAQUE-KERNEL.md §9.8 step 2f, no global or locked writes in the switch (branch step2f) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new and edited lines on every architecture: sched/mod.rs's set_idle_at_switch (both outcomes: the bit already as wanted, and changed), take_resched's load before its swap (both outcomes), regroup_current's compare by two loads, its store and the fence when the counts differ, note_moved's SeqCst increment, and choose_next's moves into previous and current with the let-else that unlocks when either is absent (defensive: both were stored the line above); arch/speculation.rs's entered_space loads and stores and count_here; object/quota.rs's effective through ferrix_sched::carried_weight; and the check code, sched/check.rs's a_running_processor_is_not_idle_across_switches and switch_and_look, and object/quota_check.rs's check_the_weight bound. |
 | po5-red, an idle processor leaves another idle one its last waiting task (branch po5/red-main; the consultant's OK IF of 2026-10-05, ledger 366, condition S2) | x86_64, aarch64, armv7a | carried from the evidence's own commits, no anchor dropped. | Measure and test or argue the new lines on every architecture: sched/mod.rs steal_from's keeps_its_last, both outcomes -- a victim running its idle task with one waiting task kept, and one with two or more, or a busy victim, stolen from. |
@@ -94,8 +95,8 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
 | `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 686, 689, 692, 699 |
-| `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 318, 700, 709 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1461-1462 |
+| `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 321, 777, 786 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1476-1477 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 336 |
 
 ---

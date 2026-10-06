@@ -93,6 +93,51 @@ pub(crate) const XSTATE_X87_SSE: u64 = 0b011;
 /// registers.
 pub(crate) const XSTATE_AVX: u64 = 0b100;
 
+/// The x87 state component alone, bit 0.
+pub(crate) const XSTATE_X87: u64 = 0b001;
+
+/// `VZEROALL`, then `LDMXCSR` of `mxcsr`: every `YMM` register zero, which is
+/// SSE's and AVX's initial state but for `MXCSR`, and `MXCSR` given.
+///
+/// # Safety
+///
+/// (SYSREG) AVX in `XCR0`, and `mxcsr` a value `STMXCSR` stored.
+pub(crate) unsafe fn zero_vectors(mxcsr: u32) {
+    // SAFETY: (SYSREG) the caller's guarantee; a load of this frame's word.
+    unsafe {
+        asm!(
+            "vzeroall",
+            "ldmxcsr [{0}]",
+            in(reg) &raw const mxcsr,
+            out("xmm0") _, out("xmm1") _, out("xmm2") _, out("xmm3") _,
+            out("xmm4") _, out("xmm5") _, out("xmm6") _, out("xmm7") _,
+            out("xmm8") _, out("xmm9") _, out("xmm10") _, out("xmm11") _,
+            out("xmm12") _, out("xmm13") _, out("xmm14") _, out("xmm15") _,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+/// Whether the x87 may hold anything but its initial state: `XINUSE` bit 0,
+/// read with `XGETBV` 1 where `CPUID` 0xD.1 `EAX` bit 2 offers it, and
+/// `true` where it does not, so the caller resets it either way.
+pub(crate) fn x87_in_use() -> bool {
+    if !XINUSE_READABLE.load(Ordering::Relaxed) {
+        return true;
+    }
+    // SAFETY: (SYSREG) `XGETBV` with `ECX` 1, which `CPUID` said exists.
+    let inuse = unsafe { core::arch::x86_64::_xgetbv(1) };
+    inuse & XSTATE_X87 != 0
+}
+
+/// Whether `XGETBV` 1 may be asked, for the check.
+pub(crate) fn xinuse_readable() -> bool {
+    XINUSE_READABLE.load(Ordering::Relaxed)
+}
+
+/// Whether `XGETBV` 1 may be asked: decided by [`enable_extended_state`].
+static XINUSE_READABLE: AtomicBool = AtomicBool::new(false);
+
 /// Bytes of an `XSAVE` area holding x87, SSE and AVX in the standard form:
 /// the 512-byte legacy area, the 64-byte header, and AVX's 256 bytes at the
 /// architectural offset 576.
@@ -165,6 +210,7 @@ pub(crate) fn enable_extended_state(allow_avx: bool) -> u64 {
         unsafe { write_xcr0(components) };
     }
     XSAVE_COMPONENTS.store(components, Ordering::Relaxed);
+    XINUSE_READABLE.store(__cpuid_count(0xD, 1).eax & (1 << 2) != 0, Ordering::Relaxed);
     components
 }
 

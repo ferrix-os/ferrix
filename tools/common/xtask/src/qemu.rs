@@ -1956,8 +1956,14 @@ pub(crate) fn x86_cpu(accelerator: &str) -> String {
     // otherwise drops it with a warning: a `CR3` write that empties the
     // return address predictor, which the switch inside a speculation domain
     // then needs no software refill for (`docs/OPAQUE-KERNEL.md` §9.10).
-    let eraps = if accelerator == "kvm" { ",+eraps" } else { "" };
-    format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}{eraps}")
+    // XGETBV 1 (XINUSE) under KVM too, which the switch's vector reset reads
+    // to leave an x87 in its initial state alone (§9.10).
+    let kvm = if accelerator == "kvm" {
+        ",+eraps,+xgetbv1"
+    } else {
+        ""
+    };
+    format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}{kvm}")
 }
 
 /// [`x86_cpu`] for the QEMU at `binary`: under TCG before QEMU 9.1, without

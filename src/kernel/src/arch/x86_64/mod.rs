@@ -164,6 +164,21 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
             report.reset,
             report.kept
         );
+        let how = if report.fast { "VZEROALL" } else { "XRSTOR" };
+        match report.xinuse {
+            Some((busy, quiet)) => crate::console::println!(
+                "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \
+                 after a busy and a quiet program: {busy:#x} and {quiet:#x}",
+                report.x87.0,
+                report.x87.1,
+            ),
+            None => crate::console::println!(
+                "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \
+                 not offered",
+                report.x87.0,
+                report.x87.1,
+            ),
+        }
     } else {
         crate::console::println!(
             "  vectors  saved with FXSAVE: every switch keeps the vector registers whole, and \

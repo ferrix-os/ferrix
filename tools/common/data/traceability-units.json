@@ -49,6 +49,8 @@
     "arch::x86_64::identity_map_live": "Its only caller is main.rs's stage 2 check, which runs only when the boot checks.",
     "arch::x86_64::paranoid::debug_hook": "Only a breakpoint target and counter for paranoid/check.rs's check_breakpoints_do_not_nest; every kernel #DB calls it so the check can arm a breakpoint on the handler's own path.",
     "arch::x86_64::speculation::refill_wanted_in_domain": "The x86-64 half of arch::speculation::refill_wanted_in_domain, with no product caller: the domain check's case 1 (object::domain_check) asks it whether CPUID, read again, wants the in-domain refill, so that the check does not trust the plan the switch follows.",
+    "arch::x86_64::switch::x87_resets": "Read only by the stage-9 switch-state check (arch::x86_64::switch::check), with no product caller: this processor's counts of the fast vector reset's two x87 branches, which the check must see each taken (po7-ipcM's consultant, V5 and W1).",
+    "arch::x86_64::cpu::xinuse_readable": "Read only by the stage-9 switch-state check, with no product caller: whether XGETBV 1 may be asked, so the check knows whether the x87-left branch and the XINUSE probe can run.",
     "arch::x86_64::speculation::check": "The x86-64 half of arch::speculation_check::check (machine::check), with no product caller: it runs VERW once to show the exit paths' operand is accepted. It reaches speculation.rs's private plan.",
     "arch::x86_64::speculation::clear_cpu_buffers": "Called only by speculation::check, to run VERW once for the boot check.",
     "arch::x86_64::trap::breakpoint": "Its only callers are main.rs's check_breakpoint, which raises int3 twice for stage 3's check.",

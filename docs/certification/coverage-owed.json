@@ -10,6 +10,14 @@
   ],
   "owed": [
  {
+  "landing": "po7-ipcM step 5, the vector reset by VZEROALL and the x87 by XINUSE (branch po7/step5-vec; po7-ipcM's consultant, design verdict of 2026-10-06, V6, and code verdict W1-W3)",
+  "architectures": [
+   "x86_64"
+  ],
+  "dropped": "carried from the evidence's own commits, no anchor dropped.",
+  "what": "arch/x86_64/switch.rs reset_vectors's fast form and cpu.rs zero_vectors and x87_in_use: the x87-left branch (X87_LEFT) is reached only where XGETBV 1 is offered, the KVM boot (QEMU's TCG reports every component in use, and the gate's TCG model does not offer it), so measure it under KVM or argue it as absent hardware; reset_vectors's fallback XRSTOR of every component is unreachable in the reference configuration (XCR0 x87, SSE and AVX exactly) and gets an argued row, not a BACKLOG row."
+ },
+ {
   "landing": "po7-ipcM step 5, ERAPS in place of the in-domain return-stack refill (branch po7/step5; the consultant's OK IF of 2026-10-06, po7-ipcM's consultant, condition C5)",
   "architectures": [
    "x86_64"

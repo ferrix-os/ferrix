@@ -267,17 +267,22 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.155'> anUnsavedStateIsReset : ItemLowLevel {
             attribute :>> statement = "restore_user_state shall, for a state marked
-                unsaved, XRSTOR64 the area with an empty XSTATE_BV and XCR0's enabled
-                components less PKRU requested, which initialises every one and loads
-                the task's own MXCSR, then load the task's x87 control word where it
-                is not 0x037F, and clear the mark; nothing else shall clear it.";
-            attribute :>> criterion = "The three wakes of the `vectors` line read
-                neither program's pattern; with the reset skipped and the mark
-                cleared the first reads the second program's and the check fails by
-                name.";
+                unsaved, put every component XCR0 enables less PKRU in its initial
+                state, with the task's own MXCSR and x87 control word, leaving XINUSE
+                independent of what ran before, and clear the mark; nothing else
+                shall clear it.";
+            attribute :>> criterion = "The wakes of the `vectors` line read neither
+                program's pattern and their own MXCSR and control word, beside a
+                program that used the x87 and one that left it initial, with both of
+                the fast reset's x87 branches taken where XGETBV 1 is offered, and a
+                probe woken after a busy and after a quiet program reads the same
+                XINUSE; with VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE
+                test inverted, the check fails by name.";
             attribute :>> parent = "H.SCHED.12";
             attribute :>> unit = ("arch::x86_64::switch::restore_user_state",
-                "arch::x86_64::switch::reset_vectors", "arch::x86_64::cpu::load_x87_control");
+                "arch::x86_64::switch::reset_vectors", "arch::x86_64::cpu::load_x87_control",
+                "arch::x86_64::cpu::zero_vectors", "arch::x86_64::cpu::x87_in_use",
+                "arch::x86_64::switch::count", "arch::x86_64::switch::this_logical");
         }
         requirement <'L.x86_64.156'> anUnsavedStateReadsAsInitial : ItemLowLevel {
             attribute :>> statement = "Every reader of a task's saved vector area

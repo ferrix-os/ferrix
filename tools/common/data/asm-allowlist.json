@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1610,
+  "max_total_lines": 1615,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -24,7 +24,11 @@
     "1569 lines, not 733, and had for some time. The cap moved to the truth;",
     "the assembly did not grow. 1610 since 2026-09-28, for the device register",
     "accesses of src/kernel/src/arch/{aarch64,armv7a}/mmio.rs (their entries say",
-    "why), which the tree at 1595 lines had no room for."
+    "why), which the tree at 1595 lines had no room for. 1615 since 2026-10-06",
+    "(po7-ipcM, docs/OPAQUE-KERNEL.md §9.10, step 5) for x86-64 cpu.rs's",
+    "`vzeroall` and `ldmxcsr`, the vector reset of a task woken from a blocking",
+    "native call: the kernel is built without SSE, so neither has a Rust",
+    "spelling it may use, and the XRSTOR they replace costs 70 ns a switch."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -124,7 +128,7 @@
     {
       "file": "src/kernel/src/arch/x86_64/cpu.rs",
       "max_lines": 100,
-      "reason": "CPU primitives, one instruction each: `out`/`in` reach the I/O address space, which is not memory and has no Rust syntax; `hlt` and `cli` are CPU state; reading and writing CR3 is a control register; `mov` to and from DR0-DR3, DR6 and DR7 is the debug registers the paranoid entry's boot check arms a breakpoint with and its #DB handler reads. Grows with stage 3 (IDT, TSS, APIC) and must not grow with anything else. The one exception, 2026-09-26 (docs/I386.md, I2a): `mov` to and from DS, ES, FS and GS, a 32-bit program's segment selectors, which the switch saves and loads per task -- a segment register has no Rust syntax -- and the `swapgs` pair around a GS load, without which the load would replace the kernel's own GS base: Linux's `load_gs_index`. The second, 2026-10-03 (docs/OPAQUE-KERNEL.md §9.8 2b, the consultant's Q2): `read_gs_at` and `gs_xadd`, one `mov` from and one `xadd` without `lock` to a word of this processor's record as `gs:[offset]`, the preemption count every kernel spin lock raises and lowers. One instruction, so no interrupt and no migration can come between finding this processor's record and changing it; Rust has no segment-relative addressing, and a pointer read first reopens that window. Linux's `this_cpu_add`."
+      "reason": "CPU primitives, one instruction each: `out`/`in` reach the I/O address space, which is not memory and has no Rust syntax; `hlt` and `cli` are CPU state; reading and writing CR3 is a control register; `mov` to and from DR0-DR3, DR6 and DR7 is the debug registers the paranoid entry's boot check arms a breakpoint with and its #DB handler reads. Grows with stage 3 (IDT, TSS, APIC) and must not grow with anything else. The one exception, 2026-09-26 (docs/I386.md, I2a): `mov` to and from DS, ES, FS and GS, a 32-bit program's segment selectors, which the switch saves and loads per task -- a segment register has no Rust syntax -- and the `swapgs` pair around a GS load, without which the load would replace the kernel's own GS base: Linux's `load_gs_index`. The second, 2026-10-03 (docs/OPAQUE-KERNEL.md §9.8 2b, the consultant's Q2): `read_gs_at` and `gs_xadd`, one `mov` from and one `xadd` without `lock` to a word of this processor's record as `gs:[offset]`, the preemption count every kernel spin lock raises and lowers. One instruction, so no interrupt and no migration can come between finding this processor's record and changing it; Rust has no segment-relative addressing, and a pointer read first reopens that window. Linux's `this_cpu_add`. The third, 2026-10-06 (docs/OPAQUE-KERNEL.md §9.10, step 5): `vzeroall` and `ldmxcsr`, the reset of the vector registers of a task woken from a blocking native call, which an `XRSTOR` of the whole area did at 70 ns a switch; the kernel is built without SSE and AVX, so no intrinsic for either may be called."
     },
     {
       "file": "src/kernel/src/arch/x86_64/smp.rs",

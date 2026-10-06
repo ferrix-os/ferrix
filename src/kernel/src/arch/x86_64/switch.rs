@@ -18,6 +18,9 @@
 //! ([`UserState`]), with `XSAVE` where the processor has it.
 
 use core::arch::global_asm;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use ferrix_sched::MAX_CPUS;
 
 use super::cpu;
 use super::gdt;
@@ -561,6 +564,43 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
     unsafe { super::syscall::set_entry_stack(entry_stack) };
 }
 
+/// Fast resets that reset the x87 because `XINUSE` said, or could not say,
+/// it was in use; and those that left it, already initial: per processor,
+/// for the check, which must see each branch taken on its own processor.
+/// Each processor writes only its own slots, by a load and a store with
+/// interrupts masked, as 2f's words are (`docs/OPAQUE-KERNEL.md` §9.8): no
+/// global and no locked write in the switch.
+static X87_RESETS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// See [`X87_RESETS`].
+static X87_LEFT: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+
+/// This processor's logical number, zero before it has a record.
+fn this_logical() -> usize {
+    crate::smp::this_cpu().map_or(0, |cpu| cpu.logical)
+}
+
+/// Add one to this processor's slot of `counters`.
+fn count(counters: &[AtomicU64; MAX_CPUS]) {
+    if let Some(counter) = counters.get(this_logical()) {
+        counter.store(
+            counter.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+/// This processor's fast resets so far that reset the x87, and that left it
+/// alone.
+pub(crate) fn x87_resets() -> (u64, u64) {
+    let cpu = this_logical();
+    let read = |counters: &[AtomicU64; MAX_CPUS]| {
+        counters
+            .get(cpu)
+            .map_or(0, |counter| counter.load(Ordering::Relaxed))
+    };
+    (read(&X87_RESETS), read(&X87_LEFT))
+}
+
 /// Reset the vector registers of a task whose state is `unsaved`: every
 /// enabled component to its initial state, with the task's own `MXCSR` and
 /// x87 control word, and clear the mark (3a).
@@ -573,14 +613,51 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
 /// AVX is requested (Intel SDM Vol. 1 §13.8.1). The x87's initial control
 /// word is `0x037F`, so the task's own is loaded after when it differs.
 ///
+/// Where `XCR0` less `PKRU` is x87, SSE and AVX exactly -- the reference
+/// configuration -- the same state is reached by cheaper means (step 5,
+/// `docs/OPAQUE-KERNEL.md` §9.10: an `XRSTOR` costs about 70 ns here
+/// whatever it restores): `VZEROALL` zeroes `YMM0` to `YMM15` whole, `LDMXCSR`
+/// gives the task its own `MXCSR`, and the x87 is reset by an `XRSTOR` of its
+/// component alone unless `XINUSE` (`XGETBV` 1, where `CPUID` offers it) says
+/// it is already in its initial state, whose control word is `0x037F`. Any
+/// other `XCR0` takes the `XRSTOR` of every component.
+///
 /// # Safety
 ///
 /// (CONTEXT) The registers must be the incoming task's, and `state` marked
 /// `unsaved` by [`save_user_state`], whose image `XRSTOR64` accepts.
 unsafe fn reset_vectors(state: &mut UserState) {
-    // SAFETY: (CONTEXT) the caller's guarantee: the image's `MXCSR` is one the
-    // processor held, and its header names no component.
-    unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::reset_components()) };
+    let components = cpu::reset_components();
+    if components == cpu::XSTATE_X87_SSE | cpu::XSTATE_AVX {
+        // Step 5 (`docs/OPAQUE-KERNEL.md` §9.10): the same initial state by
+        // cheaper means where `XCR0` is x87, SSE and AVX exactly. `VZEROALL`
+        // zeroes `YMM0` to `YMM15` whole, which is SSE's and AVX's initial
+        // state; `MXCSR`, the one other part of either, is the task's own,
+        // loaded from the image. The x87 is reset by an `XRSTOR` of its
+        // component alone from the image's empty header, unless `XINUSE`
+        // says it is in its initial state already.
+        let mxcsr = u32::from_le_bytes([
+            state.fpu.legacy[MXCSR_AT],
+            state.fpu.legacy[MXCSR_AT + 1],
+            state.fpu.legacy[MXCSR_AT + 2],
+            state.fpu.legacy[MXCSR_AT + 3],
+        ]);
+        // SAFETY: (CONTEXT) the incoming task's registers; AVX is in `XCR0`,
+        // and `MXCSR` is one the processor held when the task blocked.
+        unsafe { cpu::zero_vectors(mxcsr) };
+        if cpu::x87_in_use() {
+            // SAFETY: (CONTEXT) the caller's guarantee: the image's header
+            // names no component, so the x87 is initialised.
+            unsafe { ferrix_fpu_restore(&raw const state.fpu, cpu::XSTATE_X87) };
+            count(&X87_RESETS);
+        } else {
+            count(&X87_LEFT);
+        }
+    } else {
+        // SAFETY: (CONTEXT) the caller's guarantee: the image's `MXCSR` is one the
+        // processor held, and its header names no component.
+        unsafe { ferrix_fpu_restore(&raw const state.fpu, components) };
+    }
     let control = u16::from_le_bytes([state.fpu.legacy[FCW_AT], state.fpu.legacy[FCW_AT + 1]]);
     if control != INITIAL_X87_CONTROL {
         // SAFETY: (SYSREG) the incoming task's own control word.

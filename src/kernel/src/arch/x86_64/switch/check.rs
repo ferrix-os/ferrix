@@ -54,6 +54,14 @@ pub(crate) struct Report {
     /// Whether the processor saves with `XSAVE`, without which the vector
     /// cases are not run: the reset is an `XRSTOR` of an empty header.
     pub(crate) xsave: bool,
+    /// Whether the reset takes the fast form (`VZEROALL`), `XCR0` being x87,
+    /// SSE and AVX exactly.
+    pub(crate) fast: bool,
+    /// Fast resets during the x87 cases that reset the x87, and that left it.
+    pub(crate) x87: (u64, u64),
+    /// What the `XINUSE` probe read after a busy and after a quiet program,
+    /// where `XGETBV` 1 is offered.
+    pub(crate) xinuse: Option<(i32, i32)>,
 }
 
 /// How long a case may take before its program is called stuck: generous
@@ -586,6 +594,27 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             run_vector_case(wake)?;
             report.kept += 1;
         }
+        // The fast reset's two x87 branches, each seen taken (the
+        // consultant's V5): beside a program that used the x87, and beside
+        // one that left it initial, which only `XINUSE` can tell.
+        let fast = cpu::reset_components() == cpu::XSTATE_X87_SSE | cpu::XSTATE_AVX;
+        let before = super::x87_resets();
+        run_vector_case(Wake::Message)?;
+        let after = super::x87_resets();
+        if fast && after.0 <= before.0 {
+            return Err("a wake beside a program that used the x87 did not reset the x87");
+        }
+        run_vector_case_beside(Wake::Message, false)?;
+        let last = super::x87_resets();
+        if fast && cpu::xinuse_readable() && last.1 <= after.1 {
+            return Err(
+                "a wake beside a program that left the x87 initial reset it: XINUSE was not read",
+            );
+        }
+        report.reset += 2;
+        report.x87 = (last.0 - before.0, last.1 - before.1);
+        report.fast = fast;
+        report.xinuse = check_xinuse_tells_nothing()?;
     }
     report.traded = check_programs_trade_their_fs_bases()?;
     check_a_cleared_base_comes_back_and_leaks_nowhere()?;
@@ -710,6 +739,13 @@ impl Wake {
 ///
 /// Verifies: H.SCHED.12, L.sched.54, `L.x86_64.153`, `L.x86_64.154`, `L.x86_64.155`
 fn run_vector_case(wake: Wake) -> Result<(), &'static str> {
+    run_vector_case_beside(wake, true)
+}
+
+/// [`run_vector_case`], the other program using the x87 or, with
+/// `other_x87` false, never touching it, so that the victim's reset meets
+/// an x87 in its initial state.
+fn run_vector_case_beside(wake: Wake, other_x87: bool) -> Result<(), &'static str> {
     let cpu = crate::smp::this_cpu()
         .ok_or("the per-CPU register is not installed")?
         .logical;
@@ -733,7 +769,11 @@ fn run_vector_case(wake: Wake) -> Result<(), &'static str> {
             || victim_task.is_blocked(),
         )?;
     }
-    let other = vector_program(b'b', OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?;
+    let other = if other_x87 {
+        vector_program(b'b', OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?
+    } else {
+        vector_program_without_x87(OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?
+    };
     let other_task = process::start_on(&other, Some(cpu))
         .map_err(|_| "the program that fills the vector registers could not be started")?;
     if wake.blocks_natively() {
@@ -863,6 +903,165 @@ fn vector_program(
     patch(&mut code, 24, &pattern.to_le_bytes())?;
     patch(&mut code, 32, &other.to_le_bytes())?;
     load(b"/vectors", &code)
+}
+
+/// Where [`VECTOR_PROGRAM`]'s `set_pattern` loads the x87 (`fninit`,
+/// `fldcw`, two `fldl`): twenty bytes, which [`vector_program_without_x87`]
+/// turns into `nop`s.
+const X87_LOADS_AT: usize = 0x1E2;
+/// Their first four bytes, checked before they are overwritten.
+const X87_LOADS: [u8; 4] = [0xDB, 0xE3, 0xD9, 0x2D];
+
+/// [`vector_program`] in mode `b`, never touching the x87: its
+/// `set_pattern` fills `XMM` and `YMM` and leaves the x87 as `execve` left
+/// it, initial, which `XSAVE` then records as such.
+fn vector_program_without_x87(
+    pattern: u64,
+    mxcsr: u32,
+    control: u16,
+) -> Result<Arc<Process>, &'static str> {
+    let mut code = VECTOR_PROGRAM.to_vec();
+    if code.get(X87_LOADS_AT..X87_LOADS_AT + 4) != Some(&X87_LOADS[..]) {
+        return Err("the vector program's x87 loads are not where its layout says");
+    }
+    patch(&mut code, X87_LOADS_AT, &[0x90; 20])?;
+    patch(&mut code, 4, b"b")?;
+    patch(&mut code, 8, &BOOTSTRAP.0.to_le_bytes())?;
+    patch(&mut code, 12, &mxcsr.to_le_bytes())?;
+    patch(&mut code, 16, &control.to_le_bytes())?;
+    patch(&mut code, 24, &pattern.to_le_bytes())?;
+    patch(&mut code, 32, &VICTIM_PATTERN.to_le_bytes())?;
+    load(b"/vectors", &code)
+}
+
+/// The `XINUSE` probe: blocks in `channel_write_read` sending nothing, and
+/// once woken exits 40 plus `XINUSE`'s x87, SSE and AVX bits (`XGETBV` 1),
+/// or 10. Patched at 8 (handle).
+///
+/// ```text
+/// # XINUSE probe for OPAQUE-KERNEL.md 9.10 (po7-ipcM). Patched by the kernel:
+/// #  8 handle. Blocks in channel_write_read sending nothing; once woken,
+/// #  exits 40 plus XINUSE's x87, SSE and AVX bits (XGETBV 1), or 10.
+///         .text
+///         .globl _start
+/// _start:
+///         jmp start
+///         .byte 0x90, 0x90
+/// mode:   .byte '?'
+///         .byte 0, 0, 0
+/// handle: .long 0
+/// start:
+///         movl $0x1013, %eax  # channel_write_read, sending nothing
+///         movl handle(%rip), %edi
+///         movq $-1, %rsi
+///         xorl %edx, %edx
+///         xorl %r10d, %r10d
+///         xorl %r8d, %r8d
+///         syscall
+///         testq %rax, %rax
+///         js fail
+///         movl $1, %ecx
+///         xgetbv
+///         andl $7, %eax
+///         addl $40, %eax
+///         jmp exit
+/// fail:   movl $10, %eax
+/// exit:   movl %eax, %edi
+///         movl $231, %eax
+///         syscall
+///         ud2
+/// ```
+const PROBE_PROGRAM: &[u8] = &[
+    0xeb, 0x0a, 0x90, 0x90, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x13, 0x10, 0x00,
+    0x00, 0x8b, 0x3d, 0xf1, 0xff, 0xff, 0xff, 0x48, 0xc7, 0xc6, 0xff, 0xff, 0xff, 0xff, 0x31, 0xd2,
+    0x45, 0x31, 0xd2, 0x45, 0x31, 0xc0, 0x0f, 0x05, 0x48, 0x85, 0xc0, 0x78, 0x10, 0xb9, 0x01, 0x00,
+    0x00, 0x00, 0x0f, 0x01, 0xd0, 0x83, 0xe0, 0x07, 0x83, 0xc0, 0x28, 0xeb, 0x05, 0xb8, 0x0a, 0x00,
+    0x00, 0x00, 0x89, 0xc7, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x0f, 0x0b,
+];
+
+/// A program that touches no vector register: `sched_yield` until killed.
+///
+/// ```text
+///         .text
+///         .globl _start
+/// _start:
+///         movl $24, %eax
+///         syscall
+///         jmp _start
+/// ```
+const QUIET_PROGRAM: &[u8] = &[0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0xf7];
+
+/// What a program woken from a blocking native call reads in `XINUSE` must
+/// not depend on what the program that ran before it did (the consultant's
+/// V4): the probe is woken once after a program that filled every vector
+/// register and the x87, and once after one that touched none, and both
+/// read the same bits. Answers them. Only where `XGETBV` 1 is offered.
+///
+/// Verifies: `L.x86_64.155`
+fn check_xinuse_tells_nothing() -> Result<Option<(i32, i32)>, &'static str> {
+    if !cpu::xinuse_readable() {
+        return Ok(None);
+    }
+    let after_busy = run_probe(true)?;
+    let after_quiet = run_probe(false)?;
+    if !(40..48).contains(&after_busy) || !(40..48).contains(&after_quiet) {
+        println!("  vectors  the XINUSE probe ended with {after_busy} and {after_quiet}");
+        return Err("the XINUSE probe did not read XINUSE after its wake");
+    }
+    if after_busy != after_quiet {
+        println!(
+            "  vectors  XINUSE after a busy program {:#x}, after a quiet one {:#x}",
+            after_busy - 40,
+            after_quiet - 40
+        );
+        return Err(
+            "a task resumed from a blocking native call read in XINUSE whether the program before it used the vector registers",
+        );
+    }
+    Ok(Some((after_busy - 40, after_quiet - 40)))
+}
+
+/// One run of the probe, woken by a message after the other program -- the
+/// vector program in mode `b` when `busy`, [`QUIET_PROGRAM`] otherwise --
+/// has run beside it: its status.
+fn run_probe(busy: bool) -> Result<i32, &'static str> {
+    let cpu = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let (mine, theirs) = Endpoint::pair().map_err(|_| "could not make a channel")?;
+    let mut code = PROBE_PROGRAM.to_vec();
+    patch(&mut code, 8, &BOOTSTRAP.0.to_le_bytes())?;
+    let probe = load(b"/xinuse", &code)?;
+    let placed = probe
+        .with_handles(|table| table.insert(Object::Channel(mine), Rights::CHANNEL))
+        .map_err(|_| "no room for the probe's channel")?;
+    if placed != BOOTSTRAP {
+        return Err("a fresh process's first handle is not the one the probe was built for");
+    }
+    let probe_task =
+        process::start_on(&probe, Some(cpu)).map_err(|_| "the probe could not be started")?;
+    wait_until(
+        deadline,
+        "the probe never blocked in its native call",
+        || probe_task.is_blocked(),
+    )?;
+    let other = if busy {
+        vector_program(b'b', OTHER_PATTERN, OTHER_MXCSR, OTHER_CONTROL)?
+    } else {
+        load(b"/quiet", QUIET_PROGRAM)?
+    };
+    let other_task = process::start_on(&other, Some(cpu))
+        .map_err(|_| "the program beside the probe could not be started")?;
+    wait_until(deadline, "the program beside the probe never ran", || {
+        other_task.switches() >= 2
+    })?;
+    send(Some(&theirs))?;
+    let status = probe.wait_for_exit(deadline);
+    process::kill(&other, KILLED_STATUS);
+    let _ = other.wait_for_exit(deadline);
+    drop(theirs);
+    status.ok_or("the probe never ended")
 }
 
 /// Write `bytes` at `at` in `code`.
