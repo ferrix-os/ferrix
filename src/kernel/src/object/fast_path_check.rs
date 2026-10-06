@@ -489,7 +489,7 @@ fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
     wait_until(
         bound,
         "case 4: a reader was never woken by the echo's answer",
-        || READ.lock()[0].is_some() || SENT.lock().is_some(),
+        || READ.lock().iter().flatten().next().is_some() || SENT.lock().is_some(),
     )?;
     theirs
         .write_small(b"y")

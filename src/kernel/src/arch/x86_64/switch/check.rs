@@ -1053,9 +1053,10 @@ fn run_sending_vector_case(wake: Wake) -> Result<(), &'static str> {
     // made once, holding the general path to the reset.
     let fast = crate::trap::fast_write_read().is_some() && crate::smp::count() >= 2;
     for _ in 0..6 {
-        let before = counts()[Count::Trip as usize];
+        let trips = || counts().get(Count::Trip as usize).copied().unwrap_or(0);
+        let before = trips();
         send_then_wake(wake)?;
-        if !fast || counts()[Count::Trip as usize] != before {
+        if !fast || trips() != before {
             return Ok(());
         }
     }
