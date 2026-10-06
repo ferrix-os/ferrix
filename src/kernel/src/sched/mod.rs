@@ -2198,7 +2198,7 @@ fn switch_chosen(
     swap_address_space(previous.address_space(), next.address_space());
     crate::sched::fprof::stamp(9);
     switch_user_state(previous, next);
-    crate::sched::fprof::stamp(10);
+    crate::sched::fprof::stamp(14);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
     // lock, so nothing else may read or write either saved stack pointer.
@@ -2294,6 +2294,7 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
             unsafe { arch::save_user_state(state, previous.is_blocked()) };
         }
     }
+    crate::sched::fprof::stamp(10);
     // SAFETY: (SHARED) as above, for `next`.
     if let Some(state) = unsafe { next.user_state() } {
         let entry_stack = next.stack_top().unwrap_or(0);

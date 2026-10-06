@@ -489,7 +489,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     }
     entry_inner(frame);
     if profiled {
-        crate::sched::fprof::stamp(14);
+        crate::sched::fprof::stamp(18);
     }
 }
 
