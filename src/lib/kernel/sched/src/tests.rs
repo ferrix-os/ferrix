@@ -1632,7 +1632,7 @@ fn same_queue(a: &RunQueue<u64>, b: &RunQueue<u64>, case: u64) {
 /// Verifies: `L.sched.55`, `H.SCHED.13`
 #[test]
 fn hand_over_is_the_general_sequence() {
-    let mut rng = Rng(0xD1EC_7_5_1_7C4);
+    let mut rng = Rng(0x00D1_EC75_17C4);
     for case in 0..200_000 {
         let seed = rng.next() | 1;
         let mut general = running_one(&mut Rng(seed));
@@ -1695,7 +1695,7 @@ fn the_narrow_arithmetic_is_the_wide_arithmetic() {
         u64::try_from(u128::from(virt) * u128::from(weight) / u128::from(NICE_0_WEIGHT))
             .unwrap_or(u64::MAX)
     };
-    let mut rng = Rng(0xA11_0F_7E_5);
+    let mut rng = Rng(0xA110_F7E5);
     let edges = [
         0,
         1,

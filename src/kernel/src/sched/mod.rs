@@ -246,6 +246,10 @@ pub(crate) fn regroup_current() {
 /// asked of this processor, and no move between jobs since it last looked.
 /// When any is there, the tail takes the general way out instead, which
 /// reads each again and acts on it.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
 pub(crate) fn nothing_due_here() -> bool {
     let Some(cpu) = this_cpu() else {
         return false;
