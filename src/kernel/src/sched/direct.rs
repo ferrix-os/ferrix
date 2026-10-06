@@ -98,7 +98,10 @@ static COUNTED: [[AtomicU64; COUNTS]; COUNTED_PROCESSORS] =
 pub(crate) fn count(what: Count) {
     let row = this_cpu().map_or(0, |cpu| cpu.min(COUNTED_PROCESSORS - 1));
     if let Some(cell) = COUNTED.get(row).and_then(|row| row.get(what as usize)) {
-        cell.store(cell.load(Ordering::Relaxed).wrapping_add(1), Ordering::Relaxed);
+        cell.store(
+            cell.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -112,7 +115,6 @@ pub(crate) fn counts() -> [u64; COUNTS] {
     }
     sums
 }
-
 
 /// A direct switch begun: this processor's run-queue lock held, T11 to T13
 /// passed. Dropped without [`Direct::switch`], it lets the lock go, having
@@ -238,7 +240,10 @@ impl Direct {
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
         let next = queue.hand_over(peer, now, block_caller);
-        if !next.as_ref().is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer)) {
+        if !next
+            .as_ref()
+            .is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer))
+        {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "the direct switch's pick was not the parked task it handed over to (A1): task {}",
@@ -258,15 +263,15 @@ impl Direct {
         super::require_preemption_on(self.cpu);
         let (cpu, now) = (self.cpu, self.now);
         let next = self.next.take();
-        let queue = self.queue();
-        let previous = queue.current.take();
+        let lock = self.lock;
+        let previous = self.queue().current.take();
         let (Some(previous), Some(next)) = (previous, next) else {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "the direct switch had no task to switch from or to"
             );
         };
-        let Some((save, resume)) = switch_chosen(queue, cpu, previous, next, now) else {
+        let Some((save, resume)) = switch_chosen(lock, cpu, previous, next, now) else {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "the direct switch's queue lost the tasks it was given"

@@ -2110,12 +2110,7 @@ fn choose_next(
     }
     // `previous` is the clone of `queue.current` taken above; the queue's own
     // reference goes as `switch_chosen` stores the pick in its place.
-    let switched = switch_chosen(queue, cpu, previous, next, now);
-    if switched.is_none() {
-        // SAFETY: (SHARED) taken above and not handed to another context.
-        unsafe { lock.force_unlock() };
-    }
-    switched
+    switch_chosen(lock, cpu, previous, next, now)
 }
 
 /// Everything a switch does once the task to run is chosen, in this order:
@@ -2124,8 +2119,8 @@ fn choose_next(
 /// and `current`, the incoming task's switch count, the address space and the
 /// user state. Returns where to save the outgoing context and what to
 /// resume, with `queue`'s lock still held for the switch to hand over;
-/// `None`, with nothing switched, only if the queue did not hold the two
-/// tasks it had just been given, which the caller answers.
+/// `None`, with nothing switched and `lock` let go, only if the queue did
+/// not hold the two tasks it had just been given.
 ///
 /// The one tail of every switch: [`choose_next`]'s, after its pick, and the
 /// direct switch's, after `hand_over` (`docs/OPAQUE-KERNEL.md` §9.7, part 1),
@@ -2134,12 +2129,16 @@ fn choose_next(
 /// With interrupts masked, `queue`'s lock held and `cpu` this processor;
 /// `previous` is the task this processor runs, `next` another.
 fn switch_chosen(
-    queue: &mut CpuQueue,
+    lock: &'static SpinLock<CpuQueue>,
     cpu: usize,
     previous: Arc<Task>,
     next: Arc<Task>,
     now: u64,
 ) -> Option<(*mut u64, u64)> {
+    // SAFETY: (SHARED) the caller holds `lock` (`choose_next`'s
+    // `lock_manually`, the direct switch's `try_lock_manually`), and this
+    // is the only reference into it until the switch hands it over.
+    let queue = unsafe { lock.locked_data() };
     queue.stats.switches += 1;
     carry_in_call(cpu, &previous, &next);
     note_running(cpu, next.id, next.group(), next.moves_seen());
@@ -2168,8 +2167,9 @@ fn switch_chosen(
     set_current(queue, cpu, next);
     let (Some(previous), Some(next)) = (queue.previous.as_ref(), queue.current.as_ref()) else {
         // Both were stored a line above. Were either not there, nothing has
-        // been switched, and the caller lets the lock go as the no-switch
-        // path does.
+        // been switched: let the lock go as the no-switch path does.
+        // SAFETY: (SHARED) held by this context, and not handed over.
+        unsafe { lock.force_unlock() };
         return None;
     };
     next.note_switch(cpu);

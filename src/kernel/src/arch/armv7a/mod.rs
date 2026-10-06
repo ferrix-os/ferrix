@@ -97,6 +97,11 @@ pub(crate) const ARCH: Arch = Arch::Armv7a;
 /// from `arch/arm/include/uapi/asm/stat.h`. This architecture's plain
 /// `struct stat` cannot hold a 64-bit size, so musl calls only the `64` forms,
 /// and the table carries no `newfstatat` for the plain one to be filled by.
+/// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
+/// path for `channel_write_read` when one is registered
+/// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
+pub(crate) const FAST_WRITE_READ: bool = false;
+
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Stat64;
 
 /// ARMv7-A's `struct epoll_event`, 16 bytes: not packed, and the EABI aligns

@@ -1137,8 +1137,10 @@ pub(crate) static FAST_PATH_IDLE_TASK: Explanation = Explanation {
               so neither can be a processor's idle task, which has no user half and makes no \
               system call. One that is would have the switch charge, block or park the task \
               the processor falls back to (`docs/OPAQUE-KERNEL.md` §9.7, A4).",
-    causes: &["A park record named the idle task, or the running task was the idle task \
-               making a native call."],
+    causes: &[
+        "A park record named the idle task, or the running task was the idle task \
+               making a native call.",
+    ],
     see: "src/kernel/src/sched/direct.rs; docs/OPAQUE-KERNEL.md §9.7 part 1",
 };
 

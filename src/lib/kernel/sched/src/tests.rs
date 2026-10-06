@@ -1554,7 +1554,16 @@ fn running_one(rng: &mut Rng) -> RunQueue<u64> {
     let vlag = drawn_lag(rng, weight);
     let sum_exec = rng.next() >> 8;
     queue
-        .enqueue(11, 11, EntityState { weight, vlag, sum_exec }, slot())
+        .enqueue(
+            11,
+            11,
+            EntityState {
+                weight,
+                vlag,
+                sum_exec,
+            },
+            slot(),
+        )
         .unwrap();
     let _ = queue.pick_next();
     let _ = queue.update_curr(rng.below(SLICE * 3));
@@ -1595,8 +1604,22 @@ fn same_queue(a: &RunQueue<u64>, b: &RunQueue<u64>, case: u64) {
     let (ca, cb) = (a.curr.as_ref().unwrap(), b.curr.as_ref().unwrap());
     let (ea, eb) = (&ca.entity, &cb.entity);
     assert_eq!(
-        (ea.id, ea.weight, ea.vruntime, ea.deadline, ea.sum_exec, ea.payload),
-        (eb.id, eb.weight, eb.vruntime, eb.deadline, eb.sum_exec, eb.payload),
+        (
+            ea.id,
+            ea.weight,
+            ea.vruntime,
+            ea.deadline,
+            ea.sum_exec,
+            ea.payload
+        ),
+        (
+            eb.id,
+            eb.weight,
+            eb.vruntime,
+            eb.deadline,
+            eb.sum_exec,
+            eb.payload
+        ),
         "case {case}: the running entity"
     );
 }
@@ -1606,7 +1629,7 @@ fn same_queue(a: &RunQueue<u64>, b: &RunQueue<u64>, case: u64) {
 /// nothing waiting: random states, weights and lags at and past the clamp,
 /// virtual times either side of the wrap, every field compared.
 ///
-/// Verifies: the direct switch's queue step (OPAQUE-KERNEL.md §9.7 part 1)
+/// Verifies: `L.sched.55`, `H.SCHED.13`
 #[test]
 fn hand_over_is_the_general_sequence() {
     let mut rng = Rng(0xD1EC_7_5_1_7C4);
@@ -1665,17 +1688,25 @@ fn hand_over_refuses_as_enqueue_does() {
 #[test]
 fn the_narrow_arithmetic_is_the_wide_arithmetic() {
     let wide_virtual = |real: u64, weight: u32| {
-        u64::try_from(
-            u128::from(real) * u128::from(NICE_0_WEIGHT) / u128::from(weight.max(1)),
-        )
-        .unwrap_or(u64::MAX)
+        u64::try_from(u128::from(real) * u128::from(NICE_0_WEIGHT) / u128::from(weight.max(1)))
+            .unwrap_or(u64::MAX)
     };
     let wide_real = |virt: u64, weight: u32| {
         u64::try_from(u128::from(virt) * u128::from(weight) / u128::from(NICE_0_WEIGHT))
             .unwrap_or(u64::MAX)
     };
     let mut rng = Rng(0xA11_0F_7E_5);
-    let edges = [0, 1, 1023, 1024, (1 << 54) - 1, 1 << 54, (1 << 54) + 1, u64::MAX / 2, u64::MAX];
+    let edges = [
+        0,
+        1,
+        1023,
+        1024,
+        (1 << 54) - 1,
+        1 << 54,
+        (1 << 54) + 1,
+        u64::MAX / 2,
+        u64::MAX,
+    ];
     for case in 0..1_000_000_u64 {
         let value = if case % 4 == 0 {
             edges[(case / 4 % edges.len() as u64) as usize]
@@ -1687,13 +1718,35 @@ fn the_narrow_arithmetic_is_the_wide_arithmetic() {
             1 => [0, 1, NICE_0_WEIGHT, u32::MAX][rng.below(4) as usize],
             _ => rng.next() as u32,
         };
-        assert_eq!(to_virtual(value, weight), wide_virtual(value, weight), "{value} {weight}");
-        assert_eq!(to_real(value, weight), wide_real(value, weight), "{value} {weight}");
+        assert_eq!(
+            to_virtual(value, weight),
+            wide_virtual(value, weight),
+            "{value} {weight}"
+        );
+        assert_eq!(
+            to_real(value, weight),
+            wide_real(value, weight),
+            "{value} {weight}"
+        );
         let numerator = i128::from(rng.next() as i64) * if case % 5 == 0 { 1 << 60 } else { 1 };
-        let numerator = if case % 7 == 0 { i128::from(i64::MIN) } else { numerator };
+        let numerator = if case % 7 == 0 {
+            i128::from(i64::MIN)
+        } else {
+            numerator
+        };
         let denominator = 1 + i128::from(rng.next() >> rng.below(64));
-        let denominator = if case % 11 == 0 { i128::from(i64::MAX) + 1 } else { denominator };
-        assert_eq!(floor_div(numerator, denominator), numerator.div_euclid(denominator));
-        assert_eq!(truncating_div(numerator, denominator), numerator / denominator);
+        let denominator = if case % 11 == 0 {
+            i128::from(i64::MAX) + 1
+        } else {
+            denominator
+        };
+        assert_eq!(
+            floor_div(numerator, denominator),
+            numerator.div_euclid(denominator)
+        );
+        assert_eq!(
+            truncating_div(numerator, denominator),
+            numerator / denominator
+        );
     }
 }

@@ -81,6 +81,8 @@ pub(crate) struct Report {
 ///
 /// The first case whose result the general path does not give, or a fast
 /// path test a case was built to reach and did not.
+///
+/// Verifies: `H.SCHED.13`, `H.OBJ.18`, `L.sched.57`, `L.sched.58`
 pub(crate) fn run() -> Result<Report, &'static str> {
     let on = crate::trap::fast_write_read().is_some();
     let before = direct::counts();
@@ -88,7 +90,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         on,
         ..Report::default()
     };
-    if cfg!(target_arch = "x86_64") {
+    if arch::FAST_WRITE_READ {
         check_two_readers_of_one_end(on)?;
         check_a_filtered_call(on)?;
         check_an_end_in_the_last_looks_window(on)?;
@@ -172,7 +174,11 @@ fn holding_in(
 }
 
 /// Wait, sleeping a millisecond at a time, until `done` or `deadline`.
-fn wait_until(deadline: u64, stuck: &'static str, done: impl Fn() -> bool) -> Result<(), &'static str> {
+fn wait_until(
+    deadline: u64,
+    stuck: &'static str,
+    done: impl Fn() -> bool,
+) -> Result<(), &'static str> {
     while !done() {
         if crate::timer::now_nanos() >= deadline {
             return Err(stuck);
@@ -278,18 +284,32 @@ fn trips_between_in(
     trips: u64,
     jobs: [Option<&Arc<super::job::Job>>; 2],
 ) -> Result<Arc<Task>, &'static str> {
-    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
     let (_echo_process, echo) = start_echo_in(&theirs, echo_cpu, jobs[0])?;
     drop(theirs);
     let (caller_process, handle) = holding_in(&mine, jobs[1])?;
     drop(mine);
     *CALLED.lock() = None;
     *CALLER.lock() = Some((handle, trips));
-    let caller = spawn_in(&caller_process, "fast path caller", trips_in_the_process, Some(cpu))?;
+    let caller = spawn_in(
+        &caller_process,
+        "fast path caller",
+        trips_in_the_process,
+        Some(cpu),
+    )?;
     drop(caller_process);
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    wait_dead(&caller, deadline, "the fast path check's caller never finished its trips")?;
-    wait_dead(&echo, deadline, "the fast path check's echo never saw its caller's end")?;
+    wait_dead(
+        &caller,
+        deadline,
+        "the fast path check's caller never finished its trips",
+    )?;
+    wait_dead(
+        &echo,
+        deadline,
+        "the fast path check's echo never saw its caller's end",
+    )?;
     match CALLED.lock().take() {
         Some(Ok(made)) if made == trips => Ok(echo),
         Some(Err(why)) => Err(why),
@@ -300,6 +320,7 @@ fn trips_between_in(
 /// Case 9 (T11): an echo pinned to another processor answers every trip, and
 /// runs on no processor but its own: a direct switch to it would have run it
 /// on the caller's.
+/// Verifies: `L.sched.56`
 fn check_an_echo_on_another_processor(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
     let here = trip_processor();
@@ -332,11 +353,15 @@ fn spin(_argument: usize) {
 /// keeps at least a quarter of it while the trips run -- a third is its
 /// share against the caller and the echo when both are runnable, and they
 /// block for every trip -- and the trips still finish.
+/// Verifies: `L.sched.56`
 fn check_a_spinner_keeps_its_share(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
     let cpu = trip_processor();
     let start = crate::timer::now_nanos();
-    SPIN_UNTIL.store(start.saturating_add(400_000_000), core::sync::atomic::Ordering::Release);
+    SPIN_UNTIL.store(
+        start.saturating_add(400_000_000),
+        core::sync::atomic::Ordering::Release,
+    );
     let spinner = crate::sched::spawn_on(
         "fast path spinner",
         spin,
@@ -347,7 +372,9 @@ fn check_a_spinner_keeps_its_share(on: bool) -> Result<(), &'static str> {
     )?;
     let ran_before = spinner.runtime();
     let _ = trips_between(cpu, cpu, TRIPS * 10)?;
-    let window = crate::timer::now_nanos().saturating_sub(start).min(400_000_000);
+    let window = crate::timer::now_nanos()
+        .saturating_sub(start)
+        .min(400_000_000);
     let ran = spinner.runtime().saturating_sub(ran_before);
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     wait_dead(&spinner, deadline, "case 10: the spinner never stopped")?;
@@ -402,16 +429,20 @@ fn send_in_the_process(_argument: usize) {
 /// and waits there too. The echo's `"x"` and a later `"y"` answer two of the
 /// three, each once, and the third is answered by the close. Every waiter is
 /// answered within the bound.
+/// Verifies: `L.object.164`, `L.object.165`, `L.object.166`
 fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
     let cpu = trip_processor();
-    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
     let (process, handle) = holding(&mine)?;
     *READ.lock() = [None, None];
     *READERS.lock() = Some(handle);
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let first = spawn_in(&process, "fast path reader", read_in_the_process, Some(cpu))?;
-    wait_until(deadline, "case 4: the first reader never waited", || mine.reader_waiting())?;
+    wait_until(deadline, "case 4: the first reader never waited", || {
+        mine.reader_waiting()
+    })?;
     let second = spawn_in(&process, "fast path reader", read_in_the_process, Some(cpu))?;
     wait_until(deadline, "case 4: the second reader never waited", || {
         mine.waiters().listed() != 0
@@ -424,9 +455,11 @@ fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
     drop(process);
     let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
     // Two of the three are answered by the echo's "x" and this "y".
-    wait_until(bound, "case 4: a reader was never woken by the echo's answer", || {
-        READ.lock()[0].is_some() || SENT.lock().is_some()
-    })?;
+    wait_until(
+        bound,
+        "case 4: a reader was never woken by the echo's answer",
+        || READ.lock()[0].is_some() || SENT.lock().is_some(),
+    )?;
     theirs
         .write_small(b"y")
         .map_err(|_| "case 4: the check could not write its message")?;
@@ -455,13 +488,20 @@ fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
     drop(mine);
     wait_dead(&echo, bound, "case 4: the echo never ended")?;
     for task in [&first, &second, &sender] {
-        wait_dead(task, bound, "case 4: a waiter of one end was never woken within the bound")?;
+        wait_dead(
+            task,
+            bound,
+            "case 4: a waiter of one end was never woken within the bound",
+        )?;
     }
     let mut answers: alloc::vec::Vec<Answer> = READ.lock().iter().flatten().copied().collect();
     answers.extend(SENT.lock().iter().copied());
     let x = (1, [u64::from(b'x'), 0, 0]);
     let y = (1, [u64::from(b'y'), 0, 0]);
-    let closed = (refused(status::PEER_CLOSED), [nr::WRITE_READ_NOTHING as u64, 0, 0]);
+    let closed = (
+        refused(status::PEER_CLOSED),
+        [nr::WRITE_READ_NOTHING as u64, 0, 0],
+    );
     let count = |answer: Answer| answers.iter().filter(|seen| **seen == answer).count();
     let sender_closed = SENT
         .lock()
@@ -472,7 +512,9 @@ fn check_two_readers_of_one_end(on: bool) -> Result<(), &'static str> {
         || count(y) != 1
         || readers_closed + usize::from(sender_closed) != 1
     {
-        return Err("case 4: the three waiters of one end were not answered x, y and the close once each");
+        return Err(
+            "case 4: the three waiters of one end were not answered x, y and the close once each",
+        );
     }
     if on && moved(&before, Count::Park) == 0 {
         return Err("case 4: the first reader never parked");
@@ -522,21 +564,32 @@ fn filtered_in_the_process(_argument: usize) {
 /// Case 11 (T2): with the probe armed to refuse it, the call answers the
 /// probe's `EPERM` and the echo parked on the other end is not answered; with
 /// it armed to allow it, the call is answered by the echo.
+/// Verifies: `L.object.169`
 fn check_a_filtered_call(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
     let cpu = trip_processor();
     for refuse in [true, false] {
-        let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+        let (mine, theirs) =
+            Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
         let (_echo_process, echo) = start_echo(&theirs, cpu)?;
         let echoed = ECHOED.load(core::sync::atomic::Ordering::Acquire);
         let (process, handle) = holding(&mine)?;
         drop(mine);
         *FILTERED_ANSWER.lock() = None;
         *FILTERED.lock() = Some((handle, refuse));
-        let caller = spawn_in(&process, "fast path filtered", filtered_in_the_process, Some(cpu))?;
+        let caller = spawn_in(
+            &process,
+            "fast path filtered",
+            filtered_in_the_process,
+            Some(cpu),
+        )?;
         drop(process);
         let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-        wait_dead(&caller, deadline, "case 11: the filtered caller never finished")?;
+        wait_dead(
+            &caller,
+            deadline,
+            "case 11: the filtered caller never finished",
+        )?;
         let answer = FILTERED_ANSWER.lock().take();
         if refuse {
             if answer.map(|answer| answer.0) != Some(Errno::EPERM.as_return_value()) {
@@ -586,17 +639,24 @@ fn windowed_in_the_process(_argument: usize) {
 /// call whose process ends while it waits does, and nothing is left blocked.
 /// With the fast path off the hook is never reached, and the call is
 /// answered.
+/// Verifies: `L.sched.56`, `L.sched.62`
 fn check_an_end_in_the_last_looks_window(on: bool) -> Result<(), &'static str> {
     let before = direct::counts();
     let cpu = trip_processor();
-    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
     let (_echo_process, echo) = start_echo(&theirs, cpu)?;
     let (process, handle) = holding(&mine)?;
     drop(mine);
     GO.store(false, core::sync::atomic::Ordering::Release);
     *WINDOWED_ANSWER.lock() = None;
     *WINDOWED.lock() = Some(handle);
-    let caller = spawn_in(&process, "fast path windowed", windowed_in_the_process, Some(cpu))?;
+    let caller = spawn_in(
+        &process,
+        "fast path windowed",
+        windowed_in_the_process,
+        Some(cpu),
+    )?;
     crate::sched::work::arm(crate::sched::work::HOOK_LAST_LOOK, &caller);
     GO.store(true, core::sync::atomic::Ordering::Release);
     let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
@@ -683,6 +743,7 @@ fn parked_in_the_process(_argument: usize) {
 /// message written on its end by a third party, its peer's close, its
 /// process's kill -- and answers what the general path answers: the message,
 /// `PEER_CLOSED`, or nothing at all, its thread ended on the way out.
+/// Verifies: `L.object.165`, `L.object.168`, `L.sched.60`
 fn check_a_parked_caller_woken_by(ending: Ending, on: bool) -> Result<(), &'static str> {
     // A send the fast path declined -- its processor's queue held for a
     // moment by a sleeper whose time had come -- is answered by the general
@@ -702,18 +763,31 @@ fn check_a_parked_caller_woken_by(ending: Ending, on: bool) -> Result<(), &'stat
 /// One try of [`check_a_parked_caller_woken_by`].
 fn attempt_a_parked_caller(ending: Ending) -> Result<(), &'static str> {
     let cpu = trip_processor();
-    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the fast path check's channel")?;
     let (sink_process, sink_handle) = holding(&theirs)?;
     *SUNK.lock() = None;
     *SINK.lock() = Some(sink_handle);
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    let sink = spawn_in(&sink_process, "fast path sink", sink_in_the_process, Some(cpu))?;
-    wait_until(deadline, "the continuation's sink never waited", || theirs.reader_waiting())?;
+    let sink = spawn_in(
+        &sink_process,
+        "fast path sink",
+        sink_in_the_process,
+        Some(cpu),
+    )?;
+    wait_until(deadline, "the continuation's sink never waited", || {
+        theirs.reader_waiting()
+    })?;
     let (caller_process, handle) = holding(&mine)?;
     *PARKED_ANSWER.lock() = None;
     *PARKED.lock() = Some(handle);
     GO.store(false, core::sync::atomic::Ordering::Release);
-    let caller = spawn_in(&caller_process, "fast path parked", parked_in_the_process, Some(cpu))?;
+    let caller = spawn_in(
+        &caller_process,
+        "fast path parked",
+        parked_in_the_process,
+        Some(cpu),
+    )?;
     GO.store(true, core::sync::atomic::Ordering::Release);
     // Polled slowly, so that this task's own sleep is seldom what is due on
     // a processor it shares with the two.
@@ -745,22 +819,36 @@ fn attempt_a_parked_caller(ending: Ending) -> Result<(), &'static str> {
         &caller,
         bound,
         match ending {
-            Ending::Message => "continuation: a parked caller was not woken by a message within the bound",
-            Ending::Close => "continuation: a parked caller was not woken by its peer's close within the bound",
-            Ending::Kill => "continuation: a parked caller was not woken by its kill within the bound",
+            Ending::Message => {
+                "continuation: a parked caller was not woken by a message within the bound"
+            }
+            Ending::Close => {
+                "continuation: a parked caller was not woken by its peer's close within the bound"
+            }
+            Ending::Kill => {
+                "continuation: a parked caller was not woken by its kill within the bound"
+            }
         },
     )?;
     process::kill(&sink_process, KILLED_STATUS);
     drop(caller_process);
     drop(theirs);
     drop(mine);
-    wait_dead(&sink, crate::timer::now_nanos().saturating_add(PATIENCE_NANOS), "the continuation's sink never ended")?;
+    wait_dead(
+        &sink,
+        crate::timer::now_nanos().saturating_add(PATIENCE_NANOS),
+        "the continuation's sink never ended",
+    )?;
     drop(sink_process);
     let answer = PARKED_ANSWER.lock().take();
     let fine = match ending {
         Ending::Message => answer == Some((1, [u64::from(b'm'), 0, 0])),
         Ending::Close => {
-            answer == Some((refused(status::PEER_CLOSED), [nr::WRITE_READ_NOTHING as u64, 0, 0]))
+            answer
+                == Some((
+                    refused(status::PEER_CLOSED),
+                    [nr::WRITE_READ_NOTHING as u64, 0, 0],
+                ))
                 || answer.is_some_and(|answer| answer.0 == refused(status::PEER_CLOSED))
         }
         Ending::Kill => answer.is_none_or(|answer| answer.0 == Errno::EINTR.as_return_value()),
@@ -768,7 +856,9 @@ fn attempt_a_parked_caller(ending: Ending) -> Result<(), &'static str> {
     if !fine {
         return Err(match ending {
             Ending::Message => "continuation: a parked caller woken by a message did not answer it",
-            Ending::Close => "continuation: a parked caller woken by its peer's close did not answer PEER_CLOSED",
+            Ending::Close => {
+                "continuation: a parked caller woken by its peer's close did not answer PEER_CLOSED"
+            }
             Ending::Kill => "continuation: a parked caller woken by its kill did not answer EINTR",
         });
     }
@@ -813,7 +903,9 @@ fn check_the_barriers_in_a_domain_and_across_two(on: bool) -> Result<(), &'stati
         crate::console::println!(
             "  fastpath case 13: in a domain {decided_in} barriers decided, {refilled_in} refills"
         );
-        return Err("case 13: trips inside one speculation domain made barrier decisions a switch inside it does not");
+        return Err(
+            "case 13: trips inside one speculation domain made barrier decisions a switch inside it does not",
+        );
     }
     let decided_before = decided();
     let _ = trips_between_in(cpu, cpu, TRIPS, [Some(&one), Some(&other)])?;
@@ -822,7 +914,9 @@ fn check_the_barriers_in_a_domain_and_across_two(on: bool) -> Result<(), &'stati
         crate::console::println!(
             "  fastpath case 13: across two domains {decided_across} barriers decided"
         );
-        return Err("case 13: trips across two speculation domains skipped a barrier a switch between them makes");
+        return Err(
+            "case 13: trips across two speculation domains skipped a barrier a switch between them makes",
+        );
     }
     if on && moved(&before, Count::Trip) == 0 && crate::smp::count() >= 2 {
         return Err("case 13: no trip of the barrier case was handed over directly");

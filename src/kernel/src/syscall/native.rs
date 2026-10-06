@@ -888,7 +888,6 @@ fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
 /// The words the fast path's commit puts in the reader's reply cell for a
 /// send of `count` bytes from `a`'s registers: the general path's write then
 /// read, without the inbox between.
-#[cfg(target_arch = "x86_64")]
 fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
     words_of(&sent_bytes(a), count)
 }
@@ -923,7 +922,6 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
         // 2), on a boot that has the fast path: park, so that a fast writer
         // can hand the next message over directly. Declined, it waits below
         // as before; woken without a reply, it carries on as after that wait.
-        #[cfg(target_arch = "x86_64")]
         if crate::trap::fast_write_read().is_some() {
             match park_for_reply(endpoint) {
                 Parked::Replied(answer) => return Ok(answer),
@@ -950,7 +948,6 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
 }
 
 /// What the receive half made of a wait.
-#[cfg(target_arch = "x86_64")]
 enum Parked {
     /// It could not park: the general wait runs.
     Declined,
@@ -967,7 +964,6 @@ enum Parked {
 /// interrupts on as the general wait blocks. Woken by a commit, it takes its
 /// reply; by anything else, it leaves its record and goes on as after the
 /// general wait.
-#[cfg(target_arch = "x86_64")]
 fn park_for_reply(endpoint: &Endpoint) -> Parked {
     let Some(task) = crate::sched::current() else {
         return Parked::Declined;
@@ -999,7 +995,6 @@ fn park_for_reply(endpoint: &Endpoint) -> Parked {
 ///
 /// [`Fast::Tail`]: crate::trap::Fast::Tail
 /// [`Fast::Done`]: crate::trap::Fast::Done
-#[cfg(target_arch = "x86_64")]
 pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::sched::direct::{self, Count};
     use crate::trap::Fast;
@@ -1062,8 +1057,11 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
 /// `may_block` check made, then off its record, the call's end as
 /// `dispatch_write_read` makes it, and the way back as `trap::system_call`
 /// makes it. Returns with interrupts masked again.
-#[cfg(target_arch = "x86_64")]
-fn continue_general(endpoint: &Endpoint, caller: &crate::sched::Task, a: &[u64; 6]) -> crate::trap::Outcome {
+fn continue_general(
+    endpoint: &Endpoint,
+    caller: &crate::sched::Task,
+    a: &[u64; 6],
+) -> crate::trap::Outcome {
     arch::enable_interrupts();
     if !crate::sched::may_block() {
         crate::panic::fatal!(

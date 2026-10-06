@@ -1677,7 +1677,8 @@ package FerrixObjectRequirements {
                 case 4, reach T6 to T10 with the fast path on and get the general
                 path's results; each test's control fails its case.";
             attribute :>> parent = "H.OBJ.18";
-            attribute :>> unit = "object::channel::Endpoint::send_direct";
+            attribute :>> unit = ("object::channel::Endpoint::send_direct",
+                "object::channel::sendable");
         }
         requirement <'L.object.167'> theReplyIsZeroPastItsCount : ItemLowLevel {
             attribute :>> statement = "The words a commit hands over shall be the

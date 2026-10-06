@@ -174,10 +174,7 @@ pub(crate) fn after_from(nanos: u64, now: u64) {
     };
     let wanted = now.saturating_add(nanos).max(1);
     let armed = slot.load(Ordering::Relaxed);
-    if !periodic
-        && armed != 0
-        && (armed <= wanted || requested.load(Ordering::Relaxed) <= wanted)
-    {
+    if !periodic && armed != 0 && (armed <= wanted || requested.load(Ordering::Relaxed) <= wanted) {
         return;
     }
     arch::timer_arm(nanos);
@@ -239,7 +236,8 @@ fn arm_at(deadline: u64) {
 pub(crate) fn stop() {
     // A load first, and the swap only for a periodic timer: a one-shot asked
     // for at every switch makes no read-modify-write here.
-    let periodic = INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
+    let periodic =
+        INTERVAL.load(Ordering::Relaxed) != 0 && INTERVAL.swap(0, Ordering::Relaxed) != 0;
     // A one-shot that is not armed -- one that fired, which leaves the
     // hardware quiet (`timer_disarm_fired`), or one never armed -- has
     // nothing to stop: writing it again was two exits at every switch to a
