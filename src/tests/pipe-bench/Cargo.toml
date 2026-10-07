@@ -17,6 +17,11 @@ publish = false
 name = "pipe-bench-test"
 path = "src/main.rs"
 
+# What the domain run makes with process_create: it execs pipe-bench-test.
+[[bin]]
+name = "domain-exec"
+path = "src/bin/domain-exec.rs"
+
 [dependencies]
 libc = "0.2"
 # The native calls that start the second run in a speculation domain.
@@ -57,6 +62,9 @@ allow_attributes_without_reason = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
 overflow-checks = true

@@ -384,9 +384,6 @@ fn label(name: &str) -> String {
     }
 }
 
-/// The file the starter makes before it starts the member, which is how the
-/// member knows it is one.
-const MEMBER_MARK: &str = "/tmp/pipe-bench-member";
 /// The FIFO the member's lines come back through.
 const MEMBER_FIFO: &str = "/tmp/pipe-bench-fifo";
 
@@ -437,11 +434,12 @@ fn run_in_domain() -> Result<(), String> {
             )
         };
     }
-    // Itself: where `bench-pipe` carries it, since the kernel's built-in init
-    // has no file of its own; else by /proc.
-    let image = std::fs::read("/bin/pipe-bench")
-        .or_else(|_| std::fs::read("/proc/self/exe"))
-        .map_err(|error| format!("reading itself: {error}"))?;
+    // A process `process_create` makes has no Linux start-up stack, which
+    // this program's C library reads; `domain-exec` needs none, and execs
+    // `/bin/pipe-bench member`, which keeps the process and its domain.
+    // `bench-pipe` carries both.
+    let image = std::fs::read("/bin/domain-exec")
+        .map_err(|error| format!("reading /bin/domain-exec: {error}"))?;
     let _ = std::fs::create_dir("/sys/fs/cgroup/pipe-bench");
     let dir = std::fs::File::open("/sys/fs/cgroup/pipe-bench")
         .map_err(|error| format!("opening the cgroup: {error}"))?;
@@ -460,7 +458,6 @@ fn run_in_domain() -> Result<(), String> {
     if unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) } != 0 {
         return Err(format!("mkfifo: {}", std::io::Error::last_os_error()));
     }
-    std::fs::write(MEMBER_MARK, b"member").map_err(|error| format!("the mark: {error}"))?;
     let process = pending::create_process(&domain, &elf, "pipe-bench")
         .map_err(|error| format!("process_create: {error:?}"))?;
     let (ours, theirs) = channel::create(Native).map_err(|error| format!("channel: {error:?}"))?;
@@ -531,7 +528,6 @@ fn read_member(fifo: &std::ffi::CStr) -> Result<String, String> {
 /// The member's start: its output to the starter's FIFO.
 fn become_member() {
     IN_DOMAIN.store(true, Ordering::Relaxed);
-    let _ = std::fs::remove_file(MEMBER_MARK);
     let _ = std::fs::write(MEMBER_ALIVE, b"alive");
     if let Ok(fifo) = std::fs::OpenOptions::new().write(true).open(MEMBER_FIFO) {
         use std::os::fd::IntoRawFd as _;
@@ -546,7 +542,7 @@ fn become_member() {
 }
 
 fn main() {
-    let member = std::path::Path::new(MEMBER_MARK).exists();
+    let member = std::env::args().nth(1).as_deref() == Some("member");
     if member {
         become_member();
     }
