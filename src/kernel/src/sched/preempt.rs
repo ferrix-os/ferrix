@@ -345,6 +345,27 @@ pub(crate) fn preempt_enable() {
     enable_from(false);
 }
 
+/// Count a lock held under the interrupt mask (`sync::try_lock_masked`,
+/// the native round trip's fast path): one lock on this processor's word,
+/// so that A3 (`require_preemption_on`, FX-0503) sees it as it sees any
+/// guard's, but no site recorded and no deferred decision, which a masked
+/// holder could not make anyway. Two plain per-CPU adds, no locked
+/// operation.
+pub(crate) fn raise_masked() {
+    if counting() {
+        // SAFETY: (SHARED) as in `raise`.
+        let _ = unsafe { arch::this_cpu_add(crate::smp::PREEMPT_WORD_OFFSET, ONE_LOCK) };
+    }
+}
+
+/// Take back [`raise_masked`]'s lock, as the masked guard drops; stops the
+/// machine (FX-0503's catalogue entry) for one it finds nothing to lower.
+pub(crate) fn lower_masked() {
+    if let Some(Err(old)) = lower(ONE_LOCK) {
+        unmatched(old, true);
+    }
+}
+
 /// [`preempt_enable`], saying whether a lock's guard is what is being
 /// released.
 fn enable_from(by_lock: bool) {
