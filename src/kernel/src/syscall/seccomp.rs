@@ -295,6 +295,10 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     if !EVER_FILTERED.load(Ordering::Acquire) {
         return Verdict::Continue;
     }
+    // ABLATION (po10-pipe abl1): an unfiltered thread is asked by a borrow.
+    if !thread::with_current(|thread| thread.is_filtered()).unwrap_or(false) {
+        return Verdict::Continue;
+    }
     let Some(thread) = thread::current() else {
         return Verdict::Continue;
     };
