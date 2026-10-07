@@ -1611,6 +1611,18 @@ channel's half of side A, the half of side B, then this processor's run
 queue. The halves are locked by side, A before B, whichever end the caller
 holds. The handle table's lock is taken and released before them.
 
+*Nor does it close an end (F-65, 2026-10-07; ledger line 520).* The
+caller's `Arc<Endpoint>` from the lookup is held across the park, and
+another thread of the caller's process may close the handle meanwhile, so
+that reference can be the end's last; its close takes locks, wakes the
+survivor's reader and frees memory. So it is let go only with interrupts
+open: the continuation lets go inside its own unmasked span, and the frame
+tail's return and a decline after the lookup through `release_unmasked`,
+which opens interrupts, makes the `may_block` check, lets go and masks
+again. `Endpoint::drop` stops with FX-0535 on a masked close
+(`L.object.179`). It is the only counted reference the masked span lets
+go: the peer is a borrowed half, and the parked record's task moves.
+
 **Every lock it takes**, directly or through what it calls (condition 5).
 Each is either taken with `try_lock`, or is a *leaf*: a lock under which
 nothing else is taken and nothing waits, so that its holder lets it go
@@ -5122,3 +5134,14 @@ pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
+**F-65: the caller's endpoint let go with interrupts open (po10-obj;
+ledger lines 511 and 520).** Not a cut for the figure but a fix: the
+endpoint reference the fast path holds across its park was let go masked on
+every return after the lookup, and when another thread of the caller's
+process had closed the handle meanwhile it was the end's last, so the
+end's close ran in the masked span (part 2, "Nor does it close an end").
+It is now let go with interrupts open on every return, and a masked close
+stops the machine (FX-0535). Stage 9's case 16 makes the last reference
+the parked caller's and resumes it by the frame tail and by the
+continuation. The frame tail's return now opens and masks interrupts once
+more a direction; measured by G8 in the landing's message.
