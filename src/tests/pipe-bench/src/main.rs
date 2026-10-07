@@ -342,7 +342,25 @@ fn bench_futex(samples: &mut Samples) {
     let _ = unsafe { libc::waitpid(child, &raw mut status, 0) };
 }
 
+/// With `profile`: Ferrix's system call count and this process's switches,
+/// so a run says how many calls and switches a round trip took.
+fn counters(when: &str) {
+    if ONLY.is_none() {
+        return;
+    }
+    for path in ["/proc/ferrix-seam", "/proc/self/status"] {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            for line in text.lines() {
+                if line.starts_with("seam") || line.contains("ctxt_switches") {
+                    println!("LB counters {when} {line}");
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    counters("start");
     let per_us = ticks_per_us();
     println!("LB start warmup={WARMUP} samples={SAMPLES} repeats={REPEATS} ticks_per_us={per_us}");
     let mut samples = Samples {
@@ -364,6 +382,7 @@ fn main() {
     if runs("futex") {
         bench_futex(&mut samples);
     }
+    counters("end");
     println!("LB done");
     let _ = std::io::stdout().flush();
 }
