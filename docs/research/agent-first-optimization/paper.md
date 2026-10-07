@@ -1,6 +1,8 @@
 # Paper skeleton: agent-first, hardware-specific optimization of OS hot paths
 
-Status: skeleton and draft text, 2026-10-06 (session po7-paper). Markdown,
+Status: skeleton and draft text, 2026-10-06 (session po7-paper); the State
+column of §5 brought up to the evidence of data/INDEX.md (F33-F50, S12-S13,
+O1-O20) on 2026-10-07, no text changed. Markdown,
 so it builds with nothing new in the repository; it converts to the venue's
 LaTeX class when a venue is chosen (pandoc, or by hand, outside the tree).
 Citation keys are those of [references.bib](references.bib). Every claim in
@@ -150,20 +152,20 @@ Draft of T4 (to be measured, not asserted):
 | # | Claim | Evidence | State |
 |---|---|---|---|
 | C1 | Before the work, the native round trip was 37 µs under KVM on nazuna | §9.1; `logs/os-ipc/base-smp1.log` | have (note: general calls, no domain) |
-| C2 | seL4 with matched protections does a round trip in 440 ns on the same host, VM and core | §9.6; `~/.local/share/ferrix/sel4/logs/` | have |
+| C2 | seL4 with matched protections does a round trip in 440 ns on the same host, VM and core | §9.6; `~/.local/share/ferrix/sel4/logs/` | have; the retakes S9-S13 (2026-10-06) read 430-530 ns by boot (matched build in two clusters, 1,892 and 2,332 ticks); 440 ns is the lower cluster and must be quoted with its mode (O17) |
 | C3 | Redox 0.9.0 does a scheme round trip in 1,965 ns there, with no speculative defence | §9.6a; `redox-bench/logs/` | have |
-| C4 | Landed work (steps 1–3b) brought the matched round trip to about 2.26–2.29 µs | M8 | have |
-| C5 | Step 4's fast path brings it to about 1.33 µs | M12 | have, but unlanded and unreviewed; **owed**: the consultant's code review and the equivalence run on the measured tree |
-| C6 | Ferrix's round trip is faster than Redox's with every defence on | C3, C5 (1.33 vs 1.97 µs) | have once C5 lands; today's landed figure (C4) is slower than Redox |
-| C7 | Ferrix matches or beats seL4 with matched protections | — | **owed**; the budget (§9.10) projects 420–520 ns after step 5, and under 400 only with every item at its best |
-| C8 | A per-direction profile explains the trip to within 10% | spans 1,209–1,300 vs 1,130 ns half trip | have, at 7–15% over; within 15%, not 10% |
-| C9 | A substantial share of the late savings is hardware-specific | T4 draft; M9, M10, M11 | partly: M10 and M11 are measured, M9 is within noise; **owed**: ablations |
+| C4 | Landed work (steps 1–3b) brought the matched round trip to about 2.26–2.29 µs | M8 | have; superseded as the landed figure by F33 onward |
+| C5 | Step 4's fast path brings it to about 1.33 µs | M12 | have, and now landed and reviewed: 0edd644b2 (consultant OK IF, ledger line 404; conditions review line 405 answered by 98fdf69cc), F33: 1,548–1,558 ns vs 2,576, ratio 0.605, 5 rounds, equivalence run on 96598a860 per the commit. The 1.33 µs in the claim is the WIP figure (F26, F28); the landed tree's is F33's 1.55 µs. **Owed**: 10 rounds on the landed tree (O2) |
+| C6 | Ferrix's round trip is faster than Redox's with every defence on | C3, C5 (1.33 vs 1.97 µs) | have for the landed tree: F33 1,548–1,558 ns (and 1,048–1,300 ns after F35, F36, F40 by the handover of 2026-10-07) against R1's 1,965 ns; note R1 ran without speculative defences (C3), Ferrix with every defence on |
+| C7 | Ferrix matches or beats seL4 with matched protections | — | **owed**. Best Ferrix figure logged: 858 ns, one boot of a tree that is not on main (F48), 1,048–1,068 for its other boots; seL4 430–465 ns (S1, S9; S12 up to 530): about 1.9 times at best. The handover's budget totals 620 ns a direction (P14). The §9.10 projection of 420–520 ns after step 5 is not met on any logged boot. O1 (`--against-sel4`, same invocation) and O18 (a quiet-window series on a main tip) are open |
+| C8 | A per-direction profile explains the trip to within 10% | spans 1,209–1,300 vs 1,130 ns half trip | have, at 7–15% over; within 15%, not 10%. P14 and P15 are new profiles of the current trees; not recomputed against an uninstrumented half trip |
+| C9 | A substantial share of the late savings is hardware-specific | T4 draft; M9, M10, M11 | partly: M10 and M11 are measured, M9 is within noise. Ablations now on file: selector skip F35 (0.896–0.910 by mode), FS/GS skip F45 (about −160 to −180 a round trip in each mode, 5 boots a side), `VZEROALL` F24, ERAPS F20–F23 (F23 incomplete, O5), user-side inlining F44, ablation series F42–F43. **Owed**: each item against the full tree with 5 boots a side per mode (O6), the T4 shares |
 | C10 | Hot-path instructions transfer to another ISA with less effort | — | **owed** (RQ3) |
 | C11 | Results keyed by a hardware hash are reusable on a same-key machine | — | **owed** (RQ4) |
-| C12 | The key must include the virtual CPU model | nazuna has no PCID; ERAPS needs `+eraps`; `RDCL_NO` cleared by the model (§9.6) | have as observations; **owed** as an experiment |
+| C12 | The key must include the virtual CPU model | nazuna has no PCID; ERAPS needs `+eraps`; `RDCL_NO` cleared by the model (§9.6) | have as observations; **owed** as an experiment. A new confound for any such experiment: one tree steps by about 290 ns between boots on the same host, and seL4 steps too (about 100 ns, S12); the cause is open (O17) |
 | C13 | The review loop found defects the gates did not | F-60, the spec domain's F1 blocker, 3b's write-skip, the 65-signal cap, a lost close wake (handover 2026-10-03; ledger) | have, uncounted; **owed**: T7 |
 | C14 | The process took [N] sessions, [N] points, [N] gate runs, [N] review rounds | fleet log, INDEX, ledger | **owed** (extraction, research-plan §8) |
-| C15 | Every landed step kept the certification evidence: rows, checks, negative controls, coverage carried | landing lines in `fleet/log`; ledger | have |
+| C15 | Every landed step kept the certification evidence: rows, checks, negative controls, coverage carried | landing lines in `fleet/log`; ledger | have; the messages of 0edd644b2, 690754979, 69cf2754c, 4066f41dd, f6627521c and 7b06cef25 each list their rows, checks and the controls that FIRED (read in the commit messages, gates not re-run by me) |
 | C16 | The `IBPB` barrier costs about 230 ns a switch under KVM here | §9.6 | have |
 | C17 | The round trip is below a Linux pipe ping-pong in the same VM | Linux measured only natively (2,105 ns) | **owed** |
 | C18 | Faster IPC changes an application-level figure | — | **owed** |
