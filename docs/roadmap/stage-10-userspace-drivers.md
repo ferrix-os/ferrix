@@ -721,7 +721,7 @@ repeat.
   `src/kernel/src/interfaces/` (b22841d7), since they are what a driver talks
   to, not drivers; and `acpi`, `fdt`, `pci` and `devmgr` to
   `src/kernel/src/discovery/` (aa78061e), with the board registry beside them.
-* *ACPI or the device tree, decided once* (d5896c75): `discovery::description`
+* *ACPI or the device tree, decided once* (fa4e88a6): `discovery::description`
   opens ACPI's tables and falls back to the device tree, in the host-tested
   `src/lib/platform/description` (`L.discovery.1`), where each caller used to
   decide for itself.
@@ -731,7 +731,10 @@ repeat.
   `device::publish` runs them once, in that order, stopping the boot on the
   first failure. Two boot lines, `nodes` (the published order's digest) and
   `reserved` (the reserved ranges' count and digest), exist so the next
-  discovery change can be compared with this one. os-9f reviewed each step.
+  discovery change can be compared with this one (`reserved` is d5896c75).
+  The steps landed without a recorded review; the certification consultant
+  (os-ad) reviewed them after the fact on 2026-10-01 (da45a113), and its
+  conditions are a row of `docs/BACKLOG.md`.
 * *`ferrix-driver`* (`src/user/system/native/driver`, d5b03142): START, register
   blocks, DMA memory, the virtio transport, and a subsystem module per class
   (`input`, `block`), which a driver implements a trait of. Matching is the
