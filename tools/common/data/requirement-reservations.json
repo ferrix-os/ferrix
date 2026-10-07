@@ -31,6 +31,34 @@
       "branch": "nvidia-c3k",
       "date": "2026-10-02",
       "purpose": "NVIDIA C3-K, the kernel's fault windows (docs/NVIDIA.md §11.4, the consultant's OK IF of 2026-10-02): window regions, forwarded faults and their wait, kernel copies that never wait, refused partial operations, the mapping count and UNMAPPED, break-before-make entries, revoke, server death, insert checks and holds, answers only from the server handle; a server-inserted frame unreachable before its hold goes, and a client waiting on a server only by its own mapping"
+    },
+    {
+      "ids": ["L.object.171-178"],
+      "owner": "po9-obj",
+      "branch": "po9/obj",
+      "date": "2026-10-07",
+      "purpose": "IPC round trip toward seL4: the fast path's object side, lookup and park without an Arc (po9-cert's verdict, ledger 2026-10-07, O1-O10)"
+    },
+    {
+      "ids": ["L.sched.63-68", "L.x86_64.161-164"],
+      "owner": "po9-sched",
+      "branch": "po9/sched",
+      "date": "2026-10-07",
+      "purpose": "IPC round trip toward seL4: the fast path's charge, switch and entry/exit (po9-cert's verdict, ledger 2026-10-07, D1-D11)"
+    },
+    {
+      "ids": ["L.x86_64.165"],
+      "owner": "po9-sel",
+      "branch": "po9/sel",
+      "date": "2026-10-07",
+      "purpose": "IPC round trip toward seL4: the DS/ES selector-load skip, if L.x86_64.8 is split (po9-cert's verdict, ledger 2026-10-07, S1-S7, E1-E6)"
+    },
+    {
+      "ids": ["L.mm.65-68"],
+      "owner": "po9-user",
+      "branch": "po9/user",
+      "date": "2026-10-07",
+      "purpose": "IPC round trip toward seL4: fewer user pages a trip, 2 MiB native text, KASLR-placement alignment (po9-cert's verdict, ledger 2026-10-07, U1-U9, K1-K7)"
     }
   ]
 }
