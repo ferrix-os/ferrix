@@ -107,13 +107,24 @@ fn boot_once(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, program, shell::SCRIPT)?;
     let natives = native::build(arch, args.release)?;
-    let image = std::fs::read(program)
-        .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
-    let carried = vec![ports::File {
-        path: CARRIED_AT.to_owned(),
-        mode: 0o755,
-        content: ports::Content::Bytes(image),
-    }];
+    let read = |path: &Path| {
+        std::fs::read(path)
+            .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
+    };
+    // `domain-exec` is the crate's other program, built beside it.
+    let exec = program.with_file_name("domain-exec");
+    let carried = vec![
+        ports::File {
+            path: CARRIED_AT.to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(read(program)?),
+        },
+        ports::File {
+            path: "bin/domain-exec".to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(read(&exec)?),
+        },
+    ];
     let initramfs = initramfs::build(None, &natives, None, &carried)?;
     let cmdline = crate::image_cmdline(args);
     let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
