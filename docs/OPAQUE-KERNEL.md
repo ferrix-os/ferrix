@@ -5122,3 +5122,309 @@ pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
+
+### 9.12 Fast path v2: the direct resume (design for the consultant, draft, 2026-10-07, os-76)
+
+The customer's target is `domain-call` under 400 ns p50 on nazuna, matched
+(§9.10), and at most seL4's 440 (2026-10-07). On 2026-10-07 the customer
+also ruled that the target stays nazuna, with software only: no PCID host as
+the platform, and no protection-key address spaces. This section is a design
+for the consultant's first look. Nothing in it is built. It names its
+requirement rows but reserves no ids; they are reserved before rows are
+written. Every figure is **measured** (where it was), **guessed**, or
+**inferred** from reading the code.
+
+#### Where one direction goes (`main` 08984c2db)
+
+`domain-call` reads 873 ns (858 and 888 in the fast boot mode, F48 in the
+evidence index; 3c, measured on its branch in a quiet window). That is
+about 436 a direction. After the four items in flight it reads about 760 to
+800 (**guessed**, po10's estimate). Those items are user-side inlining, J
+(the job-load fold), the object side's cut 3, and the Q items Q1 to Q7 of
+the round's plan: the clock without a divide, inverse weights, `this_cpu`
+once, cached GDT and TSS pointers, a lazy CPU mask, a base `WRMSR` skipped
+by an `RDMSR` compare, and `opt-level` 3.
+
+The direction, read from the code (**inferred**):
+- **Locked read-modify-writes: 16.** Four ticket locks: the handle table,
+  two inbox locks and the run queue. Four `Arc` operations: the lookup's
+  clone, the queue's `current().cloned()`, `finish_switch`'s drop of the
+  previous task, and the drop of B's endpoint. Two run-slot operations, four
+  job-load operations, and `install`'s CPU mask join and leave.
+- **About 10 to 14 64-bit `DIV`s:** two in `now_nanos`, the rest in
+  `slice_for`, `RunQueue::hand_over` and `effective_weight`.
+- **The way back.** B resumes through `ferrix_switch` and returns up its
+  whole kernel call chain: `Direct::switch`, `send_direct`, the closure,
+  `fast_write_read`, the hook, `trap::fast_write_read_now` and
+  `ferrix_syscall_entry`, then the frame tail, `take_reply` and
+  `write_outcome`. Every return address on that chain was pushed before the
+  `CR3` write, which with ERAPS empties the return-address predictor. So
+  each of those eight or nine returns probably mispredicts (**inferred**;
+  not measured).
+
+The budget a direction, with the in-flight items and the Q items landed
+(**guessed** except `CR3`):
+
+| Piece | Then | Target |
+|---|---|---|
+| `CR3` write, no PCID (**measured** 79 to 113) | 88 | 88 |
+| `SYSCALL`, `SYSRET`, the stub's pushes, clears and pops | 35 | 28 |
+| user TLB refill | 30 | 20 |
+| user state: base writes, the vector reset | 45 | 20 |
+| kernel software | 120 to 150 | 40 |
+| **a direction** | **320 to 350** | **196** |
+
+Kernel software is the piece this section is for. seL4 does its fast path
+in about 50 ns a direction (§9.10). It does so because nothing is live on a
+kernel stack while a thread waits in `Call` or `ReplyRecv`: the fast path
+writes the message into the receiver's saved registers, switches the space
+and returns to user mode from them. Ferrix keeps a kernel stack per task and
+resumes a waiting task by switching to it and returning up its call chain.
+That costs a context switch, a `finish_switch` and an unwind that the
+predictor has just forgotten. This design removes all three for the trip
+that matters, and keeps the general path's results.
+
+#### Two layers
+
+The design is in two layers, so that the Linux pipe ping-pong (po10-pipe)
+can build on the lower one:
+- **The generic layer (G1 to G3)** serves any "wake one task, then block"
+  pair on one processor.
+- **The call layer (C1 and C2)** is `channel_write_read`'s own.
+
+A pipe fast path would need its own call layer. The waker would complete the
+reader's `read`, copying into the reader's buffer in the reader's space
+after the `CR3` write, and that is its design, not this one.
+
+#### G1: the continuation park and the direct resume
+
+**The resume frame.** The `SYSCALL` stub builds the program's frame at the
+top of the task's kernel stack (`gs:8`) and calls `ferrix_syscall_entry`
+below it. It now also reserves seven words between the two, before the
+call: `subq $56, %rsp` after the pushes, and `addq $56, %rsp` before the
+pops. That is the size of `ferrix_switch`'s frame: six callee-saved
+registers and a return address. No code on the call chain ever touches
+those words, because the chain starts below them. So they can be written at
+any time while the task runs in a system call, by the task itself.
+
+**The park, made a continuation.** When the direct switch parks the caller
+A, it does the following, in this order, under the run-queue lock as today:
+1. It writes A's resume frame: zeros for the six registers, and
+   `ferrix_fast_resume` as the return address.
+2. It stores A's saved stack pointer as that frame's address
+   (`stack_pointer_slot`, which `ferrix_switch` would have written).
+3. It sets A blocked and parked. These are the same states as step 4's,
+   with the same order (part 3).
+
+From then on, nothing of A's below its user frame is live. Every way A can
+run again starts at its user frame:
+- **The direct resume (fast).** A later trip's commit writes A's reply into
+  A's frame and returns to user mode from it.
+- **The general resume.** Any other wake, by a general writer, the peer's
+  close, `END`, or a kill, wakes A as today. When a processor next picks A,
+  `ferrix_switch` pops A's resume frame and returns into
+  `ferrix_fast_resume`, with RSP at A's user frame. `ferrix_fast_resume` is
+  a stub in the shape of `ferrix_task_entry`: it calls
+  `fast_resume_general(frame)`, then jumps to the `SYSCALL` stub's way out
+  (`addq` skipped, pops, `FERRIX_CLEAR_BUFFERS`, `swapgs`, `sysretq`).
+  `fast_resume_general` makes `finish_switch` first, as every switched-to
+  context does. Then it runs §9.7's general continuation (condition 3)
+  exactly as now: interrupts on, `may_block`, `unpark`,
+  `receive_then_answer` with the call's own arguments read back from the
+  frame, `record_call`, `regroup_current`, `call_left`, and `leave`. Only
+  the stack it starts from differs.
+
+**The direct resume.** The commit to a parked B now does this, still on
+A's stack with interrupts masked and the run-queue lock held:
+1. **The scheduler part.** Everything `hand_over` and `switch_chosen` make
+   today, up to `swap_address_space` and `switch_user_state`, with no
+   change to what they decide.
+2. **The reply.** It goes into B's frame: `rax`, `rsi`, `rdx`, `r10`, as
+   `write_outcome`'s `ReturnWords` writes them (C1).
+3. **B's way out.** What `frame_tail` makes for B today is made here for
+   B, on this processor, with B now `current`: the attention look
+   (`nothing_due_here`, and T2 for B). Then:
+   - **If nothing is due:** `IN_CALL` and B's vector mark are lowered, and B
+     leaves by the quiet way out (steps 4 to 7).
+   - **If something is due:** steps 4 to 6 are made the same way, and then,
+     on B's stack below its frame, `frame_tail`'s general branch runs
+     instead of the pops (`frame_tail_general(frame, outcome)`: interrupts
+     on, `may_block`, `regroup_current`, `call_left`, `leave`).
+
+   Either way B leaves as today's frame tail would make it leave.
+4. **The entry stack.** `set_entry_stack(B's top)`, so that B's next entry
+   lands on B's stack.
+5. **The stack moves.** RSP moves to B's user frame. This is the first
+   instruction that leaves A's stack.
+6. **The lock goes.** The run-queue lock is let go: `force_unlock`, a plain
+   store. This is the rule `finish_switch` keeps today, that the lock goes
+   with the switch and is let go only in the context switched to. Here the
+   "context switched to" is B's frame, and nothing runs on A's stack after
+   step 5.
+7. **The pops, then `sysretq` into B.**
+
+Every general-purpose register B sees is its own frame's, the reply words
+excepted (FDP_RIP.2): the 16 pops replace all of them, and RSP too. Vector
+state, `MXCSR`, x87 and selectors go through `switch_user_state` as now
+(condition 7).
+
+**What it removes:**
+- `ferrix_switch`, and A's six pushes and B's six pops;
+- `finish_switch`, with its `borrow::auditing` look and the previous
+  task's `Arc` drop. The drop becomes a move: `queue.previous` is not used;
+  the outgoing task's `Arc` goes into its park record, as `hand_over`'s
+  `between` already does;
+- B's unwind and its mispredicted returns;
+- `take_reply`, the reply cell, `frame_tail`'s second T2 call and its
+  `write_outcome`;
+- the return through `ferrix_syscall_entry`.
+
+The guess is 50 to 80 ns a direction, 100 to 160 a round trip. The unwind's
+share is to be measured first by an ablation that flattens the chain (see
+the evidence below).
+
+**The invariants**, each with a check:
+- **I1:** a task parked by the direct switch has its saved stack pointer at
+  its resume frame, and the frame's return address is `ferrix_fast_resume`.
+  - Check: stage 9 resumes a parked task by each general way (write, close,
+    `END`, kill) and requires the general path's results, fast path off and
+    on (`ipc-equiv`, extended).
+  - Control: the resume frame not written. The general resume then returns
+    to a stale address and the boot stops.
+- **I2:** nothing runs on the outgoing task's stack after the run-queue lock
+  is let go. The lock is the only thing that keeps a waker on another
+  processor from switching to A on A's stack.
+  - Check: a per-processor word `on_stack_of`, set to A at the commit and
+    cleared at step 5. `fast_resume_general` stops the machine, with a code
+    of its own, if any processor still has it naming the task it resumes.
+  - Control: the lock let go before step 5, with a spin of a few
+    microseconds in between to widen the window. Run under an `--smp 2`
+    stress whose second processor posts `END` to the parked task, it must
+    fire.
+- **I3:** the stub's reserved words are never on the call chain.
+  - Check: a boot check reads RSP at `ferrix_syscall_entry` and requires it
+    below the frame by exactly the reserve and the call.
+  - Control: `subq` removed, which must fire.
+
+**What it does not change:** which task runs next, when, and every
+scheduling quantity (Part 1's equality and its host test). The park's
+states and who may touch them (Part 3), with its `loom` model. The
+speculation domain's barrier decision and the refill or ERAPS (Part 4). The
+vector reset (Part 5). The general path itself, which never parks. With
+`ferrix.fastpath=off`, or on AArch64 and ARMv7-A, nothing parks and the
+stub's reserve is unused. It is reserved on every `SYSCALL`, which costs a
+`subq` and an `addq`.
+
+**Diagnostics.** A parked task has no kernel backtrace. A hang dump says
+"parked in 0x1013, resume frame at …" instead of walking a stack that is no
+longer there.
+
+#### G2: the hand-over's arithmetic
+
+After J, Q1 and Q2 land, what is left of `CpuQueue::hand_over` on this path
+is:
+- `account(now)`'s `follow_group_share`, if J leaves it;
+- the second `effective_weight`;
+- `slice_for`;
+- the run-slot `take` and `return` as compare-and-swaps under the lock;
+- `fair.current().cloned()`.
+
+G2 makes them:
+- the charge as a multiply by the inverse weight, as Q2 builds it, with no
+  group-share walk on a hand-over between two tasks of one job (J's
+  argument);
+- `slice_for` from a table, since its argument is the queue's length plus
+  one;
+- the slot moved by plain stores under the lock, with its assert kept
+  (FX-0534's compare stays where the slot leaves the lock);
+- `current` moved, not cloned.
+
+The equality of Part 1, fast against general, is kept by changing both
+paths' arithmetic together. Q2's host tests carry it. The guess is 15 to 30
+ns a direction.
+
+#### G3: one word for "nothing to look at"
+
+Today the path asks, at different points:
+- T1, a static;
+- T2, two statics, a probe task and the ever-filtered flag;
+- T11 to T13: `has_end` for both tasks, `waiting`, `sleeper_due`;
+- the frame tail's `nothing_due_here`: the resched ask, the moves against
+  `RUNNING_SEEN`, and `work::peek`;
+- T2 again.
+
+G3 keeps two words:
+- **A per-task word,** with a bit for each of: a filter installed, a tracer,
+  `END` or any work posted, and a move between jobs.
+- **A per-processor word,** with a bit for each of: a resched asked, a task
+  waiting, and a sleeper filed earlier than the armed deadline.
+
+Each bit is set where its state is made, by the code that makes it. The
+fast path reads the two words with two loads, at the points where it makes
+the tests today.
+
+The ordering arguments do not change: `END`'s `SeqCst` pairing with the
+park (part 3), and T13 under the run-queue lock. G3 changes where the
+answer is read, not when. It is its own design, after G1, and is worth 10
+to 20 ns a direction (**guessed**).
+
+#### C1 and C2: the call layer
+
+- **C1.** The commit writes B's reply into B's frame (G1, step 2). The reply
+  cell, `fill_reply` and `take_reply` go. A commit is always followed by
+  B's direct resume or by the trampoline that resumes B with the reply in
+  its frame. So no reply can wait in a cell any more.
+- **C2.** The endpoint across the park. Today the parked caller holds its
+  `Arc<Endpoint>` in a local of the frame that G1 makes dead. It must still
+  hold it, because a general resume continues on that endpoint, and the
+  endpoint must not close while a call waits on it. So the `Arc` the lookup
+  made is moved into the task's park record at the park (a move, not a
+  clone), and taken at either resume. If cut 3's park without an `Arc` is
+  accepted (ledger, cut 3), G1 takes its form instead.
+
+#### Order, evidence and points
+
+1. **A measurement first:** the unwind's share. A timing-only ablation keeps
+   step 4 but makes B's way back one return deep: the switch tail and the
+   frame tail inlined into the entry, `#[inline(always)]` down the chain.
+   It is alternated against `main`, 5 boots a side in one mode.
+   - If it reads less than 10 ns a direction, the unwind is not where G1's
+     saving is. G1 is then argued only by `ferrix_switch` and
+     `finish_switch`, about 20 to 30 ns a direction.
+   - 2 to 3 points, os-76.
+2. **G1 with C1 and C2,** one landing:
+   - the stub's reserve, `ferrix_fast_resume`, `fast_resume_general`, and
+     the direct resume in `sched::direct`;
+   - I1 to I3 with their checks and controls, and `ipc-equiv` extended to
+     the general resumes;
+   - the `loom` model of the park unchanged, since the states are the
+     same;
+   - the boots and controls of the step 4 row (§9.7, Part 6).
+   - 20 to 30 points.
+3. **G2,** after J and Q2: 5 to 8 points.
+4. **G3,** its own design first: 8 to 13 points.
+
+Each item is measured ABAB against its base with `--record`. It is quoted
+by mode, with the count of boots a mode, as §9.11 does.
+
+**On Arm:** G1's idea carries, the resume frame, the trampoline and a return
+from the frame by `ERET`, but the stubs differ. As with step 4, it is
+x86-64 only until an Arm fast path is its own design (§9.7, answer 13).
+
+#### Questions for the consultant (9.12)
+
+1. Is G1 acceptable inside the item? The general continuation is the same
+   function, reached from a reserved resume frame instead of a live call
+   chain. The direct resume returns to user mode from the woken task's
+   frame. The run-queue lock is let go after the stack moves, as
+   `finish_switch` lets it go in the context switched to.
+2. Are I1 to I3 the right invariants? Is the `on_stack_of` check, with its
+   widened-window control under `--smp 2`, a control that can fire in the
+   sense of condition 11? If not, what would be?
+3. C2: keep the `Arc` moved into the park record, or wait for cut 3's
+   scheme?
+4. Rows: a new H row for the direct resume, with L rows for the stub's
+   reserve, the trampoline, I1 to I3 and C1. Do you want the existing step
+   4 rows (L.object.166 to 169, the direct switch's H row) restated
+   instead?
+5. G3: its own design later, as proposed, or in this round with G1?
