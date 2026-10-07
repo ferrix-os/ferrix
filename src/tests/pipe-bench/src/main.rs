@@ -437,13 +437,10 @@ fn run_in_domain() -> Result<(), String> {
             )
         };
     }
-    // Itself, by /proc, or else by the name it was started as.
-    let image = std::fs::read("/proc/self/exe")
-        .or_else(|first| {
-            std::env::args()
-                .next()
-                .map_or(Err(first), |name| std::fs::read(name))
-        })
+    // Itself: where `bench-pipe` carries it, since the kernel's built-in init
+    // has no file of its own; else by /proc.
+    let image = std::fs::read("/bin/pipe-bench")
+        .or_else(|_| std::fs::read("/proc/self/exe"))
         .map_err(|error| format!("reading itself: {error}"))?;
     let _ = std::fs::create_dir("/sys/fs/cgroup/pipe-bench");
     let dir = std::fs::File::open("/sys/fs/cgroup/pipe-bench")

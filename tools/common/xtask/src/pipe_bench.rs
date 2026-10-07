@@ -16,7 +16,9 @@
 
 use crate::args::Args;
 use crate::ipc::{Host, PIN, host_processors};
-use crate::{Error, Result, paths, sem};
+use crate::paths::Arch;
+use crate::{Error, Result, cargo, fat, initramfs, native, paths, ports, qemu, sem, shell};
+use std::path::Path;
 
 /// The tests the program runs, in its order.
 const TESTS: &[&str] = &[
@@ -52,7 +54,7 @@ pub(crate) fn bench_pipe(args: &Args) -> Result<()> {
         let mut figures: Vec<Vec<u64>> = vec![Vec::new(); TESTS.len()];
         for boot in 1..=boots {
             let host = Host::before(args.pin.as_deref());
-            let lines = sem::boot(arch, &program, &args)?;
+            let lines = boot_once(arch, &program, &args)?;
             println!("  {arch}: boot {boot}: {}", host.after());
             if let Some(error) = lines.iter().find(|line| line.contains("LB error")) {
                 return Err(Error::new(format!(
@@ -92,6 +94,30 @@ pub(crate) fn bench_pipe(args: &Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Where the program is carried in the initramfs as well as being init: the
+/// built-in init has no file of its own, and the domain run makes a process
+/// from the program's image, which it reads from here.
+const CARRIED_AT: &str = "bin/pipe-bench";
+
+/// Boot `program` as init with itself carried at [`CARRIED_AT`], and return
+/// every line once init has exited.
+fn boot_once(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
+    let loader = cargo::build_loader(arch, args.release)?;
+    let kernel = cargo::build_kernel_with_init(arch, args.release, program, shell::SCRIPT)?;
+    let natives = native::build(arch, args.release)?;
+    let image = std::fs::read(program)
+        .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
+    let carried = vec![ports::File {
+        path: CARRIED_AT.to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(image),
+    }];
+    let initramfs = initramfs::build(None, &natives, None, &carried)?;
+    let cmdline = crate::image_cmdline(args);
+    let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
+    qemu::watch_lines(arch, &image, &kernel, args, shell::EXITED)
 }
 
 /// The p50 in ns of `test`'s `LB summary` line.
