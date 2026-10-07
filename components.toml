@@ -36,5 +36,5 @@ commit = "7a6da637cf6f7b0ba30741f971c1d6a9d19828a8"
 # ferrousli, one folder an app (docs/APPS.md).
 [apps]
 path = "src/user/apps"
-repo = "https://github.com/ferrix-os/apps"
-commit = "65c716f278003010d4a56fb9af7d51621948aeb3"
+repo = "/home/sebastian/Documents/projects/os/ferrix/.claude/worktrees/po10-term/src/user/apps"
+commit = "7de9a4ed5dab2c841671b25641e9b731fec3a913"
