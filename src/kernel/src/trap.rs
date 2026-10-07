@@ -588,7 +588,7 @@ pub(crate) fn attention_due(path: &ReturnPath) -> bool {
 
 /// Whether the way back to user mode has anything to do for the running
 /// task: a kill, a signal, a stop. What a throttled task looks for.
-fn must_attend() -> bool {
+pub(crate) fn must_attend() -> bool {
     return_path().is_some_and(|path| (path.needs_attention)())
 }
 

@@ -269,7 +269,22 @@ pub(crate) fn nothing_due_here() -> bool {
         .get()
         .and_then(|seen| seen.get(cpu))
         .is_some_and(|seen| seen.load(Ordering::Relaxed) != moves);
-    !moved && !work::wants_attention(work::peek())
+    !moved && !work::wants_attention(work::peek()) && !throttled_here(cpu)
+}
+
+/// Whether the running task's job, or one above it, has used its `cpu.max`
+/// quota: what the frame tail asks so that a task making only fast-path calls
+/// is held to its quota as the general way out ([`throttle_current`]) holds
+/// it. A machine with no `cpu.max` set pays one load. With interrupts masked.
+fn throttled_here(cpu: usize) -> bool {
+    if !quota::bandwidth_in_use() {
+        return false;
+    }
+    let group = RUNNING_GROUP
+        .get()
+        .and_then(|groups| groups.get(cpu))
+        .map_or(quota::NONE, |slot| slot.load(Ordering::Acquire));
+    group != quota::NONE && quota::throttled_until(group, crate::timer::now_nanos()).is_some()
 }
 
 /// Have the running task wait out the rest of its job's `cpu.max` period if

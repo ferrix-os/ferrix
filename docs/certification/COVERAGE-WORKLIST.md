@@ -97,7 +97,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
-| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 751, 754, 757, 764 |
+| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 754, 757, 760, 767 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 321, 861, 870 |
 | `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1507-1508 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 336 |
@@ -176,7 +176,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1250, 2206 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1265, 2221 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
