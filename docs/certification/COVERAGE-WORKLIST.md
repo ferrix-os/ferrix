@@ -65,6 +65,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | OPAQUE-KERNEL.md §9.8 2a, the running task borrowed from the processor's record (branch step2a2) | x86_64, aarch64, armv7a | 2a's carry from 90a4757d6 dropped no anchor. | Measure the new code and test or argue what a passing run leaves: sched/borrow.rs (RunningSlot, current_ptr, running, with_current, current_arc, the audit and its sites), sched/borrow_check.rs (the stage-5 check), and in sched/mod.rs set_current, audit_here, the switch's and the interrupt exit's audits, current(), regroup_current and set_current_group as rewritten, and sched/work.rs's with_running, which now borrows. |
 | the home disk: fs::home_disk mounted at /home beside /data, its flush and commit (branch home-disk) | x86_64, aarch64, armv7a | Carried onto main with 0 anchors dropped as unmeasured. | Measure main.rs's two new calls of fs::home_disk::mount, after each fs::data_disk::mount in bring-up: no coverage run attaches a home disk, so a run reaches the calls but not a mount behind them; test-shell's K7 boots, `cargo xtask run` and `run-compositor` attach one. |
 | the chardev core held to its queue's room and checked at boot, F-63 and NVIDIA N12 (branch po5/c1-n12) | x86_64, aarch64, armv7a | Carried onto main 39e520e31 with 0 anchors dropped as unmeasured; only main.rs's anchors moved, by one line. | Measure stages_check.rs's check_chardev (its fatal arm is reached only when the check fails, its not-checked arm only on a machine with no PCI function) and main.rs's new call of it in check_block_ring. |
+| FX-0902, the wait for the reaper counts a program thread part-way through its end (branch po9/fx0902; po9-fx0902's consultant, OK IF C1, ledger 424, 2026-10-07) | x86_64, aarch64, armv7a | Carried onto main 4066f41dd with 0 anchors dropped as unmeasured; only sched/mod.rs's anchors moved. | Measure sched/mod.rs's begin_leaving and exit_leaving, both outcomes of exit_counted's `if leaving` (true from syscall/process.rs end_thread, false from task_start's exit), and wait_for_reaper's LEAVING != 0 arm, which is reached only when a check's frame window races a program thread between its release and exit: measure it under the 3 ms linger control (queue/po9fx-ctl-linger-fix.log) or argue it. |
 
 ---
 
@@ -175,7 +176,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1163, 2091 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1176, 2132 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---

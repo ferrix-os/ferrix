@@ -470,6 +470,19 @@ static DEAD_STILL_QUEUED: AtomicU64 = AtomicU64::new(0);
 /// one an idle processor has taken off the list and not yet dropped.
 static EXITED_UNREAPED: AtomicUsize = AtomicUsize::new(0);
 
+/// Tasks on their way out that [`EXITED_UNREAPED`] does not count yet: a
+/// program's thread between the start of its last system call's end
+/// ([`begin_leaving`]) and [`exit_leaving`].
+///
+/// In that stretch its process can already read as released -- its status
+/// posted, its waiters woken -- while the task still holds its kernel stack
+/// and, through its thread, the process's address space, which go only when
+/// it is reaped. A check that has seen the status and opens a frame window
+/// would otherwise have them come back inside it, if the task is switched out
+/// there: under a loaded host's preemption, the 77 frames of a selector
+/// program inside the memory sweep's window (FX-0902).
+static LEAVING: AtomicUsize = AtomicUsize::new(0);
+
 /// Whether the scheduler is running.
 pub(crate) fn started() -> bool {
     STARTED.load(Ordering::Acquire)
@@ -1400,8 +1413,25 @@ extern "C" fn task_start(_argument: usize) -> ! {
     exit()
 }
 
+/// Count the running task as on its way out, for [`wait_until_reaper_quiet`],
+/// from before anything of its end can be observed. It must end through
+/// [`exit_leaving`], which takes the count back.
+pub(crate) fn begin_leaving() {
+    let _ = LEAVING.fetch_add(1, Ordering::AcqRel);
+}
+
+/// End the running task, which [`begin_leaving`] counted.
+pub(crate) fn exit_leaving() -> ! {
+    exit_counted(true)
+}
+
 /// End the running task.
 pub(crate) fn exit() -> ! {
+    exit_counted(false)
+}
+
+/// [`exit`] and [`exit_leaving`]: `leaving` when [`begin_leaving`] counted it.
+fn exit_counted(leaving: bool) -> ! {
     // **Nothing switches it out while this frame holds the task.** From the
     // moment it is marked dead, a switch takes it off its queue for good and
     // the reaper frees this stack, with whatever it held still held: the
@@ -1418,6 +1448,11 @@ pub(crate) fn exit() -> ! {
         let _ = EXITED_UNREAPED.fetch_add(1, Ordering::AcqRel);
         task.set_state(DEAD);
         drop(task);
+    }
+    // After the count above, never before: a waiter that reads no task
+    // leaving then reads this one as exited, until it is reaped.
+    if leaving {
+        let _ = LEAVING.fetch_sub(1, Ordering::AcqRel);
     }
     <arch::Irq as IrqControl>::restore(saved);
     schedule();
@@ -1939,10 +1974,12 @@ pub(crate) const REAPER_PATIENCE_NANOS: u64 = 20_000_000_000;
 /// For a check counting free frames, at both edges of its window: a reaper
 /// freeing a stack or dropping a task inside the window moves the count
 /// either way. A condition rather than a delay, because a delay only makes
-/// the race rarer: no task exited and not yet dropped by its reaper, nothing
-/// on the zombie list, and no idle processor part-way through a free. What it
-/// does not wait for is a reference the caller holds to a task, a process or
-/// an address space: that is the caller's to drop, and to wait for.
+/// the race rarer: no program's thread part-way through its end, no task
+/// exited and not yet dropped by its reaper, nothing on the zombie list, and
+/// no idle processor part-way through a free. What it does not wait for is a
+/// reference the caller holds to a task, a process or an address space, or a
+/// task that has not begun to end: that is the caller's to drop, and to wait
+/// for.
 pub(crate) fn wait_until_reaper_quiet(patience_nanos: u64) -> Result<(), &'static str> {
     wait_for_reaper(patience_nanos)
 }
@@ -1953,7 +1990,7 @@ pub(crate) fn wait_until_reaper_quiet(patience_nanos: u64) -> Result<(), &'stati
 ///
 /// For a check that starts a task and counts frames. A task that has answered
 /// the check is not yet gone: it still has to leave, and
-/// [`wait_until_reaper_quiet`] counts only tasks already dead, so without this
+/// [`wait_until_reaper_quiet`] counts only tasks already ending, so without this
 /// its stack is freed inside whichever window opens next, four frames that
 /// window never took. Drop the `Arc<Task>` after this returns.
 ///
@@ -1986,7 +2023,11 @@ fn wait_for_reaper(patience_nanos: u64) -> Result<(), &'static str> {
         if !ZOMBIES.lock().is_empty() {
             let _ = reap();
         }
-        if EXITED_UNREAPED.load(Ordering::Acquire) == 0
+        // Leaving first: a task that stops leaving is counted as exited
+        // before it is uncounted as leaving, so reading the two in this order
+        // cannot miss it between them.
+        if LEAVING.load(Ordering::Acquire) == 0
+            && EXITED_UNREAPED.load(Ordering::Acquire) == 0
             && ZOMBIES.lock().is_empty()
             && !reaping_anywhere()
         {

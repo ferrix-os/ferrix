@@ -2291,6 +2291,10 @@ pub(crate) fn leave_current() -> ! {
 /// and letting go of a process takes plain locks. Every reference is dropped
 /// before the task ends, because nothing after `sched::exit` runs to drop it.
 fn end_thread(status: Option<i32>, group: bool) -> ! {
+    // Before anything here can release the process and wake a waiter: from
+    // here to `sched::exit_leaving` the task is ending but not yet exited
+    // (FX-0902).
+    sched::begin_leaving();
     crate::arch::enable_interrupts();
     if let Some(thread) = thread::current() {
         // First, so that no signal is chosen for a thread on its way out, and
@@ -2319,7 +2323,7 @@ fn end_thread(status: Option<i32>, group: bool) -> ! {
         drop(thread);
         process.thread_gone(true);
     }
-    sched::exit()
+    sched::exit_leaving()
 }
 
 /// Where a program's task begins: enter user mode where `exec::load` said.
