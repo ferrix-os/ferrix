@@ -744,7 +744,7 @@ unsafe fn load_selectors(
     // 0 was last loaded with 0, and a vendor's null load is idempotent:
     // loading 0 again would leave the hidden part exactly as it is. `FS` and
     // `GS` are loaded at every switch, their bases written below as before.
-    let [held_ds, held_es, _, _] = cpu::read_data_selectors();
+    let [held_ds, held_es, held_fs, held_gs] = cpu::read_data_selectors();
     let load_ds = ds != 0 || held_ds != 0;
     let load_es = es != 0 || held_es != 0;
     if load_ds {
@@ -758,14 +758,19 @@ unsafe fn load_selectors(
     if !(load_ds && load_es) {
         count(&SELECTOR_SKIPS);
     }
-    // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
-    unsafe { cpu::load_fs(fs) };
+    // ABLATION (po9-sel, never lands): FS and GS skipped 0 over 0 too.
+    if fs != 0 || held_fs != 0 {
+        // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
+        unsafe { cpu::load_fs(fs) };
+    }
     if fs == 0 {
         // SAFETY: (CONTEXT) a user address the program set, or zero.
         unsafe { super::syscall::set_thread_pointer(fs_base) };
     }
-    // SAFETY: (CONTEXT) as for the other three.
-    unsafe { cpu::load_user_gs(gs) };
+    if gs != 0 || held_gs != 0 {
+        // SAFETY: (CONTEXT) as for the other three.
+        unsafe { cpu::load_user_gs(gs) };
+    }
     if gs == 0 {
         // SAFETY: (CONTEXT) the program's own base, into the shadow it lives in while
         // the kernel runs.
