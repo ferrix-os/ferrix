@@ -14,10 +14,24 @@ from systemd's own listing, all committed verbatim in
 * `unistd_arm_common.h` and `unistd_arm.h`: ARM EABI, where
   `__NR_SYSCALL_BASE` is 0, and the private calls from `__ARM_NR_BASE`
   (0x0f0000), named as libseccomp names them (`set_tls`, `cacheflush`, ...).
+  The same QEMU `linux-headers`, Linux v6.12-rc5.
 * `errno-base.h`, `errno.h`: `asm-generic`'s errno numbers, which x86,
   ARM and AArch64 all use (Linux 7.0's, from the host's linux-libc-dev).
 * `systemd-259-syscall-filter.txt`: `systemd-analyze syscall-filter` of
   systemd 259, every `@group` and its members.
+
+Licences. The seven headers are Linux UAPI headers, GPL-2.0 WITH
+Linux-syscall-note, whether or not the file carries the SPDX line (the
+generated `unistd_*.h` and `unistd_arm_common.h` do not; Linux generates
+them from its syscall tables without one). The note puts their use as an
+interface outside the GPL; init reads only names and numbers from them,
+and the generated table is facts, not their text. The systemd listing is
+program output of systemd 259 (LGPL-2.1-or-later): the group names and
+members are the interface `SystemCallFilter=` is defined by. None of these
+files is linked into a binary, and they keep their own licences, not the
+crate's MIT. The unistd tables (v6.12-rc5) and the errno headers (7.0) are
+of different Linux versions; the numbers of both are stable ABI, and a
+call newer than v6.12 is simply unknown to the filter, which warns.
 
 It writes `src/lib/init/svc/src/filter/tables.rs`. The output is committed,
 and `--check` regenerates into memory and compares.
