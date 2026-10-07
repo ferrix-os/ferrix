@@ -1124,11 +1124,11 @@
     "sched/queue.rs": {
       "ring": "core",
       "lines": [
-        250,
-        262,
-        263,
-        344,
-        462
+        252,
+        264,
+        265,
+        360,
+        478
       ]
     },
     "object/oom.rs": {
@@ -1278,7 +1278,7 @@
     "sched/task.rs": {
       "ring": "core",
       "lines": [
-        647
+        680
       ]
     },
     "irq.rs": {

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8c0bfb3bccba99ce68808d61a703506880286607263d50563a9538c84c701a7a",
+  "digest": "61752d247ce0be71ea09a342088525b922970878e7239a595e66ce8bf17fe823",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 136,
-    "elements": 6606,
+    "elements": 6621,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -35648,10 +35648,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::handOverIsTheGeneralSequence",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"CpuQueue::hand_over shall charge the running task and weigh the arriving one as insert does, at one clock reading, and RunQueue::hand_over shall leave the queue, the arriving entity and the leaving entity's state exactly as enqueue, set_slice_ns, remove_curr and pick_next leave them on a queue with one entity running and nothing waiting.\"",
+                  "value": "\"RunQueue::hand_over shall leave the queue, the arriving entity and the leaving entity's state exactly as enqueue, set_slice_ns, remove_curr and pick_next leave them on a queue with one entity running and nothing waiting.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 460
+                    "line": 458
                   }
                 },
                 {
@@ -35662,7 +35662,7 @@
                   "value": "\"hand_over_is_the_general_sequence: 200,000 random queues, weights and lags at and past the clamp, virtual times either side of the wrap, every field compared; its control changes one field of the result and fails.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 464
+                    "line": 462
                   }
                 },
                 {
@@ -35673,7 +35673,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 465
+                    "line": 463
                   }
                 },
                 {
@@ -35681,10 +35681,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::handOverIsTheGeneralSequence",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::queue::CpuQueue::insert_at\")",
+                  "value": "\"sched::queue::CpuQueue::hand_over\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 467
+                    "line": 464
                   }
                 }
               ]
@@ -35697,7 +35697,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 469
+                "line": 466
               },
               "children": [
                 {
@@ -35708,7 +35708,7 @@
                   "value": "\"direct::begin shall take this processor's run-queue lock only if it is free, and decline unless the task to switch to has this processor as its home and holds both its slots (T11), nothing waits in the fair class and no sleeper is due (T12), and neither task has END posted (T13), leaving the queue unchanged when it declines.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 475
+                    "line": 472
                   }
                 },
                 {
@@ -35719,7 +35719,7 @@
                   "value": "\"Stage 9's cases 9, 10 and 14 reach T11, T12 and T13 with the fast path on and get the general path's results; each test's control fails its case (the `fastcase` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 478
+                    "line": 475
                   }
                 },
                 {
@@ -35730,7 +35730,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 479
+                    "line": 476
                   }
                 },
                 {
@@ -35741,7 +35741,7 @@
                   "value": "(\"sched::direct::begin\", \"sched::queue::CpuQueue::sleeper_due\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 481
+                    "line": 478
                   }
                 }
               ]
@@ -35754,7 +35754,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 483
+                "line": 480
               },
               "children": [
                 {
@@ -35765,7 +35765,7 @@
                   "value": "\"The direct switch shall make FX-0503's check and then the switch through switch_chosen, the tail choose_next makes after its pick, switch_to and finish_switch.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 486
+                    "line": 483
                   }
                 },
                 {
@@ -35776,7 +35776,7 @@
                   "value": "\"choose_next and Direct::switch both call switch_chosen (review); every boot runs choose_next through it, and the fast path's trips through Direct::switch (the counts line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 489
+                    "line": 486
                   }
                 },
                 {
@@ -35787,7 +35787,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 490
+                    "line": 487
                   }
                 },
                 {
@@ -35798,7 +35798,7 @@
                   "value": "(\"sched::switch_chosen\", \"sched::direct::Direct::switch\", \"sched::require_preemption_on\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 492
+                    "line": 489
                   }
                 }
               ]
@@ -35811,7 +35811,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 494
+                "line": 491
               },
               "children": [
                 {
@@ -35822,7 +35822,7 @@
                   "value": "\"Direct::hand_over shall stop the machine with FX-0532 when either task is the processor's idle task (A4), and with FX-0530 when the task handed over to is running here, queued, not blocked, or not the pick (A1).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 498
+                    "line": 495
                   }
                 },
                 {
@@ -35833,7 +35833,7 @@
                   "value": "\"A record planted on a running task stops the machine with FX-0530 (the A1 control).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 500
+                    "line": 497
                   }
                 },
                 {
@@ -35844,7 +35844,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 501
+                    "line": 498
                   }
                 },
                 {
@@ -35855,7 +35855,7 @@
                   "value": "\"sched::direct::Direct::hand_over\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 502
+                    "line": 499
                   }
                 }
               ]
@@ -35868,7 +35868,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 504
+                "line": 501
               },
               "children": [
                 {
@@ -35879,7 +35879,7 @@
                   "value": "\"A task's reply cell shall be filled only by the commit that hands the processor to it, under its home's run-queue lock while it is asleep, and emptied only by the task itself.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 507
+                    "line": 504
                   }
                 },
                 {
@@ -35890,7 +35890,7 @@
                   "value": "\"ipc-equiv's case 1 and 2 with the fast path on: every length 0 to 24 and 1,000 trips in order.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 509
+                    "line": 506
                   }
                 },
                 {
@@ -35901,7 +35901,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 510
+                    "line": 507
                   }
                 },
                 {
@@ -35912,7 +35912,7 @@
                   "value": "(\"sched::task::Task::fill_reply\", \"sched::task::Task::take_reply\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 512
+                    "line": 509
                   }
                 }
               ]
@@ -35925,7 +35925,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 514
+                "line": 511
               },
               "children": [
                 {
@@ -35936,7 +35936,7 @@
                   "value": "\"nothing_due_here shall answer true only when the running task's pending-work word is clear, no decision is asked of this processor and no move between jobs is unseen.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 517
+                    "line": 514
                   }
                 },
                 {
@@ -35947,7 +35947,7 @@
                   "value": "\"Case 14, the continuation's kill and case 15's signal leave through the general branch and act on their bit.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 519
+                    "line": 516
                   }
                 },
                 {
@@ -35958,7 +35958,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 520
+                    "line": 517
                   }
                 },
                 {
@@ -35969,7 +35969,7 @@
                   "value": "(\"sched::nothing_due_here\", \"sched::work::peek\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 521
+                    "line": 518
                   }
                 }
               ]
@@ -35982,7 +35982,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 523
+                "line": 520
               },
               "children": [
                 {
@@ -35993,7 +35993,7 @@
                   "value": "\"The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 526
+                    "line": 523
                   }
                 },
                 {
@@ -36004,7 +36004,7 @@
                   "value": "\"test-ipc-equiv requires trips with the fast path on and every count zero with it off.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 528
+                    "line": 525
                   }
                 },
                 {
@@ -36015,7 +36015,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 529
+                    "line": 526
                   }
                 },
                 {
@@ -36026,7 +36026,7 @@
                   "value": "(\"sched::direct::count\", \"sched::direct::counts\", \"fastpath::report_counts\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 531
+                    "line": 528
                   }
                 }
               ]
@@ -36039,7 +36039,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 533
+                "line": 530
               },
               "children": [
                 {
@@ -36050,7 +36050,7 @@
                   "value": "\"The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 537
+                    "line": 534
                   }
                 },
                 {
@@ -36061,7 +36061,7 @@
                   "value": "\"Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 539
+                    "line": 536
                   }
                 },
                 {
@@ -36072,7 +36072,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 540
+                    "line": 537
                   }
                 },
                 {
@@ -36083,7 +36083,7 @@
                   "value": "\"sched::work::fast_path_hook\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 541
+                    "line": 538
                   }
                 }
               ]
@@ -36096,7 +36096,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 543
+                "line": 540
               },
               "children": [
                 {
@@ -36107,7 +36107,7 @@
                   "value": "\"Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 550
+                    "line": 547
                   }
                 },
                 {
@@ -36118,7 +36118,7 @@
                   "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 556
+                    "line": 553
                   }
                 },
                 {
@@ -36129,7 +36129,7 @@
                   "value": "(\"H.SCHED.13\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 557
+                    "line": 554
                   }
                 },
                 {
@@ -36140,7 +36140,178 @@
                   "value": "(\"sched::task::Task::take_run_slot\", \"sched::task::Task::return_run_slot\", \"sched::task::Task::take_sleep_slot\", \"sched::task::Task::return_sleep_slot\", \"sched::task::Task::holds_slots\", \"sched::task::Task::holds_sleep_slot\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 561
+                    "line": 558
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theDirectSwitchFoldsItsJobLoad",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchFoldsItsJobLoad",
+              "kind": "requirement",
+              "shortName": "L.sched.64",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 560
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchFoldsItsJobLoad",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The direct switch shall change the processor load of a job both its tasks are counted in by the net of the peer's join and the caller's leave in one adjustment, and otherwise make the peer's join and then the caller's leave as the general path does; a direct switch that does not reach the caller's leave shall make the peer's join alone.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 566
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchFoldsItsJobLoad",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 9's job cases, with the fast path off and on: after trips between a caller and an echo in one job with equal and with unequal weights, in two sibling jobs, and in a job and its child, each job's load is what its tasks' words count plus what its busy children add, a child adds exactly while busy, every load reads 0 once both are gone, and with the fast path on the first two fold and the last two do not; controls: the net's sign flipped, and a fold at a job the two do not share, each fail it. The last clause, a direct switch that does not reach the caller's leave, is shown by review: every way out that drops PendingJoin unsettled ends in FX-0530, which no passing boot reaches.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 577
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchFoldsItsJobLoad",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.SCHED.13\", \"H.SCHED.3\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 578
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchFoldsItsJobLoad",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::direct::Direct::hand_over\", \"sched::task::Task::join_word\", \"sched::task::Task::leave_word\", \"sched::queue::PendingJoin::drop\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 581
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theDirectSwitchWeighsWithThePeerCounted",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchWeighsWithThePeerCounted",
+              "kind": "requirement",
+              "shortName": "L.sched.65",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 583
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchWeighsWithThePeerCounted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The direct switch shall give the peer, and the running task under account's rule, the weights effective gives with the peer counted in its job's load.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 586
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchWeighsWithThePeerCounted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 9's weight case, with the fast path off and on: a caller of trips in one job with an echo of another weight runs, after its last trip, at the weight effective gives with the echo counted, or at the one its job's share gives it as the loads stand when a charge since has moved it; control: the hand-over's weights computed without the peer counted fail it.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 592
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchWeighsWithThePeerCounted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.SCHED.13\", \"H.SCHED.3\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 593
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theDirectSwitchWeighsWithThePeerCounted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::queue::CpuQueue::account_with\", \"sched::task::Task::effective_weight_with\", \"object::quota::effective_with\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 596
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theFoldIsPlannedBeforeTheCharge",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
+              "kind": "requirement",
+              "shortName": "L.sched.66",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 598
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The direct switch shall plan a fold of its job loads from the peer's join and the caller's word before the charge, only at a job both are counted in, and shall settle it once the caller's leave has answered: by the net in one adjustment when the leave answered as planned, and otherwise by the peer's join and then the caller's leave, each in its own job.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 604
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"ferrix-sched's host test drives the kernel's plan and settlement against a model of quota::adjust over 40,000 random job trees of depth 1 to 8 with siblings and nested jobs, the two tasks in one job, siblings, nested either way and apart, equal and unequal weights, and finds every job's load and contribution and both weights equal to the general sequence's; with a fold planned at a job the two do not share, it fails.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 611
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SCHED.13\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 612
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::direct::Direct::hand_over\", \"sched::queue::PendingJoin::settle\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 614
                   }
                 }
               ]
