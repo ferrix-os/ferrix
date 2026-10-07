@@ -46,7 +46,7 @@ static MEMBER: [u8; 7] = *b"member\0";
 ///
 /// Called only as the process's entry point.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn domain_exec_start() -> ! {
     let argv: [usize; 3] = [PATH.as_ptr() as usize, MEMBER.as_ptr() as usize, 0];
     let envp: [usize; 1] = [0];
     let _ = syscall3(
