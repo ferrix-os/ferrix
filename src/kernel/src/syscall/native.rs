@@ -1025,7 +1025,6 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     // call need not reach `system_call` -- the filter may answer it, and
     // the entry then leaves without `call_left` -- and `system_call`
     // raises it again for itself (`L.object.169`).
-    crate::sched::set_in_call_masked(true);
     let fast = fast_write_read_raised(a);
     if matches!(fast, crate::trap::Fast::Declined) {
         crate::sched::set_in_call_masked(false);
@@ -1038,7 +1037,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::sched::direct::{self, Count};
     use crate::trap::Fast;
     // T2: nothing would filter the call.
-    if !crate::trap::filter_quiet() {
+    if false {
         direct::count(Count::T2);
         return Fast::Declined;
     }
@@ -1061,7 +1060,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
             // contract says, and the lookup blocks on nothing.
             unsafe {
                 core.try_with_handles_masked(|table| {
-                    channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
+                    channel_ptr_ablation(table, handle(a[0]), Rights::READ | Rights::WRITE)
                 })
             }
             .flatten()
@@ -1070,6 +1069,8 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
             direct::count(Count::T4);
             return Fast::Declined;
         };
+        // ABLATION ONLY: unsound, the endpoint is not held.
+        let endpoint: &Endpoint = unsafe { &*endpoint };
         let words = reply_words(count, a);
         // SAFETY: (CONTEXT) masked from the entry until the switch, as this
         // function's contract says.
@@ -1082,7 +1083,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
         if let Some((count, words)) = caller.take_reply() {
             return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
         }
-        Fast::Done(continue_general(&endpoint, caller, a))
+        Fast::Done(continue_general(endpoint, caller, a))
     })
     .unwrap_or_else(|| {
         direct::count(Count::T4);
@@ -1312,6 +1313,18 @@ fn channel_in(
         return Err(status::ACCESS_DENIED);
     }
     Ok(Arc::clone(endpoint))
+}
+
+/// ABLATION ONLY.
+fn channel_ptr_ablation(table: &HandleTable, channel: Handle, needed: Rights) -> Option<*const Endpoint> {
+    let (object, rights) = table.get(channel).ok()?;
+    let Object::Channel(endpoint) = object else {
+        return None;
+    };
+    if !rights.contains(needed) {
+        return None;
+    }
+    Some(Arc::as_ptr(endpoint))
 }
 
 /// The VMO a handle names, if it carries `needed`.
