@@ -103,6 +103,17 @@ pub(crate) unsafe fn set_cpu_local(address: u64) {
     // SAFETY: (SHARED) `IA32_GS_BASE` exists on every 64-bit x86 and accepts any
     // canonical address, which a kernel pointer is.
     unsafe { cpu::write_msr(IA32_GS_BASE, address) };
+    // The record notes this processor's tables, as the processor reports
+    // them now (Q4): the boot processor's final ones, loaded by `gdt::init`
+    // before any record existed; a secondary's start-up ones, which
+    // `gdt::init_secondary` replaces and notes again.
+    // SAFETY: (SHARED) `address` is this processor's own record, which the
+    // caller guarantees lives for the life of the system and is only ever
+    // reached through shared references.
+    let record = unsafe { &*(address as *const crate::smp::PerCpu) };
+    // SAFETY: (ENTRY) this processor's own record; bring-up runs with
+    // interrupts masked.
+    unsafe { gdt::note_tables(record) };
 
     // `SYSCALL` on this processor, now that `GS` names its record -- which
     // `syscall::init` parks for the first `swapgs`, and which the trampoline

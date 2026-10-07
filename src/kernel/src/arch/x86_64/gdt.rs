@@ -21,8 +21,10 @@
 
 use alloc::boxed::Box;
 use core::cell::UnsafeCell;
+use core::sync::atomic::Ordering;
 
 use super::cpu;
+use crate::smp::PerCpu;
 
 pub(super) mod check;
 
@@ -348,23 +350,53 @@ pub(crate) unsafe fn init() {
 ///
 /// # Finding the TSS
 ///
-/// By asking the processor, rather than by remembering. `STR` gives this
-/// processor's task register and `SGDT` gives its GDT, so the descriptor --
-/// and the base address inside it -- can be read back from the hardware that
-/// is actually using them.
+/// By asking the processor, rather than by remembering what this module
+/// built: `STR` gives this processor's task register and `SGDT` its GDT, so
+/// the descriptor -- and the base address inside it -- is read back from the
+/// hardware that is actually using them ([`ask_privilege_stack`]).
 ///
-/// The alternative was to record each processor's `Tables` pointer somewhere
-/// per-processor, and the ordering makes that worse than it sounds: the GDT is
-/// loaded in `init_traps`, long before `smp` exists to hold anything per
-/// processor. A cached pointer would have to be filled in later by code that
-/// remembered to, and would be wrong rather than absent if it were not.
+/// Asked when the tables are loaded, not at every switch (Q4,
+/// `docs/OPAQUE-KERNEL.md` §9.11): `SGDT` and `STR` are microcoded, and a
+/// switch made three of the one and one of the other. [`note_tables`] puts
+/// the answer in `cpu`'s record after every load of `GDTR` or `TR` made with
+/// a record installed, and when the record is installed, so the record holds
+/// exactly what asking would answer: the processor's tables change only at
+/// those loads. A record that holds nothing yet -- none installed, or a
+/// processor still on the start-up trampoline's GDT -- is asked past.
 ///
 /// # Safety
 ///
 /// (ENTRY) A TSS must be loaded, which [`init`] or [`init_secondary`] has done by the
-/// time any task runs, and `top` must be the top of a stack this processor
-/// alone uses.
-pub(crate) unsafe fn set_privilege_stack(top: u64) {
+/// time any task runs, `top` must be the top of a stack this processor
+/// alone uses, and `cpu` this processor's own record, if any.
+pub(crate) unsafe fn set_privilege_stack(cpu: Option<&PerCpu>, top: u64) {
+    let noted = cpu.map_or(0, |cpu| cpu.privilege_stack.load(Ordering::Relaxed));
+    let rsp0 = if noted == 0 {
+        // SAFETY: (ENTRY) the caller's guarantee: a TSS is loaded.
+        let Some(asked) = (unsafe { ask_privilege_stack() }) else {
+            return;
+        };
+        asked
+    } else {
+        noted as *mut u64
+    };
+    // SAFETY: (ENTRY) the TSS this processor has loaded, at the offset long mode puts
+    // `RSP0`, as `ask_privilege_stack` found it now or at the last load of this
+    // processor's tables. Unaligned because the 32-bit TSS layout put a `u32`
+    // before it, which is why `TaskStateSegment` is a byte array in the first
+    // place.
+    unsafe { rsp0.write_unaligned(top) };
+}
+
+/// Where this processor's loaded TSS keeps `RSP0`, found through `STR` and
+/// `SGDT`; `None` where the descriptor `TR` names is not inside the GDT.
+///
+/// # Safety
+///
+/// (ENTRY) A TSS must be loaded, or `TR` be null, whose slot 0 is inside any GDT
+/// and yields an address nothing writes through: the caller writes only
+/// once a TSS is loaded.
+unsafe fn ask_privilege_stack() -> Option<*mut u64> {
     // SAFETY: (ENTRY) reads the task register; no memory is touched.
     let selector = unsafe { cpu::read_task_register() };
     // SAFETY: (ENTRY) writes ten bytes of GDTR into a local.
@@ -374,8 +406,8 @@ pub(crate) unsafe fn set_privilege_stack(top: u64) {
     // A 64-bit TSS descriptor is sixteen bytes, so both halves must be inside
     // the table. A limit that says otherwise means the GDT is not the one this
     // code built, and writing into it would be writing somewhere arbitrary.
-    if index + 16 > usize::from(gdt_limit) + 1 {
-        return;
+    if selector == 0 || index + 16 > usize::from(gdt_limit) + 1 {
+        return None;
     }
 
     let descriptor = (gdt_base as usize + index) as *const u64;
@@ -394,11 +426,27 @@ pub(crate) unsafe fn set_privilege_stack(top: u64) {
     let base =
         ((low >> 16) & 0x00FF_FFFF) | (((low >> 56) & 0xFF) << 24) | ((high & 0xFFFF_FFFF) << 32);
 
-    let rsp0 = (base as usize + TSS_PRIVILEGE_STACK) as *mut u64;
-    // SAFETY: (ENTRY) the TSS this processor has loaded, at the offset long mode puts
-    // `RSP0`. Unaligned because the 32-bit TSS layout put a `u32` before it,
-    // which is why `TaskStateSegment` is a byte array in the first place.
-    unsafe { rsp0.write_unaligned(top) };
+    Some((base as usize + TSS_PRIVILEGE_STACK) as *mut u64)
+}
+
+/// Put in `cpu`'s record what asking this processor for its tables answers
+/// now: its GDT ([`live_table`]) and where its TSS keeps `RSP0`
+/// ([`ask_privilege_stack`]), zero for either it does not have (Q4). Called
+/// by [`load`] after it loads `GDTR` and `TR`, for a record installed by
+/// then, and by `set_cpu_local` as it installs one; nothing else loads
+/// either register once a record is installed, so the record answers as
+/// asking would from then on.
+///
+/// # Safety
+///
+/// (ENTRY) `cpu` must be this processor's own record, and interrupts masked.
+pub(crate) unsafe fn note_tables(cpu: &PerCpu) {
+    let table = live_table().map_or(0, |table| table as u64);
+    // SAFETY: (ENTRY) the task register is null or names the TSS a load put
+    // there; only the address is computed, nothing is written.
+    let rsp0 = unsafe { ask_privilege_stack() }.map_or(0, |rsp0| rsp0 as u64);
+    cpu.gdt.store(table, Ordering::Relaxed);
+    cpu.privilege_stack.store(rsp0, Ordering::Relaxed);
 }
 
 /// This processor's GDT, as the processor reports it, if it is one of the
@@ -407,6 +455,18 @@ fn live_table() -> Option<*mut u64> {
     // SAFETY: (ENTRY) writes ten bytes of GDTR into a local.
     let (base, limit) = unsafe { cpu::read_gdt() };
     (usize::from(limit) + 1 >= GDT_SLOTS * 8).then_some(base as *mut u64)
+}
+
+/// This processor's GDT as its record noted it at the last load
+/// ([`note_tables`]), or as the processor reports it where the record has
+/// none.
+fn noted_table() -> Option<*mut u64> {
+    let noted = crate::smp::this_cpu().map_or(0, |cpu| cpu.gdt.load(Ordering::Relaxed));
+    if noted == 0 {
+        live_table()
+    } else {
+        Some(noted as *mut u64)
+    }
 }
 
 /// The three thread-local descriptors this processor holds: the running
@@ -419,10 +479,10 @@ fn live_table() -> Option<*mut u64> {
 /// between the question and the answer.
 pub(crate) unsafe fn read_tls() -> [u64; TLS_SLOTS] {
     let mut tls = [0; TLS_SLOTS];
-    if let Some(table) = live_table() {
+    if let Some(table) = noted_table() {
         for (slot, value) in tls.iter_mut().enumerate() {
-            // SAFETY: (CONTEXT) slots 12 to 14 are inside the table `live_table`
-            // measured.
+            // SAFETY: (CONTEXT) slots 12 to 14 are inside the table, whose limit
+            // `live_table` measured, now or at its load (`noted_table`).
             let at = unsafe { table.add(TLS_FIRST_SLOT + slot) };
             // SAFETY: (CONTEXT) a slot of this processor's table, which the processor
             // reads and nothing else writes.
@@ -444,7 +504,7 @@ pub(crate) unsafe fn read_tls() -> [u64; TLS_SLOTS] {
 /// `ferrix_linux_abi::user_desc` built: ring 3 data, which no kernel selector
 /// names.
 pub(crate) unsafe fn write_tls(tls: &[u64; TLS_SLOTS]) {
-    if let Some(table) = live_table() {
+    if let Some(table) = noted_table() {
         for (slot, value) in tls.iter().enumerate() {
             // SAFETY: (CONTEXT) as in `read_tls`.
             let at = unsafe { table.add(TLS_FIRST_SLOT + slot) };
@@ -601,6 +661,15 @@ unsafe fn load(tables: &'static mut Tables, ist_tops: [u64; IST_STACKS]) {
     tables
         .tss
         .set_privilege_stack(cpu::read_stack_pointer() & !0xF);
+
+    // A secondary's record is installed before its tables are loaded: what
+    // it noted then was the start-up trampoline's, so it notes these (Q4).
+    // The boot processor has no record yet; `set_cpu_local` notes its tables.
+    if let Some(record) = crate::smp::this_cpu() {
+        // SAFETY: (ENTRY) this processor's own record; bring-up runs with
+        // interrupts masked.
+        unsafe { note_tables(record) };
+    }
 }
 
 /// Split a TSS base address into the two halves of a system descriptor.

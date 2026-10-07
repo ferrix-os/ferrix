@@ -930,12 +930,14 @@ pub(crate) unsafe fn thread_pointer() -> u64 {
 /// (ENTRY) `top` must be the top of the kernel stack of the task this processor is
 /// switching to, and a TSS must be loaded.
 pub(crate) unsafe fn set_entry_stack(top: u64) {
-    if let Some(cpu) = crate::smp::this_cpu() {
+    let cpu = crate::smp::this_cpu();
+    if let Some(cpu) = cpu {
         cpu.kernel_stack
             .store(top, core::sync::atomic::Ordering::Relaxed);
     }
-    // SAFETY: (ENTRY) the caller guarantees the stack and the TSS.
-    unsafe { gdt::set_privilege_stack(top) };
+    // SAFETY: (ENTRY) the caller guarantees the stack and the TSS; `cpu` is
+    // this processor's own record.
+    unsafe { gdt::set_privilege_stack(cpu, top) };
 }
 
 /// Enter ring 3 for the first time, at `entry` on `stack`, with `argument` in
