@@ -130,6 +130,31 @@ pub(crate) const ARM64_LINKS: &[(&str, &str)] = &[
 /// What Debian's Chromium says to `--version`.
 const ARM64_VERSION: &str = "Chromium 154.0.8037.57";
 
+/// [`ARM64_LINKS`] for ARMv7-A's Chromium volume, Debian's armhf: the loader
+/// where the program's `PT_INTERP` names it, `/lib/ld-linux-armhf.so.3`.
+pub(crate) const ARMHF_LINKS: &[(&str, &str)] = &[
+    (
+        "lib/ld-linux-armhf.so.3",
+        "/data/usr/lib/arm-linux-gnueabihf/ld-linux-armhf.so.3",
+    ),
+    (
+        "lib/arm-linux-gnueabihf",
+        "/data/usr/lib/arm-linux-gnueabihf",
+    ),
+    (
+        "usr/lib/arm-linux-gnueabihf",
+        "/data/usr/lib/arm-linux-gnueabihf",
+    ),
+    ("etc/fonts", "/data/etc/fonts"),
+    ("usr/share/fonts", "/data/usr/share/fonts"),
+    ("usr/share/fontconfig", "/data/usr/share/fontconfig"),
+    ("usr/share/alsa", "/data/usr/share/alsa"),
+];
+
+/// What Debian's armhf Chromium says to `--version`: Debian's armhf build is
+/// a version behind its arm64 and amd64 ones (150 against 154, 2026-10-07).
+const ARMHF_VERSION: &str = "Chromium 150.0.7871.181";
+
 /// How long Chromium on AArch64 is given: QEMU emulates every instruction
 /// of it on an x86-64 host, several times slower than x86-64 under KVM.
 const ARM64_TIMEOUT: u64 = 3600;
@@ -157,6 +182,23 @@ pub(crate) fn arm64_volume() -> Result<std::path::PathBuf> {
     if !image.is_file() {
         return Err(Error::new(format!(
             "{} is not there: tools/common/fetch/fetch-chromium-arm64.sh makes it",
+            image.display()
+        )));
+    }
+    Ok(image)
+}
+
+/// Where `tools/common/fetch/fetch-chromium-armhf.sh` writes, unless
+/// `FERRIX_CHROMIUM_ARMHF_VOLUME` names another directory.
+pub(crate) fn armhf_volume() -> Result<std::path::PathBuf> {
+    let directory = match std::env::var_os("FERRIX_CHROMIUM_ARMHF_VOLUME") {
+        Some(directory) => std::path::PathBuf::from(directory),
+        None => crate::paths::volume_directory("chromium-armhf")?,
+    };
+    let image = directory.join("chromium.img");
+    if !image.is_file() {
+        return Err(Error::new(format!(
+            "{} is not there: tools/common/fetch/fetch-chromium-armhf.sh makes it",
             image.display()
         )));
     }
@@ -437,7 +479,7 @@ pub(crate) fn window_command_on(arch: Arch, page: &str, profile: &str, nvidia: b
     } else {
         "--disable-gpu"
     };
-    let (program, agent) = if arch == Arch::AArch64 {
+    let (program, agent) = if matches!(arch, Arch::AArch64 | Arch::Armv7a) {
         ("/data/usr/lib/chromium/chromium", String::new())
     } else {
         (
@@ -473,26 +515,24 @@ pub(crate) fn opener(arch: Arch, profile: &str, nvidia: bool) -> crate::ports::F
 
 /// The links the image carries into the volume `arch`'s browser is on.
 pub(crate) const fn links(arch: Arch) -> &'static [(&'static str, &'static str)] {
-    if matches!(arch, Arch::AArch64) {
-        ARM64_LINKS
-    } else {
-        LINKS
+    match arch {
+        Arch::AArch64 => ARM64_LINKS,
+        Arch::Armv7a => ARMHF_LINKS,
+        Arch::X86_64 => LINKS,
     }
 }
 
 /// The volume `arch`'s browser is on: [`volume`] on x86-64, [`arm64_volume`]
-/// on AArch64.
+/// on AArch64, [`armhf_volume`] on ARMv7-A.
 ///
 /// # Errors
 ///
-/// As those two, and for an architecture with neither.
+/// As those three.
 pub(crate) fn volume_for(arch: Arch) -> Result<std::path::PathBuf> {
     match arch {
         Arch::X86_64 => volume(),
         Arch::AArch64 => arm64_volume(),
-        Arch::Armv7a => Err(Error::new(
-            "--chrome has no ARMv7-A browser: docs/CHROME.md §10 says what one would take",
-        )),
+        Arch::Armv7a => armhf_volume(),
     }
 }
 
@@ -616,12 +656,12 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
 /// any step of the script does not do what it must.
 pub(crate) fn test_chrome(args: &Args) -> Result<()> {
     let arch = match args.arches()?.as_slice() {
-        [Arch::AArch64] => return test_chromium(args),
+        [arch @ (Arch::AArch64 | Arch::Armv7a)] => return test_chromium(*arch, args),
         [Arch::X86_64] => Arch::X86_64,
         _ => {
             return Err(Error::new(
-                "test-chrome runs on x86-64, with Chrome for Testing, or on AArch64, with \
-                 Debian's Chromium: one at a time",
+                "test-chrome runs on x86-64, with Chrome for Testing, or on AArch64 or \
+                 ARMv7-A, with Debian's Chromium: one at a time",
             ));
         }
     };
@@ -663,29 +703,29 @@ pub(crate) fn test_chrome(args: &Args) -> Result<()> {
     judge(arch, VERSION, &lines)
 }
 
-/// [`test_chrome`] on AArch64: Debian's Chromium from its arm64 volume, on
-/// Debian's glibc. ferrousli has no AArch64 build to stand in for it.
+/// [`test_chrome`] on AArch64 or ARMv7-A: Debian's Chromium from its arm64
+/// or armhf volume, on Debian's glibc. ferrousli has no build for either to
+/// stand in for it.
 ///
 /// # Errors
 ///
 /// As [`test_chrome`].
-fn test_chromium(args: &Args) -> Result<()> {
-    let arch = Arch::AArch64;
+fn test_chromium(arch: Arch, args: &Args) -> Result<()> {
     if on_ferrousli(args) {
-        return Err(Error::new(
-            "test-chrome on AArch64 runs on Debian's glibc: ferrousli is built for x86-64",
-        ));
+        return Err(Error::new(format!(
+            "test-chrome on {arch} runs on Debian's glibc: ferrousli is built for x86-64"
+        )));
     }
     let mut args = args.clone();
-    args.data_image = Some(arm64_volume()?);
+    args.data_image = Some(volume_for(arch)?);
     if !args.memory_given {
         args.memory = MEMORY;
     }
     if !args.timeout_given {
         args.timeout = ARM64_TIMEOUT;
     }
-    let shell =
-        zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for AArch64"))?;
+    let shell = zinc::built(arch)?
+        .ok_or_else(|| Error::new(format!("zinc could not be built for {arch}")))?;
     println!("  {arch}: building an image whose shell runs headless Chromium on glibc");
     let script = ARM64_SCRIPT
         .replace("PAGE", PAGE)
@@ -695,7 +735,7 @@ fn test_chromium(args: &Args) -> Result<()> {
     let natives = native::build(arch, args.release)?;
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
-    let links = rustc::files(ARM64_LINKS);
+    let links = rustc::files(links(arch));
     let archive = initramfs::build(None, &natives, Some(&bytes), &links)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
     println!(
@@ -703,7 +743,12 @@ fn test_chromium(args: &Args) -> Result<()> {
         args.memory, args.timeout
     );
     let lines = qemu::watch_then(arch, &image, &kernel, &args, shell::EXITED, |_| Ok(()))?;
-    judge(arch, ARM64_VERSION, &lines)
+    let version = if arch == Arch::Armv7a {
+        ARMHF_VERSION
+    } else {
+        ARM64_VERSION
+    };
+    judge(arch, version, &lines)
 }
 
 /// Whether the transcript is a Chrome that loaded, ran a page's script,
