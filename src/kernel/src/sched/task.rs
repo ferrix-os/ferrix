@@ -80,6 +80,13 @@ pub(crate) struct Task {
     /// dies keeps it until it is reaped, which is after the last switch away
     /// from it.
     address_space: Option<Arc<AddressSpace>>,
+    /// One reference to the core process its thread runs in
+    /// (`thread.process().core_arc()`), taken as the task is made, for the
+    /// native round trip's fast path, which reaches the handle table through
+    /// it without the two `dyn` calls (`docs/OPAQUE-KERNEL.md` §9.11). `Some`
+    /// exactly when `thread` is. Declared before `thread`, so that it is let
+    /// go first and the core is still freed with its personality's process.
+    core: Option<Arc<crate::object::process::Process>>,
     /// The thread of a process whose code this task runs in user mode, or
     /// `None` for a kernel thread. Holding it is what keeps the thread, and
     /// through it the process, alive while the task is: a process does not own
@@ -293,6 +300,9 @@ impl Task {
             None => None,
         };
         let (run_slot, sleep_slot) = slots()?;
+        let core = thread
+            .as_ref()
+            .map(|thread| Arc::clone(thread.process().core_arc()));
         Ok(Task {
             id,
             name,
@@ -306,6 +316,7 @@ impl Task {
             affinity,
             address_space,
             thread,
+            core,
             user,
             weight: AtomicU32::new(weight),
             base_weight: AtomicU32::new(weight),
@@ -360,6 +371,7 @@ impl Task {
             // no user half to translate.
             address_space: None,
             thread: None,
+            core: None,
             user: None,
             weight: AtomicU32::new(weight),
             base_weight: AtomicU32::new(weight),
@@ -808,6 +820,12 @@ impl Task {
     /// The thread this task runs user code for, or `None` for a kernel thread.
     pub(crate) fn thread(&self) -> Option<&Arc<dyn UserThread>> {
         self.thread.as_ref()
+    }
+
+    /// The core process its thread runs in: `thread().process().core()`,
+    /// without the two `dyn` calls; `None` for a kernel thread.
+    pub(crate) fn core_process(&self) -> Option<&crate::object::process::Process> {
+        self.core.as_deref()
     }
 
     /// Where this task's user registers are kept while it is not running, or
