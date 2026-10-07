@@ -218,6 +218,7 @@ fn judge_thread(thread: &Thread, call: usize) -> Option<u32> {
 ///
 /// Which property failed.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    let before = seccomp::filtered_threads();
     let mut report = Report::default();
     probes(&mut report)?;
     privilege()?;
@@ -229,6 +230,13 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     report.walk_many = many;
     report.release = released;
     report.walk_long = longest_steps()?;
+    // Every thread this check filtered, a made, an inherited and an ended
+    // one, has gone: the count the entry's first look reads is back where it
+    // was, so a kernel whose filtered threads have all ended looks for no
+    // thread at a call again.
+    if seccomp::filtered_threads() != before {
+        return Err("the count of filtered threads did not come back once they had gone");
+    }
     Ok(report)
 }
 

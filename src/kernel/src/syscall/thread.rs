@@ -163,6 +163,10 @@ impl Thread {
     /// The first thread of `process`, numbered by its pid, with `signals` and
     /// `seccomp`.
     fn with(process: &Arc<Process>, signals: ThreadSignals, seccomp: seccomp::State) -> Thread {
+        // Counted as it is made filtered, and given back by its drop.
+        if seccomp.is_active() {
+            seccomp::note_filtered();
+        }
         let filtered = AtomicBool::new(seccomp.is_active());
         Thread {
             tid: AtomicU32::new(process.pid()),
@@ -197,11 +201,16 @@ impl Thread {
         let active = held.is_active();
         // Written only on change: the flag is read on every call of a filtered
         // thread, and a store each time would bounce its cache line.
+        // Counted before the flag is raised and given back after it is
+        // lowered, so the count is never zero while a flag is up.
         if active != self.filtered.load(Ordering::Relaxed) {
             if active {
                 seccomp::note_filtered();
             }
             self.filtered.store(active, Ordering::Release);
+            if !active {
+                seccomp::note_unfiltered();
+            }
         }
         answer
     }
@@ -362,6 +371,9 @@ impl Drop for Thread {
     /// Give its thread id back, unless it is its process's first, whose id is
     /// the pid and goes with the process.
     fn drop(&mut self) {
+        if *self.filtered.get_mut() {
+            seccomp::note_unfiltered();
+        }
         let tid = *self.tid.get_mut();
         if tid != 0 && tid != self.process.pid() {
             pids::release_naming(tid, &*self.process);
