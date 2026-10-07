@@ -1715,10 +1715,13 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "Stage 9's case 11 is refused with the filter's
                 errno with the fast path on, and comes back with IN_CALL down whether
                 refused or allowed; ipc-equiv's case 12 answers every
-                refusal as the general path does, with its audit records.";
+                refusal as the general path does, with its audit records; every
+                stage 9 echo's task names, as its cached core process, the one its
+                thread's process holds.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::fast_write_read",
-                "object::process::Process::try_with_handles_masked", "trap::filter_quiet",
+                "object::process::Process::try_with_handles_masked",
+                "sched::task::Task::core_process", "trap::filter_quiet",
                 "trap::set_quiet_syscall_filter");
         }
         requirement <'L.object.170'> theWayOutsAreShared : ItemLowLevel {

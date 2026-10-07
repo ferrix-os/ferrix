@@ -1209,6 +1209,11 @@ pub(crate) static SCHEDULE_WITH_PREEMPTION_HELD: Explanation = Explanation {
          processor it had left, and the next task to decide there stopped for a lock it never \
          held; the message names the file and line that last raised the count. An enable \
          that finds nothing to lower now stops the machine itself, naming the same site.",
+        "The native round trip's fast path holds its locks masked (`sync::try_lock_masked`), \
+         counted on the word but recording no site, so after such a hold the site the \
+         message names can be an earlier lock, already released: when the fast path is on, \
+         look at `object::channel::Endpoint::send_direct` and \
+         `object::process::Process::try_with_handles_masked` too.",
     ],
     see: "src/kernel/src/sync.rs; src/kernel/src/sched/preempt.rs; src/lib/kernel/sync/src/lib.rs \
           PreemptSpinLock",

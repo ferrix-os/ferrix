@@ -4694,4 +4694,38 @@ deferred (the PO, 2026-10-07).
   mask left out, FIRED (`po9-obj-ctl-reply`).
 - Rows restated: L.object.166 (how the halves are held), L.object.167 (the
   new case), L.object.169's unit.
+- Landed as 69cf2754c (consultant OK IF C1 to C3, ledger 416; OK, line 419).
+  A masked hold records no site, so an FX-0503 message after one can name an
+  earlier lock's site, already released (the control's message named
+  `sched/task.rs:392`, a slot lock). FX-0503's catalogue entry says so
+  (line 419's advisory, met in cut 2).
+
+**Cut 2: the lookup through the task's own core process.** The fast path
+reached the handle table by `caller.thread()?.process().core()`, two `dyn`
+calls, each about 3.5 ns more than a direct call in this guest (po9-sched's
+profile), and the loads behind them. `Task` now keeps, beside `thread`, one
+reference to the core process its thread runs in, cloned once in
+`Task::new` from `thread.process().core_arc()` (`Task::core_process`;
+`None` for a kernel thread, as `thread` is); the personality's process
+holds its core in an `Arc` for that (`Host::core_arc`). No `unsafe` is
+involved. The first form cached a raw pointer and rested on two safe
+traits' doc contracts, which the consultant did not accept (ledger 428,
+B1). The field is declared before `thread`, so it is let go first and the
+core is still freed within its personality process's drop. The lookup itself is
+unchanged: `try_with_handles_masked`, then `channel_in` with its clamp, type
+and rights (O1). Check: stage 9's echo start requires each spawned task's
+cached core to be the one `thread().process().core()` names, which is the
+check process's own (L.object.169). Its controls on this form both FIRED
+with that check's message: the cache left empty (`po10-obj2-ctl-core`), and
+the cache holding another process's core, each fast path echo task given
+the previous echo's (`po10-obj2-ctl-other2`). This form, measured by hand
+turn about against `main` 4066f41dd, 8 rounds, load 0.4 to 1.5
+(`~/.local/share/ferrix/logs/po10/c2a-abab.txt`), is preliminary: in the
+high mode 1,268 to 1,278 ns (7 boots) against 1,298 to 1,308 (4 boots),
+about -30 ns; in the low mode 1,028 against 1,078, one boot each; base's
+other four boots read 1,138 to 1,228. No mode had 5 boots a side, so §9.10
+counts no figure from it (ledger 432, C3). The first form (the cached
+pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
+1,058 (6 boots) in the low mode, load 1 to 4
+(`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
