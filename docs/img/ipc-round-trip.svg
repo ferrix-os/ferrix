@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="420" viewBox="0 0 1060 420" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#1f2328">
+<title>Ferrix native channel round trip, domain-call p50</title>
+<rect width="1060" height="420" fill="#ffffff"/>
+<text x="24.0" y="28.0" text-anchor="start" font-size="16" fill="#1f2328" font-weight="bold">The native channel round trip: bench-ipc domain-call p50, ns, log scale</text>
+<text x="24.0" y="46.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">One point to a landing on main, spaced evenly, not by the clock; hollow: measured on a branch, not on main</text>
+<text x="24.0" y="62.0" text-anchor="start" font-size="12" fill="#656d76" font-weight="normal">Every mitigation on, one speculation domain, KVM, one pinned processor on nazuna (Zen 5, no PCID)</text>
+<line x1="70.0" y1="343.0" x2="860.0" y2="343.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="347.0" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">500</text>
+<line x1="70.0" y1="306.4" x2="860.0" y2="306.4" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="310.4" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">1,000</text>
+<line x1="70.0" y1="269.7" x2="860.0" y2="269.7" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="273.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">2,000</text>
+<line x1="70.0" y1="221.3" x2="860.0" y2="221.3" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="225.3" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">5,000</text>
+<line x1="70.0" y1="184.7" x2="860.0" y2="184.7" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="188.7" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">10,000</text>
+<line x1="70.0" y1="148.1" x2="860.0" y2="148.1" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="152.1" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">20,000</text>
+<line x1="70.0" y1="99.6" x2="860.0" y2="99.6" stroke="#d8dee4" stroke-width="1"/>
+<text x="62.0" y="103.6" text-anchor="end" font-size="12" fill="#656d76" font-weight="normal">50,000</text>
+<text x="18.0" y="230.0" text-anchor="middle" font-size="12" fill="#656d76" font-weight="normal">ns</text>
+<line x1="70.0" y1="349.8" x2="860.0" y2="349.8" stroke="#bf3989" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="868.0" y="353.8" text-anchor="start" font-size="12" fill="#bf3989" font-weight="normal">seL4 matched, 440 ns</text>
+<line x1="70.0" y1="270.7" x2="860.0" y2="270.7" stroke="#8c959f" stroke-width="1.5" stroke-dasharray="2 3"/>
+<text x="868.0" y="284.7" text-anchor="start" font-size="12" fill="#8c959f" font-weight="normal">Redox 0.9.0, 1,965 ns</text>
+<line x1="70.0" y1="267.0" x2="860.0" y2="267.0" stroke="#1a7f37" stroke-width="1.5" stroke-dasharray="8 3 2 3"/>
+<text x="868.0" y="263.0" text-anchor="start" font-size="12" fill="#1a7f37" font-weight="normal">Linux pipe ping-pong, 2,105 ns</text>
+<line x1="580.4" y1="84.0" x2="580.4" y2="370.0" stroke="#656d76" stroke-width="1" stroke-dasharray="1 3"/>
+<text x="585.4" y="166.9" text-anchor="start" font-size="11" fill="#656d76" font-weight="normal">from here the faster of the two boot modes</text>
+<polyline points="90.0,115.3 263.1,247.9 320.8,257.0 378.5,259.5 436.2,262.7 493.8,264.4 551.5,283.1 609.2,294.7 666.9,300.2 724.6,303.9 782.3,304.9 840.0,313.6" fill="none" stroke="#0969da" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="90.0" cy="115.3" r="3.5" fill="#0969da"/>
+<text x="90.0" y="105.3" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">37,191</text>
+<text x="90.0" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-01</text>
+<text x="90.0" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">before 1</text>
+<circle cx="147.7" cy="207.4" r="4.0" fill="#ffffff" stroke="#0969da" stroke-width="2"/>
+<text x="147.7" y="197.4" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal" stroke="#ffffff" stroke-width="4" paint-order="stroke">6,508</text>
+<text x="147.7" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-01</text>
+<text x="147.7" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">sync wake</text>
+<circle cx="205.4" cy="247.9" r="4.0" fill="#ffffff" stroke="#0969da" stroke-width="2"/>
+<text x="205.4" y="237.9" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal" stroke="#ffffff" stroke-width="4" paint-order="stroke">3,021</text>
+<text x="205.4" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-01</text>
+<text x="205.4" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">domain</text>
+<circle cx="263.1" cy="247.9" r="3.5" fill="#0969da"/>
+<text x="263.1" y="237.9" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">3,021</text>
+<text x="263.1" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-02</text>
+<text x="263.1" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">step 1</text>
+<circle cx="320.8" cy="257.0" r="3.5" fill="#0969da"/>
+<text x="320.8" y="247.0" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">2,546</text>
+<text x="320.8" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-05</text>
+<text x="320.8" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">exact bench</text>
+<circle cx="378.5" cy="259.5" r="3.5" fill="#0969da"/>
+<text x="378.5" y="249.5" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">2,427</text>
+<text x="378.5" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-06</text>
+<text x="378.5" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">2f</text>
+<circle cx="436.2" cy="262.7" r="3.5" fill="#0969da"/>
+<text x="436.2" y="252.7" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">2,287</text>
+<text x="436.2" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-06</text>
+<text x="436.2" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">3a/3b</text>
+<circle cx="493.8" cy="264.4" r="3.5" fill="#0969da"/>
+<text x="493.8" y="254.4" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">2,212</text>
+<text x="493.8" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-06</text>
+<text x="493.8" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">ERAPS</text>
+<circle cx="551.5" cy="283.1" r="3.5" fill="#0969da"/>
+<text x="551.5" y="273.1" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">1,553</text>
+<text x="551.5" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-06</text>
+<text x="551.5" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">step 4</text>
+<circle cx="609.2" cy="294.7" r="3.5" fill="#0969da"/>
+<text x="609.2" y="284.7" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">1,248</text>
+<text x="609.2" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<text x="609.2" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">low mode</text>
+<circle cx="666.9" cy="300.2" r="3.5" fill="#0969da"/>
+<text x="666.9" y="290.2" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">1,123</text>
+<text x="666.9" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<text x="666.9" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">DS/ES</text>
+<circle cx="724.6" cy="303.9" r="3.5" fill="#0969da"/>
+<text x="724.6" y="293.9" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">1,048</text>
+<text x="724.6" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<text x="724.6" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">hooks</text>
+<circle cx="782.3" cy="304.9" r="3.5" fill="#0969da"/>
+<text x="782.3" y="294.9" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">1,028</text>
+<text x="782.3" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<text x="782.3" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">cut 2</text>
+<circle cx="840.0" cy="313.6" r="3.5" fill="#0969da"/>
+<text x="840.0" y="303.6" text-anchor="middle" font-size="11" fill="#0969da" font-weight="bold" stroke="#ffffff" stroke-width="4" paint-order="stroke">873</text>
+<text x="840.0" y="388.0" text-anchor="middle" font-size="11" fill="#656d76" font-weight="normal">10-07</text>
+<text x="840.0" y="402.0" text-anchor="middle" font-size="10" fill="#656d76" font-weight="normal">FS/GS</text>
+<text x="868.0" y="371.8" text-anchor="start" font-size="11" fill="#bf3989" font-weight="normal">target: seL4's, then &lt; 400</text>
+</svg>

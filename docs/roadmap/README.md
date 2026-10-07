@@ -83,6 +83,8 @@ booting with `nvidia-smi`, are on `main`.
   paragraph each.
 - [Status, estimates and forecast](status.md): the status table, velocity,
   burndown and Gantt charts.
+- [The native channel round trip](ipc-round-trip.md): domain-call p50 against
+  seL4's 440 ns, a chart and a table of every point.
 - [How this roadmap works](about.md): the two rules that order the stages, and
   how sizes are given.
 - [How to edit the roadmap](HOW-TO-EDIT.md).

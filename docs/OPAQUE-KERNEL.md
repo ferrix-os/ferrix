@@ -5116,7 +5116,7 @@ turn about against `main` 4066f41dd, 8 rounds, load 0.4 to 1.5
 (`~/.local/share/ferrix/logs/po10/c2a-abab.txt`), is preliminary: in the
 high mode 1,268 to 1,278 ns (7 boots) against 1,298 to 1,308 (4 boots),
 about -30 ns; in the low mode 1,028 against 1,078, one boot each; base's
-other four boots read 1,138 to 1,228. No mode had 5 boots a side, so §9.10
+other three boots read 1,138 to 1,228. No mode had 5 boots a side, so §9.10
 counts no figure from it (ledger 432, C3). The first form (the cached
 pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
