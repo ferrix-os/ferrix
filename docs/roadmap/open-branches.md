@@ -6,7 +6,7 @@ the product owner's and the certification consultant's; the 2026-10-04
 wind-down's branches are in the sections after this introduction, and
 *2026-10-05: refreshed* and *2026-10-05, evening: refreshed* say what of them
 has landed since, and which branches origin no longer has; *2026-10-05,
-wind-down* is the newest word. It is where the next session starts.
+wind-down* and *2026-10-07* say the rest. It is where the next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -32,6 +32,24 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-07: two landings, and branches opened since
+
+`main` is 4466212c3. Two landings changed what branches hold:
+
+- `po10-findings/c1` landed as f8b44e04c (seven verification-audit rows
+  closed by runs on `main`; see *Verification audit*). The branch is done.
+- 4466212c3 reserved `L.armv7a.4`. The row's code is on `po10-dk1/counter`
+  (`ccedfa872`, user mode reads the virtual counter, and `e26d3bb59`,
+  `bench-ipc --board-log`), unlanded; `po10-dk1/ctl-forge` is its control C4's
+  base and never lands.
+
+Opened since the wind-down and not landed: `po10-drv/live-update` (live driver
+updates, D1, D2 and D4 for the display kind with the consultant's conditions
+C1 to C10, three commits, `docs/DEVMGR.md` §4.1); `po10-install/live-gpt`
+(the installer's I6a, the live medium on a GUID partition table);
+`po10-l13c/l13c` (init's L13c rebased onto `main`, five commits, and the
+branch to resume it from in place of `po6/l13c` below).
 
 ## 2026-10-05, wind-down
 
@@ -674,6 +692,11 @@ still needs its own landing.
 `audit-2`: the second verification audit, WIP, with its mutants untriaged.
 The ledger is `~/.local/share/ferrix/verification-audit/ledger.md` on nazuna;
 read its last section first.
+
+On 2026-10-07 (f8b44e04c, C1) seven rows of the audit table in
+`docs/BACKLOG.md` were closed by runs on `main` 4066f41dd, so `audit-2`'s
+"N4 down to four controls" is done on `main`; the 37 landings that name no
+gate and the untriaged mutants stay open.
 
 | Branch | Last commit | Unlanded | Kind | Tip |
 |---|---|---:|---|---|

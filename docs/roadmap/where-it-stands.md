@@ -1,6 +1,6 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-07, to `main` 7b06cef25.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-07, to `main` 4466212c3.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -73,6 +73,26 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   sleeping on after the timer had fired (10d6dbc60). The second keeps a P1
   flake row in `docs/BACKLOG.md` until 20 TCG boots of `main` under load show
   no hang.
+
+* **Seven verification-audit rows closed by runs on `main`** (2026-10-07,
+  f8b44e04c, the certification's C1, the debt landings leave behind). The
+  audit table in `docs/BACKLOG.md` listed landings whose gates had run only
+  before a rebase, or never. Each owed run was made on `main` 4066f41dd, which
+  holds every one of those landings, and each row names its log: N4's four
+  negative controls each fired on their own message, and `test-xwindow`, the
+  musl and glibc busybox `test-shell`, the musl `test-vfs`, `test-badapple`,
+  `test-apps` and ferrousli's tests passed, as did the Finder's boots in an
+  earlier batch on the same commit. Two sentences the rows named as wrong are
+  corrected with them (stage 10's credit for the ACPI-or-device-tree decision
+  is fa4e88a6's, and the Finder series was reviewed after the fact, by os-ad;
+  the namespaces paragraph now reaches N4 and NP). The audit's other rows stay
+  open: 37 code landings that name no gate, and the untriaged mutants.
+
+* **L.armv7a.4 reserved** (2026-10-07, 4466212c3) for the ARMv7-A user
+  counter: `CNTVCT` readable from PL0, so `bench-ipc` can take the native
+  channel round trip on the STM32MP157D-DK1. Only the id is on `main`
+  (`tools/common/data/requirement-reservations.json`); the code and the
+  `bench-ipc --board-log` records are on `po10-dk1/counter`, not landed.
 
 * **Steam signs in and shows its store** on the `--everything` desktop,
   its 64-bit side on ferrousli (2026-09-30, `docs/STEAM.md` §5), and

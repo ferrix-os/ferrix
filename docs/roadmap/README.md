@@ -71,8 +71,8 @@ booting with `nvidia-smi`, are on `main`.
 
 ## Forecast
 
-- About **647 sized points** were left on 2026-10-05, the last count, at
-  the forecast rate of 20 a day: they end on 2026-11-07 (2026-10-17 at 56 a
+- About **583 sized points** were left on 2026-10-07, the last count, at
+  the forecast rate of 20 a day: they end on 2026-11-06 (2026-10-18 at 56 a
   day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
   recount and what moved it are in [Status](status.md).
 - Unsized work (self-hosting, bare metal, most of Steam) is not in any date.

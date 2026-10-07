@@ -15,7 +15,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "img"
 
-TODAY = date(2026, 10, 5)
+TODAY = date(2026, 10, 7)
 
 # Points landed per day (docs/BACKLOG.md, *Velocity*). 09-18 to 09-23 were
 # sized afterwards from `git log`; 09-23 is what is left of that backfill.
@@ -52,7 +52,7 @@ AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 1
               date(2026, 10, 3): 115, date(2026, 10, 4): 55,
               date(2026, 10, 5): 29}
 
-# The status table's sized, unfinished rows after 2026-10-05's landings.
+# The status table's sized, unfinished rows after 2026-10-07's landings.
 # The state says why a row is not moving: "unlanded" is built and waits on a
 # landing (controls, `check`, a batch), "idle" has had no session on it since
 # 2026-09-26 or longer, "added" came into scope after the 09-26 baseline.
@@ -62,7 +62,8 @@ REMAINING = [
     ("GC400, the rest", 21, "idle"),
     ("Stage 13, the controllers' rest", 30, "unlanded"),
     ("Stage 15, auth's rest", 6, ""),
-    # L13b landed 2026-10-05; L13c is built (po6/l13c) and waits to land.
+    # L13b landed 2026-10-05; L13c is built (po10-l13c/l13c, rebased onto
+    # main 2026-10-07) and waits to land.
     ("Stage 15, init L13c", 3, "added, unlanded"),
     ("Chrome on the DK1", 50, "idle"),
     ("Stage 14, real-time", 40, "idle"),
@@ -75,13 +76,15 @@ REMAINING = [
     # and 130-210. Most milestones are guesses.
     ("Stage 20, self-hosting", 45, "added"),
     ("Pixel 7, the USB driver's rest", 37, "added"),
-    ("Certification findings, in-repository work", 165, "added"),
+    # C1's five points spent 2026-10-07 (f8b44e04c, seven audit rows closed).
+    ("Certification findings, in-repository work", 160, "added"),
     # Added 2026-10-05 at the customer's question; a first guess (D1-D5).
+    # Since 2026-10-07 on branch po10-drv/live-update, nothing landed.
     ("Live driver update", 26, "added"),
-    # OPAQUE-KERNEL.md §9.5/§9.7, what is left at 2026-10-05: 2f (gated),
-    # step 3 without PCIDs, step 4's 39-59, step 5; range 60-90. The exact
-    # bench-ipc (1) landed 2026-10-05, so 70 became 69.
-    ("IPC round trip to seL4's figure", 69, "added"),
+    # OPAQUE-KERNEL.md §9.5/§9.7: 69 at 2026-10-05; 2f, step 3 without PCIDs
+    # and step 4's fast path (59) landed 2026-10-06, so 10 are left, step 5's
+    # squeeze by the profile (range 60-90 for the whole row).
+    ("IPC round trip to seL4's figure", 10, "added"),
 ]
 # The queue's order (customer, 2026-10-04): built rows first, those that only
 # need landing ("unlanded"), then every other sized row, smallest points first
@@ -124,6 +127,8 @@ DONE = [
     ("btrfs in the certified item", D(2026, 10, 2), D(2026, 10, 2)),
     ("NVIDIA N0 and N1 (60)", D(2026, 10, 2), D(2026, 10, 3)),
     ("NVIDIA N2 to N4 and the TV (64)", D(2026, 10, 3), D(2026, 10, 5)),
+    ("Round trip: 2f, step 3, step 4 (59)", D(2026, 10, 5), D(2026, 10, 7)),
+    ("Certification C1: audit rows (5)", D(2026, 10, 7), D(2026, 10, 7)),
     ("Authentication P1, P2 (desktop as a user)", D(2026, 9, 27), D(2026, 10, 4)),
     ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
     ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
@@ -146,8 +151,10 @@ ACTIVE = [
      ["Stage 22, bubblewrap's rest", "Stage 22, the rest (guess)"]),
     ("Init L13c (L13b landed)", D(2026, 10, 4), ["Stage 15, init L13c"]),
     ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest"]),
-    ("IPC round trip (steps 1, 2a-2e landed)", D(2026, 10, 1),
+    ("IPC round trip (steps 1 to 4 landed)", D(2026, 10, 1),
      ["IPC round trip to seL4's figure"]),
+    ("Live driver update (on a branch)", D(2026, 10, 7), ["Live driver update"]),
+    ("Installer, the rest (I6a on a branch)", D(2026, 9, 28), None),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
