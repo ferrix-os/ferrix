@@ -1152,14 +1152,16 @@ struct JobCase {
 
 /// What a job case's caller saw after its last trip, with interrupts masked
 /// on the processor both tasks run on: the two tasks' words, its own base
-/// weight and weight, the echo's base, and each job's load and contribution.
+/// weight and weight, the weights its job gives it with the echo counted
+/// and as the loads stand, and each job's load and contribution.
 #[derive(Clone, Copy, Debug, Default)]
 struct JobSeen {
     caller: (u32, u32),
     echo: (u32, u32),
     base: u32,
     weight: u32,
-    echo_base: u32,
+    handed: u32,
+    charged: u32,
     loads: [(u32, Option<u32>, i64, i64); 3],
 }
 
@@ -1202,12 +1204,23 @@ fn job_trips_in_the_process(_argument: usize) {
                 super::quota::contributed(job),
             );
         }
+        let (caller, echo) = (me.group_word(), case.echo.group_word());
+        let (base, echo_base) = (me.base_weight(), case.echo.base_weight());
+        // What the hand-over gave: the echo counted in the caller's job,
+        // whether it still is or not. What a charge since gives: the share
+        // as the loads stand.
+        let echo_counted = if echo.0 == caller.0 { echo.1 } else { 0 };
         let seen = JobSeen {
-            caller: me.group_word(),
-            echo: case.echo.group_word(),
-            base: me.base_weight(),
+            caller,
+            echo,
+            base,
             weight: me.entity_state().weight,
-            echo_base: case.echo.base_weight(),
+            handed: super::quota::effective_with(
+                caller.0,
+                base,
+                i64::from(echo_base) - i64::from(echo_counted),
+            ),
+            charged: super::quota::effective(caller.0, base),
             loads,
         };
         <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
@@ -1369,17 +1382,8 @@ fn check_the_direct_switch_weights() -> Result<(), &'static str> {
     let nice_0 = ferrix_sched::NICE_0_WEIGHT;
     let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
     let seen = job_case(JobShape::One, nice_0, heavier)?;
-    let (job, counted) = seen.caller;
-    let echo_counted = if seen.echo.0 == job { seen.echo.1 } else { 0 };
-    // What the hand-over gave: the echo counted, whether it is now or not.
-    let handed = super::quota::effective_with(
-        job,
-        seen.base,
-        i64::from(seen.echo_base) - i64::from(echo_counted),
-    );
-    // What a charge since gives: the share as the loads stand.
-    let charged = super::quota::effective(job, seen.base);
-    if counted != seen.base || (seen.weight != handed && seen.weight != charged) {
+    let (handed, charged) = (seen.handed, seen.charged);
+    if seen.caller.1 != seen.base || (seen.weight != handed && seen.weight != charged) {
         crate::console::println!(
             "  fastpath job weights: runs at {}, handed {handed}, charged {charged}; seen {seen:?}",
             seen.weight
