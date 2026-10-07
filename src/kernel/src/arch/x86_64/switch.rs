@@ -508,6 +508,25 @@ unsafe fn ferrix_fpu_restore(area: *const FpuArea, components: u64) {
 /// task is switched out blocked rather than runnable.
 pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.selectors = cpu::read_data_selectors();
+    if cpu::FSGSBASE_ON.load(Ordering::Relaxed) {
+        // ABLATION (po9-sel, never lands): with FSGSBASE a program writes
+        // its own bases, so the save reads them back, as Linux's save_fsgs.
+        let (fs_base, gs_base): (u64, u64);
+        // SAFETY: ablation: interrupts masked by the switch; the swapgs pair
+        // leaves the kernel's GS base in place.
+        unsafe {
+            core::arch::asm!(
+                "rdfsbase {0}",
+                "swapgs",
+                "rdgsbase {1}",
+                "swapgs",
+                out(reg) fs_base,
+                out(reg) gs_base,
+                options(nostack, preserves_flags),
+            );
+        }
+        state.set_bases(fs_base, gs_base);
+    }
     // SAFETY: (CONTEXT) the caller switches tasks with interrupts masked, so these are
     // this processor's slots and the outgoing thread's.
     state.tls = unsafe { gdt::read_tls() };
