@@ -1322,7 +1322,7 @@ package FerrixItemRequirements {
                 the kernel for the decisions it makes alone.";
             attribute :>> criterion = "At the end of a boot with checks, the
                 record holds each of the 12 events the boot's checks provoke, and
-                DMA_FAULT where an IOMMU translates, with the outcome of its class
+                DMA_FAULT where a unit reported a DMA fault, with the outcome of its class
                 and its subject; none of the OOM kill, the quiesce and the fault
                 names a process; the boot is recorded as brought up.";
             attribute :>> parent = "O.AUDIT";

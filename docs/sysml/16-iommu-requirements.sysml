@@ -556,12 +556,14 @@ package FerrixIommuRequirements {
                 audit or through a domain, shall be written to the audit record as
                 one DMA_FAULT, refused, naming the device's stream and the page it
                 addressed, with the kernel as its subject.";
-            attribute :>> criterion = "On a boot where a unit translates, the audit
-                record holds a DMA_FAULT from the out-of-domain probe, refused, with
-                pid 0; with the record's event swapped at recorded, or its subject
-                made a process, the end-of-boot audit check fails naming it.";
+            attribute :>> criterion = "On a boot that read a DMA fault from a unit
+                -- the out-of-domain probe's, wherever its entropy request completed
+                -- the audit record holds a DMA_FAULT, refused, with pid 0, and a
+                boot that read none owes none; with the record's event swapped at
+                recorded, or its subject made a process, the end-of-boot audit check
+                fails naming it.";
             attribute :>> parent = "H.DMA.2";
-            attribute :>> unit = ("iommu::recorded", "audit::record",
+            attribute :>> unit = ("iommu::recorded", "iommu::counted", "audit::record",
                 "audit::Store::record_at");
         }
         requirement <'L.iommu.45'> requesterIdsFollowTheBridges : ItemLowLevel {
