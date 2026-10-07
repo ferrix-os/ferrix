@@ -551,6 +551,7 @@ extern "C" fn secondary_start(record: u32) -> ! {
     // `SCTLR` bits; the table it points them at is code every core shares.
     unsafe { super::trap::init() };
     gicv2::init_this_cpu();
+    cpu::allow_user_counter();
     note_coherency();
     crate::smp::install_secondary_record(u64::from(record));
     // The boot core's side-channel defences, before this one can run a

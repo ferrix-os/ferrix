@@ -164,11 +164,25 @@ pub(crate) fn device_barrier() {
     unsafe { asm!("dsb sy", options(nostack, preserves_flags)) }
 }
 
-/// The processor's free-running counter, when ring 3 may read it: not yet
-/// here. Whether EL0 may read the virtual counter is the kernel's to set, and
-/// until it does a read would fault, so there is none.
+/// The processor's free-running counter: the virtual counter, `CNTVCT`,
+/// the one the kernel's clock counts. The kernel lets PL0 read it on every
+/// processor (`CNTKCTL.PL0VCTEN`, as Linux sets it on ARM). The `isb` before
+/// it for AArch64's reason: no out-of-order core (Cortex-A15, A17) may take
+/// the read before the instructions ahead of it retire.
 pub(crate) fn counter() -> Option<u64> {
-    None
+    let (low, high): (u32, u32);
+    // SAFETY: a barrier and a 64-bit read of a coprocessor register the
+    // kernel lets PL0 read; no memory or other register changes.
+    unsafe {
+        asm!(
+            "isb",
+            "mrrc p15, 1, {low}, {high}, c14",
+            low = out(reg) low,
+            high = out(reg) high,
+            options(nostack, preserves_flags),
+        );
+    }
+    Some(u64::from(high) << 32 | u64::from(low))
 }
 
 /// `exit_group(status)`.

@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1615,
+  "max_total_lines": 1619,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -28,7 +28,11 @@
     "(po7-ipcM, docs/OPAQUE-KERNEL.md §9.10, step 5) for x86-64 cpu.rs's",
     "`vzeroall` and `ldmxcsr`, the vector reset of a task woken from a blocking",
     "native call: the kernel is built without SSE, so neither has a Rust",
-    "spelling it may use, and the XRSTOR they replace costs 70 ns a switch."
+    "spelling it may use, and the XRSTOR they replace costs 70 ns a switch.",
+    "1619 since 2026-10-07 (po10-dk1, L.armv7a.4) for the user-readable",
+    "counter: ARMv7-A cpu.rs's CNTKCTL read and write (+2), and the runtime's",
+    "isb before AArch64's CNTVCT_EL0 read (+1) and ARMv7-A's isb and mrrc",
+    "(+2, inside its entry's 20); the tree went from 1614 to 1619."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -97,8 +101,8 @@
     },
     {
       "file": "src/kernel/src/arch/armv7a/cpu.rs",
-      "max_lines": 103,
-      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44)."
+      "max_lines": 105,
+      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44); 105 for CNTKCTL's read and write (`allow_user_counter`, L.armv7a.4), what user mode may read of the generic timer, a coprocessor 15 register like the rest."
     },
     {
       "file": "src/kernel/src/arch/armv7a/mmio.rs",
@@ -162,13 +166,13 @@
     },
     {
       "file": "src/user/system/native/rt/src/arch/aarch64.rs",
-      "max_lines": 20,
-      "reason": "A native program's side of the kernel's entry, and its first instructions. `_start`: the kernel enters a process with `eret`, not a call, so the frame pointer and link register hold no caller's frame and nothing promises the stack's alignment; they are zeroed and the stack aligned before the first Rust function is called, with the bootstrap handle left in X0. The trap: `svc #0` with the number in X8 and arguments in X0-X5 is `system_call`'s contract in src/kernel/src/arch/aarch64/trap.rs, and an instruction plus a register assignment is what `asm!` is -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract. Nothing a runtime adds later (threads, TLS, allocation) belongs here."
+      "max_lines": 21,
+      "reason": "A native program's side of the kernel's entry, and its first instructions. `_start`: the kernel enters a process with `eret`, not a call, so the frame pointer and link register hold no caller's frame and nothing promises the stack's alignment; they are zeroed and the stack aligned before the first Rust function is called, with the bootstrap handle left in X0. The trap: `svc #0` with the number in X8 and arguments in X0-X5 is `system_call`'s contract in src/kernel/src/arch/aarch64/trap.rs, and an instruction plus a register assignment is what `asm!` is -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract. Nothing a runtime adds later (threads, TLS, allocation) belongs here. 21 for the counter's `isb` before `mrs cntvct_el0` (2026-10-07): a barrier and a system register, neither with a Rust spelling, so that a stamp around a system call is not taken before the call's instructions retire."
     },
     {
       "file": "src/user/system/native/rt/src/arch/armv7a.rs",
       "max_lines": 20,
-      "reason": "AArch64's argument in ARM state. `_start`: the kernel enters a process with `rfeia`, so R11 and LR hold no caller's frame and the stack may not be the multiple of 8 the AAPCS requires at a call; they are zeroed and the stack aligned before `ferrix_rt_start`, with the bootstrap handle left in R0. The trap: `svc #0` with the number in R7 and arguments in R0-R5, the EABI contract `system_call` in src/kernel/src/arch/armv7a/trap.rs reads -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract."
+      "reason": "AArch64's argument in ARM state. `_start`: the kernel enters a process with `rfeia`, so R11 and LR hold no caller's frame and the stack may not be the multiple of 8 the AAPCS requires at a call; they are zeroed and the stack aligned before `ferrix_rt_start`, with the bootstrap handle left in R0. The trap: `svc #0` with the number in R7 and arguments in R0-R5, the EABI contract `system_call` in src/kernel/src/arch/armv7a/trap.rs reads -- the instruction and a line per register operand, for a call and for `exit_group`, because the register assignment is the contract. And the counter, `isb` and `mrrc p15, 1, ..., c14` (CNTVCT, which the kernel lets PL0 read since 2026-10-07): a coprocessor read has no Rust spelling."
     },
     {
       "file": "src/user/system/native/rt/src/arch/x86_64.rs",

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "f69aca353599e215167c14568479e0a04e0d59beec90f1cb6189133378d11c30",
+  "digest": "c88de97a3ee3d6b9b07b2a244567fa9b8dfb134d8e15b21683b13bb21b1e8238",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -88,7 +88,7 @@
     },
     {
       "path": "docs/sysml/21-armv7a-requirements.sysml",
-      "synopsis": "Ferrix — SysML v2 model, part 21: the low-level requirements of arch/armv7a, as far as they are written.\n\nARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own beyond these: what the system call path does for the filter the core asks about every call (seccomp, `docs/SECCOMP.md` §3.3), and what its switch barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9). The rest of the architecture waits in the baseline with the other architectures' unwritten rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of part 19 hold."
+      "synopsis": "Ferrix — SysML v2 model, part 21: the low-level requirements of arch/armv7a, as far as they are written.\n\nARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own beyond these: what the system call path does for the filter the core asks about every call (seccomp, `docs/SECCOMP.md` §3.3), what its switch barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9), and what of the generic timer user mode may read (`CNTKCTL`). The rest of the architecture waits in the baseline with the other architectures' unwritten rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of part 19 hold."
     },
     {
       "path": "docs/sysml/22-smp-requirements.sysml",
@@ -108,8 +108,8 @@
     }
   ],
   "summary": {
-    "packages": 135,
-    "elements": 6533,
+    "packages": 136,
+    "elements": 6539,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -63621,7 +63621,7 @@
       "kind": "package",
       "source": {
         "file": "docs/sysml/21-armv7a-requirements.sysml",
-        "line": 13
+        "line": 14
       },
       "children": [
         {
@@ -63630,7 +63630,7 @@
           "kind": "package",
           "source": {
             "file": "docs/sysml/21-armv7a-requirements.sysml",
-            "line": 16
+            "line": 17
           },
           "children": [
             {
@@ -63641,7 +63641,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/21-armv7a-requirements.sysml",
-                "line": 17
+                "line": 18
               },
               "children": [
                 {
@@ -63652,7 +63652,7 @@
                   "value": "\"system_call shall ask the registered filter about a call before set_tls, sigreturn and rt_sigreturn are answered and before the dispatcher is, with r7 as the number, the saved pc as the instruction after the svc, ARM or Thumb, and ARMv7-A's token, and shall apply the filter's answer as the dispatcher's; with nothing registered, set_tls and the signal returns shall be answered as they were before the filter existed.\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 24
+                    "line": 25
                   }
                 },
                 {
@@ -63663,7 +63663,7 @@
                   "value": "\"A test-only filter is shown set_tls, sigreturn and rt_sigreturn once each, before their answers, with the number, the instruction pointer and the first argument the frame held, and its errno comes back in r0 (the `seccomp` line).\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 28
+                    "line": 29
                   }
                 },
                 {
@@ -63674,7 +63674,7 @@
                   "value": "\"H.TRAP.16\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 29
+                    "line": 30
                   }
                 },
                 {
@@ -63685,7 +63685,7 @@
                   "value": "\"arch::armv7a::trap::system_call\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 30
+                    "line": 31
                   }
                 }
               ]
@@ -63698,7 +63698,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/21-armv7a-requirements.sysml",
-                "line": 32
+                "line": 33
               },
               "children": [
                 {
@@ -63709,7 +63709,7 @@
                   "value": "\"audit_arch shall give the token of the entry a call was made through, AUDIT_ARCH_ARM for the svc, and syscall_rollback_value shall give r0 the call's first argument so that a call that did not run reads as it did at the call, r7 still holding the number.\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 37
+                    "line": 38
                   }
                 },
                 {
@@ -63720,7 +63720,7 @@
                   "value": "\"The value for first argument 0x1111 is 0x1111 and the token read back from a driven svc is ARMv7-A's, 0x40000028 (the `seccomp` line).\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 40
+                    "line": 41
                   }
                 },
                 {
@@ -63731,7 +63731,7 @@
                   "value": "\"H.TRAP.16\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 41
+                    "line": 42
                   }
                 },
                 {
@@ -63742,7 +63742,7 @@
                   "value": "(\"arch::armv7a::audit_arch\", \"arch::armv7a::syscall_rollback_value\")",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 43
+                    "line": 44
                   }
                 }
               ]
@@ -63755,7 +63755,7 @@
           "kind": "package",
           "source": {
             "file": "docs/sysml/21-armv7a-requirements.sysml",
-            "line": 47
+            "line": 48
           },
           "children": [
             {
@@ -63766,7 +63766,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/21-armv7a-requirements.sysml",
-                "line": 48
+                "line": 49
               },
               "children": [
                 {
@@ -63777,7 +63777,7 @@
                   "value": "\"switch_barrier_in_domain shall issue nothing: this architecture's switch barrier is BPIALL, or ICIALLU with ACTLR.IBE, the predictor invalidation a speculation domain leaves out, and no defence of the kernel is on the switch path.\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 52
+                    "line": 53
                   }
                 },
                 {
@@ -63788,7 +63788,7 @@
                   "value": "\"Switches between two members of one marked job decide no barrier and switches out of the domain decide one each way (the `domain` line on an ARMv7-A boot).\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 55
+                    "line": 56
                   }
                 },
                 {
@@ -63799,7 +63799,7 @@
                   "value": "\"H.TRAP.17\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 56
+                    "line": 57
                   }
                 },
                 {
@@ -63810,7 +63810,75 @@
                   "value": "\"arch::armv7a::speculation::switch_barrier_in_domain\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
-                    "line": 57
+                    "line": 58
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Timer",
+          "qualifiedName": "FerrixArmv7aRequirements::Timer",
+          "kind": "package",
+          "source": {
+            "file": "docs/sysml/21-armv7a-requirements.sysml",
+            "line": 62
+          },
+          "children": [
+            {
+              "name": "programsReadTheCounter",
+              "qualifiedName": "FerrixArmv7aRequirements::Timer::programsReadTheCounter",
+              "kind": "requirement",
+              "shortName": "L.armv7a.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/21-armv7a-requirements.sysml",
+                "line": 63
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixArmv7aRequirements::Timer::programsReadTheCounter",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"allow_user_counter shall set CNTKCTL.PL0VCTEN and clear PL0PCTEN, PL0VTEN and PL0PTEN on every processor the kernel brings online.\"",
+                  "source": {
+                    "file": "docs/sysml/21-armv7a-requirements.sysml",
+                    "line": 66
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixArmv7aRequirements::Timer::programsReadTheCounter",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"After every processor is online, each reads its own CNTKCTL and finds PL0VCTEN set and the three others clear, and the virtual counter advances (the `usercnt` line on an ARMv7-A boot, N of N processors); the block driver times its requests with CNTVCT read in user mode (the `seam` line's driver share).\"",
+                  "source": {
+                    "file": "docs/sysml/21-armv7a-requirements.sysml",
+                    "line": 71
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixArmv7aRequirements::Timer::programsReadTheCounter",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.2\"",
+                  "source": {
+                    "file": "docs/sysml/21-armv7a-requirements.sysml",
+                    "line": 72
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixArmv7aRequirements::Timer::programsReadTheCounter",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"arch::armv7a::cpu::allow_user_counter\", \"arch::armv7a::cpu::read_cntkctl\")",
+                  "source": {
+                    "file": "docs/sysml/21-armv7a-requirements.sysml",
+                    "line": 74
                   }
                 }
               ]
@@ -77353,7 +77421,7 @@
       ],
       "origin": "FerrixArmv7aRequirements",
       "file": "docs/sysml/21-armv7a-requirements.sysml",
-      "line": 14
+      "line": 15
     },
     {
       "kind": "import",

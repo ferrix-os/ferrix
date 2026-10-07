@@ -354,6 +354,26 @@ pub(crate) use armv7a::ring3_reads_counter;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::ring3_reads_counter;
 
+// What user mode may read of the timer, checked on every processor once all
+// are online: ARMv7-A's `CNTKCTL` (L.armv7a.4). AArch64's check is a
+// docs/BACKLOG.md row; x86-64's counter is the TSC, which nothing closes.
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::check_user_counter;
+
+/// What user mode may read of the timer, checked: nothing yet here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "arm"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "ARMv7-A's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_user_counter() -> Result<(), &'static str> {
+    Ok(())
+}
+
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so
 // whatever a program drew has to be written back from the caches to the point
