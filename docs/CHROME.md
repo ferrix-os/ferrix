@@ -1140,3 +1140,70 @@ seconds a page. The GC400 work under way is GLES2, below what Chrome's GPU
 path wants, so it does not help here soon. Memory is the risk: 512 MiB may be
 too little whatever is built.
 
+### Where it stands, 2026-10-07
+
+Branch `po10-chrome-a/dk1` (po10-chrome-a), not on `main` yet.
+
+**Chromium runs on ARMv7-A under QEMU, in 512 MiB.** Debian 13's armhf
+Chromium 150.0.7871.181 (Debian's armhf build is a version behind its amd64
+and arm64 ones) is on a volume `tools/common/fetch/fetch-chromium-armhf.sh`
+makes the way the arm64 one is made: 124 packages pinned by SHA-256, a
+326 MiB tree, a 390 MiB image. `cargo xtask test-chrome --arch armv7a`
+attaches it read-only, and Chromium printed its version, ran a page's
+script and wrote a screenshot at `--smp 2` with 2048 MiB and with 512 MiB
+(405 MiB free at the end of boot in 512), in about a minute of guest time,
+multi-process, no `--single-process` needed for that page. Three things
+stood in the way, each fixed on the branch:
+
+* ARM EABI's own `send` (289) and `recv` (291), which glibc's armhf `send`
+  and `recv` make, were not in the table: Chromium's network service logged
+  `recv` `ENOSYS` 123,000 times and crashed every 16 seconds. They are
+  `sendto` and `recvfrom` with no address now, as on Linux.
+* `cacheflush` (`0x0f0002`), which V8's JIT makes after writing code, was
+  `ENOSYS`. It now cleans each present page of the range and empties the
+  instruction caches. QEMU cannot show whether that is needed or enough;
+  the board can (the DK1 run below).
+* A read-only btrfs could not be mapped (`mmap` was `ENODEV`), so nothing
+  ran from one; it can now. The volume is attached read-only because the
+  page cache may give back a read-only btrfs's clean pages under pressure
+  (`po10-cgctl/cgctl`'s reclaim) and a writable one's not yet.
+
+**The volume cannot live in RAM on the board.** The DK1 has 479 MiB that
+Ferrix sees (OP-TEE and the firmware keep the rest), 469 MiB managed by
+the frame allocator (its boot log of 2026-09-12); QEMU's 512 MiB machine leaves 405 MiB free at the end of boot,
+so the board should leave about 395. An initramfs costs twice its size:
+the loader's copy of the archive is kept for the life of the system
+(`fs::initramfs_archive`, for the root disk to install from) and the root
+tmpfs holds a second copy of every file. The tree is 326 MiB and Chromium's
+binary alone is 204 MB, so even that binary in the initramfs (408 MiB of
+RAM) leaves nothing for the browser. The volume has to come off the card at
+run time (po10-chrome-b's SDMMC driver and a btrfs partition, read-only for
+the reason above).
+
+**How much is enough is close to what the board has.** At 384 MiB under
+QEMU (278 MiB free at the end of boot) the same run fails: two of
+Chromium's processes are ended for want of memory for a signal frame. With
+`po10-cgctl/cgctl`'s reclaim merged in (an experiment on branch
+`po10-chrome-a/exp-cgctl`, not for landing) the kernel itself then
+panicked on a 4096-byte heap allocation: user pages had taken the last
+frames, which is what the designed frame reserve is for; and
+`--single-process` crashed into crashpad there, cause not yet found.
+Somewhere between 278 and 405 MiB free is the floor for this page, and the
+board leaves about 395, so eviction and the reserve are what will decide
+it.
+
+**Asked of the board** (the product owner schedules it): `jitflush`, a
+static armhf program that writes `mov r0,#k; bx lr` into a page mapped
+read-write-execute, calls `cacheflush`, and calls the code, 200,000 times,
+counting wrong answers; run with and without the flush (`jitflush flush`,
+`jitflush noflush`). With the flush it must find none; without it a
+Cortex-A7 is expected to find some, and if it does not, the run does not
+tell the two apart and says so. Then Chromium itself, once the card root
+is there.
+
+Left: the eviction gate (a file larger than RAM read twice on a read-only
+volume in 512 MiB, its md5 the host's and the reclaim counters moved) and a
+reserve of frames for the kernel, both designed (consultant's verdict
+2026-10-07, ledger lines 492-494) and waiting for `po10-cgctl/cgctl` to
+land; Chromium in a window on the board's compositor; and what the board
+finds.
