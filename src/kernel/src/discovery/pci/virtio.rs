@@ -308,6 +308,9 @@ fn ring_doorbell(notify: &Block, doorbell: u64) {
 /// Interrupts the check's vector has delivered.
 static DELIVERED: AtomicU64 = AtomicU64::new(0);
 
+/// Diagnostic: the processor the vector was allocated on.
+static DIAG_ALLOC_CPU: AtomicU64 = AtomicU64::new(99);
+
 /// The check's interrupt handler: count the delivery, and nothing else.
 fn on_entropy(_number: u32) {
     let _ = DELIVERED.fetch_add(1, Ordering::SeqCst);
@@ -340,6 +343,10 @@ fn vector(address: Address) -> Result<Msi, &'static str> {
     crate::fallible::try_reserve(&mut VECTORS.lock(), 1)
         .map_err(|_| "no memory to record the check's MSI vector")?;
     let msi = arch::msi_allocate(requester)?;
+    DIAG_ALLOC_CPU.store(
+        crate::smp::this_cpu().map_or(99, |cpu| cpu.logical) as u64,
+        Ordering::SeqCst,
+    );
     irq::register(msi.number, on_entropy).map_err(|_| "the MSI vector already has a handler")?;
     let _ = crate::fallible::push_within(&mut VECTORS.lock(), (requester, msi));
     Ok(msi)
@@ -655,17 +662,54 @@ fn drive(
         ));
     }
     let before = DELIVERED.load(Ordering::SeqCst);
+    let diag_cpu = || crate::smp::this_cpu().map_or(99, |cpu| cpu.logical);
+    let ring_cpu = diag_cpu();
+    let rung_at = timer::now_nanos();
     ring_doorbell(notify, doorbell);
 
     let deadline = timer::now_nanos().saturating_add(DEADLINE_NANOS);
+    let mut used_seen_at = 0_u64;
+    let mut last_look = rung_at;
+    let mut longest_gap = 0_u64;
     let completion = loop {
         let arrived = DELIVERED.load(Ordering::SeqCst) != before;
+        if used_seen_at == 0 && queue.has_used() {
+            used_seen_at = timer::now_nanos();
+        }
         if (!by_interrupt || arrived)
             && let Some(completion) = queue.take_used()?
         {
             break completion;
         }
+        let now = timer::now_nanos();
+        longest_gap = longest_gap.max(now.saturating_sub(last_look));
+        last_look = now;
         if timer::now_nanos() > deadline {
+            let expired_cpu = diag_cpu();
+            let irqs_on = arch::interrupts_enabled();
+            let held = crate::sched::preemption_held(expired_cpu);
+            let at_deadline = DELIVERED.load(Ordering::SeqCst);
+            let extra = timer::now_nanos().saturating_add(5_000_000_000);
+            let mut late = None;
+            while timer::now_nanos() < extra {
+                if DELIVERED.load(Ordering::SeqCst) != before {
+                    late = Some(timer::now_nanos());
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+            crate::println!(
+                "  entdiag  skip: alloc cpu {}, ring cpu {ring_cpu}, expired cpu {expired_cpu}, \
+                 irqs on {irqs_on}, preempt held {held}, delivered before {before} at deadline \
+                 {at_deadline}; used seen {} ms after the doorbell; longest gap between looks {} \
+                 us; late arrival {} ms after the doorbell; irq delivered {} unclaimed {}",
+                DIAG_ALLOC_CPU.load(Ordering::SeqCst),
+                if used_seen_at == 0 { 0 } else { (used_seen_at - rung_at) / 1_000_000 },
+                longest_gap / 1_000,
+                late.map_or(-1, |at| ((at - rung_at) / 1_000_000) as i64),
+                irq::delivered(),
+                irq::unclaimed(),
+            );
             return Ok(Entropy::Skipped(if by_interrupt && queue.has_used() {
                 "the device completed the request but its MSI-X interrupt never arrived"
             } else {
@@ -674,6 +718,15 @@ fn drive(
         }
         core::hint::spin_loop();
     };
+    crate::println!(
+        "  entdiag  ok: alloc cpu {}, ring cpu {ring_cpu}, done cpu {}, used seen {} us and taken \
+         {} us after the doorbell; longest gap between looks {} us",
+        DIAG_ALLOC_CPU.load(Ordering::SeqCst),
+        diag_cpu(),
+        if used_seen_at == 0 { 0 } else { (used_seen_at - rung_at) / 1_000 },
+        (timer::now_nanos() - rung_at) / 1_000,
+        longest_gap / 1_000,
+    );
 
     if completion.head != head {
         return Err(Failure::Entropy(
