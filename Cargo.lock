@@ -533,6 +533,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-sdmmc"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-blkserve",
+ "ferrix-driver",
+ "ferrix-native-abi",
+ "ferrix-rt",
+ "ferrix-stm32-sdmmc",
+ "ferrix-virtio-blk",
+]
+
+[[package]]
 name = "ferrix-seccomp"
 version = "0.1.0"
 
@@ -558,6 +571,10 @@ dependencies = [
 
 [[package]]
 name = "ferrix-stm32-display"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-stm32-sdmmc"
 version = "0.1.0"
 
 [[package]]

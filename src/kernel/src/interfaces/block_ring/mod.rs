@@ -28,7 +28,7 @@
 //! STOPPED, or its ring corrupt -- does not. Its disk is *parked*: the
 //! commands the driver held are put back on the queue, in their epochs so
 //! barrier order holds, its node stays published, and readers and writers
-//! keep waiting. The next ring made for the same PCI location whose HELLO
+//! keep waiting. The next ring made for the same location whose HELLO
 //! describes the same disk under the same name takes the parked disk up and
 //! dispatches what waited to its own driver, so a filesystem mounted on the
 //! disk sees a slow request rather than an error when `devmgr` starts a dead
@@ -95,6 +95,7 @@ pub(crate) mod check;
 pub(crate) mod driver_check;
 pub(crate) mod hop_check;
 pub(crate) mod reread_check;
+pub(crate) mod tree_check;
 pub(crate) mod trip_check;
 
 /// The block major every ring's disk is published under. Linux allocates
@@ -135,9 +136,11 @@ const MAX_OUTSTANDING: u64 = 4096;
 /// Why a ring could not be made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CreateError {
-    /// The device already has a ring, live or ended.
+    /// The device already has a ring, live or ended; or it is a device
+    /// tree node and another tree node holds the tree's location word.
     InUse,
-    /// The device is not a PCI function, which HELLO's location names.
+    /// The device is neither a PCI function nor a device tree node, the two
+    /// HELLO's location can name.
     NotPci,
     /// No memory for the channel, or no stack for the ring's task.
     NoMemory,
@@ -163,7 +166,8 @@ struct Start {
     id: usize,
     /// The kernel's end of the control channel.
     control: Arc<Endpoint>,
-    /// The PCI location of the device the ring was made for.
+    /// The location of the device the ring was made for: its PCI address,
+    /// or [`TREE_LOCATION`].
     location: Location,
 }
 
@@ -194,7 +198,8 @@ static NEXT_RING: AtomicUsize = AtomicUsize::new(1);
 /// A disk whose driver died, waiting for the next one.
 #[derive(Debug)]
 struct Parked {
-    /// The PCI location its driver served it from.
+    /// The location its driver served it from: a PCI address, or
+    /// [`TREE_LOCATION`].
     location: Location,
     /// Its name, which the next driver's HELLO must give again.
     name: DiskName,
@@ -264,20 +269,65 @@ pub(crate) fn forget_parked(location: Location) {
     parked.disk.end();
 }
 
+/// The location word a device tree node's HELLO and PUBLISHED carry, as
+/// `device_info` gives it for every tree node (`DEVICE_NOT_PCI`), and as
+/// `interfaces/display` names its card's: a block ring has no PCI address
+/// to name a tree node by. The word names one disk, so a machine serves at
+/// most one tree disk at a time ([`TREE_OWNER`]).
+pub(crate) const TREE_LOCATION: Location = Location(ferrix_native_abi::types::DEVICE_NOT_PCI);
+
+/// The device tree node that last took a ring under [`TREE_LOCATION`].
+///
+/// Parking and the HELLO check key on the location word alone, so a second
+/// tree node's driver, saying another disk at the same word, would end and
+/// unpublish the first one's parked disk (`take_parked`). A ring for a
+/// second tree node is therefore refused while this one still holds the
+/// word: while it has a claim, or a disk is parked at the word. The node
+/// it names is kept alive by it for the rest of the boot, the boot check's
+/// synthetic one included; nothing reads it but the next tree ring.
+static TREE_OWNER: SpinLock<Option<Arc<DeviceNode>>> = SpinLock::new(None);
+
+/// Whether `owner` still holds the tree word: it has a ring claim among
+/// `claims`, or a disk is parked there for its next driver.
+fn tree_word_held(owner: &Arc<DeviceNode>, claims: &[Claim]) -> bool {
+    claims.iter().any(|claim| Arc::ptr_eq(&claim.device, owner)) || is_parked(TREE_LOCATION)
+}
+
 /// Make a ring for `node` and start its task; answer the driver's end of its
 /// control channel.
+///
+/// A PCI function's ring is named by its PCI location; a device tree
+/// node's by [`TREE_LOCATION`], one at a time. Any other node -- a
+/// virtio-mmio transport -- has no ring.
 ///
 /// # Errors
 ///
 /// [`CreateError`].
 pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateError> {
-    let location = location_of(node).ok_or(CreateError::NotPci)?;
+    let tree = matches!(node.location(), device::Location::Tree(_));
+    let location = if tree {
+        TREE_LOCATION
+    } else {
+        location_of(node).ok_or(CreateError::NotPci)?
+    };
     let (kernel_end, driver_end) = Endpoint::pair().map_err(|_| CreateError::NoMemory)?;
     let id = NEXT_RING.fetch_add(1, Ordering::Relaxed);
     {
+        // The tree word's owner is held across the claim, so two tree nodes
+        // asking at once cannot both find the word free.
+        let mut owner = TREE_OWNER.lock();
         let mut claims = CLAIMS.lock();
         if claims.iter().any(|claim| Arc::ptr_eq(&claim.device, node)) {
             return Err(CreateError::InUse);
+        }
+        if tree {
+            if owner
+                .as_ref()
+                .is_some_and(|owner| !Arc::ptr_eq(owner, node) && tree_word_held(owner, &claims))
+            {
+                return Err(CreateError::InUse);
+            }
+            *owner = Some(Arc::clone(node));
         }
         claims.push(Claim {
             id,
@@ -444,8 +494,11 @@ pub(crate) fn install() -> Result<(), Full> {
 /// `block_ring_create`.
 ///
 /// `ALREADY_BOUND` for a device that has a ring, live or ended: nothing yet
-/// says its device was reset. `INVALID_ARGS` for a device that is not a PCI
-/// function, since HELLO names the disk by its PCI location. The device handle
+/// says its device was reset; and for a device tree node while another tree
+/// node holds the one location word tree disks are named by
+/// ([`TREE_LOCATION`]). `INVALID_ARGS` for a device that is neither a PCI
+/// function nor a device tree node, since HELLO names the disk by its PCI
+/// location or by `DEVICE_NOT_PCI`. The device handle
 /// and its `MANAGE` right are the item's to check (`native::control_channel`).
 fn control_create(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     let device = registers.first().copied().unwrap_or(0);

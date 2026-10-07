@@ -53,6 +53,7 @@
 //! left, which the boot check has just found to be 74.25 MHz.
 
 mod gpu;
+mod sdmmc;
 mod usb;
 
 use alloc::format;
@@ -72,7 +73,7 @@ use crate::mmio::Mmio;
 use crate::{power, timer, vmap};
 
 /// Tell the item what this board has, once, at bring-up: the display, the
-/// USB host and the GPU to the device registry, in the order their nodes are
+/// USB host, the GPU and the SD card to the device registry, in the order their nodes are
 /// published, and where the firmware keeps its boot mode to power.
 ///
 /// Called from `main.rs` before device enumeration and before any program
@@ -89,6 +90,7 @@ pub(crate) fn install(view: &BootView<'_>) -> Result<(), Full> {
     board::register_board(&DISPLAY)?;
     board::register_board(&usb::BINDING)?;
     board::register_board(&gpu::BINDING)?;
+    board::register_board(&sdmmc::BINDING)?;
     if let Ok(tree) = crate::discovery::fdt::open(view) {
         note_boot_context(&tree);
     }

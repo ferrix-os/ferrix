@@ -126,7 +126,8 @@ to 5.2 MB/s, and a Wikipedia article in 0.21 s instead of about 0.5
 * **The STM32MP157D-DK1**, sized on 2026-09-24 (`docs/CHROME.md` §10), about
   45 to 55 points: an armhf browser, Debian 13's Chromium 150, on the same
   kind of volume (3); a ring-3 SDMMC driver so the volume can live on the
-  card rather than in 512 MiB of RAM (13); page-cache eviction, so the pages
+  card rather than in 512 MiB of RAM (13; built and host-tested 2026-10-07,
+  `sdmmc`, `docs/CHROME.md` §10.1, its board run owed); page-cache eviction, so the pages
   of a 200 MB program it has touched can be given back (8–13); ARM's
   `cacheflush` for V8's JIT, or `--js-flags=--jitless` (1–3); what running it
   finds (13 or more); and the board's Ethernet, if pages are to come from the

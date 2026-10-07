@@ -74,6 +74,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DRIVERS,
     },
     Program {
+        package: "ferrix-sdmmc",
+        binary: "sdmmc",
+        directory: DRIVERS,
+    },
+    Program {
         package: "ferrix-net-driver",
         binary: "net",
         directory: DRIVERS,

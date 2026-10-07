@@ -32,7 +32,7 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
     CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceInfo,
     PROCESS_EXITED, PROCESS_KILLED, ProcessStatus, TREE_GS201_DWC3, TREE_STM32_GPU,
-    TREE_STM32_HDMI, TREE_STM32_USBH,
+    TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH,
 };
 use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
@@ -224,11 +224,18 @@ const DRIVERS: [(u16, &[u16], &[u8], Kind); 6] = [
 ///
 /// The Pixel 7's USB device controller is a gadget, driven by `usbdev`
 /// (`docs/vendor/google/pixel7/USB-HANDOVER.md`).
-const TREE_DRIVERS: [(u16, &[u8], Kind); 4] = [
+///
+/// An STM32MP15 board's SDMMC1, the SD card, is a disk, driven by `sdmmc`
+/// (`docs/CHROME.md` §10). Its HELLO and PUBLISHED name it by the location
+/// word `DEVICE_NOT_PCI`, as the HDMI card's do: [`await_published`] keys on
+/// that word alone, which is sound only because drivers are started one at
+/// a time, so no other tree device's PUBLISHED can be in flight meanwhile.
+const TREE_DRIVERS: [(u16, &[u8], Kind); 5] = [
     (TREE_STM32_HDMI, b"ltdc", Kind::Display),
     (TREE_STM32_USBH, b"usbhid", Kind::Host),
     (TREE_STM32_GPU, b"gc400", Kind::Engine),
     (TREE_GS201_DWC3, b"usbdev", Kind::Gadget),
+    (TREE_STM32_SDMMC, b"sdmmc", Kind::Block),
 ];
 
 /// Where devmgr gave up, as the exit status.
@@ -1647,7 +1654,8 @@ impl fmt::Write for Line {
     }
 }
 
-/// A virtio-blk driver, over a block ring, for the disk to be `name`.
+/// A disk's driver -- virtio-blk's, or an STM32MP15's SD card's -- over a
+/// block ring, for the disk to be `name`.
 fn start_block(
     job: &Job<Kernel>,
     device: Device<Kernel>,
@@ -1688,10 +1696,16 @@ fn start_block(
         .replace(Requested::Exactly(CONTROL_RIGHTS))
         .map_err(|_| ())?;
     let encoded = Ring::Start(start).encode();
+    // The process's name: the table chose the image already.
+    let program = if info.virtio == DEVICE_TREE_BLOCKS {
+        "sdmmc"
+    } else {
+        "blk"
+    };
     launch(
         job,
         image,
-        "blk",
+        program,
         port,
         key,
         encoded.as_bytes(),
