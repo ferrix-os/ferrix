@@ -1160,3 +1160,30 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let missing: Vec<_> = table.difference(&wrapped).collect();
     assert!(missing.is_empty(), "no wrapper makes {missing:#x?}");
 }
+
+/// `Words::of`, word by word since it stopped calling `memcpy`, packs every
+/// length a `channel_write_read` may send exactly as the one copy into a
+/// zeroed buffer did, its bytes come back through `Words::bytes`, and a
+/// message longer than three words is refused.
+#[test]
+fn words_of_packs_every_length_as_one_copy_would() {
+    let source: Vec<u8> = (1..=25_u8).map(|byte| byte.wrapping_mul(37)).collect();
+    for len in 0..=channel::WRITE_READ_BYTES {
+        let bytes = &source[..len];
+        let mut padded = [0_u8; channel::WRITE_READ_BYTES];
+        padded[..len].copy_from_slice(bytes);
+        let expected: Vec<usize> = padded
+            .chunks_exact(size_of::<usize>())
+            .map(|chunk| usize::from_ne_bytes(chunk.try_into().unwrap()))
+            .collect();
+        let words = channel::Words::of(bytes).unwrap();
+        assert_eq!(words.as_slice(), expected.as_slice(), "length {len}");
+        let back = channel::Words { len, words }.bytes();
+        assert_eq!(&back[..len], bytes, "length {len}");
+        assert!(back[len..].iter().all(|&byte| byte == 0), "length {len}");
+    }
+    assert_eq!(
+        channel::Words::of(&source[..channel::WRITE_READ_BYTES + 1]),
+        None
+    );
+}

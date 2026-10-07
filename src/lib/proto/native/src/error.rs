@@ -131,14 +131,28 @@ impl Error {
 /// # Errors
 ///
 /// The [`Error`] for a value in `-4095..=-1`.
+///
+/// Inlined, with the failure's decoding kept out of line: every call's
+/// return goes through this, and a call to it from the caller's code reaches
+/// a page of the runtime's text the caller's own code may not be on. After
+/// an address-space switch each such page is a TLB miss
+/// (`docs/OPAQUE-KERNEL.md` §9.10, the user TLB refill).
+#[inline]
 pub fn decode(value: usize) -> Result<usize, Error> {
     let signed = value.cast_signed();
     if signed < 0 && signed >= -(MAX_ERRNO as isize) {
-        let number = u16::try_from(signed.unsigned_abs()).unwrap_or(MAX_ERRNO);
-        Err(Error::from_errno(Errno(number)))
+        Err(failure(signed))
     } else {
         Ok(value)
     }
+}
+
+/// [`decode`]'s failure: the [`Error`] for `signed`, in `-4095..=-1`.
+#[cold]
+#[inline(never)]
+fn failure(signed: isize) -> Error {
+    let number = u16::try_from(signed.unsigned_abs()).unwrap_or(MAX_ERRNO);
+    Error::from_errno(Errno(number))
 }
 
 /// A return register that carries a new handle.
@@ -147,6 +161,7 @@ pub fn decode(value: usize) -> Result<usize, Error> {
 ///
 /// As [`decode`], and [`Error::Unexpected`] for a success that is not a
 /// handle.
+#[inline]
 pub fn decode_handle(value: usize) -> Result<Handle, Error> {
     let value = decode(value)?;
     match u32::try_from(value) {
@@ -160,6 +175,7 @@ pub fn decode_handle(value: usize) -> Result<Handle, Error> {
 /// # Errors
 ///
 /// As [`decode`].
+#[inline]
 pub fn decode_unit(value: usize) -> Result<(), Error> {
     decode(value).map(|_| ())
 }

@@ -5122,3 +5122,32 @@ pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
+
+#### The user side (po9-user; ledger lines 413 and 456)
+
+nazuna has no PCID, so each `CR3` write empties the user TLB and every user
+page a side touches after it is a refill (s9.10). Line 413 allowed fewer
+pages in the runtime (a1, U1 to U3); 2 MiB text pages (a2) were built on a
+branch and measured no gain, so they were dropped; global user pages (a3)
+are not yet, a design of their own.
+
+- *The channel call inlined in every native program.* `ferrix-native`'s
+  `Channel::write_read`, `decode` and its kin are `#[inline]`, `decode`'s
+  failure out of line and `#[cold]`, and `Words::of` reads whole words as
+  words instead of copying a run-time length into a padded buffer (a
+  `memcpy` call through the GOT). On `main`, `ipc-bench`'s echo loop
+  touched three text pages and the GOT a trip; now it is one text page and
+  makes no call. A short last word may still compile to a `memcpy` call;
+  a message of whole words makes none. Outside the item: the kernel links
+  `ferrix-native-abi`, not `ferrix-native`; `ipc-bench` is unchanged (G8).
+- *U2:* the host test `words_of_packs_every_length_as_one_copy_would` holds
+  `Words::of` to the old padded copy for every length 0 to 24 and the
+  refusal of 25; its three controls (a non-zero pad, big-endian words, the
+  bound moved by one) FIRED. `test-ipc-equiv --arch all` agrees off and on.
+- *U1:* alternated against 4066f41dd, `domain-call` p50 fast mode 988 to
+  1,018 ns (6 boots) against 1,048 to 1,088 (6); slow mode 1,218 (2)
+  against 1,238 to 1,298 (3); one boot at 1,048 in neither mode. The `call`
+  line moves with it (2,836 to 2,856 in 5 fast boots, 3,116 in one, against
+  2,966 to 3,096); the floor, which switches no space, does not (319). No
+  second native program was timed.
+- *U3:* no page, static or mapping is added or shared.

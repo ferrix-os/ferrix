@@ -76,6 +76,7 @@ pub struct Words {
 impl Words {
     /// The words' bytes; the first [`Words::len`] are the message.
     #[must_use]
+    #[inline]
     pub fn bytes(&self) -> [u8; WRITE_READ_BYTES] {
         let mut bytes = [0_u8; WRITE_READ_BYTES];
         for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(self.words) {
@@ -85,17 +86,32 @@ impl Words {
     }
 
     /// `bytes` as three words, if they fit.
-    fn of(bytes: &[u8]) -> Option<[usize; 3]> {
-        let mut padded = [0_u8; WRITE_READ_BYTES];
-        padded.get_mut(..bytes.len())?.copy_from_slice(bytes);
+    ///
+    /// Word by word, whole words read as words and a short last one a byte
+    /// at a time, rather than one copy of a length known only at run time:
+    /// that copy is a call to `memcpy` through the GOT on every send, two
+    /// more pages of the program touched (`decode`'s note). The compiler may
+    /// still make the short last word's bytes a call; a message of whole
+    /// words, as an echo of a word is, makes none.
+    #[inline]
+    pub(crate) fn of(bytes: &[u8]) -> Option<[usize; 3]> {
+        if bytes.len() > WRITE_READ_BYTES {
+            return None;
+        }
         let mut words = [0_usize; 3];
-        for (word, chunk) in words
-            .iter_mut()
-            .zip(padded.chunks_exact(size_of::<usize>()))
-        {
-            let mut raw = [0_u8; size_of::<usize>()];
-            raw.copy_from_slice(chunk);
-            *word = usize::from_ne_bytes(raw);
+        let mut chunks = bytes.chunks(size_of::<usize>());
+        for word in &mut words {
+            let Some(chunk) = chunks.next() else { break };
+            *word = match <[u8; size_of::<usize>()]>::try_from(chunk) {
+                Ok(whole) => usize::from_ne_bytes(whole),
+                Err(_) => {
+                    let mut raw = [0_u8; size_of::<usize>()];
+                    for (to, from) in raw.iter_mut().zip(chunk) {
+                        *to = *from;
+                    }
+                    usize::from_ne_bytes(raw)
+                }
+            };
         }
         Some(words)
     }
@@ -114,6 +130,7 @@ impl<S: Syscall> Channel<S> {
     /// take; [`Error::PeerClosed`]; whatever a write is refused for;
     /// [`Error::Unsupported`] where the way this handle makes calls cannot
     /// read registers back ([`Syscall::call_words`]).
+    #[inline]
     pub fn write_read(&self, send: Option<&[u8]>) -> Result<Words, Error> {
         let (count, words) = match send {
             Some(bytes) => (bytes.len(), Words::of(bytes).ok_or(Error::TooBig)?),
