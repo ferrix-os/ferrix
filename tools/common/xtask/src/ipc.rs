@@ -222,26 +222,10 @@ fn other_tree(args: &Args, tree: &std::path::Path, reference: &str, pinned: bool
         }
         None => std::process::Command::new("cargo"),
     };
-    let init = args.init.clone().unwrap_or_default();
     let _ = command
         .current_dir(tree)
         .env("CARGO_TARGET_DIR", tree.join("target"))
-        .args([
-            "xtask",
-            "bench-ipc",
-            "--arch",
-            "x86_64",
-            "--smp",
-            "1",
-            "--init",
-            &init,
-        ]);
-    if args.release {
-        let _ = command.arg("--release");
-    }
-    if let Some(accel) = args.accel.as_deref() {
-        let _ = command.args(["--accel", accel]);
-    }
+        .args(other_tree_args(args));
     let output = command
         .output()
         .map_err(|error| Error::new(format!("could not run {reference}'s bench-ipc: {error}")))?;
@@ -251,11 +235,45 @@ fn other_tree(args: &Args, tree: &std::path::Path, reference: &str, pinned: bool
         .iter()
         .any(|line| line.contains("ipc-bench") && line.contains("exit 0"));
     if !output.status.success() || !finished {
+        // The other tree's own words are the only account of why it stopped.
+        let errors = String::from_utf8_lossy(&output.stderr);
+        let tail = |text: &str| {
+            let count = text.lines().count();
+            text.lines()
+                .skip(count.saturating_sub(40))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         return Err(Error::new(format!(
-            "{reference}'s bench-ipc did not finish"
+            "{reference}'s bench-ipc did not finish ({})\n--- its stdout, last lines ---\n{}\n--- its stderr, last lines ---\n{}",
+            output.status,
+            tail(&text),
+            tail(&errors)
         )));
     }
     Ok(Boot { lines })
+}
+
+/// The other tree's `bench-ipc` arguments: this run's, so both sides boot the
+/// same configuration. The kernel options go too, or `ferrix.fastpath=on`
+/// would be measured against the general path.
+fn other_tree_args(args: &Args) -> Vec<String> {
+    let mut out: Vec<String> = ["xtask", "bench-ipc", "--arch", "x86_64", "--smp", "1"]
+        .map(String::from)
+        .to_vec();
+    if let Some(init) = args.init.as_deref() {
+        out.extend(["--init".to_owned(), init.to_owned()]);
+    }
+    if args.release {
+        out.push("--release".to_owned());
+    }
+    if let Some(accel) = args.accel.as_deref() {
+        out.extend(["--accel".to_owned(), accel.to_owned()]);
+    }
+    for option in &args.kernel_options {
+        out.extend(["--kernel-option".to_owned(), option.clone()]);
+    }
+    out
 }
 
 /// `--against-sel4` and `--against-redox`: this tree's domain-call against
@@ -593,4 +611,45 @@ pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod other_tree_tests {
+    use super::other_tree_args;
+    use crate::args::Args;
+
+    fn args(line: &[&str]) -> Args {
+        Args::parse(line.iter().map(|word| (*word).to_owned())).unwrap()
+    }
+
+    #[test]
+    fn the_other_tree_boots_with_the_same_kernel_options() {
+        let line = args(&[
+            "bench-ipc",
+            "--release",
+            "--accel",
+            "kvm",
+            "--init",
+            "/bb/{arch}/busybox",
+            "--kernel-option",
+            "ferrix.fastpath=on",
+            "--alternate",
+            "main",
+        ]);
+        let out = other_tree_args(&line);
+        let at = out
+            .iter()
+            .position(|word| word == "--kernel-option")
+            .unwrap();
+        assert_eq!(out[at + 1], "ferrix.fastpath=on");
+        assert!(out.contains(&"--release".to_owned()));
+        assert!(!out.contains(&"--alternate".to_owned()));
+    }
+
+    #[test]
+    fn no_init_passes_no_empty_init() {
+        let out = other_tree_args(&args(&["bench-ipc", "--alternate", "main"]));
+        assert!(!out.contains(&"--init".to_owned()));
+        assert!(!out.iter().any(String::is_empty));
+    }
 }
