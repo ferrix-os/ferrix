@@ -650,14 +650,13 @@ impl CpuQueue {
             super::note_missing_slot();
             return None;
         };
-        if self.current.is_some() {
+        if self.current.is_some() && !super::abl(1) {
             self.account(now);
         }
-        // As `insert`: counted in its job (it already is, made runnable),
-        // and weighed by its job's share as things stand, the caller still
-        // counted.
+        if !super::abl(2) {
         peer.join_group();
         peer.set_weight(peer.effective_weight());
+        }
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
         let (id, state) = (peer.id, peer.entity_state());

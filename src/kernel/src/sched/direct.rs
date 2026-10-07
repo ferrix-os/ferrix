@@ -96,6 +96,9 @@ static COUNTED: [[AtomicU64; COUNTS]; COUNTED_PROCESSORS] =
 
 /// Count one `what` on this processor. With interrupts masked.
 pub(crate) fn count(what: Count) {
+    if super::abl(64) && what == Count::Trip {
+        return;
+    }
     let row = this_cpu().map_or(0, |cpu| cpu.min(COUNTED_PROCESSORS - 1));
     if let Some(cell) = COUNTED.get(row).and_then(|row| row.get(what as usize)) {
         cell.store(
@@ -207,7 +210,8 @@ impl Direct {
     ) {
         let now = self.now;
         let queue = self.queue();
-        let idle = queue.idle.as_ref().is_some_and(|idle| {
+        let skip = super::abl(128);
+        let idle = !skip && queue.idle.as_ref().is_some_and(|idle| {
             core::ptr::eq(Arc::as_ptr(idle), caller) || Arc::ptr_eq(idle, &peer)
         });
         if idle {
@@ -222,7 +226,7 @@ impl Direct {
             .is_some_and(|current| Arc::ptr_eq(current, &peer));
         // Its slots were tested under this lock hold (T11, `begin`), and
         // only a holder of a queue's lock moves them.
-        if running || peer.is_queued() || peer.state() != BLOCKED {
+        if !skip && (running || peer.is_queued() || peer.state() != BLOCKED) {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,
                 "a parked task about to be handed a reply was running or queued (A1): task {}",
@@ -233,13 +237,17 @@ impl Direct {
         // is over, as the wake at home ends it. It is in no sleeper set to
         // be taken out of: it holds its sleep slot (T11), which a set keeps
         // while it holds the task.
+        if !skip {
         let _ = peer.take_sleep_deadline();
+        }
         // Asleep, as A1 has just asserted, and every waker needs this lock.
+        if super::abl(2) { peer.set_state_raw(RUNNABLE); } else {
         peer.set_state_from(BLOCKED, RUNNABLE);
+        }
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
         let next = queue.hand_over(peer, now, block_caller);
-        if !next
+        if !skip && !next
             .as_ref()
             .is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer))
         {
@@ -249,7 +257,7 @@ impl Direct {
                 id
             );
         }
-        if queue.stats.measuring {
+        if queue.stats.measuring && !super::abl(64) {
             queue.note_pick(now);
         }
         self.next = next;
@@ -260,6 +268,7 @@ impl Direct {
     /// as `pick_and_switch` makes them. A3, FX-0503's check, first.
     pub(crate) fn switch(mut self) {
         super::require_preemption_on(self.cpu);
+        super::IN_DIRECT.store(true, Ordering::Relaxed);
         let (cpu, now) = (self.cpu, self.now);
         let next = self.next.take();
         let lock = self.lock;
@@ -321,5 +330,6 @@ pub(crate) fn set_blocked(task: &Task) {
 /// [`set_blocked`] for the direct switch's caller, which runs here under the
 /// run-queue lock with interrupts masked: see `Task::set_state_from`.
 pub(crate) fn set_running_blocked(task: &Task) {
+    if super::abl(2) { task.set_state_raw(BLOCKED); return; }
     task.set_state_from(RUNNABLE, BLOCKED);
 }

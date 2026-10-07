@@ -640,6 +640,10 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
         "  init     {} KiB program built in, starting {how}",
         inputs.program.len() / 1024
     );
+    crate::sched::ABL.store(
+        crate::sched::ABL_PENDING.load(core::sync::atomic::Ordering::Relaxed),
+        core::sync::atomic::Ordering::Relaxed,
+    );
 
     let name = args.first().copied().unwrap_or(b"");
     // A built-in program may be dynamically linked too, as a distribution's
