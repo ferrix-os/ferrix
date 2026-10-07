@@ -55,6 +55,9 @@ pub(crate) fn init(view: &BootView<'_>) {
         Some(_) => READ_OTHER,
     };
     ON_AT_BOOT.store(read == READ_ON, Ordering::Relaxed);
+    let abl = view.option("ferrix.abl").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    crate::sched::ABL_PENDING.store(abl, Ordering::Relaxed);
+    println!("  fastpath ABLATION mask {abl}");
     READ.store(read, Ordering::Relaxed);
     if read == READ_ON && crate::arch::FAST_WRITE_READ {
         crate::trap::set_fast_write_read();

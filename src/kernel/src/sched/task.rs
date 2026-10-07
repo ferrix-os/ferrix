@@ -498,6 +498,11 @@ impl Task {
     /// The direct switch's, under the run-queue lock every waker of either
     /// task takes, for the peer asleep (`BLOCKED`) and the caller running
     /// (`RUNNABLE`).
+    /// TIMING ONLY.
+    pub(crate) fn set_state_raw(&self, state: u8) {
+        self.state.store(state, Ordering::Release);
+    }
+
     pub(crate) fn set_state_from(&self, before: u8, state: u8) {
         self.state.store(state, Ordering::Release);
         if before != RUNNABLE && state == RUNNABLE {

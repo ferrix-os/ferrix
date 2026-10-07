@@ -135,6 +135,21 @@ static RUNNING_GROUP: Once<Vec<AtomicU32>> = Once::new();
 /// way back to user mode.
 static RUNNING_SEEN: Once<Vec<AtomicU64>> = Once::new();
 
+/// TIMING ONLY: ablation mask.
+pub(crate) static ABL: AtomicU32 = AtomicU32::new(0);
+/// TIMING ONLY: the mask asked for, armed as the shell starts.
+pub(crate) static ABL_PENDING: AtomicU32 = AtomicU32::new(0);
+/// TIMING ONLY: whether the switch being made is the direct one.
+pub(crate) static IN_DIRECT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+#[inline(always)]
+pub(crate) fn abl(bit: u32) -> bool {
+    ABL.load(Ordering::Relaxed) & bit != 0
+}
+#[inline(always)]
+pub(crate) fn abl_direct(bit: u32) -> bool {
+    IN_DIRECT.load(Ordering::Relaxed) && abl(bit)
+}
+
 /// Make the per-processor words [`NEXT_BALANCE`], [`RUNNING`] and
 /// [`RUNNING_GROUP`].
 fn per_cpu_words(online: usize) {
@@ -2151,9 +2166,14 @@ fn switch_chosen(
     // `lock_manually`, the direct switch's `try_lock_manually`), and this
     // is the only reference into it until the switch hands it over.
     let queue = unsafe { lock.locked_data() };
+    let skip_book = abl_direct(8);
+    if !skip_book {
     queue.stats.switches += 1;
+    }
     carry_in_call(cpu, &previous, &next);
+    if !skip_book {
     note_running(cpu, next.id, next.group(), next.moves_seen());
+    }
     // Idle to the rest of the machine exactly while the idle task is what
     // runs: cleared here, before any other task can, and set again when the
     // idle task comes back. The idle loop's own clear came too late for the
@@ -2171,7 +2191,9 @@ fn switch_chosen(
             .is_some_and(|idle| Arc::ptr_eq(idle, &next)),
     );
     queue.exec_start = now;
+    if !abl_direct(4) {
     queue.arm_timer(now);
+    }
     // Moved, not cloned (2f): the outgoing task into `previous`, which
     // `finish_switch` takes, and the pick into `current`. The rest reads both
     // where the queue holds them.
@@ -2184,7 +2206,9 @@ fn switch_chosen(
         unsafe { lock.force_unlock() };
         return None;
     };
+    if !skip_book {
     next.note_switch(cpu);
+    }
 
     // The address space goes on the processor here, under the run queue lock
     // and before the registers move. Not inside `arch::switch_to`, which takes
@@ -2363,6 +2387,11 @@ fn finish_switch() {
     // SAFETY: (SHARED) held as above, released exactly once, and the queue is not
     // touched afterwards.
     unsafe { lock.force_unlock() };
+    let previous = if !dead && abl_direct(32) {
+        if let Some(p) = previous { core::mem::forget(p); }
+        None
+    } else { previous };
+    IN_DIRECT.store(false, Ordering::Relaxed);
 
     if let Some(previous) = previous
         && dead
