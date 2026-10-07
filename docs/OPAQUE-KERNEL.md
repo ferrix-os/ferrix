@@ -5210,9 +5210,13 @@ a channel half in two ways:
 
 A per-task mark, `continuation`, says which kind a record names. It is set
 by the direct switch, under the run-queue lock, when it parks its caller.
-It is cleared by the trampoline before anything else runs. A commit to an
-unmarked peer is made exactly as today: `switch_to` and the reply cell. A
-commit to a marked peer is made by G1.
+It is cleared in the trampoline after `finish_switch` and before either
+branch. A commit to an unmarked peer switches to it with `ferrix_switch` as
+today, and the peer takes its reply from the cell. Its caller, though, is
+still parked as a continuation: `ferrix_switch` is given a scratch save word
+instead of the caller's own slot, so the caller's slot keeps the resume
+frame's address (V2-15). A commit to a marked peer is made by the direct
+resume.
 
 In a steady trade the first trip goes to an unmarked server; every trip
 after it goes to a marked peer. L.sched.59 is restated for the mark, and the
@@ -5441,12 +5445,74 @@ cited where the text above meets it.
 it to po10-obj, which is first to show whether it can be reached. C2 takes
 the form of its fix.
 
-#### Questions for the consultant (9.12, second reading)
+#### The second reading (2026-10-07, ledger 524): OK IF V2-15 to V2-22
 
-1. Does the revised G1 meet V2-1 to V2-11 as written? That is: one
-   trampoline for both resumes, entered by `ferrix_switch`'s return or by
-   the direct resume's jump at the same RSP, with `finish_switch` first.
-2. Are the I1 and I2 asserts, with their controls, acceptable as condition
-   11's evidence?
-3. C2's quiet-branch drop is deferred to po10-obj's fix of the `main`
-   finding. Is that acceptable, or must G1 wait for that fix to land?
+The review accepted the single trampoline for both resumes. It removes R3
+by construction: the woken task's `finish_switch` lets the lock go before
+anything in the trampoline can drop an endpoint.
+
+The four points it was asked to check:
+- **(a)** The alignment chain holds. Taking the stack top T as 16-byte
+  aligned:
+  - the stub's call enters `ferrix_syscall_entry` at T−200, as the ABI
+    wants;
+  - `ferrix_switch`'s return leaves RSP at T−128;
+  - the trampoline's re-reserve and call reach T−200 again.
+
+  The exit label sits on the `addq $64` itself, and every caller computes
+  `frame` before its `subq`.
+- **(b)** The direct jump is equivalent in all the trampoline relies on.
+  Only RBP and the callee-saved registers differ: zeros on a general
+  resume, A's kernel values on a direct one. So the trampoline zeroes RBP,
+  and its contract says it reads nothing but RSP. The 16 pops overwrite
+  every register before `sysretq`.
+- **(c)** Running `finish_switch` first is correct for both entries. On the
+  direct entry it releases the lock the direct switch took by
+  `try_lock_manually`, and takes `previous` (A), as `Direct::switch` hands
+  it over today.
+- **(d)** The mark's set and clear points are sound. One claim of the first
+  revision was false: "a commit to an unmarked peer is made exactly as
+  today", which would have left every trip unmarked. V2-15 fixes it above.
+
+The added conditions, each to be met by the code and its review:
+- **V2-15, the first trip.** A commit to an unmarked peer still parks its
+  caller as a continuation, `ferrix_switch` given a scratch save word. It
+  has a trip-count case. The control passes A's own slot, and I1 must fire.
+- **V2-16, "replied" cannot outlive its trip.** The branch is chosen from
+  the entry, for example by a register the resume frame pops as zero, or
+  the flag is cleared on read. A case has a general resume follow a direct
+  trip, with its control.
+- **V2-17, the switch invariant stays in the core.** `finish_switch`, both
+  clears and the I2 assert run in core code before the third hook. The hook
+  forwards only the call layer (ledger 415, H1).
+- **V2-18, A3 and I1 on the direct resume.** The direct resume keeps A3
+  (`require_preemption_on`), and `Direct`'s drop still never releases the
+  lock. The I1 assert sits in `switch_chosen`, so that it covers the direct
+  resume too.
+- **V2-19, I2's assert travels with the release.** It is part of the
+  release in `finish_switch`. Its control moves that release, not a second
+  copy of it, so it fires with the assert's own text.
+- **V2-20, the vector mark at today's points.** It is lowered after
+  `continue_general` returns and at `frame_tail`'s exits, not before the
+  branches.
+- **V2-21, the two lists before the code review.** V2-5's walk and V2-6's
+  dead-frame list are written out. By the review's reading, the dead-frame
+  list is the lookup's `Arc<Endpoint>` alone (into `parked_on`). The half
+  guards are dropped before the switch, and everything else is `Copy` or
+  borrowed.
+- **V2-22, C2's quiet release takes po10-obj's form, and G1 lands after
+  that fix.** `object::dispose` on `main` is not yet a deferral, so the
+  form G1 reuses must:
+  - allocate nothing while interrupts are masked;
+  - wait on no lock there;
+  - bound the delay of the peer's `PEER_CLOSED`;
+  - carry a check that fires on both resumes.
+
+  Where it cannot meet these, the quiet branch takes the general branch
+  instead (`Arc::into_inner`) and lets go of the endpoint there, with
+  interrupts on.
+
+**Where it stands.** G1 with C1 and C2 may be built now under V2-1 to V2-22,
+G1 to G11. It lands only after po10-obj's fix of the masked endpoint drop is
+on `main`. The timing ablation (`os76/unwind-abl`) runs first. If the unwind
+is worth little, G1 is weighed again before it is built.
