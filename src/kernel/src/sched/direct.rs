@@ -33,12 +33,14 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use ferrix_sched::JobPlan;
 use ferrix_sync::SpinLock;
 
 use super::queue::CpuQueue;
 use super::task::{BLOCKED, RUNNABLE, Task};
 use super::{finish_switch, queue_of, switch_chosen, this_cpu, work};
 use crate::arch;
+use crate::object::quota;
 
 /// What the fast path counts: trips taken, parks made, and each test's
 /// declines (`docs/OPAQUE-KERNEL.md` §9.7, part 6). Kernel statistics no
@@ -80,10 +82,19 @@ pub(crate) enum Count {
     T12,
     /// T13: the caller or the peer has `END` posted.
     T13,
+    /// A hand-over whose two tasks are counted in one job: the job's load
+    /// changed once, by the net (§9.11, J1). Not a decline.
+    Fold,
+    /// A hand-over made with the peer's join and the caller's leave apart,
+    /// as the general path makes them. Not a decline.
+    Separate,
+    /// A fold whose caller's leave did not answer as planned, which
+    /// `Task::set_group`'s callers rule out: the stage-9 check requires none.
+    FoldUnplanned,
 }
 
 /// How many [`Count`]s there are.
-const COUNTS: usize = Count::T13 as usize + 1;
+const COUNTS: usize = Count::FoldUnplanned as usize + 1;
 
 /// The processors counted apart; any further ones share the last row.
 const COUNTED_PROCESSORS: usize = 64;
@@ -234,11 +245,27 @@ impl Direct {
         // be taken out of: it holds its sleep slot (T11), which a set keeps
         // while it holds the task.
         let _ = peer.take_sleep_deadline();
-        // Asleep, as A1 has just asserted, and every waker needs this lock.
-        peer.set_state_from(BLOCKED, RUNNABLE);
+        // Asleep, as A1 has just asserted, and every waker needs this lock:
+        // `set_state_from(BLOCKED, RUNNABLE)`, with its join's word and its
+        // job's load taken apart. The plan is made here, before any charge,
+        // from the peer's word as it is counted and the caller's as read
+        // now; neither can move until the caller's leave (`Task::set_group`'s
+        // callers; §9.11, J1). Apart, the peer's load is added at once, as
+        // `set_state_from` adds it.
+        peer.store_state(RUNNABLE);
+        let joined = peer.join_word();
+        let plan = ferrix_sched::plan_job_fold(joined, caller.group_word(), quota::NONE);
+        match (plan, joined) {
+            (JobPlan::Separate, Some((job, weight))) => {
+                quota::adjust(job, i64::from(weight));
+                count(Count::Separate);
+            }
+            (JobPlan::Separate, None) => count(Count::Separate),
+            (JobPlan::Fold { .. }, _) => count(Count::Fold),
+        }
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
-        let next = queue.hand_over(peer, now, block_caller);
+        let next = queue.hand_over(peer, now, plan, block_caller);
         if !next
             .as_ref()
             .is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer))
