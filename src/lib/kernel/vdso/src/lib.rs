@@ -109,6 +109,138 @@ pub const fn counter_nanos(ticks: u64, hz: u64) -> u64 {
     seconds.saturating_mul(NANOS).saturating_add(within / hz)
 }
 
+/// [`counter_nanos`] for one rate, by multiplication: the rate's reciprocal
+/// worked out once, so that a reading costs two multiplications where
+/// [`counter_nanos`] costs two 64-bit divisions, about six nanoseconds a
+/// reading on the reference machine (`docs/OPAQUE-KERNEL.md` §9.11, Q1). The
+/// kernel's clock reads it at every switch.
+///
+/// Exact, not an approximation in the way Linux's `cyc2ns` scaling is: every
+/// answer equals [`counter_nanos`] of the same ticks and rate, bit for bit,
+/// which the host test holds across rates and readings. So the kernel's
+/// clock still agrees to the nanosecond with every other reading of the
+/// counter, the vDSO's included, which divides.
+///
+/// # The reciprocal
+///
+/// The division of any 64-bit `n` by a fixed `d` as a multiplication:
+/// Granlund and Montgomery's round-up method ("Division by invariant
+/// integers using multiplication", PLDI 1994), in libdivide's unsigned
+/// 64-bit form. With `l` the floor of `log2 d`, a magic number `m` just above
+/// `2^(64+l) / d` makes `n / d` the high half of `n * m` shifted right by
+/// `l`. Where `m` needs a 65th bit, it is kept without it, and the bit is
+/// added back as `((n - q) / 2 + q) >> l`, `q` the high half. A power of
+/// two is a shift alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CounterScale {
+    /// The rate, in hertz.
+    hz: u64,
+    /// The magic number, less its 65th bit when `add` is set; zero for a
+    /// power of two.
+    magic: u64,
+    /// The floor of the base-2 logarithm of `hz`.
+    shift: u32,
+    /// Whether the magic number has a 65th bit to add back.
+    add: bool,
+}
+
+impl CounterScale {
+    /// The reciprocal of `hz`. One 128-bit division, once; zero hertz
+    /// scales every reading to zero, as [`counter_nanos`] does.
+    #[must_use]
+    pub const fn new(hz: u64) -> CounterScale {
+        if hz == 0 {
+            return CounterScale {
+                hz,
+                magic: 0,
+                shift: 0,
+                add: false,
+            };
+        }
+        let shift = 63 - hz.leading_zeros();
+        if hz.is_power_of_two() {
+            return CounterScale {
+                hz,
+                magic: 0,
+                shift,
+                add: false,
+            };
+        }
+        // 2^(64+l) over `hz`, which is below 2^64 because `hz` is above
+        // 2^l: the floor and its remainder.
+        let numerator = 1_u128 << (64 + shift);
+        let proposed = (numerator / hz as u128) as u64;
+        let remainder = (numerator % hz as u128) as u64;
+        if hz - remainder < 1_u64 << shift {
+            // The floor plus one is within the error the shift by `l`
+            // absorbs for every 64-bit `n`.
+            CounterScale {
+                hz,
+                magic: proposed.wrapping_add(1),
+                shift,
+                add: false,
+            }
+        } else {
+            // It is not: 2^(65+l) over `hz`, rounded up, whose 65th bit is
+            // set and is added back in `quotient`.
+            let mut doubled = proposed.wrapping_add(proposed);
+            let twice = remainder.wrapping_add(remainder);
+            if twice >= hz || twice < remainder {
+                doubled = doubled.wrapping_add(1);
+            }
+            CounterScale {
+                hz,
+                magic: doubled.wrapping_add(1),
+                shift,
+                add: true,
+            }
+        }
+    }
+
+    /// The rate this is the reciprocal of.
+    #[must_use]
+    pub const fn hz(&self) -> u64 {
+        self.hz
+    }
+
+    /// `n / hz`, rounded down, for any `n`; not called with a zero rate.
+    const fn quotient(&self, n: u64) -> u64 {
+        if self.magic == 0 {
+            return n >> self.shift;
+        }
+        // The high half is at most `n`, because the magic number is below
+        // 2^64: `n - high` does not wrap and `(n - high) / 2 + high` does not
+        // overflow.
+        let high = ((n as u128 * self.magic as u128) >> 64) as u64;
+        if self.add {
+            ((n.wrapping_sub(high) >> 1).wrapping_add(high)) >> self.shift
+        } else {
+            high >> self.shift
+        }
+    }
+
+    /// [`counter_nanos`]`(ticks, hz)`, exactly, by the same split at whole
+    /// seconds with each division a [`CounterScale::quotient`]. A rate past
+    /// 18.4 GHz, whose remainder's product no longer fits, takes
+    /// [`counter_nanos`] itself.
+    #[must_use]
+    pub const fn nanos(&self, ticks: u64) -> u64 {
+        const NANOS: u64 = 1_000_000_000;
+        if self.hz == 0 {
+            return 0;
+        }
+        let seconds = self.quotient(ticks);
+        // At most `ticks`, since `seconds` is its floor over `hz`.
+        let rest = ticks.wrapping_sub(seconds.wrapping_mul(self.hz));
+        let Some(within) = rest.checked_mul(NANOS) else {
+            return counter_nanos(ticks, self.hz);
+        };
+        seconds
+            .saturating_mul(NANOS)
+            .saturating_add(self.quotient(within))
+    }
+}
+
 /// The name the image gives itself, Linux's for its vDSO.
 pub const SONAME: &str = "linux-vdso.so.1";
 
