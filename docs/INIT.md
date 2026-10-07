@@ -1885,25 +1885,33 @@ batch tip 3349682db, the code without a conflict. `SystemCallFilter=`,
 `SystemCallErrorNumber=` and `SystemCallArchitectures=` stop refusing: the
 parent compiles the program (`ferrix_svc::filter`, generated tables) and
 the child installs it last (§4.5); the gate's refusal check became the five
-filter units. Rows on 83f5ac1b0 (the same code over `l13b` before its last
-rebase): `check` (`po6-l13-c-check`) and `test-init` on x86_64, aarch64 and
-armv7a (`po6-l13-c-x86`, `-a64`, `-arm`) passed. Six negative controls,
-`gate.sh control` on x86-64, each fired on its own line:
+filter units. po6's rows and six controls ran on 83f5ac1b0, over `l13b`
+before its last rebase (`po6-l13-c-*`). Batch 20261005T184633Z failed it on
+`test-vfs --arch x86_64 --init ferrousli` alone, the cgroup applet's
+`rmdir` answering "Resource busy"; that image carries neither this init
+nor `ferrix-svc`, and the same failure is logged on 2026-09-26, before
+L13c existed (`rcf-gate-ee843753-on-d1379249/vfs-x86-ferrousli.log`).
+
+Rebased onto `main` 4466212c3 on 2026-10-07 (po10-l13c, branch
+`po10-l13c/l13c`, the code unchanged: range-diff `=` for every code
+commit), with the data files' licences added to the generator's docstring
+(the consultant's C3). Rows on e12bca3b7: `check` (`po10-l13c-check2`),
+`test-init --arch all` (`po10-l13c-init2`), `test-vfs --arch x86_64 --init ferrousli` three times (`po10-l13c-vfs-1-3`, `-2-3`, `-3-3`), `build --arch all --release` (`po10-l13c-build-3`) and `test-boot --arch x86_64 --accel tcg` (`po10-l13c-x86-tcg-3`); the x86_64 kvm, aarch64, armv7a and armv7a `--smp 2` boots are still owed. The six
+negative controls again, `gate.sh control` with `test-init --arch x86_64`,
+each fired on its own line:
 
 * the filter never installed: "sc-kill.service never had mkdir end as
-  expected" (`po6-l13-c-ctl-install`).
+  expected" (`po10-l13c-ctl-install-3`).
 * `SystemCallErrorNumber=` ignored: "sc-errno.service never had mkdir end
-  as expected", killed instead (`po6-l13-c-ctl-errno`).
+  as expected", killed instead (`po10-l13c-ctl-errno-3`).
 * a deny-list word's own `:errno` ignored: "sc-eperm.service never had
-  mkdir end as expected" (`po6-l13-c2-ctl-word`; its first run,
-  `po6-l13-c-ctl-word`, was ended by FX-1012's QEMU signal 15 8.7 s into
-  the boot, before the stage).
+  mkdir end as expected" (`po10-l13c-ctl-word-3`).
 * an allow-list defaulting to `ALLOW`: "sc-allow.service never had
-  hostname end as expected" (`po6-l13-c-ctl-allow`).
+  hostname end as expected" (`po10-l13c-ctl-allow-3`).
 * the arch check matching no entry's token: "sc-allow.service never
-  finished its checks" (`po6-l13-c-ctl-arch`).
+  finished its checks" (`po10-l13c-ctl-arch-3`).
 * `User=` not implying `no_new_privs`: "sc-kill.service never finished its
-  checks", the filter refused (`po6-l13-c-ctl-nnp`).
+  checks", the filter refused (`po10-l13c-ctl-nnp-3`).
 
 `SystemCallArchitectures=`'s other ABIs (i386 on x86-64, x32) have no
 program in the image to call through them, so the host tests hold them.
