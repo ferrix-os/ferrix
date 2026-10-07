@@ -1632,28 +1632,28 @@
     },
     {
       "file": "sched/queue.rs",
-      "lines": "242",
+      "lines": "244",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "254-255",
+      "lines": "256-257",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "326",
+      "lines": "339",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "444",
+      "lines": "457",
       "category": "defensive",
       "match": "task.return_run_slot(refused.slot);",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
