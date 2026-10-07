@@ -26,6 +26,7 @@
 //!   `FUTEX_WAIT` on a shared anonymous page (not private: two processes).
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 /// Untimed round trips before each repetition's samples.
@@ -45,8 +46,16 @@ const ONLY: Option<&str> = if cfg!(feature = "profile") {
     None
 };
 
+/// With `profile` and `PIPE_BENCH_DOMAIN` set at build time, the one test
+/// runs only in the member started in a speculation domain.
+const PROFILE_IN_DOMAIN: bool =
+    cfg!(feature = "profile") && option_env!("PIPE_BENCH_DOMAIN").is_some();
+
 /// Whether `test` runs.
 fn runs(test: &str) -> bool {
+    if PROFILE_IN_DOMAIN && !IN_DOMAIN.load(Ordering::Relaxed) {
+        return false;
+    }
     ONLY.is_none_or(|only| only == test)
 }
 /// Bytes a ping-pong message carries.
@@ -91,7 +100,9 @@ fn ticks_per_us() -> u64 {
     let start = now();
     while wall.elapsed().as_millis() < 200 {}
     let ticks = now().saturating_sub(start);
-    let us = u64::try_from(wall.elapsed().as_micros()).unwrap_or(1).max(1);
+    let us = u64::try_from(wall.elapsed().as_micros())
+        .unwrap_or(1)
+        .max(1);
     (ticks / us).max(1)
 }
 
@@ -144,8 +155,9 @@ impl Samples {
         let mean = self.ticks.iter().sum::<u64>() / u64::try_from(n.max(1)).unwrap_or(1);
         let (min, p50, p90, p99) = (at(0), at(50), at(90), at(99));
         println!(
-            "LB name={name} rep={rep} n={n} min={min} p50={p50} p90={p90} p99={p99} mean={mean} \
+            "LB name={} rep={rep} n={n} min={min} p50={p50} p90={p90} p99={p99} mean={mean} \
              p50_ns={} p90_ns={} p99_ns={}",
+            label(name),
             ns(p50),
             ns(p90),
             ns(p99)
@@ -179,7 +191,7 @@ fn bench(name: &str, samples: &mut Samples, mut op: impl FnMut()) {
     }
     p50s.sort_unstable();
     let median = p50s.get(repeats / 2).copied().unwrap_or(0);
-    println!("LB summary name={name} p50_ns={median}");
+    println!("LB summary name={} p50_ns={median}", label(name));
 }
 
 /// Fork an echo child that reads LEN bytes from `child_in` and writes them
@@ -359,7 +371,130 @@ fn counters(when: &str) {
     }
 }
 
+/// Whether this run is the member started in a speculation domain: its
+/// lines are named `domain-<test>`.
+static IN_DOMAIN: AtomicBool = AtomicBool::new(false);
+
+/// What a line calls `name`.
+fn label(name: &str) -> String {
+    if IN_DOMAIN.load(Ordering::Relaxed) {
+        format!("domain-{name}")
+    } else {
+        name.to_owned()
+    }
+}
+
+/// The file the starter makes before it starts the member, which is how the
+/// member knows it is one.
+const MEMBER_MARK: &str = "/tmp/pipe-bench-member";
+/// The FIFO the member's lines come back through.
+const MEMBER_FIFO: &str = "/tmp/pipe-bench-fifo";
+
+/// Native calls, made through the C library's `syscall` as init makes them.
+#[derive(Debug, Clone, Copy)]
+struct Native;
+
+impl ferrix_native::Syscall for Native {
+    fn call(self, raw: ferrix_native::Raw<'_>) -> usize {
+        let [a0, a1, a2, a3, a4, a5] = raw.args();
+        let number = libc::c_long::try_from(raw.number()).unwrap_or(-1);
+        // SAFETY: `raw` borrows every memory its arguments name for as long
+        // as it lives, which is past this call (`ferrix_native::call`).
+        let ret = unsafe { libc::syscall(number, a0, a1, a2, a3, a4, a5) };
+        if ret == -1 {
+            let errno = std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EIO);
+            (-isize::try_from(errno).unwrap_or(isize::MAX)).cast_unsigned()
+        } else {
+            usize::try_from(ret).unwrap_or(usize::MAX)
+        }
+    }
+}
+
+/// On Ferrix, after the tests: run them again in a process started by
+/// `process_create` into a new job marked as one speculation domain (the
+/// matched configuration `bench-ipc`'s `domain-call` is measured in), whose
+/// forked child is then a member too, and print what it prints. A starter
+/// with MANAGE on a cgroup's job is all this takes (`docs/OPAQUE-KERNEL.md`
+/// §9.2); nothing in the kernel is asked to change.
+fn run_in_domain() -> Result<(), String> {
+    use ferrix_native::{Requested, Rights, channel, job, pending, vmo};
+    let image =
+        std::fs::read("/proc/self/exe").map_err(|error| format!("reading itself: {error}"))?;
+    for (source, target, kind) in [
+        (c"sys", c"/sys", c"sysfs"),
+        (c"cgroup2", c"/sys/fs/cgroup", c"cgroup2"),
+    ] {
+        // SAFETY: three NUL-terminated strings, no data; an existing mount
+        // is as good.
+        let _ = unsafe {
+            libc::mount(
+                source.as_ptr(),
+                target.as_ptr(),
+                kind.as_ptr(),
+                0,
+                core::ptr::null(),
+            )
+        };
+    }
+    let _ = std::fs::create_dir("/sys/fs/cgroup/pipe-bench");
+    let dir = std::fs::File::open("/sys/fs/cgroup/pipe-bench")
+        .map_err(|error| format!("opening the cgroup: {error}"))?;
+    use std::os::fd::AsRawFd as _;
+    let job = job::for_cgroup(Native, dir.as_raw_fd(), Requested::Exactly(Rights::MANAGE))
+        .map_err(|error| format!("job_for_cgroup: {error:?}"))?;
+    let domain = job
+        .create_speculation_domain()
+        .map_err(|error| format!("job_create(JOB_SPECULATION_DOMAIN): {error:?}"))?;
+    let elf = vmo::create(Native, image.len()).map_err(|error| format!("vmo_create: {error:?}"))?;
+    elf.write(&image, 0)
+        .map_err(|error| format!("vmo_write: {error:?}"))?;
+    let _ = std::fs::remove_file(MEMBER_FIFO);
+    let fifo = std::ffi::CString::new(MEMBER_FIFO).map_err(|_| "fifo name".to_owned())?;
+    // SAFETY: a NUL-terminated path.
+    if unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) } != 0 {
+        return Err(format!("mkfifo: {}", std::io::Error::last_os_error()));
+    }
+    std::fs::write(MEMBER_MARK, b"member").map_err(|error| format!("the mark: {error}"))?;
+    let process = pending::create_process(&domain, &elf, "pipe-bench")
+        .map_err(|error| format!("process_create: {error:?}"))?;
+    let (ours, theirs) = channel::create(Native).map_err(|error| format!("channel: {error:?}"))?;
+    process
+        .start(theirs.into_owned())
+        .map_err(|(error, _)| format!("process_start: {error:?}"))?;
+    // Blocks until the member opens it for writing; ends when it is done.
+    let lines = std::fs::read_to_string(MEMBER_FIFO)
+        .map_err(|error| format!("reading the member: {error}"))?;
+    print!("{lines}");
+    drop((ours, process));
+    if !lines.contains("LB member done") {
+        return Err("the member did not finish".to_owned());
+    }
+    Ok(())
+}
+
+/// The member's start: its output to the starter's FIFO.
+fn become_member() {
+    IN_DOMAIN.store(true, Ordering::Relaxed);
+    let _ = std::fs::remove_file(MEMBER_MARK);
+    if let Ok(fifo) = std::fs::OpenOptions::new().write(true).open(MEMBER_FIFO) {
+        use std::os::fd::IntoRawFd as _;
+        let fd = fifo.into_raw_fd();
+        // SAFETY: `fd` is open; 1 and 2 become it.
+        unsafe {
+            let _ = libc::dup2(fd, 1);
+            let _ = libc::dup2(fd, 2);
+            let _ = libc::close(fd);
+        }
+    }
+}
+
 fn main() {
+    let member = std::path::Path::new(MEMBER_MARK).exists();
+    if member {
+        become_member();
+    }
     counters("start");
     let per_us = ticks_per_us();
     println!("LB start warmup={WARMUP} samples={SAMPLES} repeats={REPEATS} ticks_per_us={per_us}");
@@ -383,6 +518,21 @@ fn main() {
         bench_futex(&mut samples);
     }
     counters("end");
+    if member {
+        println!("LB member done");
+        let _ = std::io::stdout().flush();
+        return;
+    }
+    // On Ferrix only, and not in a profile build, which times one thing.
+    if (ONLY.is_none() || PROFILE_IN_DOMAIN)
+        && std::path::Path::new("/proc/ferrix-seam").exists()
+        && let Err(why) = run_in_domain()
+    {
+        println!("LB error domain: {why}");
+        let _ = std::io::stdout().flush();
+        // SAFETY: as in `fail`.
+        unsafe { libc::_exit(1) };
+    }
     println!("LB done");
     let _ = std::io::stdout().flush();
 }

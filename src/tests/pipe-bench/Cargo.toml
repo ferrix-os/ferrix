@@ -19,6 +19,8 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
+# The native calls that start the second run in a speculation domain.
+ferrix-native = { path = "../../lib/proto/native" }
 
 [features]
 # Only the test named by `PIPE_BENCH_ONLY` at build time (default the pipe),

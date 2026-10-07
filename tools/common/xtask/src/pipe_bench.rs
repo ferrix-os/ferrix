@@ -24,6 +24,12 @@ const TESTS: &[&str] = &[
     "pipe-pingpong-8B",
     "unix-stream-pingpong-8B",
     "futex-pingpong",
+    // Again, the two processes born in one speculation domain: the matched
+    // configuration, without the predictor barrier between them.
+    "domain-null-getppid",
+    "domain-pipe-pingpong-8B",
+    "domain-unix-stream-pingpong-8B",
+    "domain-futex-pingpong",
 ];
 
 /// Boot `--rounds` times and print every test's p50 a boot, and their median.
@@ -55,7 +61,10 @@ pub(crate) fn bench_pipe(args: &Args) -> Result<()> {
                     log.display()
                 )));
             }
-            if !lines.iter().any(|line| line.trim_end().ends_with("LB done")) {
+            if !lines
+                .iter()
+                .any(|line| line.trim_end().ends_with("LB done"))
+            {
                 return Err(Error::new(format!(
                     "{arch}: pipe-bench did not finish.\n  Serial output is in {}",
                     log.display()
