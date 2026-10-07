@@ -1,4 +1,5 @@
-//! `mmap`, `munmap`, `mprotect`, `mremap`, `madvise`, `mincore` and `brk`.
+//! `mmap`, `munmap`, `mprotect`, `mremap`, `madvise`, `mincore` and `brk`,
+//! and ARM's `cacheflush`.
 //!
 //! The four calls a program reshapes its own address space with, and the first
 //! four a static musl binary makes: it allocates with `mmap` before it does
@@ -36,7 +37,8 @@ use crate::syscall::fd;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::user::space::{
-    Advice, Declined, Destination, FileMapping, FilePlace, MMAP_MIN_ADDR, SpaceError, WindowPages,
+    Access, Advice, Declined, Destination, FileMapping, FilePlace, MMAP_MIN_ADDR, SpaceError,
+    WindowPages,
 };
 use crate::user::vmo::Vmo;
 
@@ -642,6 +644,76 @@ pub(crate) fn sys_madvise(
             Declined::Unsupported => Errno::EOPNOTSUPP,
             Declined::NoMemory => Errno::EAGAIN,
         })
+}
+
+/// `cacheflush`: ARM's private call (`__ARM_NR_cacheflush`, `0x0f0002`),
+/// which makes `[start, end)` coherent between the data and instruction
+/// sides.
+///
+/// A 32-bit ARM program cannot reach the cache maintenance operations, so
+/// whatever writes instructions -- V8's JIT above all, which makes this call
+/// after every piece of code it writes and ignores the answer -- has to ask.
+/// On a Cortex-A7 a page that stays mapped executable while it is written
+/// would otherwise run what its instruction cache still holds. A page that is
+/// installed executable is made coherent then (`mm::map_in`), and `mprotect`
+/// takes every page of its range down to be installed again, so a program
+/// that writes, then makes executable, is coherent without this call; one
+/// that writes into code already mapped is not.
+///
+/// The checks run in `do_cache_op`'s order (`arch/arm/kernel/traps.c`):
+/// `flags` other than zero, or `end` before `start`, is `EINVAL`; a range
+/// outside the program's half is `EFAULT`. Then page by page: a page no
+/// region maps, or one its region does not let be read (`PROT_NONE`, a
+/// device's), is `EFAULT`, with the pages before it already done, as Linux's
+/// fault in the middle of its walk leaves them. A page present is cleaned
+/// and the instruction caches emptied, over the part of the range it holds,
+/// through the direct map: the data cache is physically tagged, so the
+/// kernel's alias reaches the program's lines, and the instruction caches
+/// are emptied whole. A page not present is left so: no line of it was
+/// written through this mapping, and it is made coherent when it is
+/// installed. Linux faults such a page in; nothing here commits memory for a
+/// flush.
+///
+/// Like Linux's, the walk has no bound but the range: one hold of the
+/// space's lock a page, no allocation.
+pub(crate) fn sys_cacheflush(
+    process: &Process,
+    start: u64,
+    end: u64,
+    flags: u64,
+) -> Result<usize, Errno> {
+    cacheflush_pages(process, start, end, flags).map(|_| 0)
+}
+
+/// [`sys_cacheflush`], saying how many present pages it made coherent: what
+/// the self-check counts.
+pub(crate) fn cacheflush_pages(
+    process: &Process,
+    start: u64,
+    end: u64,
+    flags: u64,
+) -> Result<u64, Errno> {
+    if flags != 0 || end < start {
+        return Err(Errno::EINVAL);
+    }
+    if !uaccess::is_user_range(start, end - start) {
+        return Err(Errno::EFAULT);
+    }
+    let mut maintained = 0;
+    let mut at = start;
+    while at < end {
+        let page_end = (at - at % PAGE_SIZE).saturating_add(PAGE_SIZE).min(end);
+        let len = page_end - at;
+        let _present = process
+            .space()
+            .with_present_page(at, Access::READ, |virt| {
+                crate::arch::sync_instructions(virt, len);
+                maintained += 1;
+            })
+            .map_err(|_| Errno::EFAULT)?;
+        at = page_end;
+    }
+    Ok(maintained)
 }
 
 /// `munmap`.

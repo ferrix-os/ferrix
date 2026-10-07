@@ -824,6 +824,8 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_the_loader_refuses_what_it_cannot_run(&process)?;
     check_descriptors(&process)?;
     check_what_an_applet_asks_of_the_system(&process)?;
+    check_cacheflush_answers_as_linux_does(&process)?;
+    check_send_and_recv_are_sendto_and_recvfrom(&process)?;
     if output == Output::Show {
         check_write_reaches_the_console(&process)?;
         check_writev_gathers_in_order(&process)?;
@@ -11308,4 +11310,179 @@ pub(crate) fn native_child_image() -> Vec<u8> {
         image::Shape::Good,
         arch::USER_ARGUMENT_PROGRAM,
     )
+}
+
+// ---------------------------------------------------------------------------
+// ARMv7-A's own calls, which Chromium's armhf build makes
+//
+// At the end of the file, so that no checked function above moves off the
+// lines its coverage was measured on.
+// ---------------------------------------------------------------------------
+
+/// `__ARM_NR_cacheflush`, the number V8 makes it by.
+const ARM_CACHEFLUSH: usize = 0x000f_0002;
+
+/// `cacheflush` answers as Linux's `do_cache_op`, and makes coherent each
+/// page of the range that is present, and only those: over three pages of
+/// a mapping that may be written and run, the first and last touched and
+/// the middle never, the pages it maintains are two and the middle is
+/// still not committed afterwards. Reversed and empty ranges, flags, a
+/// range running past the mapping, one above the program's half and a
+/// `PROT_NONE` page are answered as Linux answers them, and so is a range
+/// that runs from a page that is mapped into one that is not.
+///
+/// On ARMv7-A the call also goes in by its number, `0x0f0002`, through the
+/// table a program's `svc` reaches; no other architecture has the number.
+/// What the maintenance does to the caches no emulator shows: QEMU keeps
+/// its translated code coherent with memory by itself.
+fn check_cacheflush_answers_as_linux_does(process: &Process) -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::PROT_EXEC;
+    let request = |len: u64, prot: u32| MmapRequest {
+        addr: 0,
+        len,
+        prot,
+        flags: MAP_ANONYMOUS | MAP_PRIVATE,
+        fd: -1,
+        offset: 0,
+        unit: OffsetUnit::Bytes,
+    };
+    let len = 3 * PAGE_SIZE;
+    // A fourth page, given back below once the PROT_NONE page is placed, so
+    // that a range running past the mapping meets a hole nothing else fills.
+    let code = memory::sys_mmap(
+        process,
+        &request(len + PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC),
+    )
+    .map_err(|_| "a mapping that may be written and run was refused")?;
+    let code = u64::try_from(code).map_err(|_| "mmap returned an impossible address")?;
+    let fenced = memory::sys_mmap(process, &request(PAGE_SIZE, 0))
+        .map_err(|_| "a PROT_NONE page was refused")?;
+    let fenced = u64::try_from(fenced).map_err(|_| "mmap returned an impossible address")?;
+    let hole = code + len;
+    let _ = memory::sys_munmap(process, hole, PAGE_SIZE);
+    let outcome = (|| {
+        // A return instruction's worth of bytes in the first and last pages.
+        for page in [0, 2] {
+            uaccess::copy_to_user(process.space(), code + page * PAGE_SIZE + 8, &[0x1E; 4])
+                .map_err(|_| "could not write into the mapping")?;
+        }
+        let resident = process
+            .space()
+            .resident_pages()
+            .map_err(|_| "could not count the resident pages")?;
+        // From the middle of the first page to the middle of the last.
+        let (start, end) = (code + 8, code + len - 8);
+        let maintained = memory::cacheflush_pages(process, start, end, 0);
+        if process.space().resident_pages() != Ok(resident) {
+            return Err("cacheflush committed a page the program never touched");
+        }
+        if maintained != Ok(2) {
+            return Err("cacheflush did not maintain exactly the two present pages");
+        }
+        let answers = [
+            (memory::sys_cacheflush(process, start, end, 0), Ok(0)),
+            (memory::sys_cacheflush(process, start, start, 0), Ok(0)),
+            (
+                memory::sys_cacheflush(process, start, end, 1),
+                Err(Errno::EINVAL),
+            ),
+            (
+                memory::sys_cacheflush(process, end, start, 0),
+                Err(Errno::EINVAL),
+            ),
+            (
+                memory::sys_cacheflush(process, KERNEL_HALF_BASE, KERNEL_HALF_BASE + 4, 0),
+                Err(Errno::EFAULT),
+            ),
+            (
+                memory::sys_cacheflush(process, fenced, fenced + 4, 0),
+                Err(Errno::EFAULT),
+            ),
+        ];
+        if answers.iter().any(|(got, want)| got != want) {
+            return Err("cacheflush did not answer as Linux's do_cache_op does");
+        }
+        // From the mapping's last page into the hole after it: EFAULT, as
+        // Linux's fixup answers a page no VMA maps.
+        if memory::sys_cacheflush(process, hole - 8, hole + 8, 0) != Err(Errno::EFAULT) {
+            return Err("cacheflush over a hole was not EFAULT");
+        }
+        if arch::decode_syscall(ARM_CACHEFLUSH) == Some(Call::ArmCacheflush) {
+            let by_number = crate::syscall::linux::handle(
+                Call::ArmCacheflush,
+                &SyscallArgs {
+                    abi: crate::trap::Abi::Native,
+                    number: ARM_CACHEFLUSH,
+                    args: [start, end, 0, 0, 0, 0],
+                    ip: 0,
+                },
+                Some(process),
+            );
+            if by_number != Ok(0) {
+                return Err("cacheflush by its number did not reach its handler");
+            }
+        } else if arch::ARCH == ferrix_bootinfo::Arch::Armv7a {
+            return Err("ARMv7-A's table does not decode 0x0f0002 as cacheflush");
+        }
+        Ok(())
+    })();
+    let _ = memory::sys_munmap(process, code, len);
+    let _ = memory::sys_munmap(process, fenced, PAGE_SIZE);
+    outcome
+}
+
+/// ARMv7-A's `send` and `recv`, which glibc's armhf build makes for its
+/// `send` and `recv`, are `sendto` and `recvfrom` with no address: bytes sent
+/// by one end of a socket pair with `send` come out of the other with
+/// `recv`, its flags are read (`MSG_PEEK` leaves the bytes to be read
+/// again), and an empty non-blocking socket is `EAGAIN`. On ARMv7-A the two
+/// go in by their numbers, 289 and 291, which Chromium's network service
+/// found `ENOSYS` until they were in the table.
+fn check_send_and_recv_are_sendto_and_recvfrom(process: &Process) -> Result<(), &'static str> {
+    const DATA: &[u8] = b"sent by send";
+    let page = map_rw(process, PAGE_SIZE)?;
+    let pair = socket_pair(process, page, SOCK_STREAM);
+    let outcome = pair.and_then(|(one, other)| {
+        let call = |call: Call, args: [u64; 6]| -> Result<usize, Errno> {
+            if arch::ARCH == ferrix_bootinfo::Arch::Armv7a {
+                call_by_number(process, call, args)
+            } else {
+                socket_call(process, call, &args)
+            }
+        };
+        uaccess::copy_to_user(process.space(), page + SENT, DATA)
+            .map_err(|_| "could not stage what send sends")?;
+        let flags = u64::from(MSG_NOSIGNAL);
+        if call(
+            Call::Send,
+            [as_arg(one), page + SENT, DATA.len() as u64, flags, 0, 0],
+        ) != Ok(DATA.len())
+        {
+            return Err("send did not send what it was given");
+        }
+        let len = DATA.len() as u64;
+        let peek = u64::from(MSG_PEEK);
+        for flags in [peek, 0] {
+            if call(
+                Call::Recv,
+                [as_arg(other), page + RECEIVED, len, flags, 0, 0],
+            ) != Ok(DATA.len())
+            {
+                return Err("recv did not receive what send sent");
+            }
+            let got = read_user::<12>(process, page + RECEIVED)?;
+            if got.as_slice() != DATA {
+                return Err("recv received other bytes than send sent");
+            }
+        }
+        if call(Call::Recv, [as_arg(other), page + RECEIVED, len, 0, 0, 0]) != Err(Errno::EAGAIN) {
+            return Err("recv on an empty non-blocking socket was not EAGAIN");
+        }
+        Ok(())
+    });
+    if let Ok(pair) = pair {
+        close_socket_pair(process, pair);
+    }
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
 }
