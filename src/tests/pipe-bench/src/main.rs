@@ -420,9 +420,8 @@ impl ferrix_native::Syscall for Native {
 /// §9.2); nothing in the kernel is asked to change.
 fn run_in_domain() -> Result<(), String> {
     use ferrix_native::{Requested, Rights, channel, job, pending, vmo};
-    let image =
-        std::fs::read("/proc/self/exe").map_err(|error| format!("reading itself: {error}"))?;
     for (source, target, kind) in [
+        (c"proc", c"/proc", c"proc"),
         (c"sys", c"/sys", c"sysfs"),
         (c"cgroup2", c"/sys/fs/cgroup", c"cgroup2"),
     ] {
@@ -438,6 +437,14 @@ fn run_in_domain() -> Result<(), String> {
             )
         };
     }
+    // Itself, by /proc, or else by the name it was started as.
+    let image = std::fs::read("/proc/self/exe")
+        .or_else(|first| {
+            std::env::args()
+                .next()
+                .map_or(Err(first), |name| std::fs::read(name))
+        })
+        .map_err(|error| format!("reading itself: {error}"))?;
     let _ = std::fs::create_dir("/sys/fs/cgroup/pipe-bench");
     let dir = std::fs::File::open("/sys/fs/cgroup/pipe-bench")
         .map_err(|error| format!("opening the cgroup: {error}"))?;
