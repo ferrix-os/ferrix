@@ -5516,3 +5516,25 @@ The added conditions, each to be met by the code and its review:
 G1 to G11. It lands only after po10-obj's fix of the masked endpoint drop is
 on `main`. The timing ablation (`os76/unwind-abl`) runs first. If the unwind
 is worth little, G1 is weighed again before it is built.
+
+#### Measured since the second reading (2026-10-07, os-76 window 1)
+
+The timing ablation's figures:
+- **The tree.** `os76/unwind-abl` 9b8d04556, on `08984c2db`. The woken
+  task's way back is cut from about nine returns to three.
+- **Per round trip** (host perf, guest mode, fast clock mode, quiet host):
+  4,868 cycles and 4,996 instructions, against 4,841 and 4,981 on
+  `main`'s code. Return mispredicts were 9.99 per trip on both sides.
+- **ABAB in the slow clock mode:** +10 to +20 ns, 3 boots against 5.
+
+So G1's premise is false: the ten return mispredicts a trip are not the
+kernel's unwind. A per-function profile places them after the user's
+`syscall` in `trap_words`, at `finish_switch`'s `Arc<Task>` drop and in
+`load_selectors`. G1's remaining saving is `ferrix_switch`,
+`finish_switch` and the reply cell, a few dozen instructions out of about
+5,000 a trip.
+
+**G1 is not built.** It is weighed again against the profile: the
+scheduler's hand-over is about 2,500 instructions a trip, and that comes
+first. The profile is on the gate host, at
+`~/.local/share/ferrix/logs/os76/profile-main60.txt`.
