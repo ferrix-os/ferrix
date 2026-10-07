@@ -562,7 +562,7 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
 /// reply a commit handed this task goes into its frame, in the four
 /// registers `Outcome::ReturnWords` writes. With nothing due -- no
 /// pending work, no decision asked of this processor, no move between jobs,
-/// nothing that may filter it -- the call ends here, `IN_CALL` lowered, and
+/// no `cpu.max` quota used up, nothing that may filter it -- the call ends here, `IN_CALL` lowered, and
 /// the stub's own exit runs. Otherwise the general branch: interrupts
 /// opened, the `may_block` check, the call's way back as `trap::system_call`
 /// makes it, and the entry's way out. With interrupts masked.
@@ -583,6 +583,9 @@ fn frame_tail(frame: &mut SyscallFrame, outcome: Outcome) {
         );
     }
     crate::sched::regroup_current();
+    // As `trap::system_call`'s way back: a job that has used its `cpu.max`
+    // quota waits out the rest of its period here.
+    crate::sched::throttle_current(crate::trap::must_attend);
     crate::sched::call_left();
     super::disable_interrupts();
     mark_vectors_dead(false);
