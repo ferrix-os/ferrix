@@ -578,10 +578,13 @@ impl CpuQueue {
             .map(|left| now.saturating_add(left));
 
         // A task under a `cpu.max` is cut when its quota is used up, however
-        // alone it is: nothing else would interrupt it to throttle it.
+        // alone it is: nothing else would interrupt it to throttle it. The
+        // task the fair class runs, which is the one charged (`account_in`):
+        // a switch arms the timer before it stores its pick in `current`
+        // (`switch_chosen`), so `current` there is still the outgoing task.
         let bandwidth = self
-            .current
-            .as_ref()
+            .fair
+            .current()
             .filter(|_| crate::object::quota::bandwidth_in_use())
             .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
             .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
