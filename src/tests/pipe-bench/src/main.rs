@@ -158,8 +158,14 @@ impl Samples {
 /// Time `op` REPEATS times, WARMUP untimed and SAMPLES timed calls each,
 /// and print the summary line.
 fn bench(name: &str, samples: &mut Samples, mut op: impl FnMut()) {
-    let mut p50s = Vec::with_capacity(REPEATS);
-    for rep in 1..=REPEATS {
+    // A profile of the floor needs seconds of it, as a ping-pong's does.
+    let repeats = if ONLY.is_some() && name == "null-getppid" {
+        REPEATS * 40
+    } else {
+        REPEATS
+    };
+    let mut p50s = Vec::with_capacity(repeats);
+    for rep in 1..=repeats {
         for _ in 0..WARMUP {
             op();
         }
@@ -172,7 +178,7 @@ fn bench(name: &str, samples: &mut Samples, mut op: impl FnMut()) {
         p50s.push(samples.report(name, rep));
     }
     p50s.sort_unstable();
-    let median = p50s.get(REPEATS / 2).copied().unwrap_or(0);
+    let median = p50s.get(repeats / 2).copied().unwrap_or(0);
     println!("LB summary name={name} p50_ns={median}");
 }
 
