@@ -878,6 +878,43 @@ pub(crate) fn read_data_selectors() -> [u16; 4] {
     [ds, es, fs, gs]
 }
 
+/// Load `DS` alone: selector and, from the GDT, the hidden part.
+///
+/// # Safety
+///
+/// (CONTEXT) As [`load_data_selectors`], for `selector`.
+pub(crate) unsafe fn load_ds(selector: u16) {
+    // SAFETY: (CONTEXT) the caller guarantees the selector loads.
+    unsafe {
+        asm!("mov ds, {0:e}", in(reg) u32::from(selector), options(nostack, preserves_flags));
+    }
+}
+
+/// Load `ES` alone: selector and, from the GDT, the hidden part.
+///
+/// # Safety
+///
+/// (CONTEXT) As [`load_data_selectors`], for `selector`.
+pub(crate) unsafe fn load_es(selector: u16) {
+    // SAFETY: (CONTEXT) the caller guarantees the selector loads.
+    unsafe {
+        asm!("mov es, {0:e}", in(reg) u32::from(selector), options(nostack, preserves_flags));
+    }
+}
+
+/// Load `FS` alone: selector and, from the GDT, the hidden base, which a
+/// null selector may clear (see [`load_data_selectors`]).
+///
+/// # Safety
+///
+/// (CONTEXT) As [`load_data_selectors`], for `selector`.
+pub(crate) unsafe fn load_fs(selector: u16) {
+    // SAFETY: (CONTEXT) the caller guarantees the selector loads.
+    unsafe {
+        asm!("mov fs, {0:e}", in(reg) u32::from(selector), options(nostack, preserves_flags));
+    }
+}
+
 /// Load `DS`, `ES` and `FS` for a program: selector and, from the GDT, the
 /// hidden base and limit.
 ///
@@ -891,18 +928,13 @@ pub(crate) fn read_data_selectors() -> [u16; 4] {
 /// code segment, in this processor's GDT whose DPL admits it. Anything else is
 /// `#GP` in ring 0.
 pub(crate) unsafe fn load_data_selectors(ds: u16, es: u16, fs: u16) {
-    // SAFETY: (CONTEXT) the caller guarantees each selector loads.
-    unsafe {
-        asm!(
-            "mov ds, {0:e}",
-            "mov es, {1:e}",
-            "mov fs, {2:e}",
-            in(reg) u32::from(ds),
-            in(reg) u32::from(es),
-            in(reg) u32::from(fs),
-            options(nostack, preserves_flags),
-        );
-    }
+    // SAFETY: (CONTEXT) the caller guarantees each selector loads; one load
+    // a register, which the switch's `DS`/`ES` skip takes one at a time.
+    unsafe { load_ds(ds) };
+    // SAFETY: (CONTEXT) as for `DS`.
+    unsafe { load_es(es) };
+    // SAFETY: (CONTEXT) as for `DS`.
+    unsafe { load_fs(fs) };
 }
 
 /// Load `GS` for a program without disturbing the kernel's own `GS` base.

@@ -57,6 +57,12 @@ pub(crate) const ARCH: Arch = Arch::AArch64;
 /// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
 pub(crate) const FAST_WRITE_READ: bool = false;
 
+/// The switches that left `DS` and `ES` unloaded (x86-64's `DS`/`ES` skip,
+/// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
+pub(crate) const fn selector_skips_total() -> Option<u64> {
+    None
+}
+
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Generic;
 
 /// AArch64's `struct epoll_event`, 16 bytes: not packed, so `data` is

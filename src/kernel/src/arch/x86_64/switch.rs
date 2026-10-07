@@ -573,6 +573,10 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
 static X87_RESETS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 /// See [`X87_RESETS`].
 static X87_LEFT: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// Loads of `DS` and `ES` that left one or both unloaded, 0 over 0 (the
+/// `DS`/`ES` skip): per processor, kept as [`X87_RESETS`] is, for the check,
+/// which must see the skip taken.
+static SELECTOR_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 
 /// This processor's logical number, zero before it has a record.
 fn this_logical() -> usize {
@@ -599,6 +603,26 @@ pub(crate) fn x87_resets() -> (u64, u64) {
             .map_or(0, |counter| counter.load(Ordering::Relaxed))
     };
     (read(&X87_RESETS), read(&X87_LEFT))
+}
+
+/// This processor's switches so far that left `DS` or `ES` unloaded, 0 over
+/// 0.
+pub(crate) fn selector_skips() -> u64 {
+    SELECTOR_SKIPS
+        .get(this_logical())
+        .map_or(0, |counter| counter.load(Ordering::Relaxed))
+}
+
+/// Every processor's switches so far that left `DS` or `ES` unloaded: for
+/// the fast path's counts, which show its direct switches taking the skip
+/// through the same `restore_user_state` (the consultant's E3 (iv)).
+pub(crate) fn selector_skips_total() -> Option<u64> {
+    Some(
+        SELECTOR_SKIPS
+            .iter()
+            .map(|counter| counter.load(Ordering::Relaxed))
+            .fold(0, u64::wrapping_add),
+    )
 }
 
 /// Reset the vector registers of a task whose state is `unsaved`: every
@@ -711,8 +735,31 @@ unsafe fn load_selectors(
     gs_base: u64,
 ) {
     let [ds, es, fs, gs] = selectors.map(|selector| gdt::loadable(selector, tls));
-    // SAFETY: (CONTEXT) each selector null or loadable, as `gdt::loadable` checked.
-    unsafe { cpu::load_data_selectors(ds, es, fs) };
+    // The `DS`/`ES` skip (`docs/OPAQUE-KERNEL.md` §9.8, 3b, the consultant's
+    // S1 to S7): `DS` or `ES` is left unloaded only where the selector to
+    // load and the one the processor holds, read here with no load between,
+    // are both exactly 0 -- not merely null, since 1 to 3 are null selectors
+    // whose RPL bits a program reads back -- and never by a remembered value.
+    // In long mode only an explicit load writes `DS` or `ES`, so one reading
+    // 0 was last loaded with 0, and a vendor's null load is idempotent:
+    // loading 0 again would leave the hidden part exactly as it is. `FS` and
+    // `GS` are loaded at every switch, their bases written below as before.
+    let [held_ds, held_es, _, _] = cpu::read_data_selectors();
+    let load_ds = ds != 0 || held_ds != 0;
+    let load_es = es != 0 || held_es != 0;
+    if load_ds {
+        // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
+        unsafe { cpu::load_ds(ds) };
+    }
+    if load_es {
+        // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
+        unsafe { cpu::load_es(es) };
+    }
+    if !(load_ds && load_es) {
+        count(&SELECTOR_SKIPS);
+    }
+    // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
+    unsafe { cpu::load_fs(fs) };
     if fs == 0 {
         // SAFETY: (CONTEXT) a user address the program set, or zero.
         unsafe { super::syscall::set_thread_pointer(fs_base) };

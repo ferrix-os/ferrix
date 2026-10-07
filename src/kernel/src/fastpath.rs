@@ -111,4 +111,8 @@ pub(crate) fn report_counts() {
          halves={halves} T6={t6} T7={t7} T8={t8} T9={t9} T10={t10} queue={queue} T11={t11} \
          T12={t12} T13={t13}"
     );
+    // The DS/ES skip is the switch's, so the direct switch takes it too.
+    if let Some(skipped) = crate::arch::selector_skips_total() {
+        println!("  fastpath switches that left DS or ES unloaded, 0 over 0: {skipped}");
+    }
 }

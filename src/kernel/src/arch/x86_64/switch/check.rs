@@ -23,7 +23,11 @@
 //! bases trade the processor; and one that loads `USER_DS` and then a null
 //! selector into `FS` gets its recorded base back after a switch, while a
 //! second, whose recorded base equals the one the processor last wrote, still
-//! reads its own (the consultant's condition 8).
+//! reads its own (the consultant's condition 8). The `DS`/`ES` skip (3b, the
+//! consultant's S4): a program beside one that left 3, `USER_DS`, or a based
+//! descriptor and then 0 in `DS` and `ES` reads its own; an i386 and a 64-bit
+//! program trading the processor each read their own; and two programs with
+//! null `DS` and `ES` see the skip taken.
 
 use alloc::sync::Arc;
 
@@ -1336,4 +1340,392 @@ fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
     let _ = reader.wait_for_exit(deadline);
     drop(theirs);
     vector_verdict(status)
+}
+
+// ---------------------------------------------------------------------------
+// The DS/ES skip: 0 over 0 only, by the processor's own registers
+// ---------------------------------------------------------------------------
+
+/// A 64-bit program for the `DS`/`ES` skip's cases (`docs/OPAQUE-KERNEL.md`
+/// §9.8, 3b, the consultant's S4), in one of four modes, patched at 4: `L`
+/// loads the selector patched at 12 into `DS` and `ES` before each of its
+/// yields; `R` reads `DS` and `ES` after each and exits 2 or 3 if either is
+/// not 0; `T` installs a flat 32-bit data descriptor based at the data
+/// segment through `set_thread_area` (an i386 call), and before each yield
+/// loads its selector into `DS` and `ES`, then 0; `C` yields, then far-returns
+/// into compatibility mode and reads through `DS`, which is null there, so
+/// `SIGSEGV` must end it -- surviving the read exits 5. The yields are
+/// patched at 8. Exits 0, or 10 if `set_thread_area` failed.
+///
+/// ```text
+/// _start: jmp start
+///         .org 4
+/// mode:   .byte '?'
+///         .org 8
+/// rounds: .long 0x7f7f7f7f
+///         .org 12
+/// sel:    .word 0x7f7f
+///         .org 16
+/// start:  movzbl mode(%rip), %r13d
+///         cmpb $'T', %r13b
+///         jne 1f
+///         movl $0x410100, %ecx
+///         movl $-1, (%rcx)
+///         movl $0x410000, 4(%rcx)
+///         movl $0xfffff, 8(%rcx)
+///         movl $0x51, 12(%rcx)
+///         movl $243, %eax
+///         movl $0x410100, %ebx
+///         int $0x80
+///         movl $10, %edi
+///         testl %eax, %eax
+///         jnz exit
+///         movl $0x410100, %ecx
+///         movl (%rcx), %r14d
+///         shll $3, %r14d
+///         orl $3, %r14d
+/// 1:      movl rounds(%rip), %r12d
+///         cmpb $'C', %r13b
+///         je compat_reader
+/// loop:   cmpb $'L', %r13b
+///         jne 2f
+///         movw sel(%rip), %ax
+///         movw %ax, %ds
+///         movw %ax, %es
+///         jmp yield
+/// 2:      cmpb $'T', %r13b
+///         jne yield
+///         movw %r14w, %ds
+///         movw %r14w, %es
+///         xorl %eax, %eax
+///         movw %ax, %ds
+///         movw %ax, %es
+/// yield:  movl $24, %eax
+///         syscall
+///         cmpb $'R', %r13b
+///         jne 4f
+///         movw %ds, %ax
+///         movl $2, %edi
+///         testw %ax, %ax
+///         jnz exit
+///         movw %es, %ax
+///         movl $3, %edi
+///         testw %ax, %ax
+///         jnz exit
+/// 4:      decl %r12d
+///         jnz loop
+///         xorl %edi, %edi
+/// exit:   movl $231, %eax
+///         syscall
+///         ud2
+/// compat_reader:
+///         movl $24, %eax
+///         syscall
+///         decl %r12d
+///         jnz compat_reader
+///         pushq $0x23
+///         pushq $compat
+///         lretq
+///         .code32
+/// compat: movl 0x400100, %eax
+///         movl $252, %eax
+///         movl $5, %ebx
+///         int $0x80
+///         ud2
+/// ```
+///
+/// Assembled by GNU `as`, linked at the image's entry, and read back.
+const SELECTOR_PROGRAM: &[u8] = &[
+    0xeb, 0x0e, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x00, 0x00,
+    0x44, 0x0f, 0xb6, 0x2d, 0xec, 0xff, 0xff, 0xff, 0x41, 0x80, 0xfd, 0x54, 0x75, 0x45, 0xb9, 0x00,
+    0x01, 0x41, 0x00, 0xc7, 0x01, 0xff, 0xff, 0xff, 0xff, 0xc7, 0x41, 0x04, 0x00, 0x00, 0x41, 0x00,
+    0xc7, 0x41, 0x08, 0xff, 0xff, 0x0f, 0x00, 0xc7, 0x41, 0x0c, 0x51, 0x00, 0x00, 0x00, 0xb8, 0xf3,
+    0x00, 0x00, 0x00, 0xbb, 0x00, 0x01, 0x41, 0x00, 0xcd, 0x80, 0xbf, 0x0a, 0x00, 0x00, 0x00, 0x85,
+    0xc0, 0x75, 0x70, 0xb9, 0x00, 0x01, 0x41, 0x00, 0x44, 0x8b, 0x31, 0x41, 0xc1, 0xe6, 0x03, 0x41,
+    0x83, 0xce, 0x03, 0x44, 0x8b, 0x25, 0x9e, 0xff, 0xff, 0xff, 0x41, 0x80, 0xfd, 0x43, 0x74, 0x5c,
+    0x41, 0x80, 0xfd, 0x4c, 0x75, 0x0d, 0x66, 0x8b, 0x05, 0x8f, 0xff, 0xff, 0xff, 0x8e, 0xd8, 0x8e,
+    0xc0, 0xeb, 0x12, 0x41, 0x80, 0xfd, 0x54, 0x75, 0x0c, 0x41, 0x8e, 0xde, 0x41, 0x8e, 0xc6, 0x31,
+    0xc0, 0x8e, 0xd8, 0x8e, 0xc0, 0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x41, 0x80, 0xfd, 0x52,
+    0x75, 0x1a, 0x66, 0x8c, 0xd8, 0xbf, 0x02, 0x00, 0x00, 0x00, 0x66, 0x85, 0xc0, 0x75, 0x14, 0x66,
+    0x8c, 0xc0, 0xbf, 0x03, 0x00, 0x00, 0x00, 0x66, 0x85, 0xc0, 0x75, 0x07, 0x41, 0xff, 0xcc, 0x75,
+    0xaf, 0x31, 0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x0f, 0x0b, 0xb8, 0x18, 0x00, 0x00,
+    0x00, 0x0f, 0x05, 0x41, 0xff, 0xcc, 0x75, 0xf4, 0x6a, 0x23, 0x68, 0xe1, 0x01, 0x40, 0x00, 0x48,
+    0xcb, 0xa1, 0x00, 0x01, 0x40, 0x00, 0xb8, 0xfc, 0x00, 0x00, 0x00, 0xbb, 0x05, 0x00, 0x00, 0x00,
+    0xcd, 0x80, 0x0f, 0x0b,
+];
+
+/// An i386 program that reads `DS` and `ES` after each of its `sched_yield`s
+/// and exits 2 or 3 unless both are `USER_DS` (`0x2b`), which the kernel gave
+/// it at `execve`; 0 after the yields patched at 1.
+///
+/// ```text
+/// _start: movl $0x7f7f7f7f, %esi
+/// 1:      movl $158, %eax
+///         int $0x80
+///         movw %ds, %ax
+///         movl $2, %ebx
+///         cmpw $0x2b, %ax
+///         jne exit
+///         movw %es, %ax
+///         movl $3, %ebx
+///         cmpw $0x2b, %ax
+///         jne exit
+///         decl %esi
+///         jnz 1b
+///         xorl %ebx, %ebx
+/// exit:   movl $252, %eax
+///         int $0x80
+///         ud2
+/// ```
+///
+/// Assembled by GNU `as --32`, linked at the image's entry, and read back.
+const SELECTOR_PROGRAM_I386: &[u8] = &[
+    0xbe, 0x7f, 0x7f, 0x7f, 0x7f, 0xb8, 0x9e, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x66, 0x8c, 0xd8, 0xbb,
+    0x02, 0x00, 0x00, 0x00, 0x66, 0x83, 0xf8, 0x2b, 0x75, 0x13, 0x66, 0x8c, 0xc0, 0xbb, 0x03, 0x00,
+    0x00, 0x00, 0x66, 0x83, 0xf8, 0x2b, 0x75, 0x05, 0x4e, 0x75, 0xda, 0x31, 0xdb, 0xb8, 0xfc, 0x00,
+    0x00, 0x00, 0xcd, 0x80, 0x0f, 0x0b,
+];
+
+/// `EM_386`, the machine of an i386 image.
+const EM_386: u16 = 3;
+
+/// Yields each selector program makes.
+const SELECTOR_ROUNDS: u32 = 1_000;
+
+/// Yields the compatibility-mode reader makes before its read, enough for the
+/// program beside it to have left `DS` and `ES` 0 over its descriptor.
+const COMPAT_ROUNDS: u32 = 20;
+
+/// The status `SIGSEGV` ends a program with, as `wait4` reports it.
+const KILLED_BY_SIGSEGV: i32 = 128 + ferrix_linux_abi::types::SIGSEGV as i32;
+
+/// What the `DS`/`ES` skip's cases counted, for the boot line.
+#[derive(Debug, Default)]
+pub(crate) struct SelectorReport {
+    /// Whether the compatibility-mode read through a null `DS` was decided:
+    /// not under QEMU's TCG, which never checks a data segment's presence.
+    pub(crate) compat_decided: bool,
+    /// Switches between two programs with null `DS` and `ES` during case
+    /// (iv) that left them unloaded.
+    pub(crate) skipped: u64,
+    /// Yields across which programs read their own `DS` and `ES`.
+    pub(crate) rounds: u32,
+}
+
+/// Every case of the `DS`/`ES` skip (the consultant's S4), on this processor.
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn run_selectors() -> Result<SelectorReport, &'static str> {
+    // `USER_DS` first, so that each control fires in its own case: the skip
+    // on the record alone fails here, the skip on "null" in the next.
+    check_user_ds_is_loaded_over()?;
+    check_a_null_selector_with_rpl_is_loaded_over()?;
+    let compat_decided = check_null_ds_faults_in_compatibility_mode()?;
+    check_32_and_64_bit_programs_keep_their_selectors()?;
+    let skipped = check_the_skip_is_taken()?;
+    Ok(SelectorReport {
+        compat_decided,
+        skipped,
+        rounds: SELECTOR_ROUNDS * 4,
+    })
+}
+
+/// Case (i): a program that loads 3 -- a null selector with RPL 3, which it
+/// can read back -- into `DS` and `ES`, beside one whose record is 0: the
+/// second reads 0 and 0 at every turn, since the skip is for exactly 0 over
+/// exactly 0, not for "null".
+///
+/// Verifies: `L.x86_64.8`
+fn check_a_null_selector_with_rpl_is_loaded_over() -> Result<(), &'static str> {
+    let loader = selector_program(b'L', 3, SELECTOR_ROUNDS)?;
+    let reader = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [loaded, read] = run_selector_pair(&loader, &reader)?;
+    selector_verdict(loaded, "a program that loaded DS and ES with 3 did not run")?;
+    selector_verdict(
+        read,
+        "a program with null DS and ES read the RPL bits of a null selector another program left",
+    )
+}
+
+/// Case (ii): a program that leaves `USER_DS` in `DS` and `ES`, beside one
+/// whose record is 0: the second reads 0 at every turn, since the processor's
+/// own selector is compared, not the record alone.
+///
+/// Verifies: `L.x86_64.8`
+fn check_user_ds_is_loaded_over() -> Result<(), &'static str> {
+    let loader = selector_program(b'L', gdt::USER_DATA | 3, SELECTOR_ROUNDS)?;
+    let reader = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [loaded, read] = run_selector_pair(&loader, &reader)?;
+    selector_verdict(
+        loaded,
+        "a program that loaded DS and ES with USER_DS did not run",
+    )?;
+    selector_verdict(
+        read,
+        "a program with null DS and ES read the USER_DS another program left",
+    )
+}
+
+/// Case (iii), first half: a program that loads a thread-local descriptor
+/// with a base into `DS` and `ES` and then 0 before each yield, beside one
+/// whose record is 0, which far-returns into compatibility mode and reads
+/// through `DS`: the read is `#GP` and `SIGSEGV` ends it, whatever the hidden
+/// part of a `DS` that reads 0 still holds -- the same with or without the
+/// skip, since a null load over a null selector changes nothing.
+///
+/// Under QEMU's TCG the read is not decided: its emulation loads a null
+/// selector as an absent segment but never checks a data access against
+/// that, so the read succeeds with or without the skip (seen with the skip
+/// turned off, `po9-sel-c4-off-tcg`). There the reader must end either way,
+/// and answers `false`; the case is decided on hardware and under KVM, as the
+/// consultant asked (ledger line 412, E3 (iii)).
+///
+/// Verifies: `L.x86_64.8`
+fn check_null_ds_faults_in_compatibility_mode() -> Result<bool, &'static str> {
+    let loader = selector_program(b'T', 0, SELECTOR_ROUNDS)?;
+    let reader = selector_program(b'C', 0, COMPAT_ROUNDS)?;
+    let [loaded, read] = run_selector_pair(&loader, &reader)?;
+    match loaded {
+        Some(10) => return Err("set_thread_area refused the selector program's descriptor"),
+        status => selector_verdict(
+            status,
+            "a program that loaded a thread-local descriptor into DS and ES did not run",
+        )?,
+    }
+    match read {
+        Some(KILLED_BY_SIGSEGV) => Ok(true),
+        Some(5) if under_tcg() => Ok(false),
+        Some(5) => Err(
+            "a program with null DS read through it in compatibility mode after another program left a based descriptor's hidden part",
+        ),
+        Some(_) => Err("the compatibility-mode reader ended neither by SIGSEGV nor its own exit"),
+        None => Err("the compatibility-mode reader never ended"),
+    }
+}
+
+/// Case (iii), second half: an i386 program, whose `DS` and `ES` are
+/// `USER_DS`, and a 64-bit one, whose are 0, trade the processor: each reads
+/// its own at every turn, so neither the record alone nor the processor alone
+/// decides a skip.
+///
+/// Verifies: `L.x86_64.8`
+fn check_32_and_64_bit_programs_keep_their_selectors() -> Result<(), &'static str> {
+    let mut code = SELECTOR_PROGRAM_I386.to_vec();
+    if code.get(1..5) != Some(&[0x7f; 4]) {
+        return Err("the i386 selector program's count is not where its layout says");
+    }
+    patch(&mut code, 1, &SELECTOR_ROUNDS.to_le_bytes())?;
+    let file = crate::syscall::image::build_with(
+        ferrix_elf::Class::Elf32,
+        EM_386,
+        crate::syscall::image::Shape::Good,
+        &code,
+    );
+    let wide = crate::syscall::exec::load(
+        &file,
+        &[b"/selectors-i386"],
+        &[],
+        [0x7e; ferrix_ustack::RANDOM_BYTES],
+    )
+    .map_err(|_| "the i386 selector program could not be loaded")?;
+    let narrow = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [wide, narrow] = run_selector_pair(&wide, &narrow)?;
+    selector_verdict(
+        wide,
+        "an i386 program did not read its own USER_DS in DS and ES beside a 64-bit program",
+    )?;
+    selector_verdict(
+        narrow,
+        "a 64-bit program did not read its own null DS and ES beside an i386 program",
+    )
+}
+
+/// Case (iv): two programs with null `DS` and `ES` trade the processor, and
+/// the switches between them leave both unloaded: the skip is taken. Answers
+/// how many times.
+///
+/// Verifies: `L.x86_64.8`
+fn check_the_skip_is_taken() -> Result<u64, &'static str> {
+    let first = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let second = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let before = super::selector_skips();
+    let [first, second] = run_selector_pair(&first, &second)?;
+    let after = super::selector_skips();
+    for status in [first, second] {
+        selector_verdict(
+            status,
+            "a program with null DS and ES did not read them null beside another",
+        )?;
+    }
+    match after.wrapping_sub(before) {
+        0 => Err("no switch between two programs with null DS and ES left them unloaded"),
+        skipped => Ok(skipped),
+    }
+}
+
+/// A copy of [`SELECTOR_PROGRAM`] in `mode`, loading `selector` (mode `L`),
+/// for `rounds` yields.
+fn selector_program(mode: u8, selector: u16, rounds: u32) -> Result<Arc<Process>, &'static str> {
+    let mut code = SELECTOR_PROGRAM.to_vec();
+    if code.get(4) != Some(&b'?') || code.get(8..14) != Some(&[0x7f; 6]) {
+        return Err("the selector program's fields are not where its layout says");
+    }
+    patch(&mut code, 4, &[mode])?;
+    patch(&mut code, 8, &rounds.to_le_bytes())?;
+    patch(&mut code, 12, &selector.to_le_bytes())?;
+    load(b"/selectors", &code)
+}
+
+/// Start both pinned to this processor and answer their statuses.
+fn run_selector_pair(
+    first: &Arc<Process>,
+    second: &Arc<Process>,
+) -> Result<[Option<i32>; 2], &'static str> {
+    let cpu = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let tasks: [Arc<Task>; 2] = [
+        process::start_on(first, Some(cpu))
+            .map_err(|_| "a selector program could not be started")?,
+        process::start_on(second, Some(cpu))
+            .map_err(|_| "a selector program could not be started")?,
+    ];
+    let statuses = [
+        first.wait_for_exit(deadline),
+        second.wait_for_exit(deadline),
+    ];
+    drop(tasks);
+    Ok(statuses)
+}
+
+/// What a selector program's status says: 0 is its own selectors at every
+/// read.
+fn selector_verdict(status: Option<i32>, wrong: &'static str) -> Result<(), &'static str> {
+    match status {
+        Some(0) => Ok(()),
+        Some(_) => Err(wrong),
+        None => Err("a selector program never ended"),
+    }
+}
+
+/// Whether this is QEMU's TCG: a hypervisor is present (`CPUID.1:ECX[31]`)
+/// and its leaf `0x4000_0000` names it `TCGTCGTCGTCG` (QEMU's
+/// `target/i386/cpu.c`). On hardware the bit is clear and the leaf is not
+/// read.
+fn under_tcg() -> bool {
+    /// `CPUID.1:ECX[31]`: running under a hypervisor.
+    const HYPERVISOR: u32 = 1 << 31;
+    if core::arch::x86_64::__cpuid(1).ecx & HYPERVISOR == 0 {
+        return false;
+    }
+    let leaf = core::arch::x86_64::__cpuid(0x4000_0000);
+    [leaf.ebx, leaf.ecx, leaf.edx]
+        == [
+            u32::from_le_bytes(*b"TCGT"),
+            u32::from_le_bytes(*b"CGTC"),
+            u32::from_le_bytes(*b"GTCG"),
+        ]
 }

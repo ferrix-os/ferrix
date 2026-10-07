@@ -3971,6 +3971,66 @@ equals it would run on the first program's choice. So the read skip stays
 go the per-processor fields and the boot probe, and §9.4 item 5's segment
 skip does not come back in any form.
 
+**Reopened narrowly: the `DS`/`ES` skip (2026-10-06 and -07).** §9.10's
+profile then measured the selector loads as the largest item after the
+scheduler, and the consultant reopened the skip for `DS` and `ES` alone
+(ledger line 393, conditions S1 to S7), read po7-ipc4's candidate
+f71585ad1 against them (line 398: S1 and S2 met; S3, S4, S5 and S7 not, as
+it also skipped `FS` and `GS`), and gave po9-sel's design its verdict (line
+412, E1 to E6, under the round's G1 to G11 at line 409). Answer 12 is
+amended to: *the segment skip does not come back, except `DS` and `ES`
+skipped 0 to 0, as Linux's `__switch_to` does.* Why this is not condition
+8: `DS` and `ES` have no MSR base and no record, and the comparison is with
+the processor's own register. In long mode only an explicit load writes
+`DS` or `ES` (`SYSCALL`/`SYSRET`, interrupts, `IRET` and far transfers
+leave them), so one reading 0 was last loaded with 0; whatever a vendor's
+null load does to the hidden part, it is idempotent, so loading 0 over a
+`DS` that reads 0 changes nothing, and the skip leaves exactly the state
+the load would.
+
+*As built (branch `po9/sel`, po9-sel).* `load_selectors` reads `DS` and
+`ES` (`cpu::read_data_selectors`) with no load between, and leaves each unloaded
+only where it and the record's selector are both exactly 0 (S1, S2): 1 to
+3 are null selectors whose RPL bits a program reads back, so they are
+loaded over. `FS` is loaded and its base written, and `GS` loaded between
+its `swapgs` pair and its base written, at every switch as before (S3,
+E1); the `FS`/`GS` extension of line 398 is not taken. A per-processor
+count of the switches that skipped (`SELECTOR_SKIPS`) is read only by the
+check and by the fast path's counts line, never by the switch. Every
+switch -- the general path's and the fast path's direct one -- goes
+through the one `restore_user_state`. L.x86_64.8 is restated (S5, E4); no
+new id. The Security Target's FDP_RIP.2 mechanism text and the
+vulnerability analysis's item 7 say the same.
+
+*Checks (S4, E3; stage 9, x86-64, the `selector` line):* (i) a program
+that leaves 3 in `DS` and `ES`, beside one whose record is 0, which reads
+0 and 0 after each of 1,000 yields; (ii) the same with `USER_DS`; (iii) a
+program that loads a based thread-local descriptor and then 0 into `DS`
+and `ES`, beside one with `DS` 0 that far-returns into compatibility mode
+and reads through `DS`: `SIGSEGV` under KVM or on hardware, with the skip
+and without it (under TCG not decided, below); and an i386 program
+(`USER_DS`) and a 64-bit one (0) trading the processor, each reading its
+own; (iv) two 64-bit programs with `DS` and `ES` 0 trading the processor
+count more than 0 switches that left `DS` or `ES` unloaded, and with
+`ferrix.fastpath=on` the counts line after the bench names the skips the
+direct switch took. Accepted by the consultant OK IF (ledger line 414). Under QEMU's TCG
+the compatibility-mode read is not decided: TCG loads a null selector as
+an absent segment but never checks a data access against it, so the read
+succeeds with the skip and without it (the control that turns the skip
+off showed it, `po9-sel-c4-off-tcg`); the check recognises TCG by `CPUID`
+leaf `0x4000_0000` and says so on its line, and the case is decided under
+KVM on the AMD reference host, where the read is `SIGSEGV`.
+
+*Measured (S6, E5):* `DS` and `ES` alone, fast path on, alternated against
+112a12b63 under the bench lock, 6 boots each, host load 0.5 to 3.3. Both
+sides boot in one of two modes (po9-user is finding why): in the high
+mode 1,388, 1,388 and 1,408 ns against 1,548 (ratios 0.897, 0.897,
+0.910), in the low mode 1,118 and 1,128 against 1,248 (0.896, 0.904); one
+round crossed modes (1,158 against 1,548). The skip saves 120 to 160 ns a
+round trip, 60 to 80 a direction. Records under
+`docs/hotpaths/results/ipc-round-trip/6bc2646211ca/`, logs
+`~/.local/share/ferrix/logs/po9-sel/dses/` on nazuna.
+
 **Points:** 2 to 3. **Saving:** *guess* 0.07 to 0.14 us a round trip, from
 the span: the two `rdmsr`s a switch go; the writes stay.
 
@@ -4245,7 +4305,9 @@ conditions:
     state a program is given at every switch", covering the restore and the
     reset, with ADV_ARC describing the mechanism.
 11. Linux's rule, on the read side only.
-12. The segment skip does not come back.
+12. The segment skip does not come back. *Amended 2026-10-06 (ledger
+    line 393):* except `DS` and `ES` skipped 0 to 0, compared with the
+    processor's own registers, as 3b's "Reopened narrowly" says.
 13. Each piece on its own review, in the proposed order, with F-60's fix
     before 2f.
 14. One shared hook static, if it records which check armed it and the boot
@@ -4491,3 +4553,9 @@ TLB misses than seL4, with the vector and segment state seL4 does not have.
   seL4's 50 to 90 and the `DS`/`ES` skip lands.
 
 The conclusion stands: under 400 ns needs every item at once.
+
+*The `DS`/`ES` skip, measured (po9-sel, 2026-10-07):* 60 to 80 ns a
+direction, 120 to 160 a round trip, with the fast path on (§9.8 3b,
+*Reopened narrowly*). The row's -140 to -160 a direction was for all four
+loads; `FS` and `GS` stay loaded at every switch, so the rest of it is not
+counted.

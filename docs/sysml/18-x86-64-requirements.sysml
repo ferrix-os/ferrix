@@ -143,19 +143,41 @@ package FerrixX8664Requirements {
                 "arch::x86_64::gdt::live_table");
         }
         requirement <'L.x86_64.8'> threadAreaTravelsWithThread : ItemLowLevel {
+            doc /* Restated for the DS/ES skip (OPAQUE-KERNEL.md §9.8, 3b; the
+                consultant's S1-S7, ledger lines 393, 398 and 412): DS and ES are
+                compared with the processor's own registers, read in the same
+                restore, never with a remembered value; FS and GS are loaded at
+                every switch as before. */
             attribute :>> statement = "save_user_state shall save the outgoing
                 thread's thread-local slots and data selectors, and
                 restore_user_state shall write the incoming thread's slots and
-                reload its selectors through loadable.";
+                reload its selectors through loadable, except that DS and ES are
+                each loaded from the record unless the selector the processor
+                holds, read in the same restore, and the record's are both 0.";
             attribute :>> criterion = "Two i386 programs pinned to one processor,
                 both with entry 12 and %gs 0x63 but bases 4 bytes apart, each read
                 their own word through %gs 200 times with a sched_yield between
-                reads: neither exits 46, both exit 42.";
+                reads: neither exits 46, both exit 42. Pinned beside a 64-bit
+                program whose DS and ES are 0, one that leaves 3 (a null selector
+                with RPL 3), one that leaves USER_DS, and an i386 program whose
+                DS and ES are USER_DS: each reads its own DS and ES after each of
+                1,000 yields; a 64-bit program with DS 0, beside one that loads a
+                based thread-local descriptor and then 0 into DS and ES, ends by
+                SIGSEGV when it reads through DS in compatibility mode under KVM
+                or on hardware (under QEMU's TCG, which checks no data segment,
+                the case is not decided and its line says so); and two
+                64-bit programs with DS and ES 0 trading the processor count more
+                than 0 switches that left them unloaded.";
             attribute :>> parent = "H.SCHED.7";
             attribute :>> unit = ("arch::x86_64::switch::save_user_state",
                 "arch::x86_64::switch::restore_user_state",
                 "arch::x86_64::switch::load_selectors",
+                "arch::x86_64::switch::selector_skips",
+                "arch::x86_64::switch::selector_skips_total",
                 "arch::x86_64::cpu::read_data_selectors",
+                "arch::x86_64::cpu::load_ds",
+                "arch::x86_64::cpu::load_es",
+                "arch::x86_64::cpu::load_fs",
                 "arch::x86_64::cpu::load_user_gs");
         }
         requirement <'L.x86_64.9'> fsGsBaseTravelsWithTask : ItemLowLevel {

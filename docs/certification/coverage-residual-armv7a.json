@@ -1144,10 +1144,10 @@
     "arch/armv7a/mod.rs": {
       "ring": "core",
       "lines": [
-        165,
-        1319,
-        1331,
-        1349
+        171,
+        1325,
+        1337,
+        1355
       ]
     },
     "object/channel.rs": {

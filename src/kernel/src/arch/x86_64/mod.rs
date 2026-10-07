@@ -152,9 +152,9 @@ pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
 }
 
 /// Stage 9: what the switch gives a program back, read by programs in ring 3
-/// -- the vector-state contract of the native calls that block, and the `FS`
-/// base kept in the task (`docs/OPAQUE-KERNEL.md` §9.8, 3a and 3b). See
-/// `switch::check`.
+/// -- the vector-state contract of the native calls that block, the `FS`
+/// base kept in the task, and `DS` and `ES` left unloaded only 0 over 0
+/// (`docs/OPAQUE-KERNEL.md` §9.8, 3a and 3b). See `switch::check`.
 ///
 /// # Errors
 ///
@@ -194,6 +194,19 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
         "  fsbase   {} switches between two FS bases, each its own; a base cleared by a null \
          selector came back as recorded, and leaked to no program",
         report.traded
+    );
+    let selectors = switch::check::run_selectors()?;
+    let compat = if selectors.compat_decided {
+        "a null DS faulted in compatibility mode"
+    } else {
+        "a null DS in compatibility mode not decided: TCG checks no data segment"
+    };
+    crate::console::println!(
+        "  selector {} switches left DS or ES unloaded, 0 over 0; programs read their own DS \
+         and ES across {} yields beside 3, USER_DS, an i386 program's, and a based descriptor \
+         then 0; {compat}",
+        selectors.skipped,
+        selectors.rounds
     );
     Ok(())
 }
@@ -1857,7 +1870,7 @@ pub(crate) fn service_interrupts(frame: &mut TrapFrame, handle: fn(u32)) {
 /// The context switch, and the stack layout a new task starts on.
 pub(crate) use switch::{
     UserState, prepare_stack, reset_user_state, restore_user_state, save_user_state,
-    set_thread_area, switch_to, thread_area,
+    selector_skips_total, set_thread_area, switch_to, thread_area,
 };
 pub(crate) use syscall::{UserRegs, resume_user};
 

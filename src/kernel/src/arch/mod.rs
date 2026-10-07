@@ -131,6 +131,14 @@ pub(crate) const fn write_combining_processors() -> Option<usize> {
 // §9.8, 3a and 3b), which the Arm architectures do not have.
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::check_switch_state;
+// The switches that left DS and ES unloaded, 0 over 0, for the fast path's
+// counts (OPAQUE-KERNEL.md §9.8, 3b, the DS/ES skip); none on Arm.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::selector_skips_total;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::selector_skips_total;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::selector_skips_total;
 
 /// No vector-state contract and no segment bases: nothing to check here.
 #[cfg(not(target_arch = "x86_64"))]
