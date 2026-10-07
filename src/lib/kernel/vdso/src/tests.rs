@@ -341,7 +341,7 @@ fn scale_sweep() {
     use crate::CounterScale;
     // A 64-bit linear congruential generator (Knuth's MMIX constants): the
     // same draws every run, so a failure names a reproducible rate.
-    let mut state: u64 = 0x5EED_0F_C10C;
+    let mut state: u64 = 0x005E_ED0F_C10C;
     let mut draw = move || {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
