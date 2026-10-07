@@ -48,6 +48,7 @@ Causes are listed most likely first.
 | [FX-0406](#fx-0406) | not every processor firmware described came online |
 | [FX-0407](#fx-0407) | the processors failed to work together |
 | [FX-0408](#fx-0408) | a processor's local APIC is locked in x2APIC mode |
+| [FX-0409](#fx-0409) | a processor's record does not hold its GDT and RSP0 |
 | [FX-0501](#fx-0501) | the scheduler could not be started |
 | [FX-0502](#fx-0502) | the scheduler failed its self-check |
 | [FX-0503](#fx-0503) | a task tried to block while holding a lock that disables preemption |
@@ -866,6 +867,28 @@ decision.
 
 See: src/kernel/src/arch/x86_64/apic.rs leave_x2apic;
 src/kernel/src/arch/x86_64/smp.rs secondary_start; docs/NVIDIA.md section 12.3.
+
+<a id="fx-0409"></a>
+
+## FX-0409 — a processor's record does not hold its GDT and RSP0
+
+On x86-64 the switch finds a processor's thread-local slots and its TSS's `RSP0`
+through the processor's record rather than by `SGDT` and `STR` at every switch
+(`docs/OPAQUE-KERNEL.md` §9.11, Q4). `gdt::note_tables` puts the processor's own
+answer there at each load of its GDT and task register made with a record
+installed, and as the record is installed. At each processor's bring-up, after
+its last note, the record is compared with a fresh answer; this stop means they
+differ or one is zero, so the switch would write `RSP0` or the slots through a
+wrong address, or ask the processor at every switch after all.
+
+1. A load of `GDTR` or `TR` made with a record installed and not followed by
+   `gdt::note_tables`.
+2. `set_cpu_local` or `gdt::load` no longer notes the tables, or notes them
+   before the load.
+
+See: src/kernel/src/arch/x86_64/gdt.rs note_tables;
+src/kernel/src/arch/x86_64/gdt/check.rs require_tables_noted;
+docs/OPAQUE-KERNEL.md §9.11.
 
 <a id="fx-0501"></a>
 
