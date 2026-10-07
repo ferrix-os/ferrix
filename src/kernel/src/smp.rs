@@ -824,7 +824,7 @@ fn take_turn() -> impl Sized {
             seen = generation;
             since = now;
             polls = 0;
-        } else if stood > TURN_TIMEOUT_NANOS && polls > patience(TURN_TIMEOUT_NANOS) {
+        } else if stood > 16 * TURN_TIMEOUT_NANOS && polls > 16 * patience(TURN_TIMEOUT_NANOS) {
             crate::panic::fatal!(
                 crate::panic::catalog::SHOOTDOWN_TURN_TIMEOUT,
                 "no shootdown started for {} ms while this processor waited for its turn, \
@@ -870,6 +870,7 @@ fn wait_for(
     let needed = patience(timeout);
     let mut polls: u64 = 0;
     for cpu in topology.cpus.iter().filter(|cpu| waited(cpu)) {
+        let mut late = false;
         while !done(cpu) {
             halt_if_stopping();
             as_this_cpu(answer);
@@ -880,7 +881,17 @@ fn wait_for(
             }
             let now = crate::timer::now_nanos();
             let waited = now.saturating_sub(started);
-            if waited > timeout && polls > needed {
+            if !late && waited > timeout && polls > needed {
+                late = true;
+                crate::console::println!(
+                    "FX0001-DIAG late: processor {} has not {what} in {} ms, asked {polls} \
+                     times, its ipis {}; waiting on",
+                    cpu.logical,
+                    waited / 1_000_000,
+                    cpu.ipis.load(Ordering::Relaxed)
+                );
+            }
+            if waited > 60 * timeout && polls > 60 * needed {
                 crate::panic::fatal!(
                     *entry,
                     "processor {} never {what}: no answer in {} ms, asked {polls} times",
@@ -893,6 +904,15 @@ fn wait_for(
                 kicked = now;
             }
             spin_loop();
+        }
+        if late {
+            crate::console::println!(
+                "FX0001-DIAG answered: processor {} {what} after {} ms, asked {polls} times, \
+                 its ipis {}",
+                cpu.logical,
+                crate::timer::now_nanos().saturating_sub(started) / 1_000_000,
+                cpu.ipis.load(Ordering::Relaxed)
+            );
         }
     }
 }
