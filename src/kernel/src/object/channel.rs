@@ -950,25 +950,34 @@ impl Endpoint {
             Side::Second => (peer, own),
         };
         let first = first.inbox.try_lock().ok_or(Count::Halves)?;
+        crate::object::oprof::stamp(10);
         let second = second.inbox.try_lock().ok_or(Count::Halves)?;
+        crate::object::oprof::stamp(11);
         let (mut own_inbox, mut peer_inbox) = match self.side {
             Side::First => (first, second),
             Side::Second => (second, first),
         };
         let reader = sendable(own, &own_inbox, peer, &peer_inbox)?;
+        crate::object::oprof::stamp(12);
         let mut switch = direct::begin(caller, reader)?;
+        crate::object::oprof::stamp(13);
         // The commit, which cannot fail from here.
         let Some(reader) = peer_inbox.parked.take() else {
             return Err(Count::T9);
         };
         reader.fill_reply(len, words);
+        crate::object::oprof::stamp(14);
         switch.hand_over(caller, reader, |parked| {
             direct::set_running_blocked(&parked);
             own_inbox.parked = Some(parked);
         });
+        crate::object::oprof::stamp(15);
         drop(peer_inbox);
+        crate::object::oprof::stamp(16);
         drop(own_inbox);
+        crate::object::oprof::stamp(17);
         direct::count(Count::Trip);
+        crate::object::oprof::stamp(18);
         switch.switch();
         Ok(())
     }

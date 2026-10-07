@@ -1001,11 +1001,15 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     // call need not reach `system_call` -- the filter may answer it, and
     // the entry then leaves without `call_left` -- and `system_call`
     // raises it again for itself (`L.object.169`).
+    crate::object::oprof::stamp(0);
+    crate::object::oprof::stamp(1);
     crate::sched::set_in_call_masked(true);
+    crate::object::oprof::stamp(2);
     let fast = fast_write_read_raised(a);
     if matches!(fast, crate::trap::Fast::Declined) {
         crate::sched::set_in_call_masked(false);
     }
+    crate::object::oprof::stamp(23);
     fast
 }
 
@@ -1018,6 +1022,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
         direct::count(Count::T2);
         return Fast::Declined;
     }
+    crate::object::oprof::stamp(3);
     // T3: a send of at most 24 bytes; a receive-only call is served by the
     // receive half on the general path.
     let Some(count) = usize::try_from(a[1])
@@ -1031,31 +1036,45 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     // on a table whose lock is free. A refusal is the general path's to
     // answer and audit. The caller is the processor record's borrow, good
     // across the park: the task is not freed while its own code runs.
-    crate::sched::with_current(|caller| {
+    crate::object::oprof::stamp(4);
+    let r = crate::sched::with_current(|caller| {
         let endpoint = caller.thread().and_then(|thread| {
-            thread
-                .process()
-                .core()
+            let core = thread.process().core();
+            crate::object::oprof::stamp(5);
+            let e = core
                 .try_with_handles(|table| {
-                    channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
+                    crate::object::oprof::stamp(6);
+                    let e = channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok();
+                    crate::object::oprof::stamp(7);
+                    e
                 })
-                .flatten()
+                .flatten();
+            crate::object::oprof::stamp(8);
+            e
         });
         let Some(endpoint) = endpoint else {
             direct::count(Count::T4);
             return Fast::Declined;
         };
-        if let Err(declined) = endpoint.send_direct(caller, count, reply_words(count, a)) {
+        let words = reply_words(count, a);
+        crate::object::oprof::stamp(9);
+        if let Err(declined) = endpoint.send_direct(caller, count, words) {
             direct::count(declined);
             return Fast::Declined;
         }
         // Running again: a commit handed over a reply, or something else
         // woke the park.
+        crate::object::oprof::stamp(19);
         if let Some((count, words)) = caller.take_reply() {
-            return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
+            crate::object::oprof::stamp(20);
+            let o = Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
+            crate::object::oprof::stamp(21);
+            return o;
         }
         Fast::Done(continue_general(&endpoint, caller, a))
-    })
+    });
+    crate::object::oprof::stamp(22);
+    r
     .unwrap_or_else(|| {
         direct::count(Count::T4);
         Fast::Declined
