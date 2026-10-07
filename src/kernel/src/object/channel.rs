@@ -944,6 +944,7 @@ impl Endpoint {
     /// until the switch: the halves' locks are held under that mask, counted
     /// for A3 but without the site record or the deferred decision
     /// (`sync::try_lock_masked`).
+    #[inline(always)]
     pub(crate) unsafe fn send_direct(
         &self,
         caller: &Task,

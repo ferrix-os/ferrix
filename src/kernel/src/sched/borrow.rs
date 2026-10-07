@@ -133,6 +133,7 @@ pub(super) fn running() -> bool {
 ///
 /// The reference is good for the closure's whole run, a block inside it
 /// included: see the module.
+#[inline(always)]
 pub(crate) fn with_current<R>(lend: impl FnOnce(&Task) -> R) -> Option<R> {
     let pointer = current_ptr();
     // SAFETY: (SHARED) a non-null pointer is `Arc::as_ptr` of the task this

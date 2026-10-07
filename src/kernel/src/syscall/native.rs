@@ -1019,6 +1019,7 @@ fn park_for_reply(endpoint: &Endpoint) -> Parked {
 ///
 /// [`Fast::Tail`]: crate::trap::Fast::Tail
 /// [`Fast::Done`]: crate::trap::Fast::Done
+#[inline(always)]
 pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     // Its first act, as `trap::system_call`'s is: the frame tail or the
     // continuation lowers it. A decline lowers it here, since a declined
@@ -1034,6 +1035,7 @@ pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
 }
 
 /// [`fast_write_read`] once it has raised `IN_CALL`.
+#[inline(always)]
 fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::sched::direct::{self, Count};
     use crate::trap::Fast;

@@ -84,6 +84,7 @@ unsafe extern "C" {
 /// earlier call to this function saved. No other processor may be running on
 /// either stack, and both must stay mapped for as long as their contexts
 /// exist.
+#[inline(always)]
 pub(crate) unsafe fn switch_to(save: *mut u64, next: u64) {
     // SAFETY: (CONTEXT) the caller's guarantee is exactly the assembly's contract.
     unsafe { ferrix_switch(save, next) };

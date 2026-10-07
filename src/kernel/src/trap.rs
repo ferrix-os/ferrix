@@ -466,8 +466,12 @@ pub(crate) fn fast_path_on() -> bool {
 
 /// The fast path itself, by a direct call: only once [`fast_path_on`] has
 /// said yes.
+// TIMING ONLY (os76/unwind-abl, never lands): past the link-time hook, so
+// that the chain inlines into the entry and the resumed task returns two
+// frames, not nine.
+#[inline(always)]
 pub(crate) fn fast_write_read_now(a: &[u64; 6]) -> Fast {
-    ferrix_fast_write_read(a)
+    crate::syscall::native::fast_write_read(a)
 }
 
 /// Answer one system call: what every architecture's system call path calls,

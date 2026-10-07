@@ -258,6 +258,7 @@ impl Direct {
     /// Switch to the task [`Direct::hand_over`] picked, and return when the
     /// caller runs again: `switch_chosen`, the switch, and `finish_switch`,
     /// as `pick_and_switch` makes them. A3, FX-0503's check, first.
+    #[inline(always)]
     pub(crate) fn switch(mut self) {
         super::require_preemption_on(self.cpu);
         let (cpu, now) = (self.cpu, self.now);
