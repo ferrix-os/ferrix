@@ -6335,7 +6335,9 @@ const HANDOFF_PAGE: u64 = 0x6000_0000;
 /// spins, alone on its processor where it gets no tick.
 ///
 /// First, sent while the first thread blocks it: the second must take it --
-/// the one it is given to must be the thread that does not block it. Then the
+/// the one it is given to must be the thread that does not block it, unless
+/// the second came back through the kernel and took it before the send looked
+/// for a taker, which the signal no longer pending shows. Then the
 /// first thread is sent a `SIGUSR2` of its own and the process a `SIGUSR1`,
 /// neither waking anyone, and only the first thread is woken: it takes its own
 /// signal first, and its handler's mask blocks `SIGUSR1` while that is still
@@ -6383,6 +6385,33 @@ fn check_a_signal_reaches_the_thread_that_can_take_it() -> Result<Option<i32>, &
             Err("a program of two threads with handlers ended with another status than SIGKILL's")
         }
         None => Err("a program of two threads with handlers was never released after SIGKILL"),
+    }
+}
+
+/// Whom the first send of [`hand_a_signal_on`], a `SIGUSR1` to `handing`
+/// while its first thread blocks it, was given to: the second thread, whose
+/// id is `second`, or no thread because it was already taken.
+///
+/// No thread chosen, and the signal still pending: every thread was passed
+/// over, the failure this names. Not pending, it was already taken: the
+/// second thread came back through the kernel -- a tick or an interrupt on a
+/// loaded machine -- between the post and the look for a taker, and was in
+/// its handler, which blocks `SIGUSR1`, when the look came (the stage 7
+/// hand-off flake). Who took it is decided after this by the handler's own
+/// record, as for the hand-off's second half.
+fn given_to_the_second(handing: &Process, second: u32) -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::SIGUSR1;
+
+    match handing.take_handed_to() {
+        tid if tid == second => Ok(()),
+        0 if handing.with_signals(|signals| signals.pending()) & signal::bit(SIGUSR1) != 0 => {
+            Err("a signal sent to a process of two threads was given to no thread")
+        }
+        0 => Ok(()),
+        _ => Err(
+            "a signal sent to a process was given to a thread that blocks it, not the one that \
+             does not",
+        ),
     }
 }
 
@@ -6435,16 +6464,7 @@ fn hand_a_signal_on(handing: &Process) -> Result<(), &'static str> {
     });
     let _ = handing.take_handed_to();
     crate::syscall::kill::send(handing, SIGUSR1, Origin::Kernel);
-    match handing.take_handed_to() {
-        tid if tid == second => {}
-        0 => return Err("a signal sent to a process of two threads was given to no thread"),
-        _ => {
-            return Err(
-                "a signal sent to a process was given to a thread that blocks it, not the one that \
-                 does not",
-            );
-        }
-    }
+    given_to_the_second(handing, second)?;
     until(
         &|| read(0).is_some_and(|tid| tid != 0),
         "a signal sent to a process whose first thread blocks it never reached its second thread",
