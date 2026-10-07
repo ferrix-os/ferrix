@@ -382,6 +382,24 @@ pub(crate) fn enable_umip() -> bool {
     read_cr4() & CR4_UMIP != 0
 }
 
+/// ABLATION (po9-sel, never lands): `CR4.FSGSBASE` set where `CPUID` offers
+/// it, so the switch writes the bases with `WRFSBASE`/`WRGSBASE`.
+pub(crate) static FSGSBASE_ON: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// ABLATION: set `CR4.FSGSBASE` (bit 16) where `CPUID.7.0:EBX[0]` offers it.
+pub(crate) fn enable_fsgsbase() -> bool {
+    use core::arch::x86_64::{__cpuid, __cpuid_count};
+    if __cpuid(0).eax < 7 || __cpuid_count(7, 0).ebx & 1 == 0 {
+        return false;
+    }
+    // SAFETY: (PROTECT) ablation only.
+    unsafe { write_cr4(read_cr4() | (1 << 16)) };
+    let on = read_cr4() & (1 << 16) != 0;
+    FSGSBASE_ON.store(on, core::sync::atomic::Ordering::Relaxed);
+    on
+}
+
 /// Whether `stac` and `clac` may be executed at all.
 ///
 /// They are SMAP's instructions: on a processor without the feature they are

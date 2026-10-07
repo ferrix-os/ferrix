@@ -247,6 +247,8 @@ pub(crate) unsafe fn init_traps() {
         "off, as built"
     };
     crate::console::println!("  cpu      descriptor table addresses kept from ring 3: UMIP {umip}");
+    let fsgsbase = cpu::enable_fsgsbase();
+    crate::console::println!("  cpu      ABLATION FSGSBASE {fsgsbase}");
     // Each secondary programs its own in `smp::secondary_start`.
     let pat = if cpu::program_pat() {
         let _ = PAT_PROGRAMMED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);

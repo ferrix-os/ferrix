@@ -887,6 +887,14 @@ pub(crate) unsafe fn program_gs_base() -> u64 {
 /// [`program_gs_base`], and `base` must be a user address, never the kernel's:
 /// the paranoid entry tells the two apart by the sign bit.
 pub(crate) unsafe fn set_program_gs_base(base: u64) {
+    if cpu::FSGSBASE_ON.load(core::sync::atomic::Ordering::Relaxed) {
+        // SAFETY: ablation: interrupts masked by the callers; the pair leaves
+        // the kernel's GS base in place.
+        unsafe {
+            core::arch::asm!("swapgs", "wrgsbase {0}", "swapgs", in(reg) base, options(nostack, preserves_flags));
+        }
+        return;
+    }
     // SAFETY: (CONTEXT) writing the shadow MSR changes only what the next `swapgs`
     // installs for ring 3.
     unsafe { cpu::write_msr(IA32_KERNEL_GS_BASE, base) };
@@ -902,6 +910,11 @@ pub(crate) unsafe fn set_program_gs_base(base: u64) {
 ///
 /// (CONTEXT) `base` is a user address the program chose; nothing dereferences it here.
 pub(crate) unsafe fn set_thread_pointer(base: u64) {
+    if cpu::FSGSBASE_ON.load(core::sync::atomic::Ordering::Relaxed) {
+        // SAFETY: ablation: CR4.FSGSBASE is set.
+        unsafe { core::arch::asm!("wrfsbase {0}", in(reg) base, options(nostack, preserves_flags)) };
+        return;
+    }
     // SAFETY: (CONTEXT) `IA32_FS_BASE` accepts any canonical address. Writing it affects
     // only how this processor resolves `FS`-relative user accesses.
     unsafe { cpu::write_msr(IA32_FS_BASE, base) };

@@ -1943,7 +1943,7 @@ pub(crate) fn x86_cpu(accelerator: &str) -> String {
     }
     let base = "qemu64,+pdpe1gb,+smep,+smap,+umip,+rdrand,+rdseed,+ssse3,+sse4.1,+sse4.2,+popcnt,\
                 +cx16,+movbe,+xsave,+xsaveopt,+avx,+avx2,+f16c,+fma,+bmi1,+bmi2,+abm,+pclmulqdq,+aes,\
-                +x2apic";
+                +x2apic,+fsgsbase";
     if accelerator == "tcg" {
         return base.to_owned();
     }
