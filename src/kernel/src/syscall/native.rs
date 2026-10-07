@@ -1056,11 +1056,11 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     // answer and audit. The caller is the processor record's borrow, good
     // across the park: the task is not freed while its own code runs.
     crate::sched::with_current(|caller| {
-        let endpoint = caller.thread().and_then(|thread| {
+        let endpoint = caller.core_process().and_then(|core| {
             // SAFETY: (CONTEXT) masked from the entry, as this function's
             // contract says, and the lookup blocks on nothing.
             unsafe {
-                thread.process().core().try_with_handles_masked(|table| {
+                core.try_with_handles_masked(|table| {
                     channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
                 })
             }

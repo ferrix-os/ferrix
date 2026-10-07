@@ -134,6 +134,27 @@ fn check_the_reply_words() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The fast path's lookup reaches the handle table through the core
+/// process the task cached as it was made (`Task::core_process`): it is the
+/// one `thread().process().core()` names, which is `process`'s own, for a
+/// task of a check process.
+///
+/// # Errors
+///
+/// When the cache names another process, or none.
+///
+/// Verifies: `L.object.169`
+fn check_the_task_names_its_core(task: &Task, process: &Process) -> Result<(), &'static str> {
+    let cached = task.core_process().map(core::ptr::from_ref);
+    let named = task
+        .thread()
+        .map(|thread| core::ptr::from_ref(thread.process().core()));
+    if cached.is_none() || cached != named || cached != Some(core::ptr::from_ref(process.core())) {
+        return Err("a task's cached core process is not the one its thread names");
+    }
+    Ok(())
+}
+
 /// Run every case.
 ///
 /// # Errors
@@ -296,6 +317,7 @@ fn start_echo_in(
     let (process, handle) = holding_in(end, job)?;
     *ECHO.lock() = Some(handle);
     let task = spawn_in(&process, "fast path echo", echo_in_the_process, Some(cpu))?;
+    check_the_task_names_its_core(&task, &process)?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     wait_until(deadline, "the fast path check's echo never waited", || {
         end.reader_waiting()

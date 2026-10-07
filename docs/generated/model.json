@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "3427b0e5838b77c8d8f155b1c2907fd10393db66c4bec7b1a778789c5f118c5f",
+  "digest": "a5f2f8fad0817f05ad27426d728a99bf5780ad369c2f6efd6077bfab2407c268",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -33500,10 +33500,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLooksAsTheGeneralPathDoes",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 9's case 11 is refused with the filter's errno with the fast path on, and comes back with IN_CALL down whether refused or allowed; ipc-equiv's case 12 answers every refusal as the general path does, with its audit records.\"",
+                  "value": "\"Stage 9's case 11 is refused with the filter's errno with the fast path on, and comes back with IN_CALL down whether refused or allowed; ipc-equiv's case 12 answers every refusal as the general path does, with its audit records; every stage 9 echo's task names, as its cached core process, the one its thread's process holds.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1718
+                    "line": 1720
                   }
                 },
                 {
@@ -33514,7 +33514,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1719
+                    "line": 1721
                   }
                 },
                 {
@@ -33522,10 +33522,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLooksAsTheGeneralPathDoes",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles_masked\", \"trap::filter_quiet\", \"trap::set_quiet_syscall_filter\")",
+                  "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles_masked\", \"sched::task::Task::core_process\", \"trap::filter_quiet\", \"trap::set_quiet_syscall_filter\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1722
+                    "line": 1725
                   }
                 }
               ]
@@ -33538,7 +33538,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1724
+                "line": 1727
               },
               "children": [
                 {
@@ -33549,7 +33549,7 @@
                   "value": "\"channel_write_read's answer shall go into the program's registers through write_read_outcome on the general path, the frame tail and the continuation alike.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1727
+                    "line": 1730
                   }
                 },
                 {
@@ -33560,7 +33560,7 @@
                   "value": "\"ipc-equiv's transcripts are the same on both boots.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1729
+                    "line": 1732
                   }
                 },
                 {
@@ -33571,7 +33571,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1730
+                    "line": 1733
                   }
                 },
                 {
@@ -33582,7 +33582,7 @@
                   "value": "\"syscall::write_read_outcome\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1731
+                    "line": 1734
                   }
                 }
               ]
