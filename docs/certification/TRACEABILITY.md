@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 127 | 76 | 51 |
-| Low (`L.*`) | 840 | 570 | 270 |
+| Low (`L.*`) | 841 | 571 | 270 |
 
-1748 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1750 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1750 |
-| Accessors, covered by the requirement they serve | 869 |
+| Named by a low-level requirement | 1752 |
+| Accessors, covered by the requirement they serve | 871 |
 | Check code in a product file | 73 |
 | Named by none | 894 |
 
@@ -1202,6 +1202,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.aarch64.24` | timer::arm shall make the virtual timer fire once, nanos from now, by setting its comparator to the counter plus nanos in counter ticks and enabling it, and disarm shall mask it. | Stage 3's timer check: a one-shot armed for a millisecond fires, and has not fired again ten intervals later; then 250 ticks at a requested 1,000 Hz take a time the counter measures as within 25 per cent of that rate, every tick an interrupt a handler took. | H.SCHED.5 | `arch::aarch64::timer::arm`, `arch::aarch64::timer::disarm`, `arch::aarch64::timer_arm`, `arch::aarch64::timer_disarm`, `arch::aarch64::cpu::write_cntv_cval`, `arch::aarch64::cpu::write_cntv_ctl` | `src/kernel/src/stages_check.rs::timer_check` | not built | not built | not built |
 | `L.aarch64.25` | timer::init and init_from_tree shall take the timer's interrupt as firmware describes it, a private one, and shall refuse a counter whose CNTFRQ_EL0 reads zero or that does not advance; counter_now shall read the counter after an isb. | Every boot reports the counter's frequency and ticks; a check that a zero frequency is refused is not written. | H.SCHED.5 | `arch::aarch64::timer::init`, `arch::aarch64::timer::init_from_tree`, `arch::aarch64::timer::finish`, `arch::aarch64::timer::irq`, `arch::aarch64::timer::counter_now`, `arch::aarch64::timer::counter_hz`, `arch::aarch64::timer_irq`, `arch::aarch64::counter_now`, `arch::aarch64::counter_hz`, `arch::aarch64::cpu::read_cntfrq`, `arch::aarch64::cpu::read_cntvct` | *baselined* | — | — | — |
 | `L.aarch64.26` | allow_user_counter shall let EL0 read the virtual counter and CNTFRQ_EL0, as Linux does, and nothing else of the timer. | A program's clock_gettime through musl reads the counter; a check that EL0 can read CNTVCT_EL0 and cannot write the comparator is not written. | H.MEM.2 | `arch::aarch64::cpu::allow_user_counter`, `arch::aarch64::vdso_spec`, `arch::aarch64::vdso_can_read_counter` | *baselined* | — | — | — |
+| `L.armv7a.4` | allow_user_counter shall set CNTKCTL.PL0VCTEN and clear PL0PCTEN, PL0VTEN and PL0PTEN on every processor the kernel brings online. | After every processor is online, each reads its own CNTKCTL and finds PL0VCTEN set and the three others clear, and the virtual counter advances (the `usercnt` line on an ARMv7-A boot, N of N processors); the block driver times its requests with CNTVCT read in user mode (the `seam` line's driver share). | H.MEM.2 | `arch::armv7a::cpu::allow_user_counter`, `arch::armv7a::cpu::read_cntkctl` | `src/kernel/src/arch/armv7a/check.rs::check_user_counter` | not built | not built | not reached |
 
 ### Translation
 
@@ -1609,6 +1610,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/arch/aarch64/speculation/check.rs::check_part_tables` | kernel | L.aarch64.39 |
 | `src/kernel/src/arch/aarch64/trap/check.rs::run` | kernel | L.aarch64.3 |
 | `src/kernel/src/arch/armv7a/check.rs::check_chosen` | kernel | L.console.41 |
+| `src/kernel/src/arch/armv7a/check.rs::check_user_counter` | kernel | L.armv7a.4 |
 | `src/kernel/src/arch/speculation_check.rs::check` | kernel | L.x86_64.28, L.x86_64.29, L.x86_64.31 |
 | `src/kernel/src/arch/speculation_check.rs::check_clamp` | kernel | L.x86_64.30 |
 | `src/kernel/src/arch/x86_64/apic/check.rs::require_every_processor` | kernel | L.x86_64.131 |

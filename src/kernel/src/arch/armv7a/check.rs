@@ -469,3 +469,64 @@ fn check_cache_maintenance() -> Result<(), &'static str> {
     }
     Ok(())
 }
+
+/// Processors that answered [`check_user_counter`]'s look, and those whose
+/// `CNTKCTL` left user mode without the virtual counter or gave it more.
+static COUNTER_LOOKED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static COUNTER_SHUT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static COUNTER_OPEN: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// One processor's own `CNTKCTL`, read on that processor.
+fn look_at_counter_access(_me: &'static crate::smp::PerCpu) {
+    use core::sync::atomic::Ordering::Relaxed;
+    let control = super::cpu::read_cntkctl();
+    if control & super::cpu::CNTKCTL_PL0VCTEN == 0 {
+        let _ = COUNTER_SHUT.fetch_add(1, Relaxed);
+    }
+    if control & super::cpu::CNTKCTL_CLOSED != 0 {
+        let _ = COUNTER_OPEN.fetch_add(1, Relaxed);
+    }
+    let _ = COUNTER_LOOKED.fetch_add(1, Relaxed);
+}
+
+/// Every processor lets user mode read the virtual counter and nothing else
+/// of the generic timer: each reads its own `CNTKCTL`, after every processor
+/// is online, and finds `PL0VCTEN` set and `PL0PCTEN`, `PL0VTEN` and
+/// `PL0PTEN` clear. And the counter a program reads advances. That a program
+/// really reads it is the block driver's to show: it times its requests with
+/// `CNTVCT` from user mode, and the seam check refuses a run in which it
+/// could not.
+///
+/// # Errors
+///
+/// A processor that did not look, or whose register is wrong; a counter
+/// that stands still.
+///
+/// Verifies: L.armv7a.4
+pub(crate) fn check_user_counter() -> Result<(), &'static str> {
+    use core::sync::atomic::Ordering::Relaxed;
+    for count in [&COUNTER_LOOKED, &COUNTER_SHUT, &COUNTER_OPEN] {
+        count.store(0, Relaxed);
+    }
+    crate::smp::run_everywhere(look_at_counter_access)?;
+    let processors = crate::smp::count();
+    let looked = COUNTER_LOOKED.load(Relaxed);
+    if looked != processors {
+        return Err("a processor did not report what user mode may read of its timer");
+    }
+    if COUNTER_SHUT.load(Relaxed) != 0 {
+        return Err("a processor does not let user mode read the virtual counter");
+    }
+    if COUNTER_OPEN.load(Relaxed) != 0 {
+        return Err("a processor lets user mode reach the physical counter or a timer");
+    }
+    let before = super::cpu::read_cntvct();
+    if !(0..1_000_000).any(|_| super::cpu::read_cntvct() != before) {
+        return Err("the virtual counter does not advance");
+    }
+    println!(
+        "  usercnt  user mode reads the virtual counter on {looked} of {processors} processors, \
+         the physical counter and both timers closed to it"
+    );
+    Ok(())
+}

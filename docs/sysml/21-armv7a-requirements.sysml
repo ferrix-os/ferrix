@@ -4,8 +4,9 @@
  *
  * ARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own
  * beyond these: what the system call path does for the filter the core asks
- * about every call (seccomp, `docs/SECCOMP.md` §3.3), and what its switch
- * barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9). The rest of the
+ * about every call (seccomp, `docs/SECCOMP.md` §3.3), what its switch
+ * barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9), and
+ * what of the generic timer user mode may read (`CNTKCTL`). The rest of the
  * architecture waits in the baseline with the other architectures' unwritten
  * rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of
  * part 19 hold.
@@ -55,6 +56,22 @@ package FerrixArmv7aRequirements {
                 each way (the `domain` line on an ARMv7-A boot).";
             attribute :>> parent = "H.TRAP.17";
             attribute :>> unit = "arch::armv7a::speculation::switch_barrier_in_domain";
+        }
+    }
+
+    package Timer {
+        requirement <'L.armv7a.4'> programsReadTheCounter : ItemLowLevel {
+            attribute :>> statement = "allow_user_counter shall set CNTKCTL.PL0VCTEN
+                and clear PL0PCTEN, PL0VTEN and PL0PTEN on every processor the kernel
+                brings online.";
+            attribute :>> criterion = "After every processor is online, each reads
+                its own CNTKCTL and finds PL0VCTEN set and the three others clear,
+                and the virtual counter advances (the `usercnt` line on an ARMv7-A
+                boot, N of N processors); the block driver times its requests with
+                CNTVCT read in user mode (the `seam` line's driver share).";
+            attribute :>> parent = "H.MEM.2";
+            attribute :>> unit = ("arch::armv7a::cpu::allow_user_counter",
+                "arch::armv7a::cpu::read_cntkctl");
         }
     }
 }
