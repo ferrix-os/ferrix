@@ -21,6 +21,26 @@
 //! p99=<ns> mean=<ns>`, the percentiles to an eighth of a power of two.
 //! Exit 0 is a run that finished; any other status names the step that did
 //! not.
+//!
+//! MEASUREMENT ONLY (branch `os76/p0-measure`, never lands), three additions:
+//!
+//! - `null-entry` (x86-64) and `null-general`: the bare cost of a native
+//!   call. `null-entry` is [`NULL_ENTRY`], which the kernel's `SYSCALL`
+//!   entry answers right after the fast path's T1 test, before the filter,
+//!   the decode, the interrupts opened and the way-out look; `null-general`
+//!   is [`NULL_GENERAL`], a gap in the native range that goes the general
+//!   path to `native::dispatch` and is refused there by its decode
+//!   (`ENOSYS`). Each sample is [`NULL_BATCH`] calls back to back, printed
+//!   per call, with `batch=` in the line.
+//! - `ipc-bench.long=<seconds>` on the kernel command line (read from
+//!   `/proc/cmdline`, so no rebuild): after the stock `domain-call` line the
+//!   domain client keeps going in blocks of [`BLOCK`] trips until that many
+//!   seconds have passed, printing per block `po9blk <i> med=<ticks>
+//!   min=<ticks> p90=<ticks> p99=<ticks> ns=<median ns> span=<block us>
+//!   tsc=<counter>` (the prefix and the first fields are po9-user's, so its
+//!   scripts read these), and at the end `ipc-bench long ...`, the spread of
+//!   the block medians in ns. Without the option the run prints what it
+//!   always did, plus the two null lines.
 
 #![no_std]
 #![no_main]
@@ -55,6 +75,29 @@ const O_READ: usize = 0o2_000_000;
 const O_DIR: usize = 0o2_000_000 | 0o200_000;
 /// `SEEK_END`.
 const SEEK_END: usize = 2;
+
+/// MEASUREMENT ONLY: the native number the x86-64 `SYSCALL` entry answers
+/// with 0 at once (`src/kernel/src/arch/x86_64/syscall.rs`, beside T1).
+const NULL_ENTRY: usize = 0x1FF0;
+/// MEASUREMENT ONLY: a gap in the native range, which goes the whole general
+/// path and is refused `ENOSYS` by `native::dispatch`'s decode.
+const NULL_GENERAL: usize = 0x1FF1;
+/// Null calls per timed sample: the counter steps in about 10 ns under KVM,
+/// which is the order of the call itself.
+const NULL_BATCH: u64 = 16;
+
+/// The kernel option that asks for the long run, its value in seconds.
+const LONG_OPTION: &[u8] = b"ipc-bench.long=";
+/// The longest long run asked for is cut to this, in seconds.
+const LONG_MOST: u64 = 3_600;
+/// Trips a long run's block holds.
+const BLOCK: usize = 50_000;
+/// The most blocks a long run keeps medians for: more than an hour's.
+const MOST_BLOCKS: usize = 65_536;
+/// What the launcher sends the domain client, before the long run's seconds.
+const CLIENT: &[u8] = b"CLIENT";
+/// `/proc/cmdline`.
+const CMDLINE: &[u8] = b"/proc/cmdline\0";
 
 /// The launcher with no bootstrap handle; with one, a server, or the client
 /// of the domain run if its first message carries a channel.
@@ -97,7 +140,12 @@ fn started(bootstrap: &Channel<Kernel>) -> i32 {
         && let Some(&handle) = handles.first()
     {
         let server = Channel::from_owned(OwnedHandle::from_raw(Kernel, handle));
-        return match domain_client(bootstrap, &server) {
+        // "CLIENT", and after it the long run's seconds when one was asked.
+        let long = message
+            .strip_prefix(CLIENT)
+            .and_then(|rest| <[u8; 8]>::try_from(rest).ok())
+            .map_or(0, u64::from_le_bytes);
+        return match domain_client(bootstrap, &server, long) {
             Ok(()) => 0,
             Err(step) => step,
         };
@@ -113,8 +161,13 @@ fn started(bootstrap: &Channel<Kernel>) -> i32 {
 
 /// The domain run's client: time the `channel_write_read` trip to `server`,
 /// a process of the same speculation domain, and send the line back to the
-/// launcher, which has the console.
-fn domain_client(launcher: &Channel<Kernel>, server: &Channel<Kernel>) -> Result<(), i32> {
+/// launcher, which has the console. Then, with `long` seconds asked for
+/// (`ipc-bench.long`), the long run.
+fn domain_client(
+    launcher: &Channel<Kernel>,
+    server: &Channel<Kernel>,
+    long: u64,
+) -> Result<(), i32> {
     let message = 0x5EED_u64.to_ne_bytes();
     server.write(FAST).map_err(|_| 40)?;
     let mut call = Histogram::new();
@@ -131,7 +184,77 @@ fn domain_client(launcher: &Channel<Kernel>, server: &Channel<Kernel>) -> Result
     let line = call.line("domain-call", scale);
     launcher
         .write(line.bytes.get(..line.len).unwrap_or_default())
-        .map_err(|_| 41)
+        .map_err(|_| 41)?;
+    if long > 0 {
+        long_run(launcher, server, &message, long)?;
+    }
+    Ok(())
+}
+
+/// MEASUREMENT ONLY: the long run. The same trip in blocks of [`BLOCK`],
+/// each block's line sent to the launcher as it ends, until `seconds` have
+/// passed; then the spread of the block medians. A block's line is made and
+/// sent outside its timed trips, and the launcher's print runs between
+/// blocks or inside the next one, which its median does not notice.
+fn long_run(
+    launcher: &Channel<Kernel>,
+    server: &Channel<Kernel>,
+    message: &[u8],
+    seconds: u64,
+) -> Result<(), i32> {
+    let mut block = Histogram::with_room(BLOCK);
+    let mut medians = Histogram::with_room(MOST_BLOCKS);
+    let start = linux::monotonic_nanos().unwrap_or(0);
+    let end = start.saturating_add(seconds.saturating_mul(1_000_000_000));
+    let mut index = 0_usize;
+    loop {
+        block.clear();
+        let clock = Clock::start();
+        for _ in 0..BLOCK {
+            let before = ferrix_rt::counter().unwrap_or(0);
+            call_trip(server, message)?;
+            block.add(ferrix_rt::counter().unwrap_or(0).wrapping_sub(before));
+        }
+        let (scale, span) = clock.stop_spanned();
+        let tsc = ferrix_rt::counter().unwrap_or(0);
+        let [min, median, p90, p99] = block.points();
+        let median_ns = median.saturating_mul(scale) / 1000;
+        medians.add(median_ns);
+        let line = format_line(format_args!(
+            "po9blk {index} med={median} min={min} p90={p90} p99={p99} ns={median_ns} span={} tsc={tsc}",
+            span / 1000
+        ));
+        launcher
+            .write(line.bytes.get(..line.len).unwrap_or_default())
+            .map_err(|_| 42)?;
+        index += 1;
+        if index >= MOST_BLOCKS || linux::monotonic_nanos().unwrap_or(u64::MAX) >= end {
+            break;
+        }
+    }
+    let took = linux::monotonic_nanos()
+        .unwrap_or(0)
+        .saturating_sub(start)
+        / 1_000_000;
+    let sorted = medians.sorted();
+    let at = |per_mille: usize| {
+        sorted
+            .get(sorted.len() * per_mille / 1000)
+            .copied()
+            .unwrap_or(0)
+    };
+    let line = format_line(format_args!(
+        "ipc-bench long blocks={index} trips={} ms={took} block-median-ns min={} p10={} p50={} p90={} max={}",
+        index.saturating_mul(BLOCK),
+        at(0),
+        at(100),
+        at(500),
+        at(900),
+        sorted.last().copied().unwrap_or(0),
+    ));
+    launcher
+        .write(line.bytes.get(..line.len).unwrap_or_default())
+        .map_err(|_| 43)
 }
 
 /// Echo every message until the client lets go.
@@ -191,7 +314,20 @@ fn serve_fast(channel: &Channel<Kernel>) -> i32 {
 /// domain.
 fn client() -> Result<(), i32> {
     let (image, job) = prepare()?;
+    let long = long_seconds();
+    if long > 0 {
+        say(format_args!(
+            "ipc-bench long: {long} s of {BLOCK}-trip domain-call blocks after the stock lines (ipc-bench.long)"
+        ));
+    }
     let mine = spawn(&job, &image, "ipc-echo")?;
+
+    // MEASUREMENT ONLY: the bare call, at the entry and through the general
+    // path. The first only where the entry answers it.
+    if cfg!(target_arch = "x86_64") {
+        null_calls("null-entry", NULL_ENTRY);
+    }
+    null_calls("null-general", NULL_GENERAL);
 
     let mut floor = Histogram::new();
     let clock = Clock::start();
@@ -236,22 +372,114 @@ fn client() -> Result<(), i32> {
     let scale = clock.stop();
     call.print("call", scale);
     drop(mine);
-    domain_run(&job, &image)
+    domain_run(&job, &image, long)
+}
+
+/// MEASUREMENT ONLY: time `number`, a native call that answers at once, in
+/// samples of [`NULL_BATCH`] calls, and print the line per call.
+fn null_calls(what: &str, number: usize) {
+    let null = || {
+        // SAFETY: no pointer arguments; the kernel answers the number
+        // without reading any of them.
+        let _ = unsafe { linux::call(number, [0; 6]) };
+    };
+    for _ in 0..WARMUP {
+        null();
+    }
+    let mut calls = Histogram::new();
+    let clock = Clock::start();
+    for _ in 0..ROUNDS {
+        let before = ferrix_rt::counter().unwrap_or(0);
+        for _ in 0..NULL_BATCH {
+            null();
+        }
+        calls.add(ferrix_rt::counter().unwrap_or(0).wrapping_sub(before));
+    }
+    let scale = clock.stop();
+    let line = calls.line_per(what, scale, NULL_BATCH);
+    let _ = linux::write(1, line.bytes.get(..line.len).unwrap_or_default());
+}
+
+/// MEASUREMENT ONLY: the seconds `ipc-bench.long=` asks for on the kernel
+/// command line, cut to [`LONG_MOST`]; 0 when it is not there or
+/// `/proc/cmdline` cannot be read. `/proc` is mounted here if it is not.
+fn long_seconds() -> u64 {
+    let open = || {
+        // SAFETY: `CMDLINE` is NUL-terminated and borrowed for the call.
+        unsafe {
+            linux::call(
+                numbers::OPENAT,
+                [AT_FDCWD, CMDLINE.as_ptr().addr(), O_READ, 0, 0, 0],
+            )
+        }
+    };
+    let fd = match open() {
+        Ok(fd) => fd,
+        Err(_) => {
+            let proc_dir = b"/proc\0";
+            // SAFETY: the strings are NUL-terminated and borrowed for the
+            // calls; no data argument.
+            let _ = unsafe {
+                linux::call(
+                    numbers::MKDIRAT,
+                    [AT_FDCWD, proc_dir.as_ptr().addr(), 0o555, 0, 0, 0],
+                )
+            };
+            // SAFETY: as above.
+            let _ = unsafe {
+                linux::call(
+                    numbers::MOUNT,
+                    [
+                        b"proc\0".as_ptr().addr(),
+                        proc_dir.as_ptr().addr(),
+                        b"proc\0".as_ptr().addr(),
+                        0,
+                        0,
+                        0,
+                    ],
+                )
+            };
+            match open() {
+                Ok(fd) => fd,
+                Err(_) => return 0,
+            }
+        }
+    };
+    let mut line = [0_u8; 4096];
+    let got = linux::read(fd, &mut line).unwrap_or(0);
+    let _ = linux::close(fd);
+    line.get(..got)
+        .unwrap_or_default()
+        .split(u8::is_ascii_whitespace)
+        .find_map(|word| word.strip_prefix(LONG_OPTION))
+        .and_then(|digits| core::str::from_utf8(digits).ok()?.parse::<u64>().ok())
+        .map_or(0, |seconds| seconds.min(LONG_MOST))
 }
 
 /// A client and a server born in one new speculation domain, so that their
 /// switches skip the predictor barrier (`docs/OPAQUE-KERNEL.md` §9.2): the
 /// client is told the server's channel in its first message and sends its
 /// line back. Both must be made in the job, which this process is not.
-fn domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
+/// With `long` seconds asked for, the client is told them too, and its block
+/// lines are printed as they come until its `ipc-bench long` line.
+fn domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>, long: u64) -> Result<(), i32> {
     let domain = job.create_speculation_domain().map_err(|error| {
         say(format_args!("ipc-bench: speculation domain: {error:?}"));
         50
     })?;
     let to_server = spawn(&domain, image, "ipc-echo")?;
     let to_client = spawn(&domain, image, "ipc-client")?;
+    let mut asked = [0_u8; 14];
+    let hello: &[u8] = if long == 0 {
+        CLIENT
+    } else {
+        let (name, seconds) = asked.split_at_mut(CLIENT.len());
+        name.copy_from_slice(CLIENT);
+        seconds.copy_from_slice(&long.to_le_bytes());
+        &asked
+    };
     to_client
-        .write_with(b"CLIENT", [to_server.into_owned()])
+        .write_with(hello, [to_server.into_owned()])
         .map_err(|_| 51)?;
     let mut bytes = [0_u8; 160];
     let mut handles = [Handle::INVALID; 1];
@@ -260,7 +488,9 @@ fn domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
             Ok(received) => {
                 let line = bytes.get(..received.bytes).unwrap_or_default();
                 let _ = linux::write(1, line);
-                return Ok(());
+                if long == 0 || line.starts_with(b"ipc-bench long ") {
+                    return Ok(());
+                }
             }
             Err(ReadError::Failed(Error::ShouldWait)) => {
                 let _ = to_client
@@ -418,6 +648,11 @@ impl Clock {
 
     /// Nanoseconds per thousand ticks since [`Clock::start`].
     fn stop(&self) -> u64 {
+        self.stop_spanned().0
+    }
+
+    /// [`Clock::stop`], and the nanoseconds since [`Clock::start`].
+    fn stop_spanned(&self) -> (u64, u64) {
         let nanos = linux::monotonic_nanos()
             .unwrap_or(0)
             .saturating_sub(self.nanos);
@@ -425,7 +660,7 @@ impl Clock {
             .unwrap_or(0)
             .saturating_sub(self.ticks)
             .max(1);
-        nanos.saturating_mul(1000) / ticks
+        (nanos.saturating_mul(1000) / ticks, nanos)
     }
 }
 
@@ -445,23 +680,27 @@ struct Histogram {
     sum: u64,
 }
 
-/// Room for one run's samples, page-rounded.
-const SAMPLE_BYTES: usize = (ROUNDS as usize * size_of::<u64>()).next_multiple_of(4096);
-
 impl Histogram {
-    /// Nothing counted, in fresh memory of its own.
+    /// Nothing counted, in fresh memory of its own: room for one run.
     fn new() -> Histogram {
-        let samples = vmo::create(Kernel, SAMPLE_BYTES)
-            .and_then(|room| room.map(None, SAMPLE_BYTES, Protection::ReadWrite, 0))
+        Histogram::with_room(ROUNDS as usize)
+    }
+
+    /// Nothing counted, with room for `count` samples in fresh memory of its
+    /// own.
+    fn with_room(count: usize) -> Histogram {
+        let bytes = (count * size_of::<u64>()).next_multiple_of(4096);
+        let samples = vmo::create(Kernel, bytes)
+            .and_then(|room| room.map(None, bytes, Protection::ReadWrite, 0))
             .map_or(&mut [][..], |at| {
-                // SAFETY: `vmo_map` answered `SAMPLE_BYTES` of fresh, zeroed,
+                // SAFETY: `vmo_map` answered `bytes` of fresh, zeroed,
                 // writable memory at `at`, page-aligned, which nothing else
                 // in this process names and which stays mapped when the VMO's
                 // handle goes; `u64` is valid for any bytes.
                 unsafe {
                     core::slice::from_raw_parts_mut(
                         core::ptr::with_exposed_provenance_mut::<u64>(at),
-                        SAMPLE_BYTES / size_of::<u64>(),
+                        bytes / size_of::<u64>(),
                     )
                 }
             });
@@ -470,6 +709,32 @@ impl Histogram {
             total: 0,
             sum: 0,
         }
+    }
+
+    /// Forget what was counted, keeping the room.
+    fn clear(&mut self) {
+        self.total = 0;
+        self.sum = 0;
+    }
+
+    /// The samples counted, sorted.
+    fn sorted(&mut self) -> &[u64] {
+        let sorted = self.samples.get_mut(..self.total).unwrap_or_default();
+        sorted.sort_unstable();
+        sorted
+    }
+
+    /// The least sample, and those at the 50th, 90th and 99th percentiles,
+    /// in ticks.
+    fn points(&mut self) -> [u64; 4] {
+        let sorted = self.sorted();
+        let at = |per_mille: usize| {
+            sorted
+                .get(sorted.len() * per_mille / 1000)
+                .copied()
+                .unwrap_or(0)
+        };
+        [at(0), at(500), at(900), at(990)]
     }
 
     /// Count one.
@@ -491,25 +756,36 @@ impl Histogram {
     /// ticks: the least, the samples at the 50th, 90th and 99th percentiles
     /// of the sorted run, and the mean.
     fn line(&mut self, what: &str, scale: u64) -> Line {
-        let ns = |ticks: u64| ticks.saturating_mul(scale) / 1000;
-        let sorted = self.samples.get_mut(..self.total).unwrap_or_default();
-        sorted.sort_unstable();
-        let at = |per_mille: usize| {
-            sorted
-                .get(sorted.len() * per_mille / 1000)
-                .copied()
-                .unwrap_or(0)
-        };
-        let mean = self.sum / (self.total.max(1) as u64);
-        format_line(format_args!(
-            "ipc-bench {what} n={} min={} p50={} p90={} p99={} mean={}",
-            self.total,
-            ns(at(0)),
-            ns(at(500)),
-            ns(at(900)),
-            ns(at(990)),
-            ns(mean),
-        ))
+        self.line_per(what, scale, 1)
+    }
+
+    /// [`Histogram::line`] for samples that each timed `per` calls, printed
+    /// per call; with `batch=<per>` after the count when `per` is not 1.
+    fn line_per(&mut self, what: &str, scale: u64, per: u64) -> Line {
+        let per = per.max(1);
+        let ns = |ticks: u64| ticks.saturating_mul(scale) / (1000 * per);
+        let total = self.total;
+        let mean = self.sum / (total.max(1) as u64);
+        let [min, p50, p90, p99] = self.points();
+        if per == 1 {
+            format_line(format_args!(
+                "ipc-bench {what} n={total} min={} p50={} p90={} p99={} mean={}",
+                ns(min),
+                ns(p50),
+                ns(p90),
+                ns(p99),
+                ns(mean),
+            ))
+        } else {
+            format_line(format_args!(
+                "ipc-bench {what} n={total} batch={per} min={} p50={} p90={} p99={} mean={}",
+                ns(min),
+                ns(p50),
+                ns(p90),
+                ns(p99),
+                ns(mean),
+            ))
+        }
     }
 }
 

@@ -66,6 +66,11 @@ const IA32_FS_BASE: u32 = 0xC000_0100;
 /// `EFER.SCE`: system call extensions.
 const EFER_SCE: u64 = 1;
 
+/// MEASUREMENT ONLY (os76/p0-measure, never lands): the native number
+/// [`ferrix_syscall_entry`] answers 0 at once, for `ipc-bench`'s `null-entry`
+/// line. A gap in the native range on every other entry and architecture.
+const NULL_ENTRY: usize = 0x1FF0;
+
 /// Flags cleared on entry to the kernel.
 ///
 /// `IF` matters because without it the kernel would run the first
@@ -504,6 +509,16 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
                 return leave(frame, outcome);
             }
         }
+    }
+
+    // MEASUREMENT ONLY (os76/p0-measure, never lands): `ipc-bench`'s
+    // `null-entry`, answered 0 at the earliest point after the stub's call,
+    // after T1's test so that 0x1013's path is not lengthened: no filter, no
+    // decode, interrupts never opened, no way-out look. The stub's own exit
+    // (`VERW` where needed, `swapgs`, `sysretq`) runs as for every call.
+    if frame.rax as usize == NULL_ENTRY {
+        frame.rax = 0;
+        return;
     }
 
     let args = crate::trap::SyscallArgs {
