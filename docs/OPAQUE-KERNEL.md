@@ -4729,3 +4729,99 @@ pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
+#### The scheduler side: the job loads folded (po10-sched; ledger line 461, J1 and J2)
+
+**Where the time went.** The timing build (`po10/sched-prof`, never lands:
+po9-sched's stamps rebased on the atomic slots) puts the direct switch's
+span from the commit to the switch -- `fill_reply`, `hand_over`, the
+unlocks, the count -- at 70 to 80 ns a direction in the low mode; ten
+sub-stamps inside it each read at the stamp's own floor, so no single piece
+is left. The largest that can be named is the job arithmetic: the bench's
+two programs run in a job, so each direction made two locked `fetch_add`s
+on that job's load (the peer's join, the caller's leave) and two walks of
+`quota::effective` (the caller's charge, the peer's weight), each with a
+64-bit division a level.
+
+**J1, the fold.** Before any charge, `Direct::hand_over` stores the peer's
+state and counts it in its word (`Task::join_word`), reads the caller's
+word, and plans (`ferrix_sched::plan_job_fold`): a fold only when the
+peer's word joined a job `g` and the caller's word names `g` and is
+counted; otherwise the peer's load is added at once, as `set_state_from`
+adds it, and the caller's leave is `between`'s, as before. Under a fold,
+`CpuQueue::hand_over`, once the fair class has handed the caller out,
+stores its state and lets its word go (`Task::leave_word`), the store
+first as in `set_state_from`, and `PendingJoin::settle` makes the load's
+one change by the net of the two weights, none at zero
+(`ferrix_sched::settle_job_fold`); `between`'s own `set_state_from` then
+finds the word let go and changes nothing. A way out of `hand_over` that
+does not reach the caller's leave makes the peer's join alone, in one
+place, `PendingJoin`'s drop; every such way out ends in FX-0530, so no boot
+reaches it. A leave answering other than planned makes the two changes in
+the general order and is counted (`unplanned`), which stage 9 requires to
+stay 0. The plan travels by arguments; no static holds it.
+`join_group`/`leave_group` are those word functions and `quota::adjust`,
+and `set_state_from` is `store_state` and those, so both paths run one code
+(G5).
+
+*Why it is the general result* (the consultant's (a) to (h)). Before the
+fold, `load(g) = L >= bc > 0`: the caller is running and counted in `g`,
+and every task's leave of `g` follows its own join, ordered by the
+run-queue locks it passes. The general sequence is `L -> L+bp -> L+bp-bc`,
+the fold `L -> L+bp-bc`; with `bp > 0` neither crosses zero, so `adjust`
+never walks up in either, and no level above `g` is touched by either.
+Other processors' adjusts are `fetch_add`s and commute, and none of them
+sees a crossing while the caller's `bc` is in the load, which it is until
+the fold settles. A reader of `load(g)` elsewhere -- an `effective` walk,
+`quota::load` in a check, which runs only at quiescence -- reads `L` or
+`L+bp-bc`, which it could have read in the general sequence by not looking
+in between. **Neither word can move during the fold**: `Task::set_group` is
+made only by the running task on itself (`set_task_group`, from
+`regroup_current` and `set_current_group`) or on a task no queue has held
+yet (`spawn_in_group`, `prepare_user`); the caller runs here masked and the
+peer is parked. Its doc says so, and a new caller of it on another
+processor's task reopens J1. (The design's first text guarded against such
+a move by comparing the two jobs at the leave; that guard would not have
+caught it, ledger 461 (b).)
+
+**J2, the weights read once.** The general path takes the caller's due
+(`follow_group_share`, in `account`) and the peer's weight, each with
+`load(g) = L+bp`. Under a fold the peer is counted in its word and not in
+the load, so both are computed by `quota::effective_with(g, base, bp)`,
+`effective`'s own walk with `bp` added to the first level's load and to no
+other (`ferrix_sched::carried_weight_with`; no level above `g` changes, by
+J1's argument). `account_with` hands `follow_group_share` the extra, which
+keeps `account`'s early returns, the job test and the eighth's hysteresis
+in one function, and answers the base and the due it computed; the peer
+takes that due when its base is the caller's, one walk for both, and walks
+itself otherwise. Nothing is kept past the masked span and no write of
+this processor falls between the general path's two walks, so one snapshot
+for both is the general execution in which no other processor wrote
+between them: within D1, not the memo it forbids (ledger 461 (e)).
+
+**Checks.**
+- `ferrix_sched`'s host test
+  `the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them`
+  drives `plan_job_fold` and `settle_job_fold` against a model of
+  `quota::adjust` (the model's doc names it: a drift is caught by review)
+  over 40,000 random forests of depth 1 to 8, siblings and nested jobs, the
+  two tasks in one job, siblings, nested either way or apart, equal and
+  unequal weights, other tasks or none: every load and contribution and
+  both weights equal the general sequence's (L.sched.66). Its control, a
+  fold planned without the job test, fails it.
+  `the_carried_weight_with_an_extra_raises_the_first_load_alone` holds the
+  extra to the first level (J-C5); the 128-bit equality stays
+  `the_carried_weight_is_the_wide_formula`'s.
+- Stage 9's job cases (`fast_path_check.rs`, at its end, both boots):
+  trips in one job with equal and with unequal weights, in two siblings, in
+  a job and its child; after the last trip, masked on the trips' processor,
+  each job's load is its tasks' counted words plus its busy children's
+  contributions, a child contributes exactly while busy, and every load is
+  0 once both are gone; with the fast path on the first two fold and the
+  last two do not, and none is unplanned (L.sched.64). The weight case
+  holds the caller at the weight `effective` gives with the echo counted,
+  or at the one its share gives as the loads stand where a charge has since
+  moved it by more than an eighth; both computed in the same masked
+  snapshot (L.sched.65).
+- L.sched.55 now states only what `hand_over_is_the_general_sequence`
+  proves, `RunQueue::hand_over`; its charge-and-weigh clause is L.sched.65.
+
