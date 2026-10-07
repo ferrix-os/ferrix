@@ -1396,14 +1396,16 @@ package FerrixStructure {
         #implemented part renderctl : LibraryCrate {
             attribute :>> path = "src/lib/proto/renderctl";
             attribute :>> forbidsUnsafe = true;
-            attribute :>> hostTests = 22;
+            attribute :>> hostTests = 24;
             @stage { number = 19; }
             doc /* The render control protocol between the kernel's render core
                  * and a ring-3 GPU driver (docs/GPU.md §3.3), in displayctl's
                  * shape: fixed messages decoded strictly, command buffers
                  * passed through as bytes the driver understands and the core
-                 * does not, and the core's side as a state machine. Fuzzed by
-                 * renderctl. */
+                 * does not, and the core's side as a state machine. Version 4
+                 * adds ATTACH_OBJ, an object made nameable in the context of
+                 * an open that imported it as a dmabuf (docs/GPU.md §3.13).
+                 * Fuzzed by renderctl. */
         }
         #implemented part gc400 : LibraryCrate {
             attribute :>> path = "src/lib/drivers/gpu/gc400";

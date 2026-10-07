@@ -848,6 +848,36 @@ fn make_context(
     })
 }
 
+/// Make one object nameable in a context that did not make it: the one a
+/// program imported it into as a dmabuf (`docs/GPU.md` §3.13).
+///
+/// The same command the object's maker was given in its own context; the
+/// device takes it again for a context that has it already, as Linux's
+/// virtio-gpu sends it for every handle a context opens. Nothing is pinned
+/// or unpinned: the backing stays the maker's.
+fn attach_object(
+    driver: &mut Gpu,
+    port: &Port<Kernel>,
+    object: u32,
+    context: u32,
+) -> Result<ferrix_renderctl::message::Message, Step> {
+    let attached = run_command_in(
+        driver,
+        port,
+        gpu::Context {
+            id: context,
+            ..gpu::Context::NONE
+        },
+        &Command::CtxAttachResource {
+            resource_id: object,
+        },
+    )?;
+    Ok(ferrix_renderctl::message::Message::ObjectAttached {
+        object,
+        status: status_of(attached),
+    })
+}
+
 /// Destroy one rendering context.
 fn drop_context(
     driver: &mut Gpu,
@@ -2212,6 +2242,9 @@ impl Serving {
                 drop_object(&mut self.driver, &self.port, side, object)?
             }
             RenderMessage::MakeBlob(make) => make_blob(&mut self.driver, &self.port, side, &make)?,
+            RenderMessage::AttachObject { object, context } => {
+                attach_object(&mut self.driver, &self.port, object, context)?
+            }
             RenderMessage::GetCaps { capset, version } => {
                 // Its reply carries a handle, so it is written there.
                 let _ = get_caps(&mut self.driver, &self.port, side, capset, version)?;

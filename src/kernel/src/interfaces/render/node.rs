@@ -244,6 +244,18 @@ struct Handles {
     next: u32,
 }
 
+impl Handles {
+    /// The handle the table has for `object`, if it has one: the one place
+    /// an import asks, so one handle an object holds for both of its
+    /// looks, before the attach and after it.
+    fn handle_of(&self, object: &Arc<Object>) -> Option<u32> {
+        self.live
+            .iter()
+            .find(|held| Arc::ptr_eq(&held.object, object))
+            .map(|held| held.handle)
+    }
+}
+
 impl core::fmt::Debug for RenderFile {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RenderFile")
@@ -299,6 +311,25 @@ impl RenderFile {
     /// Put `object` in this open's handle table, and answer its handle.
     fn hold(&self, object: Arc<Object>) -> u32 {
         let mut handles = self.handles.lock();
+        let handle = handles.next;
+        handles.next = handles.next.saturating_add(1);
+        handles.live.push(Handle { handle, object });
+        handle
+    }
+
+    /// The handle this open has for `object`, if it has one.
+    fn handle_of(&self, object: &Arc<Object>) -> Option<u32> {
+        self.handles.lock().handle_of(object)
+    }
+
+    /// Put `object` in this open's handle table unless it is there already,
+    /// and answer its handle: one handle an object, whichever of two
+    /// importing threads gets here first.
+    fn hold_once(&self, object: Arc<Object>) -> u32 {
+        let mut handles = self.handles.lock();
+        if let Some(handle) = handles.handle_of(&object) {
+            return handle;
+        }
         let handle = handles.next;
         handles.next = handles.next.saturating_add(1);
         handles.live.push(Handle { handle, object });
@@ -483,6 +514,7 @@ pub(crate) fn ioctl(
         drm::IOCTL_GET_CAP => get_cap(process, arg),
         drm::IOCTL_GEM_CLOSE => gem_close(process, file, arg),
         drm::IOCTL_PRIME_HANDLE_TO_FD => export(process, file, arg),
+        drm::IOCTL_PRIME_FD_TO_HANDLE => import(process, file, arg),
         _ => Err(Errno::ENOTTY),
     }
 }
@@ -1013,6 +1045,55 @@ fn export(process: &Process, file: &RenderFile, arg: u64) -> Result<usize, Errno
         .lock()
         .insert(open, prime.flags & types::O_CLOEXEC != 0)?;
     prime.fd = descriptor;
+    prime.write(&mut bytes).ok_or(Errno::EFAULT)?;
+    uaccess::copy_to_user(process.space(), arg, &bytes).map_err(|_| Errno::EFAULT)?;
+    Ok(0)
+}
+
+/// `DRM_IOCTL_PRIME_FD_TO_HANDLE`: an object another open of this node
+/// exported, given a handle in this one (`docs/GPU.md` §3.13).
+///
+/// This is how a compositor shows a client's GPU buffer: the client exports
+/// it, hands the descriptor over a socket, and the compositor imports it
+/// here, so its own context can sample the resource where it lies.
+///
+/// * A descriptor that is not an [`Exported`] of *this* renderer is
+///   `EINVAL`, as Linux answers one that is not a dmabuf; there is one
+///   device, so there is no other's buffer to import.
+/// * An object this open already has a handle for answers that handle, as
+///   Linux keeps one handle an object an open -- which is also what a
+///   program importing its own export is given.
+/// * Otherwise the object is attached to this open's context, made now if
+///   there is none, and only then put in the handle table. The handle holds
+///   the object as a made one does, so `RESOURCE_INFO`, `MAP`, the
+///   transfers and `GEM_CLOSE` work on it unchanged.
+///
+/// Nothing detaches the object on `GEM_CLOSE`: the attachment lasts until
+/// the context goes or the device unrefs the resource, which detaches it
+/// from every context, and the core gives an object id out again only after
+/// the device said it was gone -- so an old context can never name a new
+/// object by a reused id. An import after a `GEM_CLOSE`, or two threads
+/// importing one object at once, attach again, which the device takes as it
+/// takes the first (Linux attaches on every handle it opens); the handle
+/// table then keeps one handle, whichever thread put it there first.
+fn import(process: &Process, file: &RenderFile, arg: u64) -> Result<usize, Errno> {
+    let mut bytes = vec![0u8; PrimeHandle::SIZE];
+    uaccess::copy_from_user(process.space(), arg, &mut bytes).map_err(|_| Errno::EFAULT)?;
+    let mut prime = PrimeHandle::read(&bytes).ok_or(Errno::EFAULT)?;
+    let descriptor = crate::syscall::fd::file(process, crate::syscall::fd::arg(prime.fd as u64))
+        .map_err(|_| Errno::EBADF)?;
+    let object = exported(descriptor.io()).ok_or(Errno::EINVAL)?.object();
+    if !Arc::ptr_eq(&object.renderer, &file.renderer) {
+        return Err(Errno::EINVAL);
+    }
+    prime.handle = match file.handle_of(&object) {
+        Some(handle) => handle,
+        None => {
+            let context = file.context()?;
+            file.renderer.attach(object.id, context).map_err(errno_of)?;
+            file.hold_once(object)
+        }
+    };
     prime.write(&mut bytes).ok_or(Errno::EFAULT)?;
     uaccess::copy_to_user(process.space(), arg, &bytes).map_err(|_| Errno::EFAULT)?;
     Ok(0)
