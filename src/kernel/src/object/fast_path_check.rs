@@ -181,7 +181,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         check_the_barriers_in_a_domain_and_across_two(on)?;
         check_a_queued_write_takes_the_park()?;
         check_the_reply_words()?;
-        report.cases = 11;
+        check_the_direct_switch_job_loads(on)?;
+        check_the_direct_switch_weights()?;
+        report.cases = 13;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
             report.cases += 1;
@@ -1122,6 +1124,267 @@ fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
         return Err(
             "A2's case: a reader sent a queued message and then another did not read both in order",
         );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// J: the direct switch's job loads and weights (§9.11, ledger line 461)
+// ---------------------------------------------------------------------------
+
+/// Where a job case's two tasks run: in one job, in two siblings, or the
+/// echo in a job and the caller in its child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JobShape {
+    One,
+    Siblings,
+    Nested,
+}
+
+/// What a job case's caller is handed: its end, its base weight, the echo,
+/// and the jobs to look at, each with its parent among them.
+struct JobCase {
+    handle: Handle,
+    base: u32,
+    echo: Arc<Task>,
+    jobs: [(u32, Option<u32>); 3],
+}
+
+/// What a job case's caller saw after its last trip, with interrupts masked
+/// on the processor both tasks run on: the two tasks' words, its own base
+/// weight and weight, the echo's base, and each job's load and contribution.
+#[derive(Clone, Copy, Debug, Default)]
+struct JobSeen {
+    caller: (u32, u32),
+    echo: (u32, u32),
+    base: u32,
+    weight: u32,
+    echo_base: u32,
+    loads: [(u32, Option<u32>, i64, i64); 3],
+}
+
+/// The job case's setting, for its caller.
+static JOB_CASE: SpinLock<Option<JobCase>> = SpinLock::new(None);
+/// What its caller saw, or what went wrong.
+static JOB_SEEN: SpinLock<Option<Result<JobSeen, &'static str>>> = SpinLock::new(None);
+/// The base weight a job case's echo gives itself before it waits.
+static JOB_ECHO_BASE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// A job case's echo: its own base weight, then [`echo_in_the_process`].
+fn job_echo_in_the_process(argument: usize) {
+    let base = JOB_ECHO_BASE.load(core::sync::atomic::Ordering::Acquire);
+    if let Some(me) = crate::sched::current() {
+        crate::sched::set_weight(&me, base);
+    }
+    echo_in_the_process(argument)
+}
+
+/// A job case's caller: its own base weight, `TRIPS` trips, then the look,
+/// masked, while the echo waits for the next one.
+fn job_trips_in_the_process(_argument: usize) {
+    let taken = JOB_CASE.lock().take();
+    let seen = taken.map_or(Err("no job case"), |case| {
+        let me = crate::sched::current().ok_or("a job case's caller is not running")?;
+        crate::sched::set_weight(&me, case.base);
+        for trip in 1..=TRIPS {
+            let sent = [trip, !trip, trip.rotate_left(9)];
+            if call(case.handle, 24, sent) != (24, sent) {
+                return Err("a job case's trip was not answered with its own words");
+            }
+        }
+        let saved = <arch::Irq as ferrix_sync::IrqControl>::disable();
+        let mut loads = [(super::quota::NONE, None, 0, 0); 3];
+        for (seen, &(job, parent)) in loads.iter_mut().zip(&case.jobs) {
+            *seen = (
+                job,
+                parent,
+                super::quota::load(job),
+                super::quota::contributed(job),
+            );
+        }
+        let seen = JobSeen {
+            caller: me.group_word(),
+            echo: case.echo.group_word(),
+            base: me.base_weight(),
+            weight: me.entity_state().weight,
+            echo_base: case.echo.base_weight(),
+            loads,
+        };
+        <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
+        Ok(seen)
+    });
+    *JOB_SEEN.lock() = Some(seen);
+    process::exit_current(0)
+}
+
+/// Run one job case: `TRIPS` trips between an echo of base `echo_base` and a
+/// caller of base `caller_base`, both on one processor, in jobs of `shape`
+/// under a job of their own. Answers what the caller saw, and checks that
+/// once both are gone every job's load reads 0.
+fn job_case(shape: JobShape, caller_base: u32, echo_base: u32) -> Result<JobSeen, &'static str> {
+    let cpu = trip_processor();
+    let root = super::job::Job::new_root().map_err(|_| "no memory for the job cases' jobs")?;
+    let top = root
+        .new_child()
+        .map_err(|_| "the job cases: a job refused a child")?;
+    let first = top
+        .new_child()
+        .map_err(|_| "the job cases: a job refused a second child")?;
+    let second = match shape {
+        JobShape::One => Arc::clone(&first),
+        JobShape::Siblings => top
+            .new_child()
+            .map_err(|_| "the job cases: a job refused a sibling")?,
+        JobShape::Nested => first
+            .new_child()
+            .map_err(|_| "the job cases: a job refused a grandchild")?,
+    };
+    let (echo_job, caller_job) = (&first, &second);
+    let index = |job: &Arc<super::job::Job>| job.quota_index();
+    // Each job once: in one job the third entry is no job, whose load and
+    // contribution read 0 and which no task or job names.
+    let jobs = [
+        (index(&top), None),
+        (index(&first), Some(index(&top))),
+        match shape {
+            JobShape::One => (super::quota::NONE, None),
+            JobShape::Siblings => (index(&second), Some(index(&top))),
+            JobShape::Nested => (index(&second), Some(index(&first))),
+        },
+    ];
+    let (mine, theirs) =
+        Endpoint::pair().map_err(|_| "no memory for the job cases' channel")?;
+    let (echo_process, echo_handle) = holding_in(&theirs, Some(echo_job))?;
+    JOB_ECHO_BASE.store(echo_base, core::sync::atomic::Ordering::Release);
+    *ECHO.lock() = Some(echo_handle);
+    let echo = spawn_in(&echo_process, "fast path job echo", job_echo_in_the_process, Some(cpu))?;
+    drop(echo_process);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    wait_until(deadline, "the job cases' echo never waited", || {
+        theirs.reader_waiting()
+    })?;
+    drop(theirs);
+    let (caller_process, handle) = holding_in(&mine, Some(caller_job))?;
+    drop(mine);
+    *JOB_SEEN.lock() = None;
+    *JOB_CASE.lock() = Some(JobCase {
+        handle,
+        base: caller_base,
+        echo: Arc::clone(&echo),
+        jobs,
+    });
+    let caller = spawn_in(
+        &caller_process,
+        "fast path job caller",
+        job_trips_in_the_process,
+        Some(cpu),
+    )?;
+    drop(caller_process);
+    wait_dead(&caller, deadline, "the job cases' caller never finished its trips")?;
+    wait_dead(&echo, deadline, "the job cases' echo never saw its caller's end")?;
+    let seen = JOB_SEEN
+        .lock()
+        .take()
+        .unwrap_or(Err("the job cases' caller said nothing"))?;
+    if jobs.iter().any(|&(job, _)| super::quota::load(job) != 0) {
+        return Err("the job cases: tasks gone and still counted in their jobs' processor load");
+    }
+    drop((root, top, first, second));
+    Ok(seen)
+}
+
+/// The job loads after a direct switch's trips (§9.11, J1): with the echo
+/// waiting and the caller running, each job's load is the weight its tasks'
+/// words say they are counted with plus what its busy children add, and a
+/// child adds exactly while it is busy; once both are gone every load is 0.
+/// Four cases: one job with equal bases, one job with unequal bases (where a
+/// fold's net is not zero), two sibling jobs, and a job and its child. With
+/// the fast path on, the first two fold and the last two do not, and no fold
+/// ends unplanned.
+///
+/// Verifies: `L.sched.64`
+fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
+    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
+    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
+    for (shape, caller_base, echo_base, folds) in [
+        (JobShape::One, nice_0, nice_0, true),
+        (JobShape::One, nice_0, heavier, true),
+        (JobShape::Siblings, nice_0, heavier, false),
+        (JobShape::Nested, heavier, nice_0, false),
+    ] {
+        let before = direct::counts();
+        let seen = job_case(shape, caller_base, echo_base)?;
+        for &(job, _, load, contributed) in &seen.loads {
+            let counted = [seen.caller, seen.echo]
+                .iter()
+                .filter(|&&(at, _)| at == job)
+                .map(|&(_, weight)| i64::from(weight))
+                .sum::<i64>();
+            let children = seen
+                .loads
+                .iter()
+                .filter(|&&(child, parent, _, _)| parent == Some(job) && child != job)
+                .map(|&(_, _, _, contributed)| contributed)
+                .sum::<i64>();
+            if load != counted + children || (load > 0) != (contributed > 0) {
+                crate::console::println!(
+                    "  fastpath job case {shape:?}: job {job} load {load} contributes \
+                     {contributed}, its tasks count {counted} and its children add {children}; \
+                     seen {seen:?}"
+                );
+                return Err(
+                    "the job cases: the direct switch left a job's processor load off from what its tasks and children count",
+                );
+            }
+        }
+        if on {
+            let unplanned = moved(&before, Count::FoldUnplanned);
+            let (wanted, other) = if folds {
+                (Count::Fold, Count::Separate)
+            } else {
+                (Count::Separate, Count::Fold)
+            };
+            if unplanned != 0 || moved(&before, wanted) == 0 || moved(&before, other) != 0 {
+                crate::console::println!(
+                    "  fastpath job case {shape:?}: folded {}, apart {}, unplanned {unplanned}",
+                    moved(&before, Count::Fold),
+                    moved(&before, Count::Separate)
+                );
+                return Err("the job cases: the direct switch planned a fold where it should not, or none where it should");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The weights a direct switch gives (§9.11, J2): the caller of trips in
+/// one job with an echo of another base runs, after its last trip, at the
+/// weight `effective` gives with the echo counted -- what the hand-over gave
+/// it -- or, if a charge since has moved it by more than an eighth, at the
+/// weight its job's share gives it now: never at one computed without the
+/// echo counted.
+///
+/// Verifies: `L.sched.65`
+fn check_the_direct_switch_weights() -> Result<(), &'static str> {
+    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
+    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
+    let seen = job_case(JobShape::One, nice_0, heavier)?;
+    let (job, counted) = seen.caller;
+    let echo_counted = if seen.echo.0 == job { seen.echo.1 } else { 0 };
+    // What the hand-over gave: the echo counted, whether it is now or not.
+    let handed = super::quota::effective_with(
+        job,
+        seen.base,
+        i64::from(seen.echo_base) - i64::from(echo_counted),
+    );
+    // What a charge since gives: the share as the loads stand.
+    let charged = super::quota::effective(job, seen.base);
+    if counted != seen.base || (seen.weight != handed && seen.weight != charged) {
+        crate::console::println!(
+            "  fastpath job weights: runs at {}, handed {handed}, charged {charged}; seen {seen:?}",
+            seen.weight
+        );
+        return Err("the job cases: the direct switch gave a weight effective does not give with its peer counted");
     }
     Ok(())
 }

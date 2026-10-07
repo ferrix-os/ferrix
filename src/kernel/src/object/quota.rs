@@ -749,3 +749,9 @@ const _: () = assert!(
 pub(crate) fn load(index: u32) -> i64 {
     slot(index).map_or(0, |slot| slot.load.load(Ordering::Acquire))
 }
+
+/// What `index` adds to its parent's load: its own weight while it is busy,
+/// nothing while idle. For a check.
+pub(crate) fn contributed(index: u32) -> i64 {
+    slot(index).map_or(0, |slot| slot.contributed.load(Ordering::Acquire))
+}
