@@ -40,16 +40,19 @@ workspace, with all seven of Hyprland's group words read as
 `applyDynamicRules` reads them; and `no_close_for` holds a window open,
 with `killactive` saying why rather than doing nothing.
 
-What is left, of the 55, is read and kept but not acted on:
-`no_screen_share`, which does need a second pass -- drawing the frame again
-without one surface in it; the five that ask a display for what virtio-gpu
-does not offer -- tearing, variable refresh or HDR (`immediate`, `no_vrr`,
-`no_auto_hdr`, `tonemap`, `force_rgbx`); `xray`, `content`, `animation`,
-`idle_inhibit`, `no_anim`, `sync_fullscreen` and `render_unfocused`; and the
-input ones. `persistent_size` is done (2026-09-18). `xray` is half done: the
-layer rule landed on 2026-09-18, since it asks for the blur of what is
-behind a bar, which is the picture the renderer's `Backdrop` already keeps,
-but the window rule of the same name is still only recorded.
+What is left, of the 55, is read and kept but not acted on: the five
+that ask a display for what virtio-gpu does not offer -- tearing, variable
+refresh or HDR (`immediate`, `no_vrr`, `no_auto_hdr`, `tonemap`,
+`force_rgbx`); `content`, `animation`, `idle_inhibit`, `no_anim`,
+`sync_fullscreen` and `render_unfocused`; and the input ones.
+`persistent_size` is done (2026-09-18). `xray` and `no_screen_share` are done
+(2026-10-07, branch `po10-win19/stage19`): `xray` follows Hyprland's
+`shouldUseNewBlurOptimizations` -- `xray 0` never reads the kept backdrop,
+`xray 1` or `decoration:blur:xray` always does -- and `no_screen_share` is
+what Hyprland's `CScreenshareFrame::renderMonitor` does, a black box over
+the window's rectangle, rounded as it is, and over its popups, in every
+screenshot and capture while the screen shows the window as ever. Neither
+needed the second render pass it was written down as needing.
 
 **Done — all four tiling layouts, and the options that shape them
 (2026-09-17).** Hyprland 0.56 has four: `dwindle`, `master`, `monocle` and
@@ -466,9 +469,11 @@ made them in.
 The rest were read, kept and not acted on when this landed, and the module
 says why each. Since then `dim_around` and `xray` are drawn too, from the
 renderer's `Backdrop`. Still only kept: `no_anim`, which has nothing to turn
-off; `blur_popups` and `no_screen_share`, which need a second render pass --
-they read what is *behind* the frame being drawn, or need the frame drawn
-again without one surface in it; and `ignore_alpha` and `animation`. They are
+off; and `ignore_alpha` and `animation`. `blur_popups` and
+`no_screen_share` were drawn on 2026-10-07 (branch `po10-win19/stage19`)
+without the second pass they were thought to need: popups are drawn last, so
+the blur of the canvas under one is the blur of what is behind it, and a
+screenshot is the frame with a black box drawn over the copy. They are
 parsed rather than refused so a person's configuration is not a wall of
 diagnostics. The names are Hyprland 0.56's, in snake case (`above_lock`,
 `dim_around`, `no_anim`); the older run-together spellings are refused.
@@ -1395,10 +1400,12 @@ off`, a key bringing it back, and the lock chain
 it feels it (`docs/GPU.md` §3.9) -- a client's own pages as its texture's
 backing, so its pixels are not copied in the guest (8), the device queue
 being done (§3.11) -- then the second-pass effects
-(`no_screen_share`, which means drawing the frame again without one surface
-in it, and `blur_popups`, which reads what is behind the frame being drawn),
-`dwindle:precise_mouse_move`, which waits on dropping a dragged window
-back into the tiling, and the window rule `xray`. Mesa on ferrousli and
+(`no_screen_share` and `blur_popups`), `dwindle:precise_mouse_move` and
+the window rule `xray`, which are built on branch `po10-win19/stage19`
+(2026-10-07) and wait for their gate: a tiled window dragged with
+`movewindow` is lifted out of the tiling and dropped back in beside the box
+under the pointer, as Hyprland's drag controller does, which is the moment
+`precise_mouse_move` decides. Mesa on ferrousli and
 `zwp_linux_dmabuf`, for clients that draw on the GPU themselves, come after
 and are priced outside the stage (`docs/BACKLOG.md`, 8 points and 40 or
 more). `docs/COMPOSITOR-DAMAGE-HANDOFF.md` §5 says why each is where it is,
