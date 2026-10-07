@@ -1141,13 +1141,16 @@ enum JobShape {
     Nested,
 }
 
+/// The jobs a job case looks at, each with its parent among them.
+type JobsLooked = [(u32, Option<u32>); 3];
+
 /// What a job case's caller is handed: its end, its base weight, the echo,
-/// and the jobs to look at, each with its parent among them.
+/// and the jobs to look at.
 struct JobCase {
     handle: Handle,
     base: u32,
     echo: Arc<Task>,
-    jobs: [(u32, Option<u32>); 3],
+    jobs: JobsLooked,
 }
 
 /// What one of a job case's two tasks saw, with interrupts masked on the
@@ -1168,7 +1171,7 @@ struct JobSeen {
 /// The job case's setting, for its caller.
 static JOB_CASE: SpinLock<Option<JobCase>> = SpinLock::new(None);
 /// The caller and the jobs, for the echo's look.
-static JOB_CALLER: SpinLock<Option<(Arc<Task>, [(u32, Option<u32>); 3])>> = SpinLock::new(None);
+static JOB_CALLER: SpinLock<Option<(Arc<Task>, JobsLooked)>> = SpinLock::new(None);
 /// What the caller saw after its last trip, or what went wrong.
 static JOB_SEEN: SpinLock<Option<Result<JobSeen, &'static str>>> = SpinLock::new(None);
 /// What the echo saw as the last trip reached it.
