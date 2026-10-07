@@ -251,21 +251,22 @@ package FerrixSmpRequirements {
         }
         requirement <'L.smp.17'> aProcessorThatNeverAnswersIsFatal : ItemLowLevel {
             attribute :>> statement = "wait_for shall stop the kernel in the safe
-                state, naming the processor, once its wall-clock bound has passed
-                and it has asked patience's count of polls, and not before both.";
+                state, naming the processor, once its stuck bound -- 10 s of
+                wall-clock time and patience's count of polls for it -- has passed
+                without an answer, and not before both.";
             attribute :>> criterion = "A processor made to stop answering its
-                interrupt ends the boot in FX-0001 naming it, after 1 s or more and
-                16,777,216 polls or more, under tcg and under KVM.";
+                interrupt ends the boot in FX-0001 naming it, after 10 s or more and
+                167,772,160 polls or more, under tcg and under KVM.";
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = ("smp::wait_for", "smp::patience");
         }
         requirement <'L.smp.18'> aStoppedHolderIsFatal : ItemLowLevel {
             attribute :>> statement = "take_turn shall stop the kernel in the safe
-                state when the shootdown generation has stood still for 4 s and
+                state when the shootdown generation has stood still for 40 s and
                 patience's count of polls while it waits for the turn, and shall
                 start its count again whenever the generation moves.";
             attribute :>> criterion = "A holder made to stop with the turn in hand
-                ends the boot in FX-0003 after 4 s or more; a holder that keeps
+                ends the boot in FX-0003 after 40 s or more; a holder that keeps
                 taking generations for longer than that is waited for.";
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = ("smp::take_turn", "smp::patience");
@@ -458,6 +459,32 @@ package FerrixSmpRequirements {
                 processor's.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "smp::interrupt_one";
+        }
+        requirement <'L.smp.33'> aLateAnswerIsWaitedFor : ItemLowLevel {
+            attribute :>> statement = "wait_for shall keep waiting for a processor
+                that has not answered once its late bound and patience's count for
+                it have passed, and shall count the answer as late when it comes.";
+            attribute :>> criterion = "A processor kept from answering, inside a
+                read-side section, past a wait's late bound is waited for: a grace
+                period on every architecture and a shootdown on x86-64 each return
+                once it answers, with the processor among those counted late, and
+                the boot goes on (the `late` line).";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("smp::wait_for", "smp::flush_everywhere_within",
+                "smp::synchronize_within");
+        }
+        requirement <'L.smp.34'> aLateAnswerIsReportedAfterTheTurn : ItemLowLevel {
+            attribute :>> statement = "The late answers of a shootdown or a grace
+                period shall be counted, with the longest wait, and reported with
+                the time waited only once the wait has returned and the shootdown
+                turn is given back: a line for each of the first four, then one each
+                time the count reaches a power of two.";
+            attribute :>> criterion = "With a processor starved by the host past
+                the late bound, the boot log shows a line for each of the first four
+                late answers and then one at 8, 16, 32 and so on, each printed with
+                the turn free; no line is printed from inside a wait.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = "smp::report_late";
         }
     }
 }

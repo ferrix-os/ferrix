@@ -180,11 +180,16 @@ The rest of the stage was 50 points (range 40-75), sized on 2026-10-04's
 evening, and is 45 since S-2 landed on 2026-10-05; S-0, CI green, is the
 first bullet above and is met too. A guess is marked.
 
-* **S-1, FX-0001 under a loaded host, 8** (3 to 13, a guess). A shootdown
-  wait on x86-64 still ends when the host runs the waiter and not the
-  processor waited for (it also fired at a load of 13 on 2026-09-30); Arm
-  invalidates in hardware and never waits. The 2026-10-04 plan run never
-  reached its kernel builds, so it is untested whether the plan now finishes.
+* **S-1, FX-0001 under a loaded host, 8** (3 to 13, a guess), **fixed on
+  branch `po10-selfhost/fx0001` (2026-10-07)**. A shootdown wait on x86-64
+  ended when the host ran the waiter and not the processor waited for.
+  Reproduced without loading the host, by making one QEMU vCPU thread
+  `SCHED_IDLE` beside busy loops on its core: every one of 257 waits past
+  the 1 s bound was answered, after 1.0 to 3.6 s, while `main` stopped the
+  same starved `test-selfhost --smp 8` on FX-0001. A wait now has a late
+  bound, past which the answer is waited for and counted, and a stuck bound
+  of 10 s (MEMORY-AND-TIMING.md §2.2a). Whether the whole plan now finishes
+  is S-3's question.
 * **S-2, plan mode made complete, 5** (firm), **done 2026-10-05** (ce133294c,
   a3b240c6b, on `main`). Plan mode stops a row at its first boot and missed
   23 of 153 distinct builds, the ones a test makes after a boot (negative

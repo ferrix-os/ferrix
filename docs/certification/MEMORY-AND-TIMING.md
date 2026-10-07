@@ -473,7 +473,8 @@ Real, and narrower than a WCET:
 
 A processor that interrupts the others and waits for each to answer -- a TLB
 shootdown or a grace period, `src/kernel/src/smp.rs` `wait_for` and `take_turn` --
-gives up and stops the machine (FX-0001 to FX-0003) if one never answers.
+gives up and stops the machine (FX-0001 to FX-0003) if one never answers, and
+waits for one that answers late.
 That bound is a liveness diagnosis, not a safety property: waiting longer never
 frees memory early, so its one job is to report a processor that will never
 answer without ever calling a live one stuck.
@@ -484,10 +485,37 @@ translated block through one process-wide lock, `test-compositor` stopped on
 FX-0001 with nothing stuck. The bound is now two conditions together: the
 wall-clock floor it always had, and a count of the waiter's own polls, which
 slows exactly as the machine does and stands still while the waiter is not
-running. A processor made to stop answering is still found: in 1.8 s under
-KVM, 5.1 s under `tcg` and 32 s under the plugin. The residual is a host that
-starves one virtual processor while it runs the waiter; that ends the wait
-early, which costs availability and never integrity.
+running. A processor made to stop answering was then found in 1.8 s under
+KVM, 5.1 s under `tcg` and 32 s under the plugin.
+
+The residual was a host that starves one virtual processor while it runs the
+waiter, and on 2026-10-07 it was measured (stage 20 S-1, FX-0001): with one
+vCPU thread of QEMU made `SCHED_IDLE` beside three busy loops on one host core
+of nazuna, a diagnostic kernel that waited on past the bound counted 21 waits
+of a `test-boot --accel kvm --smp 4` and 236 of a `test-selfhost --accel kvm
+--smp 8` past it, and every one was answered, after 1.0 to 3.6 s; `main`
+stopped the same starved build on FX-0001 38 s into the starvation. So each
+wait now has two bounds, each a wall-clock floor and a count of polls. Past
+the **late** bound -- the old bound, 1 s for a shootdown and 5 s for a grace
+period -- the answer is waited for and counted late (`L.smp.33`, the `late`
+line), and reported once the shootdown turn is given back, a few lines a boot
+and then a summary each time the count doubles (`L.smp.34`). Past the **stuck** bound,
+10 s and 167,772,160 polls (about 5.5 s of polls under KVM, so the wall clock
+governs there; about 51 s under `tcg`; about 5 min under the plugin), the
+machine stops as before (`L.smp.17`); the turn's bound is four times that,
+40 s (`L.smp.18`, not yet shown by a control). The consultant's verdict is
+ledger line 455 of 2026-10-07.
+
+What the late bound costs is availability, and it is a cost the item now
+pays rather than a stop: while a processor answers late, its waiter's
+processor runs nothing else, since the shootdown turn is a `SpinLock` and
+disables preemption, and every other processor needing a shootdown queues in
+`take_turn` for up to the 40 s (ASR-8, AoU-4). Nothing is freed and no
+permission relied on before every processor has answered, as before. This
+does not make the item tolerate host starvation in general: the same
+starvation stopped two boot self-checks whose waits are wall-clock bounds
+(FX-1011, FX-0882) and ran one boot past its 120 s timeout, each with a
+`docs/BACKLOG.md` row.
 
 A program leaving its speculation domain (`speculation::leaving_domain`,
 SPECULATION.md §3) waits for one grace period under this bound, and holds

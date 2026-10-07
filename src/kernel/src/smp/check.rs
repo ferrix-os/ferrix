@@ -865,3 +865,173 @@ pub(crate) fn migrating_shootdown(
     }
     Ok(Some((left, moved_to)))
 }
+
+// ---------------------------------------------------------------------------
+// A processor that answers late is waited for, not called stuck
+//
+// Run after the scheduler is up, since the processor kept from answering is
+// kept so by a task pinned to it.
+// ---------------------------------------------------------------------------
+
+/// Set by the wait the moment it counts the held processor late: the one
+/// thing the holder waits on, so that it is let go by the wait itself.
+static LATE_MARK: AtomicBool = AtomicBool::new(false);
+
+/// Set by the holder once it is inside its read-side section.
+static LATE_HOLDING: AtomicBool = AtomicBool::new(false);
+
+/// Set by the holder once it has left its section.
+static LATE_HELD_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Set by the holder if its guard, not the mark, let it go.
+static LATE_GUARD_FIRED: AtomicBool = AtomicBool::new(false);
+
+/// The late bound the check's waits are given: a wall-clock floor and a
+/// count of polls far below a product wait's, so the check costs
+/// milliseconds; the stuck bound stays the product's.
+const LATE_CHECK_NANOS: u64 = 20_000_000;
+
+/// The polls of the check's late bound.
+const LATE_CHECK_POLLS: u64 = 1 << 16;
+
+/// How long the holder keeps interrupts masked at the most when the wait
+/// never marks it late: long enough for any machine to reach the check's
+/// late bound, and short of the stuck bound, so a wait that never counts it
+/// fails the check rather than stopping the machine.
+const LATE_GUARD_NANOS: u64 = 5_000_000_000;
+
+/// Keep this processor from answering anything, as a host that stops
+/// running it would, until the wait has counted it late.
+///
+/// A read-side section masks interrupts, so neither a shootdown's nor a grace
+/// period's interrupt is taken until it ends; taken then, it answers both.
+fn late_holder(_argument: usize) {
+    super::read_section(|| {
+        LATE_HOLDING.store(true, Ordering::SeqCst);
+        let guard = crate::timer::now_nanos().saturating_add(LATE_GUARD_NANOS);
+        while !LATE_MARK.load(Ordering::SeqCst) {
+            if crate::timer::now_nanos() > guard {
+                LATE_GUARD_FIRED.store(true, Ordering::SeqCst);
+                break;
+            }
+            core::hint::spin_loop();
+        }
+    });
+    LATE_HELD_DONE.store(true, Ordering::SeqCst);
+}
+
+/// Which wait [`late_round`] runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LateWait {
+    /// A grace period, [`super::synchronize_within`].
+    Grace,
+    /// A shootdown of every processor, [`super::flush_everywhere_within`].
+    Shootdown,
+}
+
+/// Hold processor `held` from answering, run one wait, and return what it
+/// counted late.
+fn late_round(held: usize, wait: LateWait) -> Result<super::Late, &'static str> {
+    LATE_MARK.store(false, Ordering::SeqCst);
+    LATE_HOLDING.store(false, Ordering::SeqCst);
+    LATE_HELD_DONE.store(false, Ordering::SeqCst);
+    LATE_GUARD_FIRED.store(false, Ordering::SeqCst);
+    let holder = crate::sched::spawn_on(
+        "late-holder",
+        late_holder,
+        0,
+        NICE_0_WEIGHT,
+        held,
+        CpuSet::of(held),
+    )?;
+    spin_until(
+        MIGRATION_PATIENCE_NANOS,
+        || LATE_HOLDING.load(Ordering::SeqCst),
+        "the task that was to keep a processor from answering never started",
+    )?;
+    let bounds = super::Bounds::checked(LATE_CHECK_NANOS, LATE_CHECK_POLLS, &LATE_MARK);
+    let late = match wait {
+        LateWait::Grace => super::synchronize_within(bounds),
+        LateWait::Shootdown => super::flush_everywhere_within(bounds),
+    };
+    spin_until(
+        MIGRATION_PATIENCE_NANOS,
+        || LATE_HELD_DONE.load(Ordering::SeqCst),
+        "the task that kept a processor from answering never finished",
+    )?;
+    drop(holder);
+    if LATE_GUARD_FIRED.load(Ordering::SeqCst) {
+        return Err(
+            "a wait never counted a processor kept from answering late, and its guard let it go",
+        );
+    }
+    if late.count == 0 || !late.cpus.contains(held) {
+        return Err("a processor that answered a wait late was not counted late");
+    }
+    Ok(late)
+}
+
+/// What [`late_answer`] saw.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LateAnswers {
+    /// The processor kept from answering.
+    pub(crate) held: usize,
+    /// How long the grace period waited for it, in microseconds.
+    pub(crate) grace_us: u64,
+    /// How long the shootdown waited for it, in microseconds; `None` where
+    /// the architecture's invalidation is broadcast and nothing waits.
+    pub(crate) shootdown_us: Option<u64>,
+}
+
+/// A processor that answers a wait past its late bound -- here kept from
+/// answering by a task inside a read-side section, which from the waiter's
+/// side is a host that stopped running it -- is waited for and counted late,
+/// and the wait returns once it answers, without stopping the machine.
+///
+/// A grace period on every architecture, and a shootdown of every processor
+/// where invalidation is not broadcast, first, so that a processor that never
+/// answers (the negative control) ends the boot in FX-0001 there. The check's
+/// waits are given a late bound of 20 ms and 65,536 polls of their own; the
+/// stuck bound is the product's.
+///
+/// The task running this cannot be on the held processor during a round:
+/// it is running elsewhere when it sees the holder inside its section. A
+/// running task moves only by being pulled, by a stealing or balancing
+/// processor onto itself, and the held processor, interrupts masked, runs
+/// neither until the holder lets go; and this task never sleeps during a
+/// round -- every wait in it spins -- so no wakeup places it there either.
+///
+/// Returns `None` with fewer than two processors online.
+///
+/// # Errors
+///
+/// If the holder never starts or finishes, if a wait never counts the held
+/// processor late, or if it returns without the held processor among those
+/// counted.
+///
+/// Verifies: L.smp.33
+pub(crate) fn late_answer(topology: &Topology) -> Result<Option<LateAnswers>, &'static str> {
+    if topology.online() < 2 {
+        return Ok(None);
+    }
+    let here = super::this_cpu()
+        .ok_or("no processor to run the late-answer check on")?
+        .logical;
+    let held = topology
+        .cpus()
+        .iter()
+        .find(|cpu| cpu.is_online() && cpu.logical != here)
+        .ok_or("no other processor online to keep from answering")?
+        .logical;
+    let shootdown_us = if arch::TLB_FLUSH_IS_BROADCAST {
+        None
+    } else {
+        Some(late_round(held, LateWait::Shootdown)?.longest_nanos / 1_000)
+    };
+    let grace_us = late_round(held, LateWait::Grace)?.longest_nanos / 1_000;
+    Ok(Some(LateAnswers {
+        held,
+        grace_us,
+        shootdown_us,
+    }))
+}

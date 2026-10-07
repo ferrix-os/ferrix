@@ -391,8 +391,10 @@ TOR-3 records them.
 
 `test-seat` and
 `test-compositor` pass under TCG but not under the plugin, which slows TCG
-enough that the first misses its redraw and the second trips the TLB
-shootdown's bound (`processor 0 never flushed its TLB for a shootdown`). A
+enough that the first misses its redraw and the second tripped the TLB
+shootdown's bound (`processor 0 never flushed its TLB for a shootdown`);
+that was the one-bound wait before 2026-10-07, and `test-compositor` under the
+plugin has not been run against the late and stuck bounds since. A
 failing run is not coverage evidence, so neither counts. `test-foot`,
 `test-video`, `test-vkgears`, `test-rustc`, `test-chrome` and `test-selfhost`
 need a GL host, ports or fetched volumes.
