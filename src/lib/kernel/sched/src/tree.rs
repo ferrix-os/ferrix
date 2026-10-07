@@ -113,11 +113,26 @@ impl<T> Slot<T> {
         })
         .map(Slot)
     }
+
+    /// The node itself, for a holder that keeps it as a raw pointer while
+    /// no queue holds it (the kernel's task, whose slot cells are atomics:
+    /// `docs/OPAQUE-KERNEL.md` §9.7). Nothing is allocated or freed.
+    #[must_use]
+    pub fn into_box(self) -> Box<Node<T>> {
+        self.0
+    }
+
+    /// A slot again, from the node [`Slot::into_box`] gave.
+    #[must_use]
+    pub fn from_box(node: Box<Node<T>>) -> Slot<T> {
+        Slot(node)
+    }
 }
 
-/// One queued entity, and the facts about the subtree below it.
+/// One queued entity, and the facts about the subtree below it. Opaque
+/// outside this crate: a [`Slot`]'s storage, which a holder may keep boxed.
 #[derive(Debug)]
-pub(crate) struct Node<T> {
+pub struct Node<T> {
     /// The entity.
     pub(crate) entity: Entity<T>,
     /// Everything with an earlier key.

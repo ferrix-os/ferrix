@@ -2785,6 +2785,64 @@ send back:
     case for A2. Cases 13 and 14 were brought to ERAPS (no in-domain refill
     is wanted where `refill_wanted_in_domain` says so) and to TCG (case 14
     makes its call again until T13 saw it).
+14. **The task's slots are atomic cells (2026-10-07, po9-sched; po9-cert's
+    S1-S7, ledger line 415).** `Task::run_slot` and `sleep_slot` were each a
+    `SpinLock<Option<TaskSlot>>`, a lock pair of about 5 ns per take, give
+    back or look, and a fast trip made three a direction: T11's
+    `holds_sleep_slot`, the peer's `take_run_slot`, and the caller's
+    `return_run_slot`. Each is now `SlotCell`, one `AtomicPtr` to the node.
+    A take is a swap with null. A give-back is a compare-exchange from null,
+    which stops the machine with FX-0534 if the cell is not empty. A look is
+    one load. The task's drop frees a node the cell holds. Each operation
+    is a single atomic and so linearisable (`L.sched.63`). The give-back
+    was first proposed as a load and a store; `loom` 0.7.2 lost a node
+    given back that way against a concurrent swap, so it is the
+    compare-exchange, which also makes FX-0534's test exact. `ferrix_sched`
+    stays free of `unsafe`: `Slot::into_box` and `from_box` are safe, and
+    `Node` is public but opaque. The kernel's `Box::into_raw`/`from_raw`
+    are traced `KMEM`. Nothing is allocated (F-23).
+
+    *Every site, and who owns the slot there (S1).* The run slot is taken
+    only under the lock of the queue that will hold the task:
+    - `CpuQueue::insert_at`: the wake, and `wake_sleepers`'s insert;
+    - `CpuQueue::hand_over`: the peer, under this processor's lock;
+    - `Zombies::push`: a dead task its queue has let go, under the reaper's
+      lock.
+
+    It is given back only by that holder, as it lets the task go:
+    - `insert_at`'s refused enqueue, at once;
+    - `detach_current`;
+    - `release`;
+    - `hand_over`, for the leaving caller and for a refused peer;
+    - `Zombies::pop`.
+
+    The sleep slot is taken only by `file_sleeper`, for the running task
+    blocking on its own processor, under that queue's lock. It is given
+    back only by the set that holds it: `wake_sleepers` and
+    `remove_sleeper`, under that set's lock.
+
+    So for every give-back the giver took the only copy, and no two
+    give-backs of one slot can be in flight.
+
+    *The one compound use* is `holds_slots`, two loads one after the other
+    (it was two locks one after the other, no more atomic as a pair). Its
+    caller, `asleep_at_home`, reads it under the home queue's lock, which
+    every run-slot taker for a task homed there holds, so the run slot
+    cannot change under it. The task is blocked, so nothing takes its sleep
+    slot. A sleeper set elsewhere may give the sleep slot back meanwhile,
+    under its own lock. That can only turn "lent" into "held", so a stale
+    read declines a move it could have made, and never makes one it should
+    not have. T11's `holds_sleep_slot` is the same look, made under the
+    same lock.
+
+    *Checks.* `src/tests/loom/tests/slots.rs` models the cell: two takers,
+    a give-back and a look; a give-back against a take; a double give-back
+    stopped. Its controls are a take as a load and a store, and a
+    give-back as a plain store, and both fail as required. The
+    `ferrix-sched` host test takes a slot apart and puts it together
+    around an enqueue, a pick and a removal. A1's control (T12 removed, so
+    the pick is not the peer) and T11's control were fired again on this
+    code.
 
 ### 9.8 Steps 2 and 3: the designs (draft for the consultant)
 

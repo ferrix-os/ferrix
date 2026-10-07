@@ -1278,7 +1278,7 @@
     "sched/task.rs": {
       "ring": "core",
       "lines": [
-        553
+        635
       ]
     },
     "irq.rs": {

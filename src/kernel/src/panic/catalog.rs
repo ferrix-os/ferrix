@@ -1164,6 +1164,28 @@ pub(crate) static FAST_PATH_CONTINUATION_MASKED: Explanation = Explanation {
           src/kernel/src/arch/x86_64/syscall.rs; docs/OPAQUE-KERNEL.md §9.7 part 2",
 };
 
+/// For `sched::task::SlotCell`, when a slot is given back to a task that
+/// already holds one.
+pub(crate) static TASK_SLOT_RETURNED_TWICE: Explanation = Explanation {
+    code: "FX-0534",
+    title: "a task's run or sleep slot was given back while it held one",
+    meaning: "A task owns two nodes, its slots, which a run queue, a sleeper set or the \
+              reaper's list borrows while it holds the task and gives back as it lets it go \
+              (finding F-23: queueing allocates nothing). Each slot is one atomic cell, so \
+              that taking it, giving it back and asking whether it is held are single \
+              atomic operations and need no lock (`docs/OPAQUE-KERNEL.md` §9.7). Only the \
+              holder that took a slot gives it back, so a cell is empty whenever a slot \
+              comes back. One that is not means two holders thought they held the task: \
+              the task was queued twice or filed twice, and would be run or woken twice.",
+    causes: &[
+        "A queue, sleeper set or the reaper gave back a slot it did not take, or gave one \
+         back twice.",
+        "A path took a task out of a queue or set without its slot and filed it again.",
+    ],
+    see: "src/kernel/src/sched/task.rs SlotCell; src/kernel/src/sched/queue.rs; \
+          docs/OPAQUE-KERNEL.md §9.7",
+};
+
 /// For `sched::schedule`, when asked to switch with the preemption count
 /// raised.
 pub(crate) static SCHEDULE_WITH_PREEMPTION_HELD: Explanation = Explanation {
@@ -3188,6 +3210,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FAST_PATH_PARK_BROKEN,
     &FAST_PATH_IDLE_TASK,
     &FAST_PATH_CONTINUATION_MASKED,
+    &TASK_SLOT_RETURNED_TWICE,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

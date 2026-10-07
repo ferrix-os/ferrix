@@ -18,16 +18,17 @@ use alloc::sync::Arc;
 use core::any::Any;
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{
+    AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
+};
 
-use ferrix_sched::{CpuSet, EntityState, Slot};
+use ferrix_sched::{CpuSet, EntityState, Node, Slot};
 use ferrix_sync::IrqControl;
 
 use crate::arch;
 use crate::fallible::{self, AllocError};
 use crate::object::process::Host;
 use crate::object::quota;
-use crate::sync::SpinLock;
 use crate::user::space::AddressSpace;
 use crate::vmap::Stack;
 
@@ -159,10 +160,91 @@ pub(crate) struct Task {
     /// Lent to a queue as the task is queued and handed back as it leaves,
     /// so that queueing, which a wake-up does from an interrupt handler,
     /// allocates nothing (finding F-23). Allocated with the task.
-    run_slot: SpinLock<Option<TaskSlot>>,
+    run_slot: SlotCell,
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
-    sleep_slot: SpinLock<Option<TaskSlot>>,
+    sleep_slot: SlotCell,
+}
+
+/// One of a task's slots, while the task holds it: a node pointer, null
+/// while a queue, a sleeper set or the reaper's list holds the slot
+/// (`L.sched.63`).
+///
+/// **Each operation is one atomic, so each is linearisable.** Taking it is a
+/// swap with null; asking whether it is held is one load; giving it back is
+/// a compare-exchange from null. The swap means two takers never both get
+/// the node, and the compare-exchange that no give-back overwrites a node:
+/// one into a cell that is not empty stops the machine (FX-0534). Only the
+/// holder that took a slot gives it back, and it took the only copy, so that
+/// never happens; and a node is freed only by the task's drop, from the
+/// cell, once. The `loom` model is `src/tests/loom/tests/slots.rs`; a load
+/// and then a store for the give-back, the form first proposed, could not
+/// be held to it there. Until 2026-10-07 the cell was a
+/// `SpinLock<Option<TaskSlot>>`, about 5 ns a take or give-back against
+/// about 4 for one locked operation and 0.3 for a load, and the fast path
+/// made three a direction (`docs/OPAQUE-KERNEL.md` §9.7, "as built", 14).
+struct SlotCell(AtomicPtr<Node<Arc<Task>>>);
+
+impl fmt::Debug for SlotCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.holds() {
+            "SlotCell(held)"
+        } else {
+            "SlotCell(lent)"
+        })
+    }
+}
+
+impl SlotCell {
+    /// A cell holding `slot`.
+    fn new(slot: TaskSlot) -> SlotCell {
+        SlotCell(AtomicPtr::new(Box::into_raw(slot.into_box())))
+    }
+
+    /// Take the slot, if the cell holds it.
+    fn take(&self) -> Option<TaskSlot> {
+        let node = self.0.swap(core::ptr::null_mut(), Ordering::AcqRel);
+        if node.is_null() {
+            return None;
+        }
+        // SAFETY: (KMEM) a non-null pointer in the cell came from
+        // `Box::into_raw` in `new` or `put`, and the swap took the cell's only
+        // copy of it, so this is the one box made from it.
+        Some(Slot::from_box(unsafe { Box::from_raw(node) }))
+    }
+
+    /// Give the slot back, into a cell that must be empty (FX-0534).
+    fn put(&self, slot: TaskSlot) {
+        let node = Box::into_raw(slot.into_box());
+        if self
+            .0
+            .compare_exchange(
+                core::ptr::null_mut(),
+                node,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            crate::panic::fatal!(
+                crate::panic::catalog::TASK_SLOT_RETURNED_TWICE,
+                "a task's slot was given back while its cell held one"
+            );
+        }
+    }
+
+    /// Whether the cell holds its slot.
+    fn holds(&self) -> bool {
+        !self.0.load(Ordering::Acquire).is_null()
+    }
+}
+
+impl Drop for SlotCell {
+    /// Free the node, if the cell holds it. A task is dropped only when
+    /// nothing holds it, so then nothing holds its slots either.
+    fn drop(&mut self) {
+        drop(self.take());
+    }
 }
 
 /// A full reply cell's mark, in its first word beside the length.
@@ -322,8 +404,8 @@ impl Task {
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
-            run_slot: SpinLock::new(Some(run_slot)),
-            sleep_slot: SpinLock::new(Some(sleep_slot)),
+            run_slot: SlotCell::new(run_slot),
+            sleep_slot: SlotCell::new(sleep_slot),
         })
     }
 
@@ -376,31 +458,31 @@ impl Task {
             cpus_run_on: AtomicU64::new(0),
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
-            run_slot: SpinLock::new(Some(run_slot)),
-            sleep_slot: SpinLock::new(Some(sleep_slot)),
+            run_slot: SlotCell::new(run_slot),
+            sleep_slot: SlotCell::new(sleep_slot),
         })
     }
 
     /// Take the slot a run queue holds this task in, to queue it with.
     /// `None` if a queue already holds it.
     pub(crate) fn take_run_slot(&self) -> Option<TaskSlot> {
-        self.run_slot.lock().take()
+        self.run_slot.take()
     }
 
     /// Have back the slot a run queue held this task in.
     pub(crate) fn return_run_slot(&self, slot: TaskSlot) {
-        *self.run_slot.lock() = Some(slot);
+        self.run_slot.put(slot);
     }
 
     /// Take the slot a sleeper set or the reaper holds this task in. `None`
     /// if one already holds it.
     pub(crate) fn take_sleep_slot(&self) -> Option<TaskSlot> {
-        self.sleep_slot.lock().take()
+        self.sleep_slot.take()
     }
 
     /// Have back the slot a sleeper set or the reaper held this task in.
     pub(crate) fn return_sleep_slot(&self, slot: TaskSlot) {
-        *self.sleep_slot.lock() = Some(slot);
+        self.sleep_slot.put(slot);
     }
 
     /// Hand it a reply of `len` bytes in `words`, the bytes past `len`
@@ -637,15 +719,21 @@ impl Task {
     /// set or reaper's list does. What a task [`crate::sched::wake_with`] may
     /// move must be, since a set elsewhere still holding it would run it
     /// there too.
+    ///
+    /// Two loads, one after the other, as it was two locks: not one atomic
+    /// reading of the pair. Its caller asks under the home queue's lock,
+    /// which every taker of the run slot holds, and a sleeper set elsewhere
+    /// that holds the sleep slot gives it back only under its own lock and
+    /// only once (`asleep_at_home`).
     pub(crate) fn holds_slots(&self) -> bool {
-        self.run_slot.lock().is_some() && self.sleep_slot.lock().is_some()
+        self.run_slot.holds() && self.sleep_slot.holds()
     }
 
     /// Whether it holds its sleep slot: no sleeper set or reaper's list
     /// holds it. The direct switch's half of [`Task::holds_slots`]; its run
     /// slot is held exactly while it is not queued, which it asserts.
     pub(crate) fn holds_sleep_slot(&self) -> bool {
-        self.sleep_slot.lock().is_some()
+        self.sleep_slot.holds()
     }
 
     /// Swap in whether it is inside a system call, for the switch that takes
