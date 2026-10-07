@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8c0bfb3bccba99ce68808d61a703506880286607263d50563a9538c84c701a7a",
+  "digest": "117c4ed52e5c4deface15813bc265aa1c2b4cab554607f9669eb51b8922976b0",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,10 +109,10 @@
   ],
   "summary": {
     "packages": 136,
-    "elements": 6606,
+    "elements": 6608,
     "maturity": {
       "implemented": 277,
-      "inProgress": 16,
+      "inProgress": 18,
       "writtenAhead": 1,
       "planned": 29
     },
@@ -15532,7 +15532,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 10,
-          "doc": "A native program on src/user/system/native/rt, not a musl binary: src/user/system/native/devmgr, /sbin/devmgr. Receives a handle per device node, matches a driver, spawns it in its own Job with the four resources above. The kernel starts it from stage 10's boot check with DEVICES messages holding a job, every device node twice and every driver image /lib/drivers/MANIFEST lists (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches virtio-blk, virtio-net, virtio-gpu, virtio-input and the virtio-serial port by a table of its own, starts each driver with START, waits for every one but the port driver to be PUBLISHED before the next, and REPORTs. docs/DEVMGR.md.",
+          "doc": "A native program on src/user/system/native/rt, not a musl binary: src/user/system/native/devmgr, /sbin/devmgr. Receives a handle per device node, matches a driver, spawns it in its own Job with the four resources above. The kernel starts it from stage 10's boot check with DEVICES messages holding a job, every device node twice and every image /lib/drivers/MANIFEST lists -- the drivers, and drvupdated in the images that carry it (DrvUpdated below) -- (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches virtio-blk, virtio-net, virtio-gpu, virtio-input and the virtio-serial port by a table of its own, starts each driver with START, waits for every one but the port driver to be PUBLISHED before the next, and REPORTs. docs/DEVMGR.md.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
             "line": 179
@@ -15544,7 +15544,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 192
+                "line": 193
               }
             },
             {
@@ -15553,7 +15553,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 193
+                "line": 194
               }
             },
             {
@@ -15564,7 +15564,18 @@
               "doc": "device_quiesce after a driver's TERMINATED: the kernel waits for the block, display and render cores to let the device go (src/kernel/src/claim.rs), then DIED.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 194
+                "line": 195
+              }
+            },
+            {
+              "name": "updateDriver",
+              "qualifiedName": "FerrixDrivers::DevMgr::updateDriver",
+              "kind": "action",
+              "maturity": "inProgress",
+              "doc": "An image root sent through drvupdated put on a device that a restartDriver kind drives: devmgr copies it, proves it loads with process_create in a scratch job, stops and quiesces the running driver, starts the copy and gives it 15 s to publish, or starts the image the device had again. The display kind is gated by test-restart --update; the other kinds and the image's signature (D3) are owed. docs/DEVMGR.md section 4.1.",
+              "source": {
+                "file": "docs/sysml/08-drivers.sysml",
+                "line": 200
               }
             },
             {
@@ -15575,10 +15586,23 @@
               "doc": "A display driver that died is started again on a duplicate of devmgr's kept device handle, at most eight times a device; its card returns as the number it had. RESTARTED tells the kernel. docs/DEVMGR.md section 4.",
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 199
+                "line": 210
               }
             }
           ]
+        },
+        {
+          "name": "DrvUpdated",
+          "qualifiedName": "FerrixDrivers::DrvUpdated",
+          "kind": "part",
+          "definition": true,
+          "maturity": "inProgress",
+          "stage": 10,
+          "doc": "src/user/system/native/drvupdated: the helper through which a new driver image reaches DevMgr, which reads no files and waits on one port. Started by devmgr from /lib/drivers when the image carries it -- only test-restart --update's do (SAFETY-MANUAL AoU-26) -- it takes root's connections on the abstract socket ferrix.devmgr.update, refuses any other peer and any header past 8 MiB before it makes a VMO, and hands devmgr the request and the image's VMO on a channel. /bin/drvupdate is its client. docs/DEVMGR.md section 4.1.",
+          "source": {
+            "file": "docs/sysml/08-drivers.sysml",
+            "line": 218
+          }
         },
         {
           "name": "VirtioBlkDriver",
@@ -15591,7 +15615,7 @@
           "doc": "The first driver: virtio-blk as a user process. Exit test: a sector read through ring 3 with the IOMMU on, and a deliberate out-of-domain DMA attempt faulting. src/user/system/native/drivers/block/virtio-blk over src/lib/drivers/block/virtio-blk and src/lib/drivers/block/blkserve; the exit is met in the boot test, with VT-d translating on x86-64 and the SMMUv3 on AArch64, and ARMv7-A in degraded trusted mode.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 207
+            "line": 231
           }
         },
         {
@@ -15604,7 +15628,7 @@
           "doc": "src/user/system/native/drivers/net/virtio-net over src/lib/drivers/net/virtio-net and src/lib/drivers/net/netserve, speaking the net ring; cargo xtask test-net is its gate.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 217
+            "line": 241
           }
         },
         {
@@ -15618,7 +15642,7 @@
           "doc": "src/user/system/native/drivers/display/virtio-gpu over src/lib/drivers/display/virtio-gpu: the display core's card0 over displayctl, and since stage 19 the render core's renderD128 over renderctl, turning its messages into virtio-gpu's 3D commands. cargo xtask test-display is its gate. The one driver devmgr starts again after it dies (restartDriver).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 222
+            "line": 246
           }
         },
         {
@@ -15632,7 +15656,7 @@
           "doc": "src/user/system/native/drivers/input/virtio-input over src/lib/drivers/input/virtio-input, feeding the input core's /dev/input/eventN over inputctl; cargo xtask test-input is its gate.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 231
+            "line": 255
           }
         },
         {
@@ -15646,7 +15670,7 @@
           "doc": "src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7).",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 238
+            "line": 262
           }
         },
         {
@@ -15660,7 +15684,7 @@
           "doc": "src/user/system/native/drivers/gpu/gc400 over src/lib/drivers/gpu/gc400: the STM32MP157's Vivante GC400T, the G2 step of the board's gears (docs/GPU.md §6.3). It prints the core's identity, soft-resets and initialises it as etnaviv does, starts the front end on a WAIT/LINK loop in one page pinned PIN_COHERENT, splices in two blocks that each raise an event, and takes each as the interrupt. devmgr starts it as an engine, which serves no kernel subsystem yet, and does not wait for it. No QEMU machine has the core; its gates are src/lib/drivers/gpu/gc400's tests against models of the host interface and the front end, and on the board, on 2026-09-24, both events arrived by interrupt (G2 done). Drawing is G3 to G5.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 252
+            "line": 276
           }
         },
         {
@@ -15720,7 +15744,7 @@
           ],
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 267
+            "line": 291
           },
           "children": [
             {
@@ -15732,7 +15756,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 281
+                "line": 305
               }
             },
             {
@@ -15744,7 +15768,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 282
+                "line": 306
               }
             },
             {
@@ -15756,7 +15780,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 283
+                "line": 307
               }
             },
             {
@@ -15768,7 +15792,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 284
+                "line": 308
               }
             },
             {
@@ -15780,7 +15804,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 285
+                "line": 309
               }
             },
             {
@@ -15792,7 +15816,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 286
+                "line": 310
               }
             }
           ]

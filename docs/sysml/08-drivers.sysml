@@ -183,7 +183,8 @@ package FerrixDrivers {
              * driver, spawns it in its own Job with the four resources
              * above. The kernel starts it from stage 10's boot check with
              * DEVICES messages holding a job, every device node twice and
-             * every driver image /lib/drivers/MANIFEST lists
+             * every image /lib/drivers/MANIFEST lists -- the drivers, and
+             * drvupdated in the images that carry it (DrvUpdated below) --
              * (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches
              * virtio-blk, virtio-net, virtio-gpu, virtio-input and the
              * virtio-serial port by a table of its own, starts each driver
@@ -196,12 +197,35 @@ package FerrixDrivers {
                  * for the block, display and render cores to let the device go
                  * (src/kernel/src/claim.rs), then DIED. */
         }
+        #inProgress action updateDriver {
+            doc /* An image root sent through drvupdated put on a device that
+                 * a restartDriver kind drives: devmgr copies it, proves it
+                 * loads with process_create in a scratch job, stops and
+                 * quiesces the running driver, starts the copy and gives it
+                 * 15 s to publish, or starts the image the device had again.
+                 * The display kind is gated by test-restart --update; the
+                 * other kinds and the image's signature (D3) are owed.
+                 * docs/DEVMGR.md section 4.1. */
+        }
         #implemented action restartDriver {
             doc /* A display driver that died is started again on a duplicate
                  * of devmgr's kept device handle, at most eight times a device;
                  * its card returns as the number it had. RESTARTED tells the
                  * kernel. docs/DEVMGR.md section 4. */
         }
+    }
+
+    #inProgress part def DrvUpdated {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drvupdated: the helper through which a
+             * new driver image reaches DevMgr, which reads no files and waits
+             * on one port. Started by devmgr from /lib/drivers when the image
+             * carries it -- only test-restart --update's do (SAFETY-MANUAL
+             * AoU-26) -- it takes root's connections on the abstract socket
+             * ferrix.devmgr.update, refuses any other peer and any header past
+             * 8 MiB before it makes a VMO, and hands devmgr the request and
+             * the image's VMO on a channel. /bin/drvupdate is its client.
+             * docs/DEVMGR.md section 4.1. */
     }
 
     #implemented part def VirtioBlkDriver :> DriverProcess {

@@ -67,6 +67,24 @@
       "devmgr has reported, and re-roots pid 1 with the switch. It exists, the",
       "images that boot /sbin/init use it, and no claim is made of it",
       "(ITEM.md 5, SAFETY-MANUAL AoU-8 and AoU-13)."
+    ],
+    "driver_updates": "absent",
+    "driver_updates_settings": [
+      "absent",
+      "test"
+    ],
+    "driver_updates_why": [
+      "Whether the image carries drvupdated, the helper through which root",
+      "puts a new driver image on a device while the machine runs",
+      "(docs/DEVMGR.md 4.1). It changes no kernel code: devmgr and every",
+      "driver stay outside the item, and a replaced driver is the T.DMA",
+      "attacker already, confined by the same domain, quiesce and quarantine.",
+      "But a driver image after boot is not authenticated until the update's",
+      "verification lands (D3). `absent`, the reference, is every image but",
+      "`test-restart --update`'s, and xtask refuses any other image that",
+      "carries the helper (native::refuse_updater). `test` is those images",
+      "alone, and no claim is made of them (ITEM.md 5, SAFETY-MANUAL AoU-26;",
+      "the certification consultant's C1, 2026-10-07)."
     ]
   },
   "test_file_patterns": [

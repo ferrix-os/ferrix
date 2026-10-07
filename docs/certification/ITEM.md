@@ -418,6 +418,7 @@ A certificate attaches to a configuration, not to a repository.
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
 | Build settings | **one**, `cargo xtask --mitigations on\|off`; the reference is `on`, the default |
 | Boot options that change the item's work | **one**, `ferrix.devmgr=kernel\|init`; the reference is `kernel`, the default |
+| Driver updates at run time | **absent**: no reference image carries `drvupdated` (`docs/DEVMGR.md` §4.1); only `cargo xtask test-restart --update`'s images do, xtask refuses it in any other, and no claim is made of them (SAFETY-MANUAL AoU-26) |
 | Test platform | QEMU; on x86-64 the patched 10.2.1 `(ferrix-cfi)`, whose VT-d blocks compatibility-format interrupts, with `intel-iommu,intremap=on,eim=off` and, under KVM, the split interrupt controller ([TOOLS.md](TOOLS.md)) |
 | Kernel link (`on`) | a static PIE on x86-64 (PIC code model, every x86-64 crate) and AArch64 (static code model, `-pie -z notext`); on ARMv7-A a fixed-address link that keeps its relocations (`--emit-relocs`). The loader moves it each boot (KASLR). `off`: the static fixed-address image |
 | External crates | 21, listed in [SOUP.md](SOUP.md) |

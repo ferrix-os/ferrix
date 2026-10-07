@@ -119,12 +119,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 136 packages, 6606 elements, 215 relations. Model digest `8c0bfb3bccba99ce`.
+26 files, 136 packages, 6608 elements, 215 relations. Model digest `117c4ed52e5c4def`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
 | `#implemented` | 277 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 16 | The owning stage has started; part of the element runs. |
+| `#inProgress` | 18 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 29 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -2425,14 +2425,21 @@ The data path is not per-request IPC: driver and kernel share a descriptor ring 
 
 `#implemented`  ·  stage 10
 
-A native program on src/user/system/native/rt, not a musl binary: src/user/system/native/devmgr, /sbin/devmgr. Receives a handle per device node, matches a driver, spawns it in its own Job with the four resources above. The kernel starts it from stage 10's boot check with DEVICES messages holding a job, every device node twice and every driver image /lib/drivers/MANIFEST lists (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches virtio-blk, virtio-net, virtio-gpu, virtio-input and the virtio-serial port by a table of its own, starts each driver with START, waits for every one but the port driver to be PUBLISHED before the next, and REPORTs. docs/DEVMGR.md.
+A native program on src/user/system/native/rt, not a musl binary: src/user/system/native/devmgr, /sbin/devmgr. Receives a handle per device node, matches a driver, spawns it in its own Job with the four resources above. The kernel starts it from stage 10's boot check with DEVICES messages holding a job, every device node twice and every image /lib/drivers/MANIFEST lists -- the drivers, and drvupdated in the images that carry it (DrvUpdated below) -- (src/kernel/src/discovery/devmgr.rs, src/lib/proto/devmgr-proto); it matches virtio-blk, virtio-net, virtio-gpu, virtio-input and the virtio-serial port by a table of its own, starts each driver with START, waits for every one but the port driver to be PUBLISHED before the next, and REPORTs. docs/DEVMGR.md.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
 | `match` | action |  |  |  |
 | `spawnDriver` | action |  |  |  |
 | `quiesceOnDeath` | action |  | `#implemented` | device_quiesce after a driver's TERMINATED: the kernel waits for the block, display and render cores to let the device go (src/kernel/src/claim.rs), then DIED. |
+| `updateDriver` | action |  | `#inProgress` | An image root sent through drvupdated put on a device that a restartDriver kind drives: devmgr copies it, proves it loads with process_create in a scratch job, stops and quiesces the running driver, starts the copy and gives it 15 s to publish, or starts the… |
 | `restartDriver` | action |  | `#implemented` | A display driver that died is started again on a duplicate of devmgr's kept device handle, at most eight times a device; its card returns as the number it had. |
+
+#### DrvUpdated
+
+`#inProgress`  ·  stage 10
+
+src/user/system/native/drvupdated: the helper through which a new driver image reaches DevMgr, which reads no files and waits on one port. Started by devmgr from /lib/drivers when the image carries it -- only test-restart --update's do (SAFETY-MANUAL AoU-26) -- it takes root's connections on the abstract socket ferrix.devmgr.update, refuses any other peer and any header past 8 MiB before it makes a VMO, and hands devmgr the request and the image's VMO on a channel. /bin/drvupdate is its client. docs/DEVMGR.md section 4.1.
 
 #### VirtioBlkDriver
 
@@ -4860,6 +4867,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::DriverProcess` | part | `#implemented` |
 | 10 | `FerrixDrivers::SharedRing` | part | `#implemented` |
 | 10 | `FerrixDrivers::DevMgr` | part | `#implemented` |
+| 10 | `FerrixDrivers::DrvUpdated` | part | `#inProgress` |
 | 10 | `FerrixDrivers::VirtioBlkDriver` | part | `#implemented` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
@@ -4915,7 +4923,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 19 | `FerrixDrivers::Gc400Driver` | part | `#inProgress` |
 | 19 | `FerrixAssurance::VideoTest` | verification | `#implemented` |
 
-185 elements across 18 stages.
+186 elements across 18 stages.
 
 ## Figures
 

@@ -411,7 +411,11 @@ kernel:
   driver's name, the device's PCI address word (or any, which means every
   device that driver drives) and the length. The helper copies the bytes
   into a VMO it creates, up to 8 MiB, and writes UPDATE to `devmgr` with the
-  VMO. It writes `devmgr`'s answer back to the client as one line.
+  VMO. It refuses a header past 8 MiB before it makes any VMO, and a read
+  that waits 10 s closes the connection. It writes `devmgr`'s 16-byte answer
+  back to the client, which prints it as one line. An abstract name belongs
+  to whoever binds it first, so the client checks that the server's
+  `SO_PEERCRED` uid is root's before it sends anything.
 * `devmgr` copies that VMO into one of its own before it reads anything in
   it. Any handle the helper kept cannot change the bytes between `devmgr`'s
   checks and `process_create`, and §5 holds as it does at boot: the new
@@ -440,9 +444,11 @@ running driver alone unless all three hold:
    can start, and the answer is then `refused`. `devmgr` kills the scratch
    job either way.
 3. The console line names the image: its length and its FNV-1a-64
-   fingerprint, so the log shows which bytes drive the device. This proves
-   integrity, not authenticity. Whether an update must also carry a
-   signature, and whose key verifies it, is the customer's question
+   fingerprint, so the log shows which bytes drive the device. FNV-1a
+   identifies bytes; it proves no integrity against an adversary, who can
+   make other bytes with the same fingerprint. A claim of D3 rests on
+   SHA-256 or a signature's digest, never on it. Whether an update must
+   carry a signature, and whose key verifies it, is the customer's question
    (below).
 
 **The swap, and the rule for going back.**
@@ -464,7 +470,11 @@ running driver alone unless all three hold:
    back` and prints the same pair of images. If the old image does not
    publish either, the device stays quiesced, as when a restarted driver
    dies before it publishes (§4), and the answer is `failed`.
-5. An update counts against no restart budget, as a BIND does not. Requests
+5. An update that names every device a driver drives (no location) takes
+   them one at a time and stops at the first that does not update. That
+   one is rolled back or failed, the ones before it stay updated, and the
+   answer says so: fewer `updated` than `tried`.
+6. An update counts against no restart budget, as a BIND does not. Requests
    that arrive while it runs wait in the inbox, as during any other wait.
    `devmgr` runs one update at a time.
 
@@ -479,19 +489,50 @@ the uid-0 gate, the loader's refusal and the fingerprint line, and no
 signature.
 
 **Its gate** is `cargo xtask test-restart --update` (D4). On the display
-kind, with `/bin/blank` holding the card, the gate updates the driver four
+kind, with `/bin/blank` holding the card, the gate updates the driver five
 times:
 
 1. to bytes that are not a program: `refused`, and the card never goes;
-2. to a native program that never publishes: `rolled back`, and `card0`
-   comes back from the old image;
-3. to the `gpu` driver built as version `next`, which prints `gpu: version
+2. to an image past 8 MiB: `malformed`, refused by the helper from the
+   header, and the card never goes;
+3. to `/sbin/pong`, a native program that exits at once on a START it does
+   not read: `rolled back`, and `card0` comes back from the old image;
+4. to the `gpu` driver built as version `silent`, which says so and then
+   neither publishes nor exits: `rolled back` once the 15 s pass;
+5. to the `gpu` driver built as version `next`, which prints `gpu: version
    next` once at its start: `updated`, `card0` comes back, the line
-   appears, and the fingerprint is the carried file's;
-4. then a `kill -9` of the updated driver: it is started again from the new
-   image, and its version line appears a second time.
+   appears, and `devmgr`'s line carries the carried file's fingerprint.
 
-The shell must answer after each step.
+Then the two kill rounds run as for every kind, and each restart must print
+`gpu: version next` again: a restart starts the image the update put on the
+device. The shell must answer after each step. The versions are the `gpu`
+driver built with `FERRIX_DRIVER_VERSION` set, which every other build
+leaves unset.
+
+**Where it stands (2026-10-07).** The certification consultant's design
+verdict (po10-drv-cert, the ledger's 2026-10-07 entry): OK if C1 to C10
+hold, building D1, D2 and D4 now for `test-restart --update`'s images only.
+As built on branch `po10-drv/live-update`, for the display kind:
+`src/lib/proto/drvupdate-proto` (the request, the answer and the
+fingerprint, a crate the kernel does not link, C8),
+`src/user/system/native/drvupdated`, `devmgr`'s update and rollback, and
+`/bin/drvupdate` in the init workspace. `devmgr` watches each start of a
+device's driver under a port key whose high half counts the starts, so the
+death of a driver an update stopped, which arrives after the next one
+started, is not taken for the new one's. A new driver that publishes just
+after its deadline may leave a PUBLISHED on the kernel's channel; once it is
+killed and the device quiesced no HELLO can come from it, and `devmgr` reads
+the channel off before it starts the old image, keeping BIND and UNBIND, so
+the rollback's wait takes only the old image's. A trial load whose process
+is not gone within 5 s refuses the update with nothing stopped. The code
+review's verdict (po10-drv-cert, 2026-10-07): OK if K1 to K5. C1 holds by
+`native::refuse_updater` and the reference configuration's
+`driver_updates: absent` (SAFETY-MANUAL AoU-26). Owed: the other four
+kinds, the disk's only once the worst case, 15 s and the old image's
+restart, is shown to fit blkserve's 30 s (C5c); the in-test refusals of a
+uid-1000 client and of a server that is not root's, which the gate's image
+cannot yet show, having no `su` (C10); D3 (C4) and D5's requirements, the
+analysis notes and their checks (C2, C9).
 
 ## 5. No driver faults on the disk it serves
 
@@ -510,7 +551,10 @@ completion forever. Under this design it holds by construction rather than by
 
 What is left to enforce is the future: a pivot onto btrfs must not re-exec or
 remap a running driver from the new root, and a driver started after the
-pivot must still get its image from the initramfs copy the kernel keeps.
+pivot must still get its image from an anonymous copy `devmgr` holds: the
+initramfs copy the kernel keeps, or an update's (§4.1), copied whole by
+`devmgr` before the old driver stops. `devmgr` keeps the device's previous
+image until the new one publishes, and reads no file.
 `devmgr` is the one process that starts drivers, so it is where that rule
 lives when the pivot exists.
 

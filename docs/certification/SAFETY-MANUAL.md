@@ -488,6 +488,20 @@ code built on it keeps no value there; a program that issues these calls by
 other means shall declare the same clobbers, or it loses the values it kept,
 which harms only itself. No Linux call and no other architecture is affected.
 
+### AoU-26 — a claimed configuration carries no driver update helper
+`drvupdated` lets root put a new driver image on a device while the machine
+runs (`docs/DEVMGR.md` §4.1). A driver is outside the element either way, and
+a replaced one is held by the same IOMMU domain, quiesce and quarantine as
+any other. But until the update's verification lands (D3: a signature
+`devmgr` checks under a key fixed when the image is composed, and a
+downgrade rule), an image put on a device after boot is not authenticated,
+and the element's audit trail records the kill, the quiesce and the process
+made, not which image ran. The integrator shall not put `drvupdated` in
+`/lib/drivers` of any configuration a claim is made of. This tree carries it
+only in `cargo xtask test-restart --update`'s images, and xtask refuses any
+other image that does (`native::refuse_updater`; the certification
+consultant's C1, 2026-10-07).
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —
