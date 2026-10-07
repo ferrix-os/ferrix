@@ -301,13 +301,16 @@ impl CpuQueue {
             return;
         };
         if task.group() == crate::object::quota::NONE {
+            super::fprof::add_pub(&super::fprof::UNGROUPED);
             return;
         }
+        super::fprof::add_pub(&super::fprof::GROUPED);
         let (id, now) = (task.id, task.entity_state().weight);
         let due = task.effective_weight();
         if now.abs_diff(due) <= now / 8 {
             return;
         }
+        super::fprof::add_pub(&super::fprof::REWEIGHED);
         task.set_weight(due);
         // The only refusal is a weight of zero, which `effective` never
         // answers.
@@ -653,6 +656,7 @@ impl CpuQueue {
         if self.current.is_some() {
             self.account(now);
         }
+        crate::sched::fprof::sub(2);
         // As `insert`: counted in its job (it already is, made runnable),
         // and weighed by its job's share as things stand, the caller still
         // counted.
@@ -661,10 +665,12 @@ impl CpuQueue {
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
         let (id, state) = (peer.id, peer.entity_state());
+        crate::sched::fprof::sub(3);
         // The peer's own reference goes into the queue, and the caller's
         // comes out of it into `between`: moved, not counted up and down.
         match self.fair.hand_over(id, peer, state, slot, slice_after) {
             Ok(left) => {
+                crate::sched::fprof::sub(4);
                 if let Some(next) = self.fair.current() {
                     next.set_queued(true);
                 }

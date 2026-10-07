@@ -238,6 +238,7 @@ impl Direct {
         peer.set_state_from(BLOCKED, RUNNABLE);
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
+        crate::sched::fprof::sub(1);
         let next = queue.hand_over(peer, now, block_caller);
         if !next
             .as_ref()
@@ -253,6 +254,7 @@ impl Direct {
             queue.note_pick(now);
         }
         self.next = next;
+        crate::sched::fprof::sub(7);
     }
 
     /// Switch to the task [`Direct::hand_over`] picked, and return when the

@@ -47,6 +47,42 @@ static DROPPED: AtomicU64 = AtomicU64::new(0);
 static SUM: [[AtomicU64; N]; CLASSES] = [const { [const { AtomicU64::new(0) }; N] }; CLASSES];
 static HIST: [[[AtomicU32; BUCKETS]; N]; CLASSES] =
     [const { [const { [const { AtomicU32::new(0) }; BUCKETS] }; N] }; CLASSES];
+pub(crate) const SUBS: usize = 10;
+const SUB_NAMES: [&str; SUBS] = [
+    "h0 fill_reply",
+    "h1 A4/A1 asserts, take_sleep_deadline, set_state_from(peer)",
+    "h2 take_run_slot + account(now)",
+    "h3 join_group + effective_weight + set_weight + slice_for",
+    "h4 RunQueue::hand_over",
+    "h5 set_queued, slots back, store_entity_state",
+    "h6 between: set_running_blocked + park",
+    "h7 pick check, note_pick, store next",
+    "h8 drop both inbox guards",
+    "h9 count(Trip)",
+];
+pub(crate) static GROUPED: AtomicU64 = AtomicU64::new(0);
+pub(crate) static UNGROUPED: AtomicU64 = AtomicU64::new(0);
+pub(crate) static REWEIGHED: AtomicU64 = AtomicU64::new(0);
+static SUBLAST: AtomicU64 = AtomicU64::new(0);
+static SUBCUR: [AtomicU64; SUBS] = [const { AtomicU64::new(0) }; SUBS];
+static SUBSUM: [[AtomicU64; SUBS]; CLASSES] = [const { [const { AtomicU64::new(0) }; SUBS] }; CLASSES];
+static SUBHIST: [[[AtomicU32; 512]; SUBS]; CLASSES] =
+    [const { [const { [const { AtomicU32::new(0) }; 512] }; SUBS] }; CLASSES];
+
+/// Start the sub-spans of span 5.
+#[inline(always)]
+pub(crate) fn sub_start() {
+    SUBLAST.store(tsc(), Relaxed);
+}
+
+/// End sub-span `i`.
+#[inline(always)]
+pub(crate) fn sub(i: usize) {
+    let now = tsc();
+    SUBCUR[i].store(now.wrapping_sub(SUBLAST.load(Relaxed)), Relaxed);
+    SUBLAST.store(tsc(), Relaxed);
+}
+
 static T0: AtomicU64 = AtomicU64::new(0);
 static NS0: AtomicU64 = AtomicU64::new(0);
 
@@ -80,6 +116,12 @@ pub(crate) fn stamp(i: usize) {
                     let b = &HIST[class][k][((d / WIDTH) as usize).min(BUCKETS - 1)];
                     b.store(b.load(Relaxed) + 1, Relaxed);
                 }
+                for k in 0..SUBS {
+                    let d = SUBCUR[k].load(Relaxed);
+                    add(&SUBSUM[class][k], d);
+                    let b = &SUBHIST[class][k][((d / WIDTH) as usize).min(511)];
+                    b.store(b.load(Relaxed) + 1, Relaxed);
+                }
             } else {
                 add(&DROPPED, 1);
             }
@@ -104,6 +146,12 @@ pub(crate) fn reset() {
                 b.store(0, Relaxed);
             }
         }
+        for k in 0..SUBS {
+            SUBSUM[c][k].store(0, Relaxed);
+            for b in &SUBHIST[c][k] {
+                b.store(0, Relaxed);
+            }
+        }
     }
     DROPPED.store(0, Relaxed);
     MASK.store(0, Relaxed);
@@ -125,6 +173,10 @@ pub(crate) fn print() {
         per_us,
         b.wrapping_sub(a),
         DROPPED.load(Relaxed)
+    );
+    crate::console::println!(
+        "  fprof    follow_group_share: grouped {} ungrouped {} reweighed {}",
+        GROUPED.load(Relaxed), UNGROUPED.load(Relaxed), REWEIGHED.load(Relaxed)
     );
     for c in 0..CLASSES {
         let n = DIRS[c].load(Relaxed);
@@ -152,6 +204,22 @@ pub(crate) fn print() {
                 ns(mean)
             );
         }
+        for k in 0..SUBS {
+            let mut seen = 0;
+            let mut p50 = 0;
+            for (j, bucket) in SUBHIST[c][k].iter().enumerate() {
+                seen += u64::from(bucket.load(Relaxed));
+                if n > 0 && seen * 2 >= n {
+                    p50 = j as u64 * WIDTH + WIDTH / 2;
+                    break;
+                }
+            }
+            let mean = SUBSUM[c][k].load(Relaxed) / n.max(1);
+            crate::console::println!(
+                "  fprof {} sub {:<60} p50 {:>5} ns  mean {:>5} ns",
+                c, SUB_NAMES[k], ns(p50), ns(mean)
+            );
+        }
         crate::console::println!(
             "  fprof {}    a direction: sum of p50s {} ns, sum of means {} ns",
             c,
@@ -159,4 +227,9 @@ pub(crate) fn print() {
             ns(means)
         );
     }
+}
+
+/// Count one.
+pub(crate) fn add_pub(a: &AtomicU64) {
+    add(a, 1);
 }

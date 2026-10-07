@@ -970,18 +970,24 @@ impl Endpoint {
         crate::sched::fprof::stamp(3);
         let mut switch = direct::begin(caller, reader)?;
         crate::sched::fprof::stamp(4);
+        crate::sched::fprof::sub_start();
         // The commit, which cannot fail from here.
         let Some(reader) = peer_inbox.parked.take() else {
             return Err(Count::T9);
         };
         reader.fill_reply(len, words);
+        crate::sched::fprof::sub(0);
         switch.hand_over(caller, reader, |parked| {
+            crate::sched::fprof::sub(5);
             direct::set_running_blocked(&parked);
             own_inbox.parked = Some(parked);
+            crate::sched::fprof::sub(6);
         });
         drop(peer_inbox);
         drop(own_inbox);
+        crate::sched::fprof::sub(8);
         direct::count(Count::Trip);
+        crate::sched::fprof::sub(9);
         crate::sched::fprof::stamp(5);
         switch.switch();
         Ok(())
