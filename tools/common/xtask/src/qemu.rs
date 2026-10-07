@@ -2787,7 +2787,9 @@ fn attach_data_image(command: &mut Command, arch: Arch, args: &Args) -> Result<(
     } else {
         volume
     };
-    let (snapshot, said) = if args.data_image_kept || persistent {
+    let (snapshot, said) = if args.data_image_read_only && !persistent {
+        (",readonly=on", "read-only")
+    } else if args.data_image_kept || persistent {
         ("", "kept")
     } else {
         (",snapshot=on", "snapshot")
