@@ -45,6 +45,22 @@ pub(crate) fn bench_ipc(args: &Args) -> Result<()> {
     if args.pin.is_none() && host_processors() > 12 {
         args.pin = Some(PIN.to_owned());
     }
+    // MEASUREMENT ONLY (os76/p0-measure): `--kernel-option
+    // ipc-bench.long=<seconds>` runs that long after the stock lines, so the
+    // boot's timeout grows by twice that unless `--timeout` was given.
+    if let Some(seconds) = args
+        .kernel_options
+        .iter()
+        .find_map(|option| option.strip_prefix("ipc-bench.long=")?.parse::<u64>().ok())
+        && !args.timeout_given
+    {
+        args.timeout = args.timeout.saturating_add(seconds.saturating_mul(2));
+        println!(
+            "  bench-ipc: ipc-bench.long={seconds}: blocks of 50,000 domain-call trips after the \
+             stock lines; timeout {} s",
+            args.timeout
+        );
+    }
     let rounds = args.rounds.unwrap_or(3);
     let (boots, reference) = if let Some(reference) = args.alternate.clone() {
         alternate(&args, &reference, rounds)?

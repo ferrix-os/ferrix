@@ -2101,6 +2101,55 @@ pub(crate) fn arm_cpu(arch: Arch) -> String {
     .to_owned()
 }
 
+/// MEASUREMENT ONLY (os76/p0-measure): `FERRIX_QEMU_HUGETLB=1` backs an
+/// x86-64 KVM guest's RAM with preallocated 2 MiB hugetlb pages, as
+/// `~/.local/share/ferrix/sel4/run.sh` does for seL4 with the same variable
+/// (the customer's rule: a host setup used for Ferrix's runs is used for
+/// seL4's too). The backend is `-m`'s size, and the line printed says so for
+/// the log. Unset, or any other value, changes nothing.
+///
+/// # Errors
+///
+/// Set on a host with fewer free 2 MiB hugepages than the guest's RAM
+/// needs: QEMU's `prealloc=on` would refuse it less plainly.
+fn hugetlb_arguments(accelerator: &str, memory: u32) -> Result<Vec<String>> {
+    const POOL: &str = "/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages";
+    if std::env::var("FERRIX_QEMU_HUGETLB").as_deref() != Ok("1") {
+        return Ok(Vec::new());
+    }
+    if accelerator != "kvm" || !cfg!(target_os = "linux") {
+        println!(
+            "  qemu: FERRIX_QEMU_HUGETLB=1 ignored: hugetlb backing is for x86-64 KVM boots on \
+             Linux, and this one is under {accelerator}"
+        );
+        return Ok(Vec::new());
+    }
+    let pages = memory.div_ceil(2);
+    let free = std::fs::read_to_string(POOL)
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    if free < pages {
+        return Err(Error::new(format!(
+            "FERRIX_QEMU_HUGETLB=1: guest RAM of {memory} MiB needs {pages} free 2 MiB hugepages, \
+             and {POOL} says {free}.\n  Reserve them first (`sysctl vm.nr_hugepages={pages}` or \
+             more, as root), or unset FERRIX_QEMU_HUGETLB."
+        )));
+    }
+    let backend =
+        format!("memory-backend-memfd,id=ram0,size={memory}M,hugetlb=on,hugetlbsize=2M,prealloc=on");
+    println!(
+        "  qemu: guest RAM on preallocated 2 MiB hugetlb pages (FERRIX_QEMU_HUGETLB=1): \
+         -object {backend} -machine memory-backend=ram0; {free} free before"
+    );
+    Ok(vec![
+        "-object".to_owned(),
+        backend,
+        "-machine".to_owned(),
+        "memory-backend=ram0".to_owned(),
+    ])
+}
+
 /// Assemble the QEMU command line for `arch`.
 /// QEMU's command, on the host processors `pin` names (`--pin`) unless it is
 /// `none`: by `taskset`, which then runs QEMU in its own place, so the child
@@ -2216,6 +2265,9 @@ fn qemu_command(
                     INTEL_IOMMU
                 },
             ]);
+            // MEASUREMENT ONLY: `FERRIX_QEMU_HUGETLB=1`, a second `-machine`
+            // that QEMU merges into the first.
+            let _ = command.args(hugetlb_arguments(&accelerator, args.memory)?);
             // The machine's own VGA, which `q35` adds unasked, is QEMU's
             // first console and the card is the second, so a window opens on
             // firmware's head and the compositor draws out of sight. A boot
