@@ -27,7 +27,9 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched::{Config, CpuLoad, EntityState, Load, RunQueue, Timeline, slice_for};
+use ferrix_sched::{
+    Config, CpuLoad, EntityState, JobPlan, Load, RunQueue, Timeline, settle_job_fold, slice_for,
+};
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 
@@ -262,11 +264,20 @@ impl CpuQueue {
     /// the scheduler asked for and the request it actually served, and it is
     /// what widens the fairness bound on a real machine.
     pub(crate) fn account(&mut self, now: u64) {
+        let _ = self.account_with(now, None);
+    }
+
+    /// [`CpuQueue::account`], its group share computed with `extra` added
+    /// to the load of the job `extra` names (the direct switch's fold,
+    /// `docs/OPAQUE-KERNEL.md` §9.11, J2). Answers the base weight and the
+    /// weight its job's share gave the running task, where the share was
+    /// looked at.
+    pub(crate) fn account_with(&mut self, now: u64, extra: Option<(u32, i64)>) -> Option<(u32, u32)> {
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
-            return;
+            return None;
         }
         if self.fair.current().is_some() {
             self.stats.busy_ns += delta;
@@ -274,7 +285,7 @@ impl CpuQueue {
             self.stats.idle_ns += delta;
         }
         let Some(remaining) = self.fair.remaining_ns() else {
-            return;
+            return None;
         };
         if let Some(task) = self.fair.current() {
             task.add_runtime(delta);
@@ -286,32 +297,34 @@ impl CpuQueue {
                 self.stats.overrun_total = self.stats.overrun_total.saturating_add(overrun);
             }
         }
-        self.follow_group_share();
+        let share = self.follow_group_share(extra);
         if self.stats.measuring {
             self.measure();
         }
+        share
     }
 
     /// Give the running task the weight its job's share says it should have
     /// now, if that has moved by more than an eighth: the other tasks of its
     /// job came and went since it was queued (`object::quota::effective`).
-    /// A task in no job other than the root never changes here.
-    fn follow_group_share(&mut self) {
-        let Some(task) = self.fair.current() else {
-            return;
-        };
+    /// A task in no job other than the root never changes here. `extra` is
+    /// [`CpuQueue::account_with`]'s. Answers the base weight and the weight
+    /// the share gave, kept or not.
+    fn follow_group_share(&mut self, extra: Option<(u32, i64)>) -> Option<(u32, u32)> {
+        let task = self.fair.current()?;
         if task.group() == crate::object::quota::NONE {
-            return;
+            return None;
         }
         let (id, now) = (task.id, task.entity_state().weight);
-        let due = task.effective_weight();
+        let (base, due) = task.effective_weight_with(extra);
         if now.abs_diff(due) <= now / 8 {
-            return;
+            return Some((base, due));
         }
         task.set_weight(due);
         // The only refusal is a weight of zero, which `effective` never
         // answers.
         let _ = self.fair.set_weight(id, due);
+        Some((base, due))
     }
 
     /// Busy and idle nanoseconds up to `now`, charging nothing.
@@ -640,24 +653,46 @@ impl CpuQueue {
     /// holds to `enqueue`, the rescale, `remove_curr` and `pick_next` bit for
     /// bit. `choose_next`'s second `account`, at the same `now`, changes
     /// nothing and is not made.
+    ///
+    /// **The job loads** (`docs/OPAQUE-KERNEL.md` §9.11, J1 and J2; ledger
+    /// line 461): `plan` is what the caller of this made of the two tasks'
+    /// words before any charge. [`JobPlan::Separate`]: the peer's join was
+    /// made in full, and the caller's leave is `between`'s, as the general
+    /// path makes them. [`JobPlan::Fold`]: the peer is counted in its word
+    /// and not yet in the job's load, which the caller keeps busy; the
+    /// charge's share and the peer's weight are computed with the peer's
+    /// weight added to that load (one walk for both when their bases are
+    /// equal), and once the caller's state is stored and its word left, the
+    /// load changes once by the net. A way out that does not reach the
+    /// caller's leave makes the peer's join alone ([`PendingJoin`]'s drop).
     pub(crate) fn hand_over(
         &mut self,
         peer: Arc<Task>,
         now: u64,
+        plan: JobPlan,
         between: impl FnOnce(Arc<Task>),
     ) -> Option<Arc<Task>> {
+        let mut pending = PendingJoin::of(plan);
+        let extra = pending.extra();
         let Some(slot) = peer.take_run_slot() else {
             super::note_missing_slot();
             return None;
         };
-        if self.current.is_some() {
-            self.account(now);
-        }
+        let share = if self.current.is_some() {
+            self.account_with(now, extra)
+        } else {
+            None
+        };
         // As `insert`: counted in its job (it already is, made runnable),
         // and weighed by its job's share as things stand, the caller still
-        // counted.
+        // counted. Under a fold, the caller's walk is the peer's when both
+        // have one base: one job, one read of its levels.
         peer.join_group();
-        peer.set_weight(peer.effective_weight());
+        let weight = match share {
+            Some((base, due)) if extra.is_some() && base == peer.base_weight() => due,
+            _ => peer.effective_weight_with(extra).1,
+        };
+        peer.set_weight(weight);
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
         let (id, state) = (peer.id, peer.entity_state());
@@ -672,6 +707,14 @@ impl CpuQueue {
                     task.return_run_slot(slot);
                     task.store_entity_state(state);
                     task.set_queued(false);
+                    // Under a fold, the caller's state and word here, the
+                    // store first as `set_state_from` makes them, and the
+                    // load's one change; `between`'s own `set_state_from`
+                    // then finds the word left and changes nothing.
+                    if pending.extra().is_some() {
+                        task.store_state(BLOCKED);
+                        pending.settle(task.leave_word());
+                    }
                     // The caller set blocked and parked, its job's load let
                     // go after the peer's weight was taken with it counted.
                     between(task);
@@ -741,5 +784,61 @@ impl CpuQueue {
         // lock this runs under, so it could never fail. `finish_switch` asks
         // it instead, at the moment it has an answer.
         Ok(())
+    }
+}
+
+/// A [`JobPlan::Fold`]'s peer join, counted in the peer's word and not yet
+/// in its job's load, until [`PendingJoin::settle`] makes the load's change
+/// with the caller's leave (`docs/OPAQUE-KERNEL.md` §9.11, J1). Dropped
+/// unsettled -- a way out of `CpuQueue::hand_over` that did not reach the
+/// caller's leave -- it makes the peer's join alone, as the general path
+/// leaves things there: the peer joined, the caller not left. One place for
+/// every such way out (ledger line 461, J-C1).
+struct PendingJoin {
+    /// The job and the weight the peer's word was counted with, until
+    /// settled.
+    fold: Option<(u32, u32)>,
+}
+
+impl PendingJoin {
+    /// The pending join `plan` leaves, if it folds.
+    const fn of(plan: JobPlan) -> PendingJoin {
+        PendingJoin {
+            fold: match plan {
+                JobPlan::Fold { job, joined } => Some((job, joined)),
+                JobPlan::Separate => None,
+            },
+        }
+    }
+
+    /// What the weights are computed with: the peer's weight, added to its
+    /// job's load, while it is pending.
+    fn extra(&self) -> Option<(u32, i64)> {
+        self.fold.map(|(job, joined)| (job, i64::from(joined)))
+    }
+
+    /// The caller's leave answered `left`: the load's change, once, by
+    /// `ferrix_sched::settle_job_fold`. A leave that did not answer as
+    /// planned -- which `Task::set_group`'s callers rule out -- is counted,
+    /// and the stage-9 check requires none.
+    fn settle(&mut self, left: Option<(u32, u32)>) {
+        let Some((job, joined)) = self.fold.take() else {
+            return;
+        };
+        let (changes, planned) = settle_job_fold(job, joined, left);
+        for (at, delta) in changes.into_iter().flatten() {
+            crate::object::quota::adjust(at, delta);
+        }
+        if !planned {
+            super::direct::count(super::direct::Count::FoldUnplanned);
+        }
+    }
+}
+
+impl Drop for PendingJoin {
+    fn drop(&mut self) {
+        if let Some((job, joined)) = self.fold.take() {
+            crate::object::quota::adjust(job, i64::from(joined));
+        }
     }
 }

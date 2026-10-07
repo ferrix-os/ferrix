@@ -149,6 +149,93 @@ pub fn carried_weight(base: u32, levels: impl IntoIterator<Item = (u32, i64)>) -
     weight
 }
 
+/// [`carried_weight`] with `extra` added (saturating) to the first level's
+/// load, and to no other: the weight a task gets while another task's
+/// weight is counted in its job's load and not yet added to it
+/// (`docs/OPAQUE-KERNEL.md` §9.11, J2). Only the first level, because the
+/// one caller adds there what changes no level's busy or idle state, so no
+/// level above it would have changed.
+#[must_use]
+pub fn carried_weight_with(
+    base: u32,
+    levels: impl IntoIterator<Item = (u32, i64)>,
+    extra: i64,
+) -> u64 {
+    let mut first = true;
+    carried_weight(
+        base,
+        levels.into_iter().map(|(own, load)| {
+            let load = if first { load.saturating_add(extra) } else { load };
+            first = false;
+            (own, load)
+        }),
+    )
+}
+
+/// What the direct switch does with its two tasks' job loads
+/// (`docs/OPAQUE-KERNEL.md` §9.11, J1): the peer joins its job's processor
+/// load as it is made runnable, and the caller leaves its own as it blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobPlan {
+    /// Both are counted in `job`, which the caller keeps busy throughout:
+    /// the peer's word is counted with `joined`, and the load changes once,
+    /// by the net of the two, after the caller's leave.
+    Fold {
+        /// The job both run in.
+        job: u32,
+        /// The weight the peer's word was counted with.
+        joined: u32,
+    },
+    /// Anything else: the peer's join is made at once, and the caller's
+    /// leave as the general path makes it.
+    Separate,
+}
+
+/// The plan, made before any charge: from `joined`, what the peer's word
+/// answered as it was counted (its job and the weight), and `caller`, the
+/// running task's word as read then (its job and the weight it is counted
+/// with). `none` is the index that means no job. A fold only where both are
+/// counted in one job: there the caller keeps the job busy from before the
+/// peer's join to after its own leave, so the job never turns idle or busy
+/// and no level above it is touched, folded or not.
+#[must_use]
+pub fn plan_job_fold(joined: Option<(u32, u32)>, caller: (u32, u32), none: u32) -> JobPlan {
+    match joined {
+        Some((job, weight)) if job != none && caller.0 == job && caller.1 != 0 => JobPlan::Fold {
+            job,
+            joined: weight,
+        },
+        _ => JobPlan::Separate,
+    }
+}
+
+/// The adjustments a [`JobPlan::Fold`] of `joined` in `job` makes once the
+/// caller's leave has answered `left` (the job and weight it was counted
+/// with; `None` if it was counted nowhere), in the order they are made, and
+/// whether the leave answered as planned. As planned: one adjustment by the
+/// net, none when that is zero. Otherwise the peer's join and then the
+/// caller's leave, each in its own job, as the general path makes them.
+#[must_use]
+pub fn settle_job_fold(
+    job: u32,
+    joined: u32,
+    left: Option<(u32, u32)>,
+) -> ([Option<(u32, i64)>; 2], bool) {
+    match left {
+        Some((at, weight)) if at == job => {
+            let net = i64::from(joined) - i64::from(weight);
+            ([(net != 0).then_some((job, net)), None], true)
+        }
+        _ => (
+            [
+                Some((job, i64::from(joined))),
+                left.map(|(at, weight)| (at, -i64::from(weight))),
+            ],
+            false,
+        ),
+    }
+}
+
 /// Why something was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SchedError {
