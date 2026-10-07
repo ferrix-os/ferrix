@@ -109,15 +109,19 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.6'> entryStackFollowsTask : ItemLowLevel {
             attribute :>> statement = "restore_user_state shall point this
-                processor's TSS RSP0, found through STR and SGDT by
-                set_privilege_stack, and its SYSCALL entry stack at the incoming
+                processor's TSS RSP0 -- which STR and SGDT find at each load of
+                this processor's tables and its per-CPU record keeps
+                (note_tables) -- and its SYSCALL entry stack at the incoming
                 task's kernel-stack top.";
-            attribute :>> criterion = "After each of N switches between two user
-                tasks on one processor, RSP0 and the per-processor entry stack read
-                back equal to the running task's kernel-stack top: 0 mismatches.";
+            attribute :>> criterion = "At every processor's bring-up, after its
+                last note, its record's GDT and RSP0 addresses equal a fresh STR
+                and SGDT answer and neither is zero; FX-0409 stops the machine
+                otherwise.";
             attribute :>> parent = "H.TRAP.6";
             attribute :>> unit = ("arch::x86_64::gdt::set_privilege_stack",
-                "arch::x86_64::switch::restore_user_state");
+                "arch::x86_64::gdt::note_tables", "arch::x86_64::gdt::ask_privilege_stack",
+                "arch::x86_64::switch::restore_user_state",
+                "arch::x86_64::cpu::read_task_register", "arch::x86_64::cpu::read_gdt");
         }
     }
 
@@ -140,7 +144,8 @@ package FerrixX8664Requirements {
                 "arch::x86_64::switch::with_interrupts_masked",
                 "arch::x86_64::gdt::write_tls",
                 "arch::x86_64::gdt::read_tls",
-                "arch::x86_64::gdt::live_table");
+                "arch::x86_64::gdt::live_table",
+                "arch::x86_64::gdt::noted_table");
         }
         requirement <'L.x86_64.8'> threadAreaTravelsWithThread : ItemLowLevel {
             doc /* Restated for the DS/ES skip (OPAQUE-KERNEL.md §9.8, 3b; the
@@ -1094,16 +1099,19 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.59'> entryStackPerTask : ItemLowLevel {
             attribute :>> statement = "set_entry_stack and restore_user_state shall
-                point both ways in from ring 3 -- the SYSCALL entry stack and the
-                TSS's RSP0, which set_privilege_stack finds through STR and SGDT --
-                at the incoming task's kernel stack, so that two programs taking
-                turns on one processor keep their own registers.";
+                point both ways in from ring 3 --
+                the SYSCALL entry stack and the TSS's RSP0, which STR and SGDT
+                find at each load of this processor's tables and its per-CPU
+                record keeps (note_tables) -- at the incoming task's kernel
+                stack, so that two programs taking turns on one processor keep
+                their own registers.";
             attribute :>> criterion = "Two spinning programs pinned to one
                 processor, each preempted in user mode at least twice, exit 41 and
                 43 with their stack pointers unchanged (the `procs` line).";
             attribute :>> parent = "H.TRAP.6";
             attribute :>> unit = ("arch::x86_64::syscall::set_entry_stack",
                 "arch::x86_64::gdt::set_privilege_stack",
+                "arch::x86_64::gdt::note_tables", "arch::x86_64::gdt::ask_privilege_stack",
                 "arch::x86_64::switch::restore_user_state",
                 "arch::x86_64::cpu::read_task_register",
                 "arch::x86_64::cpu::read_gdt");
