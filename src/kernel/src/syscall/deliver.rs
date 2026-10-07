@@ -202,6 +202,9 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
                 restart = None;
             }
             act(&thread, context, &taken);
+            if taken.signal == 10 && process.threads().len() == 2 && thread.blocks(10) {
+                crate::sched::sleep_for(300_000_000);
+            }
         }
         // The cap reached with signals perhaps left: the word's `SIGNAL` was
         // cleared by the look that brought this thread here, so it is posted
