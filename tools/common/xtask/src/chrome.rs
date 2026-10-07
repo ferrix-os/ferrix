@@ -164,8 +164,8 @@ const ARM64_SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
 cd /tmp
 chrome=/data/usr/lib/chromium/chromium
 $chrome --version || exit 3
-$chrome --headless --no-sandbox --disable-gpu --dump-dom 'PAGE' || exit 4
-$chrome --headless --no-sandbox --disable-gpu --screenshot=/tmp/shot.png --window-size=640,360 'PICTURE' || exit 5
+$chrome --headless --single-process --no-sandbox --disable-gpu --dump-dom 'PAGE' || { while read l; do echo "mi: $l"; done < /proc/meminfo; while read l; do echo "ms: $l"; done < /sys/fs/cgroup/memory.stat; exit 4; }
+$chrome --headless --single-process --no-sandbox --disable-gpu --screenshot=/tmp/shot.png --window-size=640,360 'PICTURE' || exit 5
 [ -s /tmp/shot.png ] || exit 6
 echo chrome-gate: screenshot written
 exit 16
