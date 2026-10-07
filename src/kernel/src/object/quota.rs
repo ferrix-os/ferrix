@@ -726,6 +726,22 @@ pub(crate) fn effective(index: u32, base: u32) -> u32 {
     u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
 }
 
+/// TIMING ONLY: [`effective`] as if `extra` were added to `index`'s own load.
+pub(crate) fn effective_plus(index: u32, base: u32, extra: i64) -> u32 {
+    let mut at = index;
+    let mut add = extra;
+    let levels = core::iter::from_fn(|| {
+        let slot = slot(at)?;
+        let load = slot.load.load(Ordering::Acquire).saturating_add(add);
+        add = 0;
+        let own = u32::try_from(slot.entity_weight()).unwrap_or(1);
+        at = slot.parent.load(Ordering::Acquire);
+        Some((own, load))
+    });
+    let clamped = ferrix_sched::carried_weight(base, levels).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+    u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
+}
+
 /// Every entity weight a job can be given fits a `u32`: the largest
 /// `cpu.weight`, [`MAX_WEIGHT`], in task units. What makes
 /// [`effective`]'s 64-bit arithmetic exact; a task's own weight is a `u32`

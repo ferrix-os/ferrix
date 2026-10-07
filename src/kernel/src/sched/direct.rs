@@ -108,6 +108,11 @@ pub(crate) fn count(what: Count) {
     }
 }
 
+/// TIMING ONLY: folds made.
+pub(crate) fn folds() -> u64 {
+    super::queue::FOLDS.load(Ordering::Relaxed)
+}
+
 /// Every count, summed over the processors, in [`Count`]'s order.
 pub(crate) fn counts() -> [u64; COUNTS] {
     let mut sums = [0_u64; COUNTS];
@@ -241,12 +246,24 @@ impl Direct {
         let _ = peer.take_sleep_deadline();
         }
         // Asleep, as A1 has just asserted, and every waker needs this lock.
-        if super::abl(2) || super::abl(2048) { peer.set_state_raw(RUNNABLE); } else {
+        let group = caller.group();
+        if super::abl(4096) && group != crate::object::quota::NONE && peer.group() == group {
+            peer.set_state_raw(RUNNABLE);
+            if let Some((joined_in, base)) = peer.join_word() {
+                if joined_in == group {
+                    super::queue::FOLD_JOINED.store(base, Ordering::Relaxed);
+                    super::queue::FOLD_GROUP.store(group, Ordering::Relaxed);
+                } else {
+                    crate::object::quota::adjust(joined_in, i64::from(base));
+                }
+            }
+        } else if super::abl(2) || super::abl(2048) { peer.set_state_raw(RUNNABLE); } else {
         peer.set_state_from(BLOCKED, RUNNABLE);
         }
         let id = peer.id;
         let pointer = Arc::as_ptr(&peer);
         let next = queue.hand_over(peer, now, block_caller);
+        super::queue::FOLD_GROUP.store(crate::object::quota::NONE, Ordering::Relaxed);
         if !skip && !next
             .as_ref()
             .is_some_and(|next| core::ptr::eq(Arc::as_ptr(next), pointer))
@@ -330,6 +347,25 @@ pub(crate) fn set_blocked(task: &Task) {
 /// [`set_blocked`] for the direct switch's caller, which runs here under the
 /// run-queue lock with interrupts masked: see `Task::set_state_from`.
 pub(crate) fn set_running_blocked(task: &Task) {
+    let fold = super::queue::FOLD_GROUP.load(Ordering::Relaxed);
+    if fold != crate::object::quota::NONE {
+        task.set_state_raw(BLOCKED);
+        let joined = i64::from(super::queue::FOLD_JOINED.load(Ordering::Relaxed));
+        match task.leave_word() {
+            Some((left, counted)) if left == fold => {
+                let delta = joined - i64::from(counted);
+                if delta != 0 {
+                    crate::object::quota::adjust(fold, delta);
+                }
+            }
+            Some((left, counted)) => {
+                crate::object::quota::adjust(fold, joined);
+                crate::object::quota::adjust(left, -i64::from(counted));
+            }
+            None => crate::object::quota::adjust(fold, joined),
+        }
+        return;
+    }
     if super::abl(2) || super::abl(2048) { task.set_state_raw(BLOCKED); return; }
     task.set_state_from(RUNNABLE, BLOCKED);
 }

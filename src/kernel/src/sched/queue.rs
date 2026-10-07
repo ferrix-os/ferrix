@@ -128,6 +128,16 @@ pub(crate) struct Pick {
 }
 
 /// Whether `a` is before `b` in wrapping virtual time.
+/// TIMING ONLY: the job a direct switch folds in, or `quota::NONE`.
+pub(crate) static FOLD_GROUP: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(crate::object::quota::NONE);
+/// TIMING ONLY: the base the peer's word was counted with.
+pub(crate) static FOLD_JOINED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// TIMING ONLY: folds made.
+pub(crate) static FOLDS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// TIMING ONLY: account's group share left to the fold.
+static FOLDING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 const fn before(a: u64, b: u64) -> bool {
     (a.wrapping_sub(b) as i64) < 0
 }
@@ -288,7 +298,7 @@ impl CpuQueue {
                 self.stats.overrun_total = self.stats.overrun_total.saturating_add(overrun);
             }
         }
-        if !super::abl(256) {
+        if !super::abl(256) && !FOLDING.load(core::sync::atomic::Ordering::Relaxed) {
         self.follow_group_share();
         }
         if self.stats.measuring {
@@ -654,6 +664,33 @@ impl CpuQueue {
             super::note_missing_slot();
             return None;
         };
+        let fold_group = FOLD_GROUP.load(core::sync::atomic::Ordering::Relaxed);
+        if fold_group != crate::object::quota::NONE {
+            // TIMING ONLY: the fold. The peer's word is counted, its load not
+            // added: weights computed with it added, once if bases agree.
+            FOLDS.store(FOLDS.load(core::sync::atomic::Ordering::Relaxed) + 1, core::sync::atomic::Ordering::Relaxed);
+            let joined = i64::from(FOLD_JOINED.load(core::sync::atomic::Ordering::Relaxed));
+            if self.current.is_some() {
+                FOLDING.store(true, core::sync::atomic::Ordering::Relaxed);
+                self.account(now);
+                FOLDING.store(false, core::sync::atomic::Ordering::Relaxed);
+            }
+            let base = peer.base_weight();
+            let due = crate::object::quota::effective_plus(fold_group, base, joined);
+            if let Some(task) = self.fair.current() {
+                let caller_due = if task.base_weight() == base {
+                    due
+                } else {
+                    crate::object::quota::effective_plus(fold_group, task.base_weight(), joined)
+                };
+                let (id, now_w) = (task.id, task.entity_state().weight);
+                if now_w.abs_diff(caller_due) > now_w / 8 {
+                    task.set_weight(caller_due);
+                    let _ = self.fair.set_weight(id, caller_due);
+                }
+            }
+            peer.set_weight(due);
+        } else {
         if self.current.is_some() && !super::abl(1) {
             self.account(now);
         }
@@ -663,6 +700,7 @@ impl CpuQueue {
         }
         if !super::abl(1024) {
         peer.set_weight(peer.effective_weight());
+        }
         }
         }
         // `rescale_slice` as `insert` makes it, with the peer counted.

@@ -658,6 +658,28 @@ impl Task {
     }
 
     /// Take its weight out of its job's load, if it is counted there.
+    /// TIMING ONLY: join_group's word update without the job's load.
+    pub(crate) fn join_word(&self) -> Option<(u32, u32)> {
+        let base = self.base_weight.load(Ordering::Relaxed);
+        self.group
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+                (counted_of(word) == 0 && group_of(word) != quota::NONE)
+                    .then(|| pack(group_of(word), base))
+            })
+            .ok()
+            .map(|word| (group_of(word), base))
+    }
+
+    /// TIMING ONLY: leave_group's word update without the job's load.
+    pub(crate) fn leave_word(&self) -> Option<(u32, u32)> {
+        self.group
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+                (counted_of(word) != 0).then(|| pack(group_of(word), 0))
+            })
+            .ok()
+            .map(|word| (group_of(word), counted_of(word)))
+    }
+
     fn leave_group(&self) {
         let left = self
             .group
