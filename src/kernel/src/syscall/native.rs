@@ -1147,7 +1147,7 @@ fn continue_general(
     };
     // Let go here, with interrupts open, as the general path lets go at its
     // call's end: the last reference closes the end (F-65).
-    drop(endpoint);
+    core::mem::drop(endpoint);
     if let Some(thread) = caller.thread() {
         let plain = answered.map(|(count, _)| count);
         record_call(
