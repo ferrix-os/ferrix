@@ -241,7 +241,7 @@ impl Direct {
         let _ = peer.take_sleep_deadline();
         }
         // Asleep, as A1 has just asserted, and every waker needs this lock.
-        if super::abl(2) { peer.set_state_raw(RUNNABLE); } else {
+        if super::abl(2) || super::abl(2048) { peer.set_state_raw(RUNNABLE); } else {
         peer.set_state_from(BLOCKED, RUNNABLE);
         }
         let id = peer.id;
@@ -330,6 +330,6 @@ pub(crate) fn set_blocked(task: &Task) {
 /// [`set_blocked`] for the direct switch's caller, which runs here under the
 /// run-queue lock with interrupts masked: see `Task::set_state_from`.
 pub(crate) fn set_running_blocked(task: &Task) {
-    if super::abl(2) { task.set_state_raw(BLOCKED); return; }
+    if super::abl(2) || super::abl(2048) { task.set_state_raw(BLOCKED); return; }
     task.set_state_from(RUNNABLE, BLOCKED);
 }

@@ -262,7 +262,9 @@ impl CpuQueue {
     /// the scheduler asked for and the request it actually served, and it is
     /// what widens the fairness bound on a real machine.
     pub(crate) fn account(&mut self, now: u64) {
+        if !super::abl(512) {
         self.account_load(now);
+        }
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
@@ -286,7 +288,9 @@ impl CpuQueue {
                 self.stats.overrun_total = self.stats.overrun_total.saturating_add(overrun);
             }
         }
+        if !super::abl(256) {
         self.follow_group_share();
+        }
         if self.stats.measuring {
             self.measure();
         }
@@ -654,8 +658,12 @@ impl CpuQueue {
             self.account(now);
         }
         if !super::abl(2) {
+        if !super::abl(2048) {
         peer.join_group();
+        }
+        if !super::abl(1024) {
         peer.set_weight(peer.effective_weight());
+        }
         }
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
