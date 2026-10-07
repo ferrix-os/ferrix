@@ -1409,8 +1409,14 @@ pub mod arm {
     pub const GETPEERNAME: usize = 287;
     /// Create a pair of connected sockets.
     pub const SOCKETPAIR: usize = 288;
+    /// Send a message on a connected socket: EABI's own call, which the
+    /// generic table folded into `sendto`. glibc's armhf `send` makes it.
+    pub const SEND: usize = 289;
     /// Send a message on a socket, optionally to an address.
     pub const SENDTO: usize = 290;
+    /// Receive a message from a connected socket: EABI's own call beside
+    /// `recvfrom`, and the one glibc's armhf `recv` makes.
+    pub const RECV: usize = 291;
     /// Receive a message from a socket, with its source address.
     pub const RECVFROM: usize = 292;
     /// Shut down part or all of a full-duplex connection.
@@ -2460,6 +2466,13 @@ pub enum Syscall {
     Sendto,
     /// Receive a message from a socket, with its source address.
     Recvfrom,
+    /// Send a message on a connected socket: `sendto` with no address.
+    /// ARMv7-A only, whose EABI kept the call the generic table dropped
+    /// (i386 reaches it only through `socketcall`).
+    Send,
+    /// Receive a message from a connected socket: `recvfrom` with no
+    /// address. ARMv7-A only, as [`Syscall::Send`].
+    Recv,
     /// Send a message with ancillary data on a socket.
     Sendmsg,
     /// Receive a message with ancillary data from a socket.
@@ -3829,7 +3842,9 @@ fn arm_sockets_and_shm(nr: usize) -> Option<Syscall> {
         arm::GETSOCKNAME => Syscall::Getsockname,
         arm::GETPEERNAME => Syscall::Getpeername,
         arm::SOCKETPAIR => Syscall::Socketpair,
+        arm::SEND => Syscall::Send,
         arm::SENDTO => Syscall::Sendto,
+        arm::RECV => Syscall::Recv,
         arm::RECVFROM => Syscall::Recvfrom,
         arm::SHUTDOWN => Syscall::Shutdown,
         arm::SETSOCKOPT => Syscall::Setsockopt,
