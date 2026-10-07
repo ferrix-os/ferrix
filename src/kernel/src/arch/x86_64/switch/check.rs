@@ -2311,3 +2311,92 @@ fn null_selector_vendor() -> (bool, bool) {
             && __cpuid(0x8000_0021).eax & NULL_SELECTOR_CLEARS_BASE != 0);
     (amd, clears)
 }
+
+/// TIMING ONLY (po10-quick/probe, never lands): what one of each operation
+/// Q1, Q3, Q4 and Q6 would remove costs on this processor, in TSC ticks a
+/// hundred times over (so 1234 is 12.34 ticks), the best of seven loops of
+/// 4,096, the empty loop not subtracted.
+pub(crate) fn probe_costs() {
+    use core::hint::black_box;
+    const N: u64 = 4096;
+    const FS: u32 = 0xC000_0100;
+    const KGS: u32 = 0xC000_0102;
+    const OPS: usize = 14;
+    let open = cpu::read_rflags() & (1 << 9) != 0;
+    cpu::disable_interrupts();
+    // SAFETY: (CONTEXT) timing only; both MSRs exist and are put back below.
+    let fs0 = unsafe { cpu::read_msr(FS) };
+    // SAFETY: (CONTEXT) as above.
+    let kgs0 = unsafe { cpu::read_msr(KGS) };
+    let mut best = [u64::MAX; OPS];
+    for _ in 0..7 {
+        let mut took = [0_u64; OPS];
+        for (op, slot) in took.iter_mut().enumerate() {
+            let start = cpu::rdtsc();
+            for i in 0..N {
+                // SAFETY: (CONTEXT) timing only, interrupts masked, values put back.
+                unsafe {
+                    match op {
+                        0 => {
+                            black_box(i);
+                        }
+                        1 => {
+                            black_box(cpu::read_msr(FS));
+                        }
+                        2 => cpu::write_msr(FS, black_box(fs0)),
+                        3 => cpu::write_msr(FS, black_box(fs0 ^ ((i & 1) << 12))),
+                        4 => {
+                            let want = black_box(fs0);
+                            if cpu::read_msr(FS) != want {
+                                cpu::write_msr(FS, want);
+                            }
+                        }
+                        5 => {
+                            black_box(cpu::read_msr(KGS));
+                        }
+                        6 => cpu::write_msr(KGS, black_box(kgs0)),
+                        7 => cpu::write_msr(KGS, black_box(kgs0 ^ ((i & 1) << 12))),
+                        8 => {
+                            black_box(cpu::read_gdt());
+                        }
+                        9 => {
+                            black_box(cpu::read_task_register());
+                        }
+                        10 => {
+                            black_box(crate::timer::now_nanos());
+                        }
+                        11 => {
+                            black_box(cpu::rdtsc());
+                        }
+                        12 => {
+                            black_box(crate::smp::this_cpu().map(|c| c.logical));
+                        }
+                        _ => {
+                            black_box(gdt::read_tls());
+                        }
+                    }
+                }
+            }
+            *slot = cpu::rdtsc() - start;
+        }
+        for (b, t) in best.iter_mut().zip(took) {
+            *b = (*b).min(t * 100 / N);
+        }
+    }
+    // SAFETY: (CONTEXT) the values read above.
+    unsafe {
+        cpu::write_msr(FS, fs0);
+        cpu::write_msr(KGS, kgs0);
+    }
+    if open {
+        cpu::enable_interrupts();
+    }
+    println!(
+        "  PROBE hz {} empty {} rdmsr-fs {} wrmsr-fs-same {} wrmsr-fs-alt {} rdmsr-cmp-skip-fs {} \
+         rdmsr-kgs {} wrmsr-kgs-same {} wrmsr-kgs-alt {} sgdt {} str {} now_nanos {} rdtsc {} \
+         this_cpu {} read_tls {}",
+        crate::timer::counter_hz(),
+        best[0], best[1], best[2], best[3], best[4], best[5], best[6], best[7], best[8],
+        best[9], best[10], best[11], best[12], best[13]
+    );
+}

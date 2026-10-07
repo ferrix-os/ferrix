@@ -220,6 +220,7 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
         selectors.rounds
     );
     // The `FS`/`GS` skip's cases print their own `fsgs` line (3c).
+    switch::check::probe_costs();
     switch::check::run_fs_gs()?;
     Ok(())
 }
