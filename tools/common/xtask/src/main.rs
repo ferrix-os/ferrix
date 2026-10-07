@@ -653,8 +653,7 @@ fn run() -> Result<()> {
         "test-init" => init::test_init(&args),
         "test-auth" => auth::test_auth(&args),
         "test-restart" => restart::test_restart(&args),
-        "bench-seam" | "bench-ipc" => bench(command, &args),
-        "bench-pipe" => pipe_bench::bench_pipe(&args),
+        "bench-seam" | "bench-ipc" | "bench-pipe" => bench(command, &args),
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
@@ -1067,12 +1066,13 @@ fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
 }
 
 /// The boot benchmarks: the seam's disk read against Linux's (`bench-seam`),
-/// and a channel round trip between two native processes (`bench-ipc`).
+/// a channel round trip between two native processes (`bench-ipc`), and
+/// Linux-ABI round trips between two processes (`bench-pipe`).
 fn bench(command: &str, args: &Args) -> Result<()> {
-    if command == "bench-ipc" {
-        ipc::bench_ipc(args)
-    } else {
-        seam::bench_seam(args)
+    match command {
+        "bench-ipc" => ipc::bench_ipc(args),
+        "bench-pipe" => pipe_bench::bench_pipe(args),
+        _ => seam::bench_seam(args),
     }
 }
 
