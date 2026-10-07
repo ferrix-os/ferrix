@@ -241,6 +241,16 @@ The data file's `tried` has every attempt; the ones that teach:
   skips `FS`/`GS` and does not meet S3 to S5 or S7. *Lesson: a "no
   difference" from a coarse bench is not a dead end; and a skip compared with
   a remembered value is a leak, one compared with the register is not.*
+- **The endpoint's `Arc` must outlive the park; a check's sticky flag did
+  not have to.** The fast path's `Arc<Endpoint>` stays: the general
+  continuation uses the endpoint after any wake, and the general path holds
+  it through its wait (§9.11 cut 3). As an upper bound, an ablation of the
+  `Arc`, the `IN_CALL` raise and `seccomp::quiet`'s downcast together read
+  no lower than cut 3 alone, both on a busy host. Cut 3 took about 40 to 50
+  ns a round trip (busy host, to be retaken): T2's predicate is asked four
+  times a trip, and its "a thread has ever been filtered" flag was set by
+  every boot's own checks. *Lesson: a boot's own checks run in the measured
+  boot, so state they leave behind is on the hot path.*
 - **`IBPB` was thought to cost 2 us a switch; it costs about 230 ns under KVM
   here** **(measured, §9.6)**. The speculation domain still pays off.
 - **PCID:** nazuna has none (CPUID 1 ECX[17] clear; it has `INVPCID`,

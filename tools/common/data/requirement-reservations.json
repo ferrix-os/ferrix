@@ -26,13 +26,6 @@
       "purpose": "NVIDIA C3-K, the kernel's fault windows (docs/NVIDIA.md §11.4, the consultant's OK IF of 2026-10-02): window regions, forwarded faults and their wait, kernel copies that never wait, refused partial operations, the mapping count and UNMAPPED, break-before-make entries, revoke, server death, insert checks and holds, answers only from the server handle; a server-inserted frame unreachable before its hold goes, and a client waiting on a server only by its own mapping"
     },
     {
-      "ids": ["L.object.171-178"],
-      "owner": "po9-obj",
-      "branch": "po9/obj",
-      "date": "2026-10-07",
-      "purpose": "IPC round trip toward seL4: the fast path's object side, lookup and park without an Arc (po9-cert's verdict, ledger 2026-10-07, O1-O10)"
-    },
-    {
       "ids": ["L.sched.64-68", "L.x86_64.162-164"],
       "owner": "po9-sched",
       "branch": "po9/sched",

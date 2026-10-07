@@ -1522,12 +1522,19 @@ pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
               chain and show it in /proc/<pid>/status, an ERRNO of 512 must reach the program \
               as -512 and one past 4095 as -4095, a thread killed by its filter must end its \
               process by SIGSYS and one in strict mode by SIGKILL, and the longest chain Linux \
-              allows must be made and released without running the kernel stack out.",
+              allows must be made and released without running the kernel stack out. Once its \
+              filtered threads have gone, the count of filtered threads the entry reads first \
+              must be back where it was, and two threads that kept a chain must still be \
+              looked for at a call once the thread it was installed on has gone.",
     causes: &[
         "`syscall::seccomp::set_filter` reads the program before the flags, or skips the \
          privilege rule, or does not bound the chain as Linux does.",
         "`syscall::seccomp::check` is not asked, or its flag that a thread holds a filter is \
          not set, so a filtered thread's calls run.",
+        "A thread is not counted in `seccomp::FILTERED_THREADS` as it is made filtered or as \
+         its flag is raised (`Thread::with`, `Thread::with_seccomp`), or not given back as its \
+         flag is lowered or it is dropped; or a scenario of the check holds a reference to its \
+         thread across the call its filter ends, whose frames are never returned to.",
         "`syscall::seccomp::run_chain` keeps another filter's answer than the strictest, or \
          the oldest filter's data on a tie.",
         "`Thread::forked`, `Thread::sibling` or `launch::load_native` does not give the \

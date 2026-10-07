@@ -218,6 +218,7 @@ fn judge_thread(thread: &Thread, call: usize) -> Option<u32> {
 ///
 /// Which property failed.
 pub(crate) fn run() -> Result<Report, &'static str> {
+    let before = seccomp::filtered_threads();
     let mut report = Report::default();
     probes(&mut report)?;
     privilege()?;
@@ -229,6 +230,21 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     report.walk_many = many;
     report.release = released;
     report.walk_long = longest_steps()?;
+    // Every thread this check filtered, a made, an inherited and an ended
+    // one, has gone: the count the entry's first look reads is back where it
+    // was, so a kernel whose filtered threads have all ended looks for no
+    // thread at a call again. Each scenario's task was reaped before it
+    // returned, which drops its thread; the reap is given a bounded while
+    // more on a processor that frees a task's stack late. Nothing else runs
+    // filtered during the boot's checks.
+    let patience = crate::timer::now_nanos().saturating_add(SETTLE_NANOS * 50);
+    while seccomp::filtered_threads() != before && crate::timer::now_nanos() < patience {
+        sched::sleep_for(SETTLE_NANOS);
+        let _ = sched::reap();
+    }
+    if seccomp::filtered_threads() != before {
+        return Err("the count of filtered threads did not come back once they had gone");
+    }
     Ok(report)
 }
 
@@ -467,12 +483,33 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
 
     status_shows(&env.process, 2, 2)?;
 
+    // The thread the chain was installed on goes while the two made of it
+    // live: they are still filtered, so a call still looks for its thread
+    // (`seccomp::any_filtered`, which `check` and the fast path's T2 read
+    // first). Counted as each was made, not only as a filter was installed.
+    let Env {
+        process: filtered,
+        thread: installer,
+        ..
+    } = env;
+    drop(installer);
+    if !seccomp::any_filtered() {
+        return Err(
+            "the threads that kept a chain were not looked for at a call once its installer had gone",
+        );
+    }
+    if judge_thread(&child_thread, getppid) != Some(EPERM)
+        || judge_thread(&sibling, getppid) != Some(EPERM)
+    {
+        return Err("a thread that kept its creator's chain lost it once its creator had gone");
+    }
+
     // A process nothing filtered reads none.
     let clean = Env::new()?;
     status_shows(&clean.process, 0, 0)?;
     process::kill(&clean.process, 137);
     process::kill(&child, 137);
-    process::kill(&env.process, 137);
+    process::kill(&filtered, 137);
     Ok(())
 }
 
@@ -580,19 +617,59 @@ static PAGE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(
 /// Whether the scenario task makes a native child.
 static NATIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// What [`in_the_process`] leaves its task to do once it has returned, and so
+/// let go of every reference it held.
+enum Then {
+    /// Report this.
+    Report(Found),
+    /// Report `found`, then make `call`, which a filter ends the thread for;
+    /// report `returned` instead if it comes back.
+    Ending {
+        /// What the scenario saw before the call.
+        found: Found,
+        /// The call the filter ends the thread for.
+        call: usize,
+        /// The check's complaint when it comes back.
+        returned: &'static str,
+    },
+}
+
 /// The scenario task: report what it found, then do what must end it.
+///
+/// The call that ends it is made here, in a frame that holds no reference: a
+/// thread a filter ends never returns to the frames below the call, so
+/// whatever they held -- its thread above all, which counts as filtered until
+/// it is dropped -- would never be let go.
 fn scenario_task(_argument: usize) {
     let ending = ENDING.lock().take();
-    let found = in_the_process(ending);
+    let found = match in_the_process(ending) {
+        Ok(Then::Report(found)) => found,
+        Ok(Then::Ending {
+            found,
+            call,
+            returned,
+        }) => {
+            *FOUND.lock() = Some(found);
+            let _ = arch::drive_system_call(Abi::Native, call, [0; 6], 0x1000);
+            // As `in_the_process`'s calls do: the x86-64 entry ends a thread
+            // whose process was ended on its way out, which the Arm pair's
+            // vector does after `system_call` returns.
+            if crate::syscall::thread::current().is_some_and(|me| me.process().is_terminated()) {
+                process::leave_current();
+            }
+            Err(returned)
+        }
+        Err(problem) => Err(problem),
+    };
     let broken = found.is_err();
     *FOUND.lock() = Some(found);
     process::exit_current(if broken { BROKEN } else { SURVIVED });
 }
 
 /// What the scenario task does: install filters as a program does, make the
-/// calls they judge through the core's own entry, and last make the call that
-/// ends it.
-fn in_the_process(ending: Option<Ending>) -> Found {
+/// calls they judge through the core's own entry, and last name the call that
+/// ends it, for [`scenario_task`] to make.
+fn in_the_process(ending: Option<Ending>) -> Result<Then, &'static str> {
     let thread = crate::syscall::thread::current().ok_or("the scenario task has no thread")?;
     let process = Arc::clone(thread.process());
     let page = PAGE.load(core::sync::atomic::Ordering::Acquire);
@@ -620,8 +697,8 @@ fn in_the_process(ending: Option<Ending>) -> Found {
         Ok(answer)
     };
 
-    if let Some(found) = ended_early(ending, &env, &call)? {
-        return found;
+    if let Some(then) = ended_early(ending, &env, &call)? {
+        return Ok(then);
     }
 
     // No-new-privs first, then a filter that fails getppid and clone3 and a
@@ -678,16 +755,17 @@ fn in_the_process(ending: Option<Ending>) -> Found {
     let victim = match ending {
         Some(Ending::Thread) => (number(Syscall::Getsid)?, KILL_THREAD),
         Some(Ending::Process) => (number(Syscall::Getsid)?, KILL_PROCESS),
-        _ => return Ok(seen),
+        _ => return Ok(Then::Report(Ok(seen))),
     };
     let at = env.put(&answering(&[victim]), None)?;
     if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
         return Err("a filter that kills was refused through the entry");
     }
-    *FOUND.lock() = Some(Ok(seen));
-    let _ = call(victim.0, [0; 6]);
-    // Not reached when the filter ended this thread.
-    Err("a call a filter kills for returned")
+    Ok(Then::Ending {
+        found: Ok(seen),
+        call: victim.0,
+        returned: "a call a filter kills for returned",
+    })
 }
 
 /// A native child of the running thread's process judges `getppid` as the
@@ -802,20 +880,25 @@ static SURVIVED_ITS_KILL: core::sync::atomic::AtomicBool =
 
 /// A member that gives itself a `KILL_THREAD` filter for `getsid` and makes
 /// the call: only it ends.
+///
+/// The call is made once its references are let go, as [`scenario_task`]
+/// makes its last: the frames below a call its filter ends are never
+/// returned to.
 fn killer(_argument: usize) {
-    if let Some(me) = crate::syscall::thread::current() {
+    let armed = crate::syscall::thread::current().and_then(|me| {
         let env = Env {
             process: Arc::clone(me.process()),
             thread: Arc::clone(&me),
             page: PAGE.load(core::sync::atomic::Ordering::Acquire),
         };
-        if let Ok(getsid) = number(Syscall::Getsid)
-            && attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]) == Ok(0)
-            && env.install(&answering(&[(getsid, KILL_THREAD)]), 0).is_ok()
-        {
-            let _ = arch::drive_system_call(Abi::Native, getsid, [0; 6], 0x1000);
-            SURVIVED_ITS_KILL.store(true, core::sync::atomic::Ordering::Release);
-        }
+        let getsid = number(Syscall::Getsid).ok()?;
+        (attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]) == Ok(0)
+            && env.install(&answering(&[(getsid, KILL_THREAD)]), 0).is_ok())
+        .then_some(getsid)
+    });
+    if let Some(getsid) = armed {
+        let _ = arch::drive_system_call(Abi::Native, getsid, [0; 6], 0x1000);
+        SURVIVED_ITS_KILL.store(true, core::sync::atomic::Ordering::Release);
     }
     process::leave_current();
 }
@@ -930,7 +1013,7 @@ fn ended_early(
     ending: Option<Ending>,
     env: &Env,
     call: &dyn Fn(usize, [u64; 6]) -> Result<isize, &'static str>,
-) -> Result<Option<Found>, &'static str> {
+) -> Result<Option<Then>, &'static str> {
     let getppid = number(Syscall::Getppid)?;
     let getpid = number(Syscall::Getpid)?;
     let write = number(Syscall::Write)?;
@@ -953,9 +1036,11 @@ fn ended_early(
                 return Err("strict mode did not let write run");
             }
             seen.calls += 1;
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(getpid, [0; 6]);
-            Ok(Some(Err("strict mode let getpid run")))
+            Ok(Some(Then::Ending {
+                found: Ok(seen),
+                call: getpid,
+                returned: "strict mode let getpid run",
+            }))
         }
         Some(Ending::Member) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
@@ -980,7 +1065,7 @@ fn ended_early(
                 return Err("a thread killed by its filter left the others without their calls");
             }
             seen.calls += 1;
-            Ok(Some(Ok(seen)))
+            Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::Leader) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
@@ -990,9 +1075,11 @@ fn ended_early(
             if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
                 return Err("a filter that kills was refused through the entry");
             }
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(getsid, [0; 6]);
-            Ok(Some(Err("a call a filter kills for returned")))
+            Ok(Some(Then::Ending {
+                found: Ok(seen),
+                call: getsid,
+                returned: "a call a filter kills for returned",
+            }))
         }
         Some(Ending::Thread | Ending::Process) | None => Ok(None),
     }
