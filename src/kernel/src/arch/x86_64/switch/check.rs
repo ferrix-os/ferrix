@@ -1148,6 +1148,9 @@ fn check_a_cleared_base_comes_back_and_leaks_nowhere() -> Result<(), &'static st
         "a program whose recorded FS base equals the one last written ran on the base another program left",
     )?;
     match cleared {
+        // ABLATION (po9-sel, never lands): with FSGSBASE the save reads the
+        // cleared base back, as Linux does, so Linux's legacy rule is moot.
+        Some(3) if cpu::FSGSBASE_ON.load(core::sync::atomic::Ordering::Relaxed) => Ok(()),
         Some(3 | 139) => Err(
             "a program that cleared its FS base with a null selector did not get its recorded base back after a switch",
         ),
