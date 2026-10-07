@@ -21,7 +21,7 @@ echo "ipc-bench: exit $?"
 /// The host processor `bench-ipc` pins QEMU to unless `--pin` says
 /// otherwise: the one the seL4 and Redox runs were measured on, so the
 /// figures compare (`docs/OPAQUE-KERNEL.md` §9.6).
-const PIN: &str = "11";
+pub(crate) const PIN: &str = "11";
 
 /// Boot, run the benchmark, and print its lines; with `--alternate`,
 /// `--against-sel4` or `--against-redox`, take turns with the other side
@@ -463,7 +463,7 @@ fn ratio(here: &str, there: &str, pairs: &[(u64, u64)]) {
 }
 
 /// How many processors the host has, from `/proc/cpuinfo`.
-fn host_processors() -> usize {
+pub(crate) fn host_processors() -> usize {
     std::fs::read_to_string("/proc/cpuinfo")
         .map(|text| {
             text.lines()
@@ -475,7 +475,7 @@ fn host_processors() -> usize {
 
 /// The host as a run began: its load and, when QEMU is pinned to one
 /// processor, that processor's SMT sibling's busy and total ticks.
-struct Host {
+pub(crate) struct Host {
     /// The one-minute load at the start.
     load: String,
     /// The sibling, and its busy and total ticks at the start.
@@ -484,7 +484,7 @@ struct Host {
 
 impl Host {
     /// Read now.
-    fn before(pin: Option<&str>) -> Host {
+    pub(crate) fn before(pin: Option<&str>) -> Host {
         let sibling = pin
             .and_then(|cpus| cpus.parse::<usize>().ok())
             .and_then(sibling_of)
@@ -497,7 +497,7 @@ impl Host {
 
     /// The run's host line: the load before and after, and the sibling's
     /// busy share over the run.
-    fn after(&self) -> String {
+    pub(crate) fn after(&self) -> String {
         let sibling = self.sibling.and_then(|(cpu, busy, total)| {
             let (busy_now, total_now) = ticks(cpu)?;
             let share =
