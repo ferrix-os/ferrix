@@ -211,6 +211,16 @@ all in its name, and two measurements never collide. Its members:
 | `log` | `FERRIX_HOTPATH_LOG`, the path of the run's full output, if given |
 | `taken` | UTC |
 
+**On a board** nothing can be probed from the build host, and QEMU is not
+involved: boot the image with a shell, run `/sbin/ipc-bench` at it, keep
+each boot's serial log, and give them to
+`bench-ipc --arch armv7a --board stm32mp157d-dk1 --board-log <one boot's log> ... --record`.
+It reads the logs instead of booting, and the fingerprint is the board's
+name, the counter's rate and the processor count the kernel printed
+(`clock`, `cpus`), with `vm` saying no accelerator; the configuration
+names the board and takes its processors for `smp`. The image must be
+built from the commit the record names.
+
 Raw samples are not kept: `ipc-bench` prints six statistics of its 20,000,
 and the log holds the run. A later benchmark that prints a histogram adds it
 under `runs`.

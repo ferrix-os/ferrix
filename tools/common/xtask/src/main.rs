@@ -525,6 +525,9 @@ OPTIONS:
     --against-sel4, --against-redox      bench-ipc: alternate with the seL4 or Redox image
     --record                             bench-ipc: file the result under docs/hotpaths/results/
                                          (docs/HOTPATHS.md; the log's path from FERRIX_HOTPATH_LOG)
+    --board-log <FILE>                   bench-ipc: read a board's serial log of one boot that ran
+                                         /sbin/ipc-bench instead of booting QEMU; once per boot
+    --board <NAME>                       bench-ipc --board-log: the board, which --record files under
     --pin <CPUS>                         QEMU on these host processors (taskset -c); bench-ipc
                                          pins to 11 by default, `none` for no pin
     --stage <DIR>                        flash: write the card's files into DIR instead, to copy by hand
