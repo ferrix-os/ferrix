@@ -362,7 +362,11 @@ pub(crate) unsafe fn init() {
 /// a record installed, and when the record is installed, so the record holds
 /// exactly what asking would answer: the processor's tables change only at
 /// those loads. A record that holds nothing yet -- none installed, or a
-/// processor still on the start-up trampoline's GDT -- is asked past.
+/// processor still on the start-up trampoline's GDT -- is asked past: zero
+/// means absent, never wrong. Every processor's bring-up holds its record to
+/// a fresh answer after its last note (`check::require_tables_noted`, which
+/// stops the machine otherwise), so the old objection -- a cached pointer
+/// wrong rather than absent -- is answered by a check, not by care.
 ///
 /// # Safety
 ///
