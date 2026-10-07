@@ -25,7 +25,7 @@
 //!    for again and one the device may still hold cannot; a broken session
 //!    stays broken and answers nothing; and the number of things in flight
 //!    never passes the fixed capacity, since the kernel allocates none of
-//!    it.
+//!    it -- attaches to an importing context included.
 
 #![no_main]
 
@@ -104,6 +104,7 @@ fuzz_target!(|bytes: &[u8]| {
     let rights = [Rights(Rights::WRITE.0 | Rights::TRANSFER.0)];
     if let Ok(mut core) = Session::accept(&told, &rights, work) {
         let mut in_flight = 0usize;
+        let mut attaching = 0usize;
         for step in bytes.iter().take(256) {
             let id = u32::from(step >> 4) + 1;
             let fence = u64::from(*step);
@@ -173,6 +174,26 @@ fuzz_target!(|bytes: &[u8]| {
                         in_flight -= 1;
                     }
                 }
+                // An object given to a context that imported it, and the
+                // answer, which names the object alone.
+                7 if step & 0x18 == 0 => {
+                    if core.attach_object(id, u32::from(step >> 5)).is_ok() {
+                        attaching += 1;
+                    }
+                }
+                7 if step & 0x18 == 0x08 => {
+                    let reply = Message::ObjectAttached {
+                        object: id,
+                        status: if step & 0x80 == 0 {
+                            Status::Ok
+                        } else {
+                            Status::DeviceRefused
+                        },
+                    };
+                    if core.receive(&reply).is_ok() {
+                        attaching -= 1;
+                    }
+                }
                 _ => drop(core.stop()),
             }
             // A broken session stays broken and takes nothing more.
@@ -182,6 +203,7 @@ fuzz_target!(|bytes: &[u8]| {
             }
             // The capacity is fixed, because nothing here allocates.
             assert!(in_flight <= MAX_IN_FLIGHT);
+            assert!(attaching <= MAX_IN_FLIGHT);
         }
     }
 

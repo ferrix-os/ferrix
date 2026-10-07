@@ -139,6 +139,15 @@ pub enum Event {
         /// How it went.
         status: Status,
     },
+    /// An object was made nameable in another context, or was not.
+    ObjectAttached {
+        /// Which object.
+        object: u32,
+        /// The context it was given to.
+        context: u32,
+        /// How it went.
+        status: Status,
+    },
     /// A capability set came, in the VMO beside the message, or did not.
     Caps {
         /// Which set.
@@ -205,6 +214,10 @@ pub struct Session {
     purposes: [u8; MAX_OBJECTS],
     /// Objects with a transfer the driver has not answered, 0 for none.
     moving: [u32; MAX_IN_FLIGHT],
+    /// Objects with an attach the driver has not answered, and the context
+    /// each is being given to; `(0, 0)` for none. One an object at a time:
+    /// the reply names the object and nothing else.
+    attaching: [(u32, u32); MAX_IN_FLIGHT],
     /// The capability set asked for and not yet answered.
     caps: Option<u32>,
     pending: [Pending; MAX_IN_FLIGHT],
@@ -237,6 +250,7 @@ impl Session {
             owners: [0; MAX_OBJECTS],
             purposes: [0; MAX_OBJECTS],
             moving: [0; MAX_IN_FLIGHT],
+            attaching: [(0, 0); MAX_IN_FLIGHT],
             caps: None,
             pending: [Pending {
                 fence: 0,
@@ -329,6 +343,11 @@ impl Session {
     pub fn drop_context(&mut self, context: u32) -> Result<Message, RequestError> {
         self.open()?;
         let at = live(&self.contexts, context).ok_or(RequestError::NoSuchContext)?;
+        // Nor one an object is being given to: the answer would name a
+        // context that is gone.
+        if self.attaching.iter().any(|(_, into)| *into == context) {
+            return Err(RequestError::Busy);
+        }
         // A context with objects still in it is not one to take away: the
         // objects would outlive what owns them.
         if self
@@ -454,9 +473,10 @@ impl Session {
     pub fn drop_object(&mut self, object: u32) -> Result<Message, RequestError> {
         self.open()?;
         let at = live(&self.objects, object).ok_or(RequestError::NoSuchObject)?;
-        // Bytes on their way to or from the backing: the driver is still
-        // using what a drop would take away.
-        if self.moving.contains(&object) {
+        // Bytes on their way to or from the backing, or the object on its
+        // way into another context: the driver is still using what a drop
+        // would take away.
+        if self.moving.contains(&object) || self.attaching.iter().any(|(held, _)| *held == object) {
             return Err(RequestError::Busy);
         }
         if let Some(slot) = self.objects.get_mut(at) {
@@ -578,6 +598,39 @@ impl Session {
         Ok(Message::Transfer(transfer))
     }
 
+    /// Make a live object nameable in another live context: the one that
+    /// imported it (`docs/GPU.md` §3.13).
+    ///
+    /// Asking again for an object already attached to that context is not
+    /// refused: the device takes a second attach as it takes the first.
+    ///
+    /// # Errors
+    ///
+    /// A request the conversation has no room or no state for, or an
+    /// object already on its way into a context.
+    pub fn attach_object(&mut self, object: u32, context: u32) -> Result<Message, RequestError> {
+        self.open()?;
+        if object == 0 || context == 0 {
+            return Err(RequestError::ZeroId);
+        }
+        if live(&self.objects, object).is_none() {
+            return Err(RequestError::NoSuchObject);
+        }
+        if live(&self.contexts, context).is_none() {
+            return Err(RequestError::NoSuchContext);
+        }
+        if self.attaching.iter().any(|(held, _)| *held == object) {
+            return Err(RequestError::InUse);
+        }
+        let slot = self
+            .attaching
+            .iter_mut()
+            .find(|held| **held == (0, 0))
+            .ok_or(RequestError::Full)?;
+        *slot = (object, context);
+        Ok(Message::AttachObject { object, context })
+    }
+
     /// Ask for a capability set's bytes. One question at a time.
     ///
     /// # Errors
@@ -684,6 +737,20 @@ impl Session {
                     .ok_or(Refusal::Protocol)?;
                 *slot = 0;
                 Ok(Event::Transferred { object, status })
+            }
+            Message::ObjectAttached { object, status } => {
+                let slot = self
+                    .attaching
+                    .iter_mut()
+                    .find(|(held, _)| *held == object && object != 0)
+                    .ok_or(Refusal::Protocol)?;
+                let context = slot.1;
+                *slot = (0, 0);
+                Ok(Event::ObjectAttached {
+                    object,
+                    context,
+                    status,
+                })
             }
             Message::Caps {
                 capset,

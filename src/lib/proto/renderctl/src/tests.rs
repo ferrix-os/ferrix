@@ -141,7 +141,7 @@ fn fields_lie_where_the_diagram_puts_them() {
     let bytes = encoded.as_bytes();
     assert_eq!(bytes.len(), 48);
     assert_eq!(u32_at(bytes, 0), 1, "HELLO");
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 3, "VERSION");
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 4, "VERSION");
     assert_eq!(u32_at(bytes, 12), 0x800, "location");
     assert_eq!(&bytes[16..26], b"virtio_gpu");
     assert!(bytes[26..32].iter().all(|&byte| byte == 0), "zero-padded");
@@ -195,6 +195,164 @@ fn fields_lie_where_the_diagram_puts_them() {
         [0x4000_0007, 0, 1]
     );
     assert_eq!(u32_at(bytes, 20), 0, "reserved");
+
+    let encoded = Message::AttachObject {
+        object: 0x4000_0007,
+        context: 3,
+    }
+    .encode();
+    let bytes = encoded.as_bytes();
+    assert_eq!(bytes.len(), 16);
+    assert_eq!(u32_at(bytes, 0), 24, "ATTACH_OBJ");
+    assert_eq!(u32_at(bytes, 4), 16);
+    assert_eq!([u32_at(bytes, 8), u32_at(bytes, 12)], [0x4000_0007, 3]);
+
+    let encoded = Message::ObjectAttached {
+        object: 0x4000_0007,
+        status: Status::Ok,
+    }
+    .encode();
+    let bytes = encoded.as_bytes();
+    assert_eq!(bytes.len(), 16);
+    assert_eq!(u32_at(bytes, 0), 25, "OBJ_ATTACHED");
+    assert_eq!([u32_at(bytes, 8), u32_at(bytes, 12)], [0x4000_0007, 0]);
+}
+
+/// An attach and its answer are exactly sixteen bytes, and a length or a
+/// status that is not one is refused.
+#[test]
+fn an_attach_is_sixteen_bytes_and_nothing_else() {
+    for message in [
+        Message::AttachObject {
+            object: 4,
+            context: 3,
+        },
+        Message::ObjectAttached {
+            object: 4,
+            status: Status::Ok,
+        },
+    ] {
+        let encoded = message.encode();
+        assert_eq!(
+            Message::decode(encoded.as_bytes()),
+            Some(message),
+            "{message:?}"
+        );
+        assert_eq!(Message::length_of(message.kind()), Some(16));
+        let mut bytes: Vec<u8> = encoded.as_bytes().to_vec();
+        let mut longer = bytes.clone();
+        longer.extend_from_slice(&[0, 0, 0, 0]);
+        longer[4..8].copy_from_slice(&20u32.to_le_bytes());
+        assert_eq!(Message::decode(&longer), None, "{message:?} at 20 bytes");
+        bytes.truncate(12);
+        assert_eq!(Message::decode(&bytes), None, "{message:?} cut short");
+    }
+    let mut bytes: Vec<u8> = Message::ObjectAttached {
+        object: 4,
+        status: Status::Ok,
+    }
+    .encode()
+    .as_bytes()
+    .to_vec();
+    bytes[12..16].copy_from_slice(&0xffu32.to_le_bytes());
+    assert_eq!(Message::decode(&bytes), None, "no such status");
+}
+
+/// An object is attached to another context only when both are live, one
+/// attach at a time, and the answer is one that was asked for: an answer
+/// about an object nobody attached breaks the session.
+#[test]
+fn an_attach_is_asked_for_and_answered_once() {
+    let mut core = session_with_context();
+    let _ = core.make_context(5, 4).expect("asked");
+    let _ = core
+        .receive(&Message::ContextMade {
+            context: 5,
+            status: Status::Ok,
+        })
+        .expect("made");
+    let _ = core
+        .make_object(
+            4,
+            3,
+            4096,
+            flags::MAPPABLE | flags::TO_DEVICE,
+            Work::default(),
+        )
+        .expect("asked");
+    assert_eq!(
+        core.attach_object(4, 5),
+        Err(RequestError::NoSuchObject),
+        "not made yet"
+    );
+    let _ = core
+        .receive(&Message::ObjectMade {
+            object: 4,
+            status: Status::Ok,
+        })
+        .expect("made");
+    assert_eq!(core.attach_object(0, 5), Err(RequestError::ZeroId));
+    assert_eq!(core.attach_object(4, 0), Err(RequestError::ZeroId));
+    assert_eq!(core.attach_object(9, 5), Err(RequestError::NoSuchObject));
+    assert_eq!(core.attach_object(4, 7), Err(RequestError::NoSuchContext));
+
+    assert_eq!(
+        core.attach_object(4, 5),
+        Ok(Message::AttachObject {
+            object: 4,
+            context: 5,
+        })
+    );
+    assert_eq!(core.attach_object(4, 5), Err(RequestError::InUse));
+    assert_eq!(core.drop_object(4), Err(RequestError::Busy));
+    assert_eq!(core.drop_context(5), Err(RequestError::Busy));
+    // A refusal is an answer like any other, and leaves the object live.
+    assert_eq!(
+        core.receive(&Message::ObjectAttached {
+            object: 4,
+            status: Status::DeviceRefused,
+        }),
+        Ok(Event::ObjectAttached {
+            object: 4,
+            context: 5,
+            status: Status::DeviceRefused,
+        })
+    );
+    // Asked again, as a second import of the same object asks: not refused.
+    let _ = core.attach_object(4, 5).expect("asked again");
+    assert_eq!(
+        core.receive(&Message::ObjectAttached {
+            object: 4,
+            status: Status::Ok,
+        }),
+        Ok(Event::ObjectAttached {
+            object: 4,
+            context: 5,
+            status: Status::Ok,
+        })
+    );
+    let _ = core.drop_context(5).expect("nothing is on its way into it");
+
+    // Answered once: a second answer, or one about another object, is one
+    // nobody asked for.
+    assert_eq!(
+        core.receive(&Message::ObjectAttached {
+            object: 4,
+            status: Status::Ok,
+        }),
+        Err(Refusal::Protocol)
+    );
+    assert!(core.is_broken());
+
+    let mut other = session_with_context();
+    assert_eq!(
+        other.receive(&Message::ObjectAttached {
+            object: 0,
+            status: Status::Ok,
+        }),
+        Err(Refusal::Protocol),
+        "object 0 is never attached"
+    );
 }
 
 /// A blob as Venus asks for one: host memory in context 3, mappable, at a

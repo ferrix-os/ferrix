@@ -42,6 +42,8 @@
 //!   24 blob_id u64   32 bytes u64   40 window u64 (NO_WINDOW: not mapped)
 //! BLOB_MADE  driver -> core, 24 bytes: 8 object u32   12 status u32
 //!   16 map_info u32   20 reserved
+//! ATTACH_OBJ core -> driver, 16 bytes: 8 object u32   12 context u32
+//! OBJ_ATTACHED driver -> core, 16 bytes: 8 object u32   12 status u32
 //! STOP, STOPPED                8 bytes
 //! ```
 //!
@@ -89,13 +91,23 @@
 //! A submission that names a *ring* is fenced on it: `SUBMITTED` comes when
 //! the work has finished, rather than when the device has taken it, which is
 //! what a program waiting on a fence descriptor needs.
+//!
+//! # An object another context imports
+//!
+//! An object is made in one context and is nameable there. A program that
+//! is handed it as a dmabuf imports it into its own open, and so into its
+//! own context: `ATTACH_OBJ` asks the driver to make the object nameable in
+//! that context too (`docs/GPU.md` §3.13). Nothing about the object's
+//! backing changes. Attaching an object twice to one context is not an
+//! error -- Linux's virtio-gpu attaches on every handle it opens -- so the
+//! core need not remember which contexts an object was given to.
 
 use ::core::fmt;
 
 use ferrix_native_abi::rights::Rights;
 
 /// The protocol version this crate speaks.
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 
 /// HELLO's type.
 pub const HELLO: u32 = 1;
@@ -143,6 +155,10 @@ pub const CAPS: u32 = 21;
 pub const MAKE_BLOB: u32 = 22;
 /// `BLOB_MADE`'s type.
 pub const BLOB_MADE: u32 = 23;
+/// `ATTACH_OBJ`'s type.
+pub const ATTACH_OBJ: u32 = 24;
+/// `OBJ_ATTACHED`'s type.
+pub const OBJ_ATTACHED: u32 = 25;
 
 /// Bytes of the type and length, and all of STOP and STOPPED.
 pub const HEADER_BYTES: usize = 8;
@@ -722,6 +738,20 @@ pub enum Message {
         /// virtio-gpu's `MAP_CACHE_*`. 0 for a blob not mapped.
         map_info: u32,
     },
+    /// Make an object nameable in another context: one that imported it.
+    AttachObject {
+        /// Which object.
+        object: u32,
+        /// The context it is given to.
+        context: u32,
+    },
+    /// It was, or was not.
+    ObjectAttached {
+        /// Which object.
+        object: u32,
+        /// How it went.
+        status: Status,
+    },
     /// Here they are, in the VMO this came with, or here they are not.
     Caps {
         /// Which set.
@@ -778,6 +808,8 @@ impl Message {
             Self::Caps { .. } => CAPS,
             Self::MakeBlob(_) => MAKE_BLOB,
             Self::BlobMade { .. } => BLOB_MADE,
+            Self::AttachObject { .. } => ATTACH_OBJ,
+            Self::ObjectAttached { .. } => OBJ_ATTACHED,
             Self::Stop => STOP,
             Self::Stopped => STOPPED,
         }
@@ -791,7 +823,7 @@ impl Message {
             READY => READY_BYTES,
             REFUSED => REFUSED_BYTES,
             MAKE_CTX | CTX_MADE | DROP_CTX | CTX_GONE | OBJ_MADE | DROP_OBJ | OBJ_GONE
-            | TRANSFERRED | GET_CAPS => PAIR_BYTES,
+            | TRANSFERRED | GET_CAPS | ATTACH_OBJ | OBJ_ATTACHED => PAIR_BYTES,
             MAKE_OBJ => MAKE_OBJ_BYTES,
             SUBMIT => SUBMIT_BYTES,
             SUBMITTED | WAIT | WAITED | CAPS | BLOB_MADE => FENCE_BYTES,
@@ -845,11 +877,17 @@ impl Message {
                 put32(bytes, 32, make.describe.at);
                 put32(bytes, 36, make.describe.len);
             }
-            Self::ObjectMade { object, status } | Self::ObjectGone { object, status } => {
+            Self::ObjectMade { object, status }
+            | Self::ObjectGone { object, status }
+            | Self::ObjectAttached { object, status } => {
                 put32(bytes, 8, object);
                 put32(bytes, 12, status as u32);
             }
             Self::DropObject { object } => put32(bytes, 8, object),
+            Self::AttachObject { object, context } => {
+                put32(bytes, 8, object);
+                put32(bytes, 12, context);
+            }
             Self::Submit(submit) => {
                 put32(bytes, 8, submit.context);
                 put32(bytes, 12, submit.ring);
@@ -940,6 +978,14 @@ impl Message {
                 status: status(12)?,
             },
             TRANSFERRED => Message::Transferred {
+                object: get32(bytes, 8)?,
+                status: status(12)?,
+            },
+            ATTACH_OBJ => Message::AttachObject {
+                object: get32(bytes, 8)?,
+                context: get32(bytes, 12)?,
+            },
+            OBJ_ATTACHED => Message::ObjectAttached {
                 object: get32(bytes, 8)?,
                 status: status(12)?,
             },

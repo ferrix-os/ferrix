@@ -188,6 +188,8 @@ enum Abandoned {
     Context(u32),
     /// An object's `TRANSFERRED`, from the device.
     Transfer(u32),
+    /// An object's `OBJ_ATTACHED`.
+    Attach(u32),
 }
 
 /// An upload or a command stream whose caller was answered when it was
@@ -1180,6 +1182,49 @@ impl Renderer {
         }
     }
 
+    /// Make `object` nameable in `context`, which imported it as a dmabuf
+    /// (`docs/GPU.md` §3.13), and wait until the driver says it is.
+    ///
+    /// One attach an object at a time, as the session keeps them; a second
+    /// waits for the first's answer. Attaching to a context that has the
+    /// object already is answered as the first was: the device takes it.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError`]; a refusal is the device's, and the import fails.
+    pub(crate) fn attach(&self, object: u32, context: u32) -> Result<(), RenderError> {
+        let deadline = timer::now_nanos().saturating_add(REPLY_PATIENCE_NANOS);
+        loop {
+            let seen = self.replies();
+            let sent = self.request(|state| {
+                let message = state
+                    .session
+                    .attach_object(object, context)
+                    .map_err(RenderError::Request)?;
+                Ok((message, ()))
+            });
+            match sent {
+                Err(
+                    RenderError::Busy
+                    | RenderError::Request(RequestError::Full | RequestError::InUse),
+                ) => self.wait_for_reply(seen, deadline)?,
+                Err(error) => return Err(error),
+                Ok(()) => break,
+            }
+        }
+        let event = self.collect(
+            |event| matches!(event, Event::ObjectAttached { object: given, .. } if *given == object),
+            |state| state.abandoned.push(Abandoned::Attach(object)),
+        )?;
+        match event {
+            Event::ObjectAttached {
+                status: Status::Ok, ..
+            } => Ok(()),
+            Event::ObjectAttached { status, .. } => Err(RenderError::Refused(status)),
+            _ => Err(RenderError::Gone),
+        }
+    }
+
     /// Move bytes between an object's backing and the device's copy of it.
     ///
     /// To the device, this returns once the request is sent, and the caller
@@ -1718,6 +1763,7 @@ fn abandoned_at(state: &State, event: Event) -> Option<usize> {
             Abandoned::Context(context)
         }
         Event::Transferred { object, .. } => Abandoned::Transfer(object),
+        Event::ObjectAttached { object, .. } => Abandoned::Attach(object),
         _ => return None,
     };
     state.abandoned.iter().position(|held| *held == which)

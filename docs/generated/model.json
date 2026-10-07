@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7a2d2298206ba4ad8befb56da23bc94c4f8ff6623cdabb0faa163a85790fd7bd",
+  "digest": "eda913236bf0062a49507f0a8d0ce7ec5aaffc9500fb3dffe679d8aab7fbabc1",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -5846,7 +5846,7 @@
               "type": "LibraryCrate",
               "maturity": "implemented",
               "stage": 19,
-              "doc": "The render control protocol between the kernel's render core and a ring-3 GPU driver (docs/GPU.md §3.3), in displayctl's shape: fixed messages decoded strictly, command buffers passed through as bytes the driver understands and the core does not, and the core's side as a state machine. Fuzzed by renderctl.",
+              "doc": "The render control protocol between the kernel's render core and a ring-3 GPU driver (docs/GPU.md §3.3), in displayctl's shape: fixed messages decoded strictly, command buffers passed through as bytes the driver understands and the core does not, and the core's side as a state machine. Version 4 adds ATTACH_OBJ, an object made nameable in the context of an open that imported it as a dmabuf (docs/GPU.md §3.13). Fuzzed by renderctl.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
                 "line": 1396
@@ -5879,7 +5879,7 @@
                   "qualifiedName": "FerrixStructure::Workspace::renderctl",
                   "kind": "attribute",
                   "redefines": "hostTests",
-                  "value": "22",
+                  "value": "24",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
                     "line": 1399
@@ -5897,7 +5897,7 @@
               "doc": "The STM32MP157's Vivante GC400T as logic over registers and command memory (docs/GPU.md §6.3): the registers and the command stream from the etnaviv project's MIT-licensed register database, the identity, reset and initialisation in the order Linux's etnaviv driver uses them, and a WAIT/LINK ring. Linked by src/user/system/native/drivers/gpu/gc400, which devmgr starts on the board, where it ran on 2026-09-24; no QEMU machine has the core, so no gate drives it.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1408
+                "line": 1410
               },
               "children": [
                 {
@@ -5908,7 +5908,7 @@
                   "value": "\"src/lib/drivers/gpu/gc400\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1409
+                    "line": 1411
                   }
                 },
                 {
@@ -5919,7 +5919,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1410
+                    "line": 1412
                   }
                 },
                 {
@@ -5930,7 +5930,7 @@
                   "value": "28",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1411
+                    "line": 1413
                   }
                 }
               ]
@@ -5944,7 +5944,7 @@
               "doc": "Text and filled rectangles on a linear framebuffer, with an embedded Spleen 8x16 font, clipped rather than refused and allocating nothing: what the panic screen (src/kernel/src/panic/screen.rs) draws with, and the term app (ferrix-os/apps) as well.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1422
+                "line": 1424
               },
               "children": [
                 {
@@ -5955,7 +5955,7 @@
                   "value": "\"src/lib/kernel/fbtext\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1423
+                    "line": 1425
                   }
                 },
                 {
@@ -5966,7 +5966,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1424
+                    "line": 1426
                   }
                 },
                 {
@@ -5977,7 +5977,7 @@
                   "value": "30",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1425
+                    "line": 1427
                   }
                 }
               ]
@@ -5991,7 +5991,7 @@
               "doc": "A QR code encoder with no heap, ported from Linux's drm_panic_qr.rs, for the panic screen's report.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1432
+                "line": 1434
               },
               "children": [
                 {
@@ -6002,7 +6002,7 @@
                   "value": "\"src/lib/kernel/qr\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1433
+                    "line": 1435
                   }
                 },
                 {
@@ -6013,7 +6013,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1434
+                    "line": 1436
                   }
                 },
                 {
@@ -6024,7 +6024,7 @@
                   "value": "20",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1435
+                    "line": 1437
                   }
                 }
               ]
@@ -6038,7 +6038,7 @@
               "doc": "SPICE's vdagent protocol as bytes, the chunk framing and the clipboard messages (docs/CLIPBOARD.md §4). Written ahead of the clipboard agent; since 2026-09-27 that agent, src/user/system/linux/compositor/vdagent, speaks it, and cargo xtask test-clipboard drives it both ways.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1439
+                "line": 1441
               },
               "children": [
                 {
@@ -6049,7 +6049,7 @@
                   "value": "\"src/lib/drivers/console/vdagent\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1440
+                    "line": 1442
                   }
                 },
                 {
@@ -6060,7 +6060,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1441
+                    "line": 1443
                   }
                 },
                 {
@@ -6071,7 +6071,7 @@
                   "value": "17",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1442
+                    "line": 1444
                   }
                 }
               ]
@@ -6085,7 +6085,7 @@
               "doc": "The virtio-console driver: bring-up, the control conversation until a named port is open, and that port's bytes (docs/CLIPBOARD.md §3). Linked by src/user/system/native/drivers/console/vport, which devmgr starts when --clipboard puts the device on the bus; cargo xtask test-clipboard drives it (2026-09-27).",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1449
+                "line": 1451
               },
               "children": [
                 {
@@ -6096,7 +6096,7 @@
                   "value": "\"src/lib/drivers/console/virtio-console\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1450
+                    "line": 1452
                   }
                 },
                 {
@@ -6107,7 +6107,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1451
+                    "line": 1453
                   }
                 },
                 {
@@ -6118,7 +6118,7 @@
                   "value": "15",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1452
+                    "line": 1454
                   }
                 }
               ]
@@ -6133,7 +6133,7 @@
               "doc": "The classic-BPF interpreter as a pure function over bytes.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1461
+                "line": 1463
               },
               "children": [
                 {
@@ -6144,7 +6144,7 @@
                   "value": "\"src/lib/kernel/seccomp\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1462
+                    "line": 1464
                   }
                 },
                 {
@@ -6155,7 +6155,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1463
+                    "line": 1465
                   }
                 }
               ]
@@ -6168,7 +6168,7 @@
               "maturity": "implemented",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1468
+                "line": 1470
               },
               "children": [
                 {
@@ -6179,7 +6179,7 @@
                   "value": "\"src/boot/common/uefi\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1469
+                    "line": 1471
                   }
                 },
                 {
@@ -6190,7 +6190,7 @@
                   "value": "CrateKind::Loader",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1470
+                    "line": 1472
                   }
                 },
                 {
@@ -6201,7 +6201,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1471
+                    "line": 1473
                   }
                 },
                 {
@@ -6212,7 +6212,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1472
+                    "line": 1474
                   }
                 }
               ]
@@ -6225,7 +6225,7 @@
               "maturity": "implemented",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1474
+                "line": 1476
               },
               "children": [
                 {
@@ -6236,7 +6236,7 @@
                   "value": "\"src/kernel\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1475
+                    "line": 1477
                   }
                 },
                 {
@@ -6247,7 +6247,7 @@
                   "value": "CrateKind::Kernel",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1476
+                    "line": 1478
                   }
                 },
                 {
@@ -6258,7 +6258,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1477
+                    "line": 1479
                   }
                 },
                 {
@@ -6269,7 +6269,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1478
+                    "line": 1480
                   }
                 }
               ]
@@ -6283,7 +6283,7 @@
               "doc": "Cross-compiles both halves and the native programs, writes the FAT32 image and the initramfs with its own writers, converts the ARMv7-A loader ELF to PE32, drives QEMU, runs the NAT gateway the network tests sit behind, and runs every gate. Nothing from crates.io. It no longer forbids unsafe: a few calls into Windows, for the console and an ICMP echo, each with its SAFETY comment.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1480
+                "line": 1482
               },
               "children": [
                 {
@@ -6294,7 +6294,7 @@
                   "value": "\"tools/common/xtask\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1481
+                    "line": 1483
                   }
                 },
                 {
@@ -6305,7 +6305,7 @@
                   "value": "CrateKind::HostTool",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1482
+                    "line": 1484
                   }
                 },
                 {
@@ -6316,7 +6316,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1483
+                    "line": 1485
                   }
                 },
                 {
@@ -6327,7 +6327,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1484
+                    "line": 1486
                   }
                 },
                 {
@@ -6338,7 +6338,7 @@
                   "value": "395",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1485
+                    "line": 1487
                   }
                 },
                 {
@@ -6350,7 +6350,7 @@
                   "value": "(\"build\", \"run\", \"run-compositor\", \"run-badapple\", \"remote-desktop\", \"wallpapers\", \"everything-volume\", \"test-btrfs\", \"test-powerfail\", \"test-boot\", \"test-kaslr\", \"test-shell\", \"test-vfs\", \"test-net\", \"test-clipboard\", \"test-adb\", \"test-display\", \"test-compositor\", \"test-video\", \"test-input\", \"test-audio\", \"test-badapple\", \"test-seat\", \"test-pty\", \"test-foot\", \"test-vkgears\", \"test-jobs\", \"test-init\", \"bench-seam\", \"test-auth\", \"test-restart\", \"test-install\", \"test-sysfs\", \"test-threads\", \"test-sem\", \"test-procfs\", \"test-rustc\", \"test-chrome\", \"test-steamcmd\", \"test-steam-bootstrap\", \"test-steam-window\", \"run-steam\", \"test-yserver\", \"test-xwindow\", \"test-chrome-window\", \"test-chrome-audio\", \"bench-chrome\", \"bench-chrome-video\", \"test-selfhost\", \"builds-execute\", \"coverage\", \"check\", \"host-clippy\", \"host-test\", \"host-doctest\", \"host-doc\", \"check-ferrousli\", \"miri\", \"native-clippy\", \"model-doc\", \"busybox\", \"uutils\", \"ports\", \"flash\", \"watch-serial\", \"deploy\", \"omz\", \"zsh-functions\")",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1493
+                    "line": 1495
                   }
                 }
               ]
@@ -6363,7 +6363,7 @@
               "maturity": "implemented",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1495
+                "line": 1497
               },
               "children": [
                 {
@@ -6374,7 +6374,7 @@
                   "value": "\"src/tests/fuzz\"",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1496
+                    "line": 1498
                   }
                 },
                 {
@@ -6385,7 +6385,7 @@
                   "value": "CrateKind::FuzzTargets",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1497
+                    "line": 1499
                   }
                 },
                 {
@@ -6396,7 +6396,7 @@
                   "value": "true",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1498
+                    "line": 1500
                   }
                 },
                 {
@@ -6407,7 +6407,7 @@
                   "value": "false",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
-                    "line": 1499
+                    "line": 1501
                   }
                 }
               ]
@@ -6421,7 +6421,7 @@
               "value": "(\"x86_64-unknown-none\", \"aarch64-unknown-none-softfloat\", \"armv7a-none-eabi\")",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1541
+                "line": 1543
               }
             },
             {
@@ -6433,7 +6433,7 @@
               "value": "(\"x86_64-unknown-uefi\", \"aarch64-unknown-uefi\", \"armv7-unknown-linux-musleabi\")",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1542
+                "line": 1544
               }
             },
             {
@@ -6444,7 +6444,7 @@
               "value": "\"1.97.1\"",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
-                "line": 1543
+                "line": 1545
               }
             }
           ]
@@ -76282,7 +76282,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1507
+      "line": 1509
     },
     {
       "kind": "dependency",
@@ -76294,7 +76294,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1508
+      "line": 1510
     },
     {
       "kind": "dependency",
@@ -76305,7 +76305,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1509
+      "line": 1511
     },
     {
       "kind": "dependency",
@@ -76342,7 +76342,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1513
+      "line": 1515
     },
     {
       "kind": "dependency",
@@ -76353,7 +76353,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1514
+      "line": 1516
     },
     {
       "kind": "dependency",
@@ -76365,7 +76365,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1515
+      "line": 1517
     },
     {
       "kind": "dependency",
@@ -76378,7 +76378,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1516
+      "line": 1518
     },
     {
       "kind": "dependency",
@@ -76388,7 +76388,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1517
+      "line": 1519
     },
     {
       "kind": "dependency",
@@ -76399,7 +76399,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1518
+      "line": 1520
     },
     {
       "kind": "dependency",
@@ -76410,7 +76410,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1519
+      "line": 1521
     },
     {
       "kind": "dependency",
@@ -76421,7 +76421,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1520
+      "line": 1522
     },
     {
       "kind": "dependency",
@@ -76431,7 +76431,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1521
+      "line": 1523
     },
     {
       "kind": "dependency",
@@ -76442,7 +76442,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1522
+      "line": 1524
     },
     {
       "kind": "dependency",
@@ -76453,7 +76453,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1523
+      "line": 1525
     },
     {
       "kind": "dependency",
@@ -76463,7 +76463,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1524
+      "line": 1526
     },
     {
       "kind": "dependency",
@@ -76474,7 +76474,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1525
+      "line": 1527
     },
     {
       "kind": "dependency",
@@ -76485,7 +76485,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1526
+      "line": 1528
     },
     {
       "kind": "dependency",
@@ -76495,7 +76495,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1527
+      "line": 1529
     },
     {
       "kind": "dependency",
@@ -76505,7 +76505,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1528
+      "line": 1530
     },
     {
       "kind": "dependency",
@@ -76515,7 +76515,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1529
+      "line": 1531
     },
     {
       "kind": "dependency",
@@ -76525,7 +76525,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1530
+      "line": 1532
     },
     {
       "kind": "dependency",
@@ -76537,7 +76537,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1531
+      "line": 1533
     },
     {
       "kind": "dependency",
@@ -76547,7 +76547,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1532
+      "line": 1534
     },
     {
       "kind": "dependency",
@@ -76557,7 +76557,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1533
+      "line": 1535
     },
     {
       "kind": "dependency",
@@ -76567,7 +76567,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1534
+      "line": 1536
     },
     {
       "kind": "dependency",
@@ -76578,7 +76578,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1535
+      "line": 1537
     },
     {
       "kind": "dependency",
@@ -76590,7 +76590,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1536
+      "line": 1538
     },
     {
       "kind": "dependency",
@@ -76602,7 +76602,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1537
+      "line": 1539
     },
     {
       "kind": "dependency",
@@ -76612,7 +76612,7 @@
       ],
       "origin": "FerrixStructure::Workspace",
       "file": "docs/sysml/02-structure.sysml",
-      "line": 1538
+      "line": 1540
     },
     {
       "kind": "import",
