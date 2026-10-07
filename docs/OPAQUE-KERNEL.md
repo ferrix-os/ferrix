@@ -1611,6 +1611,27 @@ channel's half of side A, the half of side B, then this processor's run
 queue. The halves are locked by side, A before B, whichever end the caller
 holds. The handle table's lock is taken and released before them.
 
+*Nor does it close an end (F-65, 2026-10-07; ledger line 520).* The
+caller's `Arc<Endpoint>` from the lookup is held across the park, and
+another thread of the caller's process may close the handle meanwhile, so
+that reference can be the end's last; its close takes locks, wakes the
+survivor's reader and frees memory. So it is let go only with interrupts
+open: the continuation lets go inside its own unmasked span, and the frame
+tail's return and a decline after the lookup through `release_unmasked`,
+which opens interrupts, makes the `may_block` check, lets go and masks
+again. `Endpoint::drop` stops with FX-0535 on a masked close
+(`L.object.179`). It is the only counted reference the masked span lets
+go: the peer is a borrowed half, and the parked record's task moves.
+What this gives a masked branch (os-76's ledger 524, V2-22): nothing is
+allocated or freed and no lock is waited for while masked, since the
+release runs with interrupts open; the peer's `PEER_CLOSED` is not
+deferred -- the end closes at the release itself, as soon as the caller
+runs again after its park, which is when the general path's waiter lets
+go of its own reference at its call's end, so the delay is the same as
+the general path's and bounded by the caller's resume; and stage 9's case
+16 makes the close on both resumes, the frame tail's and the
+continuation's.
+
 **Every lock it takes**, directly or through what it calls (condition 5).
 Each is either taken with `try_lock`, or is a *leaf*: a lock under which
 nothing else is taken and nothing waits, so that its holder lets it go
@@ -5133,7 +5154,6 @@ pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
 
-
 #### The user side (po9-user; ledger lines 413 and 456)
 
 nazuna has no PCID, so each `CR3` write empties the user TLB and every user
@@ -5162,6 +5182,7 @@ are not yet, a design of their own.
   2,966 to 3,096); the floor, which switches no space, does not (319). No
   second native program was timed.
 - *U3:* no page, static or mapping is added or shared.
+
 **Cut 3: T2's predicate from a live count of filtered threads (po10-obj;
 design ledger line 457, D1 to D9).** T2's predicate (`seccomp::quiet`) is
 asked twice a fast direction, at the entry and at the frame tail, and the
@@ -5339,3 +5360,17 @@ the ledger's line 533 and in `docs/BACKLOG.md`. po9-sched measured an
 indirect call at about 3.5 ns more than a direct one.
 
 **Q8 measured.** Measured with os-76's long bench (`os76/p0-measure` 712cec722 on each tree, measurement only; `~/.local/share/ferrix/logs/po10-quick/perf/v2-*-join.txt`): host perf on the vCPU thread, 60 s of 50,000-trip blocks a boot, turn about with `main` 523fc3d50, 3 boots a side, the fast clock mode's blocks (core 11's SMT sibling 1 to 10% busy in them). `main`: 5,045, 5,045 and 5,041 instructions and 4,608, 4,656 and 4,608 cycles a round trip, 820, 825 and 820 ns. Q8: 5,043, 5,060 and 5,030 instructions (no change, as expected: a direct call replaces an indirect one) and 4,664, 4,549 and 4,567 cycles (about -30, -0.7%, inside the run-to-run spread), 823, 806 and 820 ns. One indirect call a direction is below what this bench resolves; the change is kept for what it removes -- an indirect branch and a writable code pointer on every switch -- not for a figure.
+**F-65: the caller's endpoint let go with interrupts open (po10-obj;
+ledger lines 511 and 520).** Not a cut for the figure but a fix: the
+endpoint reference the fast path holds across its park was let go masked on
+every return after the lookup, and when another thread of the caller's
+process had closed the handle meanwhile it was the end's last, so the
+end's close ran in the masked span (part 2, "Nor does it close an end").
+It is now let go with interrupts open on every return, and a masked close
+stops the machine (FX-0535). Stage 9's case 16 makes the last reference
+the parked caller's and resumes it by the frame tail and by the
+continuation. The frame tail's return now opens and masks interrupts once
+more a direction: about +40 to +50 instructions and +20 to +40 cycles a
+round trip, measured by os-76's long bench with perf against main
+523fc3d50, the median 819 to 858 ns on both sides, no p50 change resolved
+(`~/.local/share/ferrix/logs/po10-obj/perf/f65b-*`).

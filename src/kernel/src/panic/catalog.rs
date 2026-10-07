@@ -1185,6 +1185,9 @@ pub(crate) static FAST_PATH_CONTINUATION_MASKED: Explanation = Explanation {
         "The continuation or the frame tail's general branch was entered without opening \
          interrupts.",
         "A lock taken by the fast path was not let go before its switch or its decline.",
+        "`syscall::native::release_unmasked`, which opens interrupts to let go of the \
+         caller's endpoint on the frame tail's return or a decline (F-65), was reached with \
+         a lock still held.",
     ],
     see: "src/kernel/src/syscall/native.rs fast_write_read; \
           src/kernel/src/arch/x86_64/syscall.rs; docs/OPAQUE-KERNEL.md §9.7 part 2",
@@ -1210,6 +1213,31 @@ pub(crate) static TASK_SLOT_RETURNED_TWICE: Explanation = Explanation {
     ],
     see: "src/kernel/src/sched/task.rs SlotCell; src/kernel/src/sched/queue.rs; \
           docs/OPAQUE-KERNEL.md §9.7",
+};
+
+/// For `Endpoint::drop`, when a channel end is closed with interrupts masked.
+pub(crate) static ENDPOINT_CLOSED_MASKED: Explanation = Explanation {
+    code: "FX-0535",
+    title: "a channel end was closed with interrupts masked",
+    meaning: "Closing a channel end -- letting go of its last reference -- takes the \
+              survivor's inbox and observer locks, wakes the reader parked or listed there \
+              (a run-queue lock), disposes of the messages never read and frees the end. \
+              None of that may run in a span with interrupts masked, which waits on no lock \
+              (`docs/OPAQUE-KERNEL.md` §9.7 part 2). The fast path of `channel_write_read` \
+              holds a reference to the caller's end across its park with interrupts masked, \
+              and another thread of the caller's process may close the handle meanwhile, \
+              so that reference can be the last (finding F-65): it is let go with interrupts \
+              open. This stop means some path let go of an end's last reference masked.",
+    causes: &[
+        "`syscall::native::fast_write_read` let go of the caller's endpoint before \
+         `release_unmasked` opened interrupts, or the general continuation after it masked \
+         them again.",
+        "Another path dropped an `Arc<Endpoint>` under a masked span or from an interrupt \
+         handler.",
+    ],
+    see: "src/kernel/src/object/channel.rs Endpoint::drop; \
+          src/kernel/src/syscall/native.rs release_unmasked; \
+          docs/certification/FINDINGS.md F-65; docs/OPAQUE-KERNEL.md §9.7 part 2",
 };
 
 /// For `sched::schedule`, when asked to switch with the preemption count
@@ -3250,6 +3278,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FAST_PATH_IDLE_TASK,
     &FAST_PATH_CONTINUATION_MASKED,
     &TASK_SLOT_RETURNED_TWICE,
+    &ENDPOINT_CLOSED_MASKED,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

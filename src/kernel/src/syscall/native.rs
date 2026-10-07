@@ -1075,19 +1075,49 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
         // function's contract says.
         if let Err(declined) = unsafe { endpoint.send_direct(caller, count, words) } {
             direct::count(declined);
+            release_unmasked(endpoint);
             return Fast::Declined;
         }
         // Running again: a commit handed over a reply, or something else
         // woke the park.
         if let Some((count, words)) = caller.take_reply() {
+            release_unmasked(endpoint);
             return Fast::Tail(crate::syscall::write_read_outcome(Ok((count, words))));
         }
-        Fast::Done(continue_general(&endpoint, caller, a))
+        Fast::Done(continue_general(endpoint, caller, a))
     })
     .unwrap_or_else(|| {
         direct::count(Count::T4);
         Fast::Declined
     })
+}
+
+/// Let go of the fast path's reference to the caller's endpoint with
+/// interrupts open, then mask them again, as the fast path holds them
+/// (F-65). The reference can be the end's last -- another thread of the
+/// caller's process closed its handle while the caller was parked, or, on a
+/// decline, on another processor between the lookup and the decline -- and
+/// then the end closes here: its close takes locks, wakes its peer's parked
+/// reader and frees memory, none of which a masked span may do (§9.7 part 2,
+/// "waits on no lock"). Opened whether or not it is the last, because which
+/// one is last is decided inside the release itself, free included. The
+/// general continuation lets go of its own inside its unmasked span.
+///
+/// After the frame tail's reply is in hand and `finish_switch` has let the
+/// run-queue lock go, with `IN_CALL` and the vector mark raised, so a block
+/// here stays inside 3a's contract; the frame tail's looks after it see what
+/// came in meanwhile. On a decline, before any switch, the entry goes on
+/// masked as before.
+fn release_unmasked(endpoint: Arc<Endpoint>) {
+    arch::enable_interrupts();
+    if !crate::sched::may_block() {
+        crate::panic::fatal!(
+            crate::panic::catalog::FAST_PATH_CONTINUATION_MASKED,
+            "the fast path let go of its endpoint where its task may not block"
+        );
+    }
+    drop(endpoint);
+    arch::disable_interrupts();
 }
 
 /// The general continuation (`docs/OPAQUE-KERNEL.md` §9.7, part 2,
@@ -1098,7 +1128,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
 /// `dispatch_write_read` makes it, and the way back as `trap::system_call`
 /// makes it. Returns with interrupts masked again.
 fn continue_general(
-    endpoint: &Endpoint,
+    endpoint: Arc<Endpoint>,
     caller: &crate::sched::Task,
     a: &[u64; 6],
 ) -> crate::trap::Outcome {
@@ -1113,8 +1143,11 @@ fn continue_general(
     let answered = if crate::sched::work::own_end() {
         Err(Errno::EINTR)
     } else {
-        receive_words(endpoint)
+        receive_words(&endpoint)
     };
+    // Let go here, with interrupts open, as the general path lets go at its
+    // call's end: the last reference closes the end (F-65).
+    drop::<Arc<Endpoint>>(endpoint);
     if let Some(thread) = caller.thread() {
         let plain = answered.map(|(count, _)| count);
         record_call(

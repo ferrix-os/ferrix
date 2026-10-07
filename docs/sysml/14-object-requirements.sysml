@@ -1800,10 +1800,12 @@ package FerrixObjectRequirements {
                 a reply shall open interrupts, stop with FX-0533 if it may not block,
                 leave its record, answer EINTR if END is posted or carry on as
                 receive_words does, write the call's audit record as
-                dispatch_write_read does, and run regroup_current and call_left.";
+                dispatch_write_read does, let go of its endpoint reference before it
+                masks interrupts again, and run regroup_current and call_left.";
             attribute :>> criterion = "The continuation's cases by a message, its
                 peer's close and its kill answer the message, PEER_CLOSED and EINTR
-                (the `fastcase` line).";
+                (the `fastcase` line); case 16's continuation variant closes its end
+                with interrupts open (F-65).";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::continue_general",
                 "object::channel::Endpoint::unpark");
@@ -1834,6 +1836,23 @@ package FerrixObjectRequirements {
                 boots.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = "syscall::write_read_outcome";
+        }
+        requirement <'L.object.179'> theFastPathLetsGoOfItsEndUnmasked : ItemLowLevel {
+            attribute :>> statement = "fast_write_read shall let go of its reference
+                to the caller's endpoint only with interrupts open, on the frame
+                tail's return, the general continuation and a decline after the
+                lookup alike, and a channel end closed with interrupts masked shall
+                stop the machine with FX-0535 (F-65).";
+            attribute :>> criterion = "Stage 9's case 16: a caller parked by the fast
+                path whose handle another thread closes, resumed by the frame tail
+                and by the continuation, answers 'r' and 'm', its sink sees
+                PEER_CLOSED, and the boot does not stop with FX-0535; the frame
+                tail's variant counts only when the sink's reply was handed over
+                directly too. The decline's release is argued (it goes through the
+                same release_unmasked), not driven.";
+            attribute :>> parent = "H.OBJ.18";
+            attribute :>> unit = ("syscall::native::release_unmasked",
+                "object::channel::Endpoint::drop");
         }
     }
 }
