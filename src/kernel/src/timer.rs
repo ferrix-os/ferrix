@@ -312,10 +312,12 @@ pub(crate) fn ticks() -> u64 {
 
 /// Nanoseconds since the counter started, which is some point inside firmware.
 ///
-/// Only differences between two of these mean anything. The arithmetic is done
-/// in 128 bits because the obvious 64-bit form overflows after about eighteen
-/// seconds at a 1 `GHz` counter, which is exactly long enough to pass every
-/// test and fail on a real machine.
+/// Only differences between two of these mean anything. The answer is the
+/// 128-bit `ticks * 10^9 / hz` exactly, because the obvious 64-bit form
+/// overflows after about eighteen seconds at a 1 `GHz` counter, which is
+/// exactly long enough to pass every test and fail on a real machine; it is
+/// reached without a division, by the rate's reciprocal ([`CounterScale`]),
+/// split at whole seconds as `ferrix_vdso::counter_nanos` is.
 pub(crate) fn now_nanos() -> u64 {
     let hz = arch::counter_hz();
     if hz == 0 {
