@@ -33,7 +33,22 @@ const WARMUP: usize = 2_000;
 /// Timed round trips a repetition.
 const SAMPLES: usize = 20_000;
 /// Repetitions a test.
-const REPEATS: usize = 5;
+const REPEATS: usize = if cfg!(feature = "profile") { 60 } else { 5 };
+
+/// With `profile`, the one test to run.
+const ONLY: Option<&str> = if cfg!(feature = "profile") {
+    match option_env!("PIPE_BENCH_ONLY") {
+        Some(name) => Some(name),
+        None => Some("pipe"),
+    }
+} else {
+    None
+};
+
+/// Whether `test` runs.
+fn runs(test: &str) -> bool {
+    ONLY.is_none_or(|only| only == test)
+}
 /// Bytes a ping-pong message carries.
 const LEN: usize = 8;
 
@@ -328,13 +343,21 @@ fn main() {
         ticks: Vec::with_capacity(SAMPLES),
         per_us,
     };
-    bench("null-getppid", &mut samples, || {
-        // SAFETY: `getppid` has no arguments and always succeeds.
-        let _ = unsafe { libc::getppid() };
-    });
-    bench_pipe(&mut samples);
-    bench_unix(&mut samples);
-    bench_futex(&mut samples);
+    if runs("null") {
+        bench("null-getppid", &mut samples, || {
+            // SAFETY: `getppid` has no arguments and always succeeds.
+            let _ = unsafe { libc::getppid() };
+        });
+    }
+    if runs("pipe") {
+        bench_pipe(&mut samples);
+    }
+    if runs("unix") {
+        bench_unix(&mut samples);
+    }
+    if runs("futex") {
+        bench_futex(&mut samples);
+    }
     println!("LB done");
     let _ = std::io::stdout().flush();
 }
