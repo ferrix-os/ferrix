@@ -47,6 +47,9 @@ const FRAME_BYTES: u64 = 7 * 8;
 /// # Safety
 ///
 /// (CONTEXT) As [`switch_to`], whose contract this is.
+// SAFETY: (CONTEXT) the body is the whole function: it keeps the SysV ABI
+// toward its callers -- the six callee-saved registers pushed and popped, the
+// arguments in rdi and rsi -- and returns on the stack `next` names.
 #[unsafe(naked)]
 unsafe extern "C" fn ferrix_switch(save: *mut u64, next: u64) {
     core::arch::naked_asm!(

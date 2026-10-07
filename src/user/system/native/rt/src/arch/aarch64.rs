@@ -37,6 +37,8 @@ use ferrix_native::Raw;
 /// is brought to a multiple of 16 in case a starter did not, and
 /// `ferrix_rt_start` is called. The bootstrap handle's register, X0, is already
 /// the first argument.
+// SAFETY: (ENTRY) the body is the whole function and the process's first
+// instructions: nothing calls it, and it never returns.
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn _start() -> ! {
