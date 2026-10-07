@@ -593,7 +593,7 @@ impl Task {
     /// task takes, for the peer asleep (`BLOCKED`) and the caller running
     /// (`RUNNABLE`).
     pub(crate) fn set_state_from(&self, before: u8, state: u8) {
-        self.state.store(state, Ordering::Release);
+        self.store_state(state);
         if before != RUNNABLE && state == RUNNABLE {
             self.join_group();
         } else if before == RUNNABLE && state != RUNNABLE {
@@ -601,9 +601,23 @@ impl Task {
         }
     }
 
+    /// The state's store of [`Task::set_state_from`] alone, for the direct
+    /// switch's fold, which makes the job's load itself
+    /// (`docs/OPAQUE-KERNEL.md` §9.11, J1). The same conditions.
+    pub(crate) fn store_state(&self, state: u8) {
+        self.state.store(state, Ordering::Release);
+    }
+
     /// The job whose processor share it runs in, or `quota::NONE`.
     pub(crate) fn group(&self) -> u32 {
         group_of(self.group.load(Ordering::Acquire))
+    }
+
+    /// Its job and the weight it is counted there with (0 when it is not
+    /// counted), as one read of its word.
+    pub(crate) fn group_word(&self) -> (u32, u32) {
+        let word = self.group.load(Ordering::Acquire);
+        (group_of(word), counted_of(word))
     }
 
     /// Run in `index`'s share from now on, taking its weight out of the job
@@ -613,6 +627,15 @@ impl Task {
     /// (`crate::sched::set_current_group`, which says so where charges look):
     /// a processor running a task keeps the group it switched to it with as
     /// the one its charges go to.
+    ///
+    /// **Who calls it** (`docs/OPAQUE-KERNEL.md` §9.11, J1, ledger line 461
+    /// J-C3): the running task on itself (`set_task_group`, from
+    /// `regroup_current` and `set_current_group`), and a task no queue has
+    /// held yet (`spawn_in_group`, `prepare_user`). Never a task another
+    /// processor runs, nor one parked. The direct switch's fold rests on
+    /// that: its caller runs there masked and its peer is parked, so neither
+    /// word moves between the plan and the leave. A caller of this on
+    /// another processor's task reopens J1.
     pub(crate) fn set_group(&self, index: u32) {
         quota::hold_group(index);
         let swapped = self
@@ -637,8 +660,18 @@ impl Task {
 
     /// Count its weight in its job's load, once, if it is runnable.
     pub(crate) fn join_group(&self) {
+        if let Some((job, weight)) = self.join_word() {
+            quota::adjust(job, i64::from(weight));
+        }
+    }
+
+    /// [`Task::join_group`]'s word alone: counted in its job if it is
+    /// runnable, in a job and not counted yet, answering the job and the
+    /// weight it is now counted with, which the caller adds to the job's
+    /// load. `None` when nothing changed.
+    pub(crate) fn join_word(&self) -> Option<(u32, u32)> {
         if self.state() != RUNNABLE {
-            return;
+            return None;
         }
         let base = self.base_weight.load(Ordering::Relaxed);
         let joined = self
@@ -647,21 +680,26 @@ impl Task {
                 (counted_of(word) == 0 && group_of(word) != quota::NONE)
                     .then(|| pack(group_of(word), base))
             });
-        if let Ok(word) = joined {
-            quota::adjust(group_of(word), i64::from(base));
-        }
+        joined.ok().map(|word| (group_of(word), base))
     }
 
     /// Take its weight out of its job's load, if it is counted there.
     fn leave_group(&self) {
+        if let Some((job, weight)) = self.leave_word() {
+            quota::adjust(job, -i64::from(weight));
+        }
+    }
+
+    /// [`Task::leave_group`]'s word alone: no longer counted, answering the
+    /// job and the weight it was counted with, which the caller takes out of
+    /// the job's load. `None` when it was not counted.
+    pub(crate) fn leave_word(&self) -> Option<(u32, u32)> {
         let left = self
             .group
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |word| {
                 (counted_of(word) != 0).then(|| pack(group_of(word), 0))
             });
-        if let Ok(word) = left {
-            quota::adjust(group_of(word), -i64::from(counted_of(word)));
-        }
+        left.ok().map(|word| (group_of(word), counted_of(word)))
     }
 
     /// Whether it has already looked at its job since the `moves`th move,
@@ -691,6 +729,25 @@ impl Task {
         match self.group() {
             quota::NONE => base,
             group => quota::effective(group, base),
+        }
+    }
+
+    /// [`Task::effective_weight`], with `extra` added to the load of the job
+    /// `extra` names when that is its own: the direct switch's fold, whose
+    /// peer is counted in its word and not yet in that load
+    /// (`docs/OPAQUE-KERNEL.md` §9.11, J2). Answers the base weight it was
+    /// computed from, read once, and the weight. With no `extra` of its job,
+    /// `quota::effective_with`'s extra is 0, which is `quota::effective`.
+    pub(crate) fn effective_weight_with(&self, extra: Option<(u32, i64)>) -> (u32, u32) {
+        let base = self.base_weight();
+        match self.group() {
+            quota::NONE => (base, base),
+            group => {
+                let extra = extra
+                    .filter(|&(job, _)| job == group)
+                    .map_or(0, |(_, extra)| extra);
+                (base, quota::effective_with(group, base, extra))
+            }
         }
     }
 

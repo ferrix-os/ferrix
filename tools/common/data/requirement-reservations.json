@@ -40,11 +40,11 @@
       "purpose": "IPC round trip toward seL4: the fast path's object side, lookup and park without an Arc (po9-cert's verdict, ledger 2026-10-07, O1-O10)"
     },
     {
-      "ids": ["L.sched.64-68", "L.x86_64.162-164"],
-      "owner": "po9-sched",
-      "branch": "po9/sched",
+      "ids": ["L.sched.67-68", "L.x86_64.162-164"],
+      "owner": "po10-sched",
+      "branch": "po10/sched",
       "date": "2026-10-07",
-      "purpose": "IPC round trip toward seL4: the fast path's charge, switch and entry/exit (po9-cert's verdict, ledger 2026-10-07, D1-D11)"
+      "purpose": "IPC round trip toward seL4: the fast path's charge, switch and entry/exit (po9-cert's verdict, ledger 2026-10-07, D1-D11; po9-sched's, re-owned by po10-sched at ledger line 461, L.sched.64-66 written by J)"
     },
     {
       "ids": ["L.mm.65-68"],

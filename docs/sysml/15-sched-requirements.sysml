@@ -427,19 +427,16 @@ package FerrixSchedRequirements {
              * path (docs/OPAQUE-KERNEL.md §9.7, part 1). */
 
         requirement <'L.sched.55'> handOverIsTheGeneralSequence : ItemLowLevel {
-            attribute :>> statement = "CpuQueue::hand_over shall charge the running
-                task and weigh the arriving one as insert does, at one clock reading,
-                and RunQueue::hand_over shall leave the queue, the arriving entity
-                and the leaving entity's state exactly as enqueue, set_slice_ns,
-                remove_curr and pick_next leave them on a queue with one entity
-                running and nothing waiting.";
+            attribute :>> statement = "RunQueue::hand_over shall leave the queue, the
+                arriving entity and the leaving entity's state exactly as enqueue,
+                set_slice_ns, remove_curr and pick_next leave them on a queue with
+                one entity running and nothing waiting.";
             attribute :>> criterion = "hand_over_is_the_general_sequence: 200,000
                 random queues, weights and lags at and past the clamp, virtual times
                 either side of the wrap, every field compared; its control changes
                 one field of the result and fails.";
             attribute :>> parent = "H.SCHED.13";
-            attribute :>> unit = ("sched::queue::CpuQueue::hand_over",
-                "sched::queue::CpuQueue::insert_at");
+            attribute :>> unit = "sched::queue::CpuQueue::hand_over";
         }
         requirement <'L.sched.56'> onlyWhenNothingElseCouldBePicked : ItemLowLevel {
             attribute :>> statement = "direct::begin shall take this processor's
@@ -534,6 +531,59 @@ package FerrixSchedRequirements {
                 "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
                 "sched::task::Task::return_sleep_slot", "sched::task::Task::holds_slots",
                 "sched::task::Task::holds_sleep_slot");
+        }
+        requirement <'L.sched.64'> theDirectSwitchFoldsItsJobLoad : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall change the processor
+                load of a job both its tasks are counted in by the net of the peer's
+                join and the caller's leave in one adjustment, and otherwise make the
+                peer's join and then the caller's leave as the general path does; a
+                direct switch that does not reach the caller's leave shall make the
+                peer's join alone.";
+            attribute :>> criterion = "Stage 9's job cases, with the fast path off
+                and on: after trips between a caller and an echo in one job with
+                equal and with unequal weights, in two sibling jobs, and in a job
+                and its child, each job's load is what its tasks' words count plus
+                what its busy children add, a child adds exactly while busy, every
+                load reads 0 once both are gone, and with the fast path on the first
+                two fold and the last two do not; controls: the net's sign flipped,
+                and a fold at a job the two do not share, each fail it.";
+            attribute :>> parent = ("H.SCHED.13", "H.SCHED.3");
+            attribute :>> unit = ("sched::queue::CpuQueue::hand_over",
+                "sched::direct::Direct::hand_over", "sched::task::Task::join_word",
+                "sched::task::Task::leave_word");
+        }
+        requirement <'L.sched.65'> theDirectSwitchWeighsWithThePeerCounted : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall give the peer, and the
+                running task under account's rule, the weights effective gives with
+                the peer counted in its job's load.";
+            attribute :>> criterion = "Stage 9's weight case, with the fast path off
+                and on: a caller of trips in one job with an echo of another weight
+                runs, after its last trip, at the weight effective gives with the
+                echo counted, or at the one its job's share gives it as the loads
+                stand when a charge since has moved it; control: the hand-over's
+                weights computed without the peer counted fail it.";
+            attribute :>> parent = ("H.SCHED.13", "H.SCHED.3");
+            attribute :>> unit = ("sched::queue::CpuQueue::hand_over",
+                "sched::queue::CpuQueue::account_with", "sched::task::Task::effective_weight_with",
+                "object::quota::effective_with");
+        }
+        requirement <'L.sched.66'> theFoldIsPlannedBeforeTheCharge : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall plan a fold of its job
+                loads from the peer's join and the caller's word before the charge,
+                only at a job both are counted in, and shall settle it once the
+                caller's leave has answered: by the net in one adjustment when the
+                leave answered as planned, and otherwise by the peer's join and then
+                the caller's leave, each in its own job.";
+            attribute :>> criterion = "ferrix-sched's host test drives the kernel's
+                plan and settlement against a model of quota::adjust over 40,000
+                random job trees of depth 1 to 8 with siblings and nested jobs, the
+                two tasks in one job, siblings, nested either way and apart, equal
+                and unequal weights, and finds every job's load and contribution
+                and both weights equal to the general sequence's; with a fold
+                planned at a job the two do not share, it fails.";
+            attribute :>> parent = "H.SCHED.13";
+            attribute :>> unit = ("sched::direct::Direct::hand_over",
+                "sched::queue::PendingJoin::settle");
         }
     }
 }
