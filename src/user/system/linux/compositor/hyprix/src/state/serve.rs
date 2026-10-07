@@ -211,6 +211,46 @@ impl Compositor<'_> {
                     effects.closed.push(window);
                 }
             }
+            // A dmabuf's descriptor, held until its buffer is made or its
+            // parameters go (`docs/GPU.md` §3.13).
+            Event::DmabufPlane { params, fd } => {
+                effects.claimed += 1;
+                let _ = slot.planes.insert(params, crate::pool::own(fd.0));
+            }
+            Event::Destroyed {
+                object,
+                role: Role::BufferParams,
+            } => {
+                let _ = slot.planes.remove(&object);
+            }
+            // The buffer itself: imported into the compositor's own open
+            // of the render node, which is where the kernel says whether
+            // it is a buffer of this GPU at all, and the answer told.
+            Event::DmabufCreated { dmabuf } => {
+                let imported = match (slot.planes.remove(&dmabuf.params), self.dmabuf.as_ref()) {
+                    (Some(fd), Some(node)) => crate::dmabuf::Imported::new(node, fd, &dmabuf)
+                        .map_err(|error| error.to_string()),
+                    (None, _) => Err("no plane was handed over".to_owned()),
+                    (_, None) => Err("no render node to import into".to_owned()),
+                };
+                let ok = match imported {
+                    Ok(imported) => {
+                        let _ = slot.dmabufs.insert(dmabuf.pool, imported);
+                        if !core::mem::replace(&mut self.dmabuf_said, true) {
+                            (self.report)(&format!(
+                                "hyprix: imported a dmabuf, {}x{}, through zwp_linux_dmabuf_v1",
+                                dmabuf.width, dmabuf.height
+                            ));
+                        }
+                        true
+                    }
+                    Err(why) => {
+                        (self.report)(&format!("hyprix: a dmabuf could not be imported: {why}"));
+                        false
+                    }
+                };
+                slot.client.dmabuf_imported(dmabuf.params, ok);
+            }
             Event::PoolRetired { pool } => {
                 let _ = slot.retired.insert(pool);
                 if release_retired_pools(slot) {

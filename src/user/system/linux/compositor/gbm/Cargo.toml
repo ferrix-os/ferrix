@@ -1,0 +1,21 @@
+[package]
+name = "compositor-gbm"
+description = "A GBM-shaped allocator: buffers on the GPU a client draws into and hands the compositor as dmabufs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "compositor_gbm"
+path = "src/lib.rs"
+
+[dependencies]
+# The render node, which is where the buffers are made.
+compositor-drm = { path = "../drm" }
+# virgl's format and bind words, which a resource on virtio-gpu is made with.
+compositor-virgl = { path = "../virgl" }
+
+[lints]
+workspace = true

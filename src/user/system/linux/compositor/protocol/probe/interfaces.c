@@ -79,6 +79,7 @@
 #include "vicinae-hotkey-client-protocol.h"
 #include "ext-image-capture-source-client-protocol.h"
 #include "ext-image-copy-capture-client-protocol.h"
+#include "linux-dmabuf-client-protocol.h"
 
 static void print_messages(const struct wl_interface *interface,
 			   const char *kind, const struct wl_message *messages,
@@ -320,6 +321,10 @@ int main(void)
 		&ext_image_copy_capture_session_v1_interface,
 		&ext_image_copy_capture_frame_v1_interface,
 		&ext_image_copy_capture_cursor_session_v1_interface,
+		/* linux-dmabuf-v1.xml */
+		&zwp_linux_dmabuf_v1_interface,
+		&zwp_linux_buffer_params_v1_interface,
+		&zwp_linux_dmabuf_feedback_v1_interface,
 	};
 
 	printf("# libwayland %s\n", WAYLAND_VERSION);

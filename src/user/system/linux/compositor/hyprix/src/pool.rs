@@ -150,7 +150,7 @@ impl Drop for Mapping {
 }
 
 /// Take ownership of a descriptor the server handed over.
-fn own(raw: i32) -> OwnedFd {
+pub(crate) fn own(raw: i32) -> OwnedFd {
     #[expect(
         unsafe_code,
         reason = "AUDIT: the server hands a pool's descriptor on once, to whatever maps it; nothing else in this process holds the number"

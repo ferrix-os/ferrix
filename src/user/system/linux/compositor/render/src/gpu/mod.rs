@@ -174,6 +174,10 @@ pub struct Canvas<D: Device> {
     bound_blend: Option<u32>,
     bound_view: Option<(u32, u32)>,
     surfaces: BTreeMap<u64, Kept>,
+    /// Clients' GPU buffers this canvas imported, by the key their surface
+    /// gave (`Surface::on_device`). Never handed to another surface: the
+    /// pixels are the client's, and nothing is uploaded into them.
+    imports: BTreeMap<u64, Kept>,
     spare: Vec<Image>,
     ramps: Vec<(Gradient, Image)>,
     /// The resources the draws written since the last submission read from.
@@ -264,6 +268,7 @@ impl<D: Device> Canvas<D> {
             bound_blend: None,
             bound_view: None,
             surfaces: BTreeMap::new(),
+            imports: BTreeMap::new(),
             spare: Vec::new(),
             ramps: Vec::new(),
             sampled: Vec::new(),
@@ -687,6 +692,9 @@ impl<D: Device> Canvas<D> {
     /// The texture `surface` is kept in, with `part` of it -- or all of it,
     /// for one not seen before -- brought up to date.
     fn surface_image(&mut self, surface: &Surface<'_>, part: Option<Rect>) -> Option<Image> {
+        if let Some(image) = self.imported_image(surface) {
+            return Some(image);
+        }
         let (wide, tall) = (surface.width(), surface.height());
         // A surface with no name is known by where its pixels are, which
         // says nothing about whether they changed: it is moved whole.
@@ -761,6 +769,56 @@ impl<D: Device> Canvas<D> {
         Some(image)
     }
 
+    /// The client's own GPU buffer behind `surface`, imported once and
+    /// sampled where it lies, if it has one and this device can import it
+    /// (`docs/GPU.md` §3.13).
+    ///
+    /// `None` sends the caller to the upload, which is also what a buffer
+    /// that cannot be imported gets: its pixels came with it.
+    fn imported_image(&mut self, surface: &Surface<'_>) -> Option<Image> {
+        let (fd, key) = surface.device()?;
+        let (wide, tall) = (surface.width(), surface.height());
+        if let Some(kept) = self.imports.get_mut(&key)
+            && (kept.image.width, kept.image.height) == (wide, tall)
+        {
+            kept.used = self.frame;
+            return Some(kept.image);
+        }
+        if let Some(old) = self.imports.remove(&key) {
+            let _ = self.device.release(old.image.resource);
+        }
+        let resource = match self.device.import(fd) {
+            Ok(Some(resource)) => resource,
+            Ok(None) | Err(_) => return None,
+        };
+        let image = Image {
+            resource,
+            surface: 0,
+            view: self.handle(),
+            opaque_view: self.handle(),
+            width: wide,
+            height: tall,
+        };
+        for (handle, opaque) in [(image.view, false), (image.opaque_view, true)] {
+            self.stream.create_sampler_view(
+                handle,
+                View {
+                    resource,
+                    format: pipe::FORMAT_B8G8R8A8_UNORM,
+                    opaque,
+                },
+            );
+        }
+        let _ = self.imports.insert(
+            key,
+            Kept {
+                image,
+                used: self.frame,
+            },
+        );
+        Some(image)
+    }
+
     /// Hand the textures of surfaces not drawn for a while to whatever
     /// surface of their size comes next, and let go of the ones beyond what
     /// is worth keeping.
@@ -775,6 +833,19 @@ impl<D: Device> Canvas<D> {
         for key in gone {
             if let Some(kept) = self.surfaces.remove(&key) {
                 self.spare.push(kept.image);
+            }
+        }
+        // A client's buffer is never another surface's texture: it is let
+        // go of, which the client's own handle outlives.
+        let stale: Vec<u64> = self
+            .imports
+            .iter()
+            .filter(|(_, kept)| frame.saturating_sub(kept.used) > KEPT_FRAMES)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in stale {
+            if let Some(kept) = self.imports.remove(&key) {
+                let _ = self.device.release(kept.image.resource);
             }
         }
         // The oldest first, which are the sizes longest out of use. A

@@ -75,6 +75,10 @@ pub struct Surface<'a> {
     stride: u32,
     format: Format,
     name: u64,
+    /// The buffer on a GPU the pixels also are, as a dmabuf, and what it is
+    /// called from frame to frame: a renderer on that GPU samples it where
+    /// it lies rather than uploading `data`.
+    device: Option<(std::os::fd::BorrowedFd<'a>, u64)>,
 }
 
 impl<'a> Surface<'a> {
@@ -100,6 +104,7 @@ impl<'a> Surface<'a> {
             stride,
             format,
             name: 0,
+            device: None,
         })
     }
 
@@ -144,6 +149,26 @@ impl<'a> Surface<'a> {
             name => name ^ (u64::from(x) << 40) ^ (u64::from(y) << 52),
         };
         Some(part.named(name))
+    }
+
+    /// The same pixels, said also to be the GPU buffer `fd` -- a client's
+    /// dmabuf -- known as `key` for as long as that buffer lives
+    /// (`docs/GPU.md` §3.13).
+    ///
+    /// The software renderer reads `data` and has no use for this. A
+    /// renderer on the same GPU imports the buffer once and samples it,
+    /// which is a client's frame shown without its pixels being copied
+    /// anywhere; `data` is what it falls back to when it cannot.
+    #[must_use]
+    pub const fn on_device(mut self, fd: std::os::fd::BorrowedFd<'a>, key: u64) -> Self {
+        self.device = Some((fd, key));
+        self
+    }
+
+    /// The GPU buffer [`Surface::on_device`] said these pixels are.
+    #[must_use]
+    pub const fn device(&self) -> Option<(std::os::fd::BorrowedFd<'a>, u64)> {
+        self.device
     }
 
     /// What [`Surface::named`] called it, or zero.

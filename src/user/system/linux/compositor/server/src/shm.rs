@@ -108,6 +108,10 @@ pub struct Buffer {
     /// [`PoolKey::NONE`]. Held as the four bytes the renderer reads, in the
     /// order `Format::Argb8888` puts them on a little-endian machine.
     pub solid: Option<[u8; 4]>,
+    /// Whether this is a `zwp_linux_dmabuf_v1` buffer: `pool` is then the
+    /// key its import is known by, not a `wl_shm_pool`'s, and the buffer
+    /// is that import's alone (`docs/GPU.md` §3.13).
+    pub dmabuf: bool,
 }
 
 impl Buffer {
@@ -122,6 +126,7 @@ impl Buffer {
             stride: 4,
             format: Format::Argb8888,
             solid: Some([blue, green, red, alpha]),
+            dmabuf: false,
         }
     }
 }
@@ -241,6 +246,7 @@ impl Pool {
             stride,
             format,
             solid: None,
+            dmabuf: false,
         })
     }
 }

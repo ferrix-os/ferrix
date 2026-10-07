@@ -154,6 +154,10 @@ pub enum Role {
     IdleInhibitor,
     /// `wp_single_pixel_buffer_manager_v1`: a buffer that is one colour.
     SinglePixelManager,
+    /// `zwp_linux_dmabuf_v1`: buffers that live on the GPU.
+    LinuxDmabuf,
+    /// `zwp_linux_buffer_params_v1`: one such buffer being described.
+    BufferParams,
     /// `wp_content_type_manager_v1`: what a surface is showing.
     ContentTypeManager,
     /// `wp_content_type_v1`: one surface's.

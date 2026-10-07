@@ -47,9 +47,10 @@ mod surface;
 mod xdg;
 
 pub use client::{
-    Client, Configuration, Constraint, Dragging, Event, Export, Fatal, Flavour, ForeignRequest,
-    ForeignToplevel, Frame, GAMMA_SIZE, Hotkey, Injected, Listener, Manager, Outgoing, Shortcut,
-    Source, Typed, Wanted, Workspace, WorkspaceRequest,
+    Client, Configuration, Constraint, DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, Dragging,
+    Event, Export, Fatal, Flavour, ForeignRequest, ForeignToplevel, Frame, GAMMA_SIZE, Hotkey,
+    Injected, Listener, MOD_INVALID, MOD_LINEAR, Manager, Outgoing, Plane, Shortcut, Source, Typed,
+    Wanted, Workspace, WorkspaceRequest, format_of,
 };
 pub use globals::{Global, Globals};
 pub use layer::{Anchors, Layer, LayerSurface, Margin};
@@ -63,3 +64,6 @@ pub use compositor_wire as wire;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod dmabuf_tests;

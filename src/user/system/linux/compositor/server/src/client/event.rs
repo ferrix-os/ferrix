@@ -493,6 +493,23 @@ pub enum Event {
         /// Which pool, by its key.
         pool: PoolKey,
     },
+    /// A `zwp_linux_buffer_params_v1.add` took a descriptor off the
+    /// connection. The binary holds it from now on: it imports it when
+    /// [`Event::DmabufCreated`] names these parameters, and closes it when
+    /// they are destroyed without a buffer.
+    DmabufPlane {
+        /// The parameters object.
+        params: ObjectId,
+        /// The descriptor, which nothing here touches again.
+        fd: Fd,
+    },
+    /// A dmabuf buffer was asked for. The binary imports the descriptor its
+    /// parameters were given and answers with
+    /// [`Client::dmabuf_imported`](super::Client::dmabuf_imported).
+    DmabufCreated {
+        /// What the buffer is.
+        dmabuf: super::dmabuf::Dmabuf,
+    },
     /// A pool grew. Whatever mapped it has to map it again.
     PoolResized {
         /// Which pool, by its key.
