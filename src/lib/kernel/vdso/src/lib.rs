@@ -75,7 +75,8 @@ pub const MODE_TSC: u64 = 1;
 
 /// `ticks` of a `hz` counter in nanoseconds: `ticks * 10^9 / hz`, rounded
 /// down, exactly, and `u64::MAX` past what 64 bits hold. The kernel's clock
-/// (`timer::now_nanos`) is this, the [`MODE_TSC`] functions' answer.
+/// (`timer::now_nanos`) is this, by [`CounterScale`], and so are the
+/// [`MODE_TSC`] functions' answers.
 ///
 /// # Two narrow divisions, not one wide one
 ///
