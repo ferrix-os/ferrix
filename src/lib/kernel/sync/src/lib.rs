@@ -538,6 +538,26 @@ impl<T: ?Sized, P: PreemptControl> PreemptSpinLock<T, P> {
         }
     }
 
+    /// [`try_lock`](Self::try_lock) for a caller that masks interrupts for
+    /// the whole hold, which keeps it on its CPU without the count: the same
+    /// ticket lock, so it excludes every other holder exactly as `try_lock`
+    /// does, with no `disable` and no `enable`. For the native channel round
+    /// trip's fast path (OPAQUE-KERNEL.md §9.7), which takes its locks only
+    /// by `try_lock`, with interrupts masked from the system call's entry.
+    ///
+    /// # Safety
+    ///
+    /// Interrupts are masked on this CPU from before the call until the guard
+    /// drops, and the caller neither blocks nor switches while it holds the
+    /// guard: what the count would otherwise have promised the lock. A masked
+    /// hold records no site for a report of a holder that switched; a caller
+    /// that wants the switch checked counts the hold itself, as the kernel's
+    /// `sync::try_lock_masked` does.
+    #[must_use = "the lock is released as soon as the guard is dropped"]
+    pub unsafe fn try_lock_masked(&self) -> Option<SpinLockGuard<'_, T>> {
+        self.inner.try_lock()
+    }
+
     /// Reports whether the lock was held at some instant during the call.
     #[must_use]
     pub fn is_locked(&self) -> bool {

@@ -572,6 +572,44 @@ fn a_preempt_lock_keeps_the_task_for_exactly_the_time_it_is_held() {
     assert_eq!(*LOCK.lock(), 1, "the data survived");
 }
 
+/// A count of its own for the masked acquisition's test, which no other
+/// test shares.
+struct MaskedPreempt;
+
+static MASKED_TOUCHES: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: a test double; nothing here schedules. It counts every call, which
+// the test requires to stay at zero across a masked hold.
+unsafe impl PreemptControl for MaskedPreempt {
+    fn disable() {
+        let _ = MASKED_TOUCHES.fetch_add(1, Ordering::SeqCst);
+    }
+    fn enable() {
+        let _ = MASKED_TOUCHES.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_masked_try_lock_excludes_every_holder_and_leaves_the_count_alone() {
+    static LOCK: PreemptSpinLock<u32, MaskedPreempt> = PreemptSpinLock::new(0);
+    // SAFETY: a host test has no interrupts and nothing here blocks.
+    let mut masked = unsafe { LOCK.try_lock_masked() }.expect("free");
+    *masked += 1;
+    assert_eq!(MASKED_TOUCHES.load(Ordering::SeqCst), 0, "no disable");
+    assert!(LOCK.try_lock().is_none(), "a counted try_lock is refused");
+    // SAFETY: as above.
+    let second = unsafe { LOCK.try_lock_masked() };
+    assert!(second.is_none(), "so is a masked one");
+    let touched = MASKED_TOUCHES.load(Ordering::SeqCst);
+    drop(masked);
+    assert_eq!(MASKED_TOUCHES.load(Ordering::SeqCst), touched, "no enable");
+    let counted = LOCK.lock();
+    // SAFETY: as above.
+    let under = unsafe { LOCK.try_lock_masked() };
+    assert!(under.is_none(), "refused under a counted holder");
+    assert_eq!(*counted, 1, "the data survived");
+}
+
 #[test]
 fn an_irq_lock_masks_for_exactly_the_time_it_is_held() {
     IRQ_DEPTH.store(0, Ordering::SeqCst);
