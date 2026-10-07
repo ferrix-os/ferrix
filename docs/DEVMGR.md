@@ -375,6 +375,124 @@ caught a late write, and plays a second on the third driver's card.
 START; the quiesce goes through the second handle §2 gave it for exactly
 this.
 
+### 4.1 A new version of a driver, without a reboot
+
+The customer's question of 2026-10-05: can a driver be replaced by a new
+version while the machine runs? For the five kinds §4 starts again the hard
+part exists: the device comes back with its state kept when its driver
+dies. An update is that restart onto a different image, with a way back.
+This section is the design (po10-drv, 2026-10-07); "as built" notes follow
+each landing. The other kinds and `devmgr`'s own restart are outside it, as
+they are outside §4.
+
+**Where the new image comes from.** Every image `devmgr` has comes from the
+initramfs, through the kernel (§2), and `devmgr` reads no files. An update's
+image comes from root at run time, through a helper and not through the
+kernel:
+
+* `drvupdated` (`src/user/system/native/drvupdated`) is a native program an
+  image may carry in `/lib/drivers`, listed in `MANIFEST` like a driver, so
+  the kernel hands it to `devmgr` as one more image. No table entry names it,
+  so it drives no device and is no `DRIVER` in sysfs. When the images
+  include it, `devmgr` starts it after REPORT, in a job of its own, with a
+  channel whose other end `devmgr` keeps on its port. An image without it has
+  no updates: whether the image carries the helper is the opt-in, the way
+  `nvrm-test` opts in to the test GPU. Until D3 (below) has its review,
+  only the images `cargo xtask test-restart --update` boots carry it. If
+  the helper dies, `devmgr` says so on its line
+  and does not start it again.
+* The helper binds the abstract `AF_UNIX` name `\0ferrix.devmgr.update`.
+  The name is abstract because `devmgr` and what it starts keep the
+  initramfs root (`docs/INIT.md` §7.3). The helper takes one connection at
+  a time and closes any peer whose `SO_PEERCRED` uid is not 0, as `vport`
+  does.
+* The client, `/bin/drvupdate <driver> <image> [<location>]`, sends a
+  48-byte header and then the image's bytes. The header holds a magic, the
+  driver's name, the device's PCI address word (or any, which means every
+  device that driver drives) and the length. The helper copies the bytes
+  into a VMO it creates, up to 8 MiB, and writes UPDATE to `devmgr` with the
+  VMO. It writes `devmgr`'s answer back to the client as one line.
+* `devmgr` copies that VMO into one of its own before it reads anything in
+  it. Any handle the helper kept cannot change the bytes between `devmgr`'s
+  checks and `process_create`, and §5 holds as it does at boot: the new
+  driver's image is anonymous memory, filled before the driver exists, and
+  nothing maps a file. For a disk's driver this means the whole image is in
+  memory before the old driver stops.
+
+The kernel is not the way in because that path would add a kernel
+interface into the certified item. A sysfs `update` file whose write makes
+the kernel read an image would need one, and the kernel would read a file
+from a root that is not the initramfs. The helper needs nothing new: an
+abstract socket, `SO_PEERCRED`, VMOs and channels all exist. `devmgr` does
+not take the socket itself because its loop waits on one port, and a port
+does not watch a descriptor. Slow or hostile I/O on a socket would then
+hold up the quiesce of a driver that died. The helper does the I/O and
+hands `devmgr` one finished message.
+
+**What `devmgr` checks before it stops anything.** An update leaves the
+running driver alone unless all three hold:
+
+1. The device is one the driver named in UPDATE drives by the table. Its
+   kind is one §4 starts again, and its driver is up (published). If not,
+   the answer is `no device`, `not restarted` or `busy`.
+2. The image loads. `devmgr` calls `process_create` on its copy in a scratch
+   job. The kernel's loader refuses anything that is not a native program it
+   can start, and the answer is then `refused`. `devmgr` kills the scratch
+   job either way.
+3. The console line names the image: its length and its FNV-1a-64
+   fingerprint, so the log shows which bytes drive the device. This proves
+   integrity, not authenticity. Whether an update must also carry a
+   signature, and whose key verifies it, is the customer's question
+   (below).
+
+**The swap, and the rule for going back.**
+
+1. `devmgr` kills the running driver's job and quiesces the device, as for
+   a death (§4, step 1), and sends UNBOUND. It sends no DIED, because no
+   driver died that `devmgr` did not stop.
+2. It starts the new image in a new job, on a duplicate of its kept device
+   handle, with the START the device was first given. It then waits for
+   PUBLISHED with a deadline of 15 s (`devmgr` reads the monotonic clock
+   through the Linux call `await_settled` already uses).
+3. **Published**: from now on the device's image is the new copy, so a
+   restart after a death or a BIND starts it. `devmgr` sends BOUND, answers
+   `updated` and prints `devmgr   gpu 00:02.0 updated: N bytes, fnv64 X
+   (was M bytes, fnv64 Y)`.
+4. **Not published**, because the new driver exited or the deadline passed:
+   `devmgr` kills its job, quiesces the device and starts the old image
+   again, as a restart does, then waits for PUBLISHED. It answers `rolled
+   back` and prints the same pair of images. If the old image does not
+   publish either, the device stays quiesced, as when a restarted driver
+   dies before it publishes (§4), and the answer is `failed`.
+5. An update counts against no restart budget, as a BIND does not. Requests
+   that arrive while it runs wait in the inbox, as during any other wait.
+   `devmgr` runs one update at a time.
+
+**What the kernel changes: nothing.** Every call an update makes is one a
+restart makes today. The kernel sees a driver die after a quiesce and a new
+HELLO for the same device, and the bootstrap protocol keeps its messages.
+
+**Still open, for the customer.** Is root's word enough for D3, or must an
+update image carry a signature, and if so whose key (one built into
+`devmgr`, or one in the image's configuration)? The first kind lands with
+the uid-0 gate, the loader's refusal and the fingerprint line, and no
+signature.
+
+**Its gate** is `cargo xtask test-restart --update` (D4). On the display
+kind, with `/bin/blank` holding the card, the gate updates the driver four
+times:
+
+1. to bytes that are not a program: `refused`, and the card never goes;
+2. to a native program that never publishes: `rolled back`, and `card0`
+   comes back from the old image;
+3. to the `gpu` driver built as version `next`, which prints `gpu: version
+   next` once at its start: `updated`, `card0` comes back, the line
+   appears, and the fingerprint is the carried file's;
+4. then a `kill -9` of the updated driver: it is started again from the new
+   image, and its version line appears a second time.
+
+The shell must answer after each step.
+
 ## 5. No driver faults on the disk it serves
 
 The decision of 2026-09-13 (`docs/BACKLOG.md`): a driver serving a disk must
