@@ -457,7 +457,8 @@ pub(crate) unsafe fn note_tables(cpu: &PerCpu) {
 /// secondary until `init_secondary` loads one.
 pub(crate) fn task_register_loaded() -> bool {
     // SAFETY: (ENTRY) reads the task register; no memory is touched.
-    unsafe { cpu::read_task_register() } != 0
+    let selector = unsafe { cpu::read_task_register() };
+    selector != 0
 }
 
 /// This processor's GDT, as the processor reports it, if it is one of the
