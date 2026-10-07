@@ -1156,6 +1156,14 @@ impl Drop for Endpoint {
     /// Close this side, tell the peer it is alone, and free what was queued
     /// and never read, one level at a time.
     fn drop(&mut self) {
+        // A close takes the survivor's locks, wakes its parked reader and
+        // frees memory: never with interrupts masked (F-65).
+        if !crate::arch::interrupts_enabled() {
+            crate::panic::fatal!(
+                crate::panic::catalog::ENDPOINT_CLOSED_MASKED,
+                "a channel end was closed with interrupts masked"
+            );
+        }
         let unread = self.take_unread();
         let peer = self.peer();
         // Under the survivor's inbox lock, the lock its registrations are

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8c0bfb3bccba99ce68808d61a703506880286607263d50563a9538c84c701a7a",
+  "digest": "eb224ed10acc322d000c9fac42adfa6c4df433ae79bd2f119a47b044712fdf47",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 136,
-    "elements": 6606,
+    "elements": 6611,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -33969,10 +33969,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theContinuationIsTheGeneralPath",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A caller the fast path parked and woken without a reply shall open interrupts, stop with FX-0533 if it may not block, leave its record, answer EINTR if END is posted or carry on as receive_words does, write the call's audit record as dispatch_write_read does, and run regroup_current and call_left.\"",
+                  "value": "\"A caller the fast path parked and woken without a reply shall open interrupts, stop with FX-0533 if it may not block, leave its record, answer EINTR if END is posted or carry on as receive_words does, write the call's audit record as dispatch_write_read does, let go of its endpoint reference before it masks interrupts again, and run regroup_current and call_left.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1803
+                    "line": 1804
                   }
                 },
                 {
@@ -33980,10 +33980,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theContinuationIsTheGeneralPath",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The continuation's cases by a message, its peer's close and its kill answer the message, PEER_CLOSED and EINTR (the `fastcase` line).\"",
+                  "value": "\"The continuation's cases by a message, its peer's close and its kill answer the message, PEER_CLOSED and EINTR (the `fastcase` line); case 16's continuation variant closes its end with interrupts open (F-65).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1806
+                    "line": 1808
                   }
                 },
                 {
@@ -33994,7 +33994,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1807
+                    "line": 1809
                   }
                 },
                 {
@@ -34005,7 +34005,7 @@
                   "value": "(\"syscall::native::continue_general\", \"object::channel::Endpoint::unpark\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1809
+                    "line": 1811
                   }
                 }
               ]
@@ -34018,7 +34018,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1811
+                "line": 1813
               },
               "children": [
                 {
@@ -34029,7 +34029,7 @@
                   "value": "\"fast_write_read shall decline, having changed nothing but its counts, unless the filter would let the call through unlooked at (T2), it sends at most 24 bytes (T3), and the handle table's lock is free and channel_in finds an endpoint with READ and WRITE (T4, T5).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1816
+                    "line": 1818
                   }
                 },
                 {
@@ -34040,7 +34040,7 @@
                   "value": "\"Stage 9's case 11 is refused with the filter's errno with the fast path on, and comes back with IN_CALL down whether refused or allowed; ipc-equiv's case 12 answers every refusal as the general path does, with its audit records; every stage 9 echo's task names, as its cached core process, the one its thread's process holds.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1822
+                    "line": 1824
                   }
                 },
                 {
@@ -34051,7 +34051,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1823
+                    "line": 1825
                   }
                 },
                 {
@@ -34062,7 +34062,7 @@
                   "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles_masked\", \"sched::task::Task::core_process\", \"trap::filter_quiet\", \"trap::set_quiet_syscall_filter\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1827
+                    "line": 1829
                   }
                 }
               ]
@@ -34075,7 +34075,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1829
+                "line": 1831
               },
               "children": [
                 {
@@ -34086,7 +34086,7 @@
                   "value": "\"channel_write_read's answer shall go into the program's registers through write_read_outcome on the general path, the frame tail and the continuation alike.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1832
+                    "line": 1834
                   }
                 },
                 {
@@ -34097,7 +34097,7 @@
                   "value": "\"ipc-equiv's transcripts are the same on both boots.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1834
+                    "line": 1836
                   }
                 },
                 {
@@ -34108,7 +34108,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1835
+                    "line": 1837
                   }
                 },
                 {
@@ -34119,7 +34119,64 @@
                   "value": "\"syscall::write_read_outcome\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1836
+                    "line": 1838
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theFastPathLetsGoOfItsEndUnmasked",
+              "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLetsGoOfItsEndUnmasked",
+              "kind": "requirement",
+              "shortName": "L.object.179",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1840
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLetsGoOfItsEndUnmasked",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"fast_write_read shall let go of its reference to the caller's endpoint only with interrupts open, on the frame tail's return, the general continuation and a decline after the lookup alike, and a channel end closed with interrupts masked shall stop the machine with FX-0535 (F-65).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1845
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLetsGoOfItsEndUnmasked",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 9's case 16: a caller parked by the fast path whose handle another thread closes, resumed by the frame tail and by the continuation, answers 'r' and 'm', its sink sees PEER_CLOSED, and the boot does not stop with FX-0535; the frame tail's variant counts only when the sink's reply was handed over directly too. The decline's release is argued (it goes through the same release_unmasked), not driven.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1852
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLetsGoOfItsEndUnmasked",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.OBJ.18\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1853
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLetsGoOfItsEndUnmasked",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::release_unmasked\", \"object::channel::Endpoint::drop\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1855
                   }
                 }
               ]

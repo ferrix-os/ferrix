@@ -40,13 +40,6 @@
       "purpose": "IPC round trip toward seL4: fewer user pages a trip, 2 MiB native text, KASLR-placement alignment (po9-cert's verdict, ledger 2026-10-07, U1-U9, K1-K7)"
     },
     {
-      "ids": ["L.object.179"],
-      "owner": "po10-obj",
-      "branch": "po10/f-endpoint-drop",
-      "date": "2026-10-07",
-      "purpose": "F-65: fast_write_read lets go of its endpoint reference only with interrupts open (po10-obj's consultant, ledger 2026-10-07 line 520, E8; L.object.171-178 stay po9-obj's until cut 3 lands)"
-    },
-    {
       "ids": ["L.sched.69-70"],
       "owner": "po11-slots",
       "branch": "po11/slots",

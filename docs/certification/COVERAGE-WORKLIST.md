@@ -108,7 +108,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2397 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2430 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---

@@ -22,6 +22,10 @@
 //! - **Case 14 (T13)**: an end posted in T13's window (the hook of condition
 //!   11, which only this check arms) is seen: the call answers `EINTR` and
 //!   leaves nobody blocked.
+//! - **Case 16 (F-65)**: a parked caller whose handle another thread closes
+//!   holds its end's last reference; resumed by the frame tail and by the
+//!   general continuation, it answers its message and closes the end with
+//!   interrupts open.
 //! - **The reply's words (O7)**: the words the commit puts in the reply
 //!   cell are the general path's write then read of the same registers,
 //!   the bytes past the count zero, for every count.
@@ -181,7 +185,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         check_the_barriers_in_a_domain_and_across_two(on)?;
         check_a_queued_write_takes_the_park()?;
         check_the_reply_words()?;
-        report.cases = 11;
+        check_the_last_reference(LastDrop::Tail, on)?;
+        check_the_last_reference(LastDrop::Done, on)?;
+        report.cases = 13;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
             report.cases += 1;
@@ -817,19 +823,22 @@ enum Ending {
 static SINK: SpinLock<Option<Handle>> = SpinLock::new(None);
 /// What the sink read.
 static SUNK: SpinLock<Option<Answer>> = SpinLock::new(None);
+/// What the sink's last call answered.
+static SUNK_LAST: SpinLock<Option<Answer>> = SpinLock::new(None);
 /// The parked caller's end.
 static PARKED: SpinLock<Option<Handle>> = SpinLock::new(None);
 /// What the parked caller was answered.
 static PARKED_ANSWER: SpinLock<Option<Answer>> = SpinLock::new(None);
 
 /// A sink: one receive-only call, recorded, then a second that waits until
-/// its process is killed, holding its end open until then without a sleep
-/// that would put it on its processor's sleeper set.
+/// its process is killed or its peer closes, holding its end open until then
+/// without a sleep that would put it on its processor's sleeper set; what
+/// the second answered is recorded too.
 fn sink_in_the_process(_argument: usize) {
     let taken = SINK.lock().take();
     if let Some(handle) = taken {
         *SUNK.lock() = Some(call(handle, nr::WRITE_READ_NOTHING, [0; 3]));
-        let _ = call(handle, nr::WRITE_READ_NOTHING, [0; 3]);
+        *SUNK_LAST.lock() = Some(call(handle, nr::WRITE_READ_NOTHING, [0; 3]));
     }
     process::exit_current(0)
 }
@@ -1124,4 +1133,170 @@ fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
         );
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Case 16: the parked caller's reference is the end's last (F-65)
+// ---------------------------------------------------------------------------
+
+/// How the parked caller is resumed in [`check_the_last_reference`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LastDrop {
+    /// By the sink's reply through the fast path: the frame tail.
+    Tail,
+    /// By a general write on its end: the general continuation.
+    Done,
+}
+
+/// The late sink's end.
+static LATE_SINK: SpinLock<Option<Handle>> = SpinLock::new(None);
+/// Set when the late sink may answer.
+static RELEASE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A sink that reads one message, waits for [`RELEASE`], answers `"r"`
+/// through the fast path, and waits for what comes next.
+fn late_sink_in_the_process(_argument: usize) {
+    let taken = LATE_SINK.lock().take();
+    if let Some(handle) = taken {
+        *SUNK.lock() = Some(call(handle, nr::WRITE_READ_NOTHING, [0; 3]));
+        while !RELEASE.load(core::sync::atomic::Ordering::Acquire) {
+            crate::sched::sleep_for(POLL_NANOS);
+        }
+        *SUNK_LAST.lock() = Some(call(handle, 1, [u64::from(b'r'), 0, 0]));
+    }
+    process::exit_current(0)
+}
+
+/// Case 16 (F-65): a caller the fast path parked, whose handle another
+/// thread of its process closes while it is parked -- the table's entry
+/// removed and disposed, as `handle_close` does -- holds the end's last
+/// reference. Resumed by `how`, it answers what it was sent, and the end
+/// it closes as it lets go is closed with interrupts open: its close takes
+/// locks and wakes the parked sink, which no masked span may do (§9.7 part
+/// 2), and `Endpoint::drop` stops the machine on a masked close (FX-0535).
+/// Made again, a few times at most, until the fast path parked it -- and,
+/// for the frame tail, also handed the sink's reply over directly; with the
+/// fast path on, a variant that never did fails by name.
+/// Verifies: `L.object.179`
+fn check_the_last_reference(how: LastDrop, on: bool) -> Result<(), &'static str> {
+    for _ in 0..8 {
+        if attempt_the_last_reference(how)? || !on {
+            return Ok(());
+        }
+    }
+    Err(match how {
+        LastDrop::Tail => "case 16, frame tail: the caller's send was never handed over directly",
+        LastDrop::Done => "case 16, continuation: the caller's send was never handed over directly",
+    })
+}
+
+/// One try of [`check_the_last_reference`]: whether the fast path parked
+/// the caller.
+fn attempt_the_last_reference(how: LastDrop) -> Result<bool, &'static str> {
+    let before = direct::counts();
+    let cpu = trip_processor();
+    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for case 16's channel")?;
+    let (sink_process, sink_handle) = holding(&theirs)?;
+    *SUNK.lock() = None;
+    *SUNK_LAST.lock() = None;
+    RELEASE.store(false, core::sync::atomic::Ordering::Release);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let sink = match how {
+        LastDrop::Tail => {
+            *LATE_SINK.lock() = Some(sink_handle);
+            spawn_in(
+                &sink_process,
+                "fast path late sink",
+                late_sink_in_the_process,
+                Some(cpu),
+            )?
+        }
+        LastDrop::Done => {
+            *SINK.lock() = Some(sink_handle);
+            spawn_in(
+                &sink_process,
+                "fast path sink",
+                sink_in_the_process,
+                Some(cpu),
+            )?
+        }
+    };
+    wait_until(deadline, "case 16: the sink never waited", || {
+        theirs.reader_waiting()
+    })?;
+    let (caller_process, handle) = holding(&mine)?;
+    *PARKED_ANSWER.lock() = None;
+    *PARKED.lock() = Some(handle);
+    GO.store(false, core::sync::atomic::Ordering::Release);
+    let caller = spawn_in(
+        &caller_process,
+        "fast path parked",
+        parked_in_the_process,
+        Some(cpu),
+    )?;
+    GO.store(true, core::sync::atomic::Ordering::Release);
+    while !(SUNK.lock().is_some() && mine.reader_waiting()) {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("case 16: the caller never waited");
+        }
+        crate::sched::sleep_for(20 * POLL_NANOS);
+    }
+    let parked = moved(&before, Count::Trip) != 0;
+    // Another thread of the caller's process closes the handle: the parked
+    // caller's own reference is now the last.
+    let (object, _) = caller_process
+        .with_handles(|table| table.remove(handle))
+        .map_err(|_| "case 16: the caller's handle could not be closed")?;
+    super::dispose([object]);
+    drop(mine);
+    match how {
+        LastDrop::Tail => RELEASE.store(true, core::sync::atomic::Ordering::Release),
+        LastDrop::Done => theirs
+            .write_small(b"m")
+            .map_err(|_| "case 16: the check could not write its message")?,
+    }
+    let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
+    wait_dead(
+        &caller,
+        bound,
+        "case 16: the parked caller was not resumed within the bound",
+    )?;
+    // The end it closed: the sink, waiting on the other end, is told so.
+    wait_until(
+        bound,
+        "case 16: the sink was not told its peer had closed",
+        || SUNK_LAST.lock().is_some(),
+    )?;
+    let sink_told = SUNK_LAST.lock().take();
+    process::kill(&sink_process, KILLED_STATUS);
+    wait_dead(
+        &sink,
+        crate::timer::now_nanos().saturating_add(PATIENCE_NANOS),
+        "case 16: the sink never ended",
+    )?;
+    drop(theirs);
+    drop(caller_process);
+    drop(sink_process);
+    let sent = match how {
+        LastDrop::Tail => b'r',
+        LastDrop::Done => b'm',
+    };
+    if PARKED_ANSWER.lock().take() != Some((1, [u64::from(sent), 0, 0])) {
+        return Err(
+            "case 16: a caller holding its end's last reference did not answer its message",
+        );
+    }
+    if !sink_told.is_some_and(|answer| answer.0 == refused(status::PEER_CLOSED)) {
+        return Err("case 16: the end a parked caller closed as it let go was not seen closed");
+    }
+    // Its close was made with interrupts open, or `Endpoint::drop` would
+    // have stopped the machine (FX-0535). The frame tail's variant counts
+    // only if the sink's reply was handed over directly too -- two trips,
+    // the caller's send and the reply -- so that the caller resumed by the
+    // frame tail and not by the general continuation.
+    let handed = match how {
+        LastDrop::Tail => moved(&before, Count::Trip) >= 2,
+        LastDrop::Done => true,
+    };
+    Ok(parked && handed)
 }
