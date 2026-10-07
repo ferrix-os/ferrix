@@ -10,21 +10,35 @@
 //!
 //! The kernel does the rest at the installed disk's first boot, as it does
 //! for every `run`: it finds `ferrix-root`, now on a partition, and unpacks
-//! the initramfs onto it.
+//! the initramfs onto it. The live medium's command line keeps `/` in
+//! memory (`ferrix.root=tmpfs`); the copy on the installed disk says
+//! `ferrix.root=btrfs` instead, rewritten in place in the copied volume.
 //!
 //! ```text
 //! ferrix-install [--yes] [--from /dev/vdX] /dev/vdY
 //! ```
 //!
-//! Without `--from` the live disk is the one whose first sector is the FAT32
-//! boot sector `xtask` writes (OEM name `FERRIX`). Without `--yes` it asks
-//! before it erases anything.
+//! Without `--from` the live system is found by itself: the partition named
+//! `FERRIX-LIVE` that `xtask live` writes (`docs/INSTALLER.md` §3.1), or a
+//! whole disk whose first sector is the FAT32 boot sector `xtask` writes
+//! (OEM name `FERRIX`), the image of `build --installer`. Either way it must
+//! be the only one. A target that is the live disk, or holds the live
+//! partition, is refused. Without `--yes` it asks before it erases anything.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;
 
-use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM, Partition, usable, write_table};
+use ferrix_partition::{
+    ESP, Guid, LINUX_FILESYSTEM, Partition, parse_entries, parse_header, usable, write_table,
+};
+
+/// The live medium's EFI system partition's name (`tools/common/xtask/src/installer.rs`).
+const LIVE_NAME: &str = "FERRIX-LIVE";
+/// The live session's root option, and what the installed system's says in
+/// its place: the same length, so the file is rewritten in place.
+const LIVE_ROOT: &[u8] = b"ferrix.root=tmpfs";
+const INSTALLED_ROOT: &[u8] = b"ferrix.root=btrfs";
 
 /// The empty root volume, as `xtask` packs it: records of a little-endian
 /// `u64` offset and the 4 KiB block there; zeros elsewhere.
@@ -84,10 +98,17 @@ fn run() -> Result<(), String> {
     let asked = parse()?;
     let live = match asked.from {
         Some(from) => from,
-        None => find_live()?,
+        None => {
+            let found = find_live()?;
+            println!("ferrix-install: the live system is on {found}");
+            found
+        }
     };
     if live == asked.target {
         return Err(format!("{live} is the disk this system booted from"));
+    }
+    if holds(&asked.target, &live) {
+        return Err(format!("{} holds {live}, the live system", asked.target));
     }
     if mounted(&asked.target)? {
         return Err(format!("{} has something mounted from it", asked.target));
@@ -121,8 +142,8 @@ fn run() -> Result<(), String> {
          root of {} MiB",
         asked.target,
         size >> 20,
-        (esp_last - esp_first + 1) * SECTOR >> 20,
-        (root_last - root_first + 1) * SECTOR >> 20
+        ((esp_last - esp_first + 1) * SECTOR) >> 20,
+        ((root_last - root_first + 1) * SECTOR) >> 20
     );
     if !asked.yes && !confirm()? {
         return Err("nothing was written".into());
@@ -155,6 +176,17 @@ fn run() -> Result<(), String> {
     step("copying the EFI system partition", || {
         copy_esp(&mut source, &mut disk, esp_bytes, esp_first)
     })?;
+    step("setting the installed system's command line", || {
+        if installed_cmdline(&mut disk, esp_first * SECTOR)? {
+            println!(
+                "ferrix-install: FERRIX/CMDLINE.TXT on {} says {} instead of {}",
+                asked.target,
+                String::from_utf8_lossy(INSTALLED_ROOT),
+                String::from_utf8_lossy(LIVE_ROOT)
+            );
+        }
+        Ok(())
+    })?;
     step("writing the root volume", || {
         write_root(&mut disk, root_first * SECTOR)
     })?;
@@ -177,22 +209,202 @@ fn step(what: &str, work: impl FnOnce() -> io::Result<()>) -> Result<(), String>
     work().map_err(|e| format!("{what}: {e}"))
 }
 
-/// The live disk: a `vd` disk whose first sector is `xtask`'s boot sector.
+/// The live system's FAT volume: on each `vd` disk, the partition named
+/// [`LIVE_NAME`] that holds `xtask`'s boot sector, or the whole disk when it
+/// starts with that boot sector itself. Exactly one must be found.
 fn find_live() -> Result<String, String> {
+    let mut found = Vec::new();
     for letter in b'a'..=b'z' {
         let path = format!("/dev/vd{}", letter as char);
         let Ok(mut disk) = File::open(&path) else {
             continue;
         };
-        let mut sector = [0_u8; 512];
-        if disk.read_exact(&mut sector).is_ok()
-            && &sector[3..11] == b"FERRIX  "
-            && &sector[82..90] == b"FAT32   "
-        {
-            return Ok(path);
+        if is_xtask_volume(&mut disk, 0) {
+            found.push(path);
+        } else if let Some(number) = live_partition(&mut disk) {
+            found.push(format!("{path}{number}"));
         }
     }
-    Err("no live disk found; name it with --from".into())
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Err("no live disk found; name it with --from".into()),
+        _ => Err(format!(
+            "more than one live system: {}; name one with --from",
+            found.join(", ")
+        )),
+    }
+}
+
+/// Whether the sector at `lba` is the FAT32 boot sector `xtask` writes.
+fn is_xtask_volume(disk: &mut File, lba: u64) -> bool {
+    let mut sector = [0_u8; 512];
+    disk.seek(SeekFrom::Start(lba * SECTOR)).is_ok()
+        && disk.read_exact(&mut sector).is_ok()
+        && &sector[3..11] == b"FERRIX  "
+        && &sector[82..90] == b"FAT32   "
+}
+
+/// The number of `disk`'s partition named [`LIVE_NAME`], an EFI system
+/// partition holding `xtask`'s FAT volume, as the kernel numbers it.
+fn live_partition(disk: &mut File) -> Option<u32> {
+    let sectors = disk.seek(SeekFrom::End(0)).ok()? / SECTOR;
+    let mut sector = [0_u8; 512];
+    disk.seek(SeekFrom::Start(SECTOR)).ok()?;
+    disk.read_exact(&mut sector).ok()?;
+    let header = parse_header(&sector, sectors).ok()?;
+    let mut array = vec![0_u8; header.entries_bytes()];
+    disk.seek(SeekFrom::Start(header.entries_at.checked_mul(SECTOR)?))
+        .ok()?;
+    disk.read_exact(&mut array).ok()?;
+    let named = Partition::new(ESP, Guid([0; 16]), 0, 0, LIVE_NAME).name;
+    let (index, partition) = parse_entries(&header, &array)
+        .ok()?
+        .into_iter()
+        .find(|(_, partition)| partition.type_guid == ESP && partition.name == named)?;
+    is_xtask_volume(disk, partition.first).then_some(index + 1)
+}
+
+/// Whether `target` is the whole disk `live`, a partition, is on: `vdd`
+/// holds `vdd1`.
+fn holds(target: &str, live: &str) -> bool {
+    live.strip_prefix(target)
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Rewrite `FERRIX/CMDLINE.TXT` in the FAT32 volume at byte `at` of `disk`
+/// so that the installed system keeps `/` on its disk: [`LIVE_ROOT`] becomes
+/// [`INSTALLED_ROOT`]. Whether there was one to rewrite: the MVP's image
+/// carries no command line, and needs none.
+///
+/// A reader of `xtask`'s volumes only: 512-byte sectors and 8.3 names, which
+/// is all `xtask`'s FAT writer makes. `docs/INSTALLER.md` §5.4's FAT library
+/// takes its place.
+fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
+    let volume = Fat::read(disk, at)?;
+    let Some(directory) = volume.find(disk, volume.root, b"FERRIX     ")? else {
+        return Ok(false);
+    };
+    let Some(file) = volume.find(disk, directory.cluster, b"CMDLINE TXT")? else {
+        return Ok(false);
+    };
+    let size = usize::try_from(file.size).map_err(io::Error::other)?;
+    if size > volume.cluster_bytes() {
+        return Err(io::Error::other("CMDLINE.TXT is larger than a cluster"));
+    }
+    let mut text = vec![0_u8; size];
+    let offset = volume.cluster_offset(file.cluster)?;
+    disk.seek(SeekFrom::Start(offset))?;
+    disk.read_exact(&mut text)?;
+    let Some(position) = text
+        .windows(LIVE_ROOT.len())
+        .position(|window| window == LIVE_ROOT)
+    else {
+        return Ok(false);
+    };
+    text[position..position + INSTALLED_ROOT.len()].copy_from_slice(INSTALLED_ROOT);
+    write_at(disk, offset, &text)?;
+    Ok(true)
+}
+
+/// A FAT32 volume's geometry, from its boot sector.
+struct Fat {
+    /// Where the volume starts on the disk, in bytes.
+    at: u64,
+    sectors_per_cluster: u64,
+    /// Where the first allocation table starts, in bytes from `at`.
+    table: u64,
+    /// Where cluster 2 starts, in bytes from `at`.
+    data: u64,
+    /// The root directory's first cluster.
+    root: u32,
+}
+
+/// A directory entry found: its first cluster and size.
+struct Entry {
+    cluster: u32,
+    size: u32,
+}
+
+impl Fat {
+    /// Clusters followed in one chain before it is taken for a loop.
+    const LONGEST: usize = 1 << 16;
+
+    fn read(disk: &mut File, at: u64) -> io::Result<Fat> {
+        let mut sector = [0_u8; 512];
+        disk.seek(SeekFrom::Start(at))?;
+        disk.read_exact(&mut sector)?;
+        let u16_at = |i: usize| u64::from(u16::from_le_bytes([sector[i], sector[i + 1]]));
+        let u32_at =
+            |i: usize| u32::from_le_bytes([sector[i], sector[i + 1], sector[i + 2], sector[i + 3]]);
+        let sectors_per_cluster = u64::from(sector[13]);
+        if u16_at(11) != SECTOR || sectors_per_cluster == 0 || &sector[82..90] != b"FAT32   " {
+            return Err(io::Error::other("not a FAT32 volume of 512-byte sectors"));
+        }
+        let reserved = u16_at(14);
+        let tables = u64::from(sector[16]);
+        let table_sectors = u64::from(u32_at(36));
+        Ok(Fat {
+            at,
+            sectors_per_cluster,
+            table: reserved * SECTOR,
+            data: (reserved + tables * table_sectors) * SECTOR,
+            root: u32_at(44),
+        })
+    }
+
+    fn cluster_bytes(&self) -> usize {
+        usize::try_from(self.sectors_per_cluster * SECTOR).unwrap_or(usize::MAX)
+    }
+
+    fn cluster_offset(&self, cluster: u32) -> io::Result<u64> {
+        let index = u64::from(cluster)
+            .checked_sub(2)
+            .ok_or_else(|| io::Error::other("a cluster number below 2"))?;
+        Ok(self.at + self.data + index * self.sectors_per_cluster * SECTOR)
+    }
+
+    /// The cluster after `cluster` in its chain, or `None` at its end.
+    fn next(&self, disk: &mut File, cluster: u32) -> io::Result<Option<u32>> {
+        let mut entry = [0_u8; 4];
+        disk.seek(SeekFrom::Start(
+            self.at + self.table + u64::from(cluster) * 4,
+        ))?;
+        disk.read_exact(&mut entry)?;
+        let value = u32::from_le_bytes(entry) & 0x0FFF_FFFF;
+        Ok((2..0x0FFF_FFF8).contains(&value).then_some(value))
+    }
+
+    /// The entry named `name` (8.3, space-padded) in the directory starting
+    /// at `directory`, skipping the volume label and long-name entries.
+    fn find(&self, disk: &mut File, directory: u32, name: &[u8; 11]) -> io::Result<Option<Entry>> {
+        let mut cluster = directory;
+        let mut bytes = vec![0_u8; self.cluster_bytes()];
+        for _ in 0..Self::LONGEST {
+            disk.seek(SeekFrom::Start(self.cluster_offset(cluster)?))?;
+            disk.read_exact(&mut bytes)?;
+            for entry in bytes.chunks_exact(32) {
+                match entry[0] {
+                    0x00 => return Ok(None),
+                    0xE5 => continue,
+                    _ => {}
+                }
+                if entry[11] & 0x08 != 0 || &entry[..11] != name {
+                    continue;
+                }
+                let high = u32::from(u16::from_le_bytes([entry[20], entry[21]]));
+                let low = u32::from(u16::from_le_bytes([entry[26], entry[27]]));
+                return Ok(Some(Entry {
+                    cluster: (high << 16) | low,
+                    size: u32::from_le_bytes([entry[28], entry[29], entry[30], entry[31]]),
+                }));
+            }
+            match self.next(disk, cluster)? {
+                Some(next) => cluster = next,
+                None => return Ok(None),
+            }
+        }
+        Err(io::Error::other("a directory's cluster chain does not end"))
+    }
 }
 
 /// Whether anything is mounted from `disk` or one of its partitions.

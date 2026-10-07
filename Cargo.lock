@@ -862,6 +862,7 @@ dependencies = [
  "ferrix-elf",
  "ferrix-native-abi",
  "ferrix-netwire",
+ "ferrix-partition",
  "ferrix-pkg",
  "ferrix-vdagent",
 ]

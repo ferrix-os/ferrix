@@ -207,6 +207,8 @@ USAGE:
 
 COMMANDS:
     build         Compile the loader and kernel and write a bootable image
+    live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and
+                  an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)
     run           Boot the image under QEMU, attached to the terminal
     run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
     run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
@@ -253,7 +255,7 @@ COMMANDS:
                   docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
                   (with --sabotage NAME, against an authd with that refusal turned off, which must fail)
     test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|all; gpu if not given)
-    test-install  Install the live image on a blank disk with ferrix-install, then boot that disk alone (x86_64)
+    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64)
     test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
     test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
                   image runs a 32-bit x86 build of it)
@@ -649,6 +651,7 @@ fn run() -> Result<()> {
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
+        "live" => installer::live(&args),
         "test-install" => installer::test_install(&args),
         "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),

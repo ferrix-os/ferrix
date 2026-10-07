@@ -47,6 +47,10 @@ ferrix-argon2.workspace = true
 # will be the same code, so the images this builds and the installs it will
 # make cannot disagree about what a package is.
 ferrix-pkg.workspace = true
+# GUID partition tables: `live` lays the live medium out with the writer
+# `ferrix-install` partitions a target with and the kernel's reader checks,
+# so the medium, the installer and the kernel cannot disagree about a table.
+ferrix-partition.workspace = true
 
 [dev-dependencies]
 # The native ABI's numbers, which a host test holds nvrm's C header to

@@ -590,7 +590,33 @@ tokens").** What installs Ferrix in a VM today, built from what exists:
   one, then boots the blank one alone as a virtio disk through OVMF and
   requires `/ is btrfs on vdd2`. Not in `check` yet.
 
+**I6a, the live medium on a GUID partition table (2026-10-07, po10-install,
+5 points).** §3.1's `.img`, without the ISO yet:
+
+* `cargo xtask live` writes `build/<arch>/ferrix-live.img` for x86-64 and
+  AArch64: a GUID partition table whose one partition, at 1 MiB, is an EFI
+  system partition named `FERRIX-LIVE`, holding the image `build
+  --installer` writes with its BPB's hidden sectors set, and
+  `FERRIX/CMDLINE.TXT` saying `ferrix.root=tmpfs`. The live session keeps
+  `/` in memory, so booting the medium never mounts or installs onto a disk
+  the machine already has. The partition's name does what §3.1's ESP label
+  was to do. The disk and partition GUIDs are fixed, so two builds of one
+  tree write the same image.
+* `ferrix-install` without `--from` finds the live system by itself: the
+  `FERRIX-LIVE` partition holding `xtask`'s FAT volume, or, for the MVP's
+  image, a whole disk starting with it; more than one is an error. It
+  refuses a target that holds the live partition (`/dev/vdd` for
+  `/dev/vdd1`), and on the installed disk's copy of the volume it rewrites
+  `ferrix.root=tmpfs` to `ferrix.root=btrfs` in place, with a reader of
+  `xtask`'s FAT volumes that §5.4's library (I4) replaces, as it replaces
+  the copied `CMDLINE.TXT` with §4.2 step 5's `EFI/ferrix/`.
+* `test-install` boots the medium alone first, as a virtio disk through
+  OVMF, and requires `vdd1` published and the tmpfs command line read from
+  it; then asks the installer for `/dev/vdd`, which it must refuse, then
+  installs on `/dev/vde` with the live system found by itself. A host test
+  reads the medium's table back with `ferrix-partition`.
+
 Left for later, in §9's order: a root file system the size of its partition
-(I3), `BLKRRPART`, the ISO and a GPT live image (I6), the boot menu (I8),
+(I3), `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),
 shrinking (S1–S6) and real PCs (H0–H7).
