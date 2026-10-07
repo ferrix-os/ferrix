@@ -233,7 +233,15 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     // Every thread this check filtered, a made, an inherited and an ended
     // one, has gone: the count the entry's first look reads is back where it
     // was, so a kernel whose filtered threads have all ended looks for no
-    // thread at a call again.
+    // thread at a call again. Each scenario's task was reaped before it
+    // returned, which drops its thread; the reap is given a bounded while
+    // more on a processor that frees a task's stack late. Nothing else runs
+    // filtered during the boot's checks.
+    let patience = crate::timer::now_nanos().saturating_add(SETTLE_NANOS * 50);
+    while seccomp::filtered_threads() != before && crate::timer::now_nanos() < patience {
+        sched::sleep_for(SETTLE_NANOS);
+        let _ = sched::reap();
+    }
     if seccomp::filtered_threads() != before {
         return Err("the count of filtered threads did not come back once they had gone");
     }
@@ -475,12 +483,33 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
 
     status_shows(&env.process, 2, 2)?;
 
+    // The thread the chain was installed on goes while the two made of it
+    // live: they are still filtered, so a call still looks for its thread
+    // (`seccomp::any_filtered`, which `check` and the fast path's T2 read
+    // first). Counted as each was made, not only as a filter was installed.
+    let Env {
+        process: filtered,
+        thread: installer,
+        ..
+    } = env;
+    drop(installer);
+    if !seccomp::any_filtered() {
+        return Err(
+            "the threads that kept a chain were not looked for at a call once its installer had gone",
+        );
+    }
+    if judge_thread(&child_thread, getppid) != Some(EPERM)
+        || judge_thread(&sibling, getppid) != Some(EPERM)
+    {
+        return Err("a thread that kept its creator's chain lost it once its creator had gone");
+    }
+
     // A process nothing filtered reads none.
     let clean = Env::new()?;
     status_shows(&clean.process, 0, 0)?;
     process::kill(&clean.process, 137);
     process::kill(&child, 137);
-    process::kill(&env.process, 137);
+    process::kill(&filtered, 137);
     Ok(())
 }
 
