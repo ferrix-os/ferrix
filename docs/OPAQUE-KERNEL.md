@@ -4109,6 +4109,15 @@ round trip, 60 to 80 a direction. Records under
 `docs/hotpaths/results/ipc-round-trip/6bc2646211ca/`, logs
 `~/.local/share/ferrix/logs/po9-sel/dses/` on nazuna.
 
+**Reopened for `FS` and `GS` (2026-10-07, 3c).** po10-sel-cert's design
+verdict (ledger line 445, K1 to K10) gave the same skip for `FS` and `GS`,
+with the bases still written from the record at every switch and every
+processor loading both with 0 at bring-up. Answer 12 is amended again, to:
+*the segment skip does not come back, except `DS`, `ES`, `FS` and `GS`
+skipped 0 to 0 by the processor's own registers, the `FS` and `GS` bases
+written after at every switch.* Condition 8 stands unchanged: no base is
+ever compared with anything.
+
 **Points:** 2 to 3. **Saving:** *guess* 0.07 to 0.14 us a round trip, from
 the span: the two `rdmsr`s a switch go; the writes stay.
 
@@ -4230,12 +4239,26 @@ extended as line 393's note and line 398 sketched, with condition 8 and
   `reset_user_state` (`execve`) goes through it with zeros and zero bases,
   so a new image whose `FS` read 0 keeps it, and one that held 3 or a TLS
   selector is loaded over.
-- *The count (A4).* A second per-processor counter, `FSGS_SKIPS`, kept as
-  `SELECTOR_SKIPS` is (a load and a store with interrupts masked, no
-  locked write), counts the switches that left `FS` or `GS` unloaded; it is
-  read only by the check and the fast path's counts line, never by the
-  switch. Both switches -- the general path's and the fast path's direct
-  one -- go through the one `restore_user_state` (G5).
+- *The count (A4).* Two more per-processor counters, `FS_SKIPS` and
+  `GS_SKIPS`, kept as `SELECTOR_SKIPS` is (a load and a store with
+  interrupts masked, no locked write), count the switches that left `FS`,
+  and those that left `GS`, unloaded, apart, so a skip taken for one
+  register alone cannot pass the check (K5); they are read only by the
+  check and the fast path's counts line, never by the switch. Both
+  switches -- the general path's and the fast path's direct one -- go
+  through the one `restore_user_state` (G5).
+- *The bring-up load (A5, the consultant's K1).* Nothing loaded `FS` or
+  `GS` at bring-up: `reload_segments` loads `DS`, `ES` and `SS` with the
+  kernel's data selector, and the trampoline the same, so an application
+  processor ran with `INIT`'s `FS` and `GS` (selector 0 over a usable
+  flat data segment, limit `FFFF`) and the boot processor with whatever
+  the firmware left, until a switch loaded one. With the skip, a processor
+  on which no program ever held a non-zero `FS` or `GS` would keep that
+  hidden part where today's load replaces it. So every processor loads the
+  null selector into `FS` and `GS` explicitly, in long mode, in
+  `set_cpu_local` before it writes its per-CPU `GS_BASE` (a null `GS`
+  load clears the base on Intel and on `NullSelectorClearsBase` parts):
+  from then on the registers read 0 because they were loaded with 0.
 
 *Why it leaks nothing (the FDP_RIP.2 argument, both vendors).* It is line
 393's, and holds for `FS` and `GS` as for `DS` and `ES`, with one part
@@ -4248,8 +4271,10 @@ added for the base:
    selector the kernel ever puts in `FS` or `GS` is a user one checked by
    `gdt::loadable` or 0 (the six load sites above; the kernel never loads
    one of its own), so that rule never applies. `VMRUN`/`#VMEXIT` and
-   `RSM` restore the registers whole. So a `FS` or `GS` that reads 0 was
-   last loaded with 0.
+   `RSM` restore the registers whole. And A5 loads both with 0 on every
+   processor before any program runs there (`DS`, `ES` and `SS` hold the
+   kernel's data selector from `reload_segments`, which the first switch
+   loads over). So a `FS` or `GS` that reads 0 was last loaded with 0.
 2. A vendor's null load acts on the hidden part by a rule f that depends
    only on the selector (Intel: unusable, base cleared in 64-bit mode;
    AMD: base cleared where `NullSelectorClearsBase`, CPUID `0x8000_0021`
@@ -4308,18 +4333,39 @@ shape with `FS` and `GS`, and its bases set by `arch_prctl`
   after the bench names the `FS`/`GS` skips the direct switch took.
   Control: the skip removed (the load always taken), which must fire "no
   switch between two programs with null FS and GS left them unloaded".
+- *The `GS` base (the consultant's K2).* Ferrix has no `ARCH_SET_GS`
+  (`arch_prctl` answers `ARCH_SET_FS` alone, and `paranoid.rs` rests on
+  that), and none is added here: a 64-bit program's recorded `GS` base is
+  always 0. So the `GS` half of (i) to (iii) checks that base with what
+  exists: the reader reads `%gs:0x400100` and compares it with its own
+  word at `0x400100`, which only a base of 0 gives, never another
+  program's descriptor base. The `GS` base-write control (the write
+  skipped with the load) can fire only on a processor whose null load
+  keeps the base; on `NullSelectorClearsBase` parts and under TCG the
+  null load the other program made already cleared it, so the control
+  cannot fire there, the `fsgs` line prints the vendor and CPUID
+  `0x8000_0021` `EAX[6]`, and a BACKLOG row records the run owed on an
+  AMD part without it. The `FS` base-write control must fire everywhere.
+- (vi, K1) the compatibility-mode reader of (iii) also runs through `FS`
+  and through `GS` on an application processor before any stage 9 case
+  runs there (at `--smp 2` or more): `SIGSEGV`. Control: A5's bring-up
+  load removed, which must fire under KVM on the AMD reference host.
 - 3b's `fsbase` checks stay as they are and now run through the skip (both
   programs hold 0): two programs trading `FS` bases 10,000 times, the
   cleared base coming back (Linux's rule, no base read), and condition 8's
   case. Their controls `c4`, `c6`, `c8` are re-fired on the branch, since
   the path under them changed.
 
-*Rows.* L.x86_64.8 restated: "`DS`, `ES`, `FS` and `GS` are loaded from
-the record unless the processor's selector and the record's are both 0;
-the `FS` and `GS` bases are written from the record at every switch where
-the record's selector is 0". Its criterion names the cases above. No new
-id unless the consultant wants the `FS`/`GS` half as a row of its own
-(then L.x86_64.165, held at line 412, reserved first). L.x86_64.9, .61 and
+*Rows (split, the consultant's K6).* L.x86_64.8 stays the `DS`/`ES`
+row with the `selector` line. L.x86_64.165, reserved on main for
+po9-sel's stream (`requirement-reservations.json`) and released in the
+commit that writes it: "`FS` and `GS` are each loaded from the record
+unless the processor's selector and the record's are both 0; the `FS`
+and `GS` bases are written from the record at every switch where the
+record's selector is 0, skipped or not; and every processor loads the
+null selector into `FS` and `GS` before it writes its per-CPU base",
+its criterion naming the `fsgs` line's cases and what the
+compatibility-mode case decides per hypervisor. L.x86_64.9, .61 and
 .158 unchanged in substance (the bases are still the record's and still
 written at every switch); their check list gains (iii). ADV_ARC's and the
 Security Target's FDP_RIP.2 mechanism text and the vulnerability
@@ -4419,6 +4465,94 @@ they can be without code.
 3. Is deferring slice B with the figures above acceptable, or is the
    paranoid-entry design (F2) wanted in this round regardless of its
    saving?
+
+**The consultant's design verdict (po10-sel-cert, ledger line 445).**
+Slice A may be built under K1 to K10, with S1 to S7 and E1 to E6 read
+for `FS` and `GS`, and G1 to G11. Two claims of the draft did not hold on
+the code: point 1 (nothing loaded `FS` or `GS` at bring-up; K1, now A5)
+and the fixture's `ARCH_SET_GS`, which does not exist (K2, the `GS` base
+checked as above, no new interface). The row is split (K6,
+L.x86_64.165). Slice B is deferred (K9): `CR4.FSGSBASE` stays clear,
+`AT_HWCAP2` 0, `paranoid.rs`'s rule stands, and slice B comes back as a
+design of its own, ablation 3 re-measured on a quiet host after
+po9/fx0902 lands. The ablation's figure is not counted for the landing
+(K8): the built tip is measured against its base.
+
+**As built (branch `po10/fsgs`, po10-sel, on main f8b44e04c).**
+- `load_selectors` (`switch.rs`) takes `FS` and `GS` from the same
+  `cpu::read_data_selectors` the `DS`/`ES` skip makes, and leaves each
+  unloaded only where it and `gdt::loadable`'s output are both exactly 0;
+  a skipped `GS` drops the whole `load_user_gs`. The base writes
+  (`set_thread_pointer`, `set_program_gs_base`) stand where they were,
+  under `fs == 0` and `gs == 0`, skipped or not (A1, A2, K3).
+  `load_program_selectors`, `enter_compat_segments` and `set_thread_area`'s
+  reload are unchanged (A3).
+- `FS_SKIPS` and `GS_SKIPS`, per processor, counted apart (K5);
+  `fs_gs_skips` for the check, and `selector_skips_total` now answers
+  `[DS or ES, FS, GS]`, which the fast path's counts line prints as a
+  second line, "fastpath switches that left FS unloaded, 0 over 0: N; GS:
+  M" (A4).
+- `set_cpu_local` (`x86_64/mod.rs`) calls `cpu::load_null_fs_gs` first, on
+  every processor, before it writes `GS_BASE`: `load_fs(0)`, then
+  `load_user_gs(0)`, whose `swapgs` pair points the null load at
+  `KERNEL_GS_BASE` and leaves `GS_BASE` as it was for the write after
+  (A5, K1). No new assembly.
+- The checks are `run_fs_gs` in `switch/check.rs` (stage 9, the `fsgs`
+  line), on one new 64-bit fixture (`FS_GS_PROGRAM`, modes `L`, `R`, `T`,
+  `C`, `G`) and one i386 fixture (`FS_GS_PROGRAM_I386`), cases (vi), (ii),
+  (i), (iii), its compatibility-mode half, (iv) and (v) in that order. The
+  line says whether the compatibility-mode reads were decided, the
+  application processor the bring-up case ran on, and the vendor with
+  CPUID's `NullSelectorClearsBase` (under KVM the model's bit, not the
+  silicon's: nazuna's guest reads 0 while the Ryzen 9 9900X clears).
+- Row: L.x86_64.165 (new, released from the reservation in the same
+  commit); L.x86_64.8's note points at it.
+
+*Controls (K4, on 0481f8183, logs `logs/queue/po10-sel-<name>-<accel>-<n>.log`
+on nazuna).* FIRED, with the text named, on KVM and TCG unless said:
+the `FS` skip on "null" and the `GS` skip on "null" (`f1-null`,
+`g1-null`: "read the RPL bits of a null selector another program left");
+each on the record alone (`f2-record`, `g2-record`: "read the USER_DS
+another program left"); each on the processor alone (`f3-held` on both,
+`g3-held` on KVM: "an i386 program did not read its own thread-local
+selector and base in FS and GS"; under TCG `g3-held` stops earlier, in
+stage 3's `set_thread_area` check, which loads `GS` itself, so the
+expected text is not reached: a failure, not a pass); each skip removed
+(`f4-off`: "left FS unloaded", `g4-off`: "left GS unloaded"); the `FS` base
+write skipped with the load (`f5-base`: "two programs trading one
+processor did not each read their own FS base", 3b's case running first).
+Re-fired on KVM since `load_selectors` changed: the `DS`/`ES` controls of
+line 414 (`d1-null`, `d2-record`, `d3-held`, `d4-off`, each with its old
+text) and 3b's `b4-write` ("did not each read their own FS base"),
+`b6-read` ("did not get its recorded base back") and `b8-last`, which now
+fires in condition 8's own case ("a program whose recorded FS base equals
+the one last written ran on the base another program left"), because the
+switch no longer loads a null `FS` over the base. DID NOT FIRE: `g5-base` (the `GS` base write skipped with the load)
+on KVM and TCG, because a null load clears the base on the reference host
+and under TCG, so the base another program left is 0, the reader's own
+(K2 foresaw it); and `k1-bringup` (A5's load removed) on KVM, which K1
+required to fire: the compatibility-mode reads
+through a null `FS` and `GS` on processor 3 still faulted. Either the
+processor faults on a null selector in compatibility mode whatever the
+hidden part (as the `DS` case suggests), or processor 3 had already had
+`FS` and `GS` loaded with 0 by then -- `load_program_selectors` at a
+signal's entry and return, or a switch to a program that held a non-zero
+selector, both load unconditionally -- and stage 9 comes too late to be the
+first program there. The bring-up load stays as the argument's ground (a
+`FS` or `GS` reading 0 was loaded with 0), accepted on argument and code
+review alone (po10-sel-cert, ledger line 498, L2), with a BACKLOG row for
+a run where the control can fire; its case cannot show it on this host.
+
+*Measured (K8, G8).* The built tip 09da3bbcd against its base main
+f8b44e04c, in a quiet window the PO made by pausing the fleet
+(2026-10-07 20:11 to 20:14 local), turn about, 6 rounds, fast path on,
+KVM, `--smp 1`, load 0.9 to 4.3 (logs `~/.local/share/ferrix/logs/po10/quietbench.out`
+and `logs/po9-obj/quiet-fsgs-{mine,base}-N.log` on nazuna): the skip 858,
+1,068, 888, 1,068, 1,048, 1,068 ns; main 1,238, 1,228, 998, 1,228, 1,238,
+1,238. By boot mode: the high mode 1,048 to 1,068 (4 boots) against 1,228
+to 1,238 (5), **-160 to -190 ns a round trip**; the low mode 858 and 888
+(2 boots) against 998 (1), -110 to -140, 2 against 1 boots, not claimed.
+The consultant's code verdict: OK IF L1 to L5 (ledger line 498).
 
 #### The parallel split and the landing order
 

@@ -59,7 +59,7 @@ pub(crate) const FAST_WRITE_READ: bool = false;
 
 /// The switches that left `DS` and `ES` unloaded (x86-64's `DS`/`ES` skip,
 /// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
-pub(crate) const fn selector_skips_total() -> Option<u64> {
+pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
     None
 }
 

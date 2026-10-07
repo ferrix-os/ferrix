@@ -616,6 +616,24 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P3 — hardware variants and later stages
 
+* The `FS`/`GS` skip's `GS` base control on a processor that keeps the base
+  over a null load (`docs/OPAQUE-KERNEL.md` §9.8 3c; po10-sel-cert, ledger
+  line 445, K2): an AMD part without `NullSelectorClearsBase` (CPUID
+  `0x8000_0021` `EAX[6]` clear, Zen 2 and older), on hardware or under KVM
+  there. On nazuna's Ryzen 9 9900X and under TCG a null load clears the
+  base, so the control (the `GS` base write skipped with the load) cannot
+  fire; the `fsgs` line prints the vendor and the bit. Owner: whoever next
+  has such a machine.
+* The `FS`/`GS` skip's bring-up control `k1-bringup` (A5's null load of `FS`
+  and `GS` in `set_cpu_local` removed; §9.8 3c; po10-sel-cert, ledger lines
+  445 K1 and 498 L2) did not fire on nazuna under KVM: the compatibility-mode
+  reads on processor 3 still faulted, either because the processor faults a
+  null selector there whatever the hidden part, or because earlier stages
+  had loaded `FS` and `GS` with 0 there. The load stands on argument. Owed: a
+  run where the control can fire -- KVM on an Intel host (VMX checks the
+  unusable bit, and `INIT` leaves `FS`/`GS` usable), hardware, or this host
+  with the case made truly first on a processor kept free of programs until
+  it runs.
 * GICv3 and its redistributors, with a second AArch64 boot configuration
   (`gic-version=3`); x2APIC; TSC-deadline. Real AArch64 hardware is GICv3.
 * Stage 13's namespaces and seccomp (its cgroups are in), stage 14

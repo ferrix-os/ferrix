@@ -224,10 +224,13 @@ program left (H.SCHED.8, H.SCHED.12). The refinement was widened from frames
 by the customer on 2026-10-02 (`docs/OPAQUE-KERNEL.md` §9.8, question 10);
 ADV_ARC describes the mechanism: the switch's restore, the reset of a state
 saved only in part, the `FS` and `GS` bases written from the task's record
-at every switch, and the data selectors loaded from the record, `DS` and `ES`
-each left unloaded only where the selector the processor holds, read in the
-same switch, and the record's are both exactly 0 (`docs/OPAQUE-KERNEL.md`
-§9.8, 3b: a null load over a null selector leaves the hidden part as it is).
+at every switch, and the data selectors loaded from the record, each of
+`DS`, `ES`, `FS` and `GS` left unloaded only where the selector the processor
+holds, read in the same switch, and the record's are both exactly 0
+(`docs/OPAQUE-KERNEL.md` §9.8, 3b and 3c: a null load over a null selector
+leaves the hidden part as it is, every processor loads `FS` and `GS` with
+the null selector at bring-up, and the `FS` and `GS` bases are written from
+the record after, skipped or not).
 
 **FDP_SDI.2** Stored data integrity monitoring and action. The TSF shall
 monitor user data stored in containers controlled by the TSF for **a

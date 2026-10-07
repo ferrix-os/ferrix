@@ -146,8 +146,8 @@ package FerrixX8664Requirements {
             doc /* Restated for the DS/ES skip (OPAQUE-KERNEL.md §9.8, 3b; the
                 consultant's S1-S7, ledger lines 393, 398 and 412): DS and ES are
                 compared with the processor's own registers, read in the same
-                restore, never with a remembered value; FS and GS are loaded at
-                every switch as before. */
+                restore, never with a remembered value. FS and GS are
+                L.x86_64.165's (3c). */
             attribute :>> statement = "save_user_state shall save the outgoing
                 thread's thread-local slots and data selectors, and
                 restore_user_state shall write the incoming thread's slots and
@@ -355,6 +355,41 @@ package FerrixX8664Requirements {
             attribute :>> unit = ("arch::x86_64::switch::restore_user_state",
                 "arch::x86_64::switch::load_selectors",
                 "arch::x86_64::switch::save_user_state");
+        }
+        requirement <'L.x86_64.165'> fsAndGsSkippedZeroOverZero : ItemLowLevel {
+            doc /* The FS/GS skip (OPAQUE-KERNEL.md §9.8, 3c; the consultant's
+                design verdict, ledger line 445, K1-K10, after lines 393, 398
+                and 412). Split from L.x86_64.8 (K6). */
+            attribute :>> statement = "restore_user_state shall load FS and GS
+                from the record unless the selector the processor holds, read in
+                the same restore, and the record's are both exactly 0; shall
+                write the FS and GS bases from the record wherever the record's
+                selector is 0, whether the load was skipped or not; and every
+                processor shall load the null selector into FS and GS before it
+                writes its per-CPU GS base.";
+            attribute :>> criterion = "Pinned beside a 64-bit reader whose FS
+                and GS are 0 and whose FS base is its own page, a program that
+                leaves USER_DS, one that leaves 3, one that loads a based
+                thread-local descriptor and then 0 into FS and GS, and an i386
+                program with a thread-local selector in GS and FS: the reader
+                reads FS and GS 0, its own %fs:0 word and its GS base of 0
+                (%gs:0x400100 equal to its own word there) after each of 1,000
+                yields, and the i386 program its own selector and %gs:0 and %fs:0
+                words; a 64-bit program with FS (GS) 0 that far-returns into
+                compatibility mode and reads through it ends by SIGSEGV under KVM
+                or on hardware, beside the descriptor program and on an
+                application processor before any stage 9 case runs there (under
+                QEMU's TCG, which
+                checks no data segment, not decided and the fsgs line says so);
+                and two readers trading the processor count more than 0 switches
+                that left FS unloaded and more than 0 that left GS unloaded.";
+            attribute :>> parent = ("H.SCHED.7", "H.SCHED.8");
+            attribute :>> unit = ("arch::x86_64::switch::load_selectors",
+                "arch::x86_64::switch::restore_user_state",
+                "arch::x86_64::switch::fs_gs_skips",
+                "arch::x86_64::switch::selector_skips_total",
+                "arch::x86_64::cpu::load_null_fs_gs",
+                "arch::x86_64::set_cpu_local");
         }
         requirement <'L.x86_64.159'> theFastPathIsEnteredFromSyscallOnly : ItemLowLevel {
             attribute :>> statement = "ferrix_syscall_entry shall call the fast path

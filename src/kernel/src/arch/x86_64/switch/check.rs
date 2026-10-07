@@ -27,7 +27,7 @@
 //! consultant's S4): a program beside one that left 3, `USER_DS`, or a based
 //! descriptor and then 0 in `DS` and `ES` reads its own; an i386 and a 64-bit
 //! program trading the processor each read their own; and two programs with
-//! null `DS` and `ES` see the skip taken.
+//! null `DS` and `ES` see the skip taken. The same for `FS` and `GS` (3c).
 
 use alloc::sync::Arc;
 
@@ -1728,4 +1728,586 @@ fn under_tcg() -> bool {
             u32::from_le_bytes(*b"CGTC"),
             u32::from_le_bytes(*b"GTCG"),
         ]
+}
+
+// ---------------------------------------------------------------------------
+// The FS/GS skip: 0 over 0 only, by the processor's own registers (3c)
+// ---------------------------------------------------------------------------
+
+/// A 64-bit program for the `FS`/`GS` skip's cases (`docs/OPAQUE-KERNEL.md`
+/// §9.8, 3c, the consultant's K1 to K4), in one of six modes, patched at 4:
+/// `L` loads the selector patched at 12 into `FS` and `GS` before each of
+/// its yields; `R` maps a page at the base patched at 16, puts the word
+/// patched at 24 there, makes it its `FS` base by `arch_prctl(ARCH_SET_FS)`,
+/// and after each yield exits 2 or 3 unless `FS` and `GS` read 0, 4 unless
+/// `%fs:0` is its word, and 5 unless `%gs:0x400100` is its own word at
+/// `0x400100` -- which only a `GS` base of 0, its recorded one, gives (Ferrix
+/// has no `ARCH_SET_GS`, the consultant's K2); `T` installs a flat 32-bit
+/// data descriptor based at the data segment through `set_thread_area` and
+/// before each yield loads its selector into `FS` and `GS`, then 0; `C` and
+/// `G` yield, then far-return into compatibility mode and read through `FS`
+/// or `GS`, which are null there, so `SIGSEGV` must end them -- surviving the
+/// read exits 5 or 6. The yields are patched at 8. Exits 0; 8 or 9 if
+/// `arch_prctl` or `mmap` failed, 10 if `set_thread_area` did.
+///
+/// ```text
+/// _start: jmp start
+///         .org 4
+/// mode:   .byte '?'
+///         .org 8
+/// rounds: .long 0x7f7f7f7f
+///         .org 12
+/// sel:    .word 0x7f7f
+///         .org 16
+/// base:   .quad 0x7f7f7f7f7f7f7f7f
+/// magic:  .quad 0x7f7f7f7f7f7f7f7f
+/// start:  movzbl mode(%rip), %r13d
+///         cmpb $'T', %r13b
+///         jne 1f
+///         movl $0x410100, %ecx
+///         movl $-1, (%rcx)
+///         movl $0x410000, 4(%rcx)
+///         movl $0xfffff, 8(%rcx)
+///         movl $0x51, 12(%rcx)
+///         movl $243, %eax
+///         movl $0x410100, %ebx
+///         int $0x80
+///         movl $10, %edi
+///         testl %eax, %eax
+///         jnz exit
+///         movl $0x410100, %ecx
+///         movl (%rcx), %r14d
+///         shll $3, %r14d
+///         orl $3, %r14d
+///         jmp 2f
+/// 1:      cmpb $'R', %r13b
+///         jne 2f
+///         movq base(%rip), %rdi
+///         movl $4096, %esi
+///         movl $3, %edx
+///         movl $0x32, %r10d
+///         movq $-1, %r8
+///         xorl %r9d, %r9d
+///         movl $9, %eax
+///         syscall
+///         cmpq base(%rip), %rax
+///         movl $9, %edi
+///         jne exit
+///         movq magic(%rip), %rcx
+///         movq %rcx, (%rax)
+///         movl $158, %eax
+///         movl $0x1002, %edi
+///         movq base(%rip), %rsi
+///         syscall
+///         testq %rax, %rax
+///         movl $8, %edi
+///         jnz exit
+/// 2:      movl rounds(%rip), %r12d
+///         cmpb $'C', %r13b
+///         je compat_fs
+///         cmpb $'G', %r13b
+///         je compat_gs
+/// loop:   cmpb $'L', %r13b
+///         jne 3f
+///         movw sel(%rip), %ax
+///         movw %ax, %fs
+///         movw %ax, %gs
+///         jmp yield
+/// 3:      cmpb $'T', %r13b
+///         jne yield
+///         movw %r14w, %fs
+///         movw %r14w, %gs
+///         xorl %eax, %eax
+///         movw %ax, %fs
+///         movw %ax, %gs
+/// yield:  movl $24, %eax
+///         syscall
+///         cmpb $'R', %r13b
+///         jne 4f
+///         movw %fs, %ax
+///         movl $2, %edi
+///         testw %ax, %ax
+///         jnz exit
+///         movw %gs, %ax
+///         movl $3, %edi
+///         testw %ax, %ax
+///         jnz exit
+///         movq %fs:0, %rax
+///         movl $4, %edi
+///         cmpq magic(%rip), %rax
+///         jne exit
+///         movq %gs:0x400100, %rax
+///         movl $5, %edi
+///         cmpq 0x400100, %rax
+///         jne exit
+/// 4:      decl %r12d
+///         jnz loop
+///         xorl %edi, %edi
+/// exit:   movl $231, %eax
+///         syscall
+///         ud2
+/// compat_fs:
+///         movl $24, %eax
+///         syscall
+///         decl %r12d
+///         jnz compat_fs
+///         pushq $0x23
+///         pushq $cfs
+///         lretq
+/// compat_gs:
+///         movl $24, %eax
+///         syscall
+///         decl %r12d
+///         jnz compat_gs
+///         pushq $0x23
+///         pushq $cgs
+///         lretq
+///         .code32
+/// cfs:    movl %fs:0x400100, %eax
+///         movl $252, %eax
+///         movl $5, %ebx
+///         int $0x80
+///         ud2
+/// cgs:    movl %gs:0x400100, %eax
+///         movl $252, %eax
+///         movl $6, %ebx
+///         int $0x80
+///         ud2
+/// ```
+///
+/// Assembled by GNU `as`, linked at the image's entry, and read back.
+const FS_GS_PROGRAM: &[u8] = &[
+    0xeb, 0x1e, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x00, 0x00,
+    0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+    0x44, 0x0f, 0xb6, 0x2d, 0xdc, 0xff, 0xff, 0xff, 0x41, 0x80, 0xfd, 0x54, 0x75, 0x4b, 0xb9, 0x00,
+    0x01, 0x41, 0x00, 0xc7, 0x01, 0xff, 0xff, 0xff, 0xff, 0xc7, 0x41, 0x04, 0x00, 0x00, 0x41, 0x00,
+    0xc7, 0x41, 0x08, 0xff, 0xff, 0x0f, 0x00, 0xc7, 0x41, 0x0c, 0x51, 0x00, 0x00, 0x00, 0xb8, 0xf3,
+    0x00, 0x00, 0x00, 0xbb, 0x00, 0x01, 0x41, 0x00, 0xcd, 0x80, 0xbf, 0x0a, 0x00, 0x00, 0x00, 0x85,
+    0xc0, 0x0f, 0x85, 0x1a, 0x01, 0x00, 0x00, 0xb9, 0x00, 0x01, 0x41, 0x00, 0x44, 0x8b, 0x31, 0x41,
+    0xc1, 0xe6, 0x03, 0x41, 0x83, 0xce, 0x03, 0xeb, 0x6b, 0x41, 0x80, 0xfd, 0x52, 0x75, 0x65, 0x48,
+    0x8b, 0x3d, 0x8a, 0xff, 0xff, 0xff, 0xbe, 0x00, 0x10, 0x00, 0x00, 0xba, 0x03, 0x00, 0x00, 0x00,
+    0x41, 0xba, 0x32, 0x00, 0x00, 0x00, 0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x45, 0x31, 0xc9,
+    0xb8, 0x09, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x3b, 0x05, 0x62, 0xff, 0xff, 0xff, 0xbf, 0x09,
+    0x00, 0x00, 0x00, 0x0f, 0x85, 0xc8, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, 0x58, 0xff, 0xff, 0xff,
+    0x48, 0x89, 0x08, 0xb8, 0x9e, 0x00, 0x00, 0x00, 0xbf, 0x02, 0x10, 0x00, 0x00, 0x48, 0x8b, 0x35,
+    0x3c, 0xff, 0xff, 0xff, 0x0f, 0x05, 0x48, 0x85, 0xc0, 0xbf, 0x08, 0x00, 0x00, 0x00, 0x0f, 0x85,
+    0x9d, 0x00, 0x00, 0x00, 0x44, 0x8b, 0x25, 0x1d, 0xff, 0xff, 0xff, 0x41, 0x80, 0xfd, 0x43, 0x0f,
+    0x84, 0x95, 0x00, 0x00, 0x00, 0x41, 0x80, 0xfd, 0x47, 0x0f, 0x84, 0xa0, 0x00, 0x00, 0x00, 0x41,
+    0x80, 0xfd, 0x4c, 0x75, 0x0d, 0x66, 0x8b, 0x05, 0x00, 0xff, 0xff, 0xff, 0x8e, 0xe0, 0x8e, 0xe8,
+    0xeb, 0x12, 0x41, 0x80, 0xfd, 0x54, 0x75, 0x0c, 0x41, 0x8e, 0xe6, 0x41, 0x8e, 0xee, 0x31, 0xc0,
+    0x8e, 0xe0, 0x8e, 0xe8, 0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x41, 0x80, 0xfd, 0x52, 0x75,
+    0x49, 0x66, 0x8c, 0xe0, 0xbf, 0x02, 0x00, 0x00, 0x00, 0x66, 0x85, 0xc0, 0x75, 0x43, 0x66, 0x8c,
+    0xe8, 0xbf, 0x03, 0x00, 0x00, 0x00, 0x66, 0x85, 0xc0, 0x75, 0x36, 0x64, 0x48, 0x8b, 0x04, 0x25,
+    0x00, 0x00, 0x00, 0x00, 0xbf, 0x04, 0x00, 0x00, 0x00, 0x48, 0x3b, 0x05, 0xb8, 0xfe, 0xff, 0xff,
+    0x75, 0x1f, 0x65, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x01, 0x40, 0x00, 0xbf, 0x05, 0x00, 0x00, 0x00,
+    0x48, 0x3b, 0x04, 0x25, 0x00, 0x01, 0x40, 0x00, 0x75, 0x07, 0x41, 0xff, 0xcc, 0x75, 0x80, 0x31,
+    0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x0f, 0x0b, 0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f,
+    0x05, 0x41, 0xff, 0xcc, 0x75, 0xf4, 0x6a, 0x23, 0x68, 0xb4, 0x02, 0x40, 0x00, 0x48, 0xcb, 0xb8,
+    0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x41, 0xff, 0xcc, 0x75, 0xf4, 0x6a, 0x23, 0x68, 0xc8, 0x02,
+    0x40, 0x00, 0x48, 0xcb, 0x64, 0xa1, 0x00, 0x01, 0x40, 0x00, 0xb8, 0xfc, 0x00, 0x00, 0x00, 0xbb,
+    0x05, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x0f, 0x0b, 0x65, 0xa1, 0x00, 0x01, 0x40, 0x00, 0xb8, 0xfc,
+    0x00, 0x00, 0x00, 0xbb, 0x06, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x0f, 0x0b,
+];
+
+/// An i386 program that installs a flat descriptor based at its own entry
+/// through `set_thread_area`, loads its selector into `GS` and `FS`, and
+/// after each `sched_yield` exits 2 or 4 unless `GS` and `FS` still hold it,
+/// 3 or 5 unless `%gs:0` and `%fs:0` read its own first word; 10 if
+/// `set_thread_area` failed, 0 after the yields patched at 1.
+///
+/// ```text
+/// _start: movl $0x7f7f7f7f, %esi
+///         subl $16, %esp
+///         movl $-1, (%esp)
+///         movl $0x400100, 4(%esp)
+///         movl $0xfffff, 8(%esp)
+///         movl $0x51, 12(%esp)
+///         movl $243, %eax
+///         movl %esp, %ebx
+///         int $0x80
+///         movl $10, %ebx
+///         testl %eax, %eax
+///         jnz exit
+///         movl (%esp), %edi
+///         shll $3, %edi
+///         orl $3, %edi
+///         movw %di, %gs
+///         movw %di, %fs
+/// 1:      movl $158, %eax
+///         int $0x80
+///         movw %gs, %ax
+///         movl $2, %ebx
+///         cmpw %di, %ax
+///         jne exit
+///         movl %gs:0, %eax
+///         movl $3, %ebx
+///         cmpl 0x400100, %eax
+///         jne exit
+///         movw %fs, %ax
+///         movl $4, %ebx
+///         cmpw %di, %ax
+///         jne exit
+///         movl %fs:0, %eax
+///         movl $5, %ebx
+///         cmpl 0x400100, %eax
+///         jne exit
+///         decl %esi
+///         jnz 1b
+///         xorl %ebx, %ebx
+/// exit:   movl $252, %eax
+///         int $0x80
+///         ud2
+/// ```
+///
+/// Assembled by GNU `as --32`, linked at the image's entry, and read back.
+const FS_GS_PROGRAM_I386: &[u8] = &[
+    0xbe, 0x7f, 0x7f, 0x7f, 0x7f, 0x83, 0xec, 0x10, 0xc7, 0x04, 0x24, 0xff, 0xff, 0xff, 0xff, 0xc7,
+    0x44, 0x24, 0x04, 0x00, 0x01, 0x40, 0x00, 0xc7, 0x44, 0x24, 0x08, 0xff, 0xff, 0x0f, 0x00, 0xc7,
+    0x44, 0x24, 0x0c, 0x51, 0x00, 0x00, 0x00, 0xb8, 0xf3, 0x00, 0x00, 0x00, 0x89, 0xe3, 0xcd, 0x80,
+    0xbb, 0x0a, 0x00, 0x00, 0x00, 0x85, 0xc0, 0x75, 0x59, 0x8b, 0x3c, 0x24, 0xc1, 0xe7, 0x03, 0x83,
+    0xcf, 0x03, 0x8e, 0xef, 0x8e, 0xe7, 0xb8, 0x9e, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x66, 0x8c, 0xe8,
+    0xbb, 0x02, 0x00, 0x00, 0x00, 0x66, 0x39, 0xf8, 0x75, 0x38, 0x65, 0xa1, 0x00, 0x00, 0x00, 0x00,
+    0xbb, 0x03, 0x00, 0x00, 0x00, 0x3b, 0x05, 0x00, 0x01, 0x40, 0x00, 0x75, 0x25, 0x66, 0x8c, 0xe0,
+    0xbb, 0x04, 0x00, 0x00, 0x00, 0x66, 0x39, 0xf8, 0x75, 0x18, 0x64, 0xa1, 0x00, 0x00, 0x00, 0x00,
+    0xbb, 0x05, 0x00, 0x00, 0x00, 0x3b, 0x05, 0x00, 0x01, 0x40, 0x00, 0x75, 0x05, 0x4e, 0x75, 0xb6,
+    0x31, 0xdb, 0xb8, 0xfc, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x0f, 0x0b,
+];
+
+/// Where each `FS`/`GS` reader maps its word: the reader's recorded `FS`
+/// base.
+const FS_GS_BASE: u64 = 0x5200_0000;
+/// The word each reader puts at its base.
+const FS_GS_MAGIC: u64 = 0x0F5E_0F5E_0F5E_0F5E;
+
+/// Every case of the `FS`/`GS` skip (the consultant's K1 to K5), on this
+/// processor, and the bring-up case on the last application processor; then
+/// the `fsgs` line, which says what was decided and on which processor, and
+/// whether the `GS` base control can fire here (K2): only where a null load
+/// keeps the base (AMD without `NullSelectorClearsBase`, CPUID `0x8000_0021`
+/// `EAX[6]`; under a hypervisor that bit is the model's, not the silicon's).
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn run_fs_gs() -> Result<(), &'static str> {
+    // The bring-up case first, before any case here runs a program on that
+    // processor: its `FS` and `GS` are then what `set_cpu_local` and earlier
+    // programs' 64-bit switches left.
+    let first_on = check_null_fs_gs_fault_on_an_application_processor()?;
+    // `USER_DS` first, so that each control fires in its own case, as for
+    // `DS` and `ES`.
+    check_user_ds_in_fs_gs_is_loaded_over()?;
+    check_a_null_fs_gs_with_rpl_is_loaded_over()?;
+    check_fs_gs_bases_after_a_based_descriptor()?;
+    let compat_decided = check_null_fs_gs_fault_in_compatibility_mode()?;
+    check_i386_fs_gs_beside_a_64_bit_program()?;
+    let (fs, gs) = check_the_fs_gs_skips_are_taken()?;
+    let compat = if compat_decided {
+        "a null FS and GS faulted in compatibility mode"
+    } else {
+        "a null FS and GS in compatibility mode not decided: TCG checks no data segment"
+    };
+    let vendor = match null_selector_vendor() {
+        (false, _) => "not AMD: a null load clears the base, so the GS base control cannot fire",
+        (true, true) => {
+            "AMD, NullSelectorClearsBase 1: a null load clears the base, so the GS base \
+             control cannot fire"
+        }
+        (true, false) => {
+            "AMD, CPUID's NullSelectorClearsBase 0 (under a hypervisor the model's bit, not \
+             the silicon's): the GS base control fires only where the processor keeps the base"
+        }
+    };
+    let rounds = SELECTOR_ROUNDS * 5;
+    match first_on {
+        Some(cpu) => crate::console::println!(
+            "  fsgs     {fs} switches left FS unloaded and {gs} GS, 0 over 0; programs read \
+             their own FS and GS and bases across {rounds} yields beside 3, USER_DS, an i386 \
+             program's, and a based descriptor then 0; {compat}, and on processor {cpu} after \
+             its bring-up; {vendor}"
+        ),
+        None => crate::console::println!(
+            "  fsgs     {fs} switches left FS unloaded and {gs} GS, 0 over 0; programs read \
+             their own FS and GS and bases across {rounds} yields beside 3, USER_DS, an i386 \
+             program's, and a based descriptor then 0; {compat}; no application processor to \
+             check bring-up on; {vendor}"
+        ),
+    }
+    Ok(())
+}
+
+/// Case (ii): a program that leaves `USER_DS` in `FS` and `GS`, beside one
+/// whose records are 0: the second reads 0 in both and its own bases at
+/// every turn, since the processor's own selectors are compared, not the
+/// record alone.
+///
+/// Verifies: `L.x86_64.165`
+fn check_user_ds_in_fs_gs_is_loaded_over() -> Result<(), &'static str> {
+    let loader = fs_gs_program(b'L', gdt::USER_DATA | 3, SELECTOR_ROUNDS)?;
+    let reader = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [loaded, read] = run_fs_gs_pair(&loader, &reader)?;
+    selector_verdict(
+        loaded,
+        "a program that loaded FS and GS with USER_DS did not run",
+    )?;
+    fs_gs_verdict(
+        read,
+        "a program with null FS and GS read the USER_DS another program left",
+    )
+}
+
+/// Case (i): a program that loads 3 -- a null selector with RPL 3, which it
+/// can read back -- into `FS` and `GS`, beside one whose records are 0: the
+/// second reads 0 and its own bases at every turn, since the skip is for
+/// exactly 0 over exactly 0.
+///
+/// Verifies: `L.x86_64.165`
+fn check_a_null_fs_gs_with_rpl_is_loaded_over() -> Result<(), &'static str> {
+    let loader = fs_gs_program(b'L', 3, SELECTOR_ROUNDS)?;
+    let reader = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [loaded, read] = run_fs_gs_pair(&loader, &reader)?;
+    selector_verdict(loaded, "a program that loaded FS and GS with 3 did not run")?;
+    fs_gs_verdict(
+        read,
+        "a program with null FS and GS read the RPL bits of a null selector another program left",
+    )
+}
+
+/// Case (iii), first half: a program that loads a based thread-local
+/// descriptor into `FS` and `GS` and then 0 before each yield -- so the
+/// processor holds 0 over what was a thread-local segment -- beside a reader
+/// whose records are 0: the reader reads its own `FS` base and a `GS` base
+/// of 0 at every turn, because both are written from its record whether the
+/// load was skipped or not.
+///
+/// Verifies: `L.x86_64.165`
+fn check_fs_gs_bases_after_a_based_descriptor() -> Result<(), &'static str> {
+    let loader = fs_gs_program(b'T', 0, SELECTOR_ROUNDS)?;
+    let reader = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [loaded, read] = run_fs_gs_pair(&loader, &reader)?;
+    match loaded {
+        Some(10) => return Err("set_thread_area refused the FS/GS program's descriptor"),
+        status => selector_verdict(
+            status,
+            "a program that loaded a thread-local descriptor into FS and GS did not run",
+        )?,
+    }
+    fs_gs_verdict(
+        read,
+        "a program with null FS and GS read a selector another program left over a based descriptor",
+    )
+}
+
+/// Case (iii), second half: beside the program of the first half, a reader
+/// whose `FS` (`GS`) is 0 far-returns into compatibility mode and reads
+/// through it: `#GP` and `SIGSEGV`, the same with the skip or without. Under
+/// QEMU's TCG not decided, as for `DS`. Answers whether it was decided.
+///
+/// Verifies: `L.x86_64.165`
+fn check_null_fs_gs_fault_in_compatibility_mode() -> Result<bool, &'static str> {
+    let mut decided = true;
+    for mode in *b"CG" {
+        let loader = fs_gs_program(b'T', 0, SELECTOR_ROUNDS)?;
+        let reader = fs_gs_program(mode, 0, COMPAT_ROUNDS)?;
+        let [loaded, read] = run_fs_gs_pair(&loader, &reader)?;
+        selector_verdict(
+            loaded,
+            "a program that loaded a thread-local descriptor into FS and GS did not run",
+        )?;
+        decided &= compat_verdict(
+            read,
+            "a null FS or GS did not fault in compatibility mode after another program left a based descriptor's hidden part",
+        )?;
+    }
+    Ok(decided)
+}
+
+/// Case (vi), the bring-up load (the consultant's K1): on the last
+/// application processor, before any stage 9 case has run a program there, a
+/// reader whose `FS` (`GS`) is 0 far-returns into compatibility mode and
+/// reads through it, and must fault: `set_cpu_local` loaded both with 0, so
+/// the hidden part is a null load's, not `INIT`'s usable flat segment.
+/// Answers the processor, or `None` on a machine with one.
+///
+/// Verifies: `L.x86_64.165`
+fn check_null_fs_gs_fault_on_an_application_processor() -> Result<Option<usize>, &'static str> {
+    let count = crate::smp::count();
+    let here = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let Some(last) = (1..count).rev().find(|&cpu| cpu != here) else {
+        return Ok(None);
+    };
+    for mode in *b"CG" {
+        let reader = fs_gs_program(mode, 0, COMPAT_ROUNDS)?;
+        let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+        let task = process::start_on(&reader, Some(last))
+            .map_err(|_| "an FS/GS program could not be started")?;
+        let status = reader.wait_for_exit(deadline);
+        drop(task);
+        let _decided = compat_verdict(
+            status,
+            "a null FS or GS did not fault in compatibility mode on an application processor: its bring-up left them unloaded",
+        )?;
+    }
+    Ok(Some(last))
+}
+
+/// Case (iv): an i386 program with a thread-local selector in `GS` and `FS`
+/// and a 64-bit reader with 0 in both trade the processor: each reads its own
+/// selectors and bases at every turn, so neither the record alone nor the
+/// processor alone decides a skip.
+///
+/// Verifies: `L.x86_64.165`
+fn check_i386_fs_gs_beside_a_64_bit_program() -> Result<(), &'static str> {
+    let mut code = FS_GS_PROGRAM_I386.to_vec();
+    if code.get(1..5) != Some(&[0x7f; 4]) {
+        return Err("the i386 FS/GS program's count is not where its layout says");
+    }
+    patch(&mut code, 1, &SELECTOR_ROUNDS.to_le_bytes())?;
+    let file = crate::syscall::image::build_with(
+        ferrix_elf::Class::Elf32,
+        EM_386,
+        crate::syscall::image::Shape::Good,
+        &code,
+    );
+    let wide = crate::syscall::exec::load(
+        &file,
+        &[b"/fs-gs-i386"],
+        &[],
+        [0x7e; ferrix_ustack::RANDOM_BYTES],
+    )
+    .map_err(|_| "the i386 FS/GS program could not be loaded")?;
+    let narrow = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let [wide, narrow] = run_fs_gs_pair(&wide, &narrow)?;
+    match wide {
+        Some(10) => return Err("set_thread_area refused the i386 FS/GS program's descriptor"),
+        status => selector_verdict(
+            status,
+            "an i386 program did not read its own thread-local selector and base in FS and GS beside a 64-bit program",
+        )?,
+    }
+    fs_gs_verdict(
+        narrow,
+        "a 64-bit program with null FS and GS read an i386 program's thread-local selector",
+    )
+}
+
+/// Case (v): two readers with `FS` and `GS` 0 trade the processor, and the
+/// switches between them leave each unloaded, counted apart (K5). Answers
+/// how many times, `FS`'s and `GS`'s.
+///
+/// Verifies: `L.x86_64.165`
+fn check_the_fs_gs_skips_are_taken() -> Result<(u64, u64), &'static str> {
+    let first = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let second = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
+    let before = super::fs_gs_skips();
+    let [first, second] = run_fs_gs_pair(&first, &second)?;
+    let after = super::fs_gs_skips();
+    for status in [first, second] {
+        fs_gs_verdict(
+            status,
+            "a program with null FS and GS read a selector beside another such program",
+        )?;
+    }
+    match (
+        after.0.wrapping_sub(before.0),
+        after.1.wrapping_sub(before.1),
+    ) {
+        (0, _) => Err("no switch between two programs with null FS and GS left FS unloaded"),
+        (_, 0) => Err("no switch between two programs with null FS and GS left GS unloaded"),
+        skipped => Ok(skipped),
+    }
+}
+
+/// A copy of [`FS_GS_PROGRAM`] in `mode`, loading `selector` (mode `L`),
+/// reading [`FS_GS_MAGIC`] at [`FS_GS_BASE`] (mode `R`), for `rounds` yields.
+fn fs_gs_program(mode: u8, selector: u16, rounds: u32) -> Result<Arc<Process>, &'static str> {
+    let mut code = FS_GS_PROGRAM.to_vec();
+    if code.get(4) != Some(&b'?') || code.get(8..14) != Some(&[0x7f; 6]) {
+        return Err("the FS/GS program's fields are not where its layout says");
+    }
+    patch(&mut code, 4, &[mode])?;
+    patch(&mut code, 8, &rounds.to_le_bytes())?;
+    patch(&mut code, 12, &selector.to_le_bytes())?;
+    patch(&mut code, 16, &FS_GS_BASE.to_le_bytes())?;
+    patch(&mut code, 24, &FS_GS_MAGIC.to_le_bytes())?;
+    load(b"/fs-gs", &code)
+}
+
+/// Start both pinned to this processor and answer their statuses.
+fn run_fs_gs_pair(
+    first: &Arc<Process>,
+    second: &Arc<Process>,
+) -> Result<[Option<i32>; 2], &'static str> {
+    let cpu = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let tasks: [Arc<Task>; 2] = [
+        process::start_on(first, Some(cpu)).map_err(|_| "an FS/GS program could not be started")?,
+        process::start_on(second, Some(cpu))
+            .map_err(|_| "an FS/GS program could not be started")?,
+    ];
+    let statuses = [
+        first.wait_for_exit(deadline),
+        second.wait_for_exit(deadline),
+    ];
+    drop(tasks);
+    Ok(statuses)
+}
+
+/// What an `FS`/`GS` reader's status says: 0 is its own selectors and bases
+/// at every read; `wrong` names the selector a wrong read would have been.
+fn fs_gs_verdict(status: Option<i32>, wrong: &'static str) -> Result<(), &'static str> {
+    match status {
+        Some(0) => Ok(()),
+        Some(2 | 3) => Err(wrong),
+        Some(4) => Err("a program with null FS did not read its own FS base"),
+        Some(5) => Err("a program with null GS did not read its recorded GS base of 0"),
+        Some(KILLED_BY_SIGSEGV) => {
+            Err("a program with null FS and GS faulted reading through its own bases")
+        }
+        Some(8 | 9) => Err("an FS/GS reader's mmap or arch_prctl failed"),
+        Some(_) => Err("an FS/GS reader ended with a status no case names"),
+        None => Err("an FS/GS program never ended"),
+    }
+}
+
+/// What a compatibility-mode reader's status says: `SIGSEGV` is decided,
+/// its own exit under TCG is not, anything else is `wrong`.
+fn compat_verdict(status: Option<i32>, wrong: &'static str) -> Result<bool, &'static str> {
+    match status {
+        Some(KILLED_BY_SIGSEGV) => Ok(true),
+        Some(5 | 6) if under_tcg() => Ok(false),
+        Some(5 | 6) => Err(wrong),
+        Some(_) => {
+            Err("a compatibility-mode FS/GS reader ended neither by SIGSEGV nor its own exit")
+        }
+        None => Err("a compatibility-mode FS/GS reader never ended"),
+    }
+}
+
+/// Whether this processor is AMD's (or Hygon's), and whether it says a null
+/// selector load clears the base (`CPUID 0x8000_0021` `EAX[6]`,
+/// `NullSelectorClearsBase`); Intel's always does.
+fn null_selector_vendor() -> (bool, bool) {
+    use core::arch::x86_64::__cpuid;
+    let leaf = __cpuid(0);
+    let vendor = [leaf.ebx, leaf.edx, leaf.ecx];
+    let is = |name: &[u8; 12]| {
+        vendor
+            == [
+                u32::from_le_bytes([name[0], name[1], name[2], name[3]]),
+                u32::from_le_bytes([name[4], name[5], name[6], name[7]]),
+                u32::from_le_bytes([name[8], name[9], name[10], name[11]]),
+            ]
+    };
+    let amd = is(b"AuthenticAMD") || is(b"HygonGenuine");
+    /// `CPUID 0x8000_0021` `EAX[6]`: a null selector load clears the base.
+    const NULL_SELECTOR_CLEARS_BASE: u32 = 1 << 6;
+    let clears = !amd
+        || (__cpuid(0x8000_0000).eax >= 0x8000_0021
+            && __cpuid(0x8000_0021).eax & NULL_SELECTOR_CLEARS_BASE != 0);
+    (amd, clears)
 }

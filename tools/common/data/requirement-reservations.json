@@ -47,13 +47,6 @@
       "purpose": "IPC round trip toward seL4: the fast path's charge, switch and entry/exit (po9-cert's verdict, ledger 2026-10-07, D1-D11)"
     },
     {
-      "ids": ["L.x86_64.165"],
-      "owner": "po9-sel",
-      "branch": "po9/sel",
-      "date": "2026-10-07",
-      "purpose": "IPC round trip toward seL4: the DS/ES selector-load skip, if L.x86_64.8 is split (po9-cert's verdict, ledger 2026-10-07, S1-S7, E1-E6)"
-    },
-    {
       "ids": ["L.mm.65-68"],
       "owner": "po9-user",
       "branch": "po9/user",

@@ -89,6 +89,17 @@ const IA32_GS_BASE: u32 = 0xC000_0101;
 /// (SHARED) `address` must be this processor's own `PerCpu` record, which must live for
 /// the rest of the system's life: `cpu_local` hands it back as a reference.
 pub(crate) unsafe fn set_cpu_local(address: u64) {
+    // `FS` and `GS` loaded with the null selector before anything else on
+    // this processor (`docs/OPAQUE-KERNEL.md` §9.8 3c, A5; the consultant's
+    // K1): nothing else at bring-up loads them -- `reload_segments` and the
+    // trampoline load `DS`, `ES` and `SS` -- so an application processor
+    // held `INIT`'s usable flat segments, and the boot processor what the
+    // firmware left. The switch's 0-over-0 skip rests on a `FS` or `GS` that
+    // reads 0 having been loaded with 0. Before the base below: a null `GS`
+    // load clears `GS_BASE` on Intel and on `NullSelectorClearsBase` parts.
+    // SAFETY: (CONTEXT) the null selector always loads in long mode, and
+    // nothing on this processor uses `FS` or `GS` yet.
+    unsafe { cpu::load_null_fs_gs() };
     // SAFETY: (SHARED) `IA32_GS_BASE` exists on every 64-bit x86 and accepts any
     // canonical address, which a kernel pointer is.
     unsafe { cpu::write_msr(IA32_GS_BASE, address) };
@@ -208,6 +219,8 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
         selectors.skipped,
         selectors.rounds
     );
+    // The `FS`/`GS` skip's cases print their own `fsgs` line (3c).
+    switch::check::run_fs_gs()?;
     Ok(())
 }
 

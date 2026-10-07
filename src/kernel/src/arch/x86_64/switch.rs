@@ -577,6 +577,12 @@ static X87_LEFT: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS]
 /// `DS`/`ES` skip): per processor, kept as [`X87_RESETS`] is, for the check,
 /// which must see the skip taken.
 static SELECTOR_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// Loads of `FS` that left it unloaded, 0 over 0 (the `FS`/`GS` skip, §9.8
+/// 3c): per processor, kept as [`X87_RESETS`] is, apart from `GS`'s so that
+/// the check sees each register's skip taken on its own.
+static FS_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// Loads of `GS` that left it unloaded, 0 over 0: as [`FS_SKIPS`].
+static GS_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 
 /// This processor's logical number, zero before it has a record.
 fn this_logical() -> usize {
@@ -613,16 +619,30 @@ pub(crate) fn selector_skips() -> u64 {
         .map_or(0, |counter| counter.load(Ordering::Relaxed))
 }
 
-/// Every processor's switches so far that left `DS` or `ES` unloaded: for
-/// the fast path's counts, which show its direct switches taking the skip
-/// through the same `restore_user_state` (the consultant's E3 (iv)).
-pub(crate) fn selector_skips_total() -> Option<u64> {
-    Some(
-        SELECTOR_SKIPS
+/// This processor's switches so far that left `FS` unloaded, and those that
+/// left `GS` unloaded, each 0 over 0.
+pub(crate) fn fs_gs_skips() -> (u64, u64) {
+    let cpu = this_logical();
+    let read = |counters: &[AtomicU64; MAX_CPUS]| {
+        counters
+            .get(cpu)
+            .map_or(0, |counter| counter.load(Ordering::Relaxed))
+    };
+    (read(&FS_SKIPS), read(&GS_SKIPS))
+}
+
+/// Every processor's switches so far that left `DS` or `ES` unloaded, that
+/// left `FS` unloaded, and that left `GS` unloaded, in that order: for the
+/// fast path's counts, which show its direct switches taking the skips
+/// through the same `restore_user_state` (the consultant's E3 (iv) and K5).
+pub(crate) fn selector_skips_total() -> Option<[u64; 3]> {
+    let total = |counters: &[AtomicU64; MAX_CPUS]| {
+        counters
             .iter()
             .map(|counter| counter.load(Ordering::Relaxed))
-            .fold(0, u64::wrapping_add),
-    )
+            .fold(0, u64::wrapping_add)
+    };
+    Some([total(&SELECTOR_SKIPS), total(&FS_SKIPS), total(&GS_SKIPS)])
 }
 
 /// Reset the vector registers of a task whose state is `unsaved`: every
@@ -742,9 +762,8 @@ unsafe fn load_selectors(
     // whose RPL bits a program reads back -- and never by a remembered value.
     // In long mode only an explicit load writes `DS` or `ES`, so one reading
     // 0 was last loaded with 0, and a vendor's null load is idempotent:
-    // loading 0 again would leave the hidden part exactly as it is. `FS` and
-    // `GS` are loaded at every switch, their bases written below as before.
-    let [held_ds, held_es, _, _] = cpu::read_data_selectors();
+    // loading 0 again would leave the hidden part exactly as it is.
+    let [held_ds, held_es, held_fs, held_gs] = cpu::read_data_selectors();
     let load_ds = ds != 0 || held_ds != 0;
     let load_es = es != 0 || held_es != 0;
     if load_ds {
@@ -758,14 +777,32 @@ unsafe fn load_selectors(
     if !(load_ds && load_es) {
         count(&SELECTOR_SKIPS);
     }
-    // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
-    unsafe { cpu::load_fs(fs) };
+    // The `FS`/`GS` skip (§9.8 3c, A1 to A5; the consultant's K1 to K10):
+    // the same rule, by the same read. `FS` and `GS` read 0 only after a load
+    // of 0 -- a switch's, a program's, or the one `set_cpu_local` makes on
+    // every processor at bring-up -- so the skip leaves the hidden part as a
+    // load would. The one part of it a program can read through a null `FS`
+    // or `GS` is the base, which is written below from the record wherever
+    // the record's selector is 0, skipped or not: never compared with
+    // anything (condition 8). A skipped `GS` load drops its `swapgs` pair and
+    // the interrupt mask around it; the program's base is in
+    // `KERNEL_GS_BASE`, which that pair never touched.
+    if fs != 0 || held_fs != 0 {
+        // SAFETY: (CONTEXT) null or loadable, as `gdt::loadable` checked.
+        unsafe { cpu::load_fs(fs) };
+    } else {
+        count(&FS_SKIPS);
+    }
     if fs == 0 {
         // SAFETY: (CONTEXT) a user address the program set, or zero.
         unsafe { super::syscall::set_thread_pointer(fs_base) };
     }
-    // SAFETY: (CONTEXT) as for the other three.
-    unsafe { cpu::load_user_gs(gs) };
+    if gs != 0 || held_gs != 0 {
+        // SAFETY: (CONTEXT) as for the other three.
+        unsafe { cpu::load_user_gs(gs) };
+    } else {
+        count(&GS_SKIPS);
+    }
     if gs == 0 {
         // SAFETY: (CONTEXT) the program's own base, into the shadow it lives in while
         // the kernel runs.

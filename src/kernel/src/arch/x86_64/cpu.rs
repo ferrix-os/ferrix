@@ -915,6 +915,25 @@ pub(crate) unsafe fn load_fs(selector: u16) {
     }
 }
 
+/// Load the null selector into `FS` and `GS`: once per processor at bring-up,
+/// before its per-CPU `GS_BASE` is written, so that from then on a `FS` or
+/// `GS` reading 0 was loaded with 0 (`docs/OPAQUE-KERNEL.md` §9.8 3c, A5).
+/// `GS` goes through [`load_user_gs`]'s `swapgs` pair, so the null load acts
+/// on `KERNEL_GS_BASE`, which the first switch to a program writes, and
+/// `GS_BASE` comes back as it was, to be written by the caller after.
+///
+/// # Safety
+///
+/// (CONTEXT) Only before this processor's `GS_BASE` holds its per-CPU record,
+/// with nothing yet relying on either base.
+pub(crate) unsafe fn load_null_fs_gs() {
+    // SAFETY: (CONTEXT) the null selector always loads in long mode.
+    unsafe { load_fs(0) };
+    // SAFETY: (CONTEXT) as for `FS`; the caller guarantees nothing relies on
+    // either `GS` base yet.
+    unsafe { load_user_gs(0) };
+}
+
 /// Load `DS`, `ES` and `FS` for a program: selector and, from the GDT, the
 /// hidden base and limit.
 ///
