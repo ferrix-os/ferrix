@@ -42,3 +42,59 @@ impl ferrix_sync::Parker for SchedParker {
         Some(queue)
     }
 }
+
+/// A [`SpinLock`] held under the interrupt mask rather than with the full
+/// preemption count ([`try_lock_masked`]).
+pub(crate) struct MaskedGuard<'a, T> {
+    /// The ticket lock's own guard, which releases it.
+    guard: ferrix_sync::SpinLockGuard<'a, T>,
+}
+
+/// [`SpinLock::try_lock`] for a holder that keeps interrupts masked for the
+/// whole hold: the native round trip's fast path (`docs/OPAQUE-KERNEL.md`
+/// §9.11). The same ticket lock, so it excludes every holder as `try_lock`
+/// does. The mask keeps the holder on its processor; the hold is still
+/// counted as one lock on this processor's preemption word
+/// (`sched::raise_masked`), so that a switch made with it held stops the
+/// machine at A3 (FX-0503) as it does for any guard. What it leaves out is
+/// the site record and the deferred decision on release, which a masked
+/// holder could not make.
+///
+/// # Safety
+///
+/// (CONTEXT) Interrupts are masked on this processor from before the call
+/// until the guard drops, and the holder does not block while holding it.
+pub(crate) unsafe fn try_lock_masked<T>(lock: &SpinLock<T>) -> Option<MaskedGuard<'_, T>> {
+    // SAFETY: (CONTEXT) the caller's contract is the lock's.
+    let guard = unsafe { lock.try_lock_masked() }?;
+    crate::sched::raise_masked();
+    Some(MaskedGuard { guard })
+}
+
+impl<T> core::ops::Deref for MaskedGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.guard
+    }
+}
+
+impl<T> core::ops::DerefMut for MaskedGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
+}
+
+impl<T> Drop for MaskedGuard<'_, T> {
+    /// Lowers the count; the field's own drop then lets the lock go. Both
+    /// under the mask, so the order is not observable on this processor.
+    fn drop(&mut self) {
+        crate::sched::lower_masked();
+    }
+}
+
+impl<T: core::fmt::Debug> core::fmt::Debug for MaskedGuard<'_, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&*self.guard, f)
+    }
+}

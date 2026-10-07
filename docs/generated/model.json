@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "e279d2098bc4b9362cad8366b272ef226d5ba69859598786ba979cb012d4dea9",
+  "digest": "8f3ab70009d91708e5b45471ac7d2b7cc872fcd9ca2241d7c6fcb8e289c31b96",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -33318,10 +33318,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theSendHalfDeclinesOrCommits",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"send_direct shall take the two halves' inbox locks only if free, the first side's before the second's, decline unless the caller's inbox is empty (T6), nothing is parked on its side (T7), its peer is open (T8), a reader is parked on the peer's side (T9) and the peer's side has no observers and no waiters (T10), stop the machine with FX-0531 for a record beside a message or on a closed end (A2), and otherwise fill the reader's reply cell, park the caller and hand the processor over.\"",
+                  "value": "\"send_direct shall take the two halves' inbox locks only if free, the first side's before the second's, held under the entry's interrupt mask and counted as locks on the preemption word that A3 checks at the switch, decline unless the caller's inbox is empty (T6), nothing is parked on its side (T7), its peer is open (T8), a reader is parked on the peer's side (T9) and the peer's side has no observers and no waiters (T10), stop the machine with FX-0531 for a record beside a message or on a closed end (A2), and otherwise fill the reader's reply cell, park the caller and hand the processor over.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1675
+                    "line": 1677
                   }
                 },
                 {
@@ -33332,7 +33332,7 @@
                   "value": "\"ipc-equiv's cases 3, 5, 8 and 12, and stage 9's case 4, reach T6 to T10 with the fast path on and get the general path's results; each test's control fails its case.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1678
+                    "line": 1680
                   }
                 },
                 {
@@ -33343,7 +33343,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1679
+                    "line": 1681
                   }
                 },
                 {
@@ -33354,7 +33354,7 @@
                   "value": "(\"object::channel::Endpoint::send_direct\", \"object::channel::sendable\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1681
+                    "line": 1683
                   }
                 }
               ]
@@ -33367,7 +33367,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1683
+                "line": 1685
               },
               "children": [
                 {
@@ -33378,7 +33378,7 @@
                   "value": "\"The words a commit hands over shall be the count's bytes of the sent words, the bytes past the count zero.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1685
+                    "line": 1687
                   }
                 },
                 {
@@ -33386,10 +33386,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theReplyIsZeroPastItsCount",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"ipc-equiv's case 1 with the fast path on.\"",
+                  "value": "\"ipc-equiv's case 1 with the fast path on, and stage 9's reply-words case, which holds the commit's words to the general write then read for every count (the `fastcase` line); with the mask past the count left out its control fails it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1686
+                    "line": 1691
                   }
                 },
                 {
@@ -33400,7 +33400,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1687
+                    "line": 1692
                   }
                 },
                 {
@@ -33411,7 +33411,7 @@
                   "value": "(\"syscall::native::reply_words\", \"syscall::native::words_of\", \"syscall::native::sent_bytes\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1689
+                    "line": 1694
                   }
                 }
               ]
@@ -33424,7 +33424,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1691
+                "line": 1696
               },
               "children": [
                 {
@@ -33435,7 +33435,7 @@
                   "value": "\"A caller the fast path parked and woken without a reply shall open interrupts, stop with FX-0533 if it may not block, leave its record, answer EINTR if END is posted or carry on as receive_words does, write the call's audit record as dispatch_write_read does, and run regroup_current and call_left.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1696
+                    "line": 1701
                   }
                 },
                 {
@@ -33446,7 +33446,7 @@
                   "value": "\"The continuation's cases by a message, its peer's close and its kill answer the message, PEER_CLOSED and EINTR (the `fastcase` line).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1699
+                    "line": 1704
                   }
                 },
                 {
@@ -33457,7 +33457,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1700
+                    "line": 1705
                   }
                 },
                 {
@@ -33468,7 +33468,7 @@
                   "value": "(\"syscall::native::continue_general\", \"object::channel::Endpoint::unpark\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1702
+                    "line": 1707
                   }
                 }
               ]
@@ -33481,7 +33481,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1704
+                "line": 1709
               },
               "children": [
                 {
@@ -33492,7 +33492,7 @@
                   "value": "\"fast_write_read shall decline, having changed nothing but its counts, unless the filter would let the call through unlooked at (T2), it sends at most 24 bytes (T3), and the handle table's lock is free and channel_in finds an endpoint with READ and WRITE (T4, T5).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1709
+                    "line": 1714
                   }
                 },
                 {
@@ -33503,7 +33503,7 @@
                   "value": "\"Stage 9's case 11 is refused with the filter's errno with the fast path on, and comes back with IN_CALL down whether refused or allowed; ipc-equiv's case 12 answers every refusal as the general path does, with its audit records.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1713
+                    "line": 1718
                   }
                 },
                 {
@@ -33514,7 +33514,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1714
+                    "line": 1719
                   }
                 },
                 {
@@ -33522,10 +33522,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::theFastPathLooksAsTheGeneralPathDoes",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles\", \"trap::filter_quiet\", \"trap::set_filter_quiet\")",
+                  "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles_masked\", \"trap::filter_quiet\", \"trap::set_filter_quiet\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1717
+                    "line": 1722
                   }
                 }
               ]
@@ -33538,7 +33538,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1719
+                "line": 1724
               },
               "children": [
                 {
@@ -33549,7 +33549,7 @@
                   "value": "\"channel_write_read's answer shall go into the program's registers through write_read_outcome on the general path, the frame tail and the continuation alike.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1722
+                    "line": 1727
                   }
                 },
                 {
@@ -33560,7 +33560,7 @@
                   "value": "\"ipc-equiv's transcripts are the same on both boots.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1724
+                    "line": 1729
                   }
                 },
                 {
@@ -33571,7 +33571,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1725
+                    "line": 1730
                   }
                 },
                 {
@@ -33582,7 +33582,7 @@
                   "value": "\"syscall::write_read_outcome\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1726
+                    "line": 1731
                   }
                 }
               ]

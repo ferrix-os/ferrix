@@ -1618,8 +1618,8 @@ within a few instructions whatever else is held.
 
 | Lock | Taken by | How |
 |---|---|---|
-| the process's handle table (`Process::handles`) | the lookup, through `with_handles` | `try_lock`, through a new `try_with_handles`. `with_handles` itself waits |
-| the caller's half's inbox, the peer's half's inbox | T6 to T10, the commit | `try_lock`, by side |
+| the process's handle table (`Process::handles`) | the lookup, through `with_handles` | `try_lock`, through a new `try_with_handles`. `with_handles` itself waits. Since po9 (§9.11) `sync::try_lock_masked`, counted for A3, through `try_with_handles_masked` |
+| the caller's half's inbox, the peer's half's inbox | T6 to T10, the commit | `try_lock`, by side. Since po9 (§9.11) `sync::try_lock_masked`, counted for A3 |
 | the peer's half's observers (`Half::observers`) | T10's read | `try_lock`, under the peer's inbox lock: inbox before observers, the order `write_small`'s `trigger` already takes |
 | the peer's half's wait queue (`WaitQueue::waiters`) | T10's read | `try_lock`, under the peer's inbox lock. No path takes an inbox lock under it: `wait_sliced` lets it go before `ready()` takes the inbox |
 | this processor's run queue | T11 to T13, `hand_over`, `switch_chosen`, the switch | a new `try_lock_manually` beside `lock_manually`, which `choose_next` uses, handed over at the switch as there. `try_lock` exists on every lock type in `ferrix_sync` |
@@ -4559,3 +4559,61 @@ direction, 120 to 160 a round trip, with the fast path on (§9.8 3b,
 *Reopened narrowly*). The row's -140 to -160 a direction was for all four
 loads; `FS` and `GS` stay loaded at every switch, so the rest of it is not
 counted.
+
+### 9.11 The round toward seL4's 440 ns (2026-10-07, po9)
+
+The customer's target for the round is `domain-call` p50 matched to seL4's
+440 ns (every mitigation on, both programs in one speculation domain,
+`ferrix.fastpath=on`). The consultant's design verdicts are its ledger's
+lines 409 (G1 to G11, every stream) and 410 to 412 (one per stream). Each
+stream records here what it changed and how each condition is met.
+
+**Measuring.** `domain-call` p50 on `main` falls in one of two modes a boot,
+about 1,250 ns and about 1,550 ns, on every tree; a ratio is taken within a
+mode and quoted with its boots per mode. Before 4c9c078cc,
+`bench-ipc --alternate` did not pass `--kernel-option` to the other tree, so
+a fast-path tree was compared with the general path.
+
+#### The object side (po9-obj; ledger line 410, O1 to O10)
+
+**Where the time went.** The timing build `po9/obj-prof` (never lands)
+stamps 24 points of `fast_write_read` and `send_direct`. The stamp costs
+7 ns and the guest TSC moves in 10 ns steps, so a span reads to about 10 ns
+a direction. Above that step: T2's `filter_quiet` about 20 ns
+(`seccomp::quiet`'s `with_current` and `of_task`'s downcast); the way from
+the task to its handle table about 24 (two `dyn` calls, `thread().process()`
+and `.core()`); `reply_words` about 19 (a `memcpy` call and a byte loop).
+The handle table's `try_lock`, `HandleTable::get` with its clamp, the
+`Arc<Endpoint>` clone and its drop, and each half's lock read under one step
+each. So the lookup and the park without an `Arc` (O3, O9) are worth about
+5 to 10 ns a direction against their protocol notes and checks, and are
+deferred (the PO, 2026-10-07).
+
+**Cut 1: the masked locks and the reply in registers.**
+- *The halves' and the handle table's locks are held under the entry's
+  interrupt mask, without the guard's full `disable` and `enable`.*
+  `ferrix_sync::PreemptSpinLock::try_lock_masked` takes the same ticket
+  lock without them, so it excludes every holder as `try_lock` does (host
+  test `a_masked_try_lock_excludes_every_holder_and_leaves_the_count_alone`,
+  whose control, the count raised, fails it). The kernel's
+  `sync::try_lock_masked` wraps it in a `MaskedGuard` that still counts the
+  hold as one lock on this processor's preemption word, by a plain per-CPU
+  add (`sched::raise_masked`, `lower_masked`): no site record and no
+  deferred decision, which a masked holder could not make. So A3
+  (`require_preemption_on`, FX-0503) still stops a switch made with a half
+  held (the consultant's C1, ledger line 416). Its control moves the caller's
+  half's drop after `switch.switch()` and FIRED (`po9-obj-ctl-a3`).
+  `send_direct` and `Process::try_with_handles_masked` are `unsafe` with the
+  mask as their contract, met by the entry, which holds it until the switch.
+  Nothing under them blocks or loops (D9, G4). The lock order and part 3's
+  wake argument are unchanged, because the locks are the same (O4). The lock
+  table above is restated.
+- *`reply_words` computes the words in registers.* Each word is the
+  program's `usize`, its bytes from the count on cleared by a mask (O7,
+  `Small::of`'s rule). Stage 9's reply-words case holds it to the general
+  composition `words_of(&sent_bytes(a), count)` for every count from 0 to
+  24, with every byte distinct (L.object.167's criterion). Its control, the
+  mask left out, FIRED (`po9-obj-ctl-reply`).
+- Rows restated: L.object.166 (how the halves are held), L.object.167 (the
+  new case), L.object.169's unit.
+

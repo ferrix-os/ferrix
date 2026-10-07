@@ -22,6 +22,9 @@
 //! - **Case 14 (T13)**: an end posted in T13's window (the hook of condition
 //!   11, which only this check arms) is seen: the call answers `EINTR` and
 //!   leaves nobody blocked.
+//! - **The reply's words (O7)**: the words the commit puts in the reply
+//!   cell are the general path's write then read of the same registers,
+//!   the bytes past the count zero, for every count.
 //! - **The general continuation (condition 3)**: a caller the fast path
 //!   parked, woken by a general write, by its peer's close and by its
 //!   process's kill, answers what the general path answers.
@@ -104,6 +107,33 @@ pub(crate) fn run_and_report() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The reply's words (O7): what the commit puts in the reply cell,
+/// `reply_words`, is the general path's write then read of the same
+/// registers, `words_of(&sent_bytes(a), count)`, for every count up to the
+/// call's limit, with every byte distinct so that a byte kept or zeroed in
+/// the wrong place cannot match by accident.
+///
+/// # Errors
+///
+/// When the two differ at any count.
+///
+/// Verifies: `L.object.167`
+fn check_the_reply_words() -> Result<(), &'static str> {
+    use crate::syscall::native::{reply_words, sent_bytes, words_of};
+    let mut a = [0_u64; 6];
+    for (index, register) in a.iter_mut().enumerate() {
+        *register = u64::from_le_bytes(core::array::from_fn(|byte| {
+            u8::try_from(0x11 + index * 8 + byte).unwrap_or(0) | 0x80
+        }));
+    }
+    for count in 0..=nr::CHANNEL_WRITE_READ_BYTES {
+        if reply_words(count, &a) != words_of(&sent_bytes(&a), count) {
+            return Err("the fast path's reply words differ from the general write then read");
+        }
+    }
+    Ok(())
+}
+
 /// Run every case.
 ///
 /// # Errors
@@ -129,7 +159,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         check_a_spinner_keeps_its_share(on)?;
         check_the_barriers_in_a_domain_and_across_two(on)?;
         check_a_queued_write_takes_the_park()?;
-        report.cases = 10;
+        check_the_reply_words()?;
+        report.cases = 11;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
             report.cases += 1;

@@ -937,7 +937,14 @@ impl Endpoint {
     ///
     /// The test that declined (T6 to T13, or a lock held), with nothing
     /// changed: the general path runs the call from its start.
-    pub(crate) fn send_direct(
+    ///
+    /// # Safety
+    ///
+    /// (CONTEXT) Interrupts are masked on this processor from before the call
+    /// until the switch: the halves' locks are held under that mask, counted
+    /// for A3 but without the site record or the deferred decision
+    /// (`sync::try_lock_masked`).
+    pub(crate) unsafe fn send_direct(
         &self,
         caller: &Task,
         len: usize,
@@ -949,8 +956,12 @@ impl Endpoint {
             Side::First => (own, peer),
             Side::Second => (peer, own),
         };
-        let first = first.inbox.try_lock().ok_or(Count::Halves)?;
-        let second = second.inbox.try_lock().ok_or(Count::Halves)?;
+        // SAFETY: (CONTEXT) interrupts are masked from the system call's
+        // entry until the switch, both guards drop before `switch`, and
+        // nothing under them blocks: every lock below is a `try_lock`.
+        let first = unsafe { crate::sync::try_lock_masked(&first.inbox) }.ok_or(Count::Halves)?;
+        // SAFETY: (CONTEXT) as for `first`.
+        let second = unsafe { crate::sync::try_lock_masked(&second.inbox) }.ok_or(Count::Halves)?;
         let (mut own_inbox, mut peer_inbox) = match self.side {
             Side::First => (first, second),
             Side::Second => (second, first),

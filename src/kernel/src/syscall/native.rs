@@ -858,7 +858,7 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
 /// argument registers, as they would lie in memory. The general write takes
 /// the first `count`; the fast path's commit sends them as words, the bytes
 /// past `count` zeroed ([`reply_words`]).
-fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
+pub(crate) fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
     let mut bytes = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
     for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(&a[2..5]) {
         // The word as the program held it: a `usize` in its registers,
@@ -871,7 +871,7 @@ fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
 /// The words a reader of `count` bytes of `bytes` is answered with, the
 /// bytes after `count` zero: what [`receive_words`] makes of a message held
 /// in the slot, whose bytes past its length `Small::of` left zero.
-fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
+pub(crate) fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
     let mut held = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
     if let (Some(to), Some(from)) = (held.get_mut(..count), bytes.get(..count)) {
         to.copy_from_slice(from);
@@ -887,10 +887,34 @@ fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
 
 /// The words the fast path's commit puts in the reader's reply cell for a
 /// send of `count` bytes from `a`'s registers: the general path's write then
-/// read, without the inbox between.
-fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
-    words_of(&sent_bytes(a), count)
+/// read, without the inbox between -- `words_of(&sent_bytes(a), count)`,
+/// computed in registers. Each word is the program's `usize`, its bytes from
+/// `count` on zero (`Small::of`'s rule, O7). Held to that composition for
+/// every count and byte position by stage 9's reply-words case
+/// (`object::fast_path_check`).
+pub(crate) fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
+    const WORD: usize = size_of::<usize>();
+    let mut words = [0_u64; 3];
+    for (index, (word, &register)) in words.iter_mut().zip(&a[2..5]).enumerate() {
+        // The bytes of this word the send holds: 0 to `WORD`.
+        let held = count.saturating_sub(index * WORD).min(WORD);
+        let value = register as usize;
+        let kept = if held == WORD {
+            value
+        } else {
+            // Little-endian (every target Ferrix builds for): the first
+            // `held` bytes in memory are the low ones.
+            value & ((1_usize << (held * 8)) - 1)
+        };
+        *word = kept as u64;
+    }
+    words
 }
+
+const _: () = assert!(
+    cfg!(target_endian = "little"),
+    "reply_words keeps the low bytes"
+);
 
 /// `channel_write_read`'s write: `count` bytes of the words in the third to
 /// fifth argument registers, as they would lie in memory.
@@ -1033,19 +1057,23 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     // across the park: the task is not freed while its own code runs.
     crate::sched::with_current(|caller| {
         let endpoint = caller.thread().and_then(|thread| {
-            thread
-                .process()
-                .core()
-                .try_with_handles(|table| {
+            // SAFETY: (CONTEXT) masked from the entry, as this function's
+            // contract says, and the lookup blocks on nothing.
+            unsafe {
+                thread.process().core().try_with_handles_masked(|table| {
                     channel_in(table, handle(a[0]), Rights::READ | Rights::WRITE).ok()
                 })
-                .flatten()
+            }
+            .flatten()
         });
         let Some(endpoint) = endpoint else {
             direct::count(Count::T4);
             return Fast::Declined;
         };
-        if let Err(declined) = endpoint.send_direct(caller, count, reply_words(count, a)) {
+        let words = reply_words(count, a);
+        // SAFETY: (CONTEXT) masked from the entry until the switch, as this
+        // function's contract says.
+        if let Err(declined) = unsafe { endpoint.send_direct(caller, count, words) } {
             direct::count(declined);
             return Fast::Declined;
         }

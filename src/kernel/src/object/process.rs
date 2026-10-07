@@ -447,9 +447,21 @@ impl Process {
     /// [`Process::with_handles`] for a look that may not wait: `look` runs
     /// on the table if its lock is free right now, and `None` otherwise. The
     /// fast path's lookup (`docs/OPAQUE-KERNEL.md` §9.7, T4), which waits on
-    /// no lock.
-    pub(crate) fn try_with_handles<R>(&self, look: impl FnOnce(&HandleTable) -> R) -> Option<R> {
-        self.handles.try_lock().map(|table| look(&table))
+    /// no lock, and holds it under the interrupt mask
+    /// (`sync::try_lock_masked`).
+    ///
+    /// # Safety
+    ///
+    /// (CONTEXT) Interrupts are masked on this processor across the call,
+    /// and `look` neither blocks nor switches.
+    pub(crate) unsafe fn try_with_handles_masked<R>(
+        &self,
+        look: impl FnOnce(&HandleTable) -> R,
+    ) -> Option<R> {
+        // SAFETY: (CONTEXT) the caller's contract is the lock's: masked for
+        // the whole hold, which ends before this returns, and `look` blocks
+        // on nothing.
+        unsafe { crate::sync::try_lock_masked(&self.handles) }.map(|table| look(&table))
     }
 
     /// The job it is in: its cgroup.

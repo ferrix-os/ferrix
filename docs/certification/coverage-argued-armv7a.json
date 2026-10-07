@@ -1499,21 +1499,21 @@
     },
     {
       "file": "object/process.rs",
-      "lines": "866",
+      "lines": "878",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "891",
+      "lines": "903",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1033",
+      "lines": "1045",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
@@ -1702,49 +1702,49 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1236-1237",
+      "lines": "1264-1265",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1908",
+      "lines": "1936",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1974",
+      "lines": "2002",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1977",
+      "lines": "2005",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1987",
+      "lines": "2015",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1994",
+      "lines": "2022",
       "category": "defensive",
       "match": "object::dispose([object]);",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2474",
+      "lines": "2502",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
@@ -1919,14 +1919,14 @@
     },
     {
       "file": "sched/preempt.rs",
-      "lines": "395-396",
+      "lines": "416-417",
       "category": "failure-path",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
     },
     {
       "file": "sched/preempt.rs",
-      "lines": "444",
+      "lines": "465",
       "category": "failure-path",
       "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
       "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."

@@ -1666,7 +1666,9 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.166'> theSendHalfDeclinesOrCommits : ItemLowLevel {
             attribute :>> statement = "send_direct shall take the two halves' inbox
-                locks only if free, the first side's before the second's, decline
+                locks only if free, the first side's before the second's, held under
+                the entry's interrupt mask and counted as locks on the preemption word
+                that A3 checks at the switch, decline
                 unless the caller's inbox is empty (T6), nothing is parked on its side
                 (T7), its peer is open (T8), a reader is parked on the peer's side
                 (T9) and the peer's side has no observers and no waiters (T10), stop
@@ -1683,7 +1685,10 @@ package FerrixObjectRequirements {
         requirement <'L.object.167'> theReplyIsZeroPastItsCount : ItemLowLevel {
             attribute :>> statement = "The words a commit hands over shall be the
                 count's bytes of the sent words, the bytes past the count zero.";
-            attribute :>> criterion = "ipc-equiv's case 1 with the fast path on.";
+            attribute :>> criterion = "ipc-equiv's case 1 with the fast path on, and
+                stage 9's reply-words case, which holds the commit's words to the
+                general write then read for every count (the `fastcase` line); with
+                the mask past the count left out its control fails it.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::reply_words", "syscall::native::words_of",
                 "syscall::native::sent_bytes");
@@ -1713,7 +1718,7 @@ package FerrixObjectRequirements {
                 refusal as the general path does, with its audit records.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::fast_write_read",
-                "object::process::Process::try_with_handles", "trap::filter_quiet",
+                "object::process::Process::try_with_handles_masked", "trap::filter_quiet",
                 "trap::set_filter_quiet");
         }
         requirement <'L.object.170'> theWayOutsAreShared : ItemLowLevel {
