@@ -1127,6 +1127,9 @@ fn continue_general(
     }
     let outcome = crate::syscall::write_read_outcome(answered);
     crate::sched::regroup_current();
+    // As `trap::system_call`'s way back: a job that has used its `cpu.max`
+    // quota waits out the rest of its period here.
+    crate::sched::throttle_current(crate::trap::must_attend);
     crate::sched::call_left();
     arch::disable_interrupts();
     outcome
@@ -2890,7 +2893,8 @@ fn space_status(why: SpaceError) -> Errno {
         | SpaceError::NotMapped(_)
         | SpaceError::Backing(_)
         | SpaceError::PastEnd(_)
-        | SpaceError::Unreadable(_) => status::INVALID_ARGS,
+        | SpaceError::Unreadable(_)
+        | SpaceError::Evicted => status::INVALID_ARGS,
     }
 }
 

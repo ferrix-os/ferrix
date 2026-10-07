@@ -57,7 +57,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::sync::SpinLock;
 
@@ -68,7 +68,7 @@ use ferrix_sync::Once;
 
 use super::port::{Observer, Observers, PortError, deliver, register, trigger};
 use super::process::{self, Process};
-use super::quota::{self, Charge, Quota, Resource, Usage};
+use super::quota::{self, Charge, Counter, Mark, Quota, Resource, Usage};
 use crate::fallible::{self, AllocError};
 use crate::sched::WaitQueue;
 
@@ -174,6 +174,14 @@ pub(crate) struct Job {
     /// `memory.events`' `oom_kill`: how many processes in it or beneath it
     /// the scoped OOM kill ended.
     oom_kills: AtomicU64,
+    /// `cgroup.freeze`: whether it asks that its processes, and those of
+    /// every cgroup beneath it, stop where they can be stopped again by
+    /// nothing a program can send.
+    freeze: AtomicBool,
+    /// What `cgroup.events` last said of `frozen`: frozen is asked for and
+    /// every process beneath it has stopped. Kept here so that a change is
+    /// noticed once and its pollers woken once.
+    frozen_seen: AtomicBool,
     /// The owner, group and mode `chown` and `chmod` gave its cgroupfs
     /// directory and files, by each node's slot there. cgroupfs's, kept here
     /// because a directory there is a view made afresh at every lookup, and
@@ -415,6 +423,8 @@ impl Job {
             memory_events: fallible::try_arc(WaitQueue::new())?,
             ooms: AtomicU64::new(0),
             oom_kills: AtomicU64::new(0),
+            freeze: AtomicBool::new(false),
+            frozen_seen: AtomicBool::new(false),
             nodes: SpinLock::new(Vec::new()),
             quota,
             charge: Charge::none(Resource::Objects),
@@ -530,6 +540,118 @@ impl Job {
             .as_ref()
             .map(|quota| quota.set_limit(resource, limit))
             .is_some()
+    }
+
+    /// Its `memory.high`, `memory.low` or `memory.min` mark; a `max` high and
+    /// a zero low and min for the tree's root, which has none.
+    pub(crate) fn mark(&self, mark: Mark) -> u64 {
+        self.quota.as_ref().map_or(
+            if mark == Mark::High {
+                quota::UNLIMITED
+            } else {
+                0
+            },
+            |quota| quota.mark(mark),
+        )
+    }
+
+    /// Set a mark. Whether it could be: the tree's root takes none.
+    pub(crate) fn set_mark(&self, mark: Mark, value: u64) -> bool {
+        self.quota
+            .as_ref()
+            .map(|quota| quota.set_mark(mark, value))
+            .is_some()
+    }
+
+    /// How many of `counter` were counted in it and beneath it.
+    pub(crate) fn counted(&self, counter: Counter) -> u64 {
+        self.quota
+            .as_ref()
+            .map_or(0, |quota| quota.counted(counter))
+    }
+
+    /// Wake whatever polls its `memory.events` and every job above it: a
+    /// count in it changed (`memory.high`'s).
+    pub(crate) fn wake_memory_events(&self) {
+        let mut at = Some(self);
+        while let Some(job) = at {
+            job.memory_events.wake_all();
+            at = job.parent.as_deref();
+        }
+    }
+
+    /// Its `cpu.max`: the quota in nanoseconds, or [`quota::UNLIMITED`], and
+    /// the period in nanoseconds.
+    pub(crate) fn bandwidth(&self) -> (u64, u64) {
+        self.quota.as_ref().map_or(
+            (quota::UNLIMITED, quota::DEFAULT_PERIOD_NS),
+            Quota::bandwidth,
+        )
+    }
+
+    /// Set its `cpu.max`. Whether it could be: the tree's root takes none.
+    pub(crate) fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
+        self.quota
+            .as_ref()
+            .map(|slot| slot.set_bandwidth(quota, period))
+            .is_some()
+    }
+
+    /// Nanoseconds its tasks, and those of the jobs beneath it, have used
+    /// the processor in user mode and in kernel mode; the whole machine's for
+    /// the tree's root.
+    pub(crate) fn cpu_times(&self) -> (u64, u64) {
+        self.quota
+            .as_ref()
+            .map_or_else(quota::machine_cpu, Quota::cpu_times)
+    }
+
+    /// Every job in this one's subtree, itself first.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] when the list cannot be made.
+    pub(crate) fn subtree(self: &Arc<Job>) -> Result<Vec<Arc<Job>>, AllocError> {
+        self.walk(|_| {})
+    }
+
+    /// Whether `cgroup.freeze` is set here: its own, not an ancestor's.
+    pub(crate) fn freeze_requested(&self) -> bool {
+        self.freeze.load(Ordering::Acquire)
+    }
+
+    /// Set `cgroup.freeze` here. The processes beneath it are to be told by
+    /// the caller ([`Process::sync_freeze`]), after this.
+    pub(crate) fn set_freeze(&self, on: bool) {
+        self.freeze.store(on, Ordering::SeqCst);
+    }
+
+    /// Whether it, or a job above it, asks for its processes to be frozen.
+    pub(crate) fn freezing(&self) -> bool {
+        let mut at = Some(self);
+        while let Some(job) = at {
+            if job.freeze.load(Ordering::SeqCst) {
+                return true;
+            }
+            at = job.parent.as_deref();
+        }
+        false
+    }
+
+    /// What `cgroup.events` last said of `frozen`.
+    pub(crate) fn frozen_seen(&self) -> bool {
+        self.frozen_seen.load(Ordering::Acquire)
+    }
+
+    /// Record that `frozen` is now `now`, and, if that changed what
+    /// `cgroup.events` says, wake whatever polls it. Whether it changed.
+    pub(crate) fn note_frozen(&self, now: bool) -> bool {
+        let changed = self.frozen_seen.swap(now, Ordering::AcqRel) != now;
+        if changed {
+            self.events.wake_all();
+            self.waiters.wake_all();
+        }
+        changed
     }
 
     /// Its `cpu.weight`: [`quota::DEFAULT_WEIGHT`] for the tree's root.

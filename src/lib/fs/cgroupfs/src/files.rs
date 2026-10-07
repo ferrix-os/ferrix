@@ -53,16 +53,32 @@ pub enum Kind {
     Freeze,
     /// `cgroup.kill`, which is write-only on Linux: mode 0200.
     Kill,
+    /// `cpu.stat`.
+    CpuStat,
     /// `cpu.weight`.
     CpuWeight,
+    /// `cpu.weight.nice`.
+    CpuWeightNice,
+    /// `cpu.max`.
+    CpuMax,
     /// `memory.current`.
     MemoryCurrent,
     /// `memory.max`.
     MemoryMax,
+    /// `memory.high`: the mark above which a cgroup's pages are reclaimed.
+    MemoryHigh,
+    /// `memory.low`: the best-effort protection from reclaim.
+    MemoryLow,
+    /// `memory.min`: the hard protection from reclaim.
+    MemoryMin,
     /// `memory.events`.
     MemoryEvents,
-    /// `memory.stat`: what of `memory.current` is kernel heap.
+    /// `memory.stat`: the keys Ferrix has a source for.
     MemoryStat,
+    /// `io.stat`.
+    IoStat,
+    /// `io.max`.
+    IoMax,
     /// `pids.current`.
     PidsCurrent,
     /// `pids.max`.
@@ -84,13 +100,24 @@ pub const FILES: &[File] = &[
     file("cgroup.stat", Kind::Stat, true, false),
     file("cgroup.freeze", Kind::Freeze, false, true),
     file("cgroup.kill", Kind::Kill, false, true),
+    file("cpu.stat", Kind::CpuStat, true, false),
     controlled("cpu.weight", Kind::CpuWeight, Controller::Cpu, true),
+    controlled(
+        "cpu.weight.nice",
+        Kind::CpuWeightNice,
+        Controller::Cpu,
+        true,
+    ),
+    controlled("cpu.max", Kind::CpuMax, Controller::Cpu, true),
     controlled(
         "memory.current",
         Kind::MemoryCurrent,
         Controller::Memory,
         false,
     ),
+    controlled("memory.min", Kind::MemoryMin, Controller::Memory, true),
+    controlled("memory.low", Kind::MemoryLow, Controller::Memory, true),
+    controlled("memory.high", Kind::MemoryHigh, Controller::Memory, true),
     controlled("memory.max", Kind::MemoryMax, Controller::Memory, true),
     controlled(
         "memory.events",
@@ -99,6 +126,8 @@ pub const FILES: &[File] = &[
         false,
     ),
     controlled("memory.stat", Kind::MemoryStat, Controller::Memory, false),
+    on_root_too("io.stat", Kind::IoStat, Controller::Io, false),
+    controlled("io.max", Kind::IoMax, Controller::Io, true),
     controlled("pids.current", Kind::PidsCurrent, Controller::Pids, false),
     controlled("pids.max", Kind::PidsMax, Controller::Pids, true),
     controlled("pids.events", Kind::PidsEvents, Controller::Pids, false),
@@ -126,6 +155,23 @@ const fn controlled(
         name,
         kind,
         on_root: false,
+        writable,
+        controller: Some(controller),
+    }
+}
+
+/// A table entry of a controller's that the root has too: `io.stat`, which
+/// counts what the whole machine did.
+const fn on_root_too(
+    name: &'static str,
+    kind: Kind,
+    controller: Controller,
+    writable: bool,
+) -> File {
+    File {
+        name,
+        kind,
+        on_root: true,
         writable,
         controller: Some(controller),
     }

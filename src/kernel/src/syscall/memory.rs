@@ -79,7 +79,7 @@ fn protection(prot: u32) -> Result<VmaFlags, Errno> {
 pub(crate) fn refused(error: SpaceError) -> Errno {
     match error {
         SpaceError::OutOfMemory | SpaceError::Backing(_) => Errno::ENOMEM,
-        SpaceError::Unreadable(_) => Errno::EIO,
+        SpaceError::Unreadable(_) | SpaceError::Evicted => Errno::EIO,
         // Linux's answer to a mapping whose memory type conflicts with a
         // mapping already made (`reserve_pfn_range`).
         SpaceError::NotUserRange(_) | SpaceError::BadRange | SpaceError::OtherMemoryType => {

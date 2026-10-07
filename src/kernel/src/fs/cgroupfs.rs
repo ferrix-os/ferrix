@@ -61,7 +61,7 @@ use crate::hooks::Full;
 use crate::object::Object;
 use crate::object::job::{self, Job, JobError, NodeAttributes};
 use crate::object::process::Host;
-use crate::object::quota::{self, Resource};
+use crate::object::quota::{self, Counter, Mark, Resource};
 use crate::sched::WaitQueue;
 use crate::sync::SpinLock;
 use crate::syscall::fd;
@@ -70,12 +70,16 @@ use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
 
 mod controllers_check;
+mod cpu_check;
 mod creator_check;
 mod delegation_check;
 mod events_check;
+mod freeze_check;
+mod io_check;
 mod limits_check;
 mod native_check;
 mod oom_check;
+mod reclaim_check;
 
 /// The result every operation here returns.
 type Result<T> = core::result::Result<T, Errno>;
@@ -84,10 +88,12 @@ type Result<T> = core::result::Result<T, Errno>;
 /// tells a cgroup v2 mount from a v1 one before trusting it.
 const CGROUP2_SUPER_MAGIC: u64 = 0x6367_7270;
 
-/// The controllers this kernel has built: `cpu`, `memory` and `pids`, over
-/// the job quotas. `io` is landing B1.
+/// The controllers this kernel has built: `cpu`, `io`, `memory` and `pids`.
+/// Three are over the job quotas; `io` is over what the disks' wrapper
+/// counts (`fs::blkio`).
 const BUILT: Set = Set::EMPTY
     .with(Controller::Cpu)
+    .with(Controller::Io)
     .with(Controller::Memory)
     .with(Controller::Pids);
 
@@ -823,57 +829,114 @@ impl Inode for EventsFile {
     }
 }
 
+/// The thread ids in `cgroup.threads`, as the reader's namespace numbers them.
+fn thread_names(job: &Arc<Job>) -> Vec<u32> {
+    let reader = crate::syscall::userns::acting();
+    let ns = reader
+        .as_ref()
+        .and_then(|reader| reader.numbers())
+        .map(|numbers| Arc::clone(numbers.namespace()));
+    let mut tids: Vec<u32> = members_processes(job)
+        .iter()
+        .flat_map(|process| {
+            procfs::thread_ids(process)
+                .into_iter()
+                .map(|tid| crate::syscall::pidns::thread_name_in(ns.as_ref(), process, tid))
+                .collect::<Vec<u32>>()
+        })
+        .filter(|&tid| tid != 0)
+        .collect();
+    tids.sort_unstable();
+    tids
+}
+
+/// `cpu.stat` of `job`.
+fn render_cpu_stat(out: &mut Vec<u8>, job: &Arc<Job>) {
+    // Whoever runs without a tick has not been charged for it yet.
+    crate::sched::charge_running();
+    let (user, system) = job.cpu_times();
+    ferrix_cgroupfs::cpu::render_stat(
+        out,
+        ferrix_cgroupfs::cpu::Stat {
+            usage: (user / 1000).saturating_add(system / 1000),
+            user: user / 1000,
+            system: system / 1000,
+            periods: job.counted(Counter::Periods),
+            throttled: job.counted(Counter::Throttled),
+            throttled_us: job.counted(Counter::ThrottledNs) / 1000,
+        },
+        offered(job).contains(Controller::Cpu),
+    );
+}
+
 /// What a file of `job` says now.
 fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
     let mut out = Vec::new();
     match kind {
         Kind::Type => out.extend_from_slice(b"domain\n"),
         Kind::Procs => render::ids(&mut out, &members(job)),
-        Kind::Threads => {
-            // As the reader's namespace numbers them.
-            let reader = crate::syscall::userns::acting();
-            let ns = reader
-                .as_ref()
-                .and_then(|reader| reader.numbers())
-                .map(|numbers| Arc::clone(numbers.namespace()));
-            let mut tids: Vec<u32> = members_processes(job)
-                .iter()
-                .flat_map(|process| {
-                    procfs::thread_ids(process)
-                        .into_iter()
-                        .map(|tid| crate::syscall::pidns::thread_name_in(ns.as_ref(), process, tid))
-                        .collect::<Vec<u32>>()
-                })
-                .filter(|&tid| tid != 0)
-                .collect();
-            tids.sort_unstable();
-            render::ids(&mut out, &tids);
-        }
+        Kind::Threads => render::ids(&mut out, &thread_names(job)),
         Kind::Controllers => controllers::render(&mut out, offered(job)),
         Kind::SubtreeControl => controllers::render(&mut out, job.subtree_control()),
-        Kind::Events => render::events(&mut out, job.is_populated(), false),
+        Kind::Events => render::events(&mut out, job.is_populated(), job.frozen_seen()),
         Kind::MaxDescendants => render::limit(&mut out, job.limits().1),
         Kind::MaxDepth => render::limit(&mut out, job.limits().0),
         // With no memory to count them, as many as a count can say.
         Kind::Stat => render::stat(&mut out, job.descendants().unwrap_or(u32::MAX)),
-        Kind::Freeze => out.extend_from_slice(b"0\n"),
+        Kind::Freeze => out.extend_from_slice(if job.freeze_requested() {
+            b"1\n"
+        } else {
+            b"0\n"
+        }),
         Kind::Kill => {}
         Kind::CpuWeight => render::number(&mut out, u64::from(job.cpu_weight())),
+        Kind::CpuWeightNice => {
+            let nice = ferrix_cgroupfs::cpu::nice_from_weight(job.cpu_weight());
+            out.extend_from_slice(alloc::format!("{nice}\n").as_bytes());
+        }
+        Kind::CpuMax => {
+            let (quota, period) = job.bandwidth();
+            ferrix_cgroupfs::cpu::render_max(
+                &mut out,
+                ferrix_cgroupfs::cpu::Max {
+                    quota: (quota != quota::UNLIMITED).then_some(quota / 1000),
+                    period: period / 1000,
+                },
+            );
+        }
+        Kind::IoStat => {
+            for (device, stat) in super::blkio::stats(job.quota_index()) {
+                ferrix_cgroupfs::io::render_stat(&mut out, device, stat);
+            }
+        }
+        Kind::IoMax => {
+            for (device, limits) in super::blkio::limits(job.quota_index()) {
+                ferrix_cgroupfs::io::render_max(&mut out, device, limits);
+            }
+        }
+        Kind::CpuStat => render_cpu_stat(&mut out, job),
         Kind::MemoryCurrent => render::number(&mut out, usage(job, Resource::Memory).used),
         Kind::MemoryMax => {
             let limit = usage(job, Resource::Memory).limit;
             render::max(&mut out, (limit != quota::UNLIMITED).then_some(limit));
         }
+        Kind::MemoryHigh => render_mark(&mut out, job.mark(Mark::High), true),
+        Kind::MemoryLow => render_mark(&mut out, job.mark(Mark::Low), false),
+        Kind::MemoryMin => render_mark(&mut out, job.mark(Mark::Min), false),
         Kind::MemoryEvents => {
             let (oom, oom_kill) = job.oom_counts();
             render::memory_events(
                 &mut out,
-                usage(job, Resource::Memory).refused,
-                oom,
-                oom_kill,
+                render::MemoryEvents {
+                    low: 0,
+                    high: job.counted(Counter::High),
+                    max: usage(job, Resource::Memory).refused,
+                    oom,
+                    oom_kill,
+                },
             );
         }
-        Kind::MemoryStat => render::memory_stat(&mut out, usage(job, Resource::Kernel).used),
+        Kind::MemoryStat => render::memory_stat(&mut out, memory_stat(job)),
         Kind::PidsCurrent => render::number(&mut out, usage(job, Resource::Tasks).used),
         Kind::PidsMax => {
             let limit = usage(job, Resource::Tasks).limit;
@@ -882,6 +945,38 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         Kind::PidsEvents => render::pids_events(&mut out, usage(job, Resource::Tasks).refused),
     }
     out
+}
+
+/// A mark as `memory.high`, `memory.low` and `memory.min` print it: `max`
+/// for none, else the number of bytes.
+fn render_mark(out: &mut Vec<u8>, value: u64, max_is_none: bool) {
+    if max_is_none {
+        render::max(out, (value != quota::UNLIMITED).then_some(value));
+    } else if value == quota::UNLIMITED {
+        render::max(out, None);
+    } else {
+        render::number(out, value);
+    }
+}
+
+/// What `memory.stat` says of `job`: the pages its programs hold in files'
+/// caches counted by walking them, the kernel heap and the events by the
+/// job's own counters.
+fn memory_stat(job: &Job) -> render::MemoryStat {
+    let (file, shmem) = match job.quota_index() {
+        quota::NONE => (0, 0),
+        slot => crate::user::cache::resident(slot),
+    };
+    let bytes = |pages: u64| pages.saturating_mul(ferrix_bootinfo::PAGE_SIZE);
+    render::MemoryStat {
+        file: bytes(file),
+        kernel: usage(job, Resource::Kernel).used,
+        shmem: bytes(shmem),
+        pgscan: job.counted(Counter::Scanned),
+        pgsteal: job.counted(Counter::Stolen),
+        pgfault: job.counted(Counter::Faults),
+        pgmajfault: job.counted(Counter::MajorFaults),
+    }
 }
 
 /// What `job` holds of `resource`: nothing, and no limit, for the root,
@@ -966,32 +1061,110 @@ fn limit_set(job: &Job, resource: Resource, limit: u64) {
     );
 }
 
+/// A pid written to `job`'s `cgroup.procs`: move that process in.
+fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
+    let target = write::parse_procs(data).map_err(errno)?;
+    if job.is_removed() {
+        return Err(Errno::ENODEV);
+    }
+    let process = match target {
+        Target::Writer => process::current().ok_or(Errno::ESRCH)?,
+        // A number in the writer's namespace, which must see it.
+        Target::Pid(pid) => match crate::syscall::userns::acting() {
+            Some(writer) => crate::syscall::pidns::find_in(&writer, pid),
+            None => registry::find(pid),
+        }
+        .ok_or(Errno::ESRCH)?,
+    };
+    let left = process.job();
+    // Linux's `cgroup_procs_write_permission`: a writer in a cgroup
+    // namespace moves only between cgroups inside its own root, and
+    // is told `ENOENT`, as if the rest of the tree were not there.
+    if !visible_in(&opener.ns, &[&left, job]) {
+        return Err(Errno::ENOENT);
+    }
+    attach_permissions(&opener.who, &left, job, &opener.shared)?;
+    // The move writes the process's freeze, which its threads read on their
+    // way back to user mode: counted as a post from before that write until
+    // `freeze_sync` has posted (`sched::work::audit`).
+    let posting = crate::sched::work::posting();
+    job.adopt(&process).map_err(move_errno)?;
+    // Frozen with the cgroup it went into, thawed from the one it left; and
+    // either may now be frozen, or no longer, as a whole.
+    process.freeze_sync();
+    drop(posting);
+    settle_frozen(&left);
+    settle_frozen(job);
+    Ok(())
+}
+
+/// A write to `memory.high`, `memory.low` or `memory.min`.
+fn set_mark(job: &Job, kind: Kind, data: &[u8]) -> Result<()> {
+    let mark = match kind {
+        Kind::MemoryHigh => Mark::High,
+        Kind::MemoryLow => Mark::Low,
+        _ => Mark::Min,
+    };
+    let value = write::parse_memory_max(data)
+        .map_err(errno)?
+        .map_or(quota::UNLIMITED, |bytes| {
+            bytes - bytes % ferrix_bootinfo::PAGE_SIZE
+        });
+    // Not audited: the audit record names a limit that refuses charges, and
+    // a mark refuses nothing.
+    let _ = job.set_mark(mark, value);
+    Ok(())
+}
+
+/// A write to `io.max`: a disk, then the limits to change on it.
+fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
+    let slot = job.quota_index();
+    let ((major, minor), words) = ferrix_cgroupfs::io::parse_device(data).map_err(errno)?;
+    if super::devfs::block_device(ferrix_vfs::initramfs::makedev(major, minor)).is_none() {
+        return Err(Errno::ENODEV);
+    }
+    let held = super::blkio::limits_on(slot, (major, minor));
+    let limits = ferrix_cgroupfs::io::parse_limits(words, held).map_err(errno)?;
+    super::blkio::set_limits(slot, (major, minor), limits)
+}
+
+/// A write to `cpu.max`.
+fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
+    let (_, period) = job.bandwidth();
+    let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
+    let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
+    if job.set_bandwidth(runtime, max.period * 1000) {
+        // Tasks of the job already running alone on a processor are cut by
+        // a timer nothing has armed yet.
+        crate::sched::rearm_timers();
+        audit::limit_set(
+            audit::CGROUP_LIMIT,
+            writer(),
+            job.id(),
+            ferrix_audit::resource::CPU_MAX,
+            max.quota.unwrap_or(u64::MAX),
+        );
+    }
+    Ok(())
+}
+
+/// Set `job`'s `cpu.weight`, from either file that does, and record it.
+fn set_weight(job: &Job, weight: u32) {
+    if job.set_cpu_weight(weight) {
+        audit::limit_set(
+            audit::CGROUP_LIMIT,
+            writer(),
+            job.id(),
+            ferrix_audit::resource::CPU_WEIGHT,
+            u64::from(weight),
+        );
+    }
+}
+
 /// A write of `data` to a file of `job`, opened by `opener`.
 fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
     match kind {
-        Kind::Procs => {
-            let target = write::parse_procs(data).map_err(errno)?;
-            if job.is_removed() {
-                return Err(Errno::ENODEV);
-            }
-            let process = match target {
-                Target::Writer => process::current().ok_or(Errno::ESRCH)?,
-                // A number in the writer's namespace, which must see it.
-                Target::Pid(pid) => match crate::syscall::userns::acting() {
-                    Some(writer) => crate::syscall::pidns::find_in(&writer, pid),
-                    None => registry::find(pid),
-                }
-                .ok_or(Errno::ESRCH)?,
-            };
-            // Linux's `cgroup_procs_write_permission`: a writer in a cgroup
-            // namespace moves only between cgroups inside its own root, and
-            // is told `ENOENT`, as if the rest of the tree were not there.
-            if !visible_in(&opener.ns, &[&process.job(), job]) {
-                return Err(Errno::ENOENT);
-            }
-            attach_permissions(&opener.who, &process.job(), job, &opener.shared)?;
-            job.adopt(&process).map_err(move_errno)?;
-        }
+        Kind::Procs => move_process(job, data, opener)?,
         Kind::Kill => {
             write::parse_kill(data).map_err(errno)?;
             let ended = job.kill_members().map_err(|_| Errno::ENOMEM)?;
@@ -1017,7 +1190,14 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         Kind::MaxDepth => job.set_max_depth(write::parse_limit(data).map_err(errno)?),
         Kind::MaxDescendants => job.set_max_descendants(write::parse_limit(data).map_err(errno)?),
         Kind::Type => write::parse_type(data).map_err(errno)?,
-        Kind::Threads | Kind::Freeze => return Err(Errno::EOPNOTSUPP),
+        Kind::Threads => return Err(Errno::EOPNOTSUPP),
+        Kind::Freeze => {
+            let on = write::parse_freeze(data).map_err(errno)?;
+            if job.is_removed() {
+                return Err(Errno::ENODEV);
+            }
+            freeze(job, on)?;
+        }
         Kind::PidsMax => {
             let limit = write::parse_pids_max(data).map_err(errno)?;
             let limit = limit.unwrap_or(quota::UNLIMITED);
@@ -1035,28 +1215,74 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
                 limit_set(job, Resource::Memory, bytes);
             }
         }
-        Kind::CpuWeight => {
-            let weight = write::parse_weight(data).map_err(errno)?;
-            if job.set_cpu_weight(weight) {
-                audit::limit_set(
-                    audit::CGROUP_LIMIT,
-                    writer(),
-                    job.id(),
-                    ferrix_audit::resource::CPU_WEIGHT,
-                    u64::from(weight),
-                );
-            }
+        Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => set_mark(job, kind, data)?,
+        Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?),
+        Kind::CpuWeightNice => {
+            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?);
         }
+        Kind::IoMax => set_io_max(job, data)?,
+        Kind::CpuMax => set_cpu_max(job, data)?,
         Kind::Controllers
         | Kind::Events
         | Kind::Stat
         | Kind::MemoryCurrent
         | Kind::MemoryEvents
         | Kind::MemoryStat
+        | Kind::CpuStat
+        | Kind::IoStat
         | Kind::PidsCurrent
         | Kind::PidsEvents => return Err(Errno::EACCES),
     }
     Ok(data.len())
+}
+
+/// Whether `job` is frozen as `cgroup.events` says: its subtree is to be
+/// frozen, and every process in it, live, has parked (`docs/CGROUPS.md`
+/// §11). A cgroup with no process is frozen as soon as it is asked to be.
+fn is_frozen(job: &Arc<Job>, live: &[Arc<Process>]) -> bool {
+    job.freezing()
+        && live.iter().all(|process| {
+            process.is_terminated()
+                || !job.contains(&process.core().job())
+                || (process.core().is_frozen() && process.is_parked())
+        })
+}
+
+/// Look again at whether `job`, and every cgroup above it, is frozen, and
+/// wake whatever polls the `cgroup.events` of each that changed. Called when
+/// a thread parks, leaves, or a process moves.
+pub(crate) fn settle_frozen(job: &Arc<Job>) {
+    let Ok(live) = registry::live() else {
+        return;
+    };
+    let mut at = Some(Arc::clone(job));
+    while let Some(current) = at {
+        let _ = current.note_frozen(is_frozen(&current, &live));
+        at = current.parent().cloned();
+    }
+}
+
+/// `cgroup.freeze` written to `job`: freeze, or thaw, every process beneath
+/// it (those a cgroup beneath it freezes of its own stay frozen), and settle
+/// what `cgroup.events` says of each cgroup in the subtree and above it.
+fn freeze(job: &Arc<Job>, on: bool) -> Result<()> {
+    if job.freeze_requested() == on {
+        return Ok(());
+    }
+    let tree = job.subtree().map_err(|_| Errno::ENOMEM)?;
+    job.set_freeze(on);
+    let live = registry::live().map_err(|_| Errno::ENOMEM)?;
+    for process in &live {
+        if job.contains(&process.core().job()) {
+            process.freeze_sync();
+        }
+    }
+    // A thaw is seen at once; a freeze is seen when the last has parked.
+    for member in &tree {
+        let _ = member.note_frozen(is_frozen(member, &live));
+    }
+    settle_frozen(job);
+    Ok(())
 }
 
 /// `/proc/<pid>/cgroup` for a process in `job`.
@@ -1119,6 +1345,18 @@ pub(crate) struct Report {
     /// A delegatee's attempts on its own cgroup's limits, natively and
     /// through the files, refused.
     pub(crate) limits_refused: u32,
+    /// Pages of files' caches that reclaim gave back, inside the cgroup
+    /// asking and no other, and that read back as the source has them.
+    pub(crate) reclaimed: u64,
+    /// Checks of `cgroup.freeze` passed: a program frozen, held through
+    /// `SIGCONT`, thawed, killed frozen, and the nested and moved cases.
+    pub(crate) frozen: u32,
+    /// Periods of a `cpu.max` in which a program was throttled: held to a
+    /// fifth of a processor, in its cgroup and beneath one.
+    pub(crate) throttled: u64,
+    /// Requests the `io` controller charged to the right cgroups, and
+    /// the ones `io.max` spaced out.
+    pub(crate) disk_requests: u32,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1274,6 +1512,10 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.oom_killed = oom_check::run(&mut harness)?;
     harness.report.created_as = creator_check::run(&mut harness)?;
     harness.report.limits_refused = limits_check::run(&mut harness)?;
+    harness.report.reclaimed = reclaim_check::run(&mut harness)?;
+    harness.report.frozen = freeze_check::run(&mut harness)?;
+    harness.report.throttled = cpu_check::run(&mut harness)?;
+    harness.report.disk_requests = io_check::run(&mut harness)?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)
@@ -1406,7 +1648,7 @@ fn check_the_limits(harness: &mut Harness) -> Checked<()> {
     for (file, data, errno, what) in [
         (
             &b"/check-b/cgroup.subtree_control"[..],
-            &b"+io\n"[..],
+            &b"+hugetlb\n"[..],
             Errno::EINVAL,
             "cgroup.subtree_control enabled a controller that is not built",
         ),

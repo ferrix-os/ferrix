@@ -351,7 +351,7 @@ follow, as `docs/BACKLOG.md` decided.
 | P1 | done, 2026-09-26, with the certification's F-35 | "Charge each job for its tasks, memory, objects and processor share"; "Show the job quotas as cgroup2's cpu, memory and pids controllers" |
 | M1 | charging, `memory.max`, `memory.current` and `memory.events` done, 2026-09-26; kernel memory in `memory.current` and `memory.stat`'s `kernel` line the same day, with the certification's F-37; the scoped OOM kill the same day; `memory.stat`'s other keys not | the same two; "Charge the kernel heap a job drives through the Linux personality (F-37)"; "Kill inside the cgroup whose memory.max a program's fault finds full" |
 | S1 | done differently, 2026-09-26: a weight per job applied to each task's, not a group entity | the same two |
-| M2, F1, S2, B1 | not started | |
+| M2, F1, S2, B1 | built, 2026-09-30: §10 to §13 | (landing pending) |
 
 What is left of the controllers is the rest of `memory.stat`, M2's
 reclaim, F1, S2 and B1. Init's L5 writes `TasksMax=` and `MemoryMax=`
@@ -556,3 +556,210 @@ carry today's sightings. The init's open decisions are `docs/INIT.md` §14,
 3. **Whether S1 and S2 (cpu) are in stage 13 at all.** Draft: yes, last. The
    stage names the `cpu` controller, but neither init nor the stage's exit
    needs it.
+
+## 10. Reclaim and `memory.high` (M2, 2026-09-30)
+
+What is reclaimable in a job is the clean page cache of files on a disk,
+charged to it, and nothing else: anonymous memory has no swap to go to, a
+memory filesystem's pages have nothing to be read back from, and the heap
+(`kernel` in `memory.stat`) has no shrinker. `src/kernel/src/user/cache.rs`
+keeps a weak list of every file's object (`Vmo::new_filled`) and gives back
+pages the way a truncation does (`Vmo::decommit_range`: out of the object,
+out of every mapping, a shootdown, then the frame and its charge).
+
+* **Whose.** The frame record names the job a page is charged to; a reclaim at
+  job `J` takes pages charged to `J` or beneath it, never a sibling's.
+  `memory.min` spares a child using no more than it from the reclaim of a job
+  above; `memory.low` does, unless nothing else gave enough (Linux's shares
+  are proportional, these are whole-or-nothing).
+* **What may be dropped.** A file's source says whether its pages can be read
+  again as they were (`PageSource::reclaimable`). A read-only btrfs mount
+  does. A writable one does not yet: its dirty pages are in its inodes and
+  not in the object, and a page taken between a write's copy and its dirty
+  mark would lose the write. An object a shared mapping may write through
+  does not either.
+* **When.** A fault that finds `memory.max` full reclaims in the job before it
+  asks for the kill of §6 (`object::oom`); a page-cache fill that finds it
+  full does, and with room for part of a run fills that part; with no limit
+  full but the machine out of frames, the fault reclaims anywhere. A program
+  that just took a page while its job, or one above it, is over `memory.high`
+  reclaims down to the mark (`oom::throttle`, after a fault and after a
+  read) and, if that gave back less than the excess, pauses a millisecond.
+  Linux's pause grows with the excess; this one does not.
+* **Reclaim makes an absent page a thing to fill.** Two places took an absent
+  page of a file for a hole: `Pages::read` read zeros, and a fault committed
+  a zero page or copied one into a private mapping. Both now ask the source
+  (`Filler::is_sourced`): a read fills again, and after eight tries reads the
+  source directly; a fault is retried (`SpaceError::Evicted`, which never
+  leaves `AddressSpace::fault`) and is `SIGBUS` after 64.
+* **Files.** `memory.high` (`max`), `memory.low` and `memory.min` (`0`) take
+  a byte count or `max`, rounded down to a page; there is no `memory.swap.*`.
+  `memory.events` counts `high` (the mark was hit and reclaimed from, in the
+  job whose mark it was and above). `memory.stat` prints `file`, `kernel`,
+  `shmem`, `pgscan`, `pgsteal`, `pgfault` and `pgmajfault`; `anon` is left
+  out, because page tables are charged as frames and cannot be told from
+  anonymous pages, and so are the forty keys with no source.
+* **Not built.** `memory.low` events, `memory.reclaim`, proportional
+  protection, the dentry and inode caches as reclaimable (M1's note that
+  dentries stay charged stands), `workingset_*`, and an audit record for the
+  three marks.
+
+## 11. `cgroup.freeze` (F1, 2026-09-30)
+
+A process is frozen when its job, or one above it, has `cgroup.freeze` set. It
+is a flag on the core process (`Process::is_frozen`), written under the
+membership lock a move holds, set when the process is made, moved, and when
+the file is written, and looked at again when the process becomes findable
+(`registry::publish`), so a freeze that scanned the table before a fork child
+was in it does not miss it. A frozen process's threads wait on their way back
+to user mode where a stopped one's do (`Process::must_park`), counted as
+parked; a thread in a blocking call is interrupted as a stop interrupts it, and
+the call restarts when the cgroup thaws. `SIGKILL` and `cgroup.kill` end a
+frozen process as they end a stopped one; `SIGCONT` does not thaw it, and no
+parent is told.
+
+`cgroup.events` says `frozen 1` when the cgroup is to be frozen and every live
+Linux process beneath it has parked ("live" is `registry::live`, which lists
+the Linux personality's processes: **a native process is not parked by a
+freeze, and `frozen 1` can be said while a native task runs**), and wakes its pollers when that changes
+(`cgroupfs::settle_frozen`: at a freeze, a thaw, a park, a move, a thread
+leaving). A cgroup beneath a frozen one says `frozen 1` with its own
+`cgroup.freeze` at `0`. A `clone3` into a frozen cgroup starts frozen, because
+`Process::new` reads the job it is counted in. **`cgroup.stat` does not print
+`nr_frozen_descendants`:** Linux 7.0 on the reference host prints
+`nr_descendants`, `nr_subsys_*` and the dying counts and no such line.
+
+## 12. `cpu.max` and `cpu.stat` (S2, 2026-09-30)
+
+`cpu.max` gives a job and everything beneath it a quota of processor time each
+period. `sched::CpuQueue::account_in` charges each slice to the running task's
+job and every job above it, and to the machine; a slice ended by a tick from
+user mode is user time, any other system time (tick accounting). A job whose
+use reaches its quota in a period is throttled: its tasks wait out the period
+on the way back to user mode (`sched::throttle_current`, beside
+`regroup_current`). A period starts with the first charge; the next is started
+by whoever looks first. A task alone on a processor gets no tick, so
+`arm_timer` also arms for the moment the quota would be used up.
+
+`cpu.max` is written and read as `cpu_max_write` has it (`src/lib/fs/cgroupfs`
+`cpu.rs`, with host tests and a fuzz round-trip). `cpu.weight.nice` maps to
+`cpu.weight` through Linux's table. `cpu.stat` prints `usage_usec`,
+`user_usec` and `system_usec` in every cgroup and the root (the machine's),
+and `nr_periods`, `nr_throttled` and `throttled_usec` where `cpu` is enabled;
+`nice_usec`, `core_sched.force_idle_usec` and the burst keys have no source.
+The limit is in the audit trail as a cgroup limit (`resource::CPU_MAX`).
+A throttled task sleeps to its period's end, in slices of a millisecond at each
+of which it asks whether a kill, a signal or a stop is for it (a victim of
+`SIGKILL`, `cgroup.kill` or the OOM killer is not held to the period's end), so
+a raised quota lets it go at the end of that period. `cpu.max` throttles a
+native task too, a ring-3 driver included. `cpu.idle` and `cpu.max.burst` are not built.
+
+## 13. The `io` controller (B1, 2026-09-30)
+
+`src/kernel/src/fs/blkio.rs`. The disk the block ring registers is wrapped, so
+a mount's fill, a write-back and a raw read of the node are charged, to the
+job of the task that submits them and each job above, and to the machine (the
+root's `io.stat`). A partition is not wrapped: its reads reach the disk it is
+on. `io.stat` prints the six counters per `MAJ:MIN`, and leaves out a disk the
+cgroup never used; `io.max` takes `rbps`, `wbps`, `riops` and `wiops` as
+`tg_set_limit` does (`ENODEV`, `EINVAL`, `ERANGE`), and the root has none.
+
+A request waits in its submitter for the latest instant the limits on the way
+up give it (`ferrix_block::Throttle`: one virtual clock per limit, no burst
+beyond a request, host-tested) and pays them all that start. A job's entries
+are one table keyed by its quota slot and dropped as the job goes
+(`quota::on_job_release`), each charged to the job as kernel heap (F-37). The
+block core's queue (`ferrix_block::Queue`) is not where this sits: a throttled
+request has not been queued, so no barrier can wait for it.
+
+`io.weight` and `io.latency` are not built: a weight needs a scheduler with
+more than one request in flight to divide, and both would accept a value and do
+nothing. With `io` built, `cgroup.controllers` at the root lists
+`cpu io memory pids`, and the no-internal-process rule reaches `io`.
+
+## 14. Where the controllers stand (2026-10-01)
+
+Reclaim, freezing, `cpu.max` and `io` are on `main`. Each check boots on
+x86-64, AArch64 and ARMv7-A at `--smp 2`; the `io` line had been written and
+had never been booted before this landing, and was fixed once on the way (its
+quota-slot count failed when an earlier check's killed program was reaped
+between the two counts; it now waits for the count to settle). Booting it on
+ARMv7-A also showed the `kmem` fill of files leaving 156 bytes charged: the
+attempt that hits the limit leaves its name's dentry behind, which a sibling
+opening the same name used to settle, and the check now makes each name before
+it removes it.
+
+Negative controls, twenty-three, each a one-line sabotage run through
+`fleet/gate.sh control` on x86-64 (`dentry-keep` on ARMv7-A at `--smp 2`),
+that stops the boot with the check's own message. Where the sabotage is in a
+path that may run in task context it also prints `NEGATIVE CONTROL <name>`
+once; the scheduler's tick path (`cpu-charge`) and the value-only ones show
+the message alone. `freeze-post` and `freeze-born` drop a post of the
+pending-work word (`sched::work`), so with the self-checks on they stop the
+boot with FX-0520's message rather than the check's. `reclaim-hole` needs a
+second, inert edit (a flag the source read looks at), made in a commit of its
+own that never lands; it breaks the refill that a read and a fault share
+(`Fill::sourced`), and shows it through the read path (`Vmo::read_present`).
+The fault path's own half of L.object.112, `copy_or_zero` handing an evicted
+frame back, has no control of its own. Their
+INDEX tags are `po6-cgctl-ctl-<name>` on nazuna (2026-10-05), on the tip
+rebased onto `main` 3349682db: cf400dff2 for most, 17acf31dc for
+reclaim-sibling and the four other reclaim lines, after the reclaim check
+changed (below).
+
+| Control | Sabotage | Message |
+|---|---|---|
+| io-charge | a read counts 0 bytes | io.stat does not count what a cgroup read and wrote of a disk |
+| io-parent | a charge stops at the job, not above it | a parent's io.max did not hold for its child's reads |
+| io-throttle | the wait for `io.max` is dropped | four reads under io.max rbps=16384 were not spaced out to its rate |
+| io-root | the machine's entry is not charged | the root's io.stat does not count the machine's I/O |
+| io-limit | `io.max` forgets a written `rbps` | io.max does not read back what was written |
+| io-ended | an entry is made for a job that has gone | a disk read by a task of a job that had gone kept the job's quota slot |
+| cpu-throttle | a throttled task is never put to sleep | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
+| cpu-kill | the throttle's wait never looks for a kill | a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL |
+| cpu-charge | the scheduler charges no slice to a job | the root's cpu.stat does not have its six keys and the machine's usage |
+| cpu-rearm-write | a `cpu.max` write arms no processor's timer | a running program was not held to a fifth of a processor by a cpu.max written under it |
+| cpu-rearm-move | a move beneath a `cpu.max` arms no timer | a running program moved beneath a cpu.max was not held to a fifth of a processor |
+| freeze-park | a frozen process does not park | cgroup.events never said frozen 1 for a frozen cgroup |
+| freeze-sigcont | `SIGCONT` thaws the cgroup | SIGCONT thawed a frozen cgroup's process |
+| freeze-post | a process moved into a frozen cgroup is posted no `STOP` | the way back to user mode found its pending-work word clear and something to act on (FX-0520) |
+| freeze-born | a task launched into a frozen cgroup is posted no `STOP` | the way back to user mode found its pending-work word clear and something to act on (FX-0520) |
+| freeze-moved-out | a parked process moved out of a frozen cgroup is not released | a parked program moved out of a frozen cgroup did not run again |
+| park-poll | a parked thread looks again every 5 ms, not every hour | a frozen cgroup's threads were charged processor time while parked |
+| reclaim-none | a reclaim at a job takes nothing | a cgroup over its memory.high was not brought back to it |
+| reclaim-hole | a reclaimed page is not read again from its source | pages reclaim took did not read back as the source has them |
+| resident | a disk file's cached pages are counted as `shmem` | memory.stat's file is not the cache that memory.current holds |
+| reclaim-sibling | a reclaim takes from outside its subtree | a sibling cgroup's pages were reclaimed |
+| reclaim-min | `memory.min` spares nothing | reclaim took pages from a child using no more than its memory.min |
+| dentry-keep | a create the job's memory refused keeps its negative dentry | kmem: objects gone and their heap still charged to their job |
+| cpu-arm-order | `arm_timer`'s `cpu.max` cut taken from `current`, which a switch stores after it arms (main's 2f, 445d09420) | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
+
+**Where it stands (2026-10-05).** The controllers were built on 2026-09-30
+and waited for their gate and controls at the 2026-10-01 wind-down. Rebased
+onto `main` on 2026-10-05, they met main's pending-work word (`sched::work`):
+the way back to user mode asks the personality only when a bit is posted, so
+`freeze_sync` now posts `STOP` to a frozen process's tasks, `tell_a_new_task`
+to a task launched into one, and the `cgroup.procs` write holds a posting
+across the move. The consultant's follow-up found that a parked process moved
+out of a frozen cgroup was not released (the move writes the freeze before
+`freeze_sync` looks); it is now, and the `freeze` line starts a program in a
+frozen cgroup, moves a running one in and a parked one out, and requires each
+to park or run. reclaim-sibling had never fired, because the limited cgroup's
+file was made first and met every want before a reclaim past its scope reached
+the sibling's: the sibling's file is now made first, and asked about right
+after each read. The check's lower `cpu.max` bound is a twelfth of a
+processor, as the requirements say.
+
+**Rebased again (2026-10-07, po10-cgctl).** On `main` 4466212c3 the `cpu`
+line failed: two counting threads were held to 1911 and 1934 thousandths of
+the wall clock on armv7a `--smp 2` (gate INDEX lines 11654, 11668) and the
+same message stopped `test-vfs` on x86-64 KVM (11681), while po6's tip on the
+old `main` passed the same armv7a boot under the same load (11666). Main's
+2f made `switch_chosen` arm the timer before it stores its pick in
+`current`, so the cut was armed for the task being left and a thread alone
+on its processor was never cut. `arm_timer` now takes the task from the fair
+class, the one `account_in` charges; the same boot then held the program
+with 47 periods throttled. Those failing runs are the cpu-arm-order row's
+control: the code before the fix is its sabotage. The fast path's three
+exits now wait out a used quota as the general way out does; the boot with
+`ferrix.fastpath=on` that would prove it is owed (BACKLOG, step 4's F9).

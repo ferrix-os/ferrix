@@ -41,6 +41,7 @@ fn the_root_lacks_what_linux_keeps_off_it() {
             "cgroup.max.descendants",
             "cgroup.max.depth",
             "cgroup.stat",
+            "cpu.stat",
         ]
     );
     assert_eq!(
@@ -345,6 +346,17 @@ fn a_controllers_files_are_there_only_where_it_is_enabled() {
         files::named(b"memory.current", false, all).map(files::File::mode),
         Some(0o444)
     );
+    for (name, kind) in [
+        ("memory.min", Kind::MemoryMin),
+        ("memory.low", Kind::MemoryLow),
+        ("memory.high", Kind::MemoryHigh),
+    ] {
+        assert_eq!(
+            files::named(name.as_bytes(), false, all).map(|file| (file.kind, file.mode())),
+            Some((kind, 0o644)),
+            "{name}"
+        );
+    }
     assert_eq!(files::named(b"cpu.weight", false, pids), None);
 }
 
@@ -393,6 +405,112 @@ fn memory_max_reads_sizes_as_memparse_does() {
 }
 
 #[test]
+fn cpu_max_is_read_as_cpu_max_write_reads_it() {
+    use crate::cpu::{self, Max};
+    let current = cpu::PERIOD_DEFAULT_US;
+    let max = |text: &[u8]| cpu::parse_max(text, current);
+    assert_eq!(max(b"max\n"), Ok(Max::DEFAULT));
+    assert_eq!(
+        max(b"50000 100000\n"),
+        Ok(Max {
+            quota: Some(50_000),
+            period: 100_000
+        })
+    );
+    // A period left out is kept, and so is one that is not a number.
+    assert_eq!(
+        cpu::parse_max(b"20000", 250_000),
+        Ok(Max {
+            quota: Some(20_000),
+            period: 250_000
+        })
+    );
+    assert_eq!(
+        cpu::parse_max(b"max abc", 250_000),
+        Ok(Max {
+            quota: None,
+            period: 250_000
+        })
+    );
+    // sscanf reads the digits a word starts with.
+    assert_eq!(
+        max(b"5000x 100000"),
+        Ok(Max {
+            quota: Some(5000),
+            period: 100_000
+        })
+    );
+    assert_eq!(max(b"1000 1000").map(|m| m.quota), Ok(Some(1000)));
+    // Under a millisecond, over a second, and not a number.
+    assert_eq!(max(b"999 100000"), Err(Refusal::Invalid));
+    assert_eq!(max(b"50000 999"), Err(Refusal::Invalid));
+    assert_eq!(max(b"50000 1000001"), Err(Refusal::Invalid));
+    assert_eq!(max(b"0"), Err(Refusal::Invalid));
+    assert_eq!(max(b"-1"), Err(Refusal::Invalid));
+    assert_eq!(max(b"lots"), Err(Refusal::Invalid));
+    assert_eq!(max(b""), Err(Refusal::Invalid));
+    assert_eq!(max(b"\n"), Err(Refusal::Invalid));
+    assert_eq!(
+        text(|out| cpu::render_max(out, Max::DEFAULT)),
+        b"max 100000\n"
+    );
+    assert_eq!(
+        text(|out| cpu::render_max(
+            out,
+            Max {
+                quota: Some(50_000),
+                period: 100_000
+            }
+        )),
+        b"50000 100000\n"
+    );
+}
+
+#[test]
+fn cpu_weight_nice_maps_as_the_scheduler_does() {
+    use crate::cpu;
+    // Linux prints these for these weights (`sched_prio_to_weight`).
+    assert_eq!(cpu::nice_from_weight(100), 0);
+    assert_eq!(cpu::nice_from_weight(1), 19);
+    assert_eq!(cpu::nice_from_weight(10_000), -20);
+    assert_eq!(cpu::nice_from_weight(50), 3);
+    assert_eq!(cpu::parse_nice(b"0\n"), Ok(100));
+    assert_eq!(cpu::parse_nice(b"-20"), Ok(8668));
+    assert_eq!(cpu::parse_nice(b"19"), Ok(1));
+    assert_eq!(cpu::parse_nice(b"5"), Ok(33));
+    assert_eq!(cpu::parse_nice(b"20"), Err(Refusal::Range));
+    assert_eq!(cpu::parse_nice(b"-21"), Err(Refusal::Range));
+    assert_eq!(cpu::parse_nice(b"x"), Err(Refusal::Invalid));
+    // A nice written reads back while cpu.weight's hundredths keep the
+    // weights apart: from -20 to 10. Below that two nices share a weight.
+    for nice in cpu::NICE_MIN..=10 {
+        let weight = cpu::parse_nice(alloc::format!("{nice}").as_bytes()).unwrap();
+        assert_eq!(cpu::nice_from_weight(weight), nice, "nice {nice}");
+    }
+}
+
+#[test]
+fn cpu_stat_prints_the_keys_it_has_a_source_for() {
+    use crate::cpu;
+    let stat = cpu::Stat {
+        usage: 3,
+        user: 2,
+        system: 1,
+        periods: 7,
+        throttled: 4,
+        throttled_us: 900,
+    };
+    assert_eq!(
+        text(|out| cpu::render_stat(out, stat, true)),
+        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\nnr_periods 7\nnr_throttled 4\nthrottled_usec 900\n"
+    );
+    assert_eq!(
+        text(|out| cpu::render_stat(out, stat, false)),
+        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\n"
+    );
+}
+
+#[test]
 fn cpu_weight_takes_one_to_ten_thousand() {
     assert_eq!(write::parse_weight(b"100\n"), Ok(100));
     assert_eq!(write::parse_weight(b"1"), Ok(1));
@@ -411,11 +529,126 @@ fn the_controller_files_print_as_linux_prints_them() {
     assert_eq!(rendered(|out| render::number(out, 4096)), b"4096\n");
     assert_eq!(rendered(|out| render::pids_events(out, 3)), b"max 3\n");
     assert_eq!(
-        rendered(|out| render::memory_stat(out, 8192)),
-        b"kernel 8192\n"
+        rendered(|out| render::memory_stat(
+            out,
+            render::MemoryStat {
+                file: 4096,
+                kernel: 8192,
+                shmem: 12288,
+                pgscan: 5,
+                pgsteal: 4,
+                pgfault: 99,
+                pgmajfault: 7,
+            }
+        )),
+        b"file 4096\nkernel 8192\nshmem 12288\npgscan 5\npgsteal 4\npgfault 99\npgmajfault 7\n"
     );
     assert_eq!(
-        rendered(|out| render::memory_events(out, 2, 3, 1)),
-        b"low 0\nhigh 0\nmax 2\noom 3\noom_kill 1\noom_group_kill 0\n"
+        rendered(|out| render::memory_events(
+            out,
+            render::MemoryEvents {
+                low: 0,
+                high: 6,
+                max: 2,
+                oom: 3,
+                oom_kill: 1,
+            }
+        )),
+        b"low 0\nhigh 6\nmax 2\noom 3\noom_kill 1\noom_group_kill 0\n"
+    );
+}
+
+#[test]
+fn io_max_is_read_as_tg_set_limit_reads_it() {
+    use crate::io::{self, Limits};
+    let none = Limits::NONE;
+    let (device, rest) = io::parse_device(b"8:16 rbps=2097152 wiops=120\n").unwrap();
+    assert_eq!(device, (8, 16));
+    assert_eq!(
+        io::parse_limits(rest, none),
+        Ok(Limits {
+            rbps: Some(2_097_152),
+            wbps: None,
+            riops: None,
+            wiops: Some(120),
+        })
+    );
+    // A word not given keeps its value, and max lifts one.
+    let held = Limits {
+        rbps: Some(5000),
+        wbps: Some(6000),
+        riops: Some(70),
+        wiops: Some(80),
+    };
+    assert_eq!(
+        io::parse_limits(b"wbps=max riops=9\n", held),
+        Ok(Limits {
+            rbps: Some(5000),
+            wbps: None,
+            riops: Some(9),
+            wiops: Some(80),
+        })
+    );
+    // The digits a value starts with, as sscanf reads them; iops past
+    // UINT_MAX are UINT_MAX.
+    assert_eq!(
+        io::parse_limits(b"rbps=100x wiops=99999999999", none),
+        Ok(Limits {
+            rbps: Some(100),
+            wiops: Some(0xffff_ffff),
+            ..none
+        })
+    );
+    assert_eq!(io::parse_limits(b"", held), Ok(held));
+    // Refusals: no equals, no number, unknown key, a limit of 1 byte, zero.
+    assert_eq!(io::parse_limits(b"rbps", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=lots", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbytes=10", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=1", none), Err(Refusal::Invalid));
+    assert_eq!(io::parse_limits(b"rbps=0", none), Err(Refusal::Range));
+    assert_eq!(io::parse_limits(b"bogus=0", none), Err(Refusal::Range));
+    // The device.
+    assert_eq!(io::parse_device(b"8:0").unwrap().0, (8, 0));
+    assert_eq!(io::parse_device(b"8 0"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b":0 rbps=9"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b"8:x"), Err(Refusal::Invalid));
+    assert_eq!(io::parse_device(b"8:0rbps=9"), Err(Refusal::Invalid));
+}
+
+#[test]
+fn io_files_print_as_linux_prints_them() {
+    use crate::io::{self, Limits, Stat};
+    assert_eq!(text(|out| io::render_max(out, (8, 0), Limits::NONE)), b"");
+    assert_eq!(
+        text(|out| io::render_max(
+            out,
+            (8, 0),
+            Limits {
+                rbps: None,
+                wbps: Some(200),
+                riops: None,
+                wiops: Some(7),
+            }
+        )),
+        b"8:0 rbps=max wbps=200 riops=max wiops=7\n"
+    );
+    assert_eq!(
+        text(|out| io::render_stat(out, (8, 0), Stat::default())),
+        b""
+    );
+    assert_eq!(
+        text(|out| io::render_stat(
+            out,
+            (7, 22),
+            Stat {
+                rbytes: 749_568,
+                wbytes: 0,
+                rios: 72,
+                wios: 0,
+                dbytes: 0,
+                dios: 0,
+            }
+        )),
+        b"7:22 rbytes=749568 wbytes=0 rios=72 wios=0 dbytes=0 dios=0\n"
     );
 }

@@ -31,6 +31,14 @@ use ferrix_sched::{Config, CpuLoad, EntityState, Load, RunQueue, Timeline, slice
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 
+/// The most a task under a `cpu.max` runs before the quota is looked at
+/// again, however much is left: with `n` tasks of one job running at once on
+/// `n` processors the quota goes `n` times faster than one task's look at it
+/// would say. Linux hands each processor a slice of the quota at a time for
+/// the same reason. One millisecond bounds the overshoot to about a
+/// millisecond a processor a period.
+pub(crate) const BANDWIDTH_SLICE_NS: u64 = 1_000_000;
+
 /// How much CPU a task asks for at a time.
 ///
 /// Three milliseconds: long enough that a switch costs a fraction of a per
@@ -262,14 +270,24 @@ impl CpuQueue {
     /// the scheduler asked for and the request it actually served, and it is
     /// what widens the fairness bound on a real machine.
     pub(crate) fn account(&mut self, now: u64) {
+        self.account_in(now, false);
+    }
+
+    /// [`CpuQueue::account`], with the time since the last charge counted
+    /// as used in user mode when `user`: the tick that cut it found the
+    /// processor there. Tick accounting, as `cpu.stat` has had it since
+    /// Linux was young.
+    pub(crate) fn account_in(&mut self, now: u64, user: bool) {
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
             return;
         }
-        if self.fair.current().is_some() {
+        if let Some(task) = self.fair.current() {
             self.stats.busy_ns += delta;
+            // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
+            crate::object::quota::charge_cpu(task.group(), now, delta, user);
         } else {
             self.stats.idle_ns += delta;
         }
@@ -559,7 +577,19 @@ impl CpuQueue {
             .decision_in_ns()
             .map(|left| now.saturating_add(left));
 
-        match [sleeper, slice].into_iter().flatten().min() {
+        // A task under a `cpu.max` is cut when its quota is used up, however
+        // alone it is: nothing else would interrupt it to throttle it. The
+        // task the fair class runs, which is the one charged (`account_in`):
+        // a switch arms the timer before it stores its pick in `current`
+        // (`switch_chosen`), so `current` there is still the outgoing task.
+        let bandwidth = self
+            .fair
+            .current()
+            .filter(|_| crate::object::quota::bandwidth_in_use())
+            .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
+            .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
+
+        match [sleeper, slice, bandwidth].into_iter().flatten().min() {
             Some(at) => crate::timer::after_from(at.saturating_sub(now).max(MIN_ARM_NS), now),
             None => crate::timer::stop(),
         }

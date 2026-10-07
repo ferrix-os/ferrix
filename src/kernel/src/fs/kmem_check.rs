@@ -200,12 +200,12 @@ fn fill_and_empty<T>(
     let (held, refused) = as_task_of(&job, || fill(&mut make));
     let made = held.len();
     let outcome = judge(&job, refused, made);
-    let other = as_task_of(&sibling, || make(made));
+    let other = as_task_of(&sibling, || make(made.saturating_add(1)));
     let sibling_charged = used(&sibling, Resource::Kernel) != 0;
     let other_made = other.is_ok();
     drop(other);
     drop(held);
-    clean(made.saturating_add(1));
+    clean(made.saturating_add(2));
     if let Err(problem) = outcome {
         crate::console::println!("  kmem     {name}: {problem} after {made}");
         return Err(problem);

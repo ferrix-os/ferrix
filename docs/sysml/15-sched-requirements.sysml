@@ -42,6 +42,31 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::yield_now";
         }
+        requirement <'L.sched.3'> aThrottledTaskLeavesForAKill : ItemLowLevel {
+            attribute :>> statement = "throttle_current shall hold a task whose job
+                or one above it has used its cpu.max quota until the period ends,
+                looking every millisecond whether the way back to user mode has a
+                kill, a signal or a stop to deal with, and leaving the wait if so.";
+            attribute :>> criterion = "A program in a job with cpu.max 1000 1000000
+                that has used its millisecond ends within a quarter of a second of
+                its SIGKILL, where waiting out the period takes nine tenths of a
+                second.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("sched::throttle_current", "trap::must_attend");
+        }
+        requirement <'L.sched.4'> aQuotaThatComesLateBinds : ItemLowLevel {
+            attribute :>> statement = "A cpu.max written for a job, or a task moved
+                beneath one, shall arm the timer of every processor running a
+                task of the job, so that a task alone on its processor, which
+                gets no tick, is cut when its quota is used up.";
+            attribute :>> criterion = "A program already running alone on its
+                processor is held to between a twelfth and two thirds of a
+                processor by a cpu.max 20000 100000 written under it, and by being
+                moved beneath one.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
+                "sched::set_task_group", "sched::note_moved");
+        }
     }
 
     package Wakes {

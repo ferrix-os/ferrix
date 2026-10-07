@@ -648,6 +648,33 @@ pub(super) fn check_cgroupfs() {
          refused, natively and through its files, and a job it made itself limited",
         checked.limits_refused,
     );
+    println!(
+        "  reclaim  {} pages of files' caches given back inside the cgroup over its memory.high \
+         or at its memory.max, none of a sibling's and none of a child held by memory.min, every \
+         one read again as its source has it, and no process killed where the cache was room",
+        checked.reclaimed,
+    );
+    println!(
+        "  freeze   {} claims of cgroup.freeze held: a program of three threads parked with its \
+         counts still through SIGCONT, cgroup.events saying frozen 1 once the last had and waking \
+         POLLPRI, thawed with its futex wait restarted, killed by cgroup.kill and by SIGKILL \
+         while frozen, and frozen on a move in and a fork made in a frozen cgroup",
+        checked.frozen,
+    );
+    println!(
+        "  cpu      cpu.max read and written as Linux does, cpu.weight.nice turned into cpu.weight and \
+         back, and a program of two counting threads held to about a fifth of a processor by cpu.max \
+         20000 100000 in its cgroup and beneath one ({} periods throttled), cpu.stat counting its \
+         usage and its throttling, and free again at max",
+        checked.throttled,
+    );
+    println!(
+        "  io       {} requests to a disk charged to the cgroup that made them and every one above, \
+         io.stat counting them per disk in Linux's format, a sibling's untouched, and io.max \
+         spacing a cgroup's reads out to its rate, in it and beneath it; cpu io memory pids \
+         listed as the controllers built",
+        checked.disk_requests,
+    );
 }
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
