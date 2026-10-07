@@ -467,9 +467,7 @@ fn run_in_domain() -> Result<(), String> {
     process
         .start(theirs.into_owned())
         .map_err(|(error, _)| format!("process_start: {error:?}"))?;
-    // Blocks until the member opens it for writing; ends when it is done.
-    let lines = std::fs::read_to_string(MEMBER_FIFO)
-        .map_err(|error| format!("reading the member: {error}"))?;
+    let lines = read_member(&fifo)?;
     print!("{lines}");
     drop((ours, process));
     if !lines.contains("LB member done") {
@@ -478,10 +476,63 @@ fn run_in_domain() -> Result<(), String> {
     Ok(())
 }
 
+/// The member's file, written as it starts, so a starter that hears nothing
+/// can say whether the member ran at all.
+const MEMBER_ALIVE: &str = "/tmp/pipe-bench-alive";
+
+/// Everything the member writes into the FIFO, until it closes it, or why
+/// not within three minutes.
+fn read_member(fifo: &std::ffi::CStr) -> Result<String, String> {
+    // SAFETY: a NUL-terminated path; non-blocking, so the open does not wait
+    // for a writer.
+    let fd = unsafe { libc::open(fifo.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
+    if fd < 0 {
+        return Err(format!(
+            "opening the FIFO: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut out = Vec::new();
+    let mut heard = false;
+    let start = Instant::now();
+    loop {
+        let mut buf = [0u8; 4096];
+        // SAFETY: `buf` is writable for its length.
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        if n > 0 {
+            heard = true;
+            out.extend_from_slice(
+                buf.get(..usize::try_from(n).unwrap_or(0))
+                    .unwrap_or_default(),
+            );
+            continue;
+        }
+        // End of file once the member has opened and closed it.
+        if n == 0 && heard {
+            break;
+        }
+        if start.elapsed().as_secs() > 180 {
+            let alive = std::path::Path::new(MEMBER_ALIVE).exists();
+            // SAFETY: closing our descriptor.
+            let _ = unsafe { libc::close(fd) };
+            return Err(format!(
+                "nothing from the member in 180 s (it {} started); so far: {}",
+                if alive { "had" } else { "had not" },
+                String::from_utf8_lossy(&out)
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // SAFETY: closing our descriptor.
+    let _ = unsafe { libc::close(fd) };
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
 /// The member's start: its output to the starter's FIFO.
 fn become_member() {
     IN_DOMAIN.store(true, Ordering::Relaxed);
     let _ = std::fs::remove_file(MEMBER_MARK);
+    let _ = std::fs::write(MEMBER_ALIVE, b"alive");
     if let Ok(fifo) = std::fs::OpenOptions::new().write(true).open(MEMBER_FIFO) {
         use std::os::fd::IntoRawFd as _;
         let fd = fifo.into_raw_fd();
