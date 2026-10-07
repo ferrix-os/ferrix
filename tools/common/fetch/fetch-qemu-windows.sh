@@ -44,11 +44,14 @@ if [ "${1:-}" != --in-msys2 ]; then
     out=$(cygpath -m "${FERRIX_QEMU_DIR:-$home/.local/share/ferrix/qemu}")
     work=$(cygpath -m "${FERRIX_QEMU_WORK:-$out-build}")
     script=$(cygpath -m "$here/tools/common/fetch/$(basename "$0")")
-    MSYSTEM=MINGW64 CHERE_INVOKING=1 exec "$msys/usr/bin/bash.exe" -lc         'exec bash "$0" --in-msys2 "$1" "$2"' "$script" "$out" "$work"
+    MSYSTEM=MINGW64 CHERE_INVOKING=1 exec "$msys/usr/bin/bash.exe" -lc \
+        'exec bash "$0" --in-msys2 "$1" "$2" "$3"' "$script" "$out" "$work" \
+        "${FERRIX_QEMU_JOBS:-}"
 fi
 
 out=$(cygpath -u "$2")
 work=$(cygpath -u "$3")
+FERRIX_QEMU_JOBS=${4:-}
 mkdir -p "$out" "$work"
 
 pacman -S --needed --noconfirm --disable-download-timeout \
@@ -71,13 +74,19 @@ src=$work/qemu
 if [ ! -d "$src" ]; then
     git clone -q --depth 1 --branch "$version" https://gitlab.com/qemu-project/qemu.git "$src"
 fi
-# Only the virtio-gpu-gl fix: 0002 is the Linux build's, against 10.2.1
-# (series-10.2.1, fetch-qemu-linux.sh).
-for patch in "$here"/tools/common/data/qemu/0001-*.patch; do
-    if git -C "$src" apply --reverse --check "$patch" 2>/dev/null; then
+# The virtio-gpu-gl fix, and 0002, VT-d's compatibility-format block,
+# which stage 10's self-check requires of every x86-64 boot (FX-1002,
+# docs/NVIDIA.md section 12.3): without it the first boot of every test
+# panics. 0002 was written against 10.2.1 (series-10.2.1); its qtest hunk
+# does not apply to 11.1.0 and the tests are not built here, so that file
+# is left out.
+for patch in "$here"/tools/common/data/qemu/0001-*.patch \
+    "$here"/tools/common/data/qemu/0002-*.patch; do
+    if git -C "$src" apply --reverse --check \
+        --exclude=tests/qtest/intel-iommu-test.c "$patch" 2>/dev/null; then
         echo "qemu: $(basename "$patch") already applied"
     else
-        git -C "$src" apply "$patch"
+        git -C "$src" apply --exclude=tests/qtest/intel-iommu-test.c "$patch"
         echo "qemu: applied $(basename "$patch")"
     fi
 done
@@ -89,8 +98,10 @@ rm -rf "$src/build"
         --enable-opengl --enable-virglrenderer --enable-whpx --disable-docs \
         --disable-werror --enable-install-blobs --prefix="$out" >/dev/null
 )
-ninja -C "$src/build" >/dev/null
-ninja -C "$src/build" install >/dev/null
+# FERRIX_QEMU_JOBS caps the build, for a machine someone is using
+# (ninja's default is every processor).
+ninja -C "$src/build" ${FERRIX_QEMU_JOBS:+-j "$FERRIX_QEMU_JOBS"} >/dev/null
+ninja -C "$src/build" ${FERRIX_QEMU_JOBS:+-j "$FERRIX_QEMU_JOBS"} install >/dev/null
 
 # The DLLs it links against, and theirs in turn, until nothing new appears;
 # epoxy opens ANGLE's EGL and GLES by name, so those two go in by hand.
