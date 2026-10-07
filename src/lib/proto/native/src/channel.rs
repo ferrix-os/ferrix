@@ -92,7 +92,7 @@ impl Words {
     /// that copy is a call to `memcpy` through the GOT, two more pages of
     /// the program touched on every send (`decode`'s note).
     #[inline]
-    fn of(bytes: &[u8]) -> Option<[usize; 3]> {
+    pub(crate) fn of(bytes: &[u8]) -> Option<[usize; 3]> {
         if bytes.len() > WRITE_READ_BYTES {
             return None;
         }
