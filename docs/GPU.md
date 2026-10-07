@@ -833,7 +833,7 @@ on the 3D card under KVM, main and this change run alternately.
 
 What is left of §3.9 is the third item: a client's pixels are still copied
 into a texture's backing in the guest before the device moves them -- planned
-in §3.13.
+in §3.14.
 
 ### 3.12 The 3D card on Windows needs a patched QEMU (2026-09-27)
 
@@ -882,7 +882,7 @@ fixes the other thing that window got wrong with `gl=on`: a GtkGLArea has
 no window of its own, so the blank cursor QEMU sets over the guest was set
 on the whole window, and the host pointer vanished over the menu bar.
 
-### 3.13 Client pages as texture backing: the plan (2026-10-07)
+### 3.14 Client pages as texture backing: the plan (2026-10-07)
 
 The third item of §3.9, and the first row of §3.8's table: a `wl_shm`
 surface on the GPU path is copied twice in the guest before the device
@@ -893,50 +893,67 @@ The client's own pages can be the backing instead, as sDDF's GPU class
 makes a client's memory the resource's backing, and the transfer then
 reads the pixels where the client drew them.
 
-**The ABI is Linux's, in two steps it already has.** A client's pool is a
-`memfd`, and Linux turns a `memfd`'s pages into a buffer a device can be
-given with `/dev/udmabuf` (`UDMABUF_CREATE`: the memfd, an offset and a
-size, page-aligned, the memfd sealed against shrinking) and imports such a
-buffer into a DRM node with `DRM_IOCTL_PRIME_FD_TO_HANDLE`. So:
+It builds on step 4's import (§3.13, po10-dmabuf): the render node's
+`PRIME_FD_TO_HANDLE`, its ioctl dispatch and renderctl's version 4 are
+that design's, and this one extends them rather than adding its own.
 
-1. **`/dev/udmabuf`** (kernel, `src/kernel/src/fs/devfs.rs` and a new
-   `interfaces/udmabuf`): `UDMABUF_CREATE` answers a descriptor that holds
-   the memfd's VMO and the range, refusing a memfd without `F_SEAL_SHRINK`
-   (`EINVAL`, as Linux does) -- the seal is what keeps a client from
-   truncating pages the device is reading. `UDMABUF_CREATE_LIST` is not
-   needed and is not answered.
-2. **`PRIME_FD_TO_HANDLE` on the render node** takes such a descriptor and
-   gives a handle to an object whose backing is that range: the render core
-   hands the driver the memfd's VMO and the range where it hands an
-   anonymous VMO today (`Renderer::make_object`), and the driver pins those
-   pages for the device. `RESOURCE_CREATE` with that handle as `bo_handle`
-   makes the texture on it -- the field Linux has for this, which the node
-   refuses today because nothing made such an object.
-3. **hyprix** makes one such texture per buffer, keyed by the pool and the
-   buffer's place in it, and an upload becomes a `TRANSFER_TO_HOST` of the
+**The ABI.** A client's pool is a `memfd`, and Linux turns a `memfd`'s
+pages into a buffer a device can be given with `/dev/udmabuf`. So:
+
+1. **`/dev/udmabuf`** (kernel, `load` ring): `UDMABUF_CREATE` as Linux's,
+   its ABI taken from `linux/udmabuf.h` in the QEMU checkout -- a memfd
+   only, `F_SEAL_SHRINK` required, `F_SEAL_WRITE` and
+   `F_SEAL_FUTURE_WRITE` refused, offset and size page-aligned, non-zero,
+   not overflowing and inside the file's length as tmpfs holds it (not the
+   VMO's, which is `MAX_FILE_SIZE` pages long), `CLOEXEC` the only flag,
+   Linux's 64 MiB limit kept. The pages are populated at create and
+   charged to the caller.
+2. **`PRIME_FD_TO_HANDLE` on the render node** takes such a descriptor as
+   well as an exported render object, and gives a handle to an object whose
+   backing is exactly that range: renderctl carries an offset beside the
+   VMO, the core checks the range, and the driver is handed the VMO with
+   `READ|TRANSFER` only, so the kernel lets it pin the range read-only. Such
+   an object is `TO_DEVICE` only: `TRANSFER_FROM_HOST` on it is `EINVAL`,
+   and `VIRTGPU_MAP` is refused. `RESOURCE_CREATE` with that handle as
+   `bo_handle` makes the texture on it.
+3. **hyprix** makes one such texture per buffer, keyed by its own pool
+   object -- never a descriptor number or an address, so two clients' pools
+   cannot be mixed -- and an upload becomes a `TRANSFER_TO_HOST` of the
    damaged rows at the buffer's offset and stride, with no copy. A
    buffer's `wl_buffer.release` waits until the last transfer from it has
-   been answered (`VIRTGPU_WAIT`), since the device reads the client's
-   memory now and not a copy. A pool that is not sealed, not page-aligned
-   or not a memfd keeps today's copy, which stays the fallback.
+   been answered (`VIRTGPU_WAIT`). A pool that is not sealed, not
+   page-aligned, not a memfd, or whose import the GPU's pin budget refuses,
+   keeps today's copy.
 
-**What it changes for the certification argument.** Step 1 and step 2 are
-kernel code: a new device file, and the device reading a *client's* pages,
-where it read only pages the render core allocated. The pages are the
-client's own and already mapped by the compositor; the device reads them
-and never writes (`TO_DEVICE` only), and the seal is what keeps them alive
-for as long as the backing holds them. Both go to the certification
-consultant before they land (`AGENTS.md`), with negative controls: an
-unsealed memfd refused, a range past the memfd's end refused, and a client
-that drops its pool while a transfer is in flight leaving the pages held
-until the transfer is answered.
+**Written deviations from Linux.** `bo_handle` as an *input* to
+`RESOURCE_CREATE` (Linux only writes it); a memfd descriptor that is not
+open read-write refused; `F_SEAL_WRITE` answering `EBUSY` while a udmabuf
+lives, as it does for a writable mapping; what the udmabuf descriptor
+itself answers; and `/dev/udmabuf`'s mode.
 
-**Sizing.** 8, as counted on 2026-09-23: about 3 for `/dev/udmabuf` and the
-import, 2 for the driver's backing of a foreign VMO and the consultant's
-review, 3 for hyprix's textures, the deferred release and the measurement
-§3.8 asks for (the AV1 wallpaper behind a translucent terminal, 1920x1080
-on the 3D card under KVM, main and the change run alternately on an idle
-host).
+**What keeps the pages alive** is the driver's pin (`Vmo::hold`), held until
+the resource's unref is answered, and the `Arc<Vmo>` the object holds. The
+seal covers the time between create and pin, and stops a truncate from
+leaving a held page behind whose old bytes a regrow would show.
+
+**The certification consultant's design review: OK IF C1 to C10**
+(ledger 502, 2026-10-07): the range with least authority and renderctl's
+offset ordered with §3.13's version 4 (C1); udmabuf as Linux's (C2); the
+deviations above written down (C3); populate at create (C4); the node
+refusing what writes or widens (C5); this lifetime argument (C6); boot
+checks for every refusal, `EBUSY` on the write seal, `FROM_HOST` refused,
+a dropped pool held until the unref, a second open unable to name the
+handle, each with a negative control shown to fire (C7); T.DMA, T.EXHAUST
+and F-61's scope in the vulnerability analysis (C8); hyprix's obligations
+in item 3 (C9); and a code review before `land.sh take` (C10). The
+command stream writing a texture remains a residual under T.DMA.
+
+**Sizing.** 8, as counted on 2026-09-23: about 3 for `/dev/udmabuf` and
+the import's extension, 2 for the driver's range-limited read-only backing
+and the review, 3 for hyprix's textures, the deferred release and the
+measurement §3.8 asks for (the AV1 wallpaper behind a translucent terminal,
+1920x1080 on the 3D card under KVM, main and the change run alternately on
+an idle host). It starts once §3.13's import has landed.
 
 ### 3a, which was not chosen for the compositor
 
