@@ -52,6 +52,11 @@ pub struct Style {
     /// of what is behind a translucent window is blurred, how many times,
     /// and the colour grading over it.
     pub blur: Option<Blur>,
+    /// `decoration:blur:xray`: every window takes its blur from what is
+    /// behind the windows -- the wallpaper and the layers under them --
+    /// rather than from the windows it floats over. Off by default, as in
+    /// Hyprland; a window's own `xray` rule says otherwise for that one.
+    pub xray: bool,
 }
 
 impl Style {
@@ -180,6 +185,7 @@ impl Style {
                 .bool("decoration:blur:enabled")
                 .unwrap_or(true)
                 .then(|| blur_of(config)),
+            xray: config.bool("decoration:blur:xray").unwrap_or(false),
         }
     }
 
@@ -385,6 +391,14 @@ pub struct WindowStyle {
     /// `decoration:dim_around` while it is up, which is what a launcher or
     /// a confirmation dialog does to the desktop behind it.
     pub dim_around: bool,
+    /// `xray`: `Some(true)` takes the blur behind this window from the
+    /// [`Backdrop`] -- the wallpaper, whatever windows it is over --
+    /// `Some(false)` never does, and `None` leaves it to
+    /// `decoration:blur:xray` and the tiling, as [`reads_backdrop`] says.
+    pub xray: Option<bool>,
+    /// `no_screen_share`: a screenshot shows a black box where this window
+    /// is, rounded as it is. The screen itself shows it as ever.
+    pub no_screen_share: bool,
 }
 
 impl Default for WindowStyle {
@@ -404,6 +418,8 @@ impl Default for WindowStyle {
             opaque: false,
             nearest: false,
             dim_around: false,
+            xray: None,
+            no_screen_share: false,
         }
     }
 }
@@ -690,6 +706,11 @@ fn dim_behind<P: Painter>(canvas: &mut P, style: &Style, damage: &Damage) {
 /// A window a `dim_around` rule darkened the desktop for, or one drawn after
 /// such a window, is behind a fill the backdrop does not hold.
 ///
+/// `xray` comes first, as it does there: a window's own `xray 0` never
+/// reads the backdrop, and `decoration:blur:xray` or the window's `xray 1`
+/// always does -- floating, over other windows or behind a dim, since what
+/// it asks for is the blur of the wallpaper and not of whatever is between.
+///
 /// The caller's damage has to know the answer ([`render_onto`] says what
 /// each kind is owed), which is why this is not the renderer's own secret.
 #[must_use]
@@ -697,6 +718,11 @@ pub fn reads_backdrop(windows: &[Placed], at: usize, styles: &Styles<'_>) -> boo
     let Some(placed) = windows.get(at) else {
         return false;
     };
+    match styles.of(placed.window).xray {
+        Some(own) => return own,
+        None if styles.base.xray => return true,
+        None => {}
+    }
     !placed.floating
         && windows
             .iter()

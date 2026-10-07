@@ -173,6 +173,13 @@ pub enum Effect {
     /// `dim_around <yes-or-no>`: everything behind it is darkened by
     /// `decoration:dim_around` while it is up.
     DimAround(bool),
+    /// `xray <yes-or-no>`: the blur behind it is of the wallpaper, or --
+    /// `xray 0` -- never of the wallpaper alone, whatever
+    /// `decoration:blur:xray` and the tiling would have chosen.
+    Xray(bool),
+    /// `no_screen_share <yes-or-no>`: a screenshot or a screen being shared
+    /// shows a black box where it is.
+    NoScreenShare(bool),
     /// `rounding <n>`: how far its corners are cut.
     Rounding(i64),
     /// `border_size <n>`.
@@ -661,6 +668,8 @@ fn effect(field: &str) -> Result<Effect, String> {
             number("a number of milliseconds").map(|held| Effect::NoCloseFor(held.max(0)))
         }
         "dim_around" => Ok(Effect::DimAround(yes(value))),
+        "xray" => Ok(Effect::Xray(yes(value))),
+        "no_screen_share" => Ok(Effect::NoScreenShare(yes(value))),
         // `no_initial_focus` is `no_focus` by another name: Hyprland keeps
         // them apart because one is checked when the window maps and the
         // other whenever it would be focused, and this compositor applies

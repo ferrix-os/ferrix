@@ -124,6 +124,11 @@ pub enum Shape {
     /// A window with an `xdg_popup` on it, this many pixels square, hanging
     /// off the window's top-left corner: what a menu is.
     Menu(u32),
+    /// A [`Shape::Bar`] this many pixels tall with an `xdg_popup` the
+    /// second number square hanging off its top-left corner, taken with
+    /// `zwlr_layer_surface_v1.get_popup`: what a bar's tooltip or a tray
+    /// icon's menu is.
+    BarMenu(u32, u32),
     /// Two windows on one connection: the pattern's own, and a second
     /// `xdg_toplevel` opened once the first has drawn and destroyed once it
     /// has drawn in its turn -- a document window and a dialog that is
@@ -1288,6 +1293,11 @@ impl Client {
                 self.acked = true;
                 say(&format!("pattern: layer {width}x{height}"));
                 self.draw(out)?;
+                // The menu once the bar has something on it, as a window's
+                // waits for the window.
+                if let Shape::BarMenu(_, side) = self.shape {
+                    self.open_menu(side, out);
+                }
             }
             id::LAYER_SURFACE if opcode == zwlr_layer_surface_v1::event::CLOSED => {
                 return Err("the compositor closed this layer surface".to_owned());
@@ -1424,11 +1434,17 @@ impl Client {
         // `wl_seat` is wanted and not required: a compositor with nothing
         // plugged in may offer none, and a client that refused to start over
         // it would be a client that only runs on a machine with a keyboard.
-        let bar = matches!(self.shape, Shape::Bar(_) | Shape::Wallpaper);
+        let bar = matches!(
+            self.shape,
+            Shape::Bar(_) | Shape::BarMenu(..) | Shape::Wallpaper
+        );
+        // A bar with a menu needs the shell for the menu's `xdg_surface`,
+        // and nothing else of it.
+        let shell = !bar || matches!(self.shape, Shape::BarMenu(..));
         for (interface, id, want, required) in [
             ("wl_compositor", id::COMPOSITOR, 6u32, true),
             ("wl_shm", id::SHM, 1, true),
-            ("xdg_wm_base", id::SHELL, !bar as u32 * 6, !bar),
+            ("xdg_wm_base", id::SHELL, shell as u32 * 6, shell),
             ("wl_seat", id::SEAT, 7, false),
             // `wl_output` for its scale: a client on a scaled monitor draws
             // a buffer that many times the size and says so, or the
@@ -1482,7 +1498,7 @@ impl Client {
             &[ArgType::NewId],
             &[Arg::NewId(id::SURFACE)],
         );
-        if let Shape::Bar(height) = self.shape {
+        if let Shape::Bar(height) | Shape::BarMenu(height, _) = self.shape {
             return self.become_bar(height, out);
         }
         if self.shape == Shape::Wallpaper {
@@ -1546,6 +1562,7 @@ impl Client {
             return;
         }
         self.menu_asked = true;
+        let on_layer = matches!(self.shape, Shape::BarMenu(..));
         let side = i32::try_from(side).unwrap_or(1).max(1);
         request(
             out,
@@ -1618,10 +1635,27 @@ impl Client {
             ],
             &[
                 Arg::NewId(id::POPUP),
-                Arg::Object(id::XDG_SURFACE),
+                // A layer surface's popup is made with no parent and then
+                // handed to the layer surface, which is the protocol's own
+                // two steps: `xdg_surface.get_popup` has no way to name a
+                // surface that is not an `xdg_surface`.
+                Arg::Object(if on_layer {
+                    ObjectId(0)
+                } else {
+                    id::XDG_SURFACE
+                }),
                 Arg::Object(id::POSITIONER),
             ],
         );
+        if on_layer {
+            request(
+                out,
+                id::LAYER_SURFACE,
+                zwlr_layer_surface_v1::request::GET_POPUP,
+                &[ArgType::Object { nullable: false }],
+                &[Arg::Object(id::POPUP)],
+            );
+        }
         request(
             out,
             id::POPUP_SURFACE,

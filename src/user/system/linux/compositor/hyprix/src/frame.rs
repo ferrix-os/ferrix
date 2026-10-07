@@ -246,8 +246,12 @@ pub struct LayerRules {
     pub dim_around: bool,
     /// `abovelock`: it is drawn over the session lock.
     pub above_lock: bool,
-    /// `noscreenshare`: a screenshot leaves it out.
+    /// `no_screen_share`: a screenshot shows a black box where it is.
     pub no_screen_share: bool,
+    /// `blur_popups`: what is behind its popups is blurred, as `blur` does
+    /// for the surface itself. Read off the surface when its popups are
+    /// placed; a popup carries the outcome in its own `blur`.
+    pub blur_popups: bool,
     /// `order`: where it goes among its own layer's surfaces, a higher
     /// number nearer the top.
     pub order: i64,

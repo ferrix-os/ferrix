@@ -516,6 +516,9 @@ impl Compositor<'_> {
         let Some(screen) = self.screens.get_mut(which) else {
             return Ok(());
         };
+        // What a screenshot of this frame blacks out, worked out from
+        // what the frame is drawn from, so that the two are of one frame.
+        screen.hidden = super::unshared(&plan, &over, origin, scale);
         // And the clients' own pixels: where on this screen each
         // commit since the last frame landed.
         let heard = self.commits.on(&plan, &self.sources);

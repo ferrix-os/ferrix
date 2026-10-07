@@ -579,30 +579,7 @@ impl Canvas {
         rounding: Rounding,
         damage: &Damage,
     ) -> Vec<Rect> {
-        let radius = rounding
-            .radius
-            .min(rect.width / 2)
-            .min(rect.height / 2)
-            .max(0);
-        let rounding = Rounding { radius, ..rounding };
-        if radius == 0 {
-            return self.clips(rect, damage);
-        }
-        let mut spans = Vec::with_capacity((radius * 2 + 1) as usize);
-        for row in 0..radius {
-            let inset = corner_inset(rounding, row);
-            let width = rect.width.saturating_sub(inset.saturating_mul(2));
-            if width <= 0 {
-                continue;
-            }
-            spans.push(Rect::new(rect.x + inset, rect.y + row, width, 1));
-            spans.push(Rect::new(rect.x + inset, rect.bottom() - row - 1, width, 1));
-        }
-        let middle = rect.height.saturating_sub(radius.saturating_mul(2));
-        if middle > 0 {
-            spans.push(Rect::new(rect.x, rect.y + radius, rect.width, middle));
-        }
-        spans
+        rounded_spans(rect, rounding)
             .into_iter()
             .flat_map(|span| self.clips(span, damage))
             .collect()
@@ -1637,4 +1614,39 @@ fn over(pixel: &mut [u8], colour: [u8; 3], alpha: f32) {
         let blended = source + f32::from(*slot) * keep;
         *slot = blended.round().clamp(0.0, 255.0) as u8;
     }
+}
+
+/// `rect` with its corners cut by `rounding`, as rectangles: a row for each
+/// line of the corners and one block for the straight middle. The shape a
+/// rounded window's border is filled as, and the box a screenshot blacks
+/// out over a window that asked not to be shared.
+#[must_use]
+pub fn rounded_spans(rect: Rect, rounding: Rounding) -> Vec<Rect> {
+    if is_empty(rect) {
+        return Vec::new();
+    }
+    let radius = rounding
+        .radius
+        .min(rect.width / 2)
+        .min(rect.height / 2)
+        .max(0);
+    let rounding = Rounding { radius, ..rounding };
+    if radius == 0 {
+        return vec![rect];
+    }
+    let mut spans = Vec::with_capacity((radius * 2 + 1) as usize);
+    for row in 0..radius {
+        let inset = corner_inset(rounding, row);
+        let width = rect.width.saturating_sub(inset.saturating_mul(2));
+        if width <= 0 {
+            continue;
+        }
+        spans.push(Rect::new(rect.x + inset, rect.y + row, width, 1));
+        spans.push(Rect::new(rect.x + inset, rect.bottom() - row - 1, width, 1));
+    }
+    let middle = rect.height.saturating_sub(radius.saturating_mul(2));
+    if middle > 0 {
+        spans.push(Rect::new(rect.x, rect.y + radius, rect.width, middle));
+    }
+    spans
 }

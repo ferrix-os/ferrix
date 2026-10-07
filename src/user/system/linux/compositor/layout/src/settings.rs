@@ -207,6 +207,11 @@ pub struct DwindleSettings {
     /// naming the side for every window until it is cleared, rather than
     /// for the next one only.
     pub permanent_direction_override: bool,
+    /// `dwindle:precise_mouse_move`: a dragged window dropped back into the
+    /// tiling goes on the *quarter* of the box under the pointer it was
+    /// dropped on, as `smart_split` does for a new window, rather than on
+    /// the half.
+    pub precise_mouse_move: bool,
 }
 
 /// The master layout's options.
@@ -469,6 +474,7 @@ impl Settings {
                 permanent_direction_override: config
                     .bool("dwindle:permanent_direction_override")
                     .unwrap_or(false),
+                precise_mouse_move: config.bool("dwindle:precise_mouse_move").unwrap_or(false),
             },
             master: MasterSettings {
                 mfact: finite(config.float("master:mfact"), 0.55).clamp(0.05, 0.95),
