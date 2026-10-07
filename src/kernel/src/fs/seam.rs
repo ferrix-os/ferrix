@@ -36,7 +36,8 @@ static COMPLETED: AtomicU64 = AtomicU64::new(0);
 
 /// One Linux system call answered.
 pub(crate) fn syscall() {
-    let _ = SYSCALLS.fetch_add(1, Ordering::Relaxed);
+    // ABLATION (po10-pipe abl1): no locked add (one processor in the bench).
+    SYSCALLS.store(SYSCALLS.load(Ordering::Relaxed).wrapping_add(1), Ordering::Relaxed);
 }
 
 /// `pages` file pages served from a page cache without a fill.

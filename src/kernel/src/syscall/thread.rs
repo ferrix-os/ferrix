@@ -373,10 +373,18 @@ impl Drop for Thread {
 
 /// The thread the running task runs, or `None` for a kernel thread.
 pub(crate) fn current() -> Option<Arc<Thread>> {
-    let task = sched::current()?;
-    let thread: Arc<dyn UserThread> = Arc::clone(task.thread()?);
-    let thread: Arc<dyn Any + Send + Sync> = thread;
-    thread.downcast().ok()
+    // ABLATION (po10-pipe abl1, never lands): the task borrowed, not cloned.
+    sched::with_current(|task| {
+        let thread: Arc<dyn UserThread> = Arc::clone(task.thread()?);
+        let thread: Arc<dyn Any + Send + Sync> = thread;
+        thread.downcast().ok()
+    })
+    .flatten()
+}
+
+/// ABLATION (po10-pipe abl1): the running task's thread, lent to `lend`.
+pub(crate) fn with_current<R>(lend: impl FnOnce(&Thread) -> R) -> Option<R> {
+    sched::with_current(|task| of_task(task).map(lend)).flatten()
 }
 
 /// The thread `task` runs, if it runs one of this personality's.

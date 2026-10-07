@@ -1980,8 +1980,9 @@ pub(crate) fn current() -> Option<Arc<Process>> {
     // scheduler is core and `Process` is the Linux personality's, so the core
     // should not carry a way to name one. The thread is what owns the process
     // anyway -- `Thread::process` is the real relationship.
-    let task = sched::current()?;
-    thread::of_task(&task).map(|thread| Arc::clone(thread.process()))
+    // ABLATION (po10-pipe abl1): the task borrowed, not cloned.
+    sched::with_current(|task| thread::of_task(task).map(|thread| Arc::clone(thread.process())))
+        .flatten()
 }
 
 /// Load a program into a new process, without running it.
