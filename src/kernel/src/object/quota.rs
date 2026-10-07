@@ -1160,6 +1160,15 @@ pub(crate) fn adjust(index: u32, delta: i64) {
 /// (the assertion below): a task's base is a `u32`, and a job's is
 /// `cpu.weight` clamped to [`MAX_WEIGHT`] and scaled to task units.
 pub(crate) fn effective(index: u32, base: u32) -> u32 {
+    effective_with(index, base, 0)
+}
+
+/// [`effective`], with `extra` added to `index`'s own load and to no other
+/// level's: the direct switch's weights, made while the peer's weight is
+/// counted in its word and not yet in the load it shares with the caller
+/// (`docs/OPAQUE-KERNEL.md` §9.11, J2; `ferrix_sched::carried_weight_with`).
+/// One walk, each level read once, as `effective`'s.
+pub(crate) fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
     let mut at = index;
     let levels = core::iter::from_fn(|| {
         let slot = slot(at)?;
@@ -1172,7 +1181,8 @@ pub(crate) fn effective(index: u32, base: u32) -> u32 {
         at = slot.parent.load(Ordering::Acquire);
         Some((own, load))
     });
-    let clamped = ferrix_sched::carried_weight(base, levels).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+    let clamped =
+        ferrix_sched::carried_weight_with(base, levels, extra).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
     u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
 }
 
@@ -1368,4 +1378,10 @@ fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
         return Err("a flush did not let go of the slot the pending charge held");
     }
     Ok(())
+}
+
+/// What `index` adds to its parent's load: its own weight while it is busy,
+/// nothing while idle. For a check.
+pub(crate) fn contributed(index: u32) -> i64 {
+    slot(index).map_or(0, |slot| slot.contributed.load(Ordering::Acquire))
 }

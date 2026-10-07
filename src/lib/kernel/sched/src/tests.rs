@@ -1786,3 +1786,271 @@ fn a_slot_taken_apart_and_put_together_serves_a_queue() {
         .expect("enqueued again");
     assert_eq!(queue.pick_next().copied(), Some(11));
 }
+
+// ---------------------------------------------------------------------------
+// The direct switch's job loads (docs/OPAQUE-KERNEL.md §9.11, J1 and J2)
+// ---------------------------------------------------------------------------
+
+/// `carried_weight_with` adds its extra to the first level's load and to no
+/// other: it equals `carried_weight` of the same levels with the first
+/// load raised (saturating), at depths 1 to 8, over random and boundary
+/// weights, loads and extras. The equality with the 128-bit formula is
+/// `the_carried_weight_is_the_wide_formula`'s.
+#[test]
+fn the_carried_weight_with_an_extra_raises_the_first_load_alone() {
+    let mut random = Xorshift(0x2545_F491_4F6C_DD1D);
+    for depth in 1..=8 {
+        for _ in 0..20_000 {
+            let base = random.weight();
+            let levels: Vec<(u32, i64)> = (0..depth)
+                .map(|_| (random.weight(), random.load()))
+                .collect();
+            let extra = match random.next() % 4 {
+                0 => 0,
+                1 => i64::from(random.weight()),
+                2 => random.load(),
+                _ => -i64::from(random.weight()),
+            };
+            let mut raised = levels.clone();
+            if let Some(first) = raised.first_mut() {
+                first.1 = first.1.saturating_add(extra);
+            }
+            assert_eq!(
+                carried_weight_with(base, levels.iter().copied(), extra),
+                carried_weight(base, raised.iter().copied()),
+                "base {base}, levels {levels:?}, extra {extra}"
+            );
+        }
+    }
+}
+
+/// A job of the model: its parent, its own weight, its load and what it
+/// adds to its parent's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModelJob {
+    parent: Option<u32>,
+    weight: u32,
+    load: i64,
+    contributed: i64,
+}
+
+/// The index the model's "no job" is, as the kernel's `quota::NONE`.
+const MODEL_NONE: u32 = u32::MAX;
+
+/// `quota::adjust` (src/kernel/src/object/quota.rs) on the model: the load
+/// changes, and every job above whose busy or idle state that flipped. A
+/// model of the kernel's code, which this crate cannot call: a drift between
+/// the two is caught only by review (as the slot model's is, ledger line
+/// 420).
+fn model_adjust(jobs: &mut [ModelJob], index: u32, delta: i64) {
+    let mut at = Some(index);
+    let mut delta = delta;
+    while delta != 0 {
+        let Some(job) = at.and_then(|at| jobs.get_mut(at as usize)) else {
+            return;
+        };
+        let before = job.load;
+        job.load = before.saturating_add(delta);
+        let after = job.load;
+        if (before > 0) == (after > 0) {
+            return;
+        }
+        let fresh = if after > 0 { i64::from(job.weight) } else { 0 };
+        delta = fresh - job.contributed;
+        job.contributed = fresh;
+        at = job.parent;
+    }
+}
+
+/// `quota::effective_with`'s levels on the model, from `index` up.
+fn model_weight(jobs: &[ModelJob], index: u32, base: u32, extra: i64) -> u64 {
+    let mut at = Some(index);
+    let levels = core::iter::from_fn(|| {
+        let job = jobs.get(at? as usize)?;
+        at = job.parent;
+        Some((job.weight, job.load))
+    });
+    carried_weight_with(base, levels, extra)
+}
+
+/// One round's jobs and tasks: a forest of up to eight jobs, each one's
+/// parent an earlier job or none, so depths run from 1 to as many jobs as
+/// there are; other tasks counted where they run, none at all every fourth
+/// round; the caller's job and weight, counted; the peer's job (the
+/// caller's half the time) and weight (the caller's half the time).
+fn model_round(random: &mut Xorshift, round: u32) -> (Vec<ModelJob>, (u32, u32), (u32, u32)) {
+    let count = 1 + (random.next() % 8) as u32;
+    let mut jobs: Vec<ModelJob> = (0..count)
+        .map(|index| ModelJob {
+            parent: (index > 0 && !random.next().is_multiple_of(5))
+                .then(|| (random.next() % u64::from(index)) as u32),
+            weight: 1 + (random.next() % 200_000) as u32,
+            load: 0,
+            contributed: 0,
+        })
+        .collect();
+    if !round.is_multiple_of(4) {
+        for _ in 0..(random.next() % 6) {
+            let at = (random.next() % u64::from(count)) as u32;
+            model_adjust(&mut jobs, at, 1 + (random.next() % 90_000) as i64);
+        }
+    }
+    let weight = |random: &mut Xorshift| 1 + (random.next() % 90_000) as u32;
+    let caller_job = (random.next() % u64::from(count)) as u32;
+    let peer_job = if random.next().is_multiple_of(2) {
+        caller_job
+    } else {
+        (random.next() % u64::from(count)) as u32
+    };
+    let caller_base = weight(random);
+    let peer_base = if random.next().is_multiple_of(2) {
+        caller_base
+    } else {
+        weight(random)
+    };
+    model_adjust(&mut jobs, caller_job, i64::from(caller_base));
+    (jobs, (caller_job, caller_base), (peer_job, peer_base))
+}
+
+/// The direct switch's plan and settlement, the kernel's own functions,
+/// give what the general sequence gives: the peer's join (`adjust` by its
+/// weight), the caller's charge and the peer's weight read with it counted,
+/// then the caller's leave -- the same load and contribution at every job
+/// and the same two weights -- over random job trees of depth 1 to 8 with
+/// siblings and nested jobs, the caller and the peer in one job, in
+/// siblings, in a job and its child either way, and in jobs apart; bases
+/// equal and unequal both ways; other tasks counted or none (the job the
+/// caller alone keeps busy). A fold is planned exactly when both run in one
+/// job.
+///
+/// Verifies: L.sched.66
+#[test]
+fn the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them() {
+    let mut random = Xorshift(0xD1B5_4A32_D192_ED03);
+    let mut folds = 0_u32;
+    let mut apart = 0_u32;
+    for round in 0..40_000_u32 {
+        // The caller runs, counted; the peer is about to join.
+        let (jobs, (caller_job, caller_base), (peer_job, peer_base)) =
+            model_round(&mut random, round);
+
+        // The general sequence.
+        let mut general = jobs.clone();
+        model_adjust(&mut general, peer_job, i64::from(peer_base));
+        let caller_due = model_weight(&general, caller_job, caller_base, 0);
+        let peer_due = model_weight(&general, peer_job, peer_base, 0);
+        model_adjust(&mut general, caller_job, -i64::from(caller_base));
+
+        // The direct switch's.
+        let mut folded = jobs.clone();
+        let plan = plan_job_fold(
+            Some((peer_job, peer_base)),
+            (caller_job, caller_base),
+            MODEL_NONE,
+        );
+        let extra = match plan {
+            JobPlan::Fold { job, joined } => {
+                folds += 1;
+                Some((job, i64::from(joined)))
+            }
+            JobPlan::Separate => {
+                apart += 1;
+                model_adjust(&mut folded, peer_job, i64::from(peer_base));
+                None
+            }
+        };
+        let extra_at = |at: u32| extra.filter(|&(job, _)| job == at).map_or(0, |(_, e)| e);
+        let caller_folded = model_weight(&folded, caller_job, caller_base, extra_at(caller_job));
+        let peer_folded = model_weight(&folded, peer_job, peer_base, extra_at(peer_job));
+        match plan {
+            JobPlan::Fold { job, joined } => {
+                let (changes, planned) =
+                    settle_job_fold(job, joined, Some((caller_job, caller_base)));
+                assert!(
+                    planned,
+                    "round {round}: a fold's leave answered as planned was not"
+                );
+                for (at, delta) in changes.into_iter().flatten() {
+                    model_adjust(&mut folded, at, delta);
+                }
+            }
+            JobPlan::Separate => {
+                model_adjust(&mut folded, caller_job, -i64::from(caller_base));
+            }
+        }
+
+        let what = || {
+            std::format!(
+                "round {round}: caller in {caller_job} at {caller_base}, peer in {peer_job} at \
+                 {peer_base}, plan {plan:?}, jobs {jobs:?}"
+            )
+        };
+        assert_eq!(
+            plan == JobPlan::Separate,
+            caller_job != peer_job,
+            "a fold planned at an unshared level, or none at a shared one: {}",
+            what()
+        );
+        assert_eq!(folded, general, "the job loads differ: {}", what());
+        assert_eq!(
+            caller_folded,
+            caller_due,
+            "the caller's weight differs: {}",
+            what()
+        );
+        assert_eq!(
+            peer_folded,
+            peer_due,
+            "the peer's weight differs: {}",
+            what()
+        );
+    }
+    assert!(
+        folds > 1_000 && apart > 1_000,
+        "folds {folds}, apart {apart}"
+    );
+}
+
+/// A fold's leave that answers other than planned makes the peer's join and
+/// then the caller's leave, each in its own job, as the general path makes
+/// them, and says it was not planned; one as planned makes one change by the
+/// net, or none at zero.
+#[test]
+fn a_fold_settles_by_the_net_or_in_the_general_order() {
+    assert_eq!(
+        settle_job_fold(3, 700, Some((3, 700))),
+        ([None, None], true)
+    );
+    assert_eq!(
+        settle_job_fold(3, 700, Some((3, 500))),
+        ([Some((3, 200)), None], true)
+    );
+    assert_eq!(
+        settle_job_fold(3, 500, Some((3, 700))),
+        ([Some((3, -200)), None], true)
+    );
+    assert_eq!(
+        settle_job_fold(3, 700, Some((4, 500))),
+        ([Some((3, 700)), Some((4, -500))], false)
+    );
+    assert_eq!(
+        settle_job_fold(3, 700, None),
+        ([Some((3, 700)), None], false)
+    );
+    assert_eq!(plan_job_fold(None, (3, 700), MODEL_NONE), JobPlan::Separate);
+    assert_eq!(
+        plan_job_fold(Some((3, 700)), (3, 0), MODEL_NONE),
+        JobPlan::Separate
+    );
+    assert_eq!(
+        plan_job_fold(Some((MODEL_NONE, 700)), (MODEL_NONE, 700), MODEL_NONE),
+        JobPlan::Separate
+    );
+    assert_eq!(
+        plan_job_fold(Some((3, 700)), (3, 500), MODEL_NONE),
+        JobPlan::Fold {
+            job: 3,
+            joined: 700
+        }
+    );
+}
