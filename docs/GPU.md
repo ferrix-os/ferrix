@@ -58,7 +58,7 @@ In dependency order, with sizes in story points:
 | 2 | **A render node and the `virtgpu` ioctls.** *Begun: `src/lib/proto/renderctl`, `kernel::render`, the ABI table and the node itself are written, a program opens it, and `RESOURCE_CREATE`/`RESOURCE_INFO` make a real resource through the open's handle table -- §3.4. `MAP`, the calls that need a context, and scanout are what is left.* `/dev/dri/renderD128`, GEM handles, `DRM_IOCTL_VIRTGPU_GETPARAM`, `GET_CAPS`, `CONTEXT_INIT`, `RESOURCE_CREATE`, `RESOURCE_INFO`, `MAP`, `EXECBUFFER`, `TRANSFER_TO_HOST`/`FROM_HOST` and `WAIT`, in `src/lib/proto/linux-abi` from a committed probe as every other ABI table is. And **scanout of a 3D resource**, so the finished frame never leaves the GPU: no per-frame transfer at all, where today's best is the damaged rectangles. | 13 |
 | 5 | **The host half, in xtask.** `-device virtio-gpu-gl` and a GL display where QEMU has them, asked for as `window.rs` asks for a display today, with the 2D device otherwise. The gate host's QEMU rebuilt with OpenGL and virglrenderer, and `egl-headless` for judged boots. GPU output is not byte-exact across drivers, so a judged GPU boot compares within a stated tolerance, or against a software GL pinned on the gate host; the software renderer's images stay byte-exact. **Judging one needs a way to read its pixels that is not `screendump` -- see §3.1.** | 5 |
 | 3b | **A GPU renderer for the compositor, in Rust.** A `src/user/system/linux/compositor/virgl` crate that encodes virgl's command stream -- object creation, state, `draw_vbo`, resource transfers -- with shaders as the TGSI text virgl takes. Hyprland's effects are about eight shaders: the two blur kernels, `blurprepare`, `blurFinish`, the rounded texture, the border gradient, the shadow. `src/user/system/linux/compositor/render` gains a renderer trait with the software renderer as the fallback the roadmap already requires -- the compositor is never GPU-only. Clients stay `wl_shm`; their damaged rectangles are uploaded as textures. | 21 |
-| 4 | **`zwp_linux_dmabuf` and a GBM-shaped allocator.** Only once clients render on the GPU themselves. Not needed for 3b, and deferred with 3a. | 8 |
+| 4 | **`zwp_linux_dmabuf` and a GBM-shaped allocator.** Only once clients render on the GPU themselves. Not needed for 3b, and deferred with 3a. **Done 2026-10-07 -- §3.13.** | 8 |
 
 **52 points to a GPU-composited desktop** (1, 2, 5, 3b), in that order: the
 driver and the node first because nothing above can be tested without them,
@@ -70,7 +70,8 @@ screen is shown that very texture. 1920x1080, a video wallpaper behind a
 blurred translucent terminal, under KVM on the gate host: **39 ms a frame in
 software, 12 ms on the GPU**, where 60 fps is 16.7 -- on the scene and the
 quiet host §3.8 describes, which is worth reading before quoting the number.
-Step 4 is still only for clients that render for themselves.
+Step 4, for clients that render for themselves, was built on 2026-10-07
+(§3.13).
 
 ### 3.1 What was found when the gate host was given the device (2026-09-18)
 
@@ -881,6 +882,155 @@ warnings in a two-minute boot without it, none with it. `0004-*.patch`
 fixes the other thing that window got wrong with `gl=on`: a GtkGLArea has
 no window of its own, so the blank cursor QEMU sets over the guest was set
 on the whole window, and the host pointer vanished over the menu bar.
+
+### 3.13 Step 4: a client's GPU buffer on the screen (design, 2026-10-07)
+
+Step 4 of the table: `zwp_linux_dmabuf_v1` in hyprix and a GBM-shaped
+allocator for clients, so that a client's buffer that already lives on the
+device is shown without its pixels leaving it. Mesa on ferrousli (3a) is
+not part of it; this is what Mesa's EGL and Venus's WSI will present
+through when they come.
+
+**What exists.** A render node exports a buffer object as a descriptor,
+`DRM_IOCTL_PRIME_HANDLE_TO_FD` (`Exported`, `anon_inode:[dmabuf]`, §3.8),
+and the *card* imports one, `PRIME_FD_TO_HANDLE`, to scan it out. What does
+not exist is the import a compositor needs: a buffer object another open of
+the render node made, given a handle in the compositor's own open and made
+nameable by the compositor's own virgl context, so that its renderer can
+sample it as a texture.
+
+**The kernel half: `PRIME_FD_TO_HANDLE` on the render node.** The same
+ioctl Linux answers there, with Linux's meaning:
+
+* The descriptor must be an `Exported` of an object of *this* renderer
+  (`Arc::ptr_eq` on the renderer); anything else is `EINVAL`, as Linux
+  answers a descriptor that is not a dmabuf. There is one device, so there
+  is no import from another one to refuse more politely.
+* An object this open already has a handle for answers that handle, and
+  nothing is attached twice: Linux's `drm_gem_prime_fd_to_handle` keeps one
+  handle per object per open the same way. This also covers a program
+  importing what it exported itself.
+* Otherwise this open's context is made if it has none (as every call that
+  needs one does), the object is attached to it, and only then is it put in
+  the handle table. The handle holds the `Object` as a made one does, so
+  `RESOURCE_INFO`, `MAP`, the transfers and `GEM_CLOSE` work on it
+  unchanged; the descriptor's own reference is independent of it.
+* The attachment is a new `src/lib/proto/renderctl` request, version 4:
+  `ATTACH_OBJ` (core to driver, 16 bytes: `8 object u32  12 context u32`)
+  answered by `OBJ_ATTACHED` (`8 object u32  12 status u32`), which the
+  session validates as it does `OBJ_MADE`: an answer for an object and
+  context it did not ask about is a protocol error, and a refusal is
+  `EINVAL` to the program. The virtio-gpu driver maps it onto
+  `VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE` in that context, which it already
+  sends for an object it makes in a context. No backing changes hands and
+  nothing is pinned or unpinned: the object's backing stays the one its
+  maker's `MAKE_OBJ` pinned, released when the object goes, which is
+  `docs/DISPLAY.md` §2.2's rule unchanged.
+* **No detach on `GEM_CLOSE`.** Linux detaches a resource from a context
+  when the context's last handle to it closes. Here the attachment lasts
+  until the context goes (the open's last close) or the object does.
+  That is already how an object's *maker* is treated -- its context keeps
+  the attachment after `GEM_CLOSE` while an export holds the object -- and
+  the attachment lets the context name nothing the descriptor it was
+  handed did not already give it. Written down as a deviation rather than
+  added as a second message nothing needs yet.
+* **A second attach, and the lifetime of the first** (the consultant's C1
+  and C2). Because nothing detaches, an import after the importer's
+  `GEM_CLOSE`, and two threads importing one object at once, each send
+  `ATTACH_OBJ` again. The core keeps no record of which contexts an object
+  was given to: the device takes a repeat attach as it takes the first --
+  Linux's virtio-gpu sends one for every handle a context opens -- and the
+  session allows one attach an object in flight, so the second waits for
+  the first's answer. The handle table then keeps one handle an object,
+  whichever thread put it there first. An attachment ends at the latest
+  with the resource's `RESOURCE_UNREF`, which detaches it from every
+  context on the host, and the core gives an object id out again only
+  after `OBJ_GONE`: a reused id never names a new object in an old context.
+
+Nothing new is in the item: `interfaces::render` is the load ring and the
+virtio-gpu driver is ring 3. No new `unsafe`, no new system call, no new
+native interface; one more Linux ioctl on a node that has its siblings.
+
+**The allocator: `src/user/system/linux/compositor/gbm`.** GBM's shape in
+Rust, over `compositor-drm`'s `Render`: open the render node as a device,
+make a buffer object of a width, a height, a DRM format (`ARGB8888`,
+`XRGB8888`) and a use (sampled, drawn into, scanned out), and get its
+stride, its modifier (linear, which is the only layout virgl's resources
+have from the guest's side), its handle and resource for a program's own
+virgl stream, a dmabuf descriptor of it, and `write`, which is
+`gbm_bo_write`: the bytes into its backing and a transfer to the device.
+It is a crate rather than a C library because nothing on Ferrix that would
+link `libgbm` exists yet; Mesa's own GBM comes with 3a.
+
+**The protocol: `zwp_linux_dmabuf_v1` version 3 in hyprix.** The server
+crate answers `create_params`, `add` (one plane, offset 0, the modifier
+linear or `DRM_FORMAT_MOD_INVALID`), `create` and `create_immed`, and
+advertises `format` and `modifier` for the two formats. Its checks are the
+protocol's own errors (`already_used`, `plane_idx`, `plane_set`,
+`incomplete`, `invalid_format`, `invalid_dimensions`). Version 4's
+feedback -- the format table and the main device, which Mesa's EGL reads to
+find its device -- comes with 3a, which is its first reader. hyprix offers
+the global only on a screen drawn on the GPU, imports each buffer into its
+own open of the node, and its GPU painter samples the imported resource
+where a `wl_shm` surface's texture is uploaded: no copy, the client's
+pixels never leave the device. A buffer that cannot be imported fails as
+the protocol says (`failed` for `create`, `invalid_wl_buffer` for
+`create_immed`). The buffer is released when a commit replaces it, as a
+`wl_shm` one is.
+
+**The test: `test-compositor --gl --boot dmabuf`.** The `--gl` boot's two
+pattern windows, drawn into GBM buffers and presented through
+`zwp_linux_dmabuf_v1`, judged by the guest's own screenshot against the
+same image the `wl_shm` boot is judged against -- the picture is the same
+whichever way the pixels arrived, which is the claim. It also requires each
+client to say it presented a dmabuf and hyprix to say it imported one, so a
+fallback to `wl_shm` cannot pass it. Negative controls: the node's import
+refusing every descriptor, and hyprix sampling the wrong resource.
+
+**Reviewed before code.** The certification consultant's verdict of
+2026-10-07 (po10-dmabuf-cert, ledger lines 438-441): OK if C1 to C6. No
+item change -- `interfaces::render` is the load ring, renderctl, the driver
+and the allocator are unclassified ring 3 -- and the reach this adds to the
+render node (F-55) is granted only by a descriptor its holder was given.
+The deviation of no detach on `GEM_CLOSE` is accepted. C1 and C2 are the
+paragraph on a second attach above; C3 the client's own checks below; C4
+the negative controls in the landing's commit; C5 renderctl's tests and
+fuzzing; C6 back to the consultant if the scope grows.
+
+**Built (2026-10-07).** Everything above, as designed:
+
+* the kernel: `PRIME_FD_TO_HANDLE` on the render node
+  (`interfaces/render/node.rs` `import`) and `Renderer::attach`;
+  `src/lib/proto/renderctl` version 4 with `ATTACH_OBJ` and
+  `OBJ_ATTACHED`, its session allowing one attach an object in flight and
+  refusing a drop of the object, or of the context, while one is; the
+  virtio-gpu driver answering it with `CTX_ATTACH_RESOURCE`;
+* `src/user/system/linux/compositor/gbm`: `Device`, `Bo`, `create`,
+  `export`, `write`, `stride`, `modifier`;
+* `zwp_linux_dmabuf_v1` version 3 in the server crate
+  (`client/dmabuf.rs`), offered by hyprix where its frames are drawn on the
+  GPU; hyprix imports each buffer into its own open of the node
+  (`hyprix/src/dmabuf.rs`), and the GPU painter imports it into each
+  screen's context and samples it with no upload (`render/src/gpu`,
+  `imported_image`), falling back to the upload where a device cannot
+  import;
+* `pattern --dmabuf`, which draws into two GBM buffers and presents them,
+  and checks the import itself on a second open of the node: a pipe is
+  `EINVAL`, its own export is its own handle, a buffer imported, closed and
+  imported again is imported again, and the maker's buffer still takes
+  pixels after the importer let go;
+* `cargo xtask test-compositor --gl --boot dmabuf`, which requires those
+  four lines, each client's `presents through zwp_linux_dmabuf_v1`,
+  hyprix's `imported a dmabuf`, and the guest's own screenshot of the two
+  windows within a step of the `wl_shm` boot's image.
+
+What is left beside step 4: version 4's feedback and Mesa's EGL on top of
+it (3a); zero-copy presentation for Venus through the same import (§6.1,
+`MESA_VK_WSI_DEBUG=sw` goes then); `DRM_CAP_PRIME`, which nothing asks yet
+and whose two bits are not in `src/lib/proto/linux-abi`'s probe; and a
+software-drawn screen showing a buffer drawn on the GPU, which reads the
+buffer's backing and so needs a transfer back that nothing asks for while
+the global is offered only where the frames are drawn on the GPU.
 
 ### 3.14 Client pages as texture backing: the plan (2026-10-07)
 
