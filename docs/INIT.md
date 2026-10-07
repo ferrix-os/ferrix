@@ -1180,8 +1180,8 @@ the system people will actually use.
 | L11 | done, 2026-09-26, by ferrix-55b with T0 | "Give the restart policy a crate of its own that allocates nothing"; "Restart drivers by the service manager's policy, and report how they died" |
 | L12 | done, 2026-09-27, as built in §7.3 | "Let pid 1 start devmgr, through a starter the kernel gives it" |
 | L13a | built 2026-10-04 on branch `l13-init`, gating (below) | |
-| L13b | built 2026-10-04 on branch `l13b`, rebased onto `main` and gated 2026-10-05 (below) | |
-| L13c | built 2026-10-04 on branch `l13c`, rebased onto `l13b` and gated 2026-10-05 (below) | |
+| L13b | landed 2026-10-05 (3349682db) | |
+| L13c | built 2026-10-04 on branch `l13c`, gated 2026-10-05, rebased onto `main` 4466212c3 on 2026-10-07 (branch `po10-l13c/l13c`, below) | |
 
 All of L1 to L12's 81 points are spent. L11 put `devmgr` on the restart
 policy, which moved into `src/lib/init/restart` because `devmgr` has no
