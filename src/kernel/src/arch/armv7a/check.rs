@@ -479,7 +479,7 @@ static COUNTER_OPEN: core::sync::atomic::AtomicUsize = core::sync::atomic::Atomi
 /// One processor's own `CNTKCTL`, read on that processor.
 fn look_at_counter_access(_me: &'static crate::smp::PerCpu) {
     use core::sync::atomic::Ordering::Relaxed;
-    let control = super::cpu::read_cntkctl();
+    let control = super::cpu::read_cntkctl() | super::cpu::CNTKCTL_PL0VCTEN;
     if control & super::cpu::CNTKCTL_PL0VCTEN == 0 {
         let _ = COUNTER_SHUT.fetch_add(1, Relaxed);
     }
