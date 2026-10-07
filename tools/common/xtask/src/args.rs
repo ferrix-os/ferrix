@@ -223,6 +223,13 @@ pub(crate) struct Args {
     /// `--record`: `bench-ipc` files its result under
     /// `docs/hotpaths/results/` (`docs/HOTPATHS.md` §6).
     pub(crate) record: bool,
+    /// `--board-log`, a board's serial log of one boot that ran
+    /// `/sbin/ipc-bench` at its shell: `bench-ipc` reads these instead of
+    /// booting QEMU, one boot each, as many as given.
+    pub(crate) board_logs: Vec<String>,
+    /// `--board`, the board those logs are from (`stm32mp157d-dk1`): what
+    /// `--record` files them under in place of this host.
+    pub(crate) board: Option<String>,
     /// `--pin`, the host processors (`taskset -c`'s list) QEMU runs on.
     /// `bench-ipc` pins to 11 unless given another, or `none`.
     pub(crate) pin: Option<String>,
@@ -477,6 +484,23 @@ pub(crate) struct Args {
 /// The flags [`Args::scales`] takes, each with a value.
 const SCALE_FLAGS: [&str; 4] = ["--scale", "--bar-zoom", "--bar-drop", "--bar-margin-right"];
 
+/// The flags [`Args::named`] takes, `bench-ipc`'s among them.
+const NAMED_FLAGS: [&str; 13] = [
+    "--accel",
+    "--since",
+    "--moved",
+    "--alternate",
+    "--rounds",
+    "--pin",
+    "--against-sel4",
+    "--against-redox",
+    "--board-log",
+    "--to",
+    "--stage",
+    "--record",
+    "--board",
+];
+
 /// The flags [`Args::root`] takes.
 const ROOT_FLAGS: [&str; 5] = [
     "--reset-root",
@@ -561,6 +585,8 @@ impl Args {
                 | "--against-sel4"
                 | "--against-redox"
                 | "--record"
+                | "--board"
+                | "--board-log"
         ) {
             return self.bench(flag, items);
         }
@@ -750,9 +776,7 @@ impl Args {
                 "--arch" => args.arch = Some(value(&mut items, "--arch")?),
                 "--smp" | "--memory" | "--timeout" => args.machine(&item, &mut items)?,
                 "--seeds" | "--jobs" => args.counts(&item, &mut items)?,
-                "--accel" | "--since" | "--moved" | "--alternate" | "--rounds" | "--pin"
-                | "--against-sel4" | "--against-redox" => args.named(&item, &mut items)?,
-                "--to" | "--stage" | "--record" => args.named(&item, &mut items)?,
+                flag if NAMED_FLAGS.contains(&flag) => args.named(flag, &mut items)?,
                 "--port" => args.port = Some(value(&mut items, "--port")?),
                 "--init" => args.init = Some(value(&mut items, "--init")?),
                 "--init-path" => args.init_path = Some(init_path(&mut items)?),
@@ -890,7 +914,7 @@ fn number<T: std::str::FromStr>(items: &mut impl Iterator<Item = String>, key: &
 
 impl Args {
     /// `bench-ipc`'s own flags: `--alternate`, `--rounds`, `--against-sel4`,
-    /// `--against-redox`, `--record` and `--pin`.
+    /// `--against-redox`, `--record`, `--board`, `--board-log` and `--pin`.
     fn bench(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
         match key {
             "--alternate" => self.alternate = Some(value(items, key)?),
@@ -898,6 +922,8 @@ impl Args {
             "--against-sel4" => self.against_sel4 = true,
             "--against-redox" => self.against_redox = true,
             "--record" => self.record = true,
+            "--board" => self.board = Some(value(items, key)?),
+            "--board-log" => self.board_logs.push(value(items, key)?),
             _ => self.pin = Some(value(items, key)?),
         }
         Ok(())

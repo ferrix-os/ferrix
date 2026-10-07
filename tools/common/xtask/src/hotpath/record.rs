@@ -312,6 +312,18 @@ pub(crate) fn ipc_configuration(args: &Args, rounds: u32, alternate: Option<&str
     ])
 }
 
+/// A board's run (`bench-ipc --board-log`): the board's name, and its
+/// processors in place of `--smp`, which a board does not take. Only then,
+/// so a QEMU run's configuration, and its hash, are as they were.
+pub(crate) fn set_board(configuration: &mut Value, board: &str, processors: u64) {
+    if let Value::Object(fields) = configuration {
+        let _ = fields.insert("board".to_owned(), Value::str(board));
+        let _ = fields.insert("smp".to_owned(), Value::int(processors));
+        let _ = fields.insert("accel".to_owned(), Value::str("none"));
+        let _ = fields.insert("pin".to_owned(), Value::str("none"));
+    }
+}
+
 /// This tree's commit, and whether anything outside the results directory
 /// differs from it.
 pub(crate) fn ferrix_commit(root: &Path) -> Result<Value> {
