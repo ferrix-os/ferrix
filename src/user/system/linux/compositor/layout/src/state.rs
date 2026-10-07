@@ -198,6 +198,24 @@ impl Tiling {
         }
     }
 
+    /// Add `new`, dropped at a point by a drag: the dwindle layout puts it
+    /// beside the box under the pointer ([`Dwindle::insert_dropped`]), and
+    /// the others add it as they would a new one.
+    fn insert_dropped(
+        &mut self,
+        new: WindowId,
+        point: (f64, f64),
+        area: Area,
+        settings: &Settings,
+    ) {
+        match self {
+            Self::Dwindle(dwindle) => dwindle.insert_dropped(new, point, area, settings),
+            Self::Master(master) => master.insert(new, None, settings),
+            Self::Monocle(monocle) => monocle.insert(new),
+            Self::Scrolling(scrolling) => scrolling.insert(new, None, settings, area.w),
+        }
+    }
+
     fn remove(&mut self, window: WindowId) {
         match self {
             Self::Dwindle(dwindle) => dwindle.remove(window),
@@ -396,6 +414,11 @@ pub struct State {
     /// so it moves with the window between monitors, kept while the window
     /// is tiled so floating it again puts it back.
     floating_rects: BTreeMap<WindowId, Rect>,
+    /// Tiled windows a drag has lifted out of the tiling, with the floating
+    /// rectangle each had before -- `None` for one that never floated --
+    /// which is given back when it is dropped in again: lifting one is not
+    /// floating it, and must not change where `togglefloating` puts it.
+    lifted: BTreeMap<WindowId, Option<Rect>>,
     /// Where the pointer is, in the global space the monitors share, or
     /// `None` on a compositor that has not seen one move.
     ///
@@ -493,6 +516,7 @@ impl State {
             workspaces: BTreeMap::new(),
             windows: BTreeMap::new(),
             floating_rects: BTreeMap::new(),
+            lifted: BTreeMap::new(),
             history: Vec::new(),
             focus_trail: Vec::new(),
             names: BTreeMap::new(),
@@ -1056,6 +1080,7 @@ impl State {
             state.detach(window);
             state.history.retain(|id| *id != window);
             let _rect = state.floating_rects.remove(&window);
+            let _lifted = state.lifted.remove(&window);
             // `master:focus_master_on_close`: the focus goes to the master
             // rather than to whatever the history has next, which is what
             // `getNextCandidate` does with the option on.
@@ -3531,6 +3556,102 @@ impl State {
             return Err(Error::UnknownWindow(window));
         }
         Ok(self.run(|state| state.move_floating(window, by, false, Corner::NONE, true)))
+    }
+
+    /// Lift the focused window, tiled, out of the tiling because the pointer
+    /// has started to drag it: it floats at the size it had, centred on the
+    /// pointer at `at`, until [`State::drop_window`] puts it back.
+    ///
+    /// Hyprland's `CDragStateController::updateDragWindow`: a tiled target
+    /// dragged with `movewindow` is set floating at its own size with its
+    /// middle at the mouse, and the drag remembers it was tiled. A floating
+    /// window, or one that is not focused, is not lifted -- the drag moves
+    /// the first as it is, and the compositor drags only the focused one.
+    ///
+    /// # Errors
+    ///
+    /// The window is not one this layout holds.
+    pub fn lift_window(&mut self, window: WindowId, at: (f64, f64)) -> Result<Vec<Change>, Error> {
+        if !self.windows.contains_key(&window) {
+            return Err(Error::UnknownWindow(window));
+        }
+        if self.is_floating(window) || self.focused_window() != Some(window) {
+            return Ok(Vec::new());
+        }
+        let Some(rect) = self.rect_of(window) else {
+            return Ok(Vec::new());
+        };
+        let kept = self.floating_rects.get(&window).copied();
+        Ok(self.run(|state| {
+            let mut changes = state.toggle_floating();
+            if !state.is_floating(window) {
+                return changes;
+            }
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the pointer is on a screen, far inside i64"
+            )]
+            let (x, y) = (at.0.round() as i64, at.1.round() as i64);
+            let lifted = Rect::new(
+                x.saturating_sub(rect.width / 2),
+                y.saturating_sub(rect.height / 2),
+                rect.width,
+                rect.height,
+            );
+            changes.extend(state.place_floating(window, lifted));
+            let _previous = state.lifted.insert(window, kept);
+            changes
+        }))
+    }
+
+    /// Drop a window [`State::lift_window`] lifted back into the tiling, at
+    /// the point `at` the pointer let go of it.
+    ///
+    /// Hyprland's `CDragStateController::dragEnd`: a target that was
+    /// dragged tiled is set tiled again, which adds it to the layout with
+    /// the pointer where it was let go and `wasDraggingWindow()` set -- the
+    /// one moment `dwindle:precise_mouse_move` is read. Its floating size
+    /// is given back as it was before the drag. A window that was not
+    /// lifted, or that something floated for good while it was held, is
+    /// left alone.
+    ///
+    /// # Errors
+    ///
+    /// The window is not one this layout holds.
+    pub fn drop_window(&mut self, window: WindowId, at: (f64, f64)) -> Result<Vec<Change>, Error> {
+        if !self.windows.contains_key(&window) {
+            return Err(Error::UnknownWindow(window));
+        }
+        let Some(kept) = self.lifted.remove(&window) else {
+            return Ok(Vec::new());
+        };
+        if !self.is_floating(window) {
+            return Ok(Vec::new());
+        }
+        Ok(self.run(|state| {
+            let Some(workspace) = state.workspace_of(window) else {
+                return Vec::new();
+            };
+            let area = Area::of(state.work_area_of(workspace));
+            let settings = state.settings;
+            let Some(ws) = state.workspaces.get_mut(&workspace) else {
+                return Vec::new();
+            };
+            ws.floating.retain(|id| *id != window);
+            ws.tiling.insert_dropped(window, at, area, &settings);
+            match kept {
+                Some(rect) => {
+                    let _previous = state.floating_rects.insert(window, rect);
+                }
+                None => {
+                    let _gone = state.floating_rects.remove(&window);
+                }
+            }
+            vec![Change::Floating {
+                window,
+                floating: false,
+            }]
+        }))
     }
 
     /// Resize a window because the pointer is dragging an edge of it:

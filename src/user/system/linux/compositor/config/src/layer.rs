@@ -46,16 +46,20 @@
 //! asks for. Only above the windows: a surface drawn below them is part of
 //! what the backdrop is a copy of.
 //!
-//! The rest are read, kept and not acted on, and each for a reason.
-//! `no_anim` has nothing to turn off, because a layer surface is not
-//! animated here. `blur_popups` needs a second render pass, which reads
-//! what is *behind* the frame being drawn where this renderer draws one
-//! pass over one canvas. `no_screen_share` needs the same: a screenshot
-//! here is the screen's own buffer, and leaving one surface out of it
-//! means drawing the frame again without it. They are parsed rather than
-//! refused so that a person's configuration is not a wall of diagnostics,
-//! and recorded so that the compositor can act on them when the renderer
-//! can.
+//! `blur_popups` is drawn: the surface's popups -- a bar's tooltip, a tray
+//! icon's menu -- are blurred behind as `blur` blurs the surface, with its
+//! `xray`. Popups are drawn last, over everything, so drawing in order is
+//! the second pass this was once thought to need. `no_screen_share` is
+//! obeyed: a screenshot or a shared screen shows a black box where the
+//! surface and its popups are, drawn over the copy as Hyprland's
+//! `CScreenshareFrame::renderMonitor` does, and the screen itself is drawn
+//! as ever.
+//!
+//! The rest are read, kept and not acted on. `no_anim` has nothing to turn
+//! off, because a layer surface is not animated here; `ignore_alpha` and
+//! `animation` likewise. They are parsed rather than refused so that a
+//! person's configuration is not a wall of diagnostics, and recorded so
+//! that the compositor can act on them when it can.
 
 use compositor_regex::Regex;
 

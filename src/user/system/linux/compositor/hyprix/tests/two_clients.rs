@@ -1616,20 +1616,135 @@ fn settled(socket: &Path) -> Result<compositor_shot::Shot, String> {
 /// to.
 #[test]
 fn a_screenshot_is_the_frame_the_renderer_blesses() {
-    let work = workspace("screenshot");
+    let (taken, _, line) = screenshot_of("screenshot", "");
+    let want = expected();
+    assert_eq!(
+        taken.pixels.len(),
+        want.len(),
+        "the screenshot has {} bytes and the expected image {}",
+        taken.pixels.len(),
+        want.len()
+    );
+    let differing = taken
+        .pixels
+        .chunks_exact(3)
+        .zip(want.chunks_exact(3))
+        .filter(|(shot, blessed)| shot != blessed)
+        .count();
+    assert_eq!(
+        differing,
+        0,
+        "{differing} of {} pixels in the screenshot are not the renderer's; the compositor said \
+         {line}",
+        (WIDTH * HEIGHT) as usize
+    );
+}
+
+/// `windowrule = no_screen_share`: a screenshot shows a black box where the
+/// window is, and the screen shows the window as ever.
+///
+/// Hyprland's `CScreenshareFrame::renderMonitor` copies the monitor's frame
+/// and draws a black box over the window's own rectangle -- not its border
+/// -- rounded as the window is. So the test is three claims about one run:
+/// the screen's last frame is still the renderer's blessed picture; inside
+/// the second window's rectangle the screenshot is black; and outside it the
+/// screenshot is that blessed picture too, so nothing else went with it.
+#[test]
+fn a_window_that_is_not_shared_is_a_black_box_in_a_screenshot() {
+    let (taken, frame, line) = screenshot_of(
+        "unshared",
+        "windowrule = no_screen_share, match:title ^(two)$\n",
+    );
+    let want = expected();
+    let (on_screen, first) = compare(&frame, &want);
+    assert_eq!(
+        on_screen, 0,
+        "the screen itself changed, first at {first:?}; the compositor said {line}"
+    );
+    let two = second_window();
+    let mut inside = 0;
+    for (index, (shot, blessed)) in taken
+        .pixels
+        .chunks_exact(3)
+        .zip(want.chunks_exact(3))
+        .enumerate()
+    {
+        let (x, y) = (
+            i64::try_from(index % WIDTH as usize).expect("a column"),
+            i64::try_from(index / WIDTH as usize).expect("a row"),
+        );
+        let hidden =
+            (two.x..two.x + two.width).contains(&x) && (two.y..two.y + two.height).contains(&y);
+        if hidden {
+            inside += 1;
+            assert_eq!(shot, [0, 0, 0], "({x}, {y}) shows through the box; {line}");
+        } else {
+            assert_eq!(shot, blessed, "({x}, {y}) is not the screen's; {line}");
+        }
+    }
+    assert_eq!(
+        inside,
+        two.width * two.height,
+        "the box is the window's rectangle"
+    );
+}
+
+/// The second window's client rectangle in the blessed picture: the dwindle
+/// layout's, from the same settings the picture was built with.
+fn second_window() -> compositor_layout::Rect {
+    let mut state = compositor_layout::State::new(compositor_layout::Settings::default());
+    let _ = state
+        .add_monitor(compositor_layout::Monitor {
+            scale: 1.0,
+            transform: Default::default(),
+            name: "Virtual-1".to_owned(),
+            id: compositor_layout::MonitorId(1),
+            rect: compositor_layout::Rect::new(0, 0, i64::from(WIDTH), i64::from(HEIGHT)),
+            reserved: compositor_config::Gaps::all(0),
+            description: String::new(),
+            made: <(String, String, String)>::default(),
+        })
+        .expect("a monitor");
+    let _ = state
+        .open_window(compositor_layout::WindowId(1))
+        .expect("a window");
+    let _ = state
+        .open_window(compositor_layout::WindowId(2))
+        .expect("a window");
+    state
+        .layout()
+        .iter()
+        .flat_map(|output| output.windows.iter())
+        .find(|placed| placed.window == compositor_layout::WindowId(2))
+        .map(|placed| placed.rect)
+        .expect("the second window is on the screen")
+}
+
+/// The two pattern windows, settled, and a screenshot of them taken over
+/// the socket, with `lines` added to the configuration: the screenshot, the
+/// last frame the screen itself showed, and what the compositor said.
+fn screenshot_of(name: &str, lines: &str) -> (compositor_shot::Shot, Vec<u8>, String) {
+    let work = workspace(name);
     let socket = work.join("wayland");
+    let frames = work.join("frames");
+    let config = undithered(&work);
+    if !lines.is_empty() {
+        let mut text = std::fs::read_to_string(&config).expect("the configuration");
+        text.push_str(lines);
+        std::fs::write(&config, text).expect("the configuration");
+    }
 
     let options = Options {
         display: socket.to_string_lossy().into_owned(),
         headless: Some((WIDTH, HEIGHT)),
+        dump: Some(frames.clone()),
         // Room for `settled` to wait out a busy host: it gives up long
         // before this, and a run that reaches the deadline has gone wrong
         // in some other way.
         deadline: Some(30_000),
-        config: Some(undithered(&work)),
+        config: Some(config),
         ..Options::default()
     };
-
     let for_clients = socket.clone();
     let clients = std::thread::spawn(move || {
         for _ in 0..400 {
@@ -1677,27 +1792,7 @@ fn a_screenshot_is_the_frame_the_renderer_blesses() {
         (WIDTH, HEIGHT),
         "the screenshot is not the screen's size"
     );
-    let want = expected();
-    assert_eq!(
-        taken.pixels.len(),
-        want.len(),
-        "the screenshot has {} bytes and the expected image {}",
-        taken.pixels.len(),
-        want.len()
-    );
-    let differing = taken
-        .pixels
-        .chunks_exact(3)
-        .zip(want.chunks_exact(3))
-        .filter(|(shot, blessed)| shot != blessed)
-        .count();
-    assert_eq!(
-        differing,
-        0,
-        "{differing} of {} pixels in the screenshot are not the renderer's; the compositor said \
-         {line}",
-        (WIDTH * HEIGHT) as usize
-    );
+    (taken, last_frame(&frames), line)
 }
 
 /// What is left after a window is closed from outside it.
@@ -1980,16 +2075,68 @@ fn a_locked_screen_shows_the_lock_and_none_of_the_windows() {
 /// calling those same rules.
 #[test]
 fn a_menu_is_drawn_where_the_positioner_puts_it() {
-    let work = workspace("menu");
+    menu_is("menu", Shape::Menu(200), "", "menu-on-a-window");
+}
+
+/// `decoration:blur:popups`: a window's menu with what is behind it
+/// blurred, the picture `src/user/system/linux/compositor/render` blesses for it. Hyprland's
+/// `renderWindow` blurs a window's popups when the option is on; the
+/// unblurred picture above is the control, and the two differ.
+#[test]
+fn a_menu_is_blurred_when_decoration_blur_popups_is_on() {
+    menu_is(
+        "blurred-menu",
+        Shape::Menu(200),
+        "decoration:blur:popups = 1\n",
+        "blurred-menu-on-a-window",
+    );
+}
+
+/// `layerrule = blur_popups`: a bar's menu, taken with
+/// `zwlr_layer_surface_v1.get_popup`, with what is behind it blurred, as
+/// Hyprland's `renderLayer` does for the popups of a surface whose rule
+/// says so. The bar is the pattern client's, whose namespace is
+/// `pattern-bar`; the windows tile under it.
+#[test]
+fn a_bars_menu_is_blurred_when_its_layerrule_says_blur_popups() {
+    menu_is(
+        "bar-menu",
+        Shape::BarMenu(30, 200),
+        "layerrule = blur_popups on, match:namespace ^(pattern-bar)$\n",
+        "blurred-menu-on-a-bar",
+    );
+}
+
+/// The screen with one client opening a menu, `shape`, and the two pattern
+/// windows, required to be `src/user/system/linux/compositor/render`'s `golden` image, with
+/// `lines` added to the configuration.
+fn menu_is(name: &str, shape: Shape, lines: &str, golden: &str) {
+    let work = workspace(name);
     let socket = work.join("wayland");
+    let config = undithered(&work);
+    if !lines.is_empty() {
+        let mut text = std::fs::read_to_string(&config).expect("the configuration");
+        text.push_str(lines);
+        std::fs::write(&config, text).expect("the configuration");
+    }
 
     let options = Options {
         display: socket.to_string_lossy().into_owned(),
         headless: Some((WIDTH, HEIGHT)),
         deadline: Some(12000),
-        config: Some(undithered(&work)),
+        config: Some(config),
         ..Options::default()
     };
+
+    // A bar is a third client, before the windows, so they tile under it.
+    let mut clients = Vec::new();
+    if let Shape::BarMenu(..) = shape {
+        clients.push((Pattern::Checkerboard, "bar", shape));
+        clients.push((Pattern::Checkerboard, "one", Shape::Window));
+    } else {
+        clients.push((Pattern::Checkerboard, "one", shape));
+    }
+    clients.push((Pattern::Gradient, "two", Shape::Window));
 
     let for_clients = socket.clone();
     let clients = std::thread::spawn(move || {
@@ -2000,10 +2147,7 @@ fn a_menu_is_drawn_where_the_positioner_puts_it() {
             std::thread::sleep(Duration::from_millis(5));
         }
         let mut windows = Vec::new();
-        for (pattern, title, shape) in [
-            (Pattern::Checkerboard, "one", Shape::Menu(200)),
-            (Pattern::Gradient, "two", Shape::Window),
-        ] {
+        for (pattern, title, shape) in clients {
             let path = for_clients.clone();
             windows.push(std::thread::spawn(move || {
                 connect(&path, pattern, title, shape)
@@ -2025,7 +2169,7 @@ fn a_menu_is_drawn_where_the_positioner_puts_it() {
         taken.unwrap_or_else(|why| panic!("the screenshot: {why}; the compositor said {line}"));
 
     let want = image(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/menu-on-a-window.xrle"),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../render/tests/data/{golden}.xrle")),
     );
     let differing = taken
         .pixels
@@ -2035,7 +2179,8 @@ fn a_menu_is_drawn_where_the_positioner_puts_it() {
         .count();
     assert_eq!(
         differing, 0,
-        "{differing} pixels of the menu's frame are not the renderer's; the compositor said {line}"
+        "{differing} pixels of the menu's frame are not the renderer's {golden}; the compositor \
+         said {line}"
     );
 }
 

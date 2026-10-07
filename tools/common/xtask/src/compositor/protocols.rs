@@ -593,7 +593,7 @@ pub(super) fn test_typing(arch: Arch, programs: &Programs, args: &Args) -> Resul
 /// same: the guest prints the digest of what it was handed and this is what
 /// that is compared against. Short enough to print on one line, and simple
 /// enough that two copies cannot drift without a test saying so.
-fn fnv1a(bytes: &[u8]) -> u64 {
+pub(super) fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in bytes {
         hash ^= u64::from(*byte);

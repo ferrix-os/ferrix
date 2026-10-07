@@ -118,10 +118,10 @@ use core::fmt;
 pub use backdrop::Backdrop;
 pub use blur::Blur;
 pub use buffer::{Format, Surface, Target};
-pub use canvas::{Canvas, MAX_SIZE, Rounding, Shadow};
+pub use canvas::{Canvas, MAX_SIZE, Rounding, Shadow, rounded_spans};
 pub use compositor_config::Color;
 pub use compositor_layout::Rect;
-pub use damage::Damage;
+pub use damage::{Damage, intersect};
 pub use frame::{
     LayerFrame, Style, Styles, WindowStyle, damage_between, damage_between_parts,
     damage_between_styled, outer, reads_backdrop, render, render_onto, render_with_layers, scaled,

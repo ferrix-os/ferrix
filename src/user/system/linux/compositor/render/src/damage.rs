@@ -167,7 +167,7 @@ pub(crate) const fn is_empty(rect: Rect) -> bool {
 }
 
 /// The pixels `a` and `b` share, if any.
-pub(crate) fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+pub fn intersect(a: Rect, b: Rect) -> Option<Rect> {
     let left = a.x.max(b.x);
     let top = a.y.max(b.y);
     let right = a.right().min(b.right());

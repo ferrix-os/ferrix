@@ -580,6 +580,13 @@ fn two_client_frame() -> Vec<u8> {
 /// reserved strip, so the picture is made by the same two crates the
 /// compositor uses.
 fn bar_and_two_clients_frame() -> Vec<u8> {
+    bar_frame_with_menu(None)
+}
+
+/// The bar and the two clients, with a menu hanging off the bar's top-left
+/// corner when `menu` says whether its popup is blurred: what
+/// `layerrule = blur_popups` does to a bar's tooltip.
+fn bar_frame_with_menu(menu: Option<bool>) -> Vec<u8> {
     const BAR: u32 = 30;
 
     let monitor = Rect::new(0, 0, i64::from(WIDTH), i64::from(HEIGHT));
@@ -626,7 +633,8 @@ fn bar_and_two_clients_frame() -> Vec<u8> {
 
     let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
     let full = Damage::full(WIDTH, HEIGHT);
-    let layers = [LayerFrame {
+    let menu_pixels = Pattern::Gradient.draw(MENU as u32, MENU as u32);
+    let mut layers = vec![LayerFrame {
         rect: bar.rect,
         above: true,
         surface: Some(bar_surface),
@@ -634,6 +642,9 @@ fn bar_and_two_clients_frame() -> Vec<u8> {
         blur: false,
         xray: false,
     }];
+    if let Some(blur) = menu {
+        layers.push(menu_frame(&menu_pixels, bar.rect, blur));
+    }
     let produced = render_with_layers(
         &mut canvas,
         &layout,
@@ -1056,6 +1067,42 @@ const POINTER: (i32, i32) = (700, 300);
 /// point goes, and is what every toolkit asks for.
 #[test]
 fn a_window_with_a_menu_on_it_matches_the_expected_image() {
+    golden::check("menu-on-a-window", WIDTH, HEIGHT, &window_menu_frame(false));
+}
+
+/// `decoration:blur:popups`: the same menu with what is behind it blurred,
+/// as Hyprland's `renderWindow` blurs a window's popups when it is on.
+///
+/// The gradient's lower half can be seen through, so the blur shows there
+/// and changes the picture; the control is the unblurred image above.
+#[test]
+fn a_blurred_menu_on_a_window_matches_the_expected_image() {
+    let blurred = window_menu_frame(true);
+    golden::check("blurred-menu-on-a-window", WIDTH, HEIGHT, &blurred);
+    assert_ne!(
+        blurred,
+        window_menu_frame(false),
+        "the blur behind the menu changed nothing"
+    );
+}
+
+/// `layerrule = blur_popups`: a bar's menu with what is behind it blurred,
+/// as Hyprland's `renderLayer` does for the popups of a surface whose rule
+/// says so. The menu hangs off the bar's corner and over the windows.
+#[test]
+fn a_blurred_menu_on_a_bar_matches_the_expected_image() {
+    let blurred = bar_frame_with_menu(Some(true));
+    golden::check("blurred-menu-on-a-bar", WIDTH, HEIGHT, &blurred);
+    assert_ne!(
+        blurred,
+        bar_frame_with_menu(Some(false)),
+        "the blur behind the menu changed nothing"
+    );
+}
+
+/// The two clients with a menu on the checkerboard, its popup blurred when
+/// `blur` says so.
+fn window_menu_frame(blur: bool) -> Vec<u8> {
     let (_, layout) = two_clients();
     let buffers = client_buffers(&layout);
     // Where the compositor puts it: the placement rules, on the window the
@@ -1067,6 +1114,29 @@ fn a_window_with_a_menu_on_it_matches_the_expected_image() {
         .find(|placed| placed.window == CHECKERBOARD)
         .map(|placed| placed.rect)
         .expect("the checkerboard is on screen");
+    let menu = Pattern::Gradient.draw(MENU as u32, MENU as u32);
+    let over = [menu_frame(&menu, parent, blur)];
+    let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let full = Damage::full(WIDTH, HEIGHT);
+    let _ = render_with_layers(
+        &mut canvas,
+        &layout,
+        (0, 0),
+        &Styles::plain(&plain_style()),
+        &surfaces(&buffers),
+        &over,
+        &full,
+    );
+    canvas.data().to_vec()
+}
+
+/// The menu the pattern client opens on `parent`, drawn from `pixels`.
+///
+/// The popup hangs off a one-pixel anchor rectangle at the parent's
+/// top-left, anchored and gravitated `bottom_right`, so its own top-left
+/// lands one pixel in from the parent's -- which is where a menu opened at
+/// a point goes, and is what every toolkit asks for.
+fn menu_frame(pixels: &[u8], parent: Rect, blur: bool) -> LayerFrame<'_> {
     let positioner = compositor_layout::popup::Positioner {
         size: (MENU, MENU),
         anchor_rect: Rect::new(0, 0, 1, 1),
@@ -1082,35 +1152,22 @@ fn a_window_with_a_menu_on_it_matches_the_expected_image() {
         parent,
         Rect::new(0, 0, i64::from(WIDTH), i64::from(HEIGHT)),
     );
-    let menu = Pattern::Gradient.draw(MENU as u32, MENU as u32);
     let surface = Surface::new(
-        &menu,
+        pixels,
         MENU as u32,
         MENU as u32,
         MENU as u32 * 4,
         Pattern::Gradient.format(),
     )
     .unwrap();
-    let over = [LayerFrame {
+    LayerFrame {
         rect: Rect::new(parent.x + at.x, parent.y + at.y, at.width, at.height),
         above: true,
         surface: Some(surface),
         dim_around: false,
-        blur: false,
+        blur,
         xray: false,
-    }];
-    let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
-    let full = Damage::full(WIDTH, HEIGHT);
-    let _ = render_with_layers(
-        &mut canvas,
-        &layout,
-        (0, 0),
-        &Styles::plain(&plain_style()),
-        &surfaces(&buffers),
-        &over,
-        &full,
-    );
-    golden::check("menu-on-a-window", WIDTH, HEIGHT, canvas.data());
+    }
 }
 
 /// The menu's side, which the boot's `--menu` argument must match.
@@ -3227,6 +3284,151 @@ fn only_a_window_over_the_desktop_alone_reads_the_backdrop() {
     assert!(!reads_backdrop(&windows, 1, &dimmed));
 }
 
+/// `windowrule = xray`, and `decoration:blur:xray` for every window: the
+/// blur behind a window is of the wallpaper, whatever it floats over.
+///
+/// Hyprland's `shouldUseNewBlurOptimizations`: a window's own `xray 0`
+/// never reads the kept `m_blurFB`, the option or the window's `xray 1`
+/// always does, and otherwise a tiled window does. So the test is what the
+/// rule promises, as the layer rule's is: a translucent floating window
+/// with it is the same pixels whether or not a window is under it, and
+/// without it -- the control -- it is not.
+#[test]
+fn an_xray_window_blurs_the_wallpaper_and_not_the_window_under_it() {
+    let base = Style {
+        blur: Some(Blur::new(8, 2)),
+        ..plain_style()
+    };
+    let full = Damage::full(WIDTH, HEIGHT);
+    let behind = wallpaper(None);
+    // The gradient floated over the middle of the checkerboard.
+    let over = Rect::new(120, 200, 400, 300);
+    let draw = |style: &Style, rule: Option<bool>, under: bool| {
+        let (_, mut layout) = two_clients();
+        for placed in &mut layout.windows {
+            if placed.window == GRADIENT {
+                placed.floating = true;
+                placed.rect = over;
+            }
+        }
+        if !under {
+            layout.windows.retain(|placed| placed.window == GRADIENT);
+        }
+        let buffers = client_buffers(&layout);
+        let layers = [LayerFrame {
+            rect: Rect::new(0, 0, i64::from(WIDTH), i64::from(HEIGHT)),
+            above: false,
+            surface: Some(
+                Surface::new(
+                    &behind,
+                    WIDTH,
+                    HEIGHT,
+                    WIDTH * 4,
+                    Pattern::Checkerboard.format(),
+                )
+                .unwrap(),
+            ),
+            dim_around: false,
+            blur: false,
+            xray: false,
+        }];
+        let mut ruled = BTreeMap::new();
+        let _previous = ruled.insert(
+            GRADIENT,
+            crate::WindowStyle {
+                xray: rule,
+                ..crate::WindowStyle::default()
+            },
+        );
+        let styles = Styles {
+            base: style,
+            windows: &ruled,
+        };
+        let at = layout
+            .windows
+            .iter()
+            .position(|placed| placed.window == GRADIENT)
+            .unwrap();
+        let reads = reads_backdrop(&layout.windows, at, &styles);
+        let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
+        let mut backdrop = Backdrop::new(WIDTH, HEIGHT).unwrap();
+        let _ = render_onto(
+            &mut canvas,
+            Some(&mut backdrop),
+            &layout,
+            (0, 0),
+            &styles,
+            &surfaces(&buffers),
+            &layers,
+            &full,
+        );
+        (reads, rows(canvas.data(), over))
+    };
+
+    let (reads, with) = draw(&base, Some(true), true);
+    assert!(reads, "a floating window with `xray 1` reads the backdrop");
+    assert!(
+        with == draw(&base, Some(true), false).1,
+        "an xray window is the same pixels whether or not a window is under it"
+    );
+
+    let xray = Style { xray: true, ..base };
+    let (reads, with) = draw(&xray, None, true);
+    assert!(reads, "`decoration:blur:xray` makes every window read it");
+    assert!(
+        with == draw(&xray, None, false).1,
+        "with `decoration:blur:xray` the window under it is not blurred either"
+    );
+
+    // The control: the same two frames without the rule differ, so the
+    // window under it is what an ordinary floating window blurs.
+    let (reads, with) = draw(&base, None, true);
+    assert!(!reads, "a floating window blurs what it floats over");
+    assert!(
+        with != draw(&base, None, false).1,
+        "without xray the window under it shows through the blur"
+    );
+
+    // And `xray 0` beats the option, as it does in Hyprland.
+    let (reads, with) = draw(&xray, Some(false), true);
+    assert!(!reads, "`xray 0` never reads the backdrop");
+    assert!(with != draw(&xray, Some(false), false).1);
+}
+
+/// `xray 0` on a *tiled* window: it blurs the frame as it stands, as a
+/// floating one does, where the tiling alone would have read the backdrop.
+#[test]
+fn xray_off_takes_a_tiled_window_off_the_backdrop() {
+    let style = plain_style();
+    let (_, layout) = two_clients();
+    let mut ruled = BTreeMap::new();
+    let _previous = ruled.insert(
+        GRADIENT,
+        crate::WindowStyle {
+            xray: Some(false),
+            ..crate::WindowStyle::default()
+        },
+    );
+    let styles = Styles {
+        base: &style,
+        windows: &ruled,
+    };
+    let at = |window: WindowId| {
+        layout
+            .windows
+            .iter()
+            .position(|placed| placed.window == window)
+            .unwrap()
+    };
+    assert!(reads_backdrop(&layout.windows, at(CHECKERBOARD), &styles));
+    assert!(!reads_backdrop(&layout.windows, at(GRADIENT), &styles));
+    assert!(reads_backdrop(
+        &layout.windows,
+        at(GRADIENT),
+        &Styles::plain(&style)
+    ));
+}
+
 /// A frame is the same bytes on one thread as on seven.
 ///
 /// The blur's passes, a surface blended onto the frame and one copied into
@@ -3584,4 +3786,82 @@ fn a_translucent_surface_blends_as_tiny_skia_blends_it() {
             }
         }
     }
+}
+
+/// The two clients after the gradient, tiled on the right, was dragged with
+/// `bindm = SUPER, mouse:272, movewindow` from its own middle and let go at
+/// (300, 40), near the top of the left half of the screen: what
+/// `cargo xtask test-compositor --boot drag` requires.
+///
+/// With `dwindle:precise_mouse_move` the drop takes the quarter of the box
+/// it was let go in -- the top, since it is nearer the top edge than the
+/// side one in the box's proportions -- and the two are stacked. Without it,
+/// the half: the gradient goes on the left and the checkerboard on the
+/// right, which is the control.
+fn dropped_frame(precise: bool) -> Vec<u8> {
+    let text = if precise {
+        "dwindle:precise_mouse_move = true\n"
+    } else {
+        ""
+    };
+    let settings = Settings::from_config(&parse("t.conf", text, &mut NoSources).config);
+    let (mut state, _) = two_clients_on((WIDTH, HEIGHT), settings);
+    let _ = state.lift_window(GRADIENT, (768.0, 384.0)).unwrap();
+    let changes = state.drop_window(GRADIENT, (300.0, 40.0)).unwrap();
+    assert!(!changes.is_empty(), "the drop changed nothing");
+    let layout = state.layout().remove(0);
+    let buffers = client_buffers(&layout);
+    let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let full = Damage::full(WIDTH, HEIGHT);
+    let _ = render(
+        &mut canvas,
+        &layout,
+        (0, 0),
+        &plain_style(),
+        &surfaces(&buffers),
+        &full,
+    );
+    canvas.data().to_vec()
+}
+
+#[test]
+fn a_window_dropped_beside_another_matches_the_expected_image() {
+    golden::check("dropped-two-clients", WIDTH, HEIGHT, &dropped_frame(false));
+}
+
+#[test]
+fn a_window_dropped_precisely_matches_the_expected_image() {
+    let precise = dropped_frame(true);
+    golden::check("dropped-precisely-two-clients", WIDTH, HEIGHT, &precise);
+    assert_ne!(
+        precise,
+        dropped_frame(false),
+        "precise_mouse_move changed nothing"
+    );
+}
+
+/// What a screenshot of the two clients shows when the gradient's
+/// `windowrule = no_screen_share` hides it: the frame, with a black box
+/// over the gradient's own rectangle -- not its border -- as Hyprland's
+/// `CScreenshareFrame::renderMonitor` draws one. The screen itself is
+/// still `dwindle-two-clients`; this is what `/bin/shot` must be handed in
+/// `cargo xtask test-compositor --boot screenshot-unshared`.
+#[test]
+fn an_unshared_window_is_a_black_box_in_the_expected_screenshot() {
+    let mut frame = two_client_frame();
+    let (_, layout) = two_clients();
+    let hidden = layout
+        .windows
+        .iter()
+        .find(|placed| placed.window == GRADIENT)
+        .map(|placed| placed.rect)
+        .unwrap();
+    for y in hidden.y..hidden.bottom() {
+        for x in hidden.x..hidden.right() {
+            let at = ((y * i64::from(WIDTH) + x) * 4) as usize;
+            frame[at..at + 4].copy_from_slice(&0xFF00_0000_u32.to_le_bytes());
+        }
+    }
+    assert_ne!(frame, two_client_frame());
+    golden::check("unshared-two-clients", WIDTH, HEIGHT, &frame);
 }

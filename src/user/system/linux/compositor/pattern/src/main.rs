@@ -72,6 +72,8 @@ fn main() {
         }
     }
     let shape = match (sized("--bar"), sized("--menu")) {
+        // Both: a bar with a menu hanging off it, as a bar's tooltip does.
+        (Some(Some(height)), Some(Some(side))) => compositor_pattern::Shape::BarMenu(height, side),
         (Some(Some(height)), _) => compositor_pattern::Shape::Bar(height),
         (Some(None), _) => {
             say("pattern: --bar takes a height in pixels");

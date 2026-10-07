@@ -33,10 +33,13 @@
 //! compositor that has seen no pointer gets the behaviour these had before
 //! there was one -- the focused window's box, and the second half.
 //!
-//! Where it departs from Hyprland: `precise_mouse_move`, which decides
-//! where a *dragged* window lands when it is dropped back into the tiling,
-//! and nothing here drops one back in -- a drag floats a tiled window and
-//! leaves it floating -- so there is no moment for it to decide. `split_bias`
+//! A tiled window dragged with the mouse is dropped back in beside the box
+//! under the pointer ([`Dwindle::insert_dropped`]), on the half of it the
+//! pointer is in whatever `force_split` says, or with
+//! `dwindle:precise_mouse_move` on the quarter, as `smart_split` places a
+//! new window.
+//!
+//! Where it departs from Hyprland: `split_bias`
 //! and pseudotiling are not implemented. `dwindle:smart_resizing` is, and is the only behaviour: it
 //! is Hyprland's default and the setting is not read, so turning it off
 //! changes nothing.
@@ -98,7 +101,10 @@ impl Split {
     /// question -- it recomputes `splitTop` only when all three of
     /// `preserve_split`, `smart_split` and `precise_mouse_move` are off.
     fn stacked_in(&self, area: Area, settings: &Settings) -> bool {
-        if settings.dwindle.preserve_split || settings.dwindle.smart_split {
+        if settings.dwindle.preserve_split
+            || settings.dwindle.smart_split
+            || settings.dwindle.precise_mouse_move
+        {
             self.stacked
         } else {
             area.h * settings.dwindle.split_width_multiplier > area.w
@@ -533,6 +539,43 @@ impl Dwindle {
             return;
         };
         let place = toward.map_or(Place::Point(x, y), Place::Toward);
+        if let Some(target) = nearest(&root, (x, y), area, settings) {
+            let _found = root.split_leaf(target, new, area, settings, place);
+        }
+        self.root = Some(root);
+    }
+
+    /// Add `new`, a window the pointer dragged and dropped at `(x, y)`,
+    /// beside the window whose box is nearest the point.
+    ///
+    /// Hyprland's `CDwindleAlgorithm::addTarget` with the drag controller's
+    /// `wasDraggingWindow()` set: the box is the one under the pointer --
+    /// the dragged window is not in the tree, so it cannot be its own --
+    /// and the side is a `layoutmsg preselect`'s if one is waiting, then
+    /// the *quarter* of the box the pointer is in with
+    /// `dwindle:precise_mouse_move`, and otherwise the half of it, whatever
+    /// `force_split` says: a drop is aimed, a new window is not.
+    pub(crate) fn insert_dropped(
+        &mut self,
+        new: WindowId,
+        (x, y): (f64, f64),
+        area: Area,
+        settings: &Settings,
+    ) {
+        let Some(mut root) = self.root.take() else {
+            self.root = Some(Node::Leaf(new));
+            return;
+        };
+        let chosen = if settings.dwindle.permanent_direction_override {
+            self.preselect
+        } else {
+            self.preselect.take()
+        };
+        let place = match chosen {
+            Some(direction) => Place::Toward(direction),
+            None if settings.dwindle.precise_mouse_move => Place::Quadrant(x, y),
+            None => Place::Point(x, y),
+        };
         if let Some(target) = nearest(&root, (x, y), area, settings) {
             let _found = root.split_leaf(target, new, area, settings, place);
         }

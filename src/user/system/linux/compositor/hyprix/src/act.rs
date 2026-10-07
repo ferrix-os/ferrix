@@ -46,6 +46,10 @@ pub struct Drag {
     /// Where the pointer was when it started, and where it was last seen: a
     /// drag is carried on by the distance since the last look.
     pub from: (i64, i64),
+    /// Whether the window was tiled when the drag began and was lifted out
+    /// of the tiling for it: it is dropped back in where the drag ends
+    /// (`compositor_layout::State::drop_window`).
+    pub lifted: bool,
 }
 
 /// What started a [`Drag`].
@@ -383,7 +387,16 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
         }
     };
     if !starting {
-        *around.drag = None;
+        // A window lifted out of the tiling goes back in where the pointer
+        // let go of it, which is Hyprland's `dragEnd`.
+        let Some(held) = around.drag.take() else {
+            return false;
+        };
+        if held.lifted {
+            return state
+                .drop_window(held.window, around.seat.pointer())
+                .is_ok_and(|changes| !changes.is_empty());
+        }
         return false;
     }
     let resizing = match action {
@@ -397,8 +410,15 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
     let Some(window) = state.focused_window() else {
         return false;
     };
-    // A tiled window has no rectangle of its own to drag; Hyprland floats it
-    // first, and so does this.
+    // A tiled window has no rectangle of its own to drag. Hyprland's drag
+    // controller lifts a tiled one out of the tiling, floating at its own
+    // size round the pointer, and drops it back in when the drag ends; a
+    // resize floats it for good, as `togglefloating` would.
+    let lifted = !resizing
+        && !state.is_floating(window)
+        && state
+            .lift_window(window, around.seat.pointer())
+            .is_ok_and(|_| state.is_floating(window));
     if !state.is_floating(window) {
         let _ = state.dispatch_str("togglefloating", "");
     }
@@ -414,6 +434,7 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
         corner: Corner::NONE,
         began: Began::Bind,
         from,
+        lifted,
     });
     true
 }
@@ -482,6 +503,7 @@ pub fn grab_border(
                 corner,
                 began: Began::Border,
                 from,
+                lifted: false,
             });
         } else if drag.is_some_and(|held| held.began == Began::Border) {
             *drag = None;
@@ -536,6 +558,7 @@ pub fn client_drag(
         corner,
         began: Began::Client,
         from,
+        lifted: false,
     });
     true
 }
@@ -558,8 +581,13 @@ pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
     // The drag entry points, not the dispatchers': a hand dragging a window
     // is helped to an edge by `general:snap:*` and a dispatcher asked for a
     // number of pixels and means it.
+    // A window lifted out of the tiling is not snapped: it is going back
+    // into the tiling, and Hyprland's `mouseMove` snaps only when it is not
+    // `m_draggingTiled`.
     let moved = if drag.resizing {
         state.drag_resize_window_pixel(drag.window, &by, drag.corner)
+    } else if drag.lifted {
+        state.move_window_pixel(drag.window, &by)
     } else {
         state.drag_window_pixel(drag.window, &by)
     };
@@ -889,6 +917,7 @@ mod tests {
                 },
                 began: Began::Border,
                 from: (508, 400),
+                lifted: false,
             })
         );
 

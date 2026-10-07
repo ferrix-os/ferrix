@@ -697,7 +697,15 @@ impl<'r> Compositor<'r> {
         // The popups, which are drawn over the windows like a layer surface
         // on the top level: a menu is not a window, has no border and no
         // gaps, and belongs where its parent put it.
-        let popups = placed_popups(&self.slots, &self.state, &self.sources);
+        let mut popups = placed_popups(&self.slots, &self.state, &self.sources);
+        popup_rules(
+            &mut popups,
+            &self.slots,
+            &self.sources,
+            &self.placed_layers,
+            self.window_rules.styles(),
+            self.config.bool("decoration:blur:popups").unwrap_or(false),
+        );
         self.follow_keyboard();
         self.publish(changed);
 
@@ -2598,6 +2606,10 @@ struct Screen {
     watch: crate::damage::Watch,
     /// Its cursor plane, as it was last told: `crate::plane`.
     plane: crate::plane::Plane,
+    /// What a screenshot of the last frame shows as a black box: the
+    /// windows and layer surfaces whose `no_screen_share` hides them, and
+    /// their popups, in the canvas's pixels and cut to each one's corners.
+    hidden: Vec<(Rect, compositor_render::Rounding)>,
     /// Whether its card's going has been said since it last came back.
     said_gone: bool,
     /// Whether a dropped frame has been said since it last showed one.
@@ -2836,6 +2848,7 @@ impl Screen {
                 plane: crate::plane::Plane::default(),
                 said_gone: false,
                 said_dropped: false,
+                hidden: Vec::new(),
                 gpu_failures: 0,
                 gpu_again: None,
             });
@@ -4084,6 +4097,14 @@ fn copy_screen(
             &mut target,
             (placed.x, placed.y),
         );
+        black_out(
+            screen,
+            area,
+            placed,
+            into,
+            (offset, to_stride),
+            (width, height),
+        );
         return true;
     }
     for y in 0..height as usize {
@@ -4097,7 +4118,113 @@ fn copy_screen(
         };
         target.copy_from_slice(source);
     }
+    black_out(
+        screen,
+        area,
+        placed,
+        into,
+        (offset, to_stride),
+        (width, height),
+    );
     true
+}
+
+/// What a screenshot of a frame drawn from `plan` and `over` blacks out:
+/// `no_screen_share`.
+///
+/// Hyprland's `CScreenshareFrame::renderMonitor` copies the monitor's frame
+/// and then draws a black box over each window and layer surface whose rule
+/// says so, and over their popups: the window's box rounded as the window
+/// is -- not when it is fullscreen -- and the others square. Each box is at
+/// least 5 pixels a side, as there. The screen itself is drawn as ever;
+/// only what is copied out of it is not.
+///
+/// In the canvas's pixels: the plan's windows are in the screen's own
+/// pixels already, at the monitor's place in the space all screens share,
+/// and the layer surfaces and popups are in that space's logical pixels.
+fn unshared(
+    plan: &crate::damage::Plan,
+    over: &[crate::frame::Placed],
+    origin: (i64, i64),
+    scale: f64,
+) -> Vec<(Rect, compositor_render::Rounding)> {
+    let at_least = |rect: Rect| Rect::new(rect.x, rect.y, rect.width.max(5), rect.height.max(5));
+    let windows = plan.layout.windows.iter().filter_map(|placed| {
+        let own = plan.styles.get(&placed.window).copied().unwrap_or_default();
+        if !own.no_screen_share {
+            return None;
+        }
+        let rounding = if placed.fullscreen {
+            compositor_render::Rounding::none()
+        } else {
+            compositor_render::Rounding {
+                radius: own.rounding.unwrap_or(plan.style.rounding.radius).max(0),
+                power: own.rounding_power.unwrap_or(plan.style.rounding.power),
+            }
+        };
+        let rect = placed
+            .rect
+            .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        Some((at_least(rect), rounding))
+    });
+    let layers = over
+        .iter()
+        .filter(|placed| placed.rules.no_screen_share)
+        .map(|placed| {
+            (
+                at_least(crate::frame::local(placed.rect, origin, scale)),
+                compositor_render::Rounding::none(),
+            )
+        });
+    windows.chain(layers).collect()
+}
+
+/// Black out what [`unshared`] found in a screenshot just copied into
+/// `into`: the part `area` of the canvas, `placed` in the screen's buffer.
+fn black_out(
+    screen: &Screen,
+    area: Rect,
+    placed: Rect,
+    into: &mut [u8],
+    (offset, stride): (usize, usize),
+    (width, height): (u32, u32),
+) {
+    let logical = (
+        i64::from(screen.canvas.width()),
+        i64::from(screen.canvas.height()),
+    );
+    let shot = Rect::new(0, 0, i64::from(width), i64::from(height));
+    for &(rect, rounding) in &screen.hidden {
+        for span in compositor_render::rounded_spans(rect, rounding) {
+            let Some(span) = compositor_render::intersect(span, area) else {
+                continue;
+            };
+            // Where it is in the screen's buffer, which is the screenshot's
+            // orientation, and then in the screenshot.
+            let turned = compositor_render::transform::rect(screen.transform, logical, span)
+                .translate(placed.x.saturating_neg(), placed.y.saturating_neg());
+            let Some(dark) = compositor_render::intersect(turned, shot) else {
+                continue;
+            };
+            fill_black(into, (offset, stride), dark);
+        }
+    }
+}
+
+/// Paint `dark`, in a buffer's pixels, black.
+fn fill_black(into: &mut [u8], (offset, stride): (usize, usize), dark: Rect) {
+    let len = usize::try_from(dark.width).unwrap_or(0) * 4;
+    for y in dark.y..dark.bottom() {
+        let start = offset
+            + usize::try_from(y).unwrap_or(0) * stride
+            + usize::try_from(dark.x).unwrap_or(0) * 4;
+        let Some(row) = into.get_mut(start..start + len) else {
+            continue;
+        };
+        for pixel in row.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&0xFF00_0000_u32.to_le_bytes());
+        }
+    }
 }
 
 /// `at` moved back by `by`, in the seconds and nanoseconds the protocols
@@ -5057,6 +5184,106 @@ pub(crate) fn placed_popups(
     out
 }
 
+/// What each popup is drawn with, from what it hangs off.
+///
+/// Hyprland draws a popup with its root's settings rather than with rules
+/// of its own: a layer surface's popups are blurred when the surface's
+/// `layerrule = blur_popups` says so (`IHyprRenderer::renderLayer`), and a
+/// window's when `decoration:blur:popups` does (`renderWindow`), each with
+/// the root's `xray`. A screenshot blacks out the popups of a window or a
+/// layer surface whose `no_screen_share` hides it
+/// (`CScreenshareFrame::renderMonitor`'s `hidePopups`), since a menu says
+/// as much about what is in a window as the window does.
+///
+/// The blur is of the frame as it stands under the popup, which is what is
+/// behind it: popups are drawn last, over the windows and the layer
+/// surfaces, so drawing in order is the second pass this was once thought
+/// to need.
+pub(crate) fn popup_rules(
+    popups: &mut [crate::frame::Placed],
+    slots: &[Slot],
+    sources: &BTreeMap<WindowId, Source>,
+    layers: &[crate::frame::Placed],
+    styles: &BTreeMap<WindowId, compositor_render::WindowStyle>,
+    blur_popups: bool,
+) {
+    for placed in popups.iter_mut() {
+        let Some(slot) = slots.get(placed.client) else {
+            continue;
+        };
+        let Some((_, popup)) = slot
+            .client()
+            .popups()
+            .find(|(_, popup)| popup.surface == placed.surface)
+        else {
+            continue;
+        };
+        match popup_root(slot, popup, sources, placed.client, 0) {
+            Some(PopupRoot::Layer(surface)) => {
+                let Some(root) = layers
+                    .iter()
+                    .find(|layer| layer.client == placed.client && layer.surface == surface)
+                else {
+                    continue;
+                };
+                placed.rules.blur = root.rules.blur_popups;
+                placed.rules.xray = root.rules.xray;
+                placed.rules.no_screen_share = root.rules.no_screen_share;
+            }
+            Some(PopupRoot::Window(window)) => {
+                let own = styles.get(&window).copied().unwrap_or_default();
+                placed.rules.blur = blur_popups && own.blur;
+                placed.rules.no_screen_share = own.no_screen_share;
+            }
+            None => {}
+        }
+    }
+}
+
+/// What a popup hangs off at the bottom of its chain of parents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PopupRoot {
+    /// A layer surface, by its `wl_surface`.
+    Layer(ObjectId),
+    /// A window.
+    Window(WindowId),
+}
+
+/// The layer surface or the window a popup hangs off, through any popups
+/// between: a submenu's parent is a menu, whose parent is the window.
+///
+/// `depth` bounds the walk. The protocol makes a popup's parent exist
+/// before it, so a chain cannot loop, but a client is not trusted to have
+/// read the protocol.
+fn popup_root(
+    slot: &Slot,
+    popup: &compositor_server::Popup,
+    sources: &BTreeMap<WindowId, Source>,
+    index: usize,
+    depth: usize,
+) -> Option<PopupRoot> {
+    if depth > 16 {
+        return None;
+    }
+    let client = slot.client();
+    if let Some(layer) = popup.layer_parent {
+        return client
+            .layer_surface(layer)
+            .map(|layer| PopupRoot::Layer(layer.surface));
+    }
+    let surface = client.xdg_surface(popup.parent).map(|xdg| xdg.surface)?;
+    if let Some((window, _)) = sources
+        .iter()
+        .find(|(_, source)| source.client == index && source.surface == surface)
+    {
+        return Some(PopupRoot::Window(*window));
+    }
+    let (_, parent) = client
+        .popups()
+        .find(|(_, held)| held.xdg_surface == popup.parent)?;
+    popup_root(slot, parent, sources, index, depth + 1)
+}
+
 /// Put one popup where its positioner says, and tell the client.
 ///
 /// Gives whether anything changed, which is whenever the popup was placed:
@@ -5537,6 +5764,7 @@ fn place_layers(
                     dim_around: named.dim_around,
                     above_lock: named.above_lock,
                     no_screen_share: named.no_screen_share,
+                    blur_popups: named.blur_popups,
                     order: named.order,
                 },
                 compositor_layout::layers::Request {

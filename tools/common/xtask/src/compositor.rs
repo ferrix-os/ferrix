@@ -64,6 +64,7 @@ mod browser;
 mod desktop;
 mod drawing;
 mod drawn_here;
+mod effects;
 mod hyprlock;
 mod idle;
 mod layout;
@@ -92,6 +93,7 @@ use crate::paths::{self, Arch};
 use crate::{Error, Result};
 use drawing::{test_animation, test_decorations, test_gpu, test_terminal};
 use drawn_here::{test_caption, test_waybar, test_waybar_volume};
+use effects::{test_bar_menu, test_drag, test_drag_precise, test_screenshot_unshared};
 use layout::{test_dispatchers, test_groups, test_plugins, test_rules, test_submap, test_twin};
 use machine::{test_desktop, test_driver_restart};
 use monitors::{test_edid, test_mode, test_monitors, test_scale, test_transform};
@@ -464,7 +466,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 37] = [
+const BOOTS: [(&str, Boot); 41] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -481,12 +483,16 @@ const BOOTS: [(&str, Boot); 37] = [
     ("taskbar", test_taskbar),
     ("twin", test_twin),
     ("screenshot", test_screenshot),
+    ("screenshot-unshared", test_screenshot_unshared),
     ("lock", test_lock),
     ("hyprlock", hyprlock::test_hyprlock),
     ("hyprlock-unset", hyprlock::test_hyprlock_unset),
     ("hyprlock-session", hyprlock::test_hyprlock_session),
     ("session-end", hyprlock::test_session_end),
     ("menu", test_menu),
+    ("bar-menu", test_bar_menu),
+    ("drag", test_drag),
+    ("drag-precise", test_drag_precise),
     ("pointer", test_pointer),
     ("cursor", test_cursor),
     ("mode", test_mode),

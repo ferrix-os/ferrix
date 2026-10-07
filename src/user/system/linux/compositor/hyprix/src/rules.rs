@@ -14,7 +14,8 @@
 //!
 //! And the renderer's: `opacity`, `rounding`, `rounding_power`,
 //! `border_size`, `border_color`, `decorate`, `opaque`, `no_blur`,
-//! `no_shadow` and `no_dim`, which are what *one* window is drawn with. They
+//! `no_shadow`, `no_dim`, `xray` and `no_screen_share`, which are what *one*
+//! window is drawn with. They
 //! are kept here by window, and the frame reads them: a window with no rule
 //! is drawn as every window is.
 
@@ -286,6 +287,14 @@ impl Rules {
                 }
                 Effect::DimAround(on) => {
                     style.dim_around = *on;
+                    styled = true;
+                }
+                Effect::Xray(on) => {
+                    style.xray = Some(*on);
+                    styled = true;
+                }
+                Effect::NoScreenShare(on) => {
+                    style.no_screen_share = *on;
                     styled = true;
                 }
                 Effect::MinSize(wide, tall) => {
@@ -699,5 +708,27 @@ mod tests {
         assert!(state.is_pinned(WindowId(1)), "the rule pinned it");
         assert_eq!(state.tags_of(WindowId(1)), ["music"]);
         assert_eq!(rules.unhandled(), ["no_shortcuts_inhibit"]);
+    }
+
+    /// `xray` and `no_screen_share` reach what the window is drawn with,
+    /// and are no longer kept as rules this compositor does not carry out.
+    #[test]
+    fn xray_and_no_screen_share_reach_the_window_style() {
+        let config = config(
+            "windowrule = xray 1, no_screen_share, match:class ^(foot)$\n\
+             windowrule = xray 0, match:class ^(term)$\n",
+        );
+        let mut state = state(&config);
+        let _opened = state.open_window(WindowId(2)).expect("a window");
+        let mut rules = Rules::new(&config, &mut |_| {});
+        let _changed = rules.apply(WindowId(1), &what("foot"), &mut state, &mut |_| {});
+        let _changed = rules.apply(WindowId(2), &what("term"), &mut state, &mut |_| {});
+        let foot = rules.styles()[&WindowId(1)];
+        assert_eq!(foot.xray, Some(true));
+        assert!(foot.no_screen_share);
+        let term = rules.styles()[&WindowId(2)];
+        assert_eq!(term.xray, Some(false), "`xray 0` is a choice, not no rule");
+        assert!(!term.no_screen_share);
+        assert!(rules.unhandled().is_empty(), "{:?}", rules.unhandled());
     }
 }

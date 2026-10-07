@@ -4137,3 +4137,114 @@ fn the_focus_trail_is_every_window_focused_in_order() {
     focus(&mut state, 1);
     assert_eq!(state.take_focus_trail(), [Some(WindowId(1))]);
 }
+
+/// A tiled window dragged with the mouse is lifted out of the tiling at its
+/// own size, centred on the pointer, and dropped back in beside the window
+/// under the pointer, on the half of its box the pointer is in.
+///
+/// Hyprland's drag controller: `updateDragWindow` floats a tiled target at
+/// the mouse, and `dragEnd` sets it tiled again, which re-adds it with the
+/// mouse where it was let go. Until this, a drag floated a tiled window and
+/// left it floating.
+#[test]
+fn a_dragged_tiled_window_is_dropped_back_into_the_tiling() {
+    let mut state = setup(BARE);
+    open(&mut state, &[1, 2]);
+    focus(&mut state, 2);
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 960, 1080)), (2, r(960, 0, 960, 1080))]
+    );
+
+    let _ = state.lift_window(WindowId(2), (1440.0, 540.0)).unwrap();
+    assert!(state.is_floating(WindowId(2)), "lifted, it floats");
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 1920, 1080)), (2, r(960, 0, 960, 1080))],
+        "at its own size round the pointer, and the other window takes the room"
+    );
+
+    // Carried to the left half of the window that is left, and let go.
+    let _ = state
+        .drag_window_pixel(
+            WindowId(2),
+            &Move {
+                x: -1200,
+                y: 0,
+                exact: false,
+            },
+        )
+        .unwrap();
+    let _ = state.drop_window(WindowId(2), (240.0, 540.0)).unwrap();
+    assert!(
+        !state.is_floating(WindowId(2)),
+        "dropped, it is tiled again"
+    );
+    assert_eq!(
+        rects(&state),
+        [(1, r(960, 0, 960, 1080)), (2, r(0, 0, 960, 1080))],
+        "on the half of the box it was dropped on"
+    );
+
+    // Dropping again does nothing: the drag that lifted it is over.
+    assert!(
+        state
+            .drop_window(WindowId(2), (1800.0, 540.0))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// `dwindle:precise_mouse_move`: a dropped window goes on the *quarter* of
+/// the box under the pointer, so a drop near the top of a wide window
+/// stacks the two. Without it the same drop is the half rule's, side by
+/// side -- which is the control.
+#[test]
+fn precise_mouse_move_drops_a_window_on_the_quarter_the_pointer_is_in() {
+    let dropped = |text: &str| {
+        let mut state = setup(text);
+        open(&mut state, &[1, 2]);
+        focus(&mut state, 2);
+        let _ = state.lift_window(WindowId(2), (1440.0, 540.0)).unwrap();
+        let _ = state.drop_window(WindowId(2), (1200.0, 30.0)).unwrap();
+        rects(&state)
+    };
+    assert_eq!(
+        dropped(&format!("{BARE}dwindle:precise_mouse_move = true\n")),
+        [(1, r(0, 540, 1920, 540)), (2, r(0, 0, 1920, 540))],
+        "near the top edge: stacked, and on top"
+    );
+    assert_eq!(
+        dropped(BARE),
+        [(1, r(0, 0, 960, 1080)), (2, r(960, 0, 960, 1080))],
+        "without the option, the right half"
+    );
+}
+
+/// Lifting a window is not floating it: one that was floating before keeps
+/// the rectangle `togglefloating` puts it back at, and a window that is not
+/// focused, or is floating already, is not lifted at all.
+#[test]
+fn lifting_a_window_leaves_its_floating_rectangle_alone() {
+    let mut state = setup(BARE);
+    open(&mut state, &[1, 2]);
+    focus(&mut state, 2);
+    let _ = dispatch(&mut state, "togglefloating", "");
+    let _ = state
+        .float_window(WindowId(2), r(100, 100, 300, 200))
+        .unwrap();
+    let _ = dispatch(&mut state, "togglefloating", "");
+    assert!(!state.is_floating(WindowId(2)));
+
+    assert!(
+        state
+            .lift_window(WindowId(1), (100.0, 100.0))
+            .unwrap()
+            .is_empty(),
+        "not focused"
+    );
+    let _ = state.lift_window(WindowId(2), (1440.0, 540.0)).unwrap();
+    let _ = state.drop_window(WindowId(2), (1800.0, 540.0)).unwrap();
+    let _ = dispatch(&mut state, "togglefloating", "");
+    assert_eq!(rects(&state)[1], (2, r(100, 100, 300, 200)));
+}
