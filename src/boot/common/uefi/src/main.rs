@@ -409,7 +409,7 @@ fn stage_kernel(
         )
     };
     let declined = core::str::from_utf8(cmdline).is_ok_and(kaslr::declined);
-    let choice = kaslr::choose(
+    let mut choice = kaslr::choose(
         services,
         &elf,
         load::kernel_span(&elf)?,
@@ -417,6 +417,15 @@ fn stage_kernel(
         loader,
         declined,
     )?;
+    // EXPERIMENT ONLY (po9-user), never lands: force the image slide.
+    if let Some(slide) = core::str::from_utf8(cmdline)
+        .ok()
+        .and_then(|line| ferrix_bootinfo::option_in(line, "po9.slide"))
+        .and_then(|hex| u64::from_str_radix(hex.trim_start_matches("0x"), 16).ok())
+    {
+        choice.kernel_virt = choice.kaslr.link + slide;
+        crate::console::println!("  kaslr    po9 experiment: slide forced to {:#x}", slide);
+    }
     let image = load::place_kernel(services, &elf, choice.kernel_virt)?;
     Ok((StagedKernel { image, ..staged }, choice))
 }

@@ -39,7 +39,7 @@ use ferrix_rt::{Bootstrap, Kernel};
 ferrix_rt::entry!(main);
 
 /// Round trips timed, after [`WARMUP`] untimed ones.
-const ROUNDS: u32 = 20_000;
+const ROUNDS: u32 = 2_000_000; // EXPERIMENT ONLY (po9-user)
 /// Round trips run first and not timed: caches, first faults, the server's
 /// first sleep.
 const WARMUP: u32 = 1_000;
