@@ -272,7 +272,11 @@ impl CpuQueue {
     /// `docs/OPAQUE-KERNEL.md` §9.11, J2). Answers the base weight and the
     /// weight its job's share gave the running task, where the share was
     /// looked at.
-    pub(crate) fn account_with(&mut self, now: u64, extra: Option<(u32, i64)>) -> Option<(u32, u32)> {
+    pub(crate) fn account_with(
+        &mut self,
+        now: u64,
+        extra: Option<(u32, i64)>,
+    ) -> Option<(u32, u32)> {
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;

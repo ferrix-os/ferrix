@@ -165,7 +165,11 @@ pub fn carried_weight_with(
     carried_weight(
         base,
         levels.into_iter().map(|(own, load)| {
-            let load = if first { load.saturating_add(extra) } else { load };
+            let load = if first {
+                load.saturating_add(extra)
+            } else {
+                load
+            };
             first = false;
             (own, load)
         }),

@@ -1265,12 +1265,16 @@ fn job_case(shape: JobShape, caller_base: u32, echo_base: u32) -> Result<JobSeen
             JobShape::Nested => (index(&second), Some(index(&first))),
         },
     ];
-    let (mine, theirs) =
-        Endpoint::pair().map_err(|_| "no memory for the job cases' channel")?;
+    let (mine, theirs) = Endpoint::pair().map_err(|_| "no memory for the job cases' channel")?;
     let (echo_process, echo_handle) = holding_in(&theirs, Some(echo_job))?;
     JOB_ECHO_BASE.store(echo_base, core::sync::atomic::Ordering::Release);
     *ECHO.lock() = Some(echo_handle);
-    let echo = spawn_in(&echo_process, "fast path job echo", job_echo_in_the_process, Some(cpu))?;
+    let echo = spawn_in(
+        &echo_process,
+        "fast path job echo",
+        job_echo_in_the_process,
+        Some(cpu),
+    )?;
     drop(echo_process);
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     wait_until(deadline, "the job cases' echo never waited", || {
@@ -1293,8 +1297,16 @@ fn job_case(shape: JobShape, caller_base: u32, echo_base: u32) -> Result<JobSeen
         Some(cpu),
     )?;
     drop(caller_process);
-    wait_dead(&caller, deadline, "the job cases' caller never finished its trips")?;
-    wait_dead(&echo, deadline, "the job cases' echo never saw its caller's end")?;
+    wait_dead(
+        &caller,
+        deadline,
+        "the job cases' caller never finished its trips",
+    )?;
+    wait_dead(
+        &echo,
+        deadline,
+        "the job cases' echo never saw its caller's end",
+    )?;
     let seen = JOB_SEEN
         .lock()
         .take()
@@ -1363,7 +1375,9 @@ fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
                     moved(&before, Count::Fold),
                     moved(&before, Count::Separate)
                 );
-                return Err("the job cases: the direct switch planned a fold where it should not, or none where it should");
+                return Err(
+                    "the job cases: the direct switch planned a fold where it should not, or none where it should",
+                );
             }
         }
     }
@@ -1388,7 +1402,9 @@ fn check_the_direct_switch_weights() -> Result<(), &'static str> {
             "  fastpath job weights: runs at {}, handed {handed}, charged {charged}; seen {seen:?}",
             seen.weight
         );
-        return Err("the job cases: the direct switch gave a weight effective does not give with its peer counted");
+        return Err(
+            "the job cases: the direct switch gave a weight effective does not give with its peer counted",
+        );
     }
     Ok(())
 }

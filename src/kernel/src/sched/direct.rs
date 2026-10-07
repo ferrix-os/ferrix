@@ -38,9 +38,9 @@ use ferrix_sync::SpinLock;
 
 use super::queue::CpuQueue;
 use super::task::{BLOCKED, RUNNABLE, Task};
-use crate::object::quota;
 use super::{finish_switch, queue_of, switch_chosen, this_cpu, work};
 use crate::arch;
+use crate::object::quota;
 
 /// What the fast path counts: trips taken, parks made, and each test's
 /// declines (`docs/OPAQUE-KERNEL.md` §9.7, part 6). Kernel statistics no

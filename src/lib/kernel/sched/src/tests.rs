@@ -1959,7 +1959,10 @@ fn the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them() {
             JobPlan::Fold { job, joined } => {
                 let (changes, planned) =
                     settle_job_fold(job, joined, Some((caller_job, caller_base)));
-                assert!(planned, "round {round}: a fold's leave answered as planned was not");
+                assert!(
+                    planned,
+                    "round {round}: a fold's leave answered as planned was not"
+                );
                 for (at, delta) in changes.into_iter().flatten() {
                     model_adjust(&mut folded, at, delta);
                 }
@@ -1982,10 +1985,23 @@ fn the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them() {
             what()
         );
         assert_eq!(folded, general, "the job loads differ: {}", what());
-        assert_eq!(caller_folded, caller_due, "the caller's weight differs: {}", what());
-        assert_eq!(peer_folded, peer_due, "the peer's weight differs: {}", what());
+        assert_eq!(
+            caller_folded,
+            caller_due,
+            "the caller's weight differs: {}",
+            what()
+        );
+        assert_eq!(
+            peer_folded,
+            peer_due,
+            "the peer's weight differs: {}",
+            what()
+        );
     }
-    assert!(folds > 1_000 && apart > 1_000, "folds {folds}, apart {apart}");
+    assert!(
+        folds > 1_000 && apart > 1_000,
+        "folds {folds}, apart {apart}"
+    );
 }
 
 /// A fold's leave that answers other than planned makes the peer's join and
@@ -1994,22 +2010,40 @@ fn the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them() {
 /// net, or none at zero.
 #[test]
 fn a_fold_settles_by_the_net_or_in_the_general_order() {
-    assert_eq!(settle_job_fold(3, 700, Some((3, 700))), ([None, None], true));
-    assert_eq!(settle_job_fold(3, 700, Some((3, 500))), ([Some((3, 200)), None], true));
-    assert_eq!(settle_job_fold(3, 500, Some((3, 700))), ([Some((3, -200)), None], true));
+    assert_eq!(
+        settle_job_fold(3, 700, Some((3, 700))),
+        ([None, None], true)
+    );
+    assert_eq!(
+        settle_job_fold(3, 700, Some((3, 500))),
+        ([Some((3, 200)), None], true)
+    );
+    assert_eq!(
+        settle_job_fold(3, 500, Some((3, 700))),
+        ([Some((3, -200)), None], true)
+    );
     assert_eq!(
         settle_job_fold(3, 700, Some((4, 500))),
         ([Some((3, 700)), Some((4, -500))], false)
     );
-    assert_eq!(settle_job_fold(3, 700, None), ([Some((3, 700)), None], false));
+    assert_eq!(
+        settle_job_fold(3, 700, None),
+        ([Some((3, 700)), None], false)
+    );
     assert_eq!(plan_job_fold(None, (3, 700), MODEL_NONE), JobPlan::Separate);
-    assert_eq!(plan_job_fold(Some((3, 700)), (3, 0), MODEL_NONE), JobPlan::Separate);
+    assert_eq!(
+        plan_job_fold(Some((3, 700)), (3, 0), MODEL_NONE),
+        JobPlan::Separate
+    );
     assert_eq!(
         plan_job_fold(Some((MODEL_NONE, 700)), (MODEL_NONE, 700), MODEL_NONE),
         JobPlan::Separate
     );
     assert_eq!(
         plan_job_fold(Some((3, 700)), (3, 500), MODEL_NONE),
-        JobPlan::Fold { job: 3, joined: 700 }
+        JobPlan::Fold {
+            job: 3,
+            joined: 700
+        }
     );
 }
