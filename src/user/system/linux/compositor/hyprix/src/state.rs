@@ -38,6 +38,13 @@ pub struct Slot {
     /// to its next pool once it has destroyed this one, while buffers cut
     /// from this one still draw.
     pools: BTreeMap<PoolKey, Mapping>,
+    /// Each `zwp_linux_dmabuf_v1` buffer, imported, by the key its
+    /// `wl_buffer` names (`docs/GPU.md` §3.13).
+    dmabufs: BTreeMap<PoolKey, crate::dmabuf::Imported>,
+    /// The descriptors `zwp_linux_buffer_params_v1.add` handed over, by
+    /// the parameters object, until a buffer is made of one or the
+    /// parameters go.
+    planes: BTreeMap<ObjectId, std::os::fd::OwnedFd>,
     /// Pools the client has destroyed that still have buffers made from
     /// them. `wl_shm_pool.destroy` releases the object, not the memory:
     /// "the mmapped memory will be released when all buffers that have
@@ -99,9 +106,11 @@ impl Slot {
     pub(crate) fn for_test() -> Self {
         let (ours, _theirs) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
         Self {
-            client: Client::new(globals(1)),
+            client: Client::new(globals(1, false)),
             connection: Connection::new(ours).expect("a connection"),
             pools: BTreeMap::new(),
+            dmabufs: BTreeMap::new(),
+            planes: BTreeMap::new(),
             retired: std::collections::BTreeSet::new(),
             windows: Vec::new(),
             layers: Vec::new(),
@@ -171,6 +180,11 @@ impl Slot {
     /// The pools this connection has shared, by key.
     pub const fn pools(&self) -> &BTreeMap<PoolKey, Mapping> {
         &self.pools
+    }
+
+    /// Its dmabuf buffers, imported, by key.
+    pub const fn dmabufs(&self) -> &BTreeMap<PoolKey, crate::dmabuf::Imported> {
+        &self.dmabufs
     }
 
     /// The process that opened it.
@@ -313,6 +327,11 @@ struct Compositor<'r> {
     requests: Vec<crate::control::Pending>,
     /// The connections.
     slots: Vec<Slot>,
+    /// The render node clients' dmabufs are imported through, when the
+    /// frames are drawn on the GPU and `zwp_linux_dmabuf_v1` is offered.
+    dmabuf: Option<std::rc::Rc<compositor_drm::Render>>,
+    /// Whether the first import has been said, which a test waits for.
+    dmabuf_said: bool,
     /// How many connections there have been: a slot's serial.
     connections: u64,
     /// Which client and surface each window's pixels come from.
@@ -579,6 +598,13 @@ impl<'r> Compositor<'r> {
             style,
             overlay: crate::overlay::Overlay::default(),
             overlay_was: false,
+            dmabuf: screens
+                .iter()
+                .any(Screen::on_gpu)
+                .then(compositor_drm::Render::open)
+                .and_then(Result::ok)
+                .map(std::rc::Rc::new),
+            dmabuf_said: false,
             screens,
             window_rules,
             clipboard: crate::clipboard::Clipboard::new(),
@@ -814,7 +840,8 @@ impl<'r> Compositor<'r> {
                         },
                         pid: connection.peer_pid(),
                         client: {
-                            let mut client = Client::new(globals(self.screens.len()));
+                            let mut client =
+                                Client::new(globals(self.screens.len(), self.dmabuf.is_some()));
                             // What each screen is, and what the seat has: only
                             // the capabilities there are devices for, since a
                             // client may not ask for one the seat did not
@@ -828,6 +855,8 @@ impl<'r> Compositor<'r> {
                         },
                         connection,
                         pools: BTreeMap::new(),
+                        dmabufs: BTreeMap::new(),
+                        planes: BTreeMap::new(),
                         retired: std::collections::BTreeSet::new(),
                         windows: Vec::new(),
                         layers: Vec::new(),
@@ -2637,6 +2666,11 @@ const GPU_AGAIN_FIRST: Duration = Duration::from_secs(5);
 const GPU_AGAIN_MOST: Duration = Duration::from_secs(60);
 
 impl Screen {
+    /// Whether this screen's frames are drawn on the GPU now.
+    pub(crate) const fn on_gpu(&self) -> bool {
+        self.gpu.is_some()
+    }
+
     /// Say that the card went away, once a loss, whichever path found it.
     fn say_gone(&mut self, report: &mut dyn FnMut(&str)) {
         if !self.said_gone {
@@ -3829,6 +3863,7 @@ fn release_retired_pools(slot: &mut Slot) -> bool {
     for pool in done {
         let _ = slot.retired.remove(&pool);
         let _ = slot.pools.remove(&pool);
+        let _ = slot.dmabufs.remove(&pool);
     }
     any
 }
@@ -5938,8 +5973,10 @@ fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: Win
     client.configure_toplevel(toplevel, width, height, &states(focused));
 }
 
-/// The globals the compositor offers.
-fn globals(outputs: usize) -> Globals {
+/// The globals the compositor offers. `dmabuf` is whether a client's GPU
+/// buffer can be imported and drawn where it lies, which is only where the
+/// frames are drawn on the GPU (`docs/GPU.md` §3.13).
+fn globals(outputs: usize, dmabuf: bool) -> Globals {
     let mut globals = Globals::new();
     for (interface, version, role) in [
         // Each at the version its own interface offers. A compositor that
@@ -6295,6 +6332,15 @@ fn globals(outputs: usize) -> Globals {
         ),
     ] {
         let _ = globals.add(interface, version, role);
+    }
+    // A client's own GPU buffer, handed over as a dmabuf. Version 3: the
+    // feedback of version 4 has no reader before Mesa (`docs/GPU.md` §3a).
+    if dmabuf {
+        let _ = globals.add(
+            &compositor_protocol::linux_dmabuf::ZWP_LINUX_DMABUF_V1,
+            3,
+            Role::LinuxDmabuf,
+        );
     }
     // One `wl_output` a monitor, in the order the screens came: that is how
     // a client is told there are two screens, and which is which.

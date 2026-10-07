@@ -115,6 +115,11 @@
 //!   either toplevel list -- and a session that copies frames out of it.
 //!   The newer `grim` and every screen-sharing portal written this year
 //!   bind these rather than `zwlr_screencopy_v1`.
+//! * **`linux_dmabuf`** is `zwp_linux_dmabuf_v1`: a buffer that lives on
+//!   the GPU, handed over as a descriptor rather than as shared memory, so a
+//!   client that draws on the GPU is shown without its pixels coming back
+//!   (`docs/GPU.md` §3.13). Offered only where the compositor draws on the
+//!   GPU, so it is not in [`GLOBALS`].
 //!
 //! The list of protocols is `FILES` in the generator. Adding one is vendoring
 //! its XML, adding a line there and a module to `generated/mod.rs`, and
@@ -129,12 +134,12 @@ pub use generated::{
     alpha_modifier, background_effect, capture_source, commit_timing, content_type, core,
     cursor_shape, data_control, ext_data_control, ext_workspace, fifo, focus_grab, foreign_list,
     foreign_toplevel, fractional_scale, gamma_control, global_shortcuts, hotkey, hyprland_surface,
-    idle_inhibit, idle_notify, image_copy, input_method, kde_decoration, layer_shell, lock_notify,
-    output_management, output_power, pointer_constraints, pointer_gestures, pointer_warp,
-    presentation, primary_selection, relative_pointer, screencopy, security_context, session_lock,
-    shortcuts_inhibit, single_pixel, system_bell, tearing_control, text_input, toplevel_export,
-    toplevel_icon, toplevel_mapping, toplevel_tag, viewporter, virtual_keyboard, virtual_pointer,
-    xdg_activation, xdg_decoration, xdg_dialog, xdg_output, xdg_shell,
+    idle_inhibit, idle_notify, image_copy, input_method, kde_decoration, layer_shell, linux_dmabuf,
+    lock_notify, output_management, output_power, pointer_constraints, pointer_gestures,
+    pointer_warp, presentation, primary_selection, relative_pointer, screencopy, security_context,
+    session_lock, shortcuts_inhibit, single_pixel, system_bell, tearing_control, text_input,
+    toplevel_export, toplevel_icon, toplevel_mapping, toplevel_tag, viewporter, virtual_keyboard,
+    virtual_pointer, xdg_activation, xdg_decoration, xdg_dialog, xdg_output, xdg_shell,
 };
 
 /// Every interface the compositor offers as a global, with the version it

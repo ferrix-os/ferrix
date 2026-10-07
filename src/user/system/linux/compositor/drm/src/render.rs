@@ -428,6 +428,28 @@ impl Render {
         Ok(unsafe { OwnedFd::from_raw_fd(request.fd) })
     }
 
+    /// Take a buffer another program exported, and answer this open's
+    /// handle for it: `DRM_IOCTL_PRIME_FD_TO_HANDLE` (`docs/GPU.md` §3.13).
+    ///
+    /// The object is then nameable in this open's context, so a stream run
+    /// here may sample it where it lies. The descriptor is only read; the
+    /// caller keeps it.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the node said; `EINVAL` for a descriptor that is not a
+    /// buffer of this node's device.
+    pub fn import(&self, fd: std::os::fd::BorrowedFd<'_>) -> io::Result<u32> {
+        use std::os::fd::AsRawFd;
+        let mut request = PrimeHandle {
+            handle: 0,
+            flags: 0,
+            fd: fd.as_raw_fd(),
+        };
+        self.ioctl(drm::IOCTL_PRIME_FD_TO_HANDLE, &mut request)?;
+        Ok(request.handle)
+    }
+
     /// Wait until the device is done with object `handle`:
     /// `VIRTGPU_WAIT`. An upload and a command stream return once they are
     /// on their way, as they do on Linux, so this is what comes before

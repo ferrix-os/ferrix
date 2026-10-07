@@ -280,6 +280,45 @@ bind = , S, exec, /bin/shot 0 /etc/expected.xrle
 
 /// What the compositor says when a screen's frames are drawn on the GPU,
 /// and what it says when they stop being.
+/// `test-compositor --gl --boot dmabuf`'s configuration: the same two
+/// windows, drawn into GPU buffers and handed over through
+/// `zwp_linux_dmabuf_v1` (`docs/GPU.md` §3.13). The picture is the
+/// `wl_shm` boot's, which is the claim: what the compositor shows of a
+/// client's GPU buffer, sampled where it lies, is what the client drew.
+const DMABUF_CONFIG: &str =
+    "# Carried into the initramfs by `cargo xtask test-compositor --gl --boot dmabuf`.
+decoration:rounding = 12
+decoration:inactive_opacity = 0.6
+decoration:shadow:range = 12
+decoration:shadow:render_power = 2
+decoration:dim_inactive = 1
+decoration:dim_strength = 0.4
+exec-once = /bin/pattern checkerboard one --dmabuf
+exec-once = /bin/pattern gradient two --after one --dmabuf
+bind = , S, exec, /bin/shot 0 /etc/expected.xrle
+";
+
+/// What the dmabuf boot must have said, beside the picture: each client
+/// presented a dmabuf, hyprix imported one, and each of the client's own
+/// checks of the render node's import passed (the certification
+/// consultant's C3, 2026-10-07). A client that fell back to `wl_shm`, or a
+/// node that imported anything, says none of these.
+///
+/// The import's own checks come first, so that a failure names the check
+/// that failed rather than the presentation that never came after it.
+const DMABUF_SAID: [&str; 7] = [
+    "pattern: import: a pipe is no dmabuf (EINVAL)",
+    "pattern: import: its own export is its own handle",
+    "pattern: import: imported, closed and imported again on a second open",
+    "pattern: import: the maker's buffer still takes pixels after the importer let go",
+    "pattern: one presents through zwp_linux_dmabuf_v1",
+    "pattern: two presents through zwp_linux_dmabuf_v1",
+    "hyprix: imported a dmabuf",
+];
+
+/// What the dmabuf boot must not have said.
+const DMABUF_REFUSED: &str = "hyprix: a dmabuf could not be imported";
+
 const ON_THE_GPU: &str = "frames are drawn on the GPU";
 const IN_SOFTWARE: &str = "drawing in software";
 
@@ -315,7 +354,18 @@ pub(super) fn test_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<(
         }],
         ..Carried::none()
     };
-    let (image, kernel) = build_image(arch, programs, &undithered(GPU_CONFIG), carried, args)?;
+    // `--boot dmabuf` is the same boot with the windows presented as
+    // dmabufs; no other boot has a GPU form.
+    let (config, said_too): (&str, &[&str]) = match args.boot.as_deref() {
+        None => (GPU_CONFIG, &[]),
+        Some("dmabuf") => (DMABUF_CONFIG, &DMABUF_SAID),
+        Some(other) => {
+            return Err(Error::new(format!(
+                "test-compositor --gl has one named boot, dmabuf; not {other}"
+            )));
+        }
+    };
+    let (image, kernel) = build_image(arch, programs, &undithered(config), carried, args)?;
     let port = free_port()?;
     let mut qemu_args = args.clone();
     qemu_args.display = true;
@@ -377,21 +427,42 @@ pub(super) fn test_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<(
         Ok(())
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
-    judge_gpu(arch, &said)
+    judge_gpu(arch, &said, said_too)
 }
 
 /// What [`test_gpu`] requires of what the guest said.
-fn judge_gpu(arch: Arch, said: &[String]) -> Result<()> {
+fn judge_gpu(arch: Arch, said: &[String], said_too: &[&str]) -> Result<()> {
     let transcript = || {
         said.iter()
             .map(|line| said_on_its_own(line).to_owned())
-            .filter(|line| line.starts_with("hyprix: ") || line.starts_with("shot: "))
+            .filter(|line| {
+                line.starts_with("hyprix: ")
+                    || line.starts_with("shot: ")
+                    || line.starts_with("pattern: ")
+            })
             .collect::<Vec<_>>()
             .join("\n    ")
     };
     if let Some(line) = said.iter().find(|line| line.contains("FERRIX-PANIC")) {
         return Err(Error::new(format!(
             "{arch}: the kernel stopped while the compositor ran: {}",
+            line.trim()
+        )));
+    }
+    for wanted in said_too {
+        if !said.iter().any(|line| line.contains(wanted)) {
+            return Err(Error::new(format!(
+                "{arch}: the guest never said `{wanted}`:
+    {}",
+                transcript()
+            )));
+        }
+    }
+    if !said_too.is_empty()
+        && let Some(line) = said.iter().find(|line| line.contains(DMABUF_REFUSED))
+    {
+        return Err(Error::new(format!(
+            "{arch}: a client's dmabuf was refused: {}",
             line.trim()
         )));
     }

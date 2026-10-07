@@ -7,7 +7,7 @@
 //! will reach through QEMU.
 
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{BorrowedFd, OwnedFd};
 
 use crate::Region;
 
@@ -93,6 +93,24 @@ pub trait Device: core::fmt::Debug {
         Ok(None)
     }
 
+    /// Take a buffer another program made on this device and exported as a
+    /// dmabuf, and answer the number a stream names it by here, if this
+    /// device is the kind that can (`docs/GPU.md` §3.13).
+    ///
+    /// The resource is the other program's: a renderer samples it and never
+    /// moves pixels to or from it, and lets go of it with
+    /// [`Device::release`] like any other. `None` is a device with no such
+    /// thing -- a test server -- and the answer for a renderer that asks is
+    /// to upload the pixels it was also given.
+    ///
+    /// # Errors
+    ///
+    /// The device's: a descriptor that is not a buffer of this device.
+    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
+        let _ = fd;
+        Ok(None)
+    }
+
     /// Let go of a resource nothing will name again.
     ///
     /// A renderer keeps a texture for the next thing of its size, because
@@ -142,5 +160,9 @@ impl<D: Device + ?Sized> Device for Box<D> {
 
     fn export(&mut self, resource: u32) -> io::Result<Option<OwnedFd>> {
         (**self).export(resource)
+    }
+
+    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
+        (**self).import(fd)
     }
 }

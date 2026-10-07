@@ -158,6 +158,14 @@ name = "compositor-fan"
 version = "0.1.0"
 
 [[package]]
+name = "compositor-gbm"
+version = "0.1.0"
+dependencies = [
+ "compositor-drm",
+ "compositor-virgl",
+]
+
+[[package]]
 name = "compositor-hyprlang"
 version = "0.1.0"
 
@@ -211,6 +219,7 @@ dependencies = [
 name = "compositor-pattern"
 version = "0.1.0"
 dependencies = [
+ "compositor-gbm",
  "compositor-protocol",
  "compositor-render",
  "compositor-shm",

@@ -30,6 +30,7 @@ pub mod control;
 pub(crate) mod damage;
 pub mod deliver;
 pub mod devices;
+pub mod dmabuf;
 pub mod dragging;
 #[cfg(target_os = "linux")]
 mod flush;

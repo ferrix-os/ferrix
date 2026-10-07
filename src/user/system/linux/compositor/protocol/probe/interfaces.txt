@@ -647,3 +647,23 @@ ext_image_copy_capture_cursor_session_v1 1 event 0 enter
 ext_image_copy_capture_cursor_session_v1 1 event 1 leave 
 ext_image_copy_capture_cursor_session_v1 1 event 2 position ii
 ext_image_copy_capture_cursor_session_v1 1 event 3 hotspot ii
+zwp_linux_dmabuf_v1 5 request 0 destroy 
+zwp_linux_dmabuf_v1 5 request 1 create_params n
+zwp_linux_dmabuf_v1 5 request 2 get_default_feedback 4n
+zwp_linux_dmabuf_v1 5 request 3 get_surface_feedback 4no
+zwp_linux_dmabuf_v1 5 event 0 format u
+zwp_linux_dmabuf_v1 5 event 1 modifier 3uuu
+zwp_linux_buffer_params_v1 5 request 0 destroy 
+zwp_linux_buffer_params_v1 5 request 1 add huuuuu
+zwp_linux_buffer_params_v1 5 request 2 create iiuu
+zwp_linux_buffer_params_v1 5 request 3 create_immed 2niiuu
+zwp_linux_buffer_params_v1 5 event 0 created n
+zwp_linux_buffer_params_v1 5 event 1 failed 
+zwp_linux_dmabuf_feedback_v1 5 request 0 destroy 
+zwp_linux_dmabuf_feedback_v1 5 event 0 done 
+zwp_linux_dmabuf_feedback_v1 5 event 1 format_table hu
+zwp_linux_dmabuf_feedback_v1 5 event 2 main_device a
+zwp_linux_dmabuf_feedback_v1 5 event 3 tranche_done 
+zwp_linux_dmabuf_feedback_v1 5 event 4 tranche_target_device a
+zwp_linux_dmabuf_feedback_v1 5 event 5 tranche_formats a
+zwp_linux_dmabuf_feedback_v1 5 event 6 tranche_flags u

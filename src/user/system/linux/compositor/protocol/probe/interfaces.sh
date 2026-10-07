@@ -80,6 +80,7 @@ scan "$protocols/security-context-v1.xml" security-context
 scan "$protocols/vicinae-hotkey-v1.xml" vicinae-hotkey
 scan "$protocols/ext-image-capture-source-v1.xml" ext-image-capture-source
 scan "$protocols/ext-image-copy-capture-v1.xml" ext-image-copy-capture
+scan "$protocols/linux-dmabuf-v1.xml" linux-dmabuf
 
 gcc -O0 -Wall -Werror -I"$work" \
     $(pkg-config --cflags wayland-client) \

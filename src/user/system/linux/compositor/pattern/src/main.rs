@@ -40,6 +40,11 @@ fn main() {
     // tiling layout puts whichever wins first: a test that expects `one` on
     // the left and `two` on the right says `two --after one`.
     compositor_pattern::announce_when_drawn(drawn_path(&title));
+    // `--dmabuf`: the window's buffers are made on the GPU and handed over
+    // through `zwp_linux_dmabuf_v1` (`docs/GPU.md` §3.13).
+    if arguments.iter().any(|word| word == "--dmabuf") {
+        compositor_pattern::present_through_dmabuf();
+    }
     if let Some(at) = arguments.iter().position(|word| word == "--after") {
         let Some(other) = arguments.get(at + 1) else {
             say("pattern: --after takes the title of the window to wait for");

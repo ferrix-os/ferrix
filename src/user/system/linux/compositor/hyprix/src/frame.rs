@@ -855,9 +855,21 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     // A `wp_single_pixel_buffer_v1` is in no pool: the colour is the
     // buffer, four bytes held on the buffer itself. A window drawn from one
     // is scaled to its rectangle like any other, so one pixel fills it.
-    let bytes = match buffer.solid.as_ref() {
-        Some(colour) => colour.as_slice(),
-        None => {
+    // A dmabuf's pixels are on the GPU, where a GPU renderer samples them;
+    // its backing is what one drawn in software reads (`docs/GPU.md`
+    // §3.13).
+    let imported = if buffer.dmabuf {
+        Some(slot.dmabufs().get(&buffer.pool)?)
+    } else {
+        None
+    };
+    let bytes = match (buffer.solid.as_ref(), imported) {
+        (_, Some(imported)) => {
+            let (start, end) = buffer.range()?;
+            imported.bytes().get(start..end)?
+        }
+        (Some(colour), None) => colour.as_slice(),
+        (None, None) => {
             let mapping = pools.get(&buffer.pool)?;
             let (start, end) = buffer.range()?;
             // The client may have shrunk nothing -- a pool only grows --
@@ -882,8 +894,12 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     // A single-pixel buffer's four bytes are the buffer's own and may be
     // any colour next frame at the same size, under damage that is the
     // whole window: it is moved whole like anything else without a name.
-    .map(|made| match buffer.solid {
-        Some(_) => made,
-        None => made.named(name),
+    .map(|made| match (buffer.solid, imported) {
+        (_, Some(imported)) => made.named(name).on_device(
+            imported.fd(),
+            (slot.serial() << 32) | (buffer.pool.0 & 0xffff_ffff),
+        ),
+        (Some(_), None) => made,
+        (None, None) => made.named(name),
     })
 }

@@ -29,6 +29,7 @@ pub mod image_copy;
 pub mod input_method;
 pub mod kde_decoration;
 pub mod layer_shell;
+pub mod linux_dmabuf;
 pub mod lock_notify;
 pub mod output_management;
 pub mod output_power;

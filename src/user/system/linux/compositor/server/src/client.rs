@@ -23,6 +23,7 @@ mod clipboard;
 mod compositor;
 mod control;
 mod desktop;
+mod dmabuf;
 mod drag;
 mod event;
 mod foreign;
@@ -43,6 +44,9 @@ mod xdg_shell;
 
 pub use capture::{Frame, Source};
 pub use control::{Flavour, Manager};
+pub use dmabuf::{
+    DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, MOD_INVALID, MOD_LINEAR, Plane, format_of,
+};
 pub use drag::Dragging;
 pub use event::Event;
 pub use foreign::{ForeignRequest, ForeignToplevel};
@@ -201,6 +205,8 @@ pub struct Client {
     /// How many pools this connection has made: the last [`PoolKey`](crate::shm::PoolKey) given.
     pools_made: u64,
     buffers: BTreeMap<ObjectId, Buffer>,
+    /// Each `zwp_linux_buffer_params_v1` and what it has been told.
+    params: BTreeMap<ObjectId, dmabuf::Params>,
     xdg_surfaces: BTreeMap<ObjectId, XdgSurface>,
     toplevels: BTreeMap<ObjectId, Toplevel>,
     subsurfaces: BTreeMap<ObjectId, Subsurface>,
@@ -401,6 +407,7 @@ impl Client {
             pools: BTreeMap::new(),
             pools_made: 0,
             buffers: BTreeMap::new(),
+            params: BTreeMap::new(),
             xdg_surfaces: BTreeMap::new(),
             toplevels: BTreeMap::new(),
             subsurfaces: BTreeMap::new(),
@@ -674,8 +681,17 @@ impl Client {
                 // makes another gets a fresh configure conversation.
                 let _ = self.layers.remove(&id);
             }
+            Role::BufferParams => {
+                let _ = self.params.remove(&id);
+            }
             Role::Buffer => {
-                let _ = self.buffers.remove(&id);
+                // A dmabuf's import is its buffer's alone, so it is retired
+                // with it and let go of as a pool is once nothing uses it.
+                if let Some(buffer) = self.buffers.remove(&id)
+                    && buffer.dmabuf
+                {
+                    self.events.push(Event::PoolRetired { pool: buffer.pool });
+                }
                 // A buffer a surface is showing that the client destroys
                 // leaves the surface showing nothing, which is what
                 // `wl_buffer`'s description says: "destroying the
@@ -777,6 +793,8 @@ impl Client {
             Role::ForeignToplevel => self.toplevel_handle(sender, opcode),
             Role::LayerShell => self.layer_shell(version, opcode, args),
             Role::LayerSurface => self.layer_surface_request(sender, opcode, args),
+            Role::LinuxDmabuf => self.linux_dmabuf(version, opcode, args),
+            Role::BufferParams => self.buffer_params(sender, opcode, args),
             // The protocols a desktop session asks for beyond a window and
             // a bar, which are their own module.
             //
@@ -915,6 +933,9 @@ impl Client {
                     &[Arg::Uint(format.to_wl_shm())],
                 );
             }
+        }
+        if global.role == Role::LinuxDmabuf {
+            self.announce_dmabuf(id, version);
         }
         if global.role == Role::Presentation {
             // The protocol has the clock said at once after binding: a

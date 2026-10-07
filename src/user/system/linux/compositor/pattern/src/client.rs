@@ -71,6 +71,23 @@ mod id {
     pub(super) const TWIN_TOPLEVEL: ObjectId = ObjectId(30);
     pub(super) const TWIN_POOL: ObjectId = ObjectId(31);
     pub(super) const TWIN_BUFFER: ObjectId = ObjectId(32);
+    /// `zwp_linux_dmabuf_v1`, bound by a client that presents dmabufs, and
+    /// the parameters object each of its two buffers is described by.
+    pub(super) const DMABUF: ObjectId = ObjectId(33);
+    pub(super) const PARAMS: ObjectId = ObjectId(34);
+    pub(super) const PARAMS_TWO: ObjectId = ObjectId(35);
+}
+
+/// The parameters object each buffer is described by, in `BUFFERS`' order.
+const PARAMS: [ObjectId; 2] = [id::PARAMS, id::PARAMS_TWO];
+
+/// Whether the program said `--dmabuf`: draw into GPU buffers and hand them
+/// over through `zwp_linux_dmabuf_v1` rather than shared memory.
+static DMABUF: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// Present through `zwp_linux_dmabuf_v1` from now on (`docs/GPU.md` §3.13).
+pub fn present_through_dmabuf() {
+    let _ = DMABUF.set(());
 }
 
 /// The buffers a client may keep, in the order it fills them.
@@ -819,6 +836,10 @@ fn run_with(
         twin_closed: false,
         scaled: Vec::new(),
         stale: [Vec::new(), Vec::new()],
+        gpu: match DMABUF.get() {
+            Some(()) => Some(crate::dmabuf::Gpu::open()?),
+            None => None,
+        },
     };
 
     let started = Instant::now();
@@ -988,6 +1009,8 @@ struct Client {
     /// changed stale in every other buffer; a buffer just made is stale
     /// throughout, since it holds nothing.
     stale: [Vec<bool>; BUFFERS.len()],
+    /// The GPU buffers, for a client that presents dmabufs.
+    gpu: Option<crate::dmabuf::Gpu>,
 }
 
 impl Client {
@@ -1047,6 +1070,10 @@ impl Client {
             id::TWIN_TOPLEVEL => &xdg_shell::XDG_TOPLEVEL,
             id::TWIN_POOL => &core::WL_SHM_POOL,
             id::TWIN_BUFFER => &core::WL_BUFFER,
+            id::DMABUF => &compositor_protocol::linux_dmabuf::ZWP_LINUX_DMABUF_V1,
+            id::PARAMS | id::PARAMS_TWO => {
+                &compositor_protocol::linux_dmabuf::ZWP_LINUX_BUFFER_PARAMS_V1
+            }
             _ => return None,
         })
     }
@@ -1450,6 +1477,13 @@ impl Client {
             // a buffer that many times the size and says so, or the
             // compositor has to stretch what it sent.
             ("wl_output", id::OUTPUT, 4, false),
+            // A client's own GPU buffers, when it presents them.
+            (
+                "zwp_linux_dmabuf_v1",
+                id::DMABUF,
+                u32::from(self.gpu.is_some()) * 3,
+                self.gpu.is_some(),
+            ),
             ("zwlr_layer_shell_v1", id::LAYER_SHELL, 5, bar),
             // Who draws the title bar. Wanted rather than required, as
             // every toolkit treats it: a compositor that offers none is one
@@ -2077,14 +2111,50 @@ impl Client {
             Some(_) => compositor_render::Format::Xrgb8888.wl_shm(),
             None => self.pattern.format().wl_shm(),
         };
-        let fresh = self.shared.is_none()
-            || self.buffer_size != (width, height)
-            || self.buffer_format != Some(format);
+        let made = match &self.gpu {
+            Some(gpu) => gpu.made(),
+            None => self.shared.is_some(),
+        };
+        let fresh =
+            !made || self.buffer_size != (width, height) || self.buffer_format != Some(format);
         // The pool holds every buffer this client keeps, one after another.
         let whole = len
             .checked_mul(self.buffers)
             .ok_or("a window too large to draw")?;
-        if fresh {
+        if fresh && let Some(gpu) = self.gpu.as_mut() {
+            // The same buffers, made on the GPU and handed over as
+            // dmabufs: the old ones go first, for the ids' sake.
+            if made {
+                for buffer in BUFFERS.iter().take(self.buffers) {
+                    request(out, *buffer, core::wl_buffer::request::DESTROY, &[], &[]);
+                }
+                self.busy = [false; BUFFERS.len()];
+                self.filled = [false; BUFFERS.len()];
+            }
+            let ids: Vec<(ObjectId, ObjectId)> = PARAMS
+                .iter()
+                .copied()
+                .zip(BUFFERS.iter().copied())
+                .take(self.buffers)
+                .collect();
+            let gbm_format = match self.pattern.format() {
+                compositor_render::Format::Argb8888 => compositor_gbm::Format::Argb8888,
+                compositor_render::Format::Xrgb8888 => compositor_gbm::Format::Xrgb8888,
+            };
+            let size = (
+                u32::try_from(width).unwrap_or(0),
+                u32::try_from(height).unwrap_or(0),
+            );
+            gpu.make(out, id::DMABUF, &ids, size, gbm_format)?;
+            if !made {
+                say(&format!(
+                    "pattern: {} presents through zwp_linux_dmabuf_v1",
+                    self.title
+                ));
+            }
+            self.buffer_size = (width, height);
+            self.buffer_format = Some(format);
+        } else if fresh {
             // The ids are fixed, so the old objects have to go before the
             // new ones can take their numbers. A server is right to refuse a
             // `new_id` that is already live, and this one does.
@@ -2204,7 +2274,9 @@ impl Client {
                 Some(picture) => picture.cover(size.0, size.1),
                 None => self.pattern.draw(size.0, size.1),
             };
-            if let Some(shared) = self.shared.as_mut() {
+            if let Some(gpu) = self.gpu.as_mut() {
+                gpu.write(slot, pixels.get(..len).unwrap_or(&pixels))?;
+            } else if let Some(shared) = self.shared.as_mut() {
                 let room = shared.bytes_mut();
                 let take = pixels.len().min(len);
                 let upto = at.checked_add(take).ok_or("a window too large to draw")?;

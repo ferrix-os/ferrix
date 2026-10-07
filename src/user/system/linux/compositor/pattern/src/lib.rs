@@ -16,8 +16,9 @@
 
 mod av1;
 pub mod client;
+mod dmabuf;
 
 pub use client::{
-    Movie, Picture, Shape, announce_when_drawn, run, run_announced_on, run_on, run_shaped,
-    run_shaped_on, run_video, run_wallpaper,
+    Movie, Picture, Shape, announce_when_drawn, present_through_dmabuf, run, run_announced_on,
+    run_on, run_shaped, run_shaped_on, run_video, run_wallpaper,
 };

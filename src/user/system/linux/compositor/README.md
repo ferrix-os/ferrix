@@ -226,6 +226,10 @@ names the part of Hyprland or hyprlang it follows.
   thread a band was a thousand threads a second behind a moving wallpaper.
   **`shm`** is a client's `memfd`, the three `unsafe` calls every `wl_shm`
   client needs, audited once.
+* **`gbm`** is GBM's shape in Rust (`docs/GPU.md` §3.13): buffers on the
+  GPU a client draws into, exports as dmabufs and hands the compositor
+  through `zwp_linux_dmabuf_v1`, which `pattern --dmabuf` does and
+  `cargo xtask test-compositor --gl --boot dmabuf` judges.
 * **`vdagent`** is the clipboard agent (`docs/CLIPBOARD.md` §6): it joins the
   host's selection, arriving over the virtio-serial port `vport` binds at
   the abstract name `\0ferrix.vport`, to the compositor's, as an

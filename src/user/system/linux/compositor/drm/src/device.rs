@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{BorrowedFd, OwnedFd};
 
 use compositor_virgl::{Device, Region, Texture, pipe};
 use ferrix_linux_abi::virtgpu::{Box3d, ResourceCreate};
@@ -40,6 +40,9 @@ struct Moved {
 pub struct RenderDevice {
     node: Render,
     moved: BTreeMap<u32, Moved>,
+    /// Buffers other programs made and this one imported, by resource: the
+    /// handle each is held by here and how many imports name it.
+    imported: BTreeMap<u32, (u32, u32)>,
 }
 
 impl RenderDevice {
@@ -52,6 +55,7 @@ impl RenderDevice {
         Ok(Self {
             node: Render::open()?,
             moved: BTreeMap::new(),
+            imported: BTreeMap::new(),
         })
     }
 
@@ -228,7 +232,32 @@ impl Device for RenderDevice {
         self.node.export(held.handle).map(Some)
     }
 
+    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
+        let handle = self.node.import(fd)?;
+        let (resource, _) = match self.node.resource_info(handle) {
+            Ok(info) => info,
+            Err(error) => {
+                let _ = self.node.close(handle);
+                return Err(error);
+            }
+        };
+        // The node answers one handle an object an open, so a buffer
+        // imported twice is one handle here too, closed with the last
+        // release that names it.
+        self.imported.entry(resource).or_insert((handle, 0)).1 += 1;
+        Ok(Some(resource))
+    }
+
     fn release(&mut self, resource: u32) -> io::Result<()> {
+        if let Some((handle, count)) = self.imported.get_mut(&resource) {
+            *count = count.saturating_sub(1);
+            if *count > 0 {
+                return Ok(());
+            }
+            let handle = *handle;
+            let _ = self.imported.remove(&resource);
+            return self.node.close(handle);
+        }
         // A texture pixels are moved to or from is known by its resource;
         // one that is not was never written down, and there is no handle to
         // close. That is a renderer letting go of something it never
