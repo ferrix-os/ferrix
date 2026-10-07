@@ -4161,6 +4161,265 @@ FIRED with the text named:**
   the programs do. The condition-8 case is the one that would catch the skip
   alone on a processor that keeps the base.
 
+#### 3c: FS and GS 0 over 0, and FSGSBASE (design for the consultant, po9-sel and po10-sel, 2026-10-07)
+
+**Why now.** po9-sched's profile of `main` puts `load_selectors` -- the
+four selectors and the two bases -- at 173 ns a direction, the largest
+single item on the trip; the `DS`/`ES` skip took 60 to 80 of it. What is
+left is the `FS` load, the `GS` load inside its `swapgs` pair with
+interrupts masked, and the two base `WRMSR`s. Line 412 gave `DS` and
+`ES` only, and said `FSGSBASE` needs a design of its own (F1 to F5).
+This is that design, in two slices that land apart.
+
+**What Linux does at a switch** (Linux 6.18.54,
+`arch/x86/kernel/process_64.c`):
+- `__switch_to`, lines 656 to 664: `DS` and `ES` as built in 3b's
+  *Reopened narrowly*, then `x86_fsgsbase_load`.
+- `save_fsgs`, 275 to 291: `savesegment` of `FS` and `GS` from the
+  register; with `FSGSBASE`, `rdfsbase()` and `__rdgsbase_inactive()`
+  (`swapgs; rdgsbase; swapgs`, 165 to 212), "user code expects us to
+  save the current value"; without it `save_base_legacy` (236 to 273).
+- `x86_fsgsbase_load`, 392 to 410: with `FSGSBASE`, `FS` is loaded only
+  `if (unlikely(prev->fsindex || next->fsindex))`, `GS` likewise, where
+  `prev->fsindex` was read from the register by `save_fsgs` in the same
+  switch; then `wrfsbase(next->fsbase)` and `__wrgsbase_inactive`
+  (`swapgs; wrgsbase; swapgs`, 214 to 228) at every switch.
+- Without `FSGSBASE`, `load_seg_legacy`, 319 to 361, skips a null load
+  only when `prev_index | next_index | prev_base` is 0, and on
+  `X86_BUG_NULL_SEG` parts (AMD) loads `__USER_DS` then the null selector
+  to clear the base. That compares a recorded base, which is condition
+  8's leak; it is not proposed here.
+- Enabling: `arch/x86/kernel/cpu/common.c` 2393 to 2401 sets
+  `CR4.FSGSBASE` and `elf_hwcap2 |= HWCAP2_FSGSBASE` (bit 1,
+  `arch/x86/include/uapi/asm/hwcap2.h` line 11); `nofsgsbase` on the
+  command line clears it (509 to 513).
+- The paranoid entries, `arch/x86/entry/entry_64.S`: `paranoid_entry`
+  (857 to 910) with `FSGSBASE` does not decide `swapgs` by the `GS`
+  base's sign; it saves the base with `RDGSBASE` into `RBX` and writes the
+  kernel's (`SAVE_AND_SET_GSBASE`, the per-CPU offset found without `GS`),
+  and `paranoid_exit` (987 to 990) and the NMI exit (1422 to 1429) write
+  `RBX` back with `WRGSBASE`.
+
+**Slice A: `FS` and `GS` skipped 0 over 0, no `FSGSBASE` (proposed for
+this round).** The rule of `DS` and `ES` (S1 to S7, line 412's E1 to E6),
+extended as line 393's note and line 398 sketched, with condition 8 and
+3b's base rule untouched:
+
+- *The rule (A1).* In `load_selectors`, `FS` is left unloaded only where
+  the selector to load (after `gdt::loadable`) and the one the processor
+  holds -- read by the same `cpu::read_data_selectors` that the `DS`/`ES`
+  skip already makes, in the same switch, with no load between -- are both
+  exactly 0. `GS` likewise, and its skip drops the whole `load_user_gs`:
+  the `swapgs` pair, the `RFLAGS` read and the interrupt mask around it.
+  Exactly 0, never "null": 1 to 3 are null selectors whose RPL bits a
+  program reads back with `mov %fs`/`mov %gs`, and 4 to 7 name the LDT.
+  Never a per-processor or per-task "last loaded" (S2 as it stands); a
+  switch from a kernel thread or idle reads the processor fresh, since the
+  read is in `load_selectors` itself.
+- *The bases (A2), unchanged.* Where the record's `FS` (`GS`) selector is
+  0, its base is written from the task's record at every switch, skipped
+  or not: `set_thread_pointer` (`WRMSR` of `FS_BASE`) and
+  `set_program_gs_base` (`WRMSR` of `KERNEL_GS_BASE`), as 3b built them.
+  Where it is not 0 the selector is loaded, which loads the descriptor's
+  base, as now. So no base is ever compared with anything, recorded or
+  held; condition 8 is not touched.
+- *The other loads (A3), unchanged.* `load_program_selectors` (a 32-bit
+  signal frame's entry and return), `enter_compat_segments`, and
+  `set_thread_area`'s reload of a selector naming the slot it rewrote keep
+  loading unconditionally. Only the switch's `load_selectors` skips, and
+  `reset_user_state` (`execve`) goes through it with zeros and zero bases,
+  so a new image whose `FS` read 0 keeps it, and one that held 3 or a TLS
+  selector is loaded over.
+- *The count (A4).* A second per-processor counter, `FSGS_SKIPS`, kept as
+  `SELECTOR_SKIPS` is (a load and a store with interrupts masked, no
+  locked write), counts the switches that left `FS` or `GS` unloaded; it is
+  read only by the check and the fast path's counts line, never by the
+  switch. Both switches -- the general path's and the fast path's direct
+  one -- go through the one `restore_user_state` (G5).
+
+*Why it leaks nothing (the FDP_RIP.2 argument, both vendors).* It is line
+393's, and holds for `FS` and `GS` as for `DS` and `ES`, with one part
+added for the base:
+1. In long mode the `FS` and `GS` selectors are written only by an
+   explicit load (`MOV`/`POP`/`LFS`/`LGS`). `SYSCALL`/`SYSRET`, interrupts
+   and exceptions, `SWAPGS` (which swaps the base MSRs, not the selector)
+   and `WRMSR` of a base leave them. `IRET` and a far `RET` to ring 3 null
+   a data selector only when its descriptor's DPL is below 3; every
+   selector the kernel ever puts in `FS` or `GS` is a user one checked by
+   `gdt::loadable` or 0 (the six load sites above; the kernel never loads
+   one of its own), so that rule never applies. `VMRUN`/`#VMEXIT` and
+   `RSM` restore the registers whole. So a `FS` or `GS` that reads 0 was
+   last loaded with 0.
+2. A vendor's null load acts on the hidden part by a rule f that depends
+   only on the selector (Intel: unusable, base cleared in 64-bit mode;
+   AMD: base cleared where `NullSelectorClearsBase`, CPUID `0x8000_0021`
+   `EAX[6]`, kept before; limit and attributes kept or marked by vendor).
+   f(f(x)) = f(x): loading 0 over a register that reads 0 and was last
+   loaded with 0 changes nothing. So the skip leaves exactly the hidden
+   state today's load leaves, on every vendor -- including a stale AMD
+   limit and attributes, which are then today's question, not the skip's
+   (the compatibility-mode case below decides it on the reference host).
+3. The one part a 64-bit program can read through a null `FS` or `GS` is
+   the base, and A2 writes it from the incoming task's record after,
+   whether the load was skipped or not; and in the `GS` case the base the
+   program will see is `KERNEL_GS_BASE`, which the skipped `swapgs` pair
+   never touched anyway.
+4. A 32-bit program (compatibility mode) faults on any use of a null `FS`
+   or `GS`, with the skip or without; an i386 program's TLS selector is
+   not 0 and is always loaded.
+
+So the selector values are given exactly (exactly 0, A1), the hidden part
+is identical to the load's (2), and the bases are the program's own at
+every switch (3, A2): FDP_RIP.2 as widened holds on Intel and AMD
+semantics alike, with the vendor-specific part (2) argued and the
+observable part checked below.
+
+*Checks (stage 9, x86-64, on KVM and TCG, a new `fsgs` line after the
+`selector` line; one new fixture, `FSGS_PROGRAM`, the `DS`/`ES` fixture's
+shape with `FS` and `GS`, and its bases set by `arch_prctl`
+`ARCH_SET_FS`/`ARCH_SET_GS` to a page holding its own word):*
+- (i) a program that loads 3 into `FS` and `GS` before each of 1,000
+  yields, beside one whose record is 0 and whose bases are its own: the
+  second reads `FS` = `GS` = 0 and its own word through `%fs:0` and
+  `%gs:0` after every yield. Control: the skip on "null" (`selector & !3
+  == 0`), which must fire "read the RPL bits of a null selector another
+  program left in FS or GS".
+- (ii) the same with `USER_DS`. Control: the skip on the record alone
+  (`fs == 0`), which must fire "read the USER_DS another program left in FS
+  or GS".
+- (iii) a program that installs a based descriptor by `set_thread_area`
+  and loads it into `FS` and `GS`, then 0, before each yield (so the
+  processor holds 0 over a hidden part that was a TLS segment's), beside
+  the reader of (i): it reads its own word through `%fs:0` and `%gs:0` at
+  every turn. Control: the base writes skipped when the load is (line
+  398's control), which must fire "did not read its own FS or GS base".
+  And the compatibility-mode half, as the `DS` case's: a reader with `FS`
+  0 far-returns into compatibility mode and reads through `FS`:
+  `SIGSEGV` under KVM on the AMD reference host and on hardware; under
+  TCG undecided and said so on the line, as for `DS`.
+- (iv) an i386 program with a TLS selector in `GS` (`set_thread_area`,
+  then `mov %gs`), reading its own `GS` and `%gs:0` word after each
+  `sched_yield`, beside a 64-bit reader of (i): each reads its own.
+  Neither the record alone nor the processor alone decides a skip.
+  Control: the skip on the processor alone (`held_gs == 0`), which must
+  fire in this case or (ii).
+- (v) two readers with `FS` = `GS` = 0 trade the processor and
+  `FSGS_SKIPS` moves above 0; with `ferrix.fastpath=on` the counts line
+  after the bench names the `FS`/`GS` skips the direct switch took.
+  Control: the skip removed (the load always taken), which must fire "no
+  switch between two programs with null FS and GS left them unloaded".
+- 3b's `fsbase` checks stay as they are and now run through the skip (both
+  programs hold 0): two programs trading `FS` bases 10,000 times, the
+  cleared base coming back (Linux's rule, no base read), and condition 8's
+  case. Their controls `c4`, `c6`, `c8` are re-fired on the branch, since
+  the path under them changed.
+
+*Rows.* L.x86_64.8 restated: "`DS`, `ES`, `FS` and `GS` are loaded from
+the record unless the processor's selector and the record's are both 0;
+the `FS` and `GS` bases are written from the record at every switch where
+the record's selector is 0". Its criterion names the cases above. No new
+id unless the consultant wants the `FS`/`GS` half as a row of its own
+(then L.x86_64.165, held at line 412, reserved first). L.x86_64.9, .61 and
+.158 unchanged in substance (the bases are still the record's and still
+written at every switch); their check list gains (iii). ADV_ARC's and the
+Security Target's FDP_RIP.2 mechanism text and the vulnerability
+analysis's item 7 say the same. 3b's *After the review* records this
+section, its ledger line and the amended answer 12: *"... except `DS`,
+`ES`, `FS` and `GS` skipped 0 to 0 by the processor's own registers, the
+`FS` and `GS` bases written after at every switch"*.
+
+*Measured* (ablation 1, the load skip alone, on 4066f41dd as 52aba9e0d,
+alternated against 4066f41dd under the bench lock, fast path on, 5 boots
+a side, every boot ran, load 0.8 to 1.4 at each start; logs
+`~/.local/share/ferrix/logs/po10-sel/fsgsA/` on nazuna). Both sides
+boot in one of the two modes: main 1,048 and 1,068 ns in the low mode
+(2 boots), 1,298, 1,298, 1,298 in the high (3); the skip 888 and 908 in
+the low (2), 1,118, 1,118, 1,128 in the high (3). **-160 to -180 ns a
+round trip in each mode, -80 to -90 a direction**, the same as po9-sel's
+first ablation on 690754979 (-130 to -170 in three rounds, three of the
+ablation's boots stopped on FX-0902). With it the round trip is about
+880 to 910 ns on a low-mode boot.
+
+**Slice B: `FSGSBASE`.** The bases written by `WRFSBASE` and
+`swapgs; WRGSBASE; swapgs` instead of `WRMSR`. It needs `CR4.FSGSBASE`,
+which hands ring 3 the same four instructions, so (F1 to F5):
+- *F1, the record is no longer the truth.* A program writes its own
+  bases, so every save reads them back (`RDFSBASE`, `swapgs; RDGSBASE;
+  swapgs`), as Linux's `save_fsgs`; 3b's read skip and Linux's legacy rule
+  go, and the `fsbase` check's "cleared base comes back" becomes "a base
+  a program cleared stays cleared", as on Linux with `FSGSBASE`.
+  L.x86_64.9, .61 and .158 are restated. Condition 8 still holds: nothing
+  is compared with a per-processor record; both bases are written at
+  every switch.
+- *F2, the entries.* The paranoid entry (`trap.rs`,
+  `ferrix_paranoid_common`) decides `swapgs` by the sign of `GS_BASE`
+  (`rdmsr` of `0xC0000101`, `js`), on the ground that "no program can
+  load one" (`paranoid.rs`). With `FSGSBASE` a program can `WRGSBASE` any
+  canonical address, a kernel one included, and an NMI, `#DB` or `#MC` in
+  ring 0 would then run its handler through a program-chosen per-CPU
+  pointer. So the paranoid entry must take Linux's form: save `GS_BASE`
+  by `RDGSBASE`, write the kernel's per-CPU base found without `GS`
+  (`RDPID` or the CPU number in a GDT limit, as Linux's `GET_PERCPU_BASE`;
+  Ferrix has neither yet), and restore by `WRGSBASE` on the way out. The
+  ordinary entries decide by `CS` and the `SYSCALL` entry swaps always, so
+  they stand; the conditional `swapgs` and its `lfence` (CVE-2019-1125,
+  SPECULATION.md's SWAPGS fence row) leave the paranoid path, and that row
+  is reviewed again. The preemption count read through `GS` (2b) is the
+  kernel's and needs the entries right, nothing more.
+- *F3, what programs are told.* `user_hwcaps` (`arch/x86_64/mod.rs`)
+  answers `AT_HWCAP2` 0 today; it would carry `HWCAP2_FSGSBASE` (bit 1)
+  when `CR4.FSGSBASE` is set, and a `ferrix.fsgsbase=off` option (F-31's
+  on/off pattern, Linux's `nofsgsbase`) clears both.
+- *F4, capture and signal frames.* `UserState::capture` already reads the
+  live registers for a fork child, so it stays right; an x86-64 signal
+  frame carries selectors, not bases. `execve` zeroes both, as now.
+- *F5, the model.* `+fsgsbase` in `x86_cpu`'s model for KVM and TCG
+  (QEMU's TCG implements the four instructions); the ablation booted with
+  it under KVM.
+
+**Measured, slice B's parts** (alternated against ablation 1, fast path
+on, under the bench lock):
+- *The writes* (ablation 2, 300d3f1c0, `WRFSBASE` and `swapgs; WRGSBASE;
+  swapgs` with `CR4.FSGSBASE` set, nothing else): 938, 948, 948, 938
+  against 998, 978, 978, 978 ns in four rounds with both boots (0.940,
+  0.969, 0.969, 0.959); one base boot stopped on FX-0902. **-30 to -60 ns
+  a round trip, -15 to -30 a direction.**
+- *The writes and the reads together* (ablation 3, F1's `RDFSBASE` and
+  `swapgs; RDGSBASE; swapgs` at every save on top of the writes, on
+  4066f41dd as 4bfbe4ecf; alternated against ablation 1 on the same base,
+  logs `~/.local/share/ferrix/logs/po10-sel/fsgsB/`): **not decided.**
+  po9-sel's first run of it (612bf99c4) stopped at every boot on 3b's
+  cleared-base check, which answers 139 as well as 3 when the cleared base
+  stays cleared, as F1 says it must; with the check taking both, it boots.
+  Of eight rounds, the two taken on a quiet host read 1,048 against 1,128
+  (crossing modes) and 898 against 908; the others ran at load 5 to 25
+  with other sessions' gates on the host and crossed modes, and a third of
+  the boots on either side stopped on FX-0902 (the alloc-sweep flake
+  po9/fx0902 fixes). What can be said: slice B's net is at most a few tens
+  of ns a round trip, against -160 to -180 for slice A.
+- The paranoid entry's change (F2) is off the trip.
+
+**Recommendation.** Slice A in this round: it is nearly all the saving
+left in `load_selectors`, needs no new processor feature, no entry change
+and no ABI change, and its argument is line 393's with the base part
+added. Slice B is **not proposed now**: net of its reads it is worth at
+most a few tens of ns a round trip (to be measured on a quiet host after
+po9/fx0902 lands), and it costs a paranoid-entry rewrite in the item (F2,
+with a per-CPU base found without `GS`, which Ferrix does not have), an
+ABI change for programs (F3), and the restatement of 3b's rows (F1). It
+stays here as the design to come back to, with F1 to F5 answered as far as
+they can be without code.
+
+**Questions for the consultant (3c).**
+1. Is slice A, A1 to A4 with the checks (i) to (v) and their controls,
+   accepted under S1 to S7 and E1 to E6 read for `FS` and `GS`, with
+   condition 8 and 3b's base rule untouched?
+2. One row (L.x86_64.8 restated for all four selectors) or the `FS`/`GS`
+   half split as L.x86_64.165?
+3. Is deferring slice B with the figures above acceptable, or is the
+   paranoid-entry design (F2) wanted in this round regardless of its
+   saving?
+
 #### The parallel split and the landing order
 
 Every piece goes to the consultant as its own landing. Two sessions can work
