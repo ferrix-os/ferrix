@@ -1728,6 +1728,15 @@ The letters are used by parts 3 and 6.
     installation takes, or by a `SeqCst` store paired with a `SeqCst` load
     at T2. Seccomp's landing S3 and any `ptrace` landing carry the flag's
     rows and checks, and this design is named in theirs.
+  - *As met for seccomp* ("as built" 2, §9.11's cut 3): S3 answers T2 by the
+    personality's quiet predicate, whose first read after the probe word is
+    a live count of filtered threads (`seccomp::FILTERED_THREADS`), raised
+    before a thread's flag is raised and given back after it is lowered or
+    the thread is dropped. One location changed by `AcqRel`
+    read-modify-writes and read `Acquire`; by its coherence a thread whose
+    own filter has taken effect never reads a value without its own count,
+    so `SeqCst` is not needed (ledger 457, D1). `TSYNC` (S5) and `ptrace`
+    reopen this note.
 - **T3** The count is at most 24 bytes, or is `WRITE_READ_NOTHING`.
 
 *Under the handle table's lock:*
@@ -2651,8 +2660,9 @@ send back:
    (`syscall::seccomp::check`, a thread's `filtered` flag), so T2 is not
    "no probe armed" alone. The personality registers beside its filter a
    predicate, `seccomp::quiet`, which the core reads through
-   `trap::filter_quiet`: no probe armed, and either no thread was ever
-   filtered or the running one is not -- the reads `check` makes, in its
+   `trap::filter_quiet`: no probe armed, and either no thread is filtered
+   now (a count since 2026-10-07, §9.11's cut 3; until then a flag set once
+   that every boot's checks set) or the running one is not -- the reads `check` makes, in its
    order, so the two agree on any call. A filter registered without the
    predicate is never quiet. The frame tail reads it again, and takes the
    general branch when it is not quiet. Condition 8's flag on `Process`,
@@ -3166,7 +3176,7 @@ word means it would answer false (§9.7's condition 4):
 | `STOP` | `is_stopped` | `enter_stop`, on every task, the caller's included | no lock: after `stopped`'s store |
 | `SIGNAL` | a signal deliverable to the thread, a saved mask to put back, or a call to restart: `signal::needs_attention`'s three | a thread-directed post (`post_signal_to`, `force`) on that thread's task; a process-directed post on every task whose thread does not block the signal; `hand_on` on each thread it hands to; and the thread itself whenever it changes its own mask, saved mask or restart | the signal lock (`Process::state`, then `Thread::signals`) orders the record against the task's clear, below |
 | `TRACE` | a tracer's exit stop | reserved: nothing posts it until `ptrace` exists | the landing that brings `ptrace` |
-| `FILTERED` | the process is filtered (§9.7's T2 flag) | today `seccomp::arm_probe` on the probe's task, cleared by its disarm; owed by seccomp S3 for real filters (condition 8) | S3's install lock, or `SeqCst` against T2's load |
+| `FILTERED` | the process is filtered (§9.7's T2 flag) | today `seccomp::arm_probe` on the probe's task, cleared by its disarm; S3's real filters reach T2 instead through the quiet predicate and its live count of filtered threads (§9.7 T2's note, §9.11's cut 3), so no bit is posted for them | the count's `AcqRel` changes against T2's `Acquire` load (ledger 457, D1) |
 
 Two more inputs of the way out are per processor, not per task, and stay
 so: the resched flag (`NEED_RESCHED`, read by `call_left`) and the regroup
@@ -4663,9 +4673,10 @@ the task to its handle table about 24 (two `dyn` calls, `thread().process()`
 and `.core()`); `reply_words` about 19 (a `memcpy` call and a byte loop).
 The handle table's `try_lock`, `HandleTable::get` with its clamp, the
 `Arc<Endpoint>` clone and its drop, and each half's lock read under one step
-each. So the lookup and the park without an `Arc` (O3, O9) are worth about
-5 to 10 ns a direction against their protocol notes and checks, and are
-deferred (the PO, 2026-10-07).
+each. So the lookup and the park without an `Arc` (O3, O9) were judged
+worth about 5 to 10 ns a direction against their protocol notes and checks,
+and deferred (the PO, 2026-10-07); cut 3 records them as not built, with
+the reason.
 
 **Cut 1: the masked locks and the reply in registers.**
 - *The halves' and the handle table's locks are held under the entry's

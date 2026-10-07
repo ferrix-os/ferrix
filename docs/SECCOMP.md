@@ -1604,8 +1604,10 @@ length, the privilege rule (no-new-privs or privilege, else `EACCES`), the
 verifier, the mode, the chain's bound. A `Filter` is an `Arc` of a verified
 program that points at the one before it; a thread holds the newest in a
 `State` behind a leaf lock of its own, with a `filtered` flag and a
-machine-wide flag that no thread has ever held one, so that until one has,
-no call looks for its thread. A fork child takes its parent's chain, a thread
+machine-wide count of the threads whose flag is up, so that while none is,
+no call looks for its thread. (Until 2026-10-07 it was a flag set once and
+never cleared, which every boot's own checks set; po10-obj's cut 3,
+`docs/OPAQUE-KERNEL.md` §9.11, made it the count, `FILTERED_THREADS`.) A fork child takes its parent's chain, a thread
 its creator's, a native child its creator's through `launch::load_native`
 (`inherit_native`); `execve` keeps it, as it keeps the thread. The hook runs
 the chain newest first, with interrupts open and under no lock, allocating
@@ -1658,7 +1660,14 @@ filtered, with its creator's no-new-privs; one thread of a process killed by its
 filter, alone (the process lives and the others' calls run), and the first
 thread killed while another lives, the process ending by `SIGSYS` when the
 other leaves; and, in the `kmem` line, filters made until a job's memory limit refused one `ENOMEM`,
-a sibling job made one, and both read zero after. Each control below is a
+a sibling job made one, and both read zero after. Since 2026-10-07 (cut 3) it
+also requires the count of filtered threads back where it was once every thread
+the check filtered has gone, and a fork child and a thread that kept a chain
+still looked for at a call once the thread it was installed on has gone. A
+scenario makes the call its filter ends it for from a frame that holds no
+reference (`Then::Ending`): the frames below such a call are never returned
+to, and until then five threads and their processes stayed for the boot's
+life, which no check counted. Each control below is a
 throwaway branch with one sabotage and a `NEGATIVE CONTROL` line, and stopped
 the boot with the check's own message:
 
