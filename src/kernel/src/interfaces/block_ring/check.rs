@@ -117,11 +117,11 @@ pub(crate) struct Report {
 
 /// Counts what happened, so the report is a measurement and not a claim.
 #[derive(Debug, Default)]
-struct Counter {
+pub(super) struct Counter {
     /// See [`Report::refusals`].
-    refusals: u32,
+    pub(super) refusals: u32,
     /// See [`Report::published`].
-    published: u32,
+    pub(super) published: u32,
 }
 
 /// Run the check. `Err` names the first thing that was not true.
@@ -134,6 +134,8 @@ struct Counter {
 pub(crate) fn run() -> Result<Report, &'static str> {
     // No device needed: that ring is a page of the kernel's own.
     let rewrites = super::reread_check::run()?.rewrites;
+    // Nor here: its two tree nodes are its own, and it leaves `vda` free.
+    super::tree_check::run()?;
     let Some(node) = device::devices()
         .iter()
         .find(|node| matches!(node.location(), device::Location::Pci(_)))
@@ -193,7 +195,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 /// has freed what they left: the edge of a frame-count window. A ring's task
 /// runs on after the check has seen the kernel's end close, so the stops are
 /// waited for first, and only then the reaper.
-fn settle() -> Result<(), &'static str> {
+pub(super) fn settle() -> Result<(), &'static str> {
     let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
     super::wait_until_tasks_stopped(deadline)?;
     sched::wait_until_reaper_quiet(sched::REAPER_PATIENCE_NANOS)
@@ -332,7 +334,7 @@ fn refusals(
 }
 
 /// Require the accepted HELLO's disk to be in the registry as described.
-fn published(rdev: u64) -> Result<(), &'static str> {
+pub(super) fn published(rdev: u64) -> Result<(), &'static str> {
     let Some(disk) = devfs::block_device(rdev) else {
         return Err("an accepted HELLO published no disk under its numbers");
     };
@@ -354,7 +356,7 @@ fn published(rdev: u64) -> Result<(), &'static str> {
 /// End the ring as `ending` says: after STOPPED require its disk to go, and
 /// after a death require the device to stay bound and the disk to stay
 /// published, parked for the next driver.
-fn end(
+pub(super) fn end(
     side: &Side,
     device: Handle,
     control: Handle,
@@ -536,7 +538,7 @@ fn described(
 }
 
 /// Make a ring on `device`, answering the driver's end of its control channel.
-fn ring(side: &Side, device: Handle) -> Result<Handle, &'static str> {
+pub(super) fn ring(side: &Side, device: Handle) -> Result<Handle, &'static str> {
     side.handle(
         nr::BLOCK_RING_CREATE,
         &[reg(device)],
@@ -550,7 +552,7 @@ fn ring(side: &Side, device: Handle) -> Result<Handle, &'static str> {
 ///
 /// A disk the crate no longer accepts, or a name it no longer numbers: a
 /// change in `ferrix-blkring` the boot then reports.
-fn hello(location: ferrix_blkring::Location) -> Result<Hello, &'static str> {
+pub(super) fn hello(location: ferrix_blkring::Location) -> Result<Hello, &'static str> {
     let device = Device::new(
         BLOCK_SIZE,
         CAPACITY,
@@ -571,7 +573,7 @@ fn hello(location: ferrix_blkring::Location) -> Result<Hello, &'static str> {
 /// The objects a HELLO carries, made in `side`: the ring VMO with its header
 /// written, a data VMO, and a port; with exactly the rights the protocol
 /// specifies when `reduced`, and as created otherwise.
-fn objects(side: &Side, reduced: bool) -> Result<[Handle; 3], &'static str> {
+pub(super) fn objects(side: &Side, reduced: bool) -> Result<[Handle; 3], &'static str> {
     let ring = side.handle(
         nr::VMO_CREATE,
         &[PAGE_SIZE],
@@ -624,7 +626,7 @@ fn objects(side: &Side, reduced: bool) -> Result<[Handle; 3], &'static str> {
 }
 
 /// Send `hello` with `handles` on `control`.
-fn send(
+pub(super) fn send(
     side: &Side,
     control: Handle,
     hello: &Hello,
@@ -689,7 +691,7 @@ fn receive(side: &Side, control: Handle) -> Result<(Message, u32), &'static str>
 }
 
 /// Require REFUSED with `wanted`, then the kernel's end to close.
-fn expect_refusal(
+pub(super) fn expect_refusal(
     side: &Side,
     control: Handle,
     wanted: Refusal,
@@ -712,7 +714,7 @@ fn expect_refusal(
 }
 
 /// Require READY carrying the completion port with `WRITE` alone.
-fn expect_ready(side: &Side, control: Handle) -> Result<(), &'static str> {
+pub(super) fn expect_ready(side: &Side, control: Handle) -> Result<(), &'static str> {
     match receive(side, control)? {
         (Message::Ready, 1) => {}
         (Message::Refused(reason), _) => return Err(refused_because(reason)),
@@ -751,7 +753,7 @@ fn refused_because(reason: u32) -> &'static str {
 }
 
 /// Require a call to be refused with exactly `wanted`.
-fn refused(
+pub(super) fn refused(
     result: Result<usize, Errno>,
     wanted: Errno,
     what: &'static str,

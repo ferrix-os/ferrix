@@ -1140,3 +1140,41 @@ seconds a page. The GC400 work under way is GLES2, below what Chrome's GPU
 path wants, so it does not help here soon. Memory is the risk: 512 MiB may be
 too little whatever is built.
 
+
+### 10.1 The SD card at run time: where it stands (2026-10-07, po10-chrome-b)
+
+The card is served by `sdmmc`, a ring-3 driver for the STM32MP157's SDMMC1
+behind the block ring (`src/user/system/native/drivers/block/stm32-sdmmc`,
+its logic in `src/lib/drivers/block/stm32-sdmmc`). The kernel publishes the
+controller as a device tree node (`TREE_STM32_SDMMC`) without writing a
+register: U-Boot left it clocked, out of reset, muxed and the card powered,
+and `platform/st/stm32mp1/sdmmc.rs` only reads the RCC to check that and to
+say the kernel clock's rate (99 MHz, PLL4's P output, on a DK board). devmgr
+starts the driver as a disk, `vda` when the board has no other; the GPT
+scan at the root switch publishes its partitions, and `mount -t btrfs
+/dev/vdaN` mounts a volume from one.
+
+* **No DMA.** The driver moves every word through the controller's FIFO
+  with hardware flow control and never turns the internal DMA on. That is
+  the driver's property, not the kernel's: nothing in front of SDMMC1
+  checks what a driver programs into it (`certification/VULNERABILITY-ANALYSIS.md`, V-03).
+* **Writes only to `ferrix-` partitions.** The driver reads the card's
+  GPT at start and serves a write only inside one partition whose name
+  begins `ferrix-`; the firmware partitions (`fsbl1`, `fsbl2`, `fip`),
+  `bootfs`, both tables and unpartitioned space answer `ReadOnly`. A card
+  with no such partition, or a table that does not check, is announced
+  read-only whole: the board's card today is.
+* **One tree disk.** A tree node's ring is named `DEVICE_NOT_PCI`, so a
+  machine serves one such disk at a time; `block_ring_create` refuses a
+  second tree node while the first holds the word, and
+  `interfaces/block_ring/tree_check.rs` checks it at every boot
+  (certification consultant po10-chrome-b-cert, design OK IF C1-C7, ledger
+  lines 478-480).
+* **Evidence.** Host tests against a register-level model of the
+  controller and a card (`ferrix-stm32-sdmmc`'s 22 tests, the overrun
+  without flow control and a DMA enable each shown to fail). No emulator
+  has this controller, so the card itself has only those: the board run
+  is `docs/BACKLOG.md`'s row, read-only first, a scratch partition after
+  the product owner's OK.
+* **Left:** high speed (50 MHz) and the internal DMA, each a step of its
+  own; a Chrome volume on the card is po10-chrome-a's.
