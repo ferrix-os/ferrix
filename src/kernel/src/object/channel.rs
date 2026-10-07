@@ -1152,10 +1152,18 @@ fn carries_endpoints(message: &ChannelMessage) -> bool {
         .any(|(object, _)| matches!(object, Object::Channel(_)))
 }
 
+/// DIAGNOSTIC (po10-obj): endpoints whose last reference went with
+/// interrupts masked.
+pub(crate) static MASKED_DROPS: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
 impl Drop for Endpoint {
     /// Close this side, tell the peer it is alone, and free what was queued
     /// and never read, one level at a time.
     fn drop(&mut self) {
+        if !crate::arch::interrupts_enabled() {
+            let _ = MASKED_DROPS.fetch_add(1, Ordering::Relaxed);
+        }
         let unread = self.take_unread();
         let peer = self.peer();
         // Under the survivor's inbox lock, the lock its registrations are

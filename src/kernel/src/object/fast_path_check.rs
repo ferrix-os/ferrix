@@ -181,6 +181,10 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         check_the_barriers_in_a_domain_and_across_two(on)?;
         check_a_queued_write_takes_the_park()?;
         check_the_reply_words()?;
+        if on {
+            diagnose_the_last_reference(LastDrop::Tail)?;
+            diagnose_the_last_reference(LastDrop::Done)?;
+        }
         report.cases = 11;
         if crate::smp::count() >= 2 {
             check_an_echo_on_another_processor(on)?;
@@ -703,6 +707,135 @@ fn check_a_filtered_call(on: bool) -> Result<(), &'static str> {
     }
     if on && moved(&before, Count::T2) < 2 {
         return Err("case 11: a filtered call never reached T2");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// DIAGNOSTIC (po10-obj): the parked caller's reference is the last one
+// ---------------------------------------------------------------------------
+
+/// How the parked caller is resumed in [`diagnose_the_last_reference`].
+#[derive(Clone, Copy, Debug)]
+enum LastDrop {
+    /// By the sink's reply through the fast path: the frame tail.
+    Tail,
+    /// By a general write on its end: the general continuation.
+    Done,
+}
+
+/// The late sink's end.
+static LATE_SINK: SpinLock<Option<Handle>> = SpinLock::new(None);
+/// Set when the late sink may answer.
+static RELEASE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A sink that reads one message, waits for [`RELEASE`], answers `"r"`
+/// through the fast path, and waits for what comes next.
+fn late_sink_in_the_process(_argument: usize) {
+    let taken = LATE_SINK.lock().take();
+    if let Some(handle) = taken {
+        *SUNK.lock() = Some(call(handle, nr::WRITE_READ_NOTHING, [0; 3]));
+        while !RELEASE.load(core::sync::atomic::Ordering::Acquire) {
+            crate::sched::sleep_for(POLL_NANOS);
+        }
+        let _ = call(handle, 1, [u64::from(b'r'), 0, 0]);
+    }
+    process::exit_current(0)
+}
+
+/// DIAGNOSTIC: a caller parked by the fast path whose handle another thread
+/// of its process closes (here: the table's entry removed and disposed, as
+/// `handle_close` does) while it is parked, so that its own reference is the
+/// endpoint's last; then resumed by `how`. Prints how many endpoints were
+/// dropped with interrupts masked meanwhile.
+fn diagnose_the_last_reference(how: LastDrop) -> Result<(), &'static str> {
+    for attempt in 0..8 {
+        let before = direct::counts();
+        let masked_before =
+            super::channel::MASKED_DROPS.load(core::sync::atomic::Ordering::Relaxed);
+        let cpu = trip_processor();
+        let (mine, theirs) =
+            Endpoint::pair().map_err(|_| "no memory for the diagnostic's channel")?;
+        let (sink_process, sink_handle) = holding(&theirs)?;
+        *SUNK.lock() = None;
+        RELEASE.store(false, core::sync::atomic::Ordering::Release);
+        let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+        let sink = match how {
+            LastDrop::Tail => {
+                *LATE_SINK.lock() = Some(sink_handle);
+                spawn_in(
+                    &sink_process,
+                    "diag late sink",
+                    late_sink_in_the_process,
+                    Some(cpu),
+                )?
+            }
+            LastDrop::Done => {
+                *SINK.lock() = Some(sink_handle);
+                spawn_in(&sink_process, "diag sink", sink_in_the_process, Some(cpu))?
+            }
+        };
+        wait_until(deadline, "diag: the sink never waited", || {
+            theirs.reader_waiting()
+        })?;
+        let (caller_process, handle) = holding(&mine)?;
+        *PARKED_ANSWER.lock() = None;
+        *PARKED.lock() = Some(handle);
+        GO.store(false, core::sync::atomic::Ordering::Release);
+        let caller = spawn_in(
+            &caller_process,
+            "diag parked",
+            parked_in_the_process,
+            Some(cpu),
+        )?;
+        GO.store(true, core::sync::atomic::Ordering::Release);
+        while !(SUNK.lock().is_some() && mine.reader_waiting()) {
+            if crate::timer::now_nanos() >= deadline {
+                return Err("diag: the caller never waited");
+            }
+            crate::sched::sleep_for(20 * POLL_NANOS);
+        }
+        let parked_by_fast_path = moved(&before, Count::Trip) != 0;
+        // Another thread of the caller's process closes the handle: the
+        // parked caller's own reference is now the last.
+        let (object, _) = caller_process
+            .with_handles(|table| table.remove(handle))
+            .map_err(|_| "diag: the caller's handle could not be closed")?;
+        super::dispose([object]);
+        drop(mine);
+        let masked_mid = super::channel::MASKED_DROPS.load(core::sync::atomic::Ordering::Relaxed);
+        match how {
+            LastDrop::Tail => RELEASE.store(true, core::sync::atomic::Ordering::Release),
+            LastDrop::Done => theirs
+                .write_small(b"m")
+                .map_err(|_| "diag: the message could not be written")?,
+        }
+        let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
+        wait_dead(&caller, bound, "diag: the parked caller was never resumed")?;
+        process::kill(&sink_process, KILLED_STATUS);
+        wait_dead(
+            &sink,
+            crate::timer::now_nanos().saturating_add(PATIENCE_NANOS),
+            "diag: the sink never ended",
+        )?;
+        drop(theirs);
+        drop(caller_process);
+        drop(sink_process);
+        let masked_after = super::channel::MASKED_DROPS.load(core::sync::atomic::Ordering::Relaxed);
+        crate::console::println!(
+            "  DIAG lastdrop {:?} attempt {}: parked by the fast path {}, trips {}, masked endpoint drops {} before the close-and-drop, {} after it (+{} at the resume), answer {:?}",
+            how,
+            attempt,
+            parked_by_fast_path,
+            moved(&before, Count::Trip),
+            masked_mid.wrapping_sub(masked_before),
+            masked_after.wrapping_sub(masked_mid),
+            masked_after.wrapping_sub(masked_mid),
+            PARKED_ANSWER.lock().take(),
+        );
+        if parked_by_fast_path {
+            return Ok(());
+        }
     }
     Ok(())
 }
