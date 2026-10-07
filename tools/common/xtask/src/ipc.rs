@@ -46,7 +46,9 @@ pub(crate) fn bench_ipc(args: &Args) -> Result<()> {
         args.pin = Some(PIN.to_owned());
     }
     let rounds = args.rounds.unwrap_or(3);
-    let (boots, reference) = if let Some(reference) = args.alternate.clone() {
+    let (boots, reference) = if !args.board_logs.is_empty() {
+        (board_boots(&args)?, Reference::None)
+    } else if let Some(reference) = args.alternate.clone() {
         alternate(&args, &reference, rounds)?
     } else if args.against_sel4 || args.against_redox {
         against(&args, rounds)?
@@ -71,14 +73,20 @@ fn write_record(args: &Args, rounds: u32, boots: Vec<Boot>, reference: Reference
         .into_iter()
         .next()
         .unwrap_or(crate::paths::Arch::X86_64);
-    let fingerprint = crate::hotpath::Fingerprint::of_this_host(arch, args)?;
+    let fingerprint = match args.board.as_deref() {
+        Some(board) if !args.board_logs.is_empty() => board_fingerprint(board, &boots)?,
+        _ => crate::hotpath::Fingerprint::of_this_host(arch, args)?,
+    };
     let root = crate::paths::workspace_root();
     let rounds = if matches!(reference, Reference::None) {
         1
     } else {
         rounds
     };
-    let configuration = record::ipc_configuration(args, rounds, args.alternate.as_deref());
+    let mut configuration = record::ipc_configuration(args, rounds, args.alternate.as_deref());
+    if let (Some(board), Some(processors)) = (args.board.as_deref(), board_processors(&boots)) {
+        record::set_board(&mut configuration, board, processors);
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     let log = std::env::var("FERRIX_HOTPATH_LOG")
         .ok()
@@ -105,6 +113,77 @@ fn write_record(args: &Args, rounds: u32, boots: Vec<Boot>, reference: Reference
         fingerprint.hw_hash
     );
     Ok(())
+}
+
+/// `--board-log`: each log one boot of a board that ran `/sbin/ipc-bench`
+/// at its shell, as `run_once` reads a QEMU boot. A log whose run did not
+/// finish (no `ipc-bench domain-call` line) is refused, not skipped.
+fn board_boots(args: &Args) -> Result<Vec<Boot>> {
+    if args.board.is_none() {
+        return Err(Error::new(
+            "--board-log needs --board, the board the logs are from",
+        ));
+    }
+    let mut boots = Vec::new();
+    for log in &args.board_logs {
+        let text = std::fs::read_to_string(log)
+            .map_err(|error| Error::new(format!("reading {log}: {error}")))?;
+        let lines: Vec<String> = text.lines().map(|line| line.trim().to_owned()).collect();
+        if field(&lines, "domain-call", "p50").is_none() {
+            return Err(Error::new(format!(
+                "{log}: no `ipc-bench domain-call` line"
+            )));
+        }
+        for line in lines.iter().filter(|line| line.contains("ipc-bench")) {
+            println!("  {log}: {line}");
+        }
+        boots.push(Boot { lines });
+    }
+    Ok(boots)
+}
+
+/// The processors a board's boots ran on, from the kernel's `cpus` line
+/// (`N described by firmware, M online`), the same in every boot or `None`.
+fn board_processors(boots: &[Boot]) -> Option<u64> {
+    let of = |boot: &Boot| {
+        boot.lines.iter().find_map(|line| {
+            let (_, rest) = line.split_once("described by firmware, ")?;
+            rest.split_whitespace().next()?.parse::<u64>().ok()
+        })
+    };
+    let first = of(boots.first()?)?;
+    boots
+        .iter()
+        .all(|boot| of(boot) == Some(first))
+        .then_some(first)
+}
+
+/// A board's fingerprint: its name, its processor count and the counter's
+/// rate as the kernel read them, and no virtual machine. The board is
+/// named, not probed: nothing runs on it but the image.
+fn board_fingerprint(board: &str, boots: &[Boot]) -> Result<crate::hotpath::Fingerprint> {
+    use crate::hotpath::json::Value;
+    let clock = boots
+        .first()
+        .and_then(|boot| {
+            boot.lines.iter().find_map(|line| {
+                let (_, rest) = line.split_once("clock    generic timer at ")?;
+                Some(rest.trim().to_owned())
+            })
+        })
+        .ok_or_else(|| Error::new("the board's log has no `clock    generic timer at` line"))?;
+    let processors = board_processors(boots)
+        .ok_or_else(|| Error::new("the board's logs do not agree on a processor count"))?;
+    let host = Value::object([
+        ("board", Value::str(board)),
+        ("counter", Value::str(clock)),
+        (
+            "topology",
+            Value::object([("processors", Value::int(processors))]),
+        ),
+    ]);
+    let vm = Value::object([("accelerator", Value::str("none: the board itself"))]);
+    Ok(crate::hotpath::Fingerprint::new(host, vm))
 }
 
 /// One boot of this tree's benchmark, its lines printed and answered.
@@ -652,5 +731,67 @@ mod other_tree_tests {
         let out = other_tree_args(&args(&["bench-ipc", "--alternate", "main"]));
         assert!(!out.contains(&"--init".to_owned()));
         assert!(!out.iter().any(String::is_empty));
+    }
+}
+
+#[cfg(test)]
+mod board_tests {
+    use super::{board_fingerprint, board_processors};
+    use crate::args::Args;
+    use crate::hotpath::record::Boot;
+
+    fn boot(processors: u64, p50: u64) -> Boot {
+        let lines = [
+            "19:20:01.100     0.40 |   clock    generic timer at 24.000 MHz".to_owned(),
+            format!(
+                "19:20:01.200     0.90 |   cpus     {processors} described by firmware, {processors} online, booted on 0 0x0"
+            ),
+            format!(
+                "19:20:09.000 ipc-bench domain-call n=20000 min=1 p50={p50} p90=1 p99=1 mean=1"
+            ),
+        ];
+        Boot {
+            lines: lines.to_vec(),
+        }
+    }
+
+    #[test]
+    fn the_board_flags_parse() {
+        let args = Args::parse(
+            [
+                "bench-ipc",
+                "--board",
+                "dk1",
+                "--board-log",
+                "a.log",
+                "--board-log",
+                "b.log",
+            ]
+            .iter()
+            .map(|word| (*word).to_owned()),
+        )
+        .unwrap();
+        assert_eq!(args.board.as_deref(), Some("dk1"));
+        assert_eq!(args.board_logs, ["a.log", "b.log"]);
+    }
+
+    #[test]
+    fn a_board_is_named_by_its_logs_and_not_by_this_host() {
+        let boots = [boot(2, 9000), boot(2, 9100)];
+        assert_eq!(board_processors(&boots), Some(2));
+        let one = board_fingerprint("stm32mp157d-dk1", &boots).unwrap();
+        let again = board_fingerprint("stm32mp157d-dk1", &boots[1..]).unwrap();
+        assert_eq!(
+            one.hw_hash, again.hw_hash,
+            "the figures must not move the hash"
+        );
+        let other = board_fingerprint("stm32mp157d-dk1", &[boot(1, 9000)]).unwrap();
+        assert_ne!(one.hw_hash, other.hw_hash, "the processor count must");
+    }
+
+    #[test]
+    fn boots_that_disagree_on_processors_have_no_count() {
+        assert_eq!(board_processors(&[boot(2, 1), boot(1, 1)]), None);
+        assert!(board_fingerprint("dk1", &[boot(2, 1), boot(1, 1)]).is_err());
     }
 }
