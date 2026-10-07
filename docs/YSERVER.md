@@ -20,9 +20,10 @@ document says how yserver becomes the X server between them:
 * **the tests**, which follow `test-foot` (§6);
 * **the slices and their points** (§7).
 
-It is not GPU acceleration for X clients. hyprix has no
-`zwp_linux_dmabuf_v1`, so frames reach it as `wl_shm` copies, and yserver
-draws on the CPU through lavapipe. That is enough to show and use a window.
+It is not GPU acceleration for X clients. yserver hands hyprix its frames
+as `wl_shm` copies -- hyprix has had `zwp_linux_dmabuf_v1` since 2026-10-07
+(`docs/GPU.md` §3.13), which yserver does not use yet -- and draws on the
+CPU through lavapipe. That is enough to show and use a window.
 It is not fast. §4.3 says where the dmabuf path attaches later.
 
 It is not a window manager either. yserver keeps no decorations and does no
@@ -191,8 +192,8 @@ step if a large window turns out to be slow. The headless renderer's own
 composition of the root is left as it was. Under a Manual redirect the
 windows take no part in it.
 
-When hyprix gains `zwp_linux_dmabuf_v1` (stage 19's remainder), the backing's
-existing dmabuf export (`kms/vk/dri3.rs`) replaces the readback, and a GPU
+Now that hyprix has `zwp_linux_dmabuf_v1` (version 3, `docs/GPU.md` §3.13), the backing's
+existing dmabuf export (`kms/vk/dri3.rs`) can replace the readback, and a GPU
 render node replaces lavapipe. Neither changes the backend's shape.
 
 ### 4.4 Input and the cursor

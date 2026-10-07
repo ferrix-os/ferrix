@@ -639,9 +639,11 @@ package FerrixRoadmap {
              * counted 40 for is yserver, a Rust X11 server with a rootless
              * Wayland backend of Ferrix's own, 36 points, done on
              * 2026-09-29 (docs/YSERVER.md). The rest
-             * of the GPU road -- zwp_linux_dmabuf and a Mesa on ferrousli --
-             * is for clients that render for themselves, not for the
-             * compositor.
+             * of the GPU road is for clients that render for themselves, not
+             * for the compositor: zwp_linux_dmabuf_v1 in hyprix and a
+             * GBM-shaped allocator, so a client's GPU buffer is shown where
+             * it lies, done on 2026-10-07 (docs/GPU.md 3.13), and a Mesa on
+             * ferrousli, which is left.
              *
              * Gears, the customer's order of 2026-09-24 (docs/GPU.md 6):
              * vkgears through Venus -- Mesa's Vulkan driver in the guest,
