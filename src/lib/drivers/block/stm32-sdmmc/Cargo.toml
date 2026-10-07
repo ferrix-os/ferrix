@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-stm32-sdmmc"
+description = "An STM32MP15's SDMMC controller and the SD card behind it as logic over registers: the card's bring-up, block reads and writes through the FIFO, and the rule that keeps writes inside the card's own partitions"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

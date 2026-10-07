@@ -305,7 +305,9 @@ type, the next 4 its length. Handles ride in the message's handle array.
 28  4  device_flags      bit 0 READ_ONLY, bit 1 FLUSH, bit 2 FUA
 32  8  data_vmo_size     bytes
 40  4  location          the device's PCI address: segment in bits 31:16,
-                         bus in 15:8, devfn in 7:0
+                         bus in 15:8, devfn in 7:0; or, for a device tree
+                         node (an STM32MP15's SD card), 0xFFFF_FFFF,
+                         `DEVICE_NOT_PCI`, which names one such disk
 44  20 serial            virtio-blk VIRTIO_BLK_T_GET_ID bytes; all zero if the
                          device does not answer
 64  8  name              the node name devmgr chose, ASCII, NUL-padded:
@@ -337,6 +339,14 @@ HELLO is **refused** when:
 * `location` names a device another accepted driver already serves — the
   kernel's check that two drivers cannot claim one disk.
 
+A device tree node has no PCI address, so its disk is named by
+`DEVICE_NOT_PCI`, and that one word names one disk: `block_ring_create`
+answers `ALREADY_BOUND` for a second tree node while another holds the word
+-- its ring served, or its disk parked for its next driver (§6.3) -- since
+parking and the HELLO check key on the word alone. Any other node that is
+not a PCI function (a `virtio,mmio` transport) gets `INVALID_ARGS`.
+`interfaces/block_ring/tree_check.rs` checks both at every boot.
+
 ### 6.2 kernel → driver: READY (type 2) or REFUSED (type 3)
 
 READY carries `[kernel completion port (WRITE)]`. After READY the driver may
@@ -352,8 +362,9 @@ driver resets the device and exits. The kernel sends REFUSED for:
 header, rights and device refusals above): 7 `Name` — the name is not `vd` and
 1 to 3 lowercase letters followed only by NUL; 8 `NameInUse` — a node of that
 name is already published; 9 `LocationInUse` — another accepted driver already
-serves that PCI location; 10 `WrongLocation` — `location` is not the PCI address
-of the device node the ring was created for. 7 is checked by `ferrix-blkring`'s
+serves that location; 10 `WrongLocation` — `location` is not the PCI address
+of the device node the ring was created for, or `DEVICE_NOT_PCI` for a device tree
+node's ring. 7 is checked by `ferrix-blkring`'s
 pure validation; 10, 8 and 9 need what only the kernel knows — which node the
 ring is bound to, and the registry — so the ring glue reports them. 8 is what
 the devfs block registry's `NameInUse` refusal becomes.

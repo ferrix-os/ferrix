@@ -254,6 +254,19 @@ pub const TREE_STM32_GPU: u16 = 3;
 /// nothing in `device`, and its interrupt as vector 0. Its memory is not
 /// snooped, so the driver pins what it shares with `PIN_COHERENT`.
 pub const TREE_GS201_DWC3: u16 = 4;
+/// [`DeviceInfo::device_id`] of an STM32MP15 board's SDMMC1, the controller
+/// of a DK board's microSD slot: its registers in `common`, nothing in
+/// `device`, and its interrupt as vector 0. It is served over a block ring,
+/// whose HELLO names it by the location [`DEVICE_NOT_PCI`]; a machine has
+/// at most one such disk at a time. The kernel writes none of its registers
+/// and touches none of its clocks: firmware left it running. Its own
+/// internal DMA writes memory at addresses its registers name, and nothing
+/// in front of it checks them, so a driver that turned it on would be
+/// trusted with all of memory; the driver in this tree leaves it off and
+/// moves every word through the FIFO, which is that driver's property and
+/// not one the kernel holds. The node's clock, through `device_clock`, says
+/// the controller's kernel clock rate and refuses `CLOCK_SET`.
+pub const TREE_STM32_SDMMC: u16 = 5;
 /// How many input control channels one USB host's node may hold at once.
 pub const USB_INPUT_FUNCTIONS: usize = 8;
 
