@@ -1873,6 +1873,45 @@ fn model_weight(jobs: &[ModelJob], index: u32, base: u32, extra: i64) -> u64 {
     carried_weight_with(base, levels, extra)
 }
 
+/// One round's jobs and tasks: a forest of up to eight jobs, each one's
+/// parent an earlier job or none, so depths run from 1 to as many jobs as
+/// there are; other tasks counted where they run, none at all every fourth
+/// round; the caller's job and weight, counted; the peer's job (the
+/// caller's half the time) and weight (the caller's half the time).
+fn model_round(random: &mut Xorshift, round: u32) -> (Vec<ModelJob>, (u32, u32), (u32, u32)) {
+    let count = 1 + (random.next() % 8) as u32;
+    let mut jobs: Vec<ModelJob> = (0..count)
+        .map(|index| ModelJob {
+            parent: (index > 0 && !random.next().is_multiple_of(5))
+                .then(|| (random.next() % u64::from(index)) as u32),
+            weight: 1 + (random.next() % 200_000) as u32,
+            load: 0,
+            contributed: 0,
+        })
+        .collect();
+    if !round.is_multiple_of(4) {
+        for _ in 0..(random.next() % 6) {
+            let at = (random.next() % u64::from(count)) as u32;
+            model_adjust(&mut jobs, at, 1 + (random.next() % 90_000) as i64);
+        }
+    }
+    let weight = |random: &mut Xorshift| 1 + (random.next() % 90_000) as u32;
+    let caller_job = (random.next() % u64::from(count)) as u32;
+    let peer_job = if random.next().is_multiple_of(2) {
+        caller_job
+    } else {
+        (random.next() % u64::from(count)) as u32
+    };
+    let caller_base = weight(random);
+    let peer_base = if random.next().is_multiple_of(2) {
+        caller_base
+    } else {
+        weight(random)
+    };
+    model_adjust(&mut jobs, caller_job, i64::from(caller_base));
+    (jobs, (caller_job, caller_base), (peer_job, peer_base))
+}
+
 /// The direct switch's plan and settlement, the kernel's own functions,
 /// give what the general sequence gives: the peer's join (`adjust` by its
 /// weight), the caller's charge and the peer's weight read with it counted,
@@ -1891,41 +1930,9 @@ fn the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them() {
     let mut folds = 0_u32;
     let mut apart = 0_u32;
     for round in 0..40_000_u32 {
-        // A forest: each job's parent an earlier job, or none, so depths
-        // run from 1 to as many jobs as there are.
-        let count = 1 + (random.next() % 8) as u32;
-        let mut jobs: Vec<ModelJob> = (0..count)
-            .map(|index| ModelJob {
-                parent: (index > 0 && random.next() % 5 != 0)
-                    .then(|| (random.next() % u64::from(index)) as u32),
-                weight: 1 + (random.next() % 200_000) as u32,
-                load: 0,
-                contributed: 0,
-            })
-            .collect();
-        // Other tasks, counted where they run; none at all a quarter of the
-        // time.
-        if round % 4 != 0 {
-            for _ in 0..(random.next() % 6) {
-                let at = (random.next() % u64::from(count)) as u32;
-                model_adjust(&mut jobs, at, 1 + (random.next() % 90_000) as i64);
-            }
-        }
-        let weight = |random: &mut Xorshift| 1 + (random.next() % 90_000) as u32;
-        let caller_job = (random.next() % u64::from(count)) as u32;
-        let peer_job = if random.next() % 2 == 0 {
-            caller_job
-        } else {
-            (random.next() % u64::from(count)) as u32
-        };
-        let caller_base = weight(&mut random);
-        let peer_base = if random.next() % 2 == 0 {
-            caller_base
-        } else {
-            weight(&mut random)
-        };
-        // The caller runs, counted.
-        model_adjust(&mut jobs, caller_job, i64::from(caller_base));
+        // The caller runs, counted; the peer is about to join.
+        let (jobs, (caller_job, caller_base), (peer_job, peer_base)) =
+            model_round(&mut random, round);
 
         // The general sequence.
         let mut general = jobs.clone();
