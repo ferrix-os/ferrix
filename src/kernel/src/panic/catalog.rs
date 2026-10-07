@@ -924,6 +924,29 @@ pub(crate) static SECONDARY_START: Explanation = Explanation {
           docs/ROADMAP.md stage 4",
 };
 
+/// For x86-64's bring-up, when a processor's record does not hold the
+/// tables asking the processor answers.
+pub(crate) static TABLES_NOT_NOTED: Explanation = Explanation {
+    code: "FX-0409",
+    title: "a processor's record does not hold its GDT and RSP0",
+    meaning: "On x86-64 the switch finds a processor's thread-local slots and its TSS's `RSP0` \
+              through the processor's record rather than by `SGDT` and `STR` at every switch \
+              (`docs/OPAQUE-KERNEL.md` §9.11, Q4). `gdt::note_tables` puts the processor's own \
+              answer there at each load of its GDT and task register made with a record \
+              installed, and as the record is installed. At each processor's bring-up, after its \
+              last note, the record is compared with a fresh answer; this stop means they differ \
+              or one is zero, so the switch would write `RSP0` or the slots through a wrong \
+              address, or ask the processor at every switch after all.",
+    causes: &[
+        "A load of `GDTR` or `TR` made with a record installed and not followed by \
+               `gdt::note_tables`.",
+        "`set_cpu_local` or `gdt::load` no longer notes the tables, or notes them before the \
+               load.",
+    ],
+    see: "src/kernel/src/arch/x86_64/gdt.rs note_tables; src/kernel/src/arch/x86_64/gdt/check.rs \
+          require_tables_noted; docs/OPAQUE-KERNEL.md §9.11",
+};
+
 /// For `secondary_start` in `arch/x86_64/smp.rs`, when `gdt::init_secondary` fails.
 #[allow(
     dead_code,
@@ -3199,6 +3222,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &PROCESSOR_DISCOVERY,
     &SECONDARY_START,
     &SECONDARY_GDT,
+    &TABLES_NOT_NOTED,
     &SECONDARY_NO_RECORD,
     &SECONDARY_RECORD_MISMATCH,
     &PROCESSORS_MISSING,

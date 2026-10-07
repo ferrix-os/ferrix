@@ -449,6 +449,13 @@ pub(crate) unsafe fn note_tables(cpu: &PerCpu) {
     cpu.privilege_stack.store(rsp0, Ordering::Relaxed);
 }
 
+/// Whether this processor's task register names a TSS: false on a
+/// secondary until `init_secondary` loads one.
+pub(crate) fn task_register_loaded() -> bool {
+    // SAFETY: (ENTRY) reads the task register; no memory is touched.
+    unsafe { cpu::read_task_register() } != 0
+}
+
 /// This processor's GDT, as the processor reports it, if it is one of the
 /// tables this module built: long enough to hold every slot.
 fn live_table() -> Option<*mut u64> {

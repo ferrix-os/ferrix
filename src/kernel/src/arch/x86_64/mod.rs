@@ -114,6 +114,12 @@ pub(crate) unsafe fn set_cpu_local(address: u64) {
     // SAFETY: (ENTRY) this processor's own record; bring-up runs with
     // interrupts masked.
     unsafe { gdt::note_tables(record) };
+    // The boot processor's tables were loaded before its record existed, so
+    // this was its last note; a secondary's task register is still null here,
+    // and it is held to its record after `init_secondary` instead (Q4-C1).
+    if gdt::task_register_loaded() {
+        gdt::check::require_tables_noted(record);
+    }
 
     // `SYSCALL` on this processor, now that `GS` names its record -- which
     // `syscall::init` parks for the first `swapgs`, and which the trampoline

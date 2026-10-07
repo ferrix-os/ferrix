@@ -768,8 +768,11 @@ pub(crate) fn debug_exit() {
 /// (ENTRY) `pointer` must be the address of a `limit`/`base` pair describing a valid
 /// GDT that stays alive for as long as it is loaded. The CPU keeps using it for
 /// every privilege transition, so a GDT on a stack that goes away is a fault
-/// with no obvious cause.
-pub(crate) unsafe fn load_gdt(pointer: u64) {
+/// with no obvious cause. A load made while this processor's per-CPU record
+/// is installed must be followed by `gdt::note_tables`, before anything
+/// switches tasks: the switch reaches the thread-local slots through the
+/// record (Q4, `docs/OPAQUE-KERNEL.md` §9.11).
+pub(super) unsafe fn load_gdt(pointer: u64) {
     // SAFETY: (ENTRY) the caller guarantees the operand describes a live, valid table.
     unsafe {
         asm!("lgdt [{}]", in(reg) pointer, options(readonly, nostack, preserves_flags));
@@ -813,8 +816,10 @@ pub(crate) unsafe fn triple_fault() -> ! {
 ///
 /// (ENTRY) `selector` must name an available 64-bit TSS descriptor in the current GDT.
 /// Loading one that is already busy, or that is not a TSS at all, is a general
-/// protection fault.
-pub(crate) unsafe fn load_tss(selector: u16) {
+/// protection fault. As for [`load_gdt`], a load made while this processor's
+/// per-CPU record is installed must be followed by `gdt::note_tables`: the
+/// switch writes `RSP0` through the record.
+pub(super) unsafe fn load_tss(selector: u16) {
     // SAFETY: (ENTRY) the caller guarantees the selector names an available TSS.
     unsafe {
         asm!("ltr {0:x}", in(reg) selector, options(nostack, preserves_flags));
