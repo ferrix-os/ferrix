@@ -124,12 +124,14 @@ pub(crate) fn install() {
 /// Cheap, and asked on every way back, so that the registers are only copied
 /// out into an [`arch::UserContext`] when something will use them.
 pub(crate) fn needs_attention() -> bool {
-    thread::current().is_some_and(|thread| {
+    // ABLATION (po10-pipe abl1): borrowed, no count raised.
+    thread::with_current(|thread| {
         let process = thread.process();
-        process.must_leave(&thread)
+        process.must_leave(thread)
             || process.is_stopped()
             || thread.with_signals(|shared, own| signal::needs_attention(shared, own))
     })
+    .unwrap_or(false)
 }
 
 /// Act on everything [`needs_attention`] found, with `context` the registers
