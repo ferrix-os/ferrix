@@ -54,13 +54,6 @@
       "purpose": "ARMv7-A: CNTKCTL.PL0VCTEN set, physical counter and timers closed to PL0, on every processor, so bench-ipc runs on the DK1 (po10-dk1-cert's verdict, ledger 2026-10-07 line 449, conditions (a)-(i))"
     },
     {
-      "ids": ["L.object.179"],
-      "owner": "po10-obj",
-      "branch": "po10/f-endpoint-drop",
-      "date": "2026-10-07",
-      "purpose": "F-65: fast_write_read lets go of its endpoint reference only with interrupts open (po10-obj's consultant, ledger 2026-10-07 line 520, E8; L.object.171-178 stay po9-obj's until cut 3 lands)"
-    },
-    {
       "ids": ["L.smp.33-34"],
       "owner": "po10-selfhost",
       "branch": "po10-selfhost/fx0001",

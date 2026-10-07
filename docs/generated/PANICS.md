@@ -60,6 +60,7 @@ Causes are listed most likely first.
 | [FX-0532](#fx-0532) | the fast path's direct switch involved the idle task (A4) |
 | [FX-0533](#fx-0533) | the fast path went the general way with interrupts masked or a lock held |
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
+| [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1141,6 +1142,30 @@ twice or filed twice, and would be run or woken twice.
 
 See: src/kernel/src/sched/task.rs SlotCell; src/kernel/src/sched/queue.rs;
 docs/OPAQUE-KERNEL.md §9.7.
+
+<a id="fx-0535"></a>
+
+## FX-0535 — a channel end was closed with interrupts masked
+
+Closing a channel end -- letting go of its last reference -- takes the
+survivor's inbox and observer locks, wakes the reader parked or listed there (a
+run-queue lock), disposes of the messages never read and frees the end. None of
+that may run in a span with interrupts masked, which waits on no lock
+(`docs/OPAQUE-KERNEL.md` §9.7 part 2). The fast path of `channel_write_read`
+holds a reference to the caller's end across its park with interrupts masked,
+and another thread of the caller's process may close the handle meanwhile, so
+that reference can be the last (finding F-65): it is let go with interrupts
+open. This stop means some path let go of an end's last reference masked.
+
+1. `syscall::native::fast_write_read` let go of the caller's endpoint before
+   `release_unmasked` opened interrupts, or the general continuation after it
+   masked them again.
+2. Another path dropped an `Arc<Endpoint>` under a masked span or from an
+   interrupt handler.
+
+See: src/kernel/src/object/channel.rs Endpoint::drop;
+src/kernel/src/syscall/native.rs release_unmasked;
+docs/certification/FINDINGS.md F-65; docs/OPAQUE-KERNEL.md §9.7 part 2.
 
 <a id="fx-0601"></a>
 

@@ -1622,6 +1622,15 @@ which opens interrupts, makes the `may_block` check, lets go and masks
 again. `Endpoint::drop` stops with FX-0535 on a masked close
 (`L.object.179`). It is the only counted reference the masked span lets
 go: the peer is a borrowed half, and the parked record's task moves.
+What this gives a masked branch (os-76's ledger 524, V2-22): nothing is
+allocated or freed and no lock is waited for while masked, since the
+release runs with interrupts open; the peer's `PEER_CLOSED` is not
+deferred -- the end closes at the release itself, as soon as the caller
+runs again after its park, which is when the general path's waiter lets
+go of its own reference at its call's end, so the delay is the same as
+the general path's and bounded by the caller's resume; and stage 9's case
+16 makes the close on both resumes, the frame tail's and the
+continuation's.
 
 **Every lock it takes**, directly or through what it calls (condition 5).
 Each is either taken with `try_lock`, or is a *leaf*: a lock under which
