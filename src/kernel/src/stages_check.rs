@@ -1542,8 +1542,7 @@ pub(super) fn check_one_shot(interval_nanos: u64) -> Result<(), &'static str> {
     timer::after(interval_nanos);
 
     let mut spins: u64 = 0;
-    while timer::ticks() == before {
-        arch::wait_for_interrupt();
+    while !wait_unless(|| timer::ticks() != before) {
         spins = spins.saturating_add(1);
         if spins > 10_000_000 {
             timer::stop();
@@ -1633,9 +1632,7 @@ fn one_deadline_twice() -> Result<u64, &'static str> {
     timer::after_from(SHORT_ARM_NANOS, start);
     <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
     let give_up = start.saturating_add(LONG_ARM_NANOS + ARRIVAL_NANOS);
-    while timer::ticks() == before && timer::now_nanos() < give_up {
-        arch::wait_for_interrupt();
-    }
+    while !wait_unless(|| timer::ticks() != before || timer::now_nanos() >= give_up) {}
     if timer::ticks() == before {
         return Err("a 2 ms one-shot asked for twice did not fire");
     }
@@ -1658,9 +1655,7 @@ fn short_fires_in_time(arms: &[u64]) -> Option<u64> {
     }
     <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
     let give_up = start.saturating_add(LONG_ARM_NANOS + ARRIVAL_NANOS);
-    while timer::ticks() == before && timer::now_nanos() < give_up {
-        arch::wait_for_interrupt();
-    }
+    while !wait_unless(|| timer::ticks() != before || timer::now_nanos() >= give_up) {}
     let took = timer::now_nanos().saturating_sub(start);
     timer::stop();
     (timer::ticks() != before && took <= SHORT_ARM_NANOS + ARRIVAL_NANOS).then_some(took / 1000)
@@ -1995,4 +1990,25 @@ pub(super) fn check_no_early_window_wraps(memory: &mut EarlyMemory) -> Result<()
         return Err("a refused early device window that wraps left a mapping behind");
     }
     Ok(())
+}
+
+/// Wait for an interrupt unless `done` holds already: whether it held.
+/// Returns with interrupts unmasked, as its callers wait with them.
+///
+/// `done` is asked with interrupts masked, and the wait is
+/// [`arch::wait_for_work`], which unmasks them and waits with no gap
+/// between. A plain look and then `wait_for_interrupt` can lose the
+/// one-shot it waits for: the timer fires between the two, its tick is
+/// counted there, and the wait sleeps on with nothing left to wake it, a
+/// boot stopped with no panic. Seen once, 2026-10-07, in the skipped-arm
+/// check on x86-64 under TCG at a load of about 12
+/// (`logs/queue/batch-20261007T145820Z-9.log` on nazuna).
+fn wait_unless(done: impl Fn() -> bool) -> bool {
+    let saved = <arch::Irq as ferrix_sync::IrqControl>::disable();
+    if done() {
+        <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
+        return true;
+    }
+    arch::wait_for_work();
+    false
 }
