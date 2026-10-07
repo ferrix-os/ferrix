@@ -515,5 +515,25 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = "sched::work::fast_path_hook";
         }
+        requirement <'L.sched.63'> aTaskSlotIsOneAtomicCell : ItemLowLevel {
+            attribute :>> statement = "Each of a task's two slots shall be held in
+                one atomic cell: taking it shall swap the cell with empty and answer
+                the node only to that swap, giving it back shall be a
+                compare-exchange from empty that stops the machine with FX-0534 when
+                the cell is not empty, asking whether it is held shall be one load,
+                and the task's drop shall free a node the cell holds; nothing shall
+                be allocated by any of them.";
+            attribute :>> criterion = "The loom model of the cell finds no
+                interleaving of two takers, a give-back and a look where two
+                holders have the node or a node is lost, and fails both its controls
+                (a take by a load and a store; a give-back by a plain store); a slot
+                taken apart and put together serves a queue as the same node (the
+                ferrix-sched host test).";
+            attribute :>> parent = ("H.SCHED.13", "H.FAIL.1");
+            attribute :>> unit = ("sched::task::Task::take_run_slot",
+                "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
+                "sched::task::Task::return_sleep_slot", "sched::task::Task::holds_slots",
+                "sched::task::Task::holds_sleep_slot");
+        }
     }
 }

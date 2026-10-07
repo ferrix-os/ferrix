@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 127 | 76 | 51 |
-| Low (`L.*`) | 839 | 569 | 270 |
+| Low (`L.*`) | 840 | 570 | 270 |
 
-1742 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1747 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1744 |
-| Accessors, covered by the requirement they serve | 871 |
+| Named by a low-level requirement | 1749 |
+| Accessors, covered by the requirement they serve | 869 |
 | Check code in a product file | 73 |
-| Named by none | 891 |
+| Named by none | 894 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -635,6 +635,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.60` | nothing_due_here shall answer true only when the running task's pending-work word is clear, no decision is asked of this processor and no move between jobs is unseen. | Case 14, the continuation's kill and case 15's signal leave through the general branch and act on their bit. | H.OBJ.18 | `sched::nothing_due_here`, `sched::work::peek` | `src/kernel/src/object/fast_path_check.rs::check_a_parked_caller_woken_by` | not built | not built | not built |
 | `L.sched.61` | The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits. | test-ipc-equiv requires trips with the fast path on and every count zero with it off. | H.OBJ.18 | `sched::direct::count`, `sched::direct::counts`, `fastpath::report_counts` | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | xtask gate | xtask gate | xtask gate |
 | `L.sched.62` | The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908. | Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control). | H.OBJ.18 | `sched::work::fast_path_hook` | `src/kernel/src/object/fast_path_check.rs::check_an_end_in_the_last_looks_window` | not built | not built | not built |
+| `L.sched.63` | Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them. | The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test). | H.SCHED.13, H.FAIL.1 | `sched::task::Task::take_run_slot`, `sched::task::Task::return_run_slot`, `sched::task::Task::take_sleep_slot`, `sched::task::Task::return_sleep_slot`, `sched::task::Task::holds_slots`, `sched::task::Task::holds_sleep_slot` | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host test | host test | host test |
 
 ### Discovery
 
@@ -2056,6 +2057,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/paging/src/vtd/tests.rs::interrupts_are_isolated_only_when_every_unit_blocks` | host | L.iommu.55 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::irta_holds_the_table_in_xapic_format_with_256_entries` | host | L.iommu.50 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_queue_registers_name_slots_of_sixteen_bytes` | host | L.iommu.47 |
+| `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host | L.sched.63 |
 | `src/lib/kernel/sched/src/tests.rs::hand_over_is_the_general_sequence` | host | L.sched.55, H.SCHED.13 |
 | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host | L.sched.1 |
 | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host | L.object.160 |

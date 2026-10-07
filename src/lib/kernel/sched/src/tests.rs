@@ -1750,3 +1750,39 @@ fn the_narrow_arithmetic_is_the_wide_arithmetic() {
         );
     }
 }
+
+/// A slot taken apart into its node and put together again
+/// (`Slot::into_box`, `Slot::from_box`, the kernel's `SlotCell`) is the same
+/// node and serves a queue as one never taken apart: enqueued, picked and
+/// handed back, through a round trip at each step.
+///
+/// Verifies: L.sched.63
+#[test]
+fn a_slot_taken_apart_and_put_together_serves_a_queue() {
+    let config = Config {
+        slice_ns: 1_000_000,
+    };
+    let mut queue: RunQueue<u32> = RunQueue::new(config).expect("a queue");
+    let slot = Slot::<u32>::new().expect("a slot");
+    let node = slot.into_box();
+    let address = core::ptr::from_ref(&*node);
+    let slot = Slot::from_box(node);
+    queue
+        .enqueue(1, 10, EntityState::new(NICE_0_WEIGHT), slot)
+        .map_err(|_| ())
+        .expect("enqueued");
+    assert_eq!(queue.pick_next().copied(), Some(10));
+    let (id, payload, _, slot) = queue.remove_curr().expect("it ran");
+    assert_eq!((id, payload), (1, 10));
+    let node = slot.into_box();
+    assert!(
+        core::ptr::eq(address, &raw const *node),
+        "the node a queue gave back was not the one it was lent"
+    );
+    let slot = Slot::from_box(node);
+    queue
+        .enqueue(1, 11, EntityState::new(NICE_0_WEIGHT), slot)
+        .map_err(|_| ())
+        .expect("enqueued again");
+    assert_eq!(queue.pick_next().copied(), Some(11));
+}

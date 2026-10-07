@@ -59,6 +59,7 @@ Causes are listed most likely first.
 | [FX-0531](#fx-0531) | a reader was parked beside a message or on a closed end (A2) |
 | [FX-0532](#fx-0532) | the fast path's direct switch involved the idle task (A4) |
 | [FX-0533](#fx-0533) | the fast path went the general way with interrupts masked or a lock held |
+| [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1114,6 +1115,26 @@ masked or under a spin lock (`docs/OPAQUE-KERNEL.md` §9.7, condition 3).
 
 See: src/kernel/src/syscall/native.rs fast_write_read;
 src/kernel/src/arch/x86_64/syscall.rs; docs/OPAQUE-KERNEL.md §9.7 part 2.
+
+<a id="fx-0534"></a>
+
+## FX-0534 — a task's run or sleep slot was given back while it held one
+
+A task owns two nodes, its slots, which a run queue, a sleeper set or the
+reaper's list borrows while it holds the task and gives back as it lets it go
+(finding F-23: queueing allocates nothing). Each slot is one atomic cell, so
+that taking it, giving it back and asking whether it is held are single atomic
+operations and need no lock (`docs/OPAQUE-KERNEL.md` §9.7). Only the holder that
+took a slot gives it back, so a cell is empty whenever a slot comes back. One
+that is not means two holders thought they held the task: the task was queued
+twice or filed twice, and would be run or woken twice.
+
+1. A queue, sleeper set or the reaper gave back a slot it did not take, or gave
+   one back twice.
+2. A path took a task out of a queue or set without its slot and filed it again.
+
+See: src/kernel/src/sched/task.rs SlotCell; src/kernel/src/sched/queue.rs;
+docs/OPAQUE-KERNEL.md §9.7.
 
 <a id="fx-0601"></a>
 

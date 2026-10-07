@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "3427b0e5838b77c8d8f155b1c2907fd10393db66c4bec7b1a778789c5f118c5f",
+  "digest": "e9c36171f9162e1c8cc7a98203de155f928acbcd41f539d7a9f40e01ed2cef2c",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 135,
-    "elements": 6523,
+    "elements": 6528,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -35433,6 +35433,63 @@
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 516
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aTaskSlotIsOneAtomicCell",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
+              "kind": "requirement",
+              "shortName": "L.sched.63",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 518
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 525
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test).\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 531
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.SCHED.13\", \"H.FAIL.1\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 532
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::task::Task::take_run_slot\", \"sched::task::Task::return_run_slot\", \"sched::task::Task::take_sleep_slot\", \"sched::task::Task::return_sleep_slot\", \"sched::task::Task::holds_slots\", \"sched::task::Task::holds_sleep_slot\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 536
                   }
                 }
               ]
