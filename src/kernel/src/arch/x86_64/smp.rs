@@ -122,6 +122,11 @@ static BOOT_CR4: AtomicU64 = AtomicU64::new(0);
 // `EFER.LME` already on — rather than by way of protected mode. The far jump
 // is what enters 64-bit code: until it, the processor runs the 16-bit segment
 // it woke up in, through the identity map.
+//
+// Its `lgdtl` loads the start-up GDT before this processor has a per-CPU
+// record, so no `gdt::note_tables` is owed for it (Q4): `set_cpu_local` notes
+// it as zero, and `init_secondary`'s load replaces it and notes the real
+// tables.
 core::arch::global_asm!(
     r#"
 .pushsection .rodata.ferrix_trampoline, "a"
@@ -435,6 +440,15 @@ extern "C" fn secondary_start(record: u64) -> ! {
             crate::panic::catalog::SECONDARY_GDT,
             "a secondary processor could not build its GDT: {problem}"
         );
+    }
+    // Its last note was `init_secondary`'s: from here its record answers as
+    // asking it would (Q4, the consultant's Q4-C1).
+    match crate::smp::this_cpu() {
+        Some(cpu) => super::gdt::check::require_tables_noted(cpu),
+        None => crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_NO_RECORD,
+            "a secondary processor had no record after building its GDT"
+        ),
     }
     apic::init_this_cpu();
     crate::smp::secondary_main(record)
