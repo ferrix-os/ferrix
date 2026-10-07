@@ -52,13 +52,6 @@
       "branch": "po10/f-endpoint-drop",
       "date": "2026-10-07",
       "purpose": "F-65: fast_write_read lets go of its endpoint reference only with interrupts open (po10-obj's consultant, ledger 2026-10-07 line 520, E8; L.object.171-178 stay po9-obj's until cut 3 lands)"
-    },
-    {
-      "ids": ["L.smp.33-34"],
-      "owner": "po10-selfhost",
-      "branch": "po10-selfhost/fx0001",
-      "date": "2026-10-07",
-      "purpose": "FX-0001 under load: a late answer to a shootdown or grace period is waited for and counted, the machine stopped only past a 10 s stuck bound; the late answers reported only after the turn is given back (po10-selfhost-cert's verdict, ledger 2026-10-07 line 455, C1-C10)"
     }
   ]
 }

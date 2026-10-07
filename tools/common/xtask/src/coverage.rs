@@ -227,8 +227,9 @@ impl Gate {
 /// statements against it. Left out, and why:
 ///
 /// * `test-seat` and `test-compositor`: the plugin slows TCG enough that the
-///   first misses its redraw and the second trips the TLB shootdown's bound
-///   (`FERRIX-PANIC processor 0 never flushed its TLB for a shootdown`).
+///   first misses its redraw and the second tripped the TLB shootdown's
+///   bound (`FERRIX-PANIC processor 0 never flushed its TLB for a shootdown`)
+///   while a wait had one bound; not run since it has a late and a stuck one.
 ///   Both pass under TCG without it. A failing run is not coverage evidence.
 /// * `test-foot`, `test-video`, `test-vkgears`, `test-rustc`, `test-chrome`
 ///   and `test-selfhost`: a GL host, ports or volumes fetched from outside

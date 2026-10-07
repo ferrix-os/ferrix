@@ -1296,70 +1296,70 @@
     },
     {
       "file": "main.rs",
-      "lines": "1326",
+      "lines": "1353",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1396",
+      "lines": "1423",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1403",
+      "lines": "1430",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1428",
+      "lines": "1455",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1501",
+      "lines": "1528",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1578",
+      "lines": "1605",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1586-1587",
+      "lines": "1613-1614",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1636",
+      "lines": "1663",
       "category": "absent-hardware",
       "match": "if memory.map_framebuffer(at, framebuffer.phys, len).is_err(",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1639",
+      "lines": "1666",
       "category": "absent-hardware",
       "match": "if memory.translate(at) != Some(framebuffer.phys) {",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1642",
+      "lines": "1669",
       "category": "absent-hardware",
       "match": "panic::screen::install(&framebuffer, at, len);",
       "why": "Mapping the loader's framebuffer for the panic screen: ARMv7-A's virt has none."

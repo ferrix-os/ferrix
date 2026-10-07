@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 130 | 79 | 51 |
-| Low (`L.*`) | 851 | 581 | 270 |
+| Low (`L.*`) | 853 | 582 | 271 |
 
-1791 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1794 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1793 |
-| Accessors, covered by the requirement they serve | 892 |
+| Named by a low-level requirement | 1796 |
+| Accessors, covered by the requirement they serve | 894 |
 | Check code in a product file | 73 |
-| Named by none | 895 |
+| Named by none | 896 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -1332,8 +1332,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.smp.14` | When flush_tlb_everywhere returns, no online processor shall still translate through an entry it held before it was called. | Over 20 rounds in which every online processor reads a kernel page and the page is then moved to another frame, every processor reads the page's new value each round: 0 stale reads (the `tlb` line), on each architecture. | H.MEM.12 | `smp::flush_tlb_everywhere`, `smp::service_tlb`, `smp::on_ipi`, `smp::wait_for` | `src/kernel/src/smp/check.rs::shootdown` | reached | reached | reached |
 | `L.smp.15` | take_turn shall let one shootdown hold the turn at a time, and a processor waiting for it shall answer the shootdowns of others while it waits. | Two processors each requesting a shootdown while a third holds the turn both complete once it is let go, one after the other: 0 generations taken by two holders at once, and 0 waits for the turn ending in FX-0001. | H.MEM.12 | `smp::take_turn`, `smp::flush_tlb_everywhere` | *baselined* | — | — | — |
 | `L.smp.16` | Where invalidation is not broadcast, a task waiting for the shootdown turn shall answer shootdowns for the processor it is running on at each moment, never for one it has left. | On x86-64 with 3 or more processors online, a task waiting for the turn that moves to another processor answers a generation requested with no interrupt on the processor it moved to, and the processor it left is not recorded as answering (the `migrate` line). | H.MEM.17 | `smp::as_this_cpu`, `smp::take_turn`, `smp::service_tlb` | `src/kernel/src/smp/check.rs::migrating_shootdown` | reached | not reached | not reached |
-| `L.smp.17` | wait_for shall stop the kernel in the safe state, naming the processor, once its wall-clock bound has passed and it has asked patience's count of polls, and not before both. | A processor made to stop answering its interrupt ends the boot in FX-0001 naming it, after 1 s or more and 16,777,216 polls or more, under tcg and under KVM. | H.FAIL.1 | `smp::wait_for`, `smp::patience` | *baselined* | — | — | — |
-| `L.smp.18` | take_turn shall stop the kernel in the safe state when the shootdown generation has stood still for 4 s and patience's count of polls while it waits for the turn, and shall start its count again whenever the generation moves. | A holder made to stop with the turn in hand ends the boot in FX-0003 after 4 s or more; a holder that keeps taking generations for longer than that is waited for. | H.FAIL.1 | `smp::take_turn`, `smp::patience` | *baselined* | — | — | — |
+| `L.smp.17` | wait_for shall stop the kernel in the safe state, naming the processor, once its stuck bound -- 10 s of wall-clock time and patience's count of polls for it -- has passed without an answer, and not before both. | A processor made to stop answering its interrupt ends the boot in FX-0001 naming it, after 10 s or more and 167,772,160 polls or more, under tcg and under KVM. | H.FAIL.1 | `smp::wait_for`, `smp::patience` | *baselined* | — | — | — |
+| `L.smp.18` | take_turn shall stop the kernel in the safe state when the shootdown generation has stood still for 40 s and patience's count of polls while it waits for the turn, and shall start its count again whenever the generation moves. | A holder made to stop with the turn in hand ends the boot in FX-0003 after 40 s or more; a holder that keeps taking generations for longer than that is waited for. | H.FAIL.1 | `smp::take_turn`, `smp::patience` | *baselined* | — | — | — |
 | `L.smp.19` | wait_for shall send its interrupt again every 10 ms while a processor it waits for has not answered. | With a processor's first interrupt dropped, the shootdown still completes, the processor answering the second. | H.MEM.12 | `smp::wait_for` | *baselined* | — | — | — |
 | `L.smp.20` | A shootdown shall be refused with a diagnostic when it is requested holding a lock that disables preemption, or, once tasks run, when it would wait for another processor with interrupts masked. | A shootdown requested holding a SpinLock, and one that would wait for another processor with interrupts masked, each stop the kernel with the assertion naming the rule, in a build with debug assertions. | H.FAIL.1 | `smp::shootdown_requested`, `smp::shootdown_waits_for_others`, `smp::flush_tlb_everywhere`, `smp::invalidate_pages` | *baselined* | — | — | — |
 | `L.smp.21` | service_tlb shall flush the whole TLB of a processor more than one generation behind, or whose generation's request is not a scoped one or was rewritten while it was read, and shall record the latest generation answered without taking back a later one. | A processor two generations behind, one a generation behind a whole-TLB request, and one reading a scoped request whose generation changes under the read each flush the whole TLB; tlb_seen after each is the latest generation, never less than a value recorded meanwhile. | H.MEM.17 | `smp::service_tlb`, `smp::scoped_request` | *baselined* | — | — | — |
@@ -1368,6 +1368,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
 | `L.smp.32` | interrupt_one shall interrupt the online processor it names, and every other processor where the architecture cannot address it alone, where that processor is not online, or before the processors are known. | On x86-64 a kick to processor 2 raises its inter-processor interrupt count by 1 and the others' by 0; a kick to a processor that is not online raises every other online processor's. | H.SCHED.1 | `smp::interrupt_one` | *baselined* | — | — | — |
+| `L.smp.33` | wait_for shall keep waiting for a processor that has not answered once its late bound and patience's count for it have passed, and shall count the answer as late when it comes. | A processor kept from answering, inside a read-side section, past a wait's late bound is waited for: a grace period on every architecture and a shootdown on x86-64 each return once it answers, with the processor among those counted late, and the boot goes on (the `late` line). | H.FAIL.1 | `smp::wait_for`, `smp::flush_everywhere_within`, `smp::synchronize_within` | `src/kernel/src/smp/check.rs::late_answer` | not reached | not reached | not reached |
+| `L.smp.34` | The late answers of a shootdown or a grace period shall be counted, with the longest wait, and reported with the time waited only once the wait has returned and the shootdown turn is given back: a line for each of the first four, then one each time the count reaches a power of two. | With a processor starved by the host past the late bound, the boot log shows a line for each of the first four late answers and then one at 8, 16, 32 and so on, each printed with the turn free; no line is printed from inside a wait. | H.FAIL.1 | `smp::report_late` | *baselined* | — | — | — |
 
 ### Lines
 
@@ -1853,6 +1855,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/smp/check.rs::everywhere` | kernel | H.SCHED.6, L.smp.3, L.smp.11 |
 | `src/kernel/src/smp/check.rs::everywhere` | kernel | L.x86_64.18, L.x86_64.19, L.x86_64.86, L.x86_64.102 |
 | `src/kernel/src/smp/check.rs::grace` | kernel | H.MEM.19, L.smp.29 |
+| `src/kernel/src/smp/check.rs::late_answer` | kernel | L.smp.33 |
 | `src/kernel/src/smp/check.rs::migrating_shootdown` | kernel | L.smp.16 |
 | `src/kernel/src/smp/check.rs::page_sets` | kernel | L.smp.26, L.smp.27 |
 | `src/kernel/src/smp/check.rs::shootdown` | kernel | H.MEM.12, L.mm.28, L.smp.14, L.x86_64.108 |

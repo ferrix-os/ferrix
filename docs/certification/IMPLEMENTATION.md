@@ -878,6 +878,23 @@ case needs the same thing, a boot that expects its panic -- as
 `test-init-file`'s `ferrix.onexit=panic` boot does -- with a kernel switch
 that makes one processor stop answering.
 
+**2026-10-07, FX-0001 under load (stage 20 S-1).** A wait now has a late
+and a stuck bound (MEMORY-AND-TIMING.md §2.2a). `L.smp.33`, a processor that
+answers past the late bound waited for and counted late, is new and verified
+by `late_answer`, appended to `smp/check.rs` (the `late` line, on all four
+boots: a grace period everywhere, a shootdown on x86-64). `.17` now names
+the stuck bound, 10 s and 167,772,160 polls; 94dee288's control measured the
+old 1 s bound, and the control in the FX-0001 commit's message, a processor
+that never answers, measures the new one under KVM and `tcg`. `.18` is 40 s
+and is still proved by nothing, for the reason 237d2426 gives. `L.smp.34`, the
+late answers reported only once the wait has returned and the turn is free,
+at a few lines a boot, is written unverified and in the baseline: a boot
+that starves a processor shows it, as the starved `test-selfhost --accel kvm
+--smp 8` of the FX-0001 commit did (`g3-selfhost.log` in
+`~/ferrix-logs/fx0001/2026-10-07-po10/` on nazuna: four lines, then the
+summaries at 8 and 16, each after the wait). smp now has 34, 10 verified and 24
+that need a check.
+
 What this slice found, for review:
 
 * **Grace periods have no product caller.** `synchronize` and

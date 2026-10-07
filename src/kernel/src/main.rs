@@ -1090,7 +1090,12 @@ fn start_scheduler(cpus: &'static smp::Topology) {
         "  stage 5  {} threads scheduled fairly across {} processors",
         report.threads, report.processors,
     );
+    shootdowns_under_the_scheduler(cpus);
+}
 
+/// Stage 4's shootdown checks that need the scheduler: a waiter that moves,
+/// and a processor that answers late, each kept so by a task.
+fn shootdowns_under_the_scheduler(cpus: &smp::Topology) {
     // Stage 4's shootdown again, now that a task waiting in one can be
     // preempted and resumed on another processor, which before the scheduler
     // nothing could.
@@ -1103,6 +1108,28 @@ fn start_scheduler(cpus: &'static smp::Topology) {
             "  migrate  no processor waits for another's shootdown on {}",
             arch::NAME
         ),
+        Err(problem) => fatal!(
+            catalog::STAGE4_SMP,
+            "stage 4 self-check failed under the scheduler: {problem}"
+        ),
+    }
+
+    // A processor kept from answering past a wait's late bound, as a host
+    // that stops running it keeps it, is waited for rather than called stuck.
+    match smp::check::late_answer(cpus) {
+        Ok(Some(seen)) => match seen.shootdown_us {
+            Some(us) => println!(
+                "  late     processor {} kept from answering was waited for and counted late: \
+                 a grace period after {} us, a shootdown after {us} us",
+                seen.held, seen.grace_us
+            ),
+            None => println!(
+                "  late     processor {} kept from answering was waited for and counted late: \
+                 a grace period after {} us, no shootdown waits for it",
+                seen.held, seen.grace_us
+            ),
+        },
+        Ok(None) => println!("  late     one processor online, nothing waits for another"),
         Err(problem) => fatal!(
             catalog::STAGE4_SMP,
             "stage 4 self-check failed under the scheduler: {problem}"

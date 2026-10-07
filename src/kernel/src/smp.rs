@@ -610,9 +610,134 @@ static SHOOTING: SpinLock<()> = SpinLock::new(());
 /// Shootdowns run, for the boot log.
 static SHOOTDOWNS: AtomicU64 = AtomicU64::new(0);
 
-/// How long a shootdown waits for every processor before calling it fatal, at
-/// the least: see [`patience`] for the other half of the bound.
-const SHOOTDOWN_TIMEOUT_NANOS: u64 = 1_000_000_000;
+/// How long a shootdown waits for a processor before counting its answer
+/// late, at the least: see [`patience`] for the other half of the bound, and
+/// [`Bounds`] for what a late answer costs.
+const SHOOTDOWN_LATE_NANOS: u64 = 1_000_000_000;
+
+/// How long any wait for other processors waits for one of them before
+/// calling it stuck and stopping the machine, at the least: the other half is
+/// [`patience`] of it.
+///
+/// Until 2026-10-07 the late bound was this bound, and FX-0001 stopped
+/// self-hosting builds on a loaded host with nothing stuck: with one virtual
+/// processor's host thread starved on nazuna, 257 waits passed one second
+/// and every one was answered, after 1.0 to 3.6 s. Ten seconds is about three
+/// times the worst of those, and, at about 51 s under `tcg` once [`patience`]
+/// has had its say, still inside a boot test's timeout, so the boot that hit
+/// a stuck processor still reports it.
+const STUCK_NANOS: u64 = 10_000_000_000;
+
+/// The two bounds a wait for other processors has.
+///
+/// **Late** is where a processor that has not answered is counted late: the
+/// waiter keeps waiting, and the answer, when it comes, is reported once the
+/// shootdown turn is given back ([`report_late`]). **Stuck** is where it gives
+/// up on the machine (FX-0001, FX-0002). Each is a wall-clock floor and a
+/// count of the waiter's own polls together, for the reason [`patience`]
+/// gives. Between the two the cost is availability alone: the waiter's
+/// processor runs nothing else, since the turn disables preemption, and other
+/// shootdowns queue for the turn; nothing is freed and no permission relied on
+/// before every processor has answered.
+#[derive(Clone, Copy)]
+pub(crate) struct Bounds {
+    /// The late bound's wall-clock floor.
+    late_nanos: u64,
+    /// The late bound's count of polls.
+    late_polls: u64,
+    /// The stuck bound's wall-clock floor.
+    stuck_nanos: u64,
+    /// The stuck bound's count of polls.
+    stuck_polls: u64,
+    /// Set the moment the wait first counts an answer late: what a check
+    /// holding a processor waits on. No product wait has one.
+    mark: Option<&'static AtomicBool>,
+}
+
+impl Bounds {
+    /// A product wait's bounds: late after `late_nanos` and [`patience`] of
+    /// it, stuck after [`STUCK_NANOS`] and patience of that.
+    const fn product(late_nanos: u64) -> Bounds {
+        Bounds {
+            late_nanos,
+            late_polls: patience(late_nanos),
+            stuck_nanos: STUCK_NANOS,
+            stuck_polls: patience(STUCK_NANOS),
+            mark: None,
+        }
+    }
+
+    /// A check's bounds: late after `late_nanos` and `late_polls`, `mark` set
+    /// when it is; stuck as a product wait is.
+    pub(crate) const fn checked(
+        late_nanos: u64,
+        late_polls: u64,
+        mark: &'static AtomicBool,
+    ) -> Bounds {
+        Bounds {
+            late_nanos,
+            late_polls,
+            stuck_nanos: STUCK_NANOS,
+            stuck_polls: patience(STUCK_NANOS),
+            mark: Some(mark),
+        }
+    }
+}
+
+/// The processors one wait counted late, and the longest of their waits.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Late {
+    /// The processors that answered past the late bound.
+    pub(crate) cpus: CpuSet,
+    /// How many they were.
+    pub(crate) count: u64,
+    /// Nanoseconds from the start of the wait to the last late answer.
+    pub(crate) longest_nanos: u64,
+    /// Polls the waiter had made by then.
+    pub(crate) polls: u64,
+}
+
+/// Late answers reported so far, for the report's rate and the boot log.
+static LATE_ANSWERS: AtomicU64 = AtomicU64::new(0);
+
+/// The longest wait that ended in a late answer, in nanoseconds.
+static LATE_LONGEST_NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// How many late answers get a line of their own; after these, a line each
+/// time the count reaches a power of two.
+const LATE_LINES: u64 = 4;
+
+/// Count and report the late answers of one wait.
+///
+/// Called only after the shootdown turn is given back, never from inside a
+/// wait, and so never with the turn held: a line takes the console's lock,
+/// which a processor the waiter is waiting for may hold. Nothing calls this
+/// from the console. Rate-limited: [`LATE_LINES`] lines with the processor
+/// and the time, then one summary each time the count doubles.
+fn report_late(late: Late, what: &str) {
+    if late.count == 0 {
+        return;
+    }
+    let total = LATE_ANSWERS.fetch_add(late.count, Ordering::Relaxed) + late.count;
+    let longest = LATE_LONGEST_NANOS
+        .fetch_max(late.longest_nanos, Ordering::Relaxed)
+        .max(late.longest_nanos);
+    let before = total - late.count;
+    if before < LATE_LINES {
+        crate::console::println!(
+            "  smp      {} processor(s) {what} late, the last {} ms after it was asked \
+             ({} polls): waited for, not stuck",
+            late.count,
+            late.longest_nanos / 1_000_000,
+            late.polls
+        );
+    } else if total.ilog2() != before.ilog2() {
+        crate::console::println!(
+            "  smp      {total} late answers so far, the longest {} ms after it was asked",
+            longest / 1_000_000
+        );
+    }
+}
 
 /// How many times a waiter asks, for each second of its wall-clock bound,
 /// before a processor that has not answered is taken to be stuck.
@@ -662,10 +787,13 @@ const CLOCK_EVERY: u64 = 256;
 /// in less than the old bound from ending sooner than it did before.
 ///
 /// What it does not cover: a host that keeps running the waiter and stops
-/// running the processor it waits for. The count then passes at full speed
-/// and the wait ends, as the wall clock would have, only later. No guest can
-/// see that from inside without the host's help (KVM's steal time would be
-/// that help, and is not read here); `docs/BACKLOG.md` keeps the row.
+/// running the processor it waits for. The count then passes at full speed.
+/// No guest can see that from inside without the host's help, and KVM's
+/// steal time sees only part of it (a runnable virtual processor preempted,
+/// not one woken from a halt and not yet run, nor one held in the emulator)
+/// while it would make the kernel trust a page the host writes. That is what
+/// the two bounds of [`Bounds`] are for: past the late one such a processor
+/// is waited for, and only the stuck one, ten times later, calls it stuck.
 const fn patience(timeout: u64) -> u64 {
     POLLS_PER_SECOND.saturating_mul(timeout / 1_000_000_000)
 }
@@ -674,12 +802,11 @@ const fn patience(timeout: u64) -> u64 {
 /// for its turn before the holder is taken to have stopped, at the least; the
 /// waiter must also have asked [`patience`] of it times.
 ///
-/// A holder gives up on the machine after [`SHOOTDOWN_TIMEOUT_NANOS`] and
-/// its own polls' worth of waiting, so anything past that is a holder not
-/// running at all. Four times both, because a holder preempted on a host with
-/// more virtual processors than real ones can lose whole seconds without
-/// being stuck.
-const TURN_TIMEOUT_NANOS: u64 = 4 * SHOOTDOWN_TIMEOUT_NANOS;
+/// A holder gives up on the machine after [`STUCK_NANOS`] and its own polls'
+/// worth of waiting, so anything past that is a holder not running at all.
+/// Four times both, because a holder preempted on a host with more virtual
+/// processors than real ones can lose whole seconds without being stuck.
+const TURN_TIMEOUT_NANOS: u64 = 4 * STUCK_NANOS;
 
 /// How often a processor waiting on all the others re-sends its interrupt.
 ///
@@ -702,18 +829,33 @@ const KICK_NANOS: u64 = 10_000_000;
 /// and this would wait for it until the timeout. The waiting itself services
 /// other processors' shootdowns, so two running at once do not deadlock on
 /// each other.
+///
+/// A processor that answers past the late bound is waited for and reported
+/// once the turn is given back ([`Bounds`]).
 pub(crate) fn flush_tlb_everywhere() {
+    report_late(
+        flush_everywhere_within(Bounds::product(SHOOTDOWN_LATE_NANOS)),
+        FLUSHED,
+    );
+}
+
+/// What a processor answering [`flush_tlb_everywhere`] has done.
+const FLUSHED: &str = "flushed its TLB for a shootdown";
+
+/// [`flush_tlb_everywhere`] within `bounds`, returning the late answers it
+/// waited for with the turn already given back, and reporting none of them.
+pub(crate) fn flush_everywhere_within(bounds: Bounds) -> Late {
     shootdown_requested();
     arch::flush_tlb();
     if arch::TLB_FLUSH_IS_BROADCAST {
-        return;
+        return Late::default();
     }
     // Before discovery, or with nobody else running, there is nobody to tell.
     let Some(topology) = TOPOLOGY.get().filter(|_| this_cpu().is_some()) else {
-        return;
+        return Late::default();
     };
     if topology.online() <= 1 {
-        return;
+        return Late::default();
     }
     shootdown_waits_for_others();
 
@@ -726,10 +868,10 @@ pub(crate) fn flush_tlb_everywhere() {
     as_this_cpu(service_tlb);
     let _ = arch::send_ipi_to_others();
 
-    wait_for(
+    let late = wait_for(
         topology,
-        SHOOTDOWN_TIMEOUT_NANOS,
-        "flushed its TLB for a shootdown",
+        bounds,
+        FLUSHED,
         &crate::panic::catalog::SHOOTDOWN_TIMEOUT,
         service_tlb,
         PerCpu::is_online,
@@ -739,6 +881,7 @@ pub(crate) fn flush_tlb_everywhere() {
         },
     );
     let _ = SHOOTDOWNS.fetch_add(1, Ordering::Relaxed);
+    late
 }
 
 /// The first rule every shootdown is asked under, checked where it is asked:
@@ -845,31 +988,38 @@ fn take_turn() -> impl Sized {
 /// other processors' shootdowns — two processors each waiting for the other
 /// would otherwise wait forever — and answers for this processor itself if the
 /// waiting task has moved to one the interrupt was not sent to. It calls
-/// `kick` to re-send its interrupt every [`KICK_NANOS`]. Once `timeout` has
-/// passed *and* it has asked [`patience`] times, it gives up on the machine: a
-/// processor that never answers is one whose TLB or whose read-side section
-/// nothing can vouch for any more, and carrying on would be carrying on
-/// regardless. Both, because `timeout` alone measures the host rather than
-/// the guest; [`patience`] argues it.
+/// `kick` to re-send its interrupt every [`KICK_NANOS`].
+///
+/// Once the late bound of `bounds` has passed it counts the processor late,
+/// sets the bounds' mark if they have one, and keeps waiting; what it returns
+/// says which processors were late and how long the last of them took. Once
+/// the stuck bound has passed it gives up on the machine: a processor that
+/// never answers is one whose TLB or whose read-side section nothing can
+/// vouch for any more, and carrying on would be carrying on regardless. Each
+/// bound is a wall-clock floor *and* a count of polls, because the wall clock
+/// alone measures the host rather than the guest; [`patience`] argues it. It
+/// prints nothing: a late answer is the caller's to report, once the turn is
+/// given back.
 #[expect(
     clippy::too_many_arguments,
     reason = "three callers differ in exactly these; a struct would name each once more"
 )]
-fn wait_for(
+fn wait_for<K>(
     topology: &Topology,
-    timeout: u64,
+    bounds: Bounds,
     what: &str,
     entry: &'static crate::panic::catalog::Explanation,
     answer: fn(&'static PerCpu),
     waited: impl Fn(&PerCpu) -> bool,
     done: impl Fn(&PerCpu) -> bool,
-    kick: impl Fn(),
-) {
+    kick: impl Fn() -> K,
+) -> Late {
     let started = crate::timer::now_nanos();
     let mut kicked = started;
-    let needed = patience(timeout);
     let mut polls: u64 = 0;
+    let mut late = Late::default();
     for cpu in topology.cpus.iter().filter(|cpu| waited(cpu)) {
+        let mut counted = false;
         while !done(cpu) {
             halt_if_stopping();
             as_this_cpu(answer);
@@ -880,7 +1030,7 @@ fn wait_for(
             }
             let now = crate::timer::now_nanos();
             let waited = now.saturating_sub(started);
-            if waited > timeout && polls > needed {
+            if waited > bounds.stuck_nanos && polls > bounds.stuck_polls {
                 crate::panic::fatal!(
                     *entry,
                     "processor {} never {what}: no answer in {} ms, asked {polls} times",
@@ -888,13 +1038,27 @@ fn wait_for(
                     waited / 1_000_000
                 );
             }
+            if !counted && waited > bounds.late_nanos && polls > bounds.late_polls {
+                counted = true;
+                if let Some(mark) = bounds.mark {
+                    mark.store(true, Ordering::SeqCst);
+                }
+            }
             if now.saturating_sub(kicked) > KICK_NANOS {
-                kick();
+                let _ = kick();
                 kicked = now;
             }
             spin_loop();
         }
+        if counted {
+            // NOALLOC: a `CpuSet` is a fixed bit set.
+            let _ = late.cpus.insert(cpu.logical);
+            late.count = late.count.saturating_add(1);
+            late.longest_nanos = crate::timer::now_nanos().saturating_sub(started);
+            late.polls = polls;
+        }
     }
+    late
 }
 
 /// Flush this processor's TLB if a shootdown is waiting for it to.
@@ -1204,16 +1368,19 @@ fn scoped_request(wanted: u64, cpu: usize) -> Option<TlbPages> {
 /// `pages` holds go back to the allocator -- and not before, since until
 /// then a processor may still walk through one it cached (finding F-36).
 pub(crate) fn flush_tlb_pages(cpus: &CpuSet, pages: &mut TlbPages) {
-    invalidate_pages(cpus, pages);
+    let late = invalidate_pages(cpus, pages);
     pages.tables.release();
+    // Reported with the turn given back, never under it: see `report_late`.
+    report_late(late, INVALIDATED);
 }
 
 /// [`flush_tlb_pages`]'s invalidation, returning once every processor in
-/// `cpus` has answered, or at once when none can hold the translations.
-fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) {
+/// `cpus` has answered, or at once when none can hold the translations, with
+/// the late answers it waited for and the turn already given back.
+fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) -> Late {
     shootdown_requested();
     if pages.is_empty() {
-        return;
+        return Late::default();
     }
     if arch::TLB_FLUSH_IS_BROADCAST {
         if pages.is_everything() {
@@ -1224,11 +1391,11 @@ fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) {
             }
         }
         let _ = SCOPED_UNSENT.fetch_add(1, Ordering::Relaxed);
-        return;
+        return Late::default();
     }
     if cpus.is_empty() {
         let _ = SCOPED_UNSENT.fetch_add(1, Ordering::Relaxed);
-        return;
+        return Late::default();
     }
     // Before discovery, or with nobody else running, the only TLB that can
     // hold anything is this one.
@@ -1238,7 +1405,7 @@ fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) {
     else {
         flush_here(pages);
         let _ = SCOPED_UNSENT.fetch_add(1, Ordering::Relaxed);
-        return;
+        return Late::default();
     };
     let me = this_cpu().map(|cpu| cpu.logical);
     if topology
@@ -1302,17 +1469,15 @@ fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) {
     };
     let targets: u64 = send();
 
-    wait_for(
+    let late = wait_for(
         topology,
-        SHOOTDOWN_TIMEOUT_NANOS,
-        "invalidated its TLB for a scoped shootdown",
+        Bounds::product(SHOOTDOWN_LATE_NANOS),
+        INVALIDATED,
         &crate::panic::catalog::SHOOTDOWN_TIMEOUT,
         service_tlb,
         member,
         |cpu| !behind(cpu),
-        || {
-            let _ = send();
-        },
+        send,
     );
     if targets == 0 {
         let _ = SCOPED_UNSENT.fetch_add(1, Ordering::Relaxed);
@@ -1320,7 +1485,11 @@ fn invalidate_pages(cpus: &CpuSet, pages: &TlbPages) {
         let _ = SCOPED_SHOOTDOWNS.fetch_add(1, Ordering::Relaxed);
         let _ = SCOPED_TARGETS.fetch_add(targets, Ordering::Relaxed);
     }
+    late
 }
+
+/// What a processor answering [`invalidate_pages`] has done.
+const INVALIDATED: &str = "invalidated its TLB for a scoped shootdown";
 
 /// Invalidate `pages` on this processor only.
 fn flush_here(pages: &TlbPages) {
@@ -1364,12 +1533,14 @@ static GRACE_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Grace periods completed, for the boot log.
 static GRACE_PERIODS: AtomicU64 = AtomicU64::new(0);
 
-/// How long a grace period may take before it is called fatal.
+/// How long a grace period waits for a processor before counting its answer
+/// late; it is called stuck at [`STUCK_NANOS`], as a shootdown is.
 ///
 /// Much longer than a shootdown's, because a shootdown waits for a flush and
 /// this waits for other code to finish. But a read-side section that lasts
-/// five seconds is a bug in its own right, and one worth a line in the log.
-const GRACE_TIMEOUT_NANOS: u64 = 5_000_000_000;
+/// five seconds is a bug in its own right, or a host that stopped running the
+/// processor, and either is worth a line in the log.
+const GRACE_LATE_NANOS: u64 = 5_000_000_000;
 
 /// Run `body` as a read-side section.
 ///
@@ -1405,9 +1576,24 @@ pub(crate) fn read_section<T>(body: impl FnOnce() -> T) -> T {
 /// Must not be called from inside a [`read_section`], which would wait for
 /// itself; nor holding a lock another processor may be spinning on with
 /// interrupts masked, for the reason [`flush_tlb_everywhere`] gives.
+///
+/// A processor that answers past the late bound is waited for and reported
+/// once every processor has answered ([`Bounds`]).
 pub(crate) fn synchronize() {
+    report_late(
+        synchronize_within(Bounds::product(GRACE_LATE_NANOS)),
+        LEFT_SECTION,
+    );
+}
+
+/// What a processor answering [`synchronize`] has done.
+const LEFT_SECTION: &str = "left a read-side section for a grace period";
+
+/// [`synchronize`] within `bounds`, returning the late answers it waited for
+/// and reporting none of them.
+pub(crate) fn synchronize_within(bounds: Bounds) -> Late {
     let Some(topology) = TOPOLOGY.get().filter(|_| this_cpu().is_some()) else {
-        return;
+        return Late::default();
     };
 
     let generation = GRACE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1417,12 +1603,13 @@ pub(crate) fn synchronize() {
     // task has left may be running somebody else's section by now.
     as_this_cpu(answer_grace);
 
+    let mut late = Late::default();
     if topology.online() > 1 {
         let _ = arch::send_ipi_to_others();
-        wait_for(
+        late = wait_for(
             topology,
-            GRACE_TIMEOUT_NANOS,
-            "left a read-side section for a grace period",
+            bounds,
+            LEFT_SECTION,
             &crate::panic::catalog::GRACE_PERIOD_TIMEOUT,
             answer_grace,
             PerCpu::is_online,
@@ -1433,6 +1620,7 @@ pub(crate) fn synchronize() {
         );
     }
     let _ = GRACE_PERIODS.fetch_add(1, Ordering::Relaxed);
+    late
 }
 
 /// What a processor waiting in [`synchronize`] answers for itself: any

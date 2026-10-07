@@ -136,7 +136,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 324, 706, 1272 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 324, 706, 1299 |
 
 ---
 

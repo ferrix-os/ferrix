@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "cde61cbf6a2e70cb674678e449f4cc526a606fa83d5bf35c6e9dbc12a415b91a",
+  "digest": "8c0bfb3bccba99ce68808d61a703506880286607263d50563a9538c84c701a7a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 136,
-    "elements": 6596,
+    "elements": 6606,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -65509,10 +65509,10 @@
                   "qualifiedName": "FerrixSmpRequirements::Shootdown::aProcessorThatNeverAnswersIsFatal",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"wait_for shall stop the kernel in the safe state, naming the processor, once its wall-clock bound has passed and it has asked patience's count of polls, and not before both.\"",
+                  "value": "\"wait_for shall stop the kernel in the safe state, naming the processor, once its stuck bound -- 10 s of wall-clock time and patience's count of polls for it -- has passed without an answer, and not before both.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 255
+                    "line": 256
                   }
                 },
                 {
@@ -65520,10 +65520,10 @@
                   "qualifiedName": "FerrixSmpRequirements::Shootdown::aProcessorThatNeverAnswersIsFatal",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A processor made to stop answering its interrupt ends the boot in FX-0001 naming it, after 1 s or more and 16,777,216 polls or more, under tcg and under KVM.\"",
+                  "value": "\"A processor made to stop answering its interrupt ends the boot in FX-0001 naming it, after 10 s or more and 167,772,160 polls or more, under tcg and under KVM.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 258
+                    "line": 259
                   }
                 },
                 {
@@ -65534,7 +65534,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 259
+                    "line": 260
                   }
                 },
                 {
@@ -65545,7 +65545,7 @@
                   "value": "(\"smp::wait_for\", \"smp::patience\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 260
+                    "line": 261
                   }
                 }
               ]
@@ -65558,7 +65558,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 262
+                "line": 263
               },
               "children": [
                 {
@@ -65566,10 +65566,10 @@
                   "qualifiedName": "FerrixSmpRequirements::Shootdown::aStoppedHolderIsFatal",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"take_turn shall stop the kernel in the safe state when the shootdown generation has stood still for 4 s and patience's count of polls while it waits for the turn, and shall start its count again whenever the generation moves.\"",
+                  "value": "\"take_turn shall stop the kernel in the safe state when the shootdown generation has stood still for 40 s and patience's count of polls while it waits for the turn, and shall start its count again whenever the generation moves.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 266
+                    "line": 267
                   }
                 },
                 {
@@ -65577,10 +65577,10 @@
                   "qualifiedName": "FerrixSmpRequirements::Shootdown::aStoppedHolderIsFatal",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A holder made to stop with the turn in hand ends the boot in FX-0003 after 4 s or more; a holder that keeps taking generations for longer than that is waited for.\"",
+                  "value": "\"A holder made to stop with the turn in hand ends the boot in FX-0003 after 40 s or more; a holder that keeps taking generations for longer than that is waited for.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 269
+                    "line": 270
                   }
                 },
                 {
@@ -65591,7 +65591,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 270
+                    "line": 271
                   }
                 },
                 {
@@ -65602,7 +65602,7 @@
                   "value": "(\"smp::take_turn\", \"smp::patience\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 271
+                    "line": 272
                   }
                 }
               ]
@@ -65615,7 +65615,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 273
+                "line": 274
               },
               "children": [
                 {
@@ -65626,7 +65626,7 @@
                   "value": "\"wait_for shall send its interrupt again every 10 ms while a processor it waits for has not answered.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 275
+                    "line": 276
                   }
                 },
                 {
@@ -65637,7 +65637,7 @@
                   "value": "\"With a processor's first interrupt dropped, the shootdown still completes, the processor answering the second.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 277
+                    "line": 278
                   }
                 },
                 {
@@ -65648,7 +65648,7 @@
                   "value": "\"H.MEM.12\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 278
+                    "line": 279
                   }
                 },
                 {
@@ -65659,7 +65659,7 @@
                   "value": "\"smp::wait_for\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 279
+                    "line": 280
                   }
                 }
               ]
@@ -65672,7 +65672,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 281
+                "line": 282
               },
               "children": [
                 {
@@ -65683,7 +65683,7 @@
                   "value": "\"A shootdown shall be refused with a diagnostic when it is requested holding a lock that disables preemption, or, once tasks run, when it would wait for another processor with interrupts masked.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 285
+                    "line": 286
                   }
                 },
                 {
@@ -65694,7 +65694,7 @@
                   "value": "\"A shootdown requested holding a SpinLock, and one that would wait for another processor with interrupts masked, each stop the kernel with the assertion naming the rule, in a build with debug assertions.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 289
+                    "line": 290
                   }
                 },
                 {
@@ -65705,7 +65705,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 290
+                    "line": 291
                   }
                 },
                 {
@@ -65716,7 +65716,7 @@
                   "value": "(\"smp::shootdown_requested\", \"smp::shootdown_waits_for_others\", \"smp::flush_tlb_everywhere\", \"smp::invalidate_pages\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 293
+                    "line": 294
                   }
                 }
               ]
@@ -65729,7 +65729,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 295
+                "line": 296
               },
               "children": [
                 {
@@ -65740,7 +65740,7 @@
                   "value": "\"service_tlb shall flush the whole TLB of a processor more than one generation behind, or whose generation's request is not a scoped one or was rewritten while it was read, and shall record the latest generation answered without taking back a later one.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 300
+                    "line": 301
                   }
                 },
                 {
@@ -65751,7 +65751,7 @@
                   "value": "\"A processor two generations behind, one a generation behind a whole-TLB request, and one reading a scoped request whose generation changes under the read each flush the whole TLB; tlb_seen after each is the latest generation, never less than a value recorded meanwhile.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 305
+                    "line": 306
                   }
                 },
                 {
@@ -65762,7 +65762,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 306
+                    "line": 307
                   }
                 },
                 {
@@ -65773,7 +65773,7 @@
                   "value": "(\"smp::service_tlb\", \"smp::scoped_request\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 307
+                    "line": 308
                   }
                 }
               ]
@@ -65787,7 +65787,7 @@
           "doc": "The shootdown for a change to one address space: the pages that changed, on the processors that may hold that space's translations, and the page tables it gives back afterwards (finding F-36). The mask an address space keeps of those processors is here too.",
           "source": {
             "file": "docs/sysml/22-smp-requirements.sysml",
-            "line": 311
+            "line": 312
           },
           "children": [
             {
@@ -65798,7 +65798,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 318
+                "line": 319
               },
               "children": [
                 {
@@ -65809,7 +65809,7 @@
                   "value": "\"scoped_request shall give a processor in a scoped request's set that request's pages, or the whole TLB where it asks for more than the ceiling, and a processor outside the set nothing to invalidate.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 322
+                    "line": 323
                   }
                 },
                 {
@@ -65820,7 +65820,7 @@
                   "value": "\"For a request of 3 pages to processors 1 and 3, processor 1 is given the 3 pages and processor 2 none; for a request of the whole TLB, a member is given everything.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 325
+                    "line": 326
                   }
                 },
                 {
@@ -65831,7 +65831,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 326
+                    "line": 327
                   }
                 },
                 {
@@ -65842,7 +65842,7 @@
                   "value": "(\"smp::scoped_request\", \"smp::service_tlb\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 327
+                    "line": 328
                   }
                 }
               ]
@@ -65855,7 +65855,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 329
+                "line": 330
               },
               "children": [
                 {
@@ -65866,7 +65866,7 @@
                   "value": "\"flush_tlb_pages shall invalidate the pages it names on the online processors in its set other than the one it runs on before it returns.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 332
+                    "line": 333
                   }
                 },
                 {
@@ -65877,7 +65877,7 @@
                   "value": "\"On a machine with two processors or more, a child that wrote a shared page and holds still on its processor has the page protected read-only from this one, whose scoped shootdown names the child's processor: the child's next write ends it with SIGSEGV, 11, instead of answering (the `rmap` line), on each architecture.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 338
+                    "line": 339
                   }
                 },
                 {
@@ -65888,7 +65888,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 339
+                    "line": 340
                   }
                 },
                 {
@@ -65899,7 +65899,7 @@
                   "value": "(\"smp::flush_tlb_pages\", \"smp::invalidate_pages\", \"smp::service_tlb\", \"smp::scoped_request\", \"smp::wait_for\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 341
+                    "line": 342
                   }
                 }
               ]
@@ -65912,7 +65912,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 343
+                "line": 344
               },
               "children": [
                 {
@@ -65923,7 +65923,7 @@
                   "value": "\"flush_tlb_pages shall give back every page table its pages hold once its invalidation has returned, and none before it is called.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 346
+                    "line": 347
                   }
                 },
                 {
@@ -65934,7 +65934,7 @@
                   "value": "\"Of the tables an unmap_in emptied, 0 are given back before flush_tlb_pages is called and every one is given back by it, its list left empty, with an empty set of processors.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 349
+                    "line": 350
                   }
                 },
                 {
@@ -65945,7 +65945,7 @@
                   "value": "\"H.MEM.7\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 350
+                    "line": 351
                   }
                 },
                 {
@@ -65956,7 +65956,7 @@
                   "value": "\"smp::flush_tlb_pages\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 351
+                    "line": 352
                   }
                 }
               ]
@@ -65969,7 +65969,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 353
+                "line": 354
               },
               "children": [
                 {
@@ -65980,7 +65980,7 @@
                   "value": "\"invalidate_pages shall interrupt no processor when there is nothing to invalidate, when its set is empty, before the processors are discovered, when this processor is the only one online or where invalidation is broadcast, and shall invalidate the pages on this processor itself in the last three.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 358
+                    "line": 359
                   }
                 },
                 {
@@ -65991,7 +65991,7 @@
                   "value": "\"Each of those five calls raises the unsent count by 1 or leaves it (nothing to invalidate) and sends 0 interrupts; after the last three a translation of the named page cached before is gone on this processor.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 362
+                    "line": 363
                   }
                 },
                 {
@@ -66002,7 +66002,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 363
+                    "line": 364
                   }
                 },
                 {
@@ -66013,7 +66013,7 @@
                   "value": "(\"smp::invalidate_pages\", \"smp::flush_here\", \"smp::TlbPages::is_empty\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 365
+                    "line": 366
                   }
                 }
               ]
@@ -66026,7 +66026,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 367
+                "line": 368
               },
               "children": [
                 {
@@ -66037,7 +66037,7 @@
                   "value": "\"A TlbPages shall list each page asked for once, up to 33 pages, ask for the whole TLB past that, and when merged with another shall list both sets' pages once each and ask for the whole TLB if either did.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 371
+                    "line": 372
                   }
                 },
                 {
@@ -66048,7 +66048,7 @@
                   "value": "\"33 pages added by range and one again by an address inside it list 33 pages; 34 by range ask for everything; two sets of 1 and 2 pages sharing one merge to 2 pages in order; a merge with a set asking for everything asks for everything.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 375
+                    "line": 376
                   }
                 },
                 {
@@ -66059,7 +66059,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 376
+                    "line": 377
                   }
                 },
                 {
@@ -66070,7 +66070,7 @@
                   "value": "(\"smp::TlbPages::add\", \"smp::TlbPages::add_range\", \"smp::TlbPages::add_all\", \"smp::TlbPages::addresses\", \"smp::TlbPages::is_everything\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 379
+                    "line": 380
                   }
                 }
               ]
@@ -66083,7 +66083,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 381
+                "line": 382
               },
               "children": [
                 {
@@ -66094,7 +66094,7 @@
                   "value": "\"A CpuMask's snapshot shall hold every processor that joined it and has not left since.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 383
+                    "line": 384
                   }
                 },
                 {
@@ -66105,7 +66105,7 @@
                   "value": "\"A mask joined by processors 0 and 3 and left by 0 snapshots as 3 alone.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 385
+                    "line": 386
                   }
                 },
                 {
@@ -66116,7 +66116,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 386
+                    "line": 387
                   }
                 },
                 {
@@ -66127,7 +66127,7 @@
                   "value": "(\"smp::CpuMask::join\", \"smp::CpuMask::leave\", \"smp::CpuMask::snapshot\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 388
+                    "line": 389
                   }
                 }
               ]
@@ -66140,7 +66140,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 390
+                "line": 391
               },
               "children": [
                 {
@@ -66151,7 +66151,7 @@
                   "value": "\"add_cpus shall add every processor of one set to another and remove none.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 392
+                    "line": 393
                   }
                 },
                 {
@@ -66162,7 +66162,7 @@
                   "value": "\"{0, 2} added to {1, 2} gives {0, 1, 2}; the empty set added changes nothing.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 394
+                    "line": 395
                   }
                 },
                 {
@@ -66173,7 +66173,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 395
+                    "line": 396
                   }
                 },
                 {
@@ -66184,7 +66184,7 @@
                   "value": "\"smp::add_cpus\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 396
+                    "line": 397
                   }
                 }
               ]
@@ -66198,7 +66198,7 @@
           "doc": "Read-side sections and the wait for every one of them to end: what lets a writer free an object it has unpublished. Nothing in the product calls synchronize yet (src/kernel/src/irq.rs names the handler unregistration it is for); stage 4's grace check does.",
           "source": {
             "file": "docs/sysml/22-smp-requirements.sysml",
-            "line": 400
+            "line": 401
           },
           "children": [
             {
@@ -66209,7 +66209,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 406
+                "line": 407
               },
               "children": [
                 {
@@ -66220,7 +66220,7 @@
                   "value": "\"synchronize shall return only once every online processor has been outside a read-side section since it was called.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 409
+                    "line": 410
                   }
                 },
                 {
@@ -66231,7 +66231,7 @@
                   "value": "\"A writer that replaces an object every other online processor is reading in read_section, synchronizes and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line).\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 413
+                    "line": 414
                   }
                 },
                 {
@@ -66242,7 +66242,7 @@
                   "value": "\"H.MEM.19\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 414
+                    "line": 415
                   }
                 },
                 {
@@ -66253,7 +66253,7 @@
                   "value": "(\"smp::synchronize\", \"smp::read_section\", \"smp::answer_grace\", \"smp::on_ipi\", \"smp::wait_for\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 416
+                    "line": 417
                   }
                 }
               ]
@@ -66267,7 +66267,7 @@
           "doc": "What a panic asks of the other processors, and where they look.",
           "source": {
             "file": "docs/sysml/22-smp-requirements.sysml",
-            "line": 420
+            "line": 421
           },
           "children": [
             {
@@ -66278,7 +66278,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 423
+                "line": 424
               },
               "children": [
                 {
@@ -66289,7 +66289,7 @@
                   "value": "\"stop_others shall set the stop request and interrupt every other online processor, and return how many it asked: none before the processors are discovered.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 426
+                    "line": 427
                   }
                 },
                 {
@@ -66300,7 +66300,7 @@
                   "value": "\"A panic on one of N online processors reports N-1 asked (the `stopped` line), and 0 before discovery.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 428
+                    "line": 429
                   }
                 },
                 {
@@ -66311,7 +66311,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 429
+                    "line": 430
                   }
                 },
                 {
@@ -66322,7 +66322,7 @@
                   "value": "\"smp::stop_others\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 430
+                    "line": 431
                   }
                 }
               ]
@@ -66335,7 +66335,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 432
+                "line": 433
               },
               "children": [
                 {
@@ -66346,7 +66346,7 @@
                   "value": "\"Once a panic has asked every processor to stop, a processor shall halt on its next inter-processor interrupt, and on its next poll while it waits for the shootdown turn or for other processors' answers.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 436
+                    "line": 437
                   }
                 },
                 {
@@ -66357,7 +66357,7 @@
                   "value": "\"With a panic on one processor while the others are idle, waiting for the turn and waiting for answers, each other processor halts: 0 lines printed and 0 shootdowns completed by them after the report begins.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 440
+                    "line": 441
                   }
                 },
                 {
@@ -66368,7 +66368,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 441
+                    "line": 442
                   }
                 },
                 {
@@ -66379,7 +66379,7 @@
                   "value": "(\"smp::halt_if_stopping\", \"smp::on_ipi\", \"smp::take_turn\", \"smp::wait_for\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 443
+                    "line": 444
                   }
                 }
               ]
@@ -66393,7 +66393,7 @@
           "doc": "The interrupt the scheduler sends a processor it has given work.",
           "source": {
             "file": "docs/sysml/22-smp-requirements.sysml",
-            "line": 447
+            "line": 448
           },
           "children": [
             {
@@ -66404,7 +66404,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 450
+                "line": 451
               },
               "children": [
                 {
@@ -66415,7 +66415,7 @@
                   "value": "\"interrupt_one shall interrupt the online processor it names, and every other processor where the architecture cannot address it alone, where that processor is not online, or before the processors are known.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 454
+                    "line": 455
                   }
                 },
                 {
@@ -66426,7 +66426,7 @@
                   "value": "\"On x86-64 a kick to processor 2 raises its inter-processor interrupt count by 1 and the others' by 0; a kick to a processor that is not online raises every other online processor's.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 458
+                    "line": 459
                   }
                 },
                 {
@@ -66437,7 +66437,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 459
+                    "line": 460
                   }
                 },
                 {
@@ -66448,7 +66448,121 @@
                   "value": "\"smp::interrupt_one\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 460
+                    "line": 461
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aLateAnswerIsWaitedFor",
+              "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsWaitedFor",
+              "kind": "requirement",
+              "shortName": "L.smp.33",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/22-smp-requirements.sysml",
+                "line": 463
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsWaitedFor",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"wait_for shall keep waiting for a processor that has not answered once its late bound and patience's count for it have passed, and shall count the answer as late when it comes.\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 466
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsWaitedFor",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A processor kept from answering, inside a read-side section, past a wait's late bound is waited for: a grace period on every architecture and a shootdown on x86-64 each return once it answers, with the processor among those counted late, and the boot goes on (the `late` line).\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 471
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsWaitedFor",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.1\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 472
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsWaitedFor",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"smp::wait_for\", \"smp::flush_everywhere_within\", \"smp::synchronize_within\")",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 474
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aLateAnswerIsReportedAfterTheTurn",
+              "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsReportedAfterTheTurn",
+              "kind": "requirement",
+              "shortName": "L.smp.34",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/22-smp-requirements.sysml",
+                "line": 476
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsReportedAfterTheTurn",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The late answers of a shootdown or a grace period shall be counted, with the longest wait, and reported with the time waited only once the wait has returned and the shootdown turn is given back: a line for each of the first four, then one each time the count reaches a power of two.\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 481
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsReportedAfterTheTurn",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With a processor starved by the host past the late bound, the boot log shows a line for each of the first four late answers and then one at 8, 16, 32 and so on, each printed with the turn free; no line is printed from inside a wait.\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 485
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsReportedAfterTheTurn",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.1\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 486
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSmpRequirements::Kick::aLateAnswerIsReportedAfterTheTurn",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"smp::report_late\"",
+                  "source": {
+                    "file": "docs/sysml/22-smp-requirements.sysml",
+                    "line": 487
                   }
                 }
               ]
