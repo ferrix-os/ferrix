@@ -37,6 +37,13 @@
 //! function makes the system call it stands for, which is what a kernel
 //! whose counter is not the TSC answers with.
 //!
+//! # The kernel's clock conversion
+//!
+//! [`counter_nanos`] and [`CounterScale`] are also the kernel's own
+//! conversion from counter ticks to nanoseconds (`timer::now_nanos`), kept
+//! here so the vDSO and the kernel answer alike; `docs/BACKLOG.md` has the
+//! row to move them into a classified core crate.
+//!
 //! # No allocation
 //!
 //! [`build`] writes into a page the caller owns and allocates nothing: the
@@ -112,9 +119,9 @@ pub const fn counter_nanos(ticks: u64, hz: u64) -> u64 {
 
 /// [`counter_nanos`] for one rate, by multiplication: the rate's reciprocal
 /// worked out once, so that a reading costs two multiplications where
-/// [`counter_nanos`] costs two 64-bit divisions, about six nanoseconds a
-/// reading on the reference machine (`docs/OPAQUE-KERNEL.md` §9.11, Q1). The
-/// kernel's clock reads it at every switch.
+/// [`counter_nanos`] costs two 64-bit divisions (`docs/OPAQUE-KERNEL.md`
+/// §9.11, Q1, gives what that saved). The kernel's clock reads it at every
+/// switch.
 ///
 /// Exact, not an approximation in the way Linux's `cyc2ns` scaling is: every
 /// answer equals [`counter_nanos`] of the same ticks and rate, bit for bit,
