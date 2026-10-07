@@ -732,6 +732,7 @@ changed (below).
 | reclaim-sibling | a reclaim takes from outside its subtree | a sibling cgroup's pages were reclaimed |
 | reclaim-min | `memory.min` spares nothing | reclaim took pages from a child using no more than its memory.min |
 | dentry-keep | a create the job's memory refused keeps its negative dentry | kmem: objects gone and their heap still charged to their job |
+| cpu-arm-order | `arm_timer`'s `cpu.max` cut taken from `current`, which a switch stores after it arms (main's 2f, 445d09420) | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
 
 **Where it stands (2026-10-05).** The controllers were built on 2026-09-30
 and waited for their gate and controls at the 2026-10-01 wind-down. Rebased
@@ -748,3 +749,17 @@ file was made first and met every want before a reclaim past its scope reached
 the sibling's: the sibling's file is now made first, and asked about right
 after each read. The check's lower `cpu.max` bound is a twelfth of a
 processor, as the requirements say.
+
+**Rebased again (2026-10-07, po10-cgctl).** On `main` 4466212c3 the `cpu`
+line failed: two counting threads were held to 1911 and 1934 thousandths of
+the wall clock on armv7a `--smp 2` (gate INDEX lines 11654, 11668) and the
+same message stopped `test-vfs` on x86-64 KVM (11681), while po6's tip on the
+old `main` passed the same armv7a boot under the same load (11666). Main's
+2f made `switch_chosen` arm the timer before it stores its pick in
+`current`, so the cut was armed for the task being left and a thread alone
+on its processor was never cut. `arm_timer` now takes the task from the fair
+class, the one `account_in` charges; the same boot then held the program
+with 47 periods throttled. Those failing runs are the cpu-arm-order row's
+control: the code before the fix is its sabotage. The fast path's three
+exits now wait out a used quota as the general way out does; the boot with
+`ferrix.fastpath=on` that would prove it is owed (BACKLOG, step 4's F9).
