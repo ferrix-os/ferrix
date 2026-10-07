@@ -1,0 +1,26 @@
+[package]
+name = "ferrix-sdmmc"
+description = "The STM32MP15 SD card driver process: the block ring's driver end over SDMMC1 and the card in it, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sdmmc"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-blkserve.workspace = true
+ferrix-driver = { workspace = true, features = ["block"] }
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+ferrix-stm32-sdmmc.workspace = true
+ferrix-virtio-blk.workspace = true
+
+[lints]
+workspace = true

@@ -676,6 +676,18 @@ log path and commit; a new sighting is added to its row the day it is seen.
   `src/lib/kernel/qr` (ferrix-qr), so a panic screen can carry the whole report. WIP
   on branch `worktree-agent-a33c10946b6721065` (5690f0e), unbuilt into the
   panic path.
+* **The SD card driver on the DK1** (`sdmmc`, `docs/CHROME.md` §10.1;
+  po10-chrome-b, 2026-10-07): built and host-tested, never run on the
+  board, since no emulator has the controller. Owed, each only with the
+  product owner's OK and the register list in the request to the product
+  owner: (1) read-only: every partition and the whole card hashed on
+  Ferrix equal to the host's `sha256sum` of the same card, HELLO announced
+  read-only, a write to `vda1` (`fsbl1`) refused and its host hash
+  unchanged after, and every boot path that can reach `vda` on the board
+  named with what it did; (2) after a `ferrix-scratch` partition is made
+  on the host, writes there with the same hash check; (3) then a btrfs
+  volume on it. The certification consultant's C5 (ledger line 480) asks
+  this row.
 
 ---
 

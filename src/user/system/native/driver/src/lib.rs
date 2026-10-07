@@ -10,8 +10,9 @@
 //!
 //! * the driver core -- [`Bind`], [`Driver`], [`Step`];
 //! * resources -- [`mmio::Block`], [`dma::Dma`];
-//! * a bus -- [`virtio`], whose [`virtio::Device`] is the transport every
-//!   virtio device logic crate drives;
+//! * buses -- [`virtio`], whose [`virtio::Device`] is the transport every
+//!   virtio device logic crate drives, and [`tree`], a board's peripheral
+//!   the kernel published from its device tree;
 //! * subsystems -- `input`, which speaks `inputctl` to the kernel's input
 //!   core for any driver that implements `input::Device`, and `block`, which
 //!   serves the block ring for any driver that implements `block::Device`.
@@ -22,7 +23,9 @@
 //! must not be freed before. Here it cannot be: a [`dma::Dma`] keeps its pin
 //! when dropped, and the only way to free it is [`dma::Dma::free`], which
 //! takes a [`Stopped`]. A `Stopped` is made only by the transport that saw
-//! the device reset ([`virtio::Device::stopped`]), and a subsystem's `stop`
+//! the device reset ([`virtio::Device::stopped`]) -- or by the tree bus,
+//! which hands out no memory to free ([`tree::Device::stopped`]) -- and a
+//! subsystem's `stop`
 //! must return one or [`Stuck`]. So a driver cannot free memory early, and
 //! cannot end without either proving the reset or leaving the memory pinned.
 
@@ -31,6 +34,7 @@
 pub mod dma;
 pub mod mmio;
 pub mod start;
+pub mod tree;
 pub mod virtio;
 
 #[cfg(feature = "block")]
