@@ -42,24 +42,12 @@ use crate::vmap::Stack;
 ///
 /// `Any`, so that the personality can have its own thread back from a task.
 pub(crate) trait UserThread: Any + Send + Sync + fmt::Debug {
-    /// The process whose code it runs: the same process, at the same
-    /// address, for the thread's whole life (a task caches its core,
-    /// [`Task::core_process`]).
+    /// The process whose code it runs.
     fn process(&self) -> &dyn Host;
 }
 
 /// A task's name, unique for the life of the machine.
 pub(crate) type TaskId = u64;
-
-/// Where a task's core process is: [`Task::core_process`].
-#[derive(Debug, Clone, Copy)]
-struct CoreProcess(core::ptr::NonNull<crate::object::process::Process>);
-
-// SAFETY: (SHARED) it only ever lends `&Process` (`Task::core_process`), and
-// `Process` is `Sync`, so sharing or sending the pointer shares the process.
-unsafe impl Send for CoreProcess {}
-// SAFETY: (SHARED) as for `Send`.
-unsafe impl Sync for CoreProcess {}
 
 /// Runnable: on a run queue, or running.
 pub(crate) const RUNNABLE: u8 = 0;
@@ -92,16 +80,18 @@ pub(crate) struct Task {
     /// dies keeps it until it is reaped, which is after the last switch away
     /// from it.
     address_space: Option<Arc<AddressSpace>>,
+    /// One reference to the core process its thread runs in
+    /// (`thread.process().core_arc()`), taken as the task is made, for the
+    /// native round trip's fast path, which reaches the handle table through
+    /// it without the two `dyn` calls (`docs/OPAQUE-KERNEL.md` §9.11). `Some`
+    /// exactly when `thread` is. Declared before `thread`, so that it is let
+    /// go first and the core is still freed with its personality's process.
+    core: Option<Arc<crate::object::process::Process>>,
     /// The thread of a process whose code this task runs in user mode, or
     /// `None` for a kernel thread. Holding it is what keeps the thread, and
     /// through it the process, alive while the task is: a process does not own
     /// its tasks, its tasks own it.
     thread: Option<Arc<dyn UserThread>>,
-    /// `thread`'s `process().core()`, taken once as the task is made, for the
-    /// native round trip's fast path, which reaches the handle table through
-    /// it without the two `dyn` calls (`docs/OPAQUE-KERNEL.md` §9.11). `Some`
-    /// exactly when `thread` is.
-    core: Option<CoreProcess>,
     /// The user registers no trap saves -- thread pointer, floating point --
     /// kept here while the task is not running. `Some` exactly when `thread`
     /// is. Boxed because it is half a kilobyte and most tasks have none.
@@ -312,7 +302,7 @@ impl Task {
         let (run_slot, sleep_slot) = slots()?;
         let core = thread
             .as_ref()
-            .map(|thread| CoreProcess(core::ptr::NonNull::from(thread.process().core())));
+            .map(|thread| Arc::clone(thread.process().core_arc()));
         Ok(Task {
             id,
             name,
@@ -835,13 +825,7 @@ impl Task {
     /// The core process its thread runs in: `thread().process().core()`,
     /// without the two `dyn` calls; `None` for a kernel thread.
     pub(crate) fn core_process(&self) -> Option<&crate::object::process::Process> {
-        // SAFETY: (SHARED) the pointer is `thread.process().core()` as `new`
-        // found it. `thread` is never replaced and keeps the thread, and
-        // through it the process, alive while this task is (its field), and
-        // `UserThread::process` and `Host::core` answer the same object at
-        // the same address for the thread's whole life (their contracts). So
-        // the pointee outlives `&self`, and is only ever shared.
-        self.core.map(|core| unsafe { core.0.as_ref() })
+        self.core.as_deref()
     }
 
     /// Where this task's user registers are kept while it is not running, or
