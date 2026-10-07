@@ -137,6 +137,11 @@ pub(crate) fn dispatch(
             name_length(a[4], a[5]),
         ),
         Syscall::Recvfrom => sys_recvfrom(process, descriptor, a[1], a[2], a[3] as u32, a[4], a[5]),
+        // ARMv7-A's `send` and `recv`, which glibc's armhf `send` and `recv`
+        // make: `sendto` and `recvfrom` with no address, as Linux's
+        // `__sys_send` and `__sys_recv` are.
+        Syscall::Send => sys_sendto(process, descriptor, a[1], a[2], a[3] as u32, 0, 0),
+        Syscall::Recv => sys_recvfrom(process, descriptor, a[1], a[2], a[3] as u32, 0, 0),
         Syscall::Sendmsg => sys_sendmsg(process, descriptor, a[1], a[2] as u32, width),
         Syscall::Recvmsg => sys_recvmsg(process, descriptor, a[1], a[2] as u32, width),
         Syscall::Getsockopt => {
