@@ -2338,10 +2338,10 @@ pub(crate) fn probe_costs() {
                 unsafe {
                     match op {
                         0 => {
-                            black_box(i);
+                            let _ = black_box(i);
                         }
                         1 => {
-                            black_box(cpu::read_msr(FS));
+                            let _ = black_box(cpu::read_msr(FS));
                         }
                         2 => cpu::write_msr(FS, black_box(fs0)),
                         3 => cpu::write_msr(FS, black_box(fs0 ^ ((i & 1) << 12))),
@@ -2352,27 +2352,27 @@ pub(crate) fn probe_costs() {
                             }
                         }
                         5 => {
-                            black_box(cpu::read_msr(KGS));
+                            let _ = black_box(cpu::read_msr(KGS));
                         }
                         6 => cpu::write_msr(KGS, black_box(kgs0)),
                         7 => cpu::write_msr(KGS, black_box(kgs0 ^ ((i & 1) << 12))),
                         8 => {
-                            black_box(cpu::read_gdt());
+                            let _ = black_box(cpu::read_gdt());
                         }
                         9 => {
-                            black_box(cpu::read_task_register());
+                            let _ = black_box(cpu::read_task_register());
                         }
                         10 => {
-                            black_box(crate::timer::now_nanos());
+                            let _ = black_box(crate::timer::now_nanos());
                         }
                         11 => {
-                            black_box(cpu::rdtsc());
+                            let _ = black_box(cpu::rdtsc());
                         }
                         12 => {
-                            black_box(crate::smp::this_cpu().map(|c| c.logical));
+                            let _ = black_box(crate::smp::this_cpu().map(|c| c.logical));
                         }
                         _ => {
-                            black_box(gdt::read_tls());
+                            let _ = black_box(gdt::read_tls());
                         }
                     }
                 }
