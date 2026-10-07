@@ -6335,7 +6335,9 @@ const HANDOFF_PAGE: u64 = 0x6000_0000;
 /// spins, alone on its processor where it gets no tick.
 ///
 /// First, sent while the first thread blocks it: the second must take it --
-/// the one it is given to must be the thread that does not block it. Then the
+/// the one it is given to must be the thread that does not block it, unless
+/// the second came back through the kernel and took it before the send looked
+/// for a taker, which the signal no longer pending shows. Then the
 /// first thread is sent a `SIGUSR2` of its own and the process a `SIGUSR1`,
 /// neither waking anyone, and only the first thread is woken: it takes its own
 /// signal first, and its handler's mask blocks `SIGUSR1` while that is still
@@ -6437,7 +6439,17 @@ fn hand_a_signal_on(handing: &Process) -> Result<(), &'static str> {
     crate::syscall::kill::send(handing, SIGUSR1, Origin::Kernel);
     match handing.take_handed_to() {
         tid if tid == second => {}
-        0 => return Err("a signal sent to a process of two threads was given to no thread"),
+        // No thread chosen, and the signal still pending: every thread was
+        // passed over, the failure this names. Not pending, it was already
+        // taken: the second thread came back through the kernel -- a tick or
+        // an interrupt on a loaded machine -- between the post and the look
+        // for a taker, and was in its handler, which blocks `SIGUSR1`, when
+        // the look came (the stage 7 hand-off flake). Who took it is decided below
+        // by the handler's own record, as for the hand-off's second half.
+        0 if handing.with_signals(|signals| signals.pending()) & signal::bit(SIGUSR1) != 0 => {
+            return Err("a signal sent to a process of two threads was given to no thread");
+        }
+        0 => {}
         _ => {
             return Err(
                 "a signal sent to a process was given to a thread that blocks it, not the one that \
