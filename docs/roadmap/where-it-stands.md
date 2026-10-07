@@ -1,6 +1,6 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-05, to `main` cf30aa08f.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-07, to `main` 7b06cef25.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -41,18 +41,38 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   miss an installing processor, was found and closed on 2026-10-03.
 
 * **The channel round trip, toward seL4** (2026-10-03, `docs/OPAQUE-KERNEL.md`
-  §9.5 to §9.9). The customer's target is seL4's own figure, 440 ns a round
-  trip on nazuna, measured with protections matched. Step 1 and five of step
-  2's six pieces (2a to 2e) are on `main`, each reviewed by the certification
-  consultant: a native round trip inside a domain is 2,556 ns with every
-  mitigation on, down from 37 us. Redox, measured the same way, takes 1,965
-  ns with no speculative defence. `bench-ipc` is exact since 2026-10-05
-  (a fenced counter, sorted samples, one pinned processor, alternation;
-  3349682db). Left: 2f (gated, on `po6/step2f`, waiting for the consultant's
-  conditions), step 3 (3a and 3b, work in progress on `po6/step3`), step 4's
-  direct switch and fast path (its groundwork on `po6/step4-prep` waits for
-  review), step 5 and step 4b; the handover is
+  §9.5 to §9.11). The customer's target is seL4's own figure, 440 ns a round
+  trip on nazuna, measured with protections matched, and since 2026-10-06
+  under 400 ns. Step 1, F-60's fix, step 2 (2a to 2f), step 3 (3a and 3b) and
+  step 4's direct switch and fast path are on `main`, each reviewed by the
+  certification consultant, as are step 5's ERAPS and its vector reset
+  (2026-10-06, 445d09420 to 98fdf69cc). A send of at most 24 bytes to a reader
+  parked on the other end of a channel is handed over directly, with the
+  processor; every other call goes the general way. It runs behind
+  `ferrix.fastpath=on`, on x86-64 only, and is off in the certified
+  configuration for the first release (the customer, §9.7). `domain-call`
+  p50, every mitigation on, was 2,556 ns at the 2026-10-05 wind-down (37 us
+  before step 1); step 4 read 1,548 to 1,558 ns against 2,576 ns without it.
+  On 2026-10-07 the round's cuts went in: the DS and ES skip (690754979), the
+  object side's two cuts (69cf2754c, then 523eeccc6 and 7b06cef25, the task
+  keeping its core process as an `Arc`), the entry and T2 called by
+  link-time hooks (4066f41dd) and a task's slots as atomic cells (f6627521c,
+  L.sched.63). On 4066f41dd the p50 is about 1,048 ns in the faster of the
+  two modes a boot falls in (about 1,250 and 1,550 ns, §9.11); the slots
+  (about -20 to -30 ns) and cut 2 (about -30 ns) are preliminary and there is
+  no figure yet on 7b06cef25. Redox, measured the same way, takes 1,965 ns
+  with no speculative defence. Left: step 5's rest (112a12b63 holds the ids
+  of the user-space stream, and global pages have no session), PCIDs where
+  hardware has them and step 4b; the handover is
   `docs/handover/2026-10-03-ipc.md`.
+
+* **Two boot stops closed on 2026-10-07.** FX-0902, the memory sweep's "kept
+  frames", was the wait for the reaper not counting a program thread
+  part-way through its end (f3299dc04); and x86-64 TCG boots that stopped
+  with no panic before the skipped-arm report were the boot self-check's one-shot waits
+  sleeping on after the timer had fired (10d6dbc60). The second keeps a P1
+  flake row in `docs/BACKLOG.md` until 20 TCG boots of `main` under load show
+  no hang.
 
 * **Steam signs in and shows its store** on the `--everything` desktop,
   its 64-bit side on ferrousli (2026-09-30, `docs/STEAM.md` §5), and

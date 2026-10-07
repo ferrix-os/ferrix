@@ -62,9 +62,9 @@ the wind-down without a force; the old origin names (`l13c`, `land-n6`,
 | `po6/cgctl` | 69fe7b51c | 3349682db | the cgroup controllers (stage 13, 30 points); 23 controls fired, gates passed; owed: the consultant's look at the D1 fix and four new controls |
 | `po6/cgctl-n6` | c4e2b8f9d | 3349682db (it carries `land-n6`) | the same work with coverage carried; no gate run yet; the one to rebase now that `land-n6` has landed |
 | `po6/l13c` | aed1c3fa0 | 3349682db | init L13c, `SystemCallFilter=`; batch 20261005T184633Z failed it on `test-vfs --arch x86_64 --init ferrousli` (the cgroup applet's `rmdir`, "Resource busy"; `main` and `main` plus `land-n6` passed); next: rerun that gate on the branch alone, then rejoin |
-| `po6/step2f` | df5411820 | 3349682db | the channel round trip's 2f: `check` passed, 4 controls fired, bench 2417 ns against `main`'s 2536 to 2566; the consultant: OK if C1 to C6, ledger 382; next: rebase, regenerate, carry coverage, join |
-| `po6/step3` | one commit | 445d09420 (2f) | steps 3a and 3b: every boot, `test-threads`, `test-shell --init ferrousli` and seven controls passed or fired, `check` passed after the rebase, bench 2287 ns against `main`'s 2427; the consultant: ledger 387; lands through a batch |
-| `po6/step4-prep` | fe424cd81 | 527201573 | step 4's groundwork (the park protocol's loom model, `ferrix.fastpath`, the equivalence cases); waits for review |
+| `po6/step2f` | df5411820 | 3349682db | landed 2026-10-06 as 445d09420 (the channel round trip's 2f) |
+| `po6/step3` | one commit | 445d09420 (2f) | landed 2026-10-06 as a1d456820 (steps 3a and 3b) |
+| `po6/step4-prep` | fe424cd81 | 527201573 | landed as step 4's groundwork (cb26e335a, 9cb323010, 4ea4cc8ad); step 4's fast path itself landed 2026-10-06 (0edd644b2) |
 | `po6/n5` | 511c1bdaf | e41489fd7 | N5, unprivileged mounting; parked by the customer; the consultant has not cleared it (ledger 378: B1 mounts detached before the rename check, B2 the namespace write-out under `preempt_disable`) |
 | `po6/bwrap-user` | 09e9c9c74 | e41489fd7 | `test-bwrap` as uid 1000; parked with N5; the two together are re-sized from 5 to 16 points |
 
@@ -625,8 +625,15 @@ customer's call.
   7 and 8 met as §9.8's *As built* paragraphs say. Its gates and controls
   passed and fired on the branch (§9.9's update of 2026-10-06); it lands
   through a batch run.
-- Not started: step 4's fast path itself, which needs 2f and 3a; step 5;
-  step 4b.
+- Not started: step 4b.
+
+**2026-10-07: what has landed.** 2f (445d09420), 3a and 3b (a1d456820), step
+4's fast path (0edd644b2, 0c02066d7), and step 5's ERAPS (3b9b1e267) and
+vector reset (80f32db1f) are on `main`, and so is the round of 2026-10-07 (the
+DS and ES skip 690754979, the object side's cuts 69cf2754c and 7b06cef25,
+the link-time hooks 4066f41dd, the atomic task slots f6627521c). The
+`step2f`, `bench-exact` and `step4-prep` rows below are history, and the work that remains is step 5's rest and
+step 4b (`docs/OPAQUE-KERNEL.md` §9.11).
 
 Older branches of this work: `os-ipc/zircon-trip` is landed in substance (its
 six commits went in as step 1), and `os-ipc/prof` and `os-ipc/prof2` are

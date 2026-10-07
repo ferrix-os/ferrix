@@ -44,10 +44,12 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   `steamcmd` logs in to Steam. The Steam client draws its sign-in window
   through yserver (2026-09-29), with launch-side workarounds
   (`docs/STEAM.md`).
-- **The channel round trip, toward seL4 (440 ns):** 2,556 ns with every
-  mitigation on, from 37 us; step 1, 2a to 2e and the exact `bench-ipc` are
-  in; 2f and steps 3a and 3b are built on branches, step 4's groundwork waits
-  for review, and step 5 is left (`docs/OPAQUE-KERNEL.md` §9.9).
+- **The channel round trip, toward seL4 (440 ns):** 2,556 ns at the
+  2026-10-05 wind-down, from 37 us; step 1, step 2, step 3, step 4's fast path
+  (behind `ferrix.fastpath=on`, x86-64) and step 5's ERAPS and vector reset
+  are in, and so are the 2026-10-07 cuts, about 1,048 ns on 4066f41dd in the
+  faster of a boot's two modes; the rest of step 5 is left
+  (`docs/OPAQUE-KERNEL.md` §9.11).
 - **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28).
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library.
