@@ -4636,4 +4636,31 @@ deferred (the PO, 2026-10-07).
   mask left out, FIRED (`po9-obj-ctl-reply`).
 - Rows restated: L.object.166 (how the halves are held), L.object.167 (the
   new case), L.object.169's unit.
+- Landed as 69cf2754c (consultant OK IF C1 to C3, ledger 416; OK, line 419).
+  A masked hold records no site, so an FX-0503 message after one can name an
+  earlier lock's site, already released (the control's message named
+  `sched/task.rs:392`, a slot lock). FX-0503's catalogue entry says so
+  (line 419's advisory, met in cut 2).
+
+**Cut 2: the lookup through the task's own core process.** The fast path
+reached the handle table by `caller.thread()?.process().core()`, two `dyn`
+calls, each about 3.5 ns more than a direct call in this guest (po9-sched's
+profile), and the loads behind them. `Task` now keeps, beside `thread`, the
+pointer `thread.process().core()` answers, taken once in `Task::new`
+(`Task::core_process`; `None` for a kernel thread, as `thread` is). It
+stays valid for as long as the task does: `thread` is never replaced and
+holds the thread, and through it the process, alive (its field), and the
+contracts of `UserThread::process` and `Host::core` now say they answer the
+same object at the same address for the thread's life. Both
+implementations return a field of an `Arc`'s contents. The lookup itself is
+unchanged: `try_with_handles_masked`, then `channel_in` with its clamp, type
+and rights (O1). Check: stage 9's echo start requires each spawned task's
+cached core to be the one `thread().process().core()` names, which is the
+check process's own (L.object.169). Its control, the cache left empty,
+FIRED (`po9-obj-ctl-core`). Measured by hand (FX-0902's sweep stops some
+`--alternate` boots), turn about against `main` 4066f41dd, all in the low
+mode: 1,008 to 1,018 ns (4 boots) against 1,048 to 1,058 (6 boots), about
+-40 ns a round trip, load 1 to 4
+(`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`). One boot of main read
+1,338 at load 18 and is not counted.
 

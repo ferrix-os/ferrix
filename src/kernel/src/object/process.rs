@@ -750,7 +750,8 @@ impl Drop for Process {
 ///
 /// `Any`, so that the personality can have its own type back ([`downcast`]).
 pub(crate) trait Host: Any + Send + Sync + fmt::Debug {
-    /// The core process inside it.
+    /// The core process inside it: the same object, at the same address,
+    /// for as long as it lives (a task caches it, `Task::core_process`).
     fn core(&self) -> &Process;
 
     /// End it from outside with `status`: what a job kill, and dropping the
