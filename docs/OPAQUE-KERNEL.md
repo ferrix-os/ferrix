@@ -1728,6 +1728,15 @@ The letters are used by parts 3 and 6.
     installation takes, or by a `SeqCst` store paired with a `SeqCst` load
     at T2. Seccomp's landing S3 and any `ptrace` landing carry the flag's
     rows and checks, and this design is named in theirs.
+  - *As met for seccomp* ("as built" 2, §9.11's cut 3): S3 answers T2 by the
+    personality's quiet predicate, whose first read after the probe word is
+    a live count of filtered threads (`seccomp::FILTERED_THREADS`), raised
+    before a thread's flag is raised and given back after it is lowered or
+    the thread is dropped. One location changed by `AcqRel`
+    read-modify-writes and read `Acquire`; by its coherence a thread whose
+    own filter has taken effect never reads a value without its own count,
+    so `SeqCst` is not needed (ledger 457, D1). `TSYNC` (S5) and `ptrace`
+    reopen this note.
 - **T3** The count is at most 24 bytes, or is `WRITE_READ_NOTHING`.
 
 *Under the handle table's lock:*
@@ -2651,9 +2660,10 @@ send back:
    (`syscall::seccomp::check`, a thread's `filtered` flag), so T2 is not
    "no probe armed" alone. The personality registers beside its filter a
    predicate, `seccomp::quiet`, which the core reads through
-   `trap::filter_quiet`: no probe armed, and either no thread was ever
-   filtered or the running one is not -- the reads `check` makes, in its
-   order, so the two agree on any call. A filter registered without the
+   `trap::filter_quiet`: no probe armed, and either no thread is filtered
+   now (a count since 2026-10-07, §9.11's cut 3; until then a flag set once
+   that every boot's checks set) or the running one is not -- the reads
+   `check` makes, in its order, so the two agree on any call. A filter registered without the
    predicate is never quiet. The frame tail reads it again, and takes the
    general branch when it is not quiet. Condition 8's flag on `Process`,
    with its `TSYNC` and tracer rows, stays owed by the landings that bring
@@ -3166,7 +3176,7 @@ word means it would answer false (§9.7's condition 4):
 | `STOP` | `is_stopped` | `enter_stop`, on every task, the caller's included | no lock: after `stopped`'s store |
 | `SIGNAL` | a signal deliverable to the thread, a saved mask to put back, or a call to restart: `signal::needs_attention`'s three | a thread-directed post (`post_signal_to`, `force`) on that thread's task; a process-directed post on every task whose thread does not block the signal; `hand_on` on each thread it hands to; and the thread itself whenever it changes its own mask, saved mask or restart | the signal lock (`Process::state`, then `Thread::signals`) orders the record against the task's clear, below |
 | `TRACE` | a tracer's exit stop | reserved: nothing posts it until `ptrace` exists | the landing that brings `ptrace` |
-| `FILTERED` | the process is filtered (§9.7's T2 flag) | today `seccomp::arm_probe` on the probe's task, cleared by its disarm; owed by seccomp S3 for real filters (condition 8) | S3's install lock, or `SeqCst` against T2's load |
+| `FILTERED` | the process is filtered (§9.7's T2 flag) | today `seccomp::arm_probe` on the probe's task, cleared by its disarm; S3's real filters reach T2 instead through the quiet predicate and its live count of filtered threads (§9.7 T2's note, §9.11's cut 3), so no bit is posted for them | the count's `AcqRel` changes against T2's `Acquire` load (ledger 457, D1) |
 
 Two more inputs of the way out are per processor, not per task, and stay
 so: the resched flag (`NEED_RESCHED`, read by `call_left`) and the regroup
@@ -4663,9 +4673,10 @@ the task to its handle table about 24 (two `dyn` calls, `thread().process()`
 and `.core()`); `reply_words` about 19 (a `memcpy` call and a byte loop).
 The handle table's `try_lock`, `HandleTable::get` with its clamp, the
 `Arc<Endpoint>` clone and its drop, and each half's lock read under one step
-each. So the lookup and the park without an `Arc` (O3, O9) are worth about
-5 to 10 ns a direction against their protocol notes and checks, and are
-deferred (the PO, 2026-10-07).
+each. So the lookup and the park without an `Arc` (O3, O9) were judged
+worth about 5 to 10 ns a direction against their protocol notes and checks,
+and deferred (the PO, 2026-10-07); cut 3 records them as not built, with
+the reason.
 
 **Cut 1: the masked locks and the reply in registers.**
 - *The halves' and the handle table's locks are held under the entry's
@@ -4728,4 +4739,83 @@ counts no figure from it (ledger 432, C3). The first form (the cached
 pointer, ledger 428) measured 1,008 to 1,018 ns (4 boots) against 1,048 to
 1,058 (6 boots) in the low mode, load 1 to 4
 (`~/.local/share/ferrix/logs/po9-obj/c2-abab.txt`).
+
+**Cut 3: T2's predicate from a live count of filtered threads (po10-obj;
+design ledger line 457, D1 to D9).** T2's predicate (`seccomp::quiet`) is
+asked twice a fast direction, at the entry and at the frame tail, and the
+general path's `seccomp::check` asks the same first question at every call.
+Its first read was a flag set once that any thread had ever held a filter,
+and every boot's own checks set it, so on every boot every call made
+`with_current`, `task.thread()`, the `dyn UserThread` to `dyn Any` upcast,
+an indirect `type_id` call and the thread's flag load. The flag is now
+`FILTERED_THREADS`, a count of the threads whose `filtered` flag is up:
+raised before a thread's flag is raised (`Thread::with_seccomp`, under its
+leaf lock) and as a thread is made with it raised (`Thread::with`, so a fork
+child, a thread and a native child that inherit a chain are counted), given
+back after the flag is lowered and in `Thread`'s drop. `quiet` and `check`
+both read it through one function, `seccomp::any_filtered`, before anything
+else after the probe word, so the two still agree on any call; with no
+thread filtered each costs two loads. The ordering is one location changed
+by `AcqRel` read-modify-writes and read `Acquire`, argued at the static
+(ledger 457's D1 answer: `SeqCst` is not needed; `TSYNC` and `ptrace` reopen
+it). The answer is the one it was, so L.object.169 and L.x86_64.161 keep
+their words and no new id is used; L.object.171 to 178, reserved for O3 and
+O9, are released.
+- *The count found a leak in the check, not the product.* FX-1303's check
+  now requires the count back at its value from the start once the check's
+  threads have gone. On the first build it read 5: the scenario tasks of
+  `entry_task` made the call their filter ends them for from frames holding
+  their `Arc<Thread>`, `Arc<Process>` and `Env`, and a thread a filter ends
+  never returns to the frames below the call, so five threads and their
+  processes stayed for every boot's life; no check counts live threads or
+  processes (BACKLOG row). The product's kill path already lets its
+  references go before it leaves. The scenarios now name their last call
+  (`Then::Ending`) and `scenario_task` makes it from a frame holding
+  nothing; the member that kills itself drops its `Env` first. Each scenario
+  is reaped before the next, and the check waits a bounded second more for
+  a processor that frees a task's stack late.
+- *A new case* (D2): in the heredity check the thread the chain was
+  installed on is dropped while a fork child and a thread made of it live;
+  `any_filtered` must still answer yes and both must still be refused
+  `getppid`.
+- *Controls*, each a one-line `gate.sh control`, each FIRED with the
+  check's own message on x86-64 KVM on the landing tree b90da86b2:
+  `po10-obj3-ctl-drop-d` (the drop's give-back removed: "the count of
+  filtered threads did not come back once they had gone"),
+  `po10-obj3-ctl-made-d` (the count at `Thread::with` removed: "the threads
+  that kept a chain were not looked for at a call once its installer had
+  gone"), `po10-obj3-ctl-raise-d` (the count at `with_seccomp`'s raise
+  removed: the count's message, by the underflow at the installer's drop),
+  `po10-obj3-ctl-leak-d` (the scenario's last call made holding its thread
+  again: the count's message). The same four FIRED as `-c` on a2f04189d,
+  whose source tree is the same.
+- *Measured* by hand turn about against `main` 7b06cef25 (fast path on both
+  sides, under `bench.lock`, 10 rounds,
+  `~/.local/share/ferrix/logs/po10-obj/c3-abab.txt`), on a busy host (load
+  16 to 69 before a boot, the protocol's quiet host was not to be had that
+  evening): in the low mode 958 to 968 ns (5 boots) against 988 to 1,008
+  (7 boots), about -40 to -50 ns a round trip, the four looks a trip makes
+  at about 10 to 12 ns each; in the high mode 1,188 to 1,218 (5 boots)
+  against 1,208 and 1,248 (2 boots). The low mode has at least 5 boots a
+  side, but the host was not quiet, so §9.10 counts no figure from it until
+  it is retaken on a quiet one.
+- *Not built, with the reason (ledger 457, R1 and R2).* O3 and O9, the
+  endpoint's `Arc` in the lookup and the park without one: the caller's
+  endpoint must outlive the park, because the general continuation
+  (`continue_general`: `unpark`, `receive_words`) runs on it after any wake,
+  and the general path holds its `Arc` through its wait, so a sibling
+  closing the handle never frees it under a waiter. Line 410's read-side
+  form, bounded by the masked span, cannot cover a block, so a counted
+  reference across the park is needed anyway, and the lookup's own clone is
+  that reference. The park's task reference is already moved, not counted
+  ("as built" 13 (a)). O8, `IN_CALL`'s raise: one per-processor store, and
+  no cheaper form keeps case 11's assertion and the decline's lowering (B1).
+  An ablation (`po10/obj3-abl`, never lands: the endpoint borrowed without
+  its `Arc`, unsound; `IN_CALL`'s raise left out; and `quiet`'s downcast
+  skipped by a cast) gives the upper bound of all three at once, measured
+  the same way (8 rounds, `abl3-abab.txt`, load 28 to 53): low mode 948 to
+  978 ns (5 boots) against 988 to 1,008 (3 boots), high mode 1,178 to 1,198
+  (3) against 1,188 to 1,238 (5) -- no more than cut 3's own saving, which
+  the downcast alone accounts for, so the `Arc` and `IN_CALL` together are
+  within one 10 ns step. An upper bound, not a saving.
 

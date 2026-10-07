@@ -34,7 +34,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint, buffer_footprint};
 use ferrix_linux_abi::errno::Errno;
@@ -268,23 +268,63 @@ enum Decision {
     Leave(i32),
 }
 
-/// Whether any thread has ever held a filter. Set once and never cleared: until
-/// one has, no call of any program looks for its thread, and the hook costs the
-/// registration's load and this flag's.
-static EVER_FILTERED: AtomicBool = AtomicBool::new(false);
+/// How many threads hold seccomp state now: raised before a thread's flag
+/// ([`Thread::is_filtered`]) is raised or as a thread is made with it raised,
+/// lowered after the flag is lowered or as a thread is dropped with it raised.
+/// While it is zero, no thread is filtered, so no call of any program looks
+/// for its thread ([`any_filtered`]). A count rather than a flag set once, so
+/// that a kernel in which every filtered thread has ended -- every boot's
+/// own checks filter threads -- pays no more at a call than one that never
+/// had one.
+///
+/// **Ordering.** One location, changed only by read-modify-writes (`AcqRel`)
+/// and read with `Acquire`. While a thread's flag is up, its own `+1` was
+/// made before the flag was raised and its `-1` is made only after the flag
+/// is lowered or the thread is dropped, so every value of the count in that
+/// span includes it and is at least one. By coherence, a call that comes
+/// after the installer's own increment in that thread's order -- a call made
+/// once its filter has taken effect, or by a thread made filtered, whose
+/// increment preceded its making -- cannot read an earlier value. The only
+/// window is a call on another processor that reads the count before an
+/// installer's increment reaches it, which is ordered before the install as
+/// the flag set once was; `TSYNC` is refused, so today only the installing
+/// thread can be filtered by an install, and it is not in that window.
+/// `SeqCst` is not needed: nothing pairs the count with a second location.
+static FILTERED_THREADS: AtomicUsize = AtomicUsize::new(0);
 
-/// Note that a thread now holds seccomp state, for [`check`]'s fast path.
+/// Note that a thread now holds seccomp state, before its flag is raised or as
+/// it is made with it raised: see [`FILTERED_THREADS`].
 pub(crate) fn note_filtered() {
-    EVER_FILTERED.store(true, Ordering::Release);
+    let _ = FILTERED_THREADS.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Note that a thread no longer holds seccomp state, after its flag was
+/// lowered or as it is dropped with the flag raised.
+pub(crate) fn note_unfiltered() {
+    let _ = FILTERED_THREADS.fetch_sub(1, Ordering::AcqRel);
+}
+
+/// Whether any thread holds seccomp state now, so that a call must look for
+/// its own thread: what [`check`] and [`quiet`] both read first after the
+/// probe word, from this one function.
+pub(crate) fn any_filtered() -> bool {
+    FILTERED_THREADS.load(Ordering::Acquire) != 0
+}
+
+/// How many threads hold seccomp state now: see [`FILTERED_THREADS`]. For the
+/// boot check, which requires it back where it was once its filtered threads
+/// have gone.
+pub(crate) fn filtered_threads() -> usize {
+    FILTERED_THREADS.load(Ordering::Acquire)
 }
 
 /// The function the core asks about every system call.
 ///
 /// Allocates nothing and takes no sleeping lock: it runs on every call of
-/// every program. A kernel in which no thread has installed a filter costs two
-/// loads (this flag and the boot check's probe word); a thread with none costs
-/// the running task, its thread and one more load; the rest is for a thread
-/// that has one. The chain is walked with interrupts open and under no lock.
+/// every program. A kernel in which no thread holds a filter now costs two
+/// loads (the count of filtered threads and the boot check's probe word); a
+/// thread with none, while another holds one, costs the running task, its
+/// thread and one more load; the rest is for a thread that has one. The chain is walked with interrupts open and under no lock.
 pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     if PROBE_TASK.load(Ordering::Relaxed) != 0 {
         let verdict = probed(args);
@@ -292,7 +332,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
             return verdict;
         }
     }
-    if !EVER_FILTERED.load(Ordering::Acquire) {
+    if !any_filtered() {
         return Verdict::Continue;
     }
     let Some(thread) = thread::current() else {
@@ -317,7 +357,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
 }
 
 /// Whether [`check`] would let every call of the running task through
-/// without judging it: no probe armed, and no thread ever filtered or the
+/// without judging it: no probe armed, and no thread filtered now or the
 /// running one not. What the core's fast path asks first (T2,
 /// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before [`check`]; the same
 /// reads `check` makes, in the same order, so the two agree on any call.
@@ -326,7 +366,7 @@ pub(crate) fn quiet() -> bool {
     if PROBE_TASK.load(Ordering::Acquire) != 0 {
         return false;
     }
-    if !EVER_FILTERED.load(Ordering::Acquire) {
+    if !any_filtered() {
         return true;
     }
     sched::with_current(|task| thread::of_task(task).is_none_or(|thread| !thread.is_filtered()))
