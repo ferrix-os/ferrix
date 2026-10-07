@@ -10,6 +10,14 @@
 //! at bring-up -- explicitly, from `main.rs`, in the order boot runs, rather
 //! than by a link-time table nobody can read the order of.
 //!
+//! One exception is bound at link time instead, because a registered pointer
+//! is an indirect call and the path it sits on counts nanoseconds: the fast
+//! path for `channel_write_read` and its filter look (T2), declared in
+//! `trap.rs` and defined in `main.rs`. They are not a table either. Each is
+//! named in the manifest's `composition_root.hooks`, defined once, in
+//! `main.rs`, as one forwarding call, and `check-item-boundary.py` fails any
+//! other such declaration (`docs/certification/ITEM.md` §2).
+//!
 //! A list is a handful of [`Once`] cells, not a locked vector. It is written a
 //! few times at bring-up and read afterwards from paths that must not take a
 //! [`crate::sync::SpinLock`] -- a power-off, and board support that waits on

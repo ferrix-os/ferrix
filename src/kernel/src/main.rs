@@ -130,8 +130,27 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 /// at a call at all (`docs/OPAQUE-KERNEL.md` §9.7, T2).
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
-    trap::set_syscall_filter(syscall::seccomp::check);
-    trap::set_filter_quiet(syscall::seccomp::quiet);
+    trap::set_quiet_syscall_filter(syscall::seccomp::check);
+}
+
+/// The core's T2 hook, bound when the kernel is linked: the personality's
+/// quiet predicate, called directly (`trap::filter_quiet`, which decides
+/// whether to ask).
+#[unsafe(no_mangle)]
+fn ferrix_filter_quiet() -> bool {
+    syscall::seccomp::quiet()
+}
+
+// Each hook is the type `trap` declares it with: see the `const _`s there.
+const _: trap::FilterQuiet = ferrix_filter_quiet;
+const _: trap::FastWriteRead = ferrix_fast_write_read;
+
+/// The core's fast-path hook, bound when the kernel is linked: the item's
+/// `channel_write_read` fast path, called directly from x86-64's entry once
+/// `trap::fast_path_on` says this boot takes it.
+#[unsafe(no_mangle)]
+fn ferrix_fast_write_read(a: &[u64; 6]) -> trap::Fast {
+    syscall::native::fast_write_read(a)
 }
 
 fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {

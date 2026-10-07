@@ -460,6 +460,20 @@
         "src/kernel/src/arch/x86_64/paranoid/check.rs",
         "src/kernel/src/mm/check.rs::check_stacks"
       ]
+    },
+    {
+      "id": "LINK",
+      "name": "Link-time hooks",
+      "covers": "A function the core or the item declares in an `unsafe extern \"Rust\"` block and the composition root defines, so that the core calls up into a ring above it directly rather than through a registered pointer. The compiler checks neither side against the other: each is tied to one `fn` alias by a `const _` assertion on both sides, and check-item-boundary.py holds the declaration to `composition_root.hooks` and the definition to main.rs, as a single forwarding call.",
+      "serves": [
+        "ASR-6",
+        "FM-6"
+      ],
+      "argued_by": [
+        "src/kernel/src/trap.rs",
+        "src/kernel/src/main.rs",
+        "tools/common/check/check-item-boundary.py"
+      ]
     }
   ]
 }

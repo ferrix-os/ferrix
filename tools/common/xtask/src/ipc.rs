@@ -520,6 +520,7 @@ const FASTPATH_LINE: &str = "ipc fast path for channel_write_read:";
 /// the wrong path; a transcript that did not finish; two that differ.
 /// Verifies: `L.x86_64.150`, `L.x86_64.159`, `L.x86_64.160`, `L.sched.59`
 /// Verifies: `L.sched.61`, `L.object.167`, `L.object.170`, `H.OBJ.18`
+/// Verifies: `L.x86_64.161`
 pub(crate) fn test_ipc_equiv(args: &Args) -> Result<()> {
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new("test-ipc-equiv needs --init, a static busybox for each architecture")

@@ -950,6 +950,103 @@ def crate_line_counts(manifest: dict) -> dict[str, dict[str, int]]:
     return counts
 
 
+# --- link-time hooks ----------------------------------------------------------
+#
+# The core may reach code above it without naming it in two ways: a pointer the
+# composition root registers at bring-up (`hooks.rs`), or a function the core
+# declares in an `unsafe extern "Rust"` block and the composition root defines
+# under `#[unsafe(no_mangle)]`, which the linker binds -- a direct call, where
+# the registered pointer is an indirect one (`docs/OPAQUE-KERNEL.md` §9.7, "as
+# built", 2 and 3). The resolver above sees neither as an edge, since no path
+# is written. So this rule holds the second kind to a list that can only be
+# changed by editing the manifest: every such declaration in a core or item
+# file is named in `composition_root.hooks`, the name is defined once, in the
+# composition root, and its body is one call of the function the entry says
+# it forwards to -- no logic of the item's lives in the root.
+
+_EXTERN_RUST = re.compile(r'\bextern\s+"\s*"\s*\{')
+_FN_NAME = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
+_NO_MANGLE = re.compile(
+    r"#\s*\[\s*unsafe\s*\(\s*no_mangle\s*\)\s*\]"
+    r"(?:\s*#\s*\[[^\]]*\])*\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:extern\s+\"\s*\"\s+)?"
+    r"fn\s+([A-Za-z_]\w*)"
+)
+_CALL = re.compile(r"^([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\((?:[^(){};]|\([^(){};]*\))*\)$")
+
+
+def _closing(masked: str, open_at: int) -> int:
+    """The offset of the `}` that closes the `{` at `open_at`."""
+    depth = 0
+    for at in range(open_at, len(masked)):
+        if masked[at] == "{":
+            depth += 1
+        elif masked[at] == "}":
+            depth -= 1
+            if depth == 0:
+                return at
+    return len(masked)
+
+
+def hook_problems(ring_of: dict[str, str], read, hooks: list[dict], root: str | None) -> list[str]:
+    """What breaks the link-time hook rule, over `ring_of`'s files."""
+    listed = {entry["name"]: entry for entry in hooks}
+    declared: dict[str, str] = {}
+    defined: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    problems: list[str] = []
+    for rel in sorted(ring_of):
+        source = read(rel)
+        masked = rustlex.mask(source)
+        for block in _EXTERN_RUST.finditer(masked):
+            quote = masked.index('"', block.start())
+            if source[quote:quote + 6] != '"Rust"':
+                continue
+            open_at = block.end() - 1
+            body = masked[open_at:_closing(masked, open_at)]
+            for name in _FN_NAME.findall(body):
+                if ring_of[rel] not in ("core", "item"):
+                    continue
+                declared[name] = rel
+                if name not in listed:
+                    problems.append(
+                        f"{rel}: `{name}` is declared in an extern \"Rust\" block of the "
+                        f"{ring_of[rel]} and is not in composition_root.hooks"
+                    )
+        for found in _NO_MANGLE.finditer(masked):
+            name = found.group(1)
+            open_at = masked.find("{", found.end())
+            body = masked[open_at + 1:_closing(masked, open_at)].strip()
+            defined[name].append((rel, body))
+    for name, sites in sorted(defined.items()):
+        if name not in listed and name not in declared:
+            continue
+        for rel, body in sites:
+            if rel != root:
+                problems.append(f"{rel}: hook `{name}` is defined outside the composition root ({root})")
+                continue
+            call = _CALL.match(body)
+            want = listed.get(name, {}).get("forwards_to")
+            if call is None:
+                problems.append(f"{rel}: hook `{name}`'s body is not a single forwarding call")
+            elif want is not None and call.group(1) != want:
+                problems.append(
+                    f"{rel}: hook `{name}` forwards to `{call.group(1)}`, and "
+                    f"composition_root.hooks says `{want}`"
+                )
+        if len(sites) > 1:
+            problems.append(f"hook `{name}` is defined {len(sites)} times")
+    for name, entry in sorted(listed.items()):
+        if name not in declared:
+            problems.append(f"composition_root.hooks names `{name}`, which no core or item file declares")
+        elif entry.get("declared_in") not in (None, declared[name]):
+            problems.append(
+                f"composition_root.hooks says `{name}` is declared in {entry['declared_in']}; "
+                f"it is in {declared[name]}"
+            )
+        if name not in defined:
+            problems.append(f"composition_root.hooks names `{name}`, which the composition root does not define")
+    return problems
+
+
 # --- self-test ---------------------------------------------------------------
 
 _CRATE = {
@@ -1005,6 +1102,7 @@ def self_test() -> list[str]:
     if modules.get(("sys", "inline")) is None or modules[("sys", "inline")].file != "sys/mod.rs":
         failures.append("resolver: inline module sys::inline not placed in sys/mod.rs")
     failures += _crate_self_test()
+    failures += _hook_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
     stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
     if stale != [("load", "render/**")]:
@@ -1076,6 +1174,45 @@ def _crate_self_test() -> list[str]:
         mine = [p for p in problems if p.startswith("ferrix-btrfs-write ")]
         if bool(mine) != refused:
             failures.append(f"crate rule: {what}: {'passed' if not mine else mine}")
+    return failures
+
+
+# The hook rule's cases: a tree that keeps it, and the three ways to break it
+# the consultant asked to see fail (ledger line 415, H1), each on its own.
+_HOOK_RINGS = {"main.rs": "load", "trap.rs": "core", "up.rs": "load"}
+_HOOK_LIST = [{"name": "hook_up", "declared_in": "trap.rs", "forwards_to": "up::go"}]
+_HOOK_TREE = {
+    "main.rs": "mod trap; mod up;\n#[unsafe(no_mangle)]\nfn hook_up(a: &[u64; 6]) -> bool {\n"
+               "    up::go(a)\n}\n",
+    "trap.rs": "// SAFETY: (LINK) x\nunsafe extern \"Rust\" {\n    safe fn hook_up(a: &[u64; 6]) -> bool;\n}\n"
+               "unsafe extern \"C\" {\n    fn stub();\n}\n",
+    "up.rs": "pub fn go(a: &[u64; 6]) -> bool { a[0] == 1 }\n",
+}
+_HOOK_BREAKS = [
+    ("an undeclared hook in the core",
+     {"trap.rs": _HOOK_TREE["trap.rs"] + "unsafe extern \"Rust\" { fn sneak(); }\n"},
+     "not in composition_root.hooks"),
+    ("a definition outside the composition root",
+     {"main.rs": "mod trap; mod up;\n",
+      "up.rs": _HOOK_TREE["up.rs"] + "#[unsafe(no_mangle)]\nfn hook_up(a: &[u64; 6]) -> bool { go(a) }\n"},
+     "outside the composition root"),
+    ("a definition that does more than forward",
+     {"main.rs": "mod trap; mod up;\n#[unsafe(no_mangle)]\nfn hook_up(a: &[u64; 6]) -> bool {\n"
+                 "    let b = up::go(a);\n    b || a[1] == 0\n}\n"},
+     "not a single forwarding call"),
+]
+
+
+def _hook_self_test() -> list[str]:
+    failures = []
+    found = hook_problems(_HOOK_RINGS, _HOOK_TREE.get, _HOOK_LIST, "main.rs")
+    if found:
+        failures.append(f"hooks: a tree that keeps the rule was refused: {found}")
+    for what, change, expect in _HOOK_BREAKS:
+        tree = {**_HOOK_TREE, **change}
+        found = hook_problems(_HOOK_RINGS, tree.get, _HOOK_LIST, "main.rs")
+        if not any(expect in problem for problem in found):
+            failures.append(f"hooks: {what} passed ({found})")
     return failures
 
 
@@ -1196,6 +1333,24 @@ def main() -> int:
         ring_of,
     )
 
+    hook_found = hook_problems(
+        ring_of,
+        lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace"),
+        root.get("hooks", []),
+        root.get("file"),
+    )
+    if hook_found:
+        print(
+            f"item-boundary: {len(hook_found)} problem(s) with the link-time hooks.\n"
+            f"  A core or item file may declare a function in an extern \"Rust\"\n"
+            f"  block only if composition_root.hooks names it, and the composition\n"
+            f"  root alone defines it, as one call of what the entry forwards to:",
+            file=sys.stderr,
+        )
+        for problem in hook_found:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+
     counts = line_counts(manifest, ring_of)
     crates = crate_line_counts(manifest)
     item_crates = {p: e for p, e in crates.items() if e["ring"] in ("core", "item")}
@@ -1207,7 +1362,8 @@ def main() -> int:
         f"{len(item_crates)} crate(s): {', '.join(sorted(item_crates))}), "
         f"{counts['load']['product']} uncertified in the kernel, "
         f"{len(debt)} known upward reference(s), "
-        f"{len(root_edges)} composition-root edge(s)"
+        f"{len(root_edges)} composition-root edge(s), "
+        f"{len(root.get('hooks', []))} link-time hook(s)"
     )
     for note in crate_notes:
         print(f"  {note}")

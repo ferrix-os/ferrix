@@ -8,7 +8,7 @@
 //! policy is written once.
 
 use core::ptr;
-use core::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_sync::Once;
@@ -308,10 +308,21 @@ pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;
 /// load on every call.
 static SYSCALL_FILTER: Once<SyscallFilter> = Once::new();
 
-/// Judge every system call with `filter` from now on. The first registration
-/// stands; `main.rs` makes it before anything can enter user mode.
-pub(crate) fn set_syscall_filter(filter: SyscallFilter) {
-    register(&SYSCALL_FILTER, filter);
+/// Judge every system call with `filter` from now on, a filter whose quiet
+/// predicate is `main.rs`'s `ferrix_filter_quiet`, registered in one call so
+/// that the two cannot be registered apart: [`QUIET_REGISTERED`] is raised only by the call that installed
+/// `filter`, after it did. A filter already registered by anyone else stands,
+/// and leaves the flag down, so its calls are never quiet. `main.rs` makes it
+/// before anything can enter user mode.
+pub(crate) fn set_quiet_syscall_filter(filter: SyscallFilter) {
+    let mut installed = false;
+    let _ = SYSCALL_FILTER.call_once(|| {
+        installed = true;
+        filter
+    });
+    if installed {
+        QUIET_REGISTERED.store(true, Ordering::Release);
+    }
 }
 
 /// Ask the registered filter about one call: what every architecture's entry
@@ -327,7 +338,8 @@ pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome> {
     ask(&SYSCALL_FILTER, args)
 }
 
-/// [`set_syscall_filter`] for any slot: the first registration stands.
+/// [`set_quiet_syscall_filter`]'s registration for any slot: the first
+/// registration stands.
 pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
     let _ = slot.call_once(|| filter);
 }
@@ -344,32 +356,61 @@ pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outc
     }
 }
 
-/// Whether the registered filter would let every call of the running task
-/// through without looking at it: what the fast path tests first (T2,
-/// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before
-/// [`filter_system_call`]. Registered by the personality beside its filter,
-/// as `set_syscall_filter` is; a filter registered without one is never
-/// quiet, and with no filter registered every call is.
-pub(crate) type FilterQuiet = fn() -> bool;
-
-/// The registered [`FilterQuiet`].
-static FILTER_QUIET: Once<FilterQuiet> = Once::new();
-
-/// Say with `quiet` when the registered filter lets calls through unlooked
-/// at. The first registration stands; `main.rs` makes it beside the
-/// filter's, before anything can enter user mode.
-pub(crate) fn set_filter_quiet(quiet: FilterQuiet) {
-    let _ = FILTER_QUIET.call_once(|| quiet);
+// The two calls the core makes up into the rings above it on the fast
+// path, bound when the kernel is linked rather than through a registered
+// pointer: an indirect call costs about 3.5 ns more than a direct one here
+// (`docs/OPAQUE-KERNEL.md` §9.7, "as built", 2 and 3), and each direction of
+// a fast trip made three. The core names neither ring: it declares the two
+// symbols, and the composition root, `main.rs`, which names every ring
+// already, defines each as a forward to the function above it
+// (`crate::hooks`, *Link-time hooks*; check-item-boundary holds both ends).
+// Whether either is called is still decided at run time, at every call, by
+// the core's own flags, which keep the registrations' meaning:
+// [`FAST_PATH_ON`] for T1, and [`QUIET_REGISTERED`] for a filter registered
+// with its predicate.
+//
+// SAFETY: (LINK) each declaration's type is held to its definition's by
+// the `const _` assertions below and in `main.rs`, which tie both to one
+// alias; Rust checks neither side against the other otherwise.
+unsafe extern "Rust" {
+    /// `syscall::native::fast_write_read`, defined in `main.rs`.
+    safe fn ferrix_fast_write_read(a: &[u64; 6]) -> Fast;
+    /// `syscall::seccomp::quiet`, defined in `main.rs`.
+    safe fn ferrix_filter_quiet() -> bool;
 }
 
+/// The personality's quiet predicate, as `main.rs` defines it: whether the
+/// registered filter would let every call of the running task through
+/// without looking at it.
+pub(crate) type FilterQuiet = fn() -> bool;
+
+// The declarations are the aliases' type, as `main.rs`'s definitions are.
+const _: FastWriteRead = ferrix_fast_write_read;
+const _: FilterQuiet = ferrix_filter_quiet;
+
+/// Whether the personality said, beside its filter, when that filter lets
+/// calls through unlooked at: what the fast path tests first (T2,
+/// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before
+/// [`filter_system_call`]. A filter registered without saying so is never
+/// quiet, and with no filter registered every call is.
+static QUIET_REGISTERED: AtomicBool = AtomicBool::new(false);
+
 /// Whether the registered filter would let the running task's calls through
-/// without looking: see [`FilterQuiet`]. With interrupts masked, as the
-/// entry holds them.
+/// without looking: see [`QUIET_REGISTERED`]. Asked afresh at every call,
+/// with interrupts masked, as the entry holds them.
+///
+/// The filter is read before the flag, and the flag is raised only after the
+/// filter is in place: a reader sees no filter (quiet), the filter without
+/// the flag (never quiet), or both (the predicate's answer), and never the
+/// flag beside a filter whose predicate was not registered with it.
 pub(crate) fn filter_quiet() -> bool {
-    match (SYSCALL_FILTER.get(), FILTER_QUIET.get()) {
+    match (
+        SYSCALL_FILTER.get(),
+        QUIET_REGISTERED.load(Ordering::Acquire),
+    ) {
         (None, _) => true,
-        (Some(_), Some(quiet)) => quiet(),
-        (Some(_), None) => false,
+        (Some(_), true) => ferrix_filter_quiet(),
+        (Some(_), false) => false,
     }
 }
 
@@ -399,19 +440,34 @@ pub(crate) enum Fast {
 /// filter; returns with them masked.
 pub(crate) type FastWriteRead = fn(&[u64; 6]) -> Fast;
 
-/// The registered fast path: set at boot only when `ferrix.fastpath=on`
-/// (`fastpath.rs`), so that an unset slot is the switch off (T1).
-static FAST_WRITE_READ: Once<FastWriteRead> = Once::new();
+/// Whether this boot takes `channel_write_read` through the fast path: set
+/// at boot only when `ferrix.fastpath=on` (`fastpath.rs`), so that a clear
+/// flag is the switch off (T1). Read at every entry.
+static FAST_PATH_ON: AtomicBool = AtomicBool::new(false);
 
-/// Take `channel_write_read` through `fast` from now on. Registered once,
+/// Take `channel_write_read` through the fast path from now on. Set once,
 /// before the first program, and only on a boot that asks for it.
-pub(crate) fn set_fast_write_read(fast: FastWriteRead) {
-    let _ = FAST_WRITE_READ.call_once(|| fast);
+pub(crate) fn set_fast_write_read() {
+    FAST_PATH_ON.store(true, Ordering::Release);
 }
 
-/// The registered fast path, if this boot has one.
+/// The fast path, if this boot takes it: `main.rs`'s
+/// `ferrix_fast_write_read`, called directly from the entry
+/// ([`fast_path_on`], [`fast_write_read_now`]) and named here for the
+/// checks that ask whether it is on.
 pub(crate) fn fast_write_read() -> Option<FastWriteRead> {
-    FAST_WRITE_READ.get().copied()
+    fast_path_on().then_some(fast_write_read_now as FastWriteRead)
+}
+
+/// Whether this boot takes the fast path (T1).
+pub(crate) fn fast_path_on() -> bool {
+    FAST_PATH_ON.load(Ordering::Acquire)
+}
+
+/// The fast path itself, by a direct call: only once [`fast_path_on`] has
+/// said yes.
+pub(crate) fn fast_write_read_now(a: &[u64; 6]) -> Fast {
+    ferrix_fast_write_read(a)
 }
 
 /// Answer one system call: what every architecture's system call path calls,

@@ -57,7 +57,7 @@ pub(crate) fn init(view: &BootView<'_>) {
     ON_AT_BOOT.store(read == READ_ON, Ordering::Relaxed);
     READ.store(read, Ordering::Relaxed);
     if read == READ_ON && crate::arch::FAST_WRITE_READ {
-        crate::trap::set_fast_write_read(crate::syscall::native::fast_write_read);
+        crate::trap::set_fast_write_read();
     }
 }
 

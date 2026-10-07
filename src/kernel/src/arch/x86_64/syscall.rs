@@ -489,14 +489,14 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
     // has run in the stub by here (`docs/OPAQUE-KERNEL.md` §9.7, condition
     // 2). A declined call goes on below as any other.
     if frame.rax as usize == ferrix_native_abi::nr::CHANNEL_WRITE_READ
-        && let Some(fast) = crate::trap::fast_write_read()
+        && crate::trap::fast_path_on()
     {
         // The call blocks, and lets the vector registers go across it (3a).
         mark_vectors_dead(true);
         let args = [
             frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
         ];
-        match fast(&args) {
+        match crate::trap::fast_write_read_now(&args) {
             crate::trap::Fast::Declined => mark_vectors_dead(false),
             crate::trap::Fast::Tail(outcome) => return frame_tail(frame, outcome),
             crate::trap::Fast::Done(outcome) => {

@@ -1719,7 +1719,7 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("syscall::native::fast_write_read",
                 "object::process::Process::try_with_handles_masked", "trap::filter_quiet",
-                "trap::set_filter_quiet");
+                "trap::set_quiet_syscall_filter");
         }
         requirement <'L.object.170'> theWayOutsAreShared : ItemLowLevel {
             attribute :>> statement = "channel_write_read's answer shall go into the

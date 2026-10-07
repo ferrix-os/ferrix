@@ -427,6 +427,30 @@
       "syscall::linux",
       "syscall::seccomp",
       "syscall::time"
+    ],
+    "//hooks": [
+      "Link-time hooks (docs/OPAQUE-KERNEL.md section 9.7, as built, 2 and 3;",
+      "the consultant's ledger line 415, H1): a function a core or item file",
+      "declares in an `unsafe extern \"Rust\"` block, defined once in this file",
+      "under #[unsafe(no_mangle)] as one call of `forwards_to`. A direct call",
+      "up into a ring above, where a registered pointer would be an indirect",
+      "one; the core still decides at run time whether to make it, by flags of",
+      "its own. check-item-boundary.py fails on a declaration not listed here,",
+      "a definition elsewhere or doing more than forwarding, and a stale entry."
+    ],
+    "hooks": [
+      {
+        "name": "ferrix_fast_write_read",
+        "declared_in": "trap.rs",
+        "forwards_to": "syscall::native::fast_write_read",
+        "why": "the x86-64 entry's fast path for channel_write_read, called only while trap::fast_path_on (T1)"
+      },
+      {
+        "name": "ferrix_filter_quiet",
+        "declared_in": "trap.rs",
+        "forwards_to": "syscall::seccomp::quiet",
+        "why": "T2's quiet predicate, asked by trap::filter_quiet only for a filter registered with it"
+      }
     ]
   }
 }

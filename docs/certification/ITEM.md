@@ -189,6 +189,28 @@ load's subsystems brought up in order (`fs::root_disk`, `fs::data_disk`,
 `fs::home_disk`, `net`, `syscall::time`, `display`). The manifest's list is
 the authority; this sentence is recounted from it.
 
+**Two calls up are bound at link time (2026-10-07).** The fast path for
+`channel_write_read` and T2's quiet predicate were registered pointers until
+then, and each direction of a fast trip made three indirect calls through
+them, at about 3.5 ns each above a direct call on the reference machine
+(`docs/OPAQUE-KERNEL.md` §9.7, "as built", 2 and 3). The core now declares
+the two in one `unsafe extern "Rust"` block in `trap.rs`, and `main.rs`
+defines each under `#[unsafe(no_mangle)]` as one call of the function above
+(`syscall::native::fast_write_read`, `syscall::seccomp::quiet`). Whether the
+core makes either call is still its own decision, at every call, by flags it
+keeps: the fast path's (raised by `fastpath::init` for
+`ferrix.fastpath=on` alone) and the filter's predicate's (raised by
+`trap::set_quiet_syscall_filter` only for the filter it installed). The
+resolver sees no edge in a link-time binding, so `check-item-boundary.py`
+holds the form instead: every such declaration in a core or item file is
+listed under `composition_root.hooks`, defined once, in `main.rs`, and its
+body is one call of what the entry says it forwards to; its self-test
+fails an unlisted declaration, a definition elsewhere and one that does
+more than forward. The `unsafe extern` block is traced as the `LINK`
+obligation (SAFETY-MANUAL §2), and each side is tied to one `fn` alias by a
+`const _` assertion, since Rust checks neither against the other
+(`L.x86_64.161`; the consultant's ledger, line 415, H1-H7).
+
 That is a judgement an assessor has to accept, and it is only as good as the
 claim that those edges carry composition and no item logic. It is plausible
 from the list; it is not checked, because the exemption covers the file, and

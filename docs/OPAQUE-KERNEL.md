@@ -2657,10 +2657,30 @@ send back:
    predicate is never quiet. The frame tail reads it again, and takes the
    general branch when it is not quiet. Condition 8's flag on `Process`,
    with its `TSYNC` and tracer rows, stays owed by the landings that bring
-   them.
-3. **T1 is a registration.** `fastpath::init` registers the fast path with
-   the core's entry only for `ferrix.fastpath=on` (`trap::set_fast_write_read`,
-   a `Once`); the entry tests the slot, so off is an empty slot.
+   them. *Since 2026-10-07 (po9-sched, ledger line 415, H4):* the predicate
+   is no registered pointer but a link-time hook, `ferrix_filter_quiet`,
+   which `trap.rs` declares and `main.rs` defines as one call of
+   `seccomp::quiet`; the pointer's indirect call cost about 8 ns of the
+   9.4 a look took. The filter and its predicate are registered by one call,
+   `trap::set_quiet_syscall_filter`, which raises the core's
+   `QUIET_REGISTERED` flag only after it installed the filter, and only for
+   the filter it installed: a reader sees no filter (quiet), the filter
+   without the flag (never quiet), or both (the predicate's answer), never
+   the flag beside a filter registered without it. `filter_quiet` reads
+   both at every call.
+3. **T1 is a flag.** `fastpath::init` raises the core's fast-path flag
+   (`trap::set_fast_write_read`) only for `ferrix.fastpath=on`, before the
+   first program, and nothing lowers it; the entry reads it (Acquire) at
+   every call and, when it is raised, calls the fast path directly
+   through the link-time hook `ferrix_fast_write_read`, which `main.rs`
+   defines as one call of `syscall::native::fast_write_read`. Until
+   2026-10-07 this was a registered pointer, a `Once`, whose unset slot was
+   off. The hooks, the gate that holds them (`check-item-boundary.py`,
+   `composition_root.hooks`) and the `LINK` obligation are
+   `docs/certification/ITEM.md` §2's; `L.x86_64.150`, `.159` and `.161`
+   state them. Measured alone, the change took a fast-mode domain-call
+   from 1,248 ns to 1,208 to 1,228 ns (5 fast-mode rounds of 6, alternated
+   against `main` 4c9c078cc).
 4. **T11 includes the sleep slot.** A parked task files no deadline, but
    one woken early from an earlier sleep and moved may still have its sleep
    slot in a sleeper set elsewhere, state 3 of `wake_with`. Part 1's A1 would

@@ -106,6 +106,7 @@ to each other by `check-safety-requirements.py`.
 | `(KMEM)` | kernel memory ownership | the global allocator and the heap's pages, the page array, vmap buffers, kernel stacks and their release, a box taken back from a raw pointer, the loader's memory given back | FM-6, FM-7, FM-9 |
 | `(BOOT-DATA)` | what the loader and the image hand over | the boot information, the ACPI tables and the device tree, the kernel's own text, the vDSO's bytes | AoU-8, FM-6 |
 | `(PROBE)` | deliberate faults in self-checks | a breakpoint, a debug-register trap, a write that must fault and be mapped on demand, an access through a space under test | ASR-1, ASR-6 |
+| `(LINK)` | link-time hooks | a call the core declares in an `unsafe extern "Rust"` block and the composition root defines as one forwarding call, its type tied to one alias on both sides; `check-item-boundary.py` holds both ends to `composition_root.hooks` | ASR-6, FM-6 |
 
 Measured 2026-09-27: all 663 of the element's unsafe sites carry an id -- 123
 `CONTEXT`, 118 `SYSREG`, 87 `SHARED`, 66 `ENTRY`, 60 `TRANSLATE`, 55 `DEVICE`,

@@ -105,6 +105,10 @@ KERNEL_SRC = ROOT / "src" / "kernel" / "src"
 # expression on the right of `=`.
 UNSAFE_BLOCK = re.compile(r"(?<![\w:])unsafe\s*\{")
 UNSAFE_IMPL = re.compile(r"(?<![\w:])unsafe\s+impl\b")
+# `unsafe extern "Rust" {`: a link-time hook's declarations, whose types the
+# compiler does not check against their definitions (the `LINK` obligation).
+# The `extern "C"` blocks naming assembly are not counted here.
+UNSAFE_EXTERN_RUST = re.compile(r'(?<![\w:])unsafe\s+extern\s+"Rust"')
 UNSAFE_FN = re.compile(r"(?<![\w:])(?:pub(?:\([^)]*\))?\s+)?unsafe\s+fn\s+(\w+)")
 # `impl Trait for Type {`, whose methods implement someone else's contract.
 TRAIT_IMPL = re.compile(r"^\s*(?:unsafe\s+)?impl\s*(?:<[^>]*>)?\s+[^;{]*\bfor\b[^;{]*\{")
@@ -259,6 +263,13 @@ def scan(source: str, label: str = "") -> tuple[list[str], list[Site], int]:
             else:
                 sites.append(Site(index + 1, "block", comment_ids(lines[covering]), stripped))
 
+        if UNSAFE_EXTERN_RUST.search(line):
+            covering = safety_line(lines, index)
+            if covering is None:
+                problems.append(f"{label}:{index + 1}: unsafe extern \"Rust\" with no `// SAFETY:` comment")
+            else:
+                sites.append(Site(index + 1, "extern", comment_ids(lines[covering]), stripped))
+
         if UNSAFE_IMPL.search(line):
             covering = safety_line(lines, index)
             if covering is None:
@@ -334,6 +345,11 @@ unsafe fn plain() {}
 impl GlobalAlloc for A {
     unsafe fn alloc(&self) {}
 }
+
+// SAFETY: (LINK) tied to one alias on both sides.
+unsafe extern "Rust" {
+    safe fn hook() -> bool;
+}
 """
 
 _SELF_EXPECT = [
@@ -344,6 +360,7 @@ _SELF_EXPECT = [
     (15, "impl", ["SHARED"]),
     (22, "fn", ["TRANSLATE"]),
     (26, "fn", []),
+    (33, "extern", ["LINK"]),
 ]
 
 
