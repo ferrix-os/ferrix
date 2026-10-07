@@ -43,6 +43,8 @@ pub(crate) fn init(tree: &Fdt<'_>) -> Result<(), &'static str> {
     if cpu::read_cntfrq() == 0 {
         return Err("firmware left CNTFRQ at zero, so the counter has no frequency");
     }
+    // The boot processor's; each secondary sets its own as it starts.
+    cpu::allow_user_counter();
     disarm();
     Ok(())
 }

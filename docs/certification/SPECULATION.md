@@ -450,6 +450,11 @@ card's ARMv7-A kernel with `--strip-debug`, which keeps the relocations, not
    how long firmware took can narrow it to a few bits. The loader says so
    (`from the cycle counter, which is guessable and so not KASLR`), and the
    kernel reports the layout as `NOT randomised against a local attacker`.
+   On ARMv7-A a program reads the same virtual count since 2026-10-07
+   (`CNTKCTL.PL0VCTEN`, L.armv7a.4), so it can recover this seed as well as
+   anyone: the DK1's U-Boot has not yet been seen offering
+   `EFI_RNG_PROTOCOL`, and without it the DK1's layout is not randomised
+   against a local program.
 
 With none of them, or with `nokaslr` on the command line (`CMDLINE.TXT`, or
 `cargo xtask run --gdb`, which adds it so that a debugger's symbols are where

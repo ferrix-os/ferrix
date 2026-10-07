@@ -13,7 +13,8 @@
 //!
 //! It prints one line, and asserts nothing about the numbers: they are a
 //! measurement, and a slow host is not a failure. What it does require is
-//! that every read answers, and answers the bytes `xtask` wrote.
+//! that every read answers, and answers the bytes `xtask` wrote, and that
+//! where ring 3 may read the counter the driver timed its depth-1 requests.
 //!
 //! The depth-1 reads are traced as well (`sched::trip`), after one untimed
 //! read that names the ring's ports to the trace, and [`super::trip_check`]
@@ -191,9 +192,14 @@ fn traced_reads(
         samples.push(nanos);
         trace.add(trip);
     }
-    let device = device_mean(before, device_now());
+    let after = device_now();
     trace.stop();
-    Ok(device)
+    // The driver served READS requests: where ring 3 may read the counter it
+    // timed them, and none timed means its read of the counter failed.
+    if arch::ring3_reads_counter() && after.1 == before.1 {
+        return Err("the driver timed none of its requests, though ring 3 may read the counter");
+    }
+    Ok(device_mean(before, after))
 }
 
 /// The disk the deeper run's readers share.

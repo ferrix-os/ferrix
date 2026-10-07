@@ -47,13 +47,6 @@
       "purpose": "IPC round trip toward seL4: fewer user pages a trip, 2 MiB native text, KASLR-placement alignment (po9-cert's verdict, ledger 2026-10-07, U1-U9, K1-K7)"
     },
     {
-      "ids": ["L.armv7a.4"],
-      "owner": "po10-dk1",
-      "branch": "po10-dk1/counter",
-      "date": "2026-10-07",
-      "purpose": "ARMv7-A: CNTKCTL.PL0VCTEN set, physical counter and timers closed to PL0, on every processor, so bench-ipc runs on the DK1 (po10-dk1-cert's verdict, ledger 2026-10-07 line 449, conditions (a)-(i))"
-    },
-    {
       "ids": ["L.object.179"],
       "owner": "po10-obj",
       "branch": "po10/f-endpoint-drop",
