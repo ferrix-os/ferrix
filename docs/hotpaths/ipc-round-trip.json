@@ -9,9 +9,9 @@
     "docs/handover/2026-10-03-ipc.md"
   ],
   "as_of": {
-    "date": "2026-10-06",
-    "main": "ccf72dd94",
-    "note": "3a and 3b on main; step 4 on po7/step4, ERAPS on po7/step5, VZEROALL on po7/step5-vec (all unlanded); the budget, 9.10, on main since ccf72dd94"
+    "date": "2026-10-07",
+    "main": "390d5f278",
+    "note": "steps 1 to 4, ERAPS, VZEROALL, the DS/ES and FS/GS skips and object cuts 1 and 2 on main; J, user inlining, cut 3, Q1-Q8 and F-65's fix in flight; 9.12 (the direct resume) on os76/fastpath-v2, its premise disproved by the unwind-inline entry"
   },
   "definition": {
     "entry": "the client's SYSCALL of channel_write_read (0x1013) in ferrix_rt's x86-64 stub",
@@ -95,7 +95,11 @@
     {"id": "fsgsbase", "arch": "x86_64", "what": "FSGSBASE: bases written by WRFSBASE and swapgs/WRGSBASE/swapgs, read back at every save", "status": "deferred (ledger line 445, K9): needs the paranoid entry rewritten (RDGSBASE/WRGSBASE, a per-CPU base found without GS), AT_HWCAP2, 3b's rows restated; designed in OPAQUE-KERNEL 9.8 3c slice B", "effect": "writes alone -30 to -60 ns a round trip (ablation on 690754979, 4 rounds); with the reads at save not decided (load, FX-0902); at most a few tens of ns", "evidence": "measured", "source": "OPAQUE-KERNEL 9.8 3c; logs ~/.local/share/ferrix/logs/po9-sel/fsgsw/, po10-sel/fsgsB/"},
     {"id": "not-pursued", "arch": "x86_64", "what": "PKU instead of separate spaces; segment-limited small spaces (long mode has no limits, no LMSLE); SVM ASIDs (they tag VMs)", "status": "rejected", "effect": "-", "evidence": "argued", "source": "OPAQUE-KERNEL 9.6"},
     {"id": "aa-noise", "arch": "x86_64", "what": "the bench against itself: an A/A run, this tree (xtask-only changes) against main ccf72dd94, same kernel", "status": "finding", "effect": "domain-call ratio 0.996 (0.996-1.004), 3 rounds, p50 2,257-2,277 ns, load 10 falling to 3; the call row read 10,647 against 6,012 in one round", "evidence": "measured", "source": "docs/hotpaths/results/ipc-round-trip/597370d08a90/20261006T110504Z-cba39f6f1e4f-6b187e41.json"},
-    {"id": "redox-compare", "arch": "x86_64", "what": "Redox 0.9.0 scheme round trip measured the same way", "status": "fact", "effect": "1,965 ns with no speculative defence", "evidence": "measured", "source": "OPAQUE-KERNEL 9.6a"}
+    {"id": "redox-compare", "arch": "x86_64", "what": "Redox 0.9.0 scheme round trip measured the same way", "status": "fact", "effect": "1,965 ns with no speculative defence", "evidence": "measured", "source": "OPAQUE-KERNEL 9.6a"},
+    {"id": "unwind-inline", "arch": "x86_64", "what": "the woken task's return up its kernel chain inlined from nine returns to three (timing tree os76/unwind-abl 9b8d04556 on 08984c2db): the premise of OPAQUE-KERNEL 9.12's G1 that each return mispredicts after ERAPS empties the predictor", "status": "dead end", "effect": "per round trip 4,868 cycles and 4,996 instructions against 4,841 and 4,981; return mispredicts 9.99 on both sides; ABAB in the slow clock mode +10 to +20 ns (3 boots against 5)", "evidence": "measured", "source": "os-76 window 1, 2026-10-07: gate host ~/.local/share/ferrix/logs/os76/w1-abl-abab.log, w1abl-join.txt, w1quiet-join.txt"},
+    {"id": "hugetlb-guest-ram", "arch": "x86_64", "what": "guest RAM on preallocated 2 MiB host hugetlb pages (FERRIX_QEMU_HUGETLB=1 on os76/p0-measure)", "status": "dead end", "effect": "no guest counter moved: 4,850 cycles, 4,979 instructions, 6.0 iTLB and 6.0 dTLB walks per round trip against 4,841, 4,981, 6.0 and 6.0", "evidence": "measured", "source": "os-76 window 1, 2026-10-07: gate host ~/.local/share/ferrix/logs/os76/w1huge-join.txt against w1quiet-join.txt"},
+    {"id": "clock-modes", "arch": "x86_64", "what": "the two boot modes (about x1.23 in ns, for Ferrix and seL4 alike)", "status": "finding", "effect": "the same cycles per trip in both (4,891 against 4,854): core 11 at about 4.6 GHz against 5.6 under amd-pstate-epp powersave/balance_performance; null calls slower by the same factor; cores 11 and 23 set to governor and EPP performance on 2026-10-07 (customer)", "evidence": "measured", "source": "os-76 window 1, 2026-10-07: gate host ~/.local/share/ferrix/logs/os76/w1huge-long.log, w1huge-join.txt"},
+    {"id": "events-per-trip", "arch": "x86_64", "what": "where a round trip goes, in guest events (host perf :G on the vCPU), main's code at 08984c2db", "status": "finding", "effect": "about 4,980 instructions at IPC 1.0 (about 2,500 a direction), 6 iTLB and 6 dTLB walks, 2 TLB flushes, 10 return and 15 other mispredicts per round trip; null-entry 23 ns and null-general 131 ns a call at 5.6 GHz", "evidence": "measured", "source": "os-76 window 1, 2026-10-07: gate host ~/.local/share/ferrix/logs/os76/w1quiet-long.log, w1quiet-join.txt (os76/p0-measure 712cec722)"}
   ],
   "requirements": [
     "FDP_RIP.2 widened (customer 2026-10-02): the register state a program is given at every switch",

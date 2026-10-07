@@ -18,12 +18,21 @@ Every figure below is marked **(measured)**, with where, or **(guessed)**,
 or **(argued)** where it follows from a document rather than a run. Do not
 quote a guessed figure as a result; measure it.
 
-State on 2026-10-06: `main` ccf72dd94 has step 1, 2a to 2f, 3a/3b and
-§9.10's budget. On branches, not landed: step 4 (`po7/step4`), ERAPS
-(`po7/step5`, consultant OK, may land), the `VZEROALL` reset
-(`po7/step5-vec`), the timing build (`po7/prof`, never lands). Read them
-with `git show <branch>:<path>`; do not edit them. Check `git log main`
-first: this list ages by the hour.
+State on 2026-10-07: `main` 390d5f278 has steps 1 to 4, ERAPS, the
+`VZEROALL` reset, the `DS`/`ES` and `FS`/`GS` skips (3c), and the object
+side's cuts 1 and 2. In flight, on the product owner's agents:
+- user-side inlining;
+- J, the job-load fold;
+- object cut 3;
+- the quick items Q1 to Q8;
+- F-65's fix (the fast path's masked endpoint drop, po10-obj).
+
+`domain-call` reads 858 to 868 ns in the fast clock mode on a quiet host:
+about 4,850 cycles and 4,980 instructions per round trip **(measured,
+2026-10-07)**. The design of a direct resume (§9.12) is on
+`os76/fastpath-v2`, where its premise was disproved by measurement (§5).
+Read branches with `git show <branch>:<path>`; do not edit them. Check
+`git log main` first: this list ages by the hour.
 
 ## 1. The path
 
@@ -116,6 +125,42 @@ defence at all **(measured, §9.6a)**.
    `~/.local/share/ferrix/sel4/run.sh matched-nopcid` (seL4 at c6ce4d2a,
    sel4bench-manifest 80add415). seL4's own one-way figures read a `cpuid`
    per sample, which exits the VM; compare its root task's round trip.
+   Run seL4's `run.sh` with the same QEMU binary as bench-ipc. Called bare
+   from a non-login shell, it finds 9.2.4 first on `PATH`, against
+   bench-ipc's 10.2.1, so check the path its preamble prints.
+9. **The two clock modes:**
+   - **Before 2026-10-07 23:00,** a boot or a stretch of one ran with core
+     11 at about 4.6 GHz instead of 5.6. The ns figure was 1.23 times
+     higher at the same cycles per trip, and seL4 showed the same split
+     **(measured, os-76 window 1)**.
+   - **Since then,** cores 11 and 23 run at `performance`. If two modes
+     still show, read within a mode and count the boots in each, as §9.11
+     does.
+   - A busy SMT sibling adds about 17% in cycles on top **(measured,
+     smoke runs at load 20 to 28)**.
+10. **Instructions and cycles per trip.**
+    - **The long bench and null calls.** The measurement-only branch
+      `os76/p0-measure` adds:
+      - `--kernel-option ipc-bench.long=<s>`, 50,000-trip blocks for
+        `<s>` seconds;
+      - the `null-entry` line: a native call answered at the entry, 23 ns
+        a call at 5.6 GHz;
+      - the `null-general` line: answered at the general path's decode,
+        131 ns.
+
+      It never lands; use it as a base or cherry-pick it onto a timing
+      tree.
+    - **The perf scripts.** On the gate host, `~/.local/share/ferrix/logs/os76/`
+      holds:
+      - `perf-vcpu.sh`, which finds the vCPU thread and runs `perf stat
+        -I 250` with `:G` events;
+      - `join-perf.py`, which joins block medians to the perf intervals
+        and gives cycles, instructions and events per trip, split by
+        mode;
+      - `long-perf.sh <tag> [s]`, one locked boot of the long bench with
+        `perf-vcpu.sh` on its vCPU, then the join.
+    - **Not a quiet host.** Counting instructions needs bench.lock, but no
+      quiet host.
 
 **Profiling** (where the time goes, not the figure): the timing build
 `po7/prof` stamps the TSC at 40 points of one direction, subtracts the
@@ -210,6 +255,31 @@ The data file's `tried` has every attempt; the ones that teach:
   charge).
 - **Not pursued:** PKU instead of separate spaces, segment-limited small
   spaces (no limits in long mode, no LMSLE), SVM ASIDs (they tag VMs).
+- **The resumed task's unwind (§9.12's G1 premise), disproved.**
+  - **The premise:** after the `CR3` write empties the return predictor
+    (ERAPS), the woken task's return up its kernel chain mispredicts once a
+    frame.
+  - **The test:** the timing tree `os76/unwind-abl` inlined that chain from
+    nine returns to three.
+  - **What it read:**
+    - cycles per trip 4,868 against 4,841;
+    - instructions per trip 4,996 against 4,981;
+    - return mispredicts 9.99 per trip on both sides;
+    - in ABAB within the slow mode, ns +10 to +20.
+
+  **(measured, 2026-10-07, os-76 window 1)**
+  *Lesson: the ten return mispredicts a trip are not the kernel's unwind.
+  Count the event before designing against it.*
+- **Guest RAM on hugetlb pages.** Preallocated 2 MiB host pages changed no
+  guest counter: cycles 4,850 against 4,841, the same walks and the same
+  mispredicts **(measured, 2026-10-07)**.
+- **Where a round trip goes, in events.** On `main`'s code, fast mode:
+  - about 4,980 instructions at IPC about 1.0, so about 2,500 a direction.
+    That is the target, roughly ten times seL4's fast path in
+    instructions **(argued)**;
+  - 6 iTLB and 6 dTLB walks;
+  - 2 TLB flushes;
+  - 10 return and 15 other mispredicts.
 
 ## 6. Porting to AArch64 and ARMv7-A
 
@@ -248,14 +318,85 @@ reset; (4) ASIDs, with the lazy TLB; (5) 3b on ARMv7-A; (6) the profile on
 hardware, then step 4's port as its own design. Each item change goes to the
 consultant first.
 
-## 7. Handing a result back
+## 7. What every measurement records
+
+A result that leaves this repository is reported with its set-up, its
+spread, its baseline, its ablations and its history. None of that can be
+added after the fact, so each measurement records it when it is taken.
+
+1. **The set-up, per run.** Record:
+   - the hardware hash (`hw-fingerprint`), the microcode and the host kernel;
+   - the QEMU binary's path and version, which must be the same binary for
+     every kernel compared;
+   - the guest `-cpu` model;
+   - the pinned core's frequency policy;
+   - the load before and after, and the SMT sibling's busy share;
+   - whether the run was in a fast-track window or beside other work.
+
+   Since 2026-10-07 (about 23:00), cores 11 and 23 run governor and EPP
+   `performance` (customer). Earlier runs were `powersave` with EPP
+   `balance_performance`, and those runs fall in two clock modes. A series
+   that crosses the change says so at that point.
+2. **The configuration.** Record:
+   - the tree's full hash and kernel options;
+   - mitigations on or off, the speculation domain, and `ferrix.fastpath`;
+   - the reference: a tree, or another kernel with its build options.
+
+   A baseline kernel is named, built matched, and the reason it is the
+   baseline is written down (seL4's matched build, §2).
+3. **Repeats and spread.** At least 5 boots a side, turn about, in one
+   mode. Report the median of the per-round ratios with its spread, and
+   every run's p50, p90 and p99 as printed. Keep enough samples to draw a
+   distribution: the sorted samples, or the long bench's per-block medians.
+   A median over two modes is not a figure. Outliers and lost boots are
+   listed, never dropped.
+4. **Clock-free counters.** Record cycles and instructions per round trip,
+   from host `perf` on the vCPU thread in guest mode (`:G` events,
+   `perf_event_paranoid` 1 on nazuna). Record them beside ns, with the TLB
+   walks and mispredicts per trip. Instructions per trip repeat to about
+   ±0.5% and do not move with the clock, so they decide small changes that
+   ns cannot.
+5. **Warm-up stated.** Untimed trips come first (the bench makes 1,000). A
+   figure from a cold start says so.
+6. **Ablations, never implication.** Every piece claimed to matter has a
+   figure with and without it, alternated in one mode, and, where it can,
+   its instructions per trip. Dead ends are measured and recorded the same
+   way, as a `tried` entry with its number.
+7. **One history.** Each landing's figure goes into the series in
+   `docs/roadmap/ipc-round-trip.md`, taken by the same bench and
+   configuration. Where the instrument or the configuration changed (the
+   exact counter at 3349682db; the clock policy at 2026-10-07), the series
+   marks the point. So the series from 37 us onward reads as one history.
+8. **Breakdowns with their trees.** Budgets are stated before a design and
+   measured against after it (§9.10's table). Record the tree hash with:
+   - per-direction spans from a timing build;
+   - per-function profiles of instructions and cycles from guest sampling.
+9. **Misses and incidents as such.** Record, each with what caught it (a
+   check, a control, a ledger line):
+   - a target not met;
+   - a lost boot;
+   - a broken lock rule;
+   - a finding such as F-65;
+   - a premise disproved, such as G1's unwind.
+10. **Units and bases.** Give:
+    - ns per round trip, or per direction, saying which;
+    - cycles per trip;
+    - each ratio with what it is relative to;
+    - two or three significant digits;
+    - the hardware hash.
+11. **Raw data kept.** The record (`--record`) carries the figure. The
+    serial logs, perf CSVs and scripts stay on the gate host under
+    `~/.local/share/ferrix/logs/<session>/`, and the record or commit
+    message names their paths. Nothing is deleted.
+
+## 8. Handing a result back
 
 To the product owner (and to the consultant for an item change), in one
 message:
 - the branch, its tip, and what changed, one line a piece;
 - the record's path under `docs/hotpaths/results/ipc-round-trip/`, the
-  ABAB line (figure, base figure, median ratio, spread, rounds, load), and
-  the log's path;
+  ABAB line (figure, base figure, median ratio, spread, rounds, load), the
+  instructions and cycles per trip on both sides, and the logs' paths;
 - the gate logs and every control with its verdict, by `gate.sh` tag;
 - the consultant's ledger line, or "not yet reviewed";
 - the update to this skill's data file: a new or changed `tried` entry with
