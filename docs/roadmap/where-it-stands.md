@@ -392,8 +392,9 @@ software to 12 (`docs/GPU.md` §3.7 and §3.8; 60 fps is 16.7).
 
 Stage 19's X server is yserver (`docs/YSERVER.md`, 36 points against the
 stage's 40 for XWayland, done 2026-09-29). What the stage still owes is
-client pages as texture backing, `dwindle:precise_mouse_move` and the
-second-pass effects; Mesa and `zwp_linux_dmabuf`, for clients that draw on
+client pages as texture backing; `dwindle:precise_mouse_move` and the
+second-pass effects are built on branch `po10-win19/stage19` (2026-10-07)
+and wait for their gate; Mesa and `zwp_linux_dmabuf`, for clients that draw on
 the GPU themselves, are priced beside it.
 
 The desktop's own clients -- waybar, fuzzel, hyprlock and hypridle, written in

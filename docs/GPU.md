@@ -832,7 +832,8 @@ evening this landed, and a frame time from a contended host is noise
 on the 3D card under KVM, main and this change run alternately.
 
 What is left of §3.9 is the third item: a client's pixels are still copied
-into a texture's backing in the guest before the device moves them.
+into a texture's backing in the guest before the device moves them -- planned
+in §3.13.
 
 ### 3.12 The 3D card on Windows needs a patched QEMU (2026-09-27)
 
@@ -880,6 +881,62 @@ warnings in a two-minute boot without it, none with it. `0004-*.patch`
 fixes the other thing that window got wrong with `gl=on`: a GtkGLArea has
 no window of its own, so the blank cursor QEMU sets over the guest was set
 on the whole window, and the host pointer vanished over the menu bar.
+
+### 3.13 Client pages as texture backing: the plan (2026-10-07)
+
+The third item of §3.9, and the first row of §3.8's table: a `wl_shm`
+surface on the GPU path is copied twice in the guest before the device
+moves it -- hyprix copies the client's rows into a texture's backing
+(`src/user/system/linux/compositor/drm/src/device.rs`, `upload`), and the
+device then reads that backing. The backing exists only to be copied into.
+The client's own pages can be the backing instead, as sDDF's GPU class
+makes a client's memory the resource's backing, and the transfer then
+reads the pixels where the client drew them.
+
+**The ABI is Linux's, in two steps it already has.** A client's pool is a
+`memfd`, and Linux turns a `memfd`'s pages into a buffer a device can be
+given with `/dev/udmabuf` (`UDMABUF_CREATE`: the memfd, an offset and a
+size, page-aligned, the memfd sealed against shrinking) and imports such a
+buffer into a DRM node with `DRM_IOCTL_PRIME_FD_TO_HANDLE`. So:
+
+1. **`/dev/udmabuf`** (kernel, `src/kernel/src/fs/devfs.rs` and a new
+   `interfaces/udmabuf`): `UDMABUF_CREATE` answers a descriptor that holds
+   the memfd's VMO and the range, refusing a memfd without `F_SEAL_SHRINK`
+   (`EINVAL`, as Linux does) -- the seal is what keeps a client from
+   truncating pages the device is reading. `UDMABUF_CREATE_LIST` is not
+   needed and is not answered.
+2. **`PRIME_FD_TO_HANDLE` on the render node** takes such a descriptor and
+   gives a handle to an object whose backing is that range: the render core
+   hands the driver the memfd's VMO and the range where it hands an
+   anonymous VMO today (`Renderer::make_object`), and the driver pins those
+   pages for the device. `RESOURCE_CREATE` with that handle as `bo_handle`
+   makes the texture on it -- the field Linux has for this, which the node
+   refuses today because nothing made such an object.
+3. **hyprix** makes one such texture per buffer, keyed by the pool and the
+   buffer's place in it, and an upload becomes a `TRANSFER_TO_HOST` of the
+   damaged rows at the buffer's offset and stride, with no copy. A
+   buffer's `wl_buffer.release` waits until the last transfer from it has
+   been answered (`VIRTGPU_WAIT`), since the device reads the client's
+   memory now and not a copy. A pool that is not sealed, not page-aligned
+   or not a memfd keeps today's copy, which stays the fallback.
+
+**What it changes for the certification argument.** Step 1 and step 2 are
+kernel code: a new device file, and the device reading a *client's* pages,
+where it read only pages the render core allocated. The pages are the
+client's own and already mapped by the compositor; the device reads them
+and never writes (`TO_DEVICE` only), and the seal is what keeps them alive
+for as long as the backing holds them. Both go to the certification
+consultant before they land (`AGENTS.md`), with negative controls: an
+unsealed memfd refused, a range past the memfd's end refused, and a client
+that drops its pool while a transfer is in flight leaving the pages held
+until the transfer is answered.
+
+**Sizing.** 8, as counted on 2026-09-23: about 3 for `/dev/udmabuf` and the
+import, 2 for the driver's backing of a foreign VMO and the consultant's
+review, 3 for hyprix's textures, the deferred release and the measurement
+§3.8 asks for (the AV1 wallpaper behind a translucent terminal, 1920x1080
+on the 3D card under KVM, main and the change run alternately on an idle
+host).
 
 ### 3a, which was not chosen for the compositor
 

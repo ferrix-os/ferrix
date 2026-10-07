@@ -499,11 +499,13 @@ Not part of this handoff, but the next person will ask.
   `wp_color_manager_v1` and the five `windowrule` effects that only mean
   something with a GPU (`immediate`, `no_vrr`, `no_auto_hdr`, `tonemap`,
   `force_rgbx`) are not answered.
-- **`dwindle:precise_mouse_move`**, which decides where a *dragged* window
-  lands when it is dropped back into the tiling. Nothing drops one back in
-  -- a drag floats a tiled window and leaves it floating, where Hyprland
-  re-tiles it -- so there is no moment for the option to decide, and that
-  drag is what would have to be written first.
+- **`dwindle:precise_mouse_move` is done** (2026-10-07, branch
+  `po10-win19/stage19`), with the drag it needed: a tiled window dragged
+  with `movewindow` is lifted out of the tiling at its own size round the
+  pointer (`State::lift_window`) and dropped back in beside the box under
+  the pointer when the drag ends (`State::drop_window`), on the half the
+  pointer is in, or the quarter with the option on -- Hyprland's
+  `CDragStateController` and `CDwindleAlgorithm::addTarget`.
 
   The layout is given the pointer now (`State::set_pointer`), and with it
   `dwindle:use_active_for_splits`, `dwindle:force_split = 0` -- Hyprland's
@@ -520,11 +522,13 @@ Not part of this handoff, but the next person will ask.
   sits under was not something the layout exposed. It is
   `CDwindleAlgorithm::resizeTarget`, `dwindle:smart_resizing` and all, and
   the corner a drag grabs is what says which split moves.
-- **`no_screen_share` and `blur_popups`.** These do need a second pass:
-  `no_screen_share` means drawing the frame again without one surface in
-  it, and `blur_popups` reads what is behind the frame being drawn.
+- **`no_screen_share` and `blur_popups` are done** (2026-10-07, branch
+  `po10-win19/stage19`), and needed no second pass either: Hyprland's own
+  `no_screen_share` copies the frame and draws black boxes over the copy,
+  and a popup is drawn last, so the canvas under it is what is behind it.
+  The window rule `xray` and `decoration:blur:xray` are done the same day.
 
-  **`xray` did not, in the end** (2026-09-18). It asks for the blur of
+  **The layer rule `xray` did not, in the end** (2026-09-18). It asks for the blur of
   everything behind the windows, and that is exactly the picture §2.2's
   `Backdrop` already keeps and blurs for tiled windows -- so an `xray` bar
   reads the backdrop the way such a window does, and it is three lines in
