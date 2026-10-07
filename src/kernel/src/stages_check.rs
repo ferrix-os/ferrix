@@ -2009,6 +2009,8 @@ fn wait_unless(done: impl Fn() -> bool) -> bool {
         <arch::Irq as ferrix_sync::IrqControl>::restore(saved);
         return true;
     }
+    // WIDENED, never lands: the interrupt waited for arrives while masked.
+    spin_nanos(5_000_000);
     arch::wait_for_work();
     false
 }
