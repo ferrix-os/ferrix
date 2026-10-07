@@ -89,7 +89,7 @@ pub(crate) struct Process {
     /// Reached by [`Deref`](core::ops::Deref), because a POSIX process *is*
     /// a core process with more beside it: `process.space()` and
     /// `process.pid()` read the same here as in the core.
-    core: object::process::Process,
+    core: Arc<object::process::Process>,
     /// The file mode creation mask: the permission bits a new file or
     /// directory is made without. An atomic rather than a field under the
     /// state lock, because `umask` is a swap and nothing reads it together
@@ -406,7 +406,7 @@ impl Process {
         fs: Arc<SpinLock<Context>>,
     ) -> Result<Process, AllocError> {
         Ok(Process {
-            core: object::process::Process::new(space, pid, job)?,
+            core: fallible::try_arc(object::process::Process::new(space, pid, job)?)?,
             umask: AtomicU32::new(DEFAULT_UMASK),
             oom_score_adj: AtomicI32::new(0),
             identity: SpinLock::new(Identity::default()),
@@ -1939,6 +1939,10 @@ impl core::ops::Deref for Process {
 
 impl Host for Process {
     fn core(&self) -> &object::process::Process {
+        &self.core
+    }
+
+    fn core_arc(&self) -> &Arc<object::process::Process> {
         &self.core
     }
 

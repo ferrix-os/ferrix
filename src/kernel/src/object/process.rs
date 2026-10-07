@@ -753,6 +753,11 @@ pub(crate) trait Host: Any + Send + Sync + fmt::Debug {
     /// The core process inside it.
     fn core(&self) -> &Process;
 
+    /// The core process inside it, as the reference it is held by: what a
+    /// task keeps one clone of for the fast path's lookup
+    /// (`Task::core_process`).
+    fn core_arc(&self) -> &Arc<Process>;
+
     /// End it from outside with `status`: what a job kill, and dropping the
     /// last handle to a process nobody started, do. Its threads find out on
     /// their way back to user mode; nothing here waits for that.

@@ -1114,21 +1114,21 @@
     },
     {
       "file": "object/process.rs",
-      "lines": "878",
+      "lines": "883",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "903",
+      "lines": "908",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1045",
+      "lines": "1050",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
