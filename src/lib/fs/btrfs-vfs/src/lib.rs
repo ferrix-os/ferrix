@@ -661,6 +661,21 @@ impl<D: BlockHandle> Inode for Node<D> {
             Err(Errno::EIO)
         }
     }
+
+    /// A regular file's page cache, which a mapping of the file maps: the
+    /// object a read copies out of, filled from the volume a page at a fault
+    /// as for a read. Until 2026-10-07 this mount answered none, so `mmap`
+    /// of any file on a read-only btrfs was `ENODEV` and no program could be
+    /// run from one: glibc's loader maps every library it loads. Nothing on
+    /// this mount writes, so no mapping can write the file -- a shared
+    /// writable one needs a descriptor open for writing, which this mount
+    /// never gives -- and a private one copies the pages it writes.
+    fn mapping(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        if self.meta.kind != FileType::Regular {
+            return None;
+        }
+        self.pages().ok().and_then(|pages| pages.object())
+    }
 }
 
 // ---------------------------------------------------------------------------

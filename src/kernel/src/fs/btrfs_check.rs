@@ -17,15 +17,24 @@
 //! driver's virtio queue, the block ring, the registry's `BlockDevice`, the
 //! btrfs volume reader with its checksums, and the inode's VMO pages filled
 //! from the page source. A byte wrong anywhere is a CRC that differs.
+//!
+//! Every file is then mapped too, as glibc's loader maps a library: opened
+//! and `mmap`ped privately by a process made for the check, and its bytes
+//! read back through the mapping, each page faulted in from the same page
+//! cache, against the same CRC. A read-only btrfs answered `ENODEV` to every
+//! `mmap` until 2026-10-07, so no program could run from one.
 
 use alloc::vec::Vec;
 
+use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_btrfs::crc32c;
 use ferrix_vfs::initramfs::makedev;
 use ferrix_vfs::{Errno, FileType};
 
 use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
+use crate::syscall::memory::{self, MmapRequest, OffsetUnit};
+use crate::syscall::{fd, process, uaccess};
 
 /// The fixture's manifest: `kind hex(path) size crc32c` per line.
 const MANIFEST: &str = include_str!("../../../lib/fs/btrfs/testdata/manifest.txt");
@@ -85,6 +94,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         bytes: 0,
         skipped: None,
     };
+    let mut mapped = Vec::new();
     for line in MANIFEST
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
@@ -108,6 +118,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
                     .map_err(|_| "a file of the fixture could not be read")?;
                 report.bytes = report.bytes.saturating_add(data.len() as u64);
                 report.files += 1;
+                mapped.push((path.clone(), size, crc));
                 verify(
                     &data,
                     size,
@@ -148,6 +159,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             return Err(problem);
         }
     }
+    map_each(&mapped)?;
     Ok(report)
 }
 
@@ -176,4 +188,90 @@ fn unhex(hex: &str) -> Result<Vec<u8>, &'static str> {
                 .ok_or("a manifest path is not hex")
         })
         .collect()
+}
+
+/// Map each of `files` -- a path, its size and its CRC-32C -- privately and
+/// read only, from a process made for the check, and compare the bytes read
+/// through the mapping. An empty file is opened and not mapped: Linux maps
+/// none either.
+fn map_each(files: &[(Vec<u8>, u64, u32)]) -> Result<(), &'static str> {
+    use ferrix_linux_abi::nr::Syscall;
+    use ferrix_linux_abi::types::{
+        AT_FDCWD, MAP_ANONYMOUS, MAP_PRIVATE, O_RDONLY, PROT_READ, PROT_WRITE,
+    };
+    const CWD: u64 = AT_FDCWD as i64 as u64;
+    let request = |fd: i64, len: u64, prot: u32, flags: u32| MmapRequest {
+        addr: 0,
+        len,
+        prot,
+        flags,
+        fd,
+        offset: 0,
+        unit: OffsetUnit::Bytes,
+    };
+    let process =
+        process::new_for_check().map_err(|_| "could not make a process to map the fixture")?;
+    let page = memory::sys_mmap(
+        &process,
+        &request(
+            -1,
+            PAGE_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_ANONYMOUS | MAP_PRIVATE,
+        ),
+    )
+    .ok()
+    .and_then(|at| u64::try_from(at).ok())
+    .ok_or("a page to stage a path in was refused")?;
+    for (path, size, crc) in files {
+        let mut staged = path.clone();
+        staged.push(0);
+        if staged.len() as u64 > PAGE_SIZE {
+            continue;
+        }
+        uaccess::copy_to_user(process.space(), page, &staged)
+            .map_err(|_| "could not stage a fixture path")?;
+        let descriptor = crate::syscall::check::call_by_number(
+            &process,
+            Syscall::Openat,
+            [CWD, page, u64::from(O_RDONLY), 0, 0, 0],
+        )
+        .ok()
+        .and_then(|fd| i32::try_from(fd).ok())
+        .ok_or("a file of the fixture would not open for mapping")?;
+        let outcome = (|| {
+            if *size == 0 {
+                return Ok(());
+            }
+            let at = memory::sys_mmap(
+                &process,
+                &request(i64::from(descriptor), *size, PROT_READ, MAP_PRIVATE),
+            )
+            .map_err(|_| "a file of the read-only btrfs could not be mapped")?;
+            let at = u64::try_from(at).map_err(|_| "mmap returned an impossible address")?;
+            let mut data = Vec::new();
+            data.try_reserve_exact(usize::try_from(*size).unwrap_or(usize::MAX))
+                .map_err(|_| "no memory to read a mapping back into")?;
+            data.resize(usize::try_from(*size).unwrap_or(0), 0_u8);
+            let read = uaccess::copy_from_user(process.space(), at, &mut data);
+            let _ = memory::sys_munmap(&process, at, *size);
+            read.map_err(|_| "a mapping of a fixture file could not be read")?;
+            verify(
+                &data,
+                *size,
+                *crc,
+                "a file's bytes through a mapping differ from what the host wrote",
+            )
+        })();
+        let _ = fd::sys_close(&process, descriptor);
+        if let Err(problem) = outcome {
+            crate::console::println!(
+                "  btrfs    mapped: {}",
+                alloc::string::String::from_utf8_lossy(path)
+            );
+            return Err(problem);
+        }
+    }
+    let _ = memory::sys_munmap(&process, page, PAGE_SIZE);
+    Ok(())
 }
