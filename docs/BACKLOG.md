@@ -616,6 +616,16 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P3 — hardware variants and later stages
 
+* The DK1 run `cacheflush` owes (po10-chrome-a, 2026-10-07; the
+  certification consultant's D1.5): QEMU keeps translated code coherent by
+  itself, so only the board shows whether `cacheflush` (`0x0f0002`) makes
+  code written into a page mapped executable run. `jitflush` (source and a
+  static armhf build in `~/.local/share/ferrix/logs/po10-chrome-a/` on
+  nazuna) writes and calls `mov r0,#k; bx lr` 200,000 times: `jitflush
+  flush` must find no wrong answer; `jitflush noflush` is expected to find
+  some on a Cortex-A7, and if it finds none the run does not discriminate
+  and is recorded so. Needs a board image with the program in it; scheduled
+  by the product owner.
 * GICv3 and its redistributors, with a second AArch64 boot configuration
   (`gic-version=3`); x2APIC; TSC-deadline. Real AArch64 hardware is GICv3.
 * Stage 13's namespaces and seccomp (its cgroups are in), stage 14
