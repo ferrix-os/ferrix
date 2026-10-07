@@ -1037,7 +1037,7 @@ fn fast_write_read_raised(a: &[u64; 6]) -> crate::trap::Fast {
     use crate::sched::direct::{self, Count};
     use crate::trap::Fast;
     // T2: nothing would filter the call.
-    if false {
+    if !crate::trap::filter_quiet() {
         direct::count(Count::T2);
         return Fast::Declined;
     }

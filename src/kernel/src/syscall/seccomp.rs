@@ -329,8 +329,14 @@ pub(crate) fn quiet() -> bool {
     if !EVER_FILTERED.load(Ordering::Acquire) {
         return true;
     }
-    sched::with_current(|task| thread::of_task(task).is_none_or(|thread| !thread.is_filtered()))
-        .unwrap_or(true)
+    sched::with_current(|task| {
+        task.thread().is_none_or(|thread| {
+            // ABLATION ONLY: unsound in general, Thread is the only impl today.
+            let pointer = alloc::sync::Arc::as_ptr(thread) as *const () as *const thread::Thread;
+            !unsafe { &*pointer }.is_filtered()
+        })
+    })
+    .unwrap_or(true)
 }
 
 /// Judge the call `args` describes for `thread`, which may be any thread, not
