@@ -446,6 +446,15 @@ fn path_of(request: &[u8]) -> Option<String> {
 ///
 /// `answer` fills `out` and says whether to send it; a datagram it refuses is
 /// dropped, which is what a resolver does with a question it cannot parse.
+///
+/// Each turn waits with a peek and only then receives, as the gateway does
+/// ([`crate::gateway::next_frame`]): on Windows a receive whose read timeout
+/// fires as a datagram arrives can lose that datagram, and a stub that loses
+/// a query leaves its asker waiting out its own timeout. With [`TURN`] cut to
+/// 1 ms, this DNS stub lost 18 of 20,000 queries receiving directly and none
+/// of 20,000 peeking first, on a 24-thread Windows PC (2026-10-07); CI's Windows
+/// runner lost the one DNS query of `the_stubs_serve_what_the_commands_expect`
+/// to it on 2026-10-05 and 2026-10-07.
 fn serve_datagrams(
     socket: &UdpSocket,
     stop: &AtomicBool,
@@ -454,7 +463,7 @@ fn serve_datagrams(
     let mut buffer = [0_u8; MAX_DATAGRAM];
     let mut out = Vec::new();
     while !stop.load(Ordering::Relaxed) {
-        let Ok((read, from)) = socket.recv_from(&mut buffer) else {
+        let Ok((read, from)) = crate::gateway::next_frame(socket, &mut buffer) else {
             continue;
         };
         out.clear();

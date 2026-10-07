@@ -412,7 +412,13 @@ fn serve(mut core: Core, stop: &AtomicBool) {
 /// Any other error the peek reports, a datagram too long for the buffer or
 /// the reset Windows reports after a send found nobody, is left for the
 /// receive to take, so that it does not come back on every turn.
-fn next_frame(socket: &UdpSocket, frame: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+///
+/// The test network's DNS and UDP echo stubs (`net::serve_datagrams`) wait
+/// the same way, for the same reason.
+pub(crate) fn next_frame(
+    socket: &UdpSocket,
+    frame: &mut [u8],
+) -> std::io::Result<(usize, SocketAddr)> {
     match socket.peek_from(frame) {
         Err(error)
             if matches!(
