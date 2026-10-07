@@ -122,6 +122,7 @@ mod parallel;
 mod paths;
 mod pe;
 mod persistent;
+mod pipe_bench;
 mod pkg;
 mod ports;
 mod powerfail;
@@ -245,6 +246,8 @@ COMMANDS:
                   service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean
     bench-ipc     Boot --init's shell and time a channel round trip between two native processes
                   (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds
+    bench-pipe    Boot src/tests/pipe-bench as init --rounds times (5) and time Linux-ABI round trips
+                  between two processes: a pipe, a Unix stream socket and a futex ping-pong of 8 bytes
     hw-fingerprint  Print this host's and --arch's guest's canonical hardware description and its SHA-256, the key
                   hot-path results are filed by (docs/HOTPATHS.md)
     test-ipc-equiv
@@ -648,6 +651,7 @@ fn run() -> Result<()> {
         "test-auth" => auth::test_auth(&args),
         "test-restart" => restart::test_restart(&args),
         "bench-seam" | "bench-ipc" => bench(command, &args),
+        "bench-pipe" => pipe_bench::bench_pipe(&args),
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
