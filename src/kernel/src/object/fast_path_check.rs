@@ -1178,7 +1178,7 @@ fn job_echo_in_the_process(argument: usize) {
     if let Some(me) = crate::sched::current() {
         crate::sched::set_weight(&me, base);
     }
-    echo_in_the_process(argument)
+    echo_in_the_process(argument);
 }
 
 /// A job case's caller: its own base weight, `TRIPS` trips, then the look,

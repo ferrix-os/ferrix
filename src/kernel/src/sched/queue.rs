@@ -288,9 +288,7 @@ impl CpuQueue {
         } else {
             self.stats.idle_ns += delta;
         }
-        let Some(remaining) = self.fair.remaining_ns() else {
-            return None;
-        };
+        let remaining = self.fair.remaining_ns()?;
         if let Some(task) = self.fair.current() {
             task.add_runtime(delta);
         }
