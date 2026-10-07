@@ -25,6 +25,7 @@ use ferrix_devmgr_proto::{
     ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM,
     DEVICES_MAX_BYTES, DevicesView, Message, NAME_BYTES, SHORT_BYTES,
 };
+use ferrix_drvupdate_proto::{self as update, Answer, Fingerprint, Outcome, REQUEST_BYTES};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::signals::Signals;
@@ -45,7 +46,7 @@ use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::job::Job;
 use ferrix_rt::native::pending::{self, Process};
 use ferrix_rt::native::port::{self, Port};
-use ferrix_rt::native::vmo::Vmo;
+use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 
 ferrix_rt::entry!(main);
@@ -352,6 +353,25 @@ struct Started {
     published: bool,
     /// Whether it has ended.
     dead: bool,
+    /// How many times a driver has been started on it: the high half of
+    /// the port key its death is watched under ([`key_of`]), so the death of
+    /// a driver an update stopped, which arrives after the next one started,
+    /// is told apart and ignored.
+    generation: u32,
+    /// The image an update put on it (`docs/DEVMGR.md` §4.1): `devmgr`'s
+    /// own copy, which every later start uses. `None` is the initramfs's.
+    image: Option<Image>,
+}
+
+/// The port key a driver of the device in `slot` is watched under, started
+/// for the `generation`th time.
+fn key_of(slot: usize, generation: u32) -> u64 {
+    (slot as u64 & 0xFFFF_FFFF) | (u64::from(generation) << 32)
+}
+
+/// The slot and generation a port key names.
+fn slot_of(key: u64) -> (usize, u32) {
+    ((key & 0xFFFF_FFFF) as usize, (key >> 32) as u32)
 }
 
 /// What the kernel handed over: the job, the devices twice, the images.
@@ -448,7 +468,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 ) {
                     true
                 } else {
-                    await_published(channel, &port, info.location, u64::from(count), &mut inbox)
+                    await_boot(channel, &port, info.location, u64::from(count), &mut inbox)
                 };
                 if published {
                     let _ = channel.write(
@@ -474,6 +494,8 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     process,
                     published,
                     dead: false,
+                    generation: 0,
+                    image: None,
                 });
                 count += 1;
             }
@@ -497,6 +519,67 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         images: &given.images,
     };
     serve(channel, &port, &mut started, &drivers, &mut inbox)
+}
+
+/// [`await_published`] for a driver started at boot, which has no deadline.
+fn await_boot(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    location: u32,
+    key: u64,
+    inbox: &mut Inbox,
+) -> bool {
+    await_published(channel, port, location, key, Deadline::Never, inbox).published
+}
+
+/// The helper's name among the images: an image that carries it takes
+/// updates (`docs/DEVMGR.md` §4.1).
+const UPDATER: &[u8] = b"drvupdated";
+
+/// `drvupdated`, running: `devmgr`'s end of its channel, and its job and
+/// process, kept for as long as it runs.
+struct Updater {
+    channel: Channel<Kernel>,
+    _job: Job<Kernel>,
+    _process: Process<Kernel>,
+}
+
+/// The port key the helper's channel is watched under: below the kernel's,
+/// above every driver's, whose low half is a slot under [`MAX_DEVICES`].
+const KEY_UPDATE: u64 = u64::MAX - 1;
+
+/// Start `drvupdated` if the initramfs carries it, in a job of its own, and
+/// answer `devmgr`'s end of its channel, watched on `port`. An image
+/// without it takes no updates, and says nothing.
+fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> {
+    let index = image_index(drivers.names, drivers.count, UPDATER)?;
+    let image = drivers
+        .images
+        .get(usize::from(index))
+        .and_then(Option::as_ref)?;
+    let started = (|| {
+        let job = drivers.job.create_child().ok()?;
+        let process = pending::create_process(&job, image, "drvupdated").ok()?;
+        let (near, far) = channel::create(Kernel).ok()?;
+        process.start(far.into_owned()).ok()?;
+        near.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_UPDATE)
+            .ok()?;
+        Some(Updater {
+            channel: near,
+            _job: job,
+            _process: process,
+        })
+    })();
+    if started.is_none() {
+        say(format_args!(
+            "devmgr   drvupdated could not be started: no driver updates"
+        ));
+    } else {
+        say(format_args!(
+            "devmgr   drvupdated started: driver updates are taken"
+        ));
+    }
+    started
 }
 
 /// How a driver of `kind` is started on the device `info` describes, or
@@ -701,13 +784,17 @@ const KEY_KERNEL: u64 = u64::MAX;
 ///
 /// A BIND or UNBIND that arrives meanwhile is kept in `inbox`, to be
 /// answered once this driver is settled.
+///
+/// An update's start waits until `deadline` and no longer
+/// (`docs/DEVMGR.md` §4.1): every other start waits for ever.
 fn await_published(
     channel: &Channel<Kernel>,
     port: &Port<Kernel>,
     location: u32,
     key: u64,
+    deadline: Deadline,
     inbox: &mut Inbox,
-) -> bool {
+) -> Awaited {
     // Other drivers' deaths arrive here too; they are queued again after, for
     // `serve_deaths`.
     let mut deaths = [None::<u64>; MAX_DEVICES];
@@ -737,7 +824,8 @@ fn await_published(
         {
             break false;
         }
-        let Ok(packet) = port.wait(Deadline::Never) else {
+        let Ok(packet) = port.wait(deadline) else {
+            // The deadline passed, or the port failed: not published.
             break false;
         };
         if packet.key == key {
@@ -760,7 +848,18 @@ fn await_published(
     if published && exited {
         let _ = port.queue(key, [0, 0]);
     }
-    published
+    Awaited { published, exited }
+}
+
+/// How a wait for a driver to publish ended.
+#[derive(Clone, Copy)]
+struct Awaited {
+    /// The kernel said it published.
+    published: bool,
+    /// Its death was seen during the wait. Unless it also published, that
+    /// death's packet was taken and will not come again; a driver that
+    /// neither published nor died ran past the deadline and still runs.
+    exited: bool,
 }
 
 /// For the life of the machine: deaths -- quiesce the device, tell the
@@ -773,6 +872,9 @@ fn serve(
     drivers: &Drivers<'_>,
     inbox: &mut Inbox,
 ) -> Result<(), Step> {
+    // The helper is started once every driver has reported, so an update
+    // never meets a boot still starting drivers.
+    let mut updates = spawn_updater(drivers, port);
     let _ = channel.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_KERNEL);
     loop {
         // What arrived while a driver was being waited for comes first.
@@ -786,10 +888,17 @@ fn serve(
             let _ = channel.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_KERNEL);
             continue;
         }
-        let Some(entry) = started.get_mut(key as usize).and_then(Option::as_mut) else {
+        if key == KEY_UPDATE {
+            take_updates(channel, port, started, drivers, inbox, &mut updates);
+            continue;
+        }
+        let (slot, generation) = slot_of(key);
+        let Some(entry) = started.get_mut(slot).and_then(Option::as_mut) else {
             continue;
         };
-        if entry.dead {
+        // A driver an update stopped dies after the next one started: its
+        // death is not this driver's.
+        if entry.dead || entry.generation != generation {
             continue;
         }
         entry.dead = true;
@@ -824,7 +933,7 @@ fn serve(
         // The policy counts the restart it decides on.
         if entry.quiesced
             && entry.policy.decide(Ended::of(exit), None) == Decision::Now
-            && launch_again(channel, port, key, entry, drivers, inbox)
+            && launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never)
         {
             let _ = channel.write(
                 &Message::Restarted {
@@ -937,34 +1046,358 @@ fn answer(
                 done(channel, token, ANSWER_FAILED);
                 return;
             }
-            let answered = if launch_again(channel, port, key as u64, entry, drivers, inbox) {
-                ANSWER_DONE
-            } else {
-                ANSWER_FAILED
-            };
+            let answered =
+                if launch_again(channel, port, key, entry, drivers, inbox, Deadline::Never) {
+                    ANSWER_DONE
+                } else {
+                    ANSWER_FAILED
+                };
             done(channel, token, answered);
+        }
+    }
+}
+
+/// How long an update's new driver has to publish before the old image is
+/// started again (`docs/DEVMGR.md` §4.1).
+const UPDATE_PATIENCE_NANOS: u64 = 15_000_000_000;
+
+/// How long the image's trial load may take to be gone again.
+const TRIAL_PATIENCE_NANOS: u64 = 5_000_000_000;
+
+/// Bytes copied at a time from the helper's VMO into `devmgr`'s own.
+const COPY_CHUNK: usize = 1024;
+
+/// An image an update put on a device: `devmgr`'s copy, and what its line
+/// says of it.
+struct Image {
+    vmo: Vmo<Kernel>,
+    length: u64,
+    fingerprint: u64,
+}
+
+/// Every request the helper has written, each answered on its channel; then
+/// the watch armed again. A helper that has gone is said and forgotten:
+/// there are no updates after it.
+fn take_updates(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    started: &mut [Option<Started>; MAX_DEVICES],
+    drivers: &Drivers<'_>,
+    inbox: &mut Inbox,
+    updates: &mut Option<Updater>,
+) {
+    let gone = {
+        let Some(updater) = updates.as_ref() else {
+            return;
+        };
+        loop {
+            let mut bytes = [0_u8; REQUEST_BYTES];
+            let mut handles = [Handle::INVALID; 1];
+            match updater.channel.read(&mut bytes, &mut handles) {
+                Ok(got) => {
+                    // Owned at once, so a handle that came with a bad
+                    // request is closed with it.
+                    let image = (got.handles == 1).then(|| {
+                        Vmo::from_owned(OwnedHandle::from_raw(
+                            Kernel,
+                            handles.first().copied().unwrap_or(Handle::INVALID),
+                        ))
+                    });
+                    let request = update::Request::decode(bytes.get(..got.bytes).unwrap_or(&[]));
+                    let answer = match (request, image) {
+                        (Ok(request), Some(image)) => {
+                            update_driver(channel, port, started, drivers, inbox, &request, &image)
+                        }
+                        _ => Answer::of(Outcome::Malformed),
+                    };
+                    let _ = updater.channel.write(&answer.encode());
+                }
+                Err(ReadError::Failed(Error::ShouldWait)) => break false,
+                Err(_) => break true,
+            }
+        }
+    };
+    if gone {
+        say(format_args!(
+            "devmgr   drvupdated has ended: no more driver updates"
+        ));
+        *updates = None;
+    } else if let Some(updater) = updates.as_ref() {
+        let _ =
+            updater
+                .channel
+                .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_UPDATE);
+    }
+}
+
+/// One update, as `docs/DEVMGR.md` §4.1 orders it: the request checked
+/// against the table, the image copied into `devmgr`'s own memory and
+/// fingerprinted, its trial load, then each device it names swapped, one at
+/// a time, with the old image started again for one whose new driver does
+/// not publish. Nothing the helper parsed is trusted: the request is read
+/// again here, and the image is `devmgr`'s copy.
+fn update_driver(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    started: &mut [Option<Started>; MAX_DEVICES],
+    drivers: &Drivers<'_>,
+    inbox: &mut Inbox,
+    request: &update::Request,
+    given: &Vmo<Kernel>,
+) -> Answer {
+    let name = request.name();
+    let Ok(program) = core::str::from_utf8(name) else {
+        return Answer::of(Outcome::Malformed);
+    };
+    // The helper is an image too, but no device's driver.
+    let Some(driver) = image_index(drivers.names, drivers.count, name).filter(|_| name != UPDATER)
+    else {
+        return Answer::of(Outcome::NoDevice);
+    };
+    let named = |entry: &Started| {
+        entry.driver == driver
+            && (request.location == update::ANY || entry.location == request.location)
+    };
+    // Every device it names must be one that can be swapped before any is.
+    let mut tried = 0_u32;
+    for entry in started.iter().flatten().filter(|entry| named(entry)) {
+        tried += 1;
+        let refused = if !restarted(entry.kind) {
+            Outcome::NotRestarted
+        } else if entry.dead || !entry.published || entry.unbinding.is_some() {
+            Outcome::Busy
+        } else {
+            continue;
+        };
+        return Answer {
+            outcome: refused,
+            updated: 0,
+            tried,
+        };
+    }
+    if tried == 0 {
+        return Answer::of(Outcome::NoDevice);
+    }
+    let Some(image) = copy_image(given, request.length) else {
+        return Answer {
+            outcome: Outcome::Malformed,
+            updated: 0,
+            tried,
+        };
+    };
+    if !loads(drivers.job, &image.vmo, program) {
+        say(format_args!(
+            "devmgr   update of {program} refused: the kernel's loader did not take {} bytes, fnv64 {:016x}, or its trial did not end",
+            image.length, image.fingerprint
+        ));
+        return Answer {
+            outcome: Outcome::Refused,
+            updated: 0,
+            tried,
+        };
+    }
+    let mut updated = 0_u32;
+    for (slot, entry) in started.iter_mut().enumerate() {
+        let Some(entry) = entry.as_mut().filter(|entry| named(entry)) else {
+            continue;
+        };
+        let outcome = swap(channel, port, slot, entry, drivers, inbox, &image, program);
+        if outcome != Outcome::Updated {
+            return Answer {
+                outcome,
+                updated,
+                tried,
+            };
+        }
+        updated += 1;
+    }
+    Answer {
+        outcome: Outcome::Updated,
+        updated,
+        tried,
+    }
+}
+
+/// `length` bytes of `given` in a VMO of `devmgr`'s own, so nothing the
+/// helper still holds can change them between the checks and
+/// `process_create`, and their fingerprint. `None` when `given` is shorter,
+/// `length` is past [`update::MAX_IMAGE`], or there is no memory.
+fn copy_image(given: &Vmo<Kernel>, length: u64) -> Option<Image> {
+    if length == 0 || length > update::MAX_IMAGE || given.size().ok()? < length {
+        return None;
+    }
+    let vmo = vmo::create(Kernel, usize::try_from(length).ok()?).ok()?;
+    let mut fingerprint = Fingerprint::new();
+    let mut chunk = [0_u8; COPY_CHUNK];
+    let mut offset = 0_u64;
+    while offset < length {
+        let take = usize::try_from(length - offset)
+            .unwrap_or(COPY_CHUNK)
+            .min(COPY_CHUNK);
+        let bytes = chunk.get_mut(..take)?;
+        given.read(bytes, offset).ok()?;
+        vmo.write(bytes, offset).ok()?;
+        fingerprint.update(bytes);
+        offset += take as u64;
+    }
+    Some(Image {
+        vmo,
+        length,
+        fingerprint: fingerprint.value(),
+    })
+}
+
+/// Whether the kernel's loader takes `image` as `program`: a process made
+/// from it in a scratch job under `job`, never started, holding no handle,
+/// and gone again -- or the answer is no -- before anything is stopped (the certification
+/// consultant's C7, 2026-10-07).
+fn loads(job: &Job<Kernel>, image: &Vmo<Kernel>, program: &str) -> bool {
+    let Ok(scratch) = job.create_child() else {
+        return false;
+    };
+    let loaded = match pending::create_process(&scratch, image, program) {
+        Ok(process) => {
+            let _ = scratch.kill();
+            let deadline = ferrix_rt::linux::monotonic_nanos().map_or(Deadline::Never, |now| {
+                Deadline::At(now.saturating_add(TRIAL_PATIENCE_NANOS))
+            });
+            // A trial that is not gone in time refuses the update with
+            // nothing stopped (the certification consultant's K2).
+            process.wait_one(Signals::TERMINATED, deadline).is_ok()
+        }
+        Err(_) => false,
+    };
+    let _ = scratch.kill();
+    loaded
+}
+
+/// Put `image` on the device `entry` drives: stop its driver, quiesce the
+/// device, start the image and give it [`UPDATE_PATIENCE_NANOS`] to publish;
+/// when it does not, start the image the device had again.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the swap needs everything a restart needs, and the image"
+)]
+fn swap(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    slot: usize,
+    entry: &mut Started,
+    drivers: &Drivers<'_>,
+    inbox: &mut Inbox,
+    image: &Image,
+    program: &str,
+) -> Outcome {
+    let place = gpu::Place(entry.location);
+    // The clock and the device's own copy first: nothing is stopped for an
+    // update that could not be timed or kept. A copy rather than a second
+    // handle, so no handle in devmgr is passed on with the rights it holds
+    // (P6, `budget_tests`), and each device keeps its image apart.
+    let Ok(now) = ferrix_rt::linux::monotonic_nanos() else {
+        return Outcome::Unanswered;
+    };
+    let Some(mine) = copy_image(&image.vmo, image.length) else {
+        return Outcome::Unanswered;
+    };
+    let was = match entry.image.as_ref() {
+        Some(old) => Was::Update(old.length, old.fingerprint),
+        None => Was::Initramfs,
+    };
+    // The running driver goes as a death does, but no DIED: nothing died
+    // that devmgr did not stop. Its death packet, still to come, carries
+    // this generation, which the next start leaves behind.
+    let _ = entry.job.kill();
+    let _ = entry.process.wait_one(Signals::TERMINATED, Deadline::Never);
+    entry.dead = true;
+    entry.quiesced = quiesce(&entry.device);
+    let _ = channel.write(
+        &Message::Unbound {
+            device: entry.index,
+        }
+        .encode(),
+    );
+    if !entry.quiesced {
+        say(format_args!(
+            "devmgr   {program} {place} update failed: the device would not quiesce"
+        ));
+        return Outcome::Failed;
+    }
+    let previous = entry.image.replace(mine);
+    let deadline = Deadline::At(now.saturating_add(UPDATE_PATIENCE_NANOS));
+    if launch_again(channel, port, slot, entry, drivers, inbox, deadline) {
+        say(format_args!(
+            "devmgr   {program} {place} updated: {} bytes, fnv64 {:016x} (was {was})",
+            image.length, image.fingerprint
+        ));
+        return Outcome::Updated;
+    }
+    // Back to the image it had, kept until now for this. A new driver that
+    // published just after its deadline left a PUBLISHED for this location
+    // on the kernel's channel; it was killed and the device quiesced since,
+    // so no HELLO can come from it again, and what it left is read off here
+    // -- requests kept, anything else dropped -- or the wait for the old
+    // image would take it for that one's (the certification consultant's K4).
+    take_requests(channel, inbox);
+    entry.image = previous;
+    if entry.quiesced && launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never) {
+        say(format_args!(
+            "devmgr   {program} {place} rolled back: {} bytes, fnv64 {:016x} did not publish; {was} drives it again",
+            image.length, image.fingerprint
+        ));
+        return Outcome::RolledBack;
+    }
+    say(format_args!(
+        "devmgr   {program} {place} update failed: neither image published; the device stays quiesced"
+    ));
+    Outcome::Failed
+}
+
+/// The image a device had before an update, as its line says it.
+#[derive(Clone, Copy)]
+enum Was {
+    /// The initramfs's.
+    Initramfs,
+    /// An earlier update's: its length and fingerprint.
+    Update(u64, u64),
+}
+
+impl fmt::Display for Was {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Was::Initramfs => f.write_str("the initramfs image"),
+            Was::Update(length, fingerprint) => {
+                write!(f, "{length} bytes, fnv64 {fingerprint:016x}")
+            }
         }
     }
 }
 
 /// Start `entry`'s driver again, in a job of its own, on a duplicate of the
 /// device handle devmgr keeps, the way it was started at boot, and wait for
-/// it to publish as at boot; tell the kernel it is bound. `false`, with the
-/// device left quiesced, when it could not be started or did not publish.
+/// it to publish as at boot, or until `deadline` for an update's start; tell
+/// the kernel it is bound. `false`, with the device left quiesced, when it
+/// could not be started or did not publish.
+///
+/// The image is the one an update put on the device, or the initramfs's.
+/// Each start is a new generation of the device's port key, so a death
+/// still on its way from an earlier driver is not taken for this one's.
 fn launch_again(
     channel: &Channel<Kernel>,
     port: &Port<Kernel>,
-    key: u64,
+    slot: usize,
     entry: &mut Started,
     drivers: &Drivers<'_>,
     inbox: &mut Inbox,
+    deadline: Deadline,
 ) -> bool {
     // The dead driver's job, and anything it left running in it, goes first.
     let _ = entry.job.kill();
-    let Some((image, _, _)) = driver_for(&entry.info, drivers.names, drivers.count, drivers.images)
+    let Some((initramfs, _, _)) =
+        driver_for(&entry.info, drivers.names, drivers.count, drivers.images)
     else {
         return false;
     };
+    let image = entry.image.as_ref().map_or(initramfs, |image| &image.vmo);
     // A GPU is handed over again, as at boot: the mark stays set, and the
     // budget is set again under no live pins, since the dead driver's are
     // quarantined, not live.
@@ -974,6 +1407,8 @@ fn launch_again(
     let Ok(device) = entry.device.duplicate(Requested::Exactly(DEVICE_RIGHTS)) else {
         return false;
     };
+    let generation = entry.generation.wrapping_add(1);
+    let key = key_of(slot, generation);
     let Ok((job, process, _bootstrap)) = start(
         drivers.job,
         device,
@@ -985,15 +1420,23 @@ fn launch_again(
     ) else {
         return false;
     };
+    entry.generation = generation;
     entry.job = job;
     entry.process = process;
     entry.dead = false;
     entry.quiesced = false;
-    let published = matches!(
+    let awaited = if matches!(
         entry.kind,
         Kind::Port | Kind::Host | Kind::Gadget | Kind::Gpu
-    ) || await_published(channel, port, entry.location, key, inbox);
-    if published {
+    ) {
+        Awaited {
+            published: true,
+            exited: false,
+        }
+    } else {
+        await_published(channel, port, entry.location, key, deadline, inbox)
+    };
+    if awaited.published {
         entry.published = true;
         let _ = channel.write(
             &Message::Bound {
@@ -1004,9 +1447,13 @@ fn launch_again(
         );
         return true;
     }
-    // It died before publishing, or never would: its death packet, if any,
-    // was taken by the wait above, so it is ended and quiesced here.
+    // It died before publishing, and the wait above took its death; or it
+    // ran past an update's deadline, and is ended here and waited for, since
+    // a device is quiesced only once its driver's handles are closed.
     let _ = entry.job.kill();
+    if !awaited.exited {
+        let _ = entry.process.wait_one(Signals::TERMINATED, Deadline::Never);
+    }
     entry.dead = true;
     entry.quiesced = quiesce(&entry.device);
     false

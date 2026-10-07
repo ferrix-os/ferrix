@@ -162,6 +162,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
  "ferrix-devmgr-proto",
+ "ferrix-drvupdate-proto",
  "ferrix-native-abi",
  "ferrix-netring",
  "ferrix-restart",
@@ -197,6 +198,18 @@ dependencies = [
  "ferrix-virtio",
  "ferrix-virtio-blk",
  "ferrix-virtio-input",
+]
+
+[[package]]
+name = "ferrix-drvupdate-proto"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-drvupdated"
+version = "0.1.0"
+dependencies = [
+ "ferrix-drvupdate-proto",
+ "ferrix-rt",
 ]
 
 [[package]]

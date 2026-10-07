@@ -401,6 +401,9 @@ pub(crate) struct Built {
     svc: PathBuf,
     /// The directory's test client, carried by `test-init` alone.
     dirclient: PathBuf,
+    /// The driver update client, carried by `test-restart --update` alone
+    /// (`docs/DEVMGR.md` §4.1).
+    pub(crate) drvupdate: PathBuf,
 }
 
 /// Build `src/user/system/linux/init/` for `arch`, or `None` on an architecture it is not built
@@ -419,6 +422,7 @@ pub(crate) fn built(arch: Arch) -> Result<Option<Built>> {
         generator: release.join("getty-generator"),
         svc: release.join("svc"),
         dirclient: release.join("dirclient"),
+        drvupdate: release.join("drvupdate"),
     };
     crate::builds::Build::cargo(
         format!("cargo build (init) --target {target}"),
@@ -434,6 +438,7 @@ pub(crate) fn built(arch: Arch) -> Result<Option<Built>> {
     .output(&built.generator)
     .output(&built.svc)
     .output(&built.dirclient)
+    .output(&built.drvupdate)
     .run()?;
     Ok(Some(built))
 }

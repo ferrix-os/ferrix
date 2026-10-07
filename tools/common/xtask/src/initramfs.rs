@@ -634,6 +634,8 @@ fn build_with_shell(
 ) -> Result<Vec<u8>> {
     // A sabotaged authd goes into test-auth's control images and no other.
     crate::auth::refuse_sabotaged(ports)?;
+    // drvupdated goes into test-restart --update's images and no other.
+    native::refuse_updater(natives)?;
     let mut archive = Newc::new();
     archive.directory(".", 0o755)?;
     for (name, permissions) in [
@@ -788,6 +790,25 @@ fn build_with_shell(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `drvupdated` goes into `test-restart --update`'s images alone (the
+    /// certification consultant's C1 and K3, 2026-10-07): an archive that
+    /// carries it is refused in any run that did not allow it, as every
+    /// test here does not.
+    #[test]
+    fn no_image_carries_the_driver_update_helper_unasked() {
+        let helper = native::Built {
+            name: native::UPDATER.binary,
+            directory: native::DRIVERS,
+            bytes: b"\x7fELF".to_vec(),
+        };
+        let refused = build_with(None, &[helper]).expect_err("the helper is refused");
+        assert!(refused.to_string().contains("carries drvupdated"));
+        assert!(
+            build_with(None, &[]).is_ok(),
+            "an archive without it is built"
+        );
+    }
 
     #[test]
     fn a_carried_program_keeps_its_name_from_busybox() {

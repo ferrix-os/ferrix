@@ -70,6 +70,9 @@ pub const CLOCK_MONOTONIC: usize = 1;
 pub const SOL_SOCKET: usize = 1;
 /// `SO_PEERCRED`: the pid, uid and gid of the peer as it connected.
 pub const SO_PEERCRED: usize = 17;
+/// `SO_RCVTIMEO` (`SO_RCVTIMEO_OLD`): how long a read waits, as a `timeval`
+/// of the architecture's `long`.
+pub const SO_RCVTIMEO: usize = 20;
 
 /// Bytes of a `sockaddr_un`: the family, then the path.
 pub const SOCKADDR_UN_BYTES: usize = 110;
@@ -173,6 +176,24 @@ pub fn peer_uid(fd: usize) -> Result<u32, Errno> {
         arch::linux(nr::GETSOCKOPT, [fd, SOL_SOCKET, SO_PEERCRED, at, len_at, 0])
     })?;
     Ok(credentials[1])
+}
+
+/// `setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO)`: a read of `fd` that waits
+/// longer than `seconds` fails with `EAGAIN`. `drvupdated` keeps a client
+/// that stops sending from holding it (`docs/DEVMGR.md` §4.1).
+///
+/// # Errors
+///
+/// Whatever the kernel answers.
+pub fn receive_timeout(fd: usize, seconds: usize) -> Result<usize, Errno> {
+    // `struct timeval`: seconds and microseconds, each the width of `long`,
+    // which is `usize`'s on every architecture Ferrix runs.
+    let timeval = [seconds, 0_usize];
+    let at = timeval.as_ptr().addr();
+    let len = size_of_val(&timeval);
+    // SAFETY: `timeval` is `len` bytes borrowed for the call; the kernel
+    // only reads it.
+    decode(unsafe { arch::linux(nr::SETSOCKOPT, [fd, SOL_SOCKET, SO_RCVTIMEO, at, len, 0]) })
 }
 
 /// `listen(fd, backlog)`.

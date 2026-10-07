@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-drvupdate-proto"
+description = "A driver update's messages between /bin/drvupdate, drvupdated and devmgr, as docs/DEVMGR.md 4.1 fixes them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

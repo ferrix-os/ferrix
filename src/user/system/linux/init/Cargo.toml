@@ -9,7 +9,7 @@
 # backends that turn its actions into system calls.
 [workspace]
 resolver = "3"
-members = ["dirclient", "getty", "init", "svc"]
+members = ["dirclient", "drvupdate", "getty", "init", "svc"]
 
 [workspace.package]
 version = "0.1.0"

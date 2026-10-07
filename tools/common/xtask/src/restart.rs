@@ -36,6 +36,10 @@
 //! driver in the same line, and the gate fails naming the pids if one is
 //! not, rather than kill whatever has the number by then.
 //!
+//! `--update` first puts the display's driver on new images while the
+//! machine runs (`docs/DEVMGR.md` §4.1, [`update`]), then kills it as
+//! above, and requires each restart to start the updated image.
+//!
 //! x86-64 only, for the reason `test-jobs` is: `kill` and `cat` are uutils',
 //! built for x86-64 alone (`docs/UUTILS.md` D3).
 
@@ -45,6 +49,8 @@ use crate::args::Args;
 use crate::paths::Arch;
 use crate::{Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, native, ports, qemu};
 use crate::{uutils, zinc};
+
+mod update;
 
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -177,12 +183,17 @@ pub(crate) fn test_restart(args: &Args) -> Result<()> {
         ));
     }
     let kinds = Kind::asked(args.boot.as_deref())?;
+    if args.update && kinds != [Kind::Gpu] {
+        return Err(Error::new(
+            "test-restart --update updates the display's driver so far: --boot gpu, or no --boot",
+        ));
+    }
     let shell =
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
     println!("  {arch}: building an image whose init is an interactive shell");
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, "")?;
-    let natives = native::build(arch, args.release)?;
+    let mut natives = native::build(arch, args.release)?;
     let utilities = uutils::carried(arch)?;
     if utilities.is_empty() {
         return Err(Error::new(
@@ -202,6 +213,15 @@ pub(crate) fn test_restart(args: &Args) -> Result<()> {
         let evecho = crate::input::build_evecho(arch, false)?;
         carried.push(carry(EVECHO, &evecho)?);
     }
+    // The helper, the client and the images it updates the card's driver to.
+    let fingerprint = if args.update {
+        let update = update::carried(arch, args.release)?;
+        natives.push(update.natives);
+        carried.extend(update.files);
+        Some(update.fingerprint)
+    } else {
+        None
+    };
     let archive = initramfs::build_with_utilities(
         Some(&shell),
         &natives,
@@ -211,7 +231,7 @@ pub(crate) fn test_restart(args: &Args) -> Result<()> {
     )?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
     for kind in kinds {
-        restart_one(arch, &image, &kernel, args, kind)?;
+        restart_one(arch, &image, &kernel, args, kind, fingerprint)?;
     }
     Ok(())
 }
@@ -235,6 +255,7 @@ fn restart_one(
     kernel: &std::path::Path,
     args: &Args,
     kind: Kind,
+    update: Option<u64>,
 ) -> Result<()> {
     let mut booted = args.clone();
     match kind {
@@ -280,6 +301,18 @@ fn restart_one(
                 }
             };
             let mut killed = Vec::new();
+            if let Some(fingerprint) = update {
+                match update::steps(watching, fingerprint) {
+                    // Every driver the updates started but the last is
+                    // gone, though /proc may list it yet: the rounds kill
+                    // the newest alone.
+                    Ok(()) => killed = update::stale_drivers(watching, kind.comm()),
+                    Err(failure) => {
+                        failures.push(failure);
+                        return Ok(());
+                    }
+                }
+            }
             for round in 1..=2 {
                 let outcome = kill_and_expect_back(watching, kind, round, &mut killed)
                     .and_then(|()| serves_again(watching, kind, round, &before, booted.qmp_port));
@@ -293,6 +326,15 @@ fn restart_one(
     )?;
     if let Some(panic) = lines.iter().find(|line| line.contains(qemu::PANIC_MARKER)) {
         failures.push(format!("the kernel panicked: {}", panic.trim()));
+    }
+    // The update's start, then one for each of the two rounds' restarts.
+    let started = update::next_started(&lines);
+    if update.is_some() && failures.is_empty() && started < 3 {
+        failures.push(format!(
+            "{:?} came {started} times, not 3: a restart after the update must start the \
+             image the update put on the card",
+            update::VERSION_NEXT
+        ));
     }
     if failures.is_empty()
         && let Some(checker) = checker

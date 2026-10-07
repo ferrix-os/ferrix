@@ -21,6 +21,7 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_elf::{EM_AARCH64, EM_ARM, EM_X86_64, ET_EXEC, Elf, PT_DYNAMIC, PT_INTERP, Segment};
 
@@ -150,24 +151,71 @@ pub(crate) fn build(arch: Arch, release: bool) -> Result<Vec<Built>> {
 pub(crate) fn build_in(arch: Arch, release: bool, target_dir: &Path) -> Result<Vec<Built>> {
     PROGRAMS
         .iter()
-        .map(|program| {
-            let path =
-                cargo::build_native(arch, release, program.package, program.binary, target_dir)?;
-            let bytes = std::fs::read(&path)
-                .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
-            verify(arch, &bytes).map_err(|why| {
-                Error::new(format!(
-                    "{} for {arch} is not a program the kernel can start: {why}",
-                    program.binary
-                ))
-            })?;
-            Ok(Built {
-                name: program.binary,
-                directory: program.directory,
-                bytes,
-            })
-        })
+        .map(|program| build_one(arch, release, target_dir, program))
         .collect()
+}
+
+/// `drvupdated`, the helper that takes driver updates for `devmgr`
+/// (`docs/DEVMGR.md` §4.1). Not in [`PROGRAMS`]: until the image's
+/// verification has its review, only the images
+/// `cargo xtask test-restart --update` boots carry it (the certification
+/// consultant's C1, 2026-10-07), which [`refuse_updater`] holds.
+pub(crate) const UPDATER: Program = Program {
+    package: "ferrix-drvupdated",
+    binary: "drvupdated",
+    directory: DRIVERS,
+};
+
+/// One program of the tree, built and checked.
+pub(crate) fn build_one(
+    arch: Arch,
+    release: bool,
+    target_dir: &Path,
+    program: &Program,
+) -> Result<Built> {
+    let path = cargo::build_native(arch, release, program.package, program.binary, target_dir)?;
+    let bytes = std::fs::read(&path)
+        .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
+    verify(arch, &bytes).map_err(|why| {
+        Error::new(format!(
+            "{} for {arch} is not a program the kernel can start: {why}",
+            program.binary
+        ))
+    })?;
+    Ok(Built {
+        name: program.binary,
+        directory: program.directory,
+        bytes,
+    })
+}
+
+/// Set by `test-restart --update` alone: the one run whose images may
+/// carry [`UPDATER`].
+static UPDATES_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Let this run's images carry [`UPDATER`]: `test-restart --update` only.
+pub(crate) fn allow_updater() {
+    UPDATES_ASKED.store(true, Ordering::Relaxed);
+}
+
+/// Refuse a set of native programs that carries [`UPDATER`], unless
+/// `test-restart --update` is building it (the certification consultant's
+/// C1, 2026-10-07).
+///
+/// # Errors
+///
+/// When `natives` carries the helper in any other run.
+pub(crate) fn refuse_updater(natives: &[Built]) -> Result<()> {
+    if UPDATES_ASKED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    if natives.iter().any(|built| built.name == UPDATER.binary) {
+        return Err(Error::new(
+            "this image carries drvupdated, which only test-restart --update may carry until \
+             driver updates are verified (docs/DEVMGR.md 4.1, the consultant's C1)",
+        ));
+    }
+    Ok(())
 }
 
 /// A page, as the kernel's loader applies permissions to them.

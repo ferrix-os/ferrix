@@ -1,0 +1,21 @@
+[package]
+name = "ferrix-drvupdated"
+description = "drvupdated: takes a new driver image from root over an abstract socket and hands it to devmgr as a VMO (docs/DEVMGR.md 4.1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "drvupdated"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-drvupdate-proto.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

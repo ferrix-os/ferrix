@@ -11,6 +11,7 @@ members = [
     "src/lib/proto/blkring",
     "src/lib/drivers/block/blkserve",
     "src/lib/proto/devmgr-proto",
+    "src/lib/proto/drvupdate-proto",
     "src/lib/init/svc-proto",
     "src/lib/proto/auth-proto",
     "src/lib/proto/displayctl",
@@ -106,6 +107,7 @@ members = [
     "src/user/system/native/drivers/gpu/gc400",
     "src/user/system/native/drivers/console/vport",
     "src/user/system/native/devmgr",
+    "src/user/system/native/drvupdated",
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/xtask",
@@ -128,6 +130,7 @@ ferrix-block = { path = "src/lib/fs/block" }
 ferrix-blkring = { path = "src/lib/proto/blkring" }
 ferrix-blkserve = { path = "src/lib/drivers/block/blkserve" }
 ferrix-devmgr-proto = { path = "src/lib/proto/devmgr-proto" }
+ferrix-drvupdate-proto = { path = "src/lib/proto/drvupdate-proto" }
 ferrix-svc-proto = { path = "src/lib/init/svc-proto" }
 ferrix-auth-proto = { path = "src/lib/proto/auth-proto" }
 ferrix-displayctl = { path = "src/lib/proto/displayctl" }

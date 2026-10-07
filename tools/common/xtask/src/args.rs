@@ -115,6 +115,9 @@ pub(crate) struct Args {
     /// `--btrfs-root`: boot `test-chrome-window` with `/` on a btrfs root
     /// disk, made fresh from the fixture for the run, as the desktop's is.
     pub(crate) btrfs_root: bool,
+    /// `--update`: `test-restart` updates the driver to new images before it
+    /// kills it (`docs/DEVMGR.md` §4.1).
+    pub(crate) update: bool,
     /// `--net`: give the guest a virtio-net device, with `xtask`'s own gateway
     /// behind it. Off by default for a boot that is judged, because every boot
     /// that does not need a network is a boot with one fewer device on the bus
@@ -714,6 +717,7 @@ impl Args {
         match flag {
             "--chrome" => self.chrome = true,
             "--login" => self.login = true,
+            "--update" => self.update = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -752,7 +756,7 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" | "--login" | "--nvidia" => args.switch(&item),
+                "--chrome" | "--login" | "--nvidia" | "--update" => args.switch(&item),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;

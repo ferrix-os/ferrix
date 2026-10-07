@@ -78,7 +78,7 @@ kernel or a loader. Each crate sits in exactly one group:
 
 | Group | Holds | Crates |
 |---|---|---|
-| `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `native-abi` `native` `bootinfo` `devmgr-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` |
+| `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `native-abi` `native` `bootinfo` `devmgr-proto` `drvupdate-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` |
 | `src/lib/kernel/` | Kernel-internal cores: memory, scheduling, synchronisation, objects, randomness, the process stack image, the vDSO, the panic screen | `frame` `heap` `kmem` `paging` `vma` `sched` `sync` `objects` `fallible` `crng` `seccomp` `ustack` `vdso` `qr` `fbtext` |
 | `src/lib/platform/` | Parsers for what firmware and the boot medium hand over, and which of the two descriptions a machine is read by | `acpi` `fdt` `description` `pci` `elf` |
 | `src/lib/fs/` | Storage and filesystems, including the text of the pseudo-filesystems | `vfs` `block` `btrfs` `btrfs-vfs` `btrfs-write` `cpio` `procfs` `sysfs` `cgroupfs` |
@@ -124,6 +124,7 @@ initramfs by xtask:
 | `src/user/system/native/rt/` | The runtime every native program links: entry, the system-call instruction, exit, panic. |
 | `src/user/system/native/driver/` | `ferrix-driver`, what every driver process shares: START, register blocks, DMA memory freed only after a reset, a bus's transport (`virtio`), and the protocol a subsystem speaks to its kernel interface (`input`, `block`). A driver implements its subsystem's trait and nothing else. virtio-input and virtio-blk are on it; the other drivers move as they are touched. |
 | `src/user/system/native/devmgr/` | Matches devices to drivers and starts each in a job of its own. |
+| `src/user/system/native/drvupdated/` | Takes a new driver image from root over an abstract socket and hands it to `devmgr` (`docs/DEVMGR.md` §4.1). Only the images `test-restart --update` boots carry it. |
 | `src/user/system/native/drivers/<function>/<name>/` | One process per driver, grouped by function as in the table above. The logic lives in `src/lib/drivers/`; the program is the thin shell around it. |
 | `src/user/system/native/pong/`, `src/user/system/native/channel-echo/` | Small native test programs the boot gates start. |
 

@@ -16,6 +16,7 @@ bench = false
 [dependencies]
 ferrix-blkring.workspace = true
 ferrix-devmgr-proto.workspace = true
+ferrix-drvupdate-proto.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-netring.workspace = true
 ferrix-restart.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "drvupdate"
+description = "/bin/drvupdate: sends a new driver image to drvupdated and prints devmgr's answer (docs/DEVMGR.md 4.1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+libc = "0.2.189"
+# The request and the answer, as drvupdated and devmgr read them.
+ferrix-drvupdate-proto = { path = "../../../../../lib/proto/drvupdate-proto" }
+
+[lints]
+workspace = true

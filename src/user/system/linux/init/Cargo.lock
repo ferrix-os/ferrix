@@ -12,7 +12,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "drvupdate"
+version = "0.1.0"
+dependencies = [
+ "ferrix-drvupdate-proto",
+ "libc",
+]
+
+[[package]]
 name = "ferrix-audit"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-drvupdate-proto"
 version = "0.1.0"
 
 [[package]]

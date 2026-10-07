@@ -265,6 +265,31 @@ pub(crate) fn build_native(
     artifact(path)
 }
 
+/// [`build_native`], with `FERRIX_DRIVER_VERSION` set to `version`: a
+/// driver that says that version once at its start, for
+/// `cargo xtask test-restart --update` to tell from the initramfs's
+/// (`docs/DEVMGR.md` §4.1).
+pub(crate) fn build_native_version(
+    arch: Arch,
+    release: bool,
+    package: &str,
+    binary: &str,
+    target_dir: &Path,
+    version: &str,
+) -> Result<PathBuf> {
+    let profile = if release { "release" } else { "debug" };
+    let path = target_dir
+        .join(arch.kernel_target())
+        .join(profile)
+        .join(binary);
+    build(package, arch.kernel_target(), release)?
+        .env("CARGO_TARGET_DIR", target_dir)
+        .env("FERRIX_DRIVER_VERSION", version)
+        .output(&path)
+        .run()?;
+    artifact(path)
+}
+
 /// The kernel, with `init` as pid 1's program, told to run `script` with
 /// `sh -c`: both go in the image's initramfs, not in the kernel ([`Kernel`]).
 ///
