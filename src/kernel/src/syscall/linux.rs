@@ -334,6 +334,8 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
         Syscall::Msync => memory::sys_msync(process, a[0], a[1], truncate(a[2])),
         Syscall::Madvise => memory::sys_madvise(process, a[0], a[1], attributes::int(a[2])),
         Syscall::Mincore => memory::sys_mincore(process, a[0], a[1], a[2]),
+        // ARMv7-A only: no other table decodes it.
+        Syscall::ArmCacheflush => memory::sys_cacheflush(process, a[0], a[1], a[2]),
         Syscall::Unshare => namespace::sys_unshare(process, a[0]),
         Syscall::Setns => namespace::sys_setns(process, fd::arg(a[0]), truncate(a[1])),
         Syscall::SetTidAddress => Ok(set_tid_address(process, a[0])),

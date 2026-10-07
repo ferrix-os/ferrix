@@ -1819,6 +1819,8 @@ const ARM_ONLY: &[Syscall] = &[
     Syscall::Sigreturn,
     Syscall::ArmSetTls,
     Syscall::ArmCacheflush,
+    Syscall::Send,
+    Syscall::Recv,
     Syscall::ClockSettime64,
     Syscall::ClockAdjtime64,
     Syscall::Pselect6Time64,
@@ -2005,7 +2007,9 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (286, Syscall::Getsockname),              // getsockname
     (287, Syscall::Getpeername),              // getpeername
     (288, Syscall::Socketpair),               // socketpair
+    (289, Syscall::Send),                     // send
     (290, Syscall::Sendto),                   // sendto
+    (291, Syscall::Recv),                     // recv
     (292, Syscall::Recvfrom),                 // recvfrom
     (293, Syscall::Shutdown),                 // shutdown
     (294, Syscall::Setsockopt),               // setsockopt
@@ -2298,7 +2302,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 273, "the ARMv7-A table maps 273 calls");
+    assert_eq!(mapped_arm().len(), 275, "the ARMv7-A table maps 275 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
