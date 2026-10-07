@@ -160,18 +160,21 @@ pub(crate) fn device_barrier() {
 /// The processor's free-running counter: the virtual counter, `CNTVCT_EL0`,
 /// the one the kernel's clock counts. The kernel lets EL0 read it on every
 /// processor (`CNTKCTL_EL1.EL0VCTEN`, which Linux sets for its vDSO too).
-/// No `isb` before it, unlike the kernel's read: the read may be taken a few
-/// instructions early, which does not matter to a driver timing a device in
-/// tens of microseconds, and the file's assembly budget is spent.
+/// The `isb` before it, as in the kernel's read and as x86-64's `lfence`:
+/// without it an out-of-order core may take the read before the instructions
+/// ahead of it retire, and a stamp around a system call (`bench-ipc`) would
+/// leave part of the call outside. Not `nomem`, so that the compiler does not
+/// move memory accesses across the stamp either.
 pub(crate) fn counter() -> Option<u64> {
     let count: u64;
-    // SAFETY: a read of a system register the kernel lets EL0 read; no
-    // memory or other register changes.
+    // SAFETY: a barrier and a read of a system register the kernel lets EL0
+    // read; no memory or other register changes.
     unsafe {
         asm!(
+            "isb",
             "mrs {}, cntvct_el0",
             out(reg) count,
-            options(nomem, nostack, preserves_flags),
+            options(nostack, preserves_flags),
         );
     }
     Some(count)

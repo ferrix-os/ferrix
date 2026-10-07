@@ -1467,11 +1467,11 @@ pub(crate) fn counter_hz() -> u64 {
     timer::counter_hz()
 }
 
-/// Whether a program can read the counter [`counter_now`] reads: not here.
-/// Nothing sets `CNTKCTL.PL0VCTEN`, so a read of `CNTVCT` from user mode is
-/// an undefined instruction.
+/// Whether a program can read the counter [`counter_now`] reads: always.
+/// That is `CNTVCT`, and every processor sets `CNTKCTL.PL0VCTEN` as it
+/// starts (`cpu::allow_user_counter`), as Linux does on ARM.
 pub(crate) fn ring3_reads_counter() -> bool {
-    false
+    true
 }
 
 /// Fire the timer interrupt once, `nanos` from now.
@@ -1608,7 +1608,7 @@ pub(crate) fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
     None
 }
 
-/// With no vDSO, nothing in a program reads the counter.
+/// With no vDSO, no C library reads the counter (a program may: see `ring3_reads_counter`).
 pub(crate) fn vdso_can_read_counter() -> bool {
     false
 }
@@ -1622,3 +1622,13 @@ pub(crate) fn sigpage_code() -> Option<&'static [u8]> {
 
 /// No program to check a vDSO with, since there is none.
 pub(crate) const USER_VDSO_PROGRAM: &[u8] = &[];
+
+/// What user mode may read of the generic timer, on every processor: see
+/// [`check::check_user_counter`]. After every processor is online.
+///
+/// # Errors
+///
+/// What did not hold.
+pub(crate) fn check_user_counter() -> Result<(), &'static str> {
+    check::check_user_counter()
+}

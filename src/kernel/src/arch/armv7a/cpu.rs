@@ -822,3 +822,42 @@ pub(crate) fn write_cntv_ctl(control: u32) {
         );
     }
 }
+
+/// `CNTKCTL`: what of the generic timer user mode may touch.
+pub(crate) fn read_cntkctl() -> u32 {
+    let control: u32;
+    // SAFETY: (SYSREG) reading `CNTKCTL` has no side effects.
+    unsafe {
+        asm!("mrc p15, 0, {}, c14, c1, 0", out(reg) control, options(nomem, nostack, preserves_flags));
+    }
+    control
+}
+
+/// Let user mode read the virtual counter, and close the rest of the timer
+/// to it: `CNTKCTL.PL0VCTEN` set; `PL0PCTEN`, `PL0VTEN` and `PL0PTEN` clear,
+/// whatever firmware left there, as Linux's `arch_counter_set_user_access`
+/// does on ARM and arm64 alike. A program then reads `CNTVCT` with `mrrc`
+/// for its clock without a system call; the physical counter, and both
+/// timers' compare and control registers, stay the kernel's. `EVNTEN`,
+/// `EVNTDIR` and `EVNTI` are left as found: they are the event stream, which
+/// wakes a `wfe` and gives no program a register, and nothing in Ferrix turns
+/// it on. A processor's own register: every processor runs this before it
+/// can run a program -- the boot processor from `timer::init`, each
+/// secondary in `smp::secondary_start` -- and it is the only writer of
+/// `CNTKCTL` in the kernel.
+pub(crate) fn allow_user_counter() {
+    let control = (read_cntkctl() & !CNTKCTL_CLOSED) | CNTKCTL_PL0VCTEN;
+    // SAFETY: (SYSREG) `CNTKCTL` decides only what user mode may read or program of
+    // the generic timer; no mapping, interrupt or timer of the kernel's
+    // changes. The `isb` makes the write take effect before a program runs.
+    unsafe {
+        asm!("mcr p15, 0, {}, c14, c1, 0", "isb", in(reg) control, options(nostack, preserves_flags));
+    }
+}
+
+/// `CNTKCTL.PL0VCTEN`: user mode may read `CNTVCT` and `CNTFRQ`.
+pub(crate) const CNTKCTL_PL0VCTEN: u32 = 1 << 1;
+
+/// What user mode is never given: `PL0PCTEN` (the physical counter),
+/// `PL0VTEN` and `PL0PTEN` (the virtual and physical timers' registers).
+pub(crate) const CNTKCTL_CLOSED: u32 = 1 | (1 << 8) | (1 << 9);
