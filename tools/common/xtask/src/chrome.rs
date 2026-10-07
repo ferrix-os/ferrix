@@ -718,6 +718,10 @@ fn test_chromium(arch: Arch, args: &Args) -> Result<()> {
     }
     let mut args = args.clone();
     args.data_image = Some(volume_for(arch)?);
+    // Read-only on ARMv7-A, the DK1's architecture: the page cache gives back
+    // a read-only volume's clean pages under pressure, so Chromium can run in
+    // the board's 512 MiB (`docs/CHROME.md` §10).
+    args.data_image_read_only = arch == Arch::Armv7a;
     if !args.memory_given {
         args.memory = MEMORY;
     }

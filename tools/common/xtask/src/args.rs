@@ -186,6 +186,11 @@ pub(crate) struct Args {
     /// `test-selfhost`'s volume, made afresh for each run, which the host
     /// reads the built image back out of.
     pub(crate) data_image_kept: bool,
+    /// Whether `data_image` is attached read-only (QEMU's `readonly=on`,
+    /// which the guest's virtio-blk sees as `VIRTIO_BLK_F_RO`): a program
+    /// volume whose clean pages the page cache may give back under pressure,
+    /// as it may for no writable btrfs yet (`docs/CHROME.md` §10).
+    pub(crate) data_image_read_only: bool,
     /// A home volume a test boot attaches, kept: `test-shell`'s K7 boots
     /// (`crate::init_file`). `run` and `run-compositor` attach
     /// `build/home.img` beside their root instead.
