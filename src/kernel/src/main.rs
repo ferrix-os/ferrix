@@ -390,9 +390,9 @@ fn say_booted() {
         // Last before the marker, so every driver the boot starts has run: a
         // DMA fault its unit recorded and nothing provoked fails the boot
         // here rather than sitting unread in the unit's record.
-        let translating = iommu::check_dma_faults();
+        let dma_faults_read = iommu::check_dma_faults();
         // And after it, since reading the faults is what records them.
-        stages_check::check_audit_booted(translating);
+        stages_check::check_audit_booted(dma_faults_read);
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
         println!(

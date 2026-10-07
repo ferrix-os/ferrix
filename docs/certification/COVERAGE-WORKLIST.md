@@ -23,15 +23,15 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
 | [`sched`](#sched) | 2 | 3 | 3 | 2 |
 | [`arch/armv7a`](#archarmv7a) | - | - | 2 | 2 |
-| [`iommu`](#iommu) | 2 | 1 | 1 | 1 |
 | [`irq`](#irq) | 2 | - | 1 | 1 |
 | [`random`](#random) | 2 | 2 | 2 | 1 |
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`claim`](#claim) | 1 | - | - | 1 |
+| [`iommu`](#iommu) | - | 1 | 1 | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **131** | **177** | **234** | 38 |
+| **Total** | **129** | **177** | **234** | 38 |
 
 ---
 
@@ -191,14 +191,6 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
-## `iommu`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `iommu.rs` | `core` | 2 | 1 | 1 | 0 | - |
-
----
-
 ## `irq`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
@@ -228,6 +220,14 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `claim.rs` | `core` | 1 | 0 | 0 | 0 | - |
+
+---
+
+## `iommu`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `iommu.rs` | `core` | 0 | 1 | 1 | 0 | - |
 
 ---
 

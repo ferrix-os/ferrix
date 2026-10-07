@@ -749,8 +749,8 @@ impl Translation {
     fn take_fault(&self) -> Option<Fault> {
         match self {
             Translation::None => None,
-            Translation::VtD { unit, .. } => recorded(unit.take_fault()),
-            Translation::SmmuV3 { unit, .. } => recorded(unit.take_fault()),
+            Translation::VtD { unit, .. } => recorded(counted(unit.take_fault())),
+            Translation::SmmuV3 { unit, .. } => recorded(counted(unit.take_fault())),
         }
     }
 
@@ -1415,6 +1415,20 @@ static STRAY: AtomicU64 = AtomicU64::new(0);
 /// ([`Cause::Overflow`]).
 static STRAY_EVENTS: AtomicU64 = AtomicU64::new(0);
 
+/// DMA faults read from a unit, provoked or not, counted where each read is
+/// made ([`counted`]) and not by [`recorded`], so that a read that skipped the
+/// record still counts: what the end-of-boot audit check requires a
+/// `DMA_FAULT` record for. A boot whose out-of-domain probe did not run --
+/// its entropy request skipped, under load an interrupt that never came --
+/// read none, and owes none (FX-0309).
+static DMA_FAULTS_READ: AtomicU64 = AtomicU64::new(0);
+
+/// How many DMA faults have been read from a unit so far. See
+/// [`DMA_FAULTS_READ`].
+fn dma_faults_read() -> u64 {
+    DMA_FAULTS_READ.load(Ordering::Relaxed)
+}
+
 /// Record that `stream`'s device is about to be made to write `page`, which its
 /// domain does not map, so the fault the unit records for it is not stray.
 ///
@@ -1505,15 +1519,24 @@ pub(crate) fn audit_faults() -> FaultAudit {
     let mut audit = FaultAudit::default();
     if let Some(programmed) = PROGRAMMED.get() {
         for unit in &programmed.vtd {
-            drain(|| recorded(unit.take_fault()), &mut audit);
+            drain(|| recorded(counted(unit.take_fault())), &mut audit);
         }
         for unit in &programmed.smmu {
-            drain(|| recorded(unit.take_fault()), &mut audit);
+            drain(|| recorded(counted(unit.take_fault())), &mut audit);
         }
     }
     audit.stray = STRAY.load(Ordering::Relaxed);
     audit.stray_events = STRAY_EVENTS.load(Ordering::Relaxed);
     audit
+}
+
+/// Count `fault` in [`DMA_FAULTS_READ`] if it is one [`recorded`] writes as a
+/// `DMA_FAULT`: anything but an interrupt request's fault.
+fn counted(fault: Option<Fault>) -> Option<Fault> {
+    if fault.is_some_and(|fault| !matches!(fault.cause, Cause::Interrupt { .. })) {
+        let _ = DMA_FAULTS_READ.fetch_add(1, Ordering::Relaxed);
+    }
+    fault
 }
 
 /// A fault a unit reported, recorded in the audit record as it is read

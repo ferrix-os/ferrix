@@ -38,8 +38,8 @@
 //! widening refused, a limit's refusal, a native process made, a job given
 //! for a cgroup, a device's control channel given, a job killed, a cgroup
 //! killed, an OOM kill, a device quiesced, a limit set through a job's
-//! handle and through a cgroup's file and, where an IOMMU
-//! translates, a DMA fault -- each with the outcome its class says, and the
+//! handle and through a cgroup's file and, where a unit reported one, a
+//! DMA fault -- each with the outcome its class says, and the
 //! subject that decided it: the calling process where a program asked, the
 //! kernel for the OOM kill, the quiesce and the fault, which no task that
 //! happened to be running may be blamed for.
@@ -652,9 +652,12 @@ const PROVOKED: [(Event, Decider, &str); 12] = [
 /// What the boot was, for the end-of-boot check.
 #[derive(Debug)]
 pub(crate) struct Booted {
-    /// Whether an IOMMU translates, so that its out-of-domain probe made a
-    /// fault for the record.
-    pub(crate) translating: bool,
+    /// How many DMA faults were read from a unit, the out-of-domain probe's
+    /// among them, each owing a record. Not whether a unit translates: the
+    /// probe runs only after the entropy request it rides on completes, and
+    /// a boot that skipped that request, as a loaded host's late interrupt
+    /// makes one, faulted nothing (FX-0309).
+    pub(crate) dma_faults_read: u64,
 }
 
 /// The end-of-boot check: see the module's header. Answers how many events
@@ -702,7 +705,7 @@ pub(crate) fn booted(boot: &Booted) -> Result<usize, &'static str> {
     if all().any(|record| kernel_only.iter().any(|&event| record.is(event)) && record.pid != 0) {
         return Err("a decision the kernel made was recorded against a process");
     }
-    if boot.translating {
+    if boot.dma_faults_read > 0 {
         let fault =
             all().any(|record| record.is(DMA_FAULT) && record.outcome == Outcome::Refused as u16);
         if !fault {

@@ -1422,8 +1422,8 @@ pub(super) fn check_btrfs_disk() {
 /// a thousand threads, did.
 /// The audit record at the end of boot: every decision the boot's own
 /// checks made at a recording site is in it (`audit::check::booted`).
-pub(super) fn check_audit_booted(translating: bool) {
-    match audit::check::booted(&audit::check::Booted { translating }) {
+pub(super) fn check_audit_booted(dma_faults_read: u64) {
+    match audit::check::booted(&audit::check::Booted { dma_faults_read }) {
         Ok(found) => println!(
             "  audit    {found} kinds of decision the boot's checks made are recorded, each with \
              its outcome and the subject that decided it; the boot recorded among its own records"
