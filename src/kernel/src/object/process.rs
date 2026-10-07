@@ -277,7 +277,13 @@ impl Process {
         job::notify(flipped);
         // As it is made in `job`, born in its domain, if it is one: its space
         // says so too, and a space another domain already claimed is out.
-        let domain = job.domain();
+        // ABLATION (po10-pipe abl2, never lands): every process of an
+        // unmarked job is in one shared domain, so no switch between two
+        // programs issues the predictor barrier.
+        let domain = match job.domain() {
+            0 => 1 << 40,
+            marked => marked,
+        };
         space.claim_domain(domain);
         Ok(Process {
             space,
