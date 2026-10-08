@@ -106,16 +106,16 @@ are not given.
 | Tag | Command | Unit |
 |---|---|---|
 | `lat_syscall.null`, `.read`, `.write` | `lat_syscall null` (getppid), `read` (1 byte of /dev/zero), `write` (1 byte to /dev/null) | us |
-| `lat_syscall.stat`, `.fstat`, `.open` | `lat_syscall stat|fstat|open $TMP/lmbench-stat` | us |
+| `lat_syscall.stat`, `.fstat`, `.open` | `lat_syscall stat`, `fstat`, `open`, each on `$TMP/lmbench-stat` | us |
 | `lat_pipe`, `lat_unix` | defaults | us |
 | `lat_ctx.s0.p2`, `lat_ctx.s16.p2` | `lat_ctx -s 0 2`, `lat_ctx -s 16 2` | us |
-| `lat_proc.fork`, `.exec`, `.shell` | `lat_proc fork|exec|shell`; `hello` is copied to `/tmp/hello` first | us |
-| `lat_sig.install`, `.catch` | `lat_sig install|catch` | us |
+| `lat_proc.fork`, `.exec`, `.shell` | `lat_proc fork`, `exec`, `shell`; `hello` is copied to `/tmp/hello` first | us |
+| `lat_sig.install`, `.catch` | `lat_sig install`, `catch` | us |
 | `lat_pagefault` | on an 8 MB file in `$TMP` (lmbench's default MB=8) | us |
 | `lat_mmap.512k`, `.2m`, `.8m` | `lat_mmap <size> $TMP/XXX` (it refuses sizes under 320 KB) | us |
 | `bw_pipe`, `bw_unix` | defaults | MB/s |
 | `lat_mem_rd.s64.<MB>` | `lat_mem_rd 32 64`: every range from 512 bytes to 32 MB at the A7's 64-byte line | ns |
-| `bw_mem.<rd|wr|cp>.<16k|128k|8m>` | L1, L2 and DRAM sizes | MB/s |
+| `bw_mem.<what>.<size>` | `bw_mem <size> <what>`, what `rd`, `wr`, `cp`; size `16k`, `128k`, `8m` (L1, L2, DRAM) | MB/s |
 
 `exec-check` runs before `lat_proc`: `lat_proc` never reads its child's exit
 status, so a kernel whose `execve` fails would still get a figure (fork plus
@@ -146,19 +146,23 @@ checked against Linux's `asm-arm/unistd-common.h`):
 | `lat_proc.exec` | the above and `execve` (11) |
 | `lat_sig.install` | `rt_sigaction` (174) |
 | `lat_sig.catch` | `kill` (37), the handler, `sigreturn` (119) |
-| `lat_pagefault` | `mmap2` (192), `msync`, `munmap` (91), the faults |
+| `lat_pagefault` | `mmap2` (192), `msync` (144), `munmap` (91), the faults |
 | `lat_mmap` | `mmap2`, `munmap` |
 
 Timing is `gettimeofday`, which musl implements with `clock_gettime`: on
-Linux through the vDSO (`__vdso_clock_gettime64`), with no system call. On a
-kernel without a vDSO each reading is `clock_gettime64` (403). lmbench reads
+Linux through the vDSO (`__vdso_clock_gettime64`), with no system call.
+Ferrix has a vDSO on x86-64 only (`src/kernel/src/syscall/vdso.rs`), so on
+the DK1 each reading is a `clock_gettime64` (403) system call. lmbench reads
 the clock twice per sample of `ENOUGH` microseconds and subtracts its own
 measured timing overhead, so this moves no figure by more than the overhead
 correction's error.
 
 Where a figure depends on musl's wrapper rather than on one system call,
 say so beside it: `stat`/`fstat` are `statx` only if the kernel has
-`statx`; otherwise every call is two system calls.
+`statx`; otherwise every call is two system calls. Ferrix has `statx`
+(`Syscall::Statx`), so today both kernels make one. speedtest1 reads the
+clock only around each test, so the missing vDSO costs it nothing that
+shows.
 
 ## speedtest1
 
@@ -201,6 +205,19 @@ too. Ferrix has no ramfs (`mount -t ramfs` is ENODEV), and a btrfs root or
 `/data` is a disk, not RAM. So the file case is a tmpfs on both kernels:
 Linux's initramfs must mount a tmpfs at `/tmp` (its rootfs may be ramfs),
 and `run-speedtest1.sh` prints the file system it found.
+
+## Smoke tests (2026-10-08, nazuna; TCG timings, not results)
+
+- **qemu-arm 9.2.4, user mode:** every program and both speedtest1 modes
+  ran. `lat_proc exec` and `shell` cannot exec an ARM program there
+  (no binfmt entry), and `exec-check` marked both FAIL, as it should.
+- **Ferrix armv7a under QEMU TCG** (`qemu-system-arm -cpu cortex-a7`, 4
+  processors, 1 GiB, `--tmpfs-root`, tree 58ddc3202): the whole lmbench set
+  gave a figure with no failures, `exec-check` passed both calls, and
+  speedtest1 ran in both modes at `--size 5` and at `--size 60`, the file
+  database on Ferrix's `/tmp` tmpfs. No system call was missing. (One boot
+  of the three stopped earlier, in stage 7's futex self-check, before any
+  of this ran; see the B5 report.)
 
 ## Running them
 
