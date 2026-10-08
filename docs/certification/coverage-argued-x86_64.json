@@ -1412,49 +1412,49 @@
     },
     {
       "file": "user/space.rs",
-      "lines": "616",
+      "lines": "620",
       "category": "defensive",
       "match": "Ok((vmo.page(index).unwrap_or(shared), None))",
       "why": "A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically."
     },
     {
       "file": "user/space.rs",
-      "lines": "828",
+      "lines": "832",
       "category": "credited-elsewhere",
       "match": "let _ = inner.native.remove(&id);",
       "why": "Run whenever a mapping is abandoned part-way: the allocation sweep's `fork` scenario fails the file mapping's table insert after a native object is mapped, and `abandon_region` runs (its lines 637 and 641 are reached). The line's only statement row is on the removal of an entry the set holds, and `abandon_region` is only called for an id that never went into the native set -- a native mapping whose insert failed, or a file mapping -- so the search always ends empty-handed, under the inlined `BTreeSet::remove`'s rows."
     },
     {
       "file": "user/space.rs",
-      "lines": "1287",
+      "lines": "1290",
       "category": "defensive",
       "match": "};",
       "why": "A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2460",
+      "lines": "2461",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2464-2465",
+      "lines": "2465-2466",
       "category": "defensive",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2887",
+      "lines": "2888",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."
     },
     {
       "file": "user/space.rs",
-      "lines": "3091",
+      "lines": "3092",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."

@@ -119,7 +119,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 137 packages, 6654 elements, 215 relations. Model digest `d9aec12b6b0aa634`.
+26 files, 139 packages, 6711 elements, 215 relations. Model digest `1da816551561336e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -237,7 +237,7 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.4` | Once bring-up has dropped the loader's identity map, no leaf mapping under the kernel's own root table or the identity root shall be both writable and executable. | The boot's sweep of every leaf mapping under the kernel's root and the identity root counts N mappings, E > 0 of them executable, and 0 both writable and executable (the `w^x` line). | `O.WXN, ASR-2` |
 | `H.MEM.5` | No mapping of the frames that hold the kernel's text and read-only data, the direct map's alias of them included, shall be writable. | The boot's sweep of every mapping of those frames finds 0 writable, and finds the direct map aliasing every byte of them (the `sealed` line). | `O.WXN, ASR-2` |
 | `H.MEM.6` | A physical frame shall hold only zeros when it is committed to a VMO, mapped into a user address space for the first time, or made a page table. | A frame written with a pattern, freed and committed again reads 0 non-zero bytes of its 4096 before the new owner's first write, for a VMO page and for a page table alike. | `O.SCRUB, ASR-5` |
-| `H.MEM.7` | A page-table frame an unmap empties shall not return to the frame allocator until the TLB invalidation that covers the unmap has been made. | A page table an unmap empties is still held, not freed, until the shootdown covering it completes: 0 tables freed before it, and exactly the tables it emptied given back by it. | `O.ISOLATE, ASR-1` |
+| `H.MEM.7` | A page-table frame an unmap empties shall not return to the frame allocator until the TLB invalidation that covers the unmap has been made; and the tables and frames of a dropped address space shall not return to it until every TLB entry that can reach them has been invalidated or, on ARMv7-A, is tagged with an ASID no processor uses again before its own next full flush. | A page table an unmap empties is still held, not freed, until the shootdown covering it completes: 0 tables freed before it, and exactly the tables it emptied given back by it. | `O.ISOLATE, ASR-1` |
 | `H.MEM.8` | After a fork, a write by the parent or the child to a private page shall not be visible to the other. | The `cow` program, in which each side writes a page both shared, exits 61 (neither saw the other's write). | `O.ISOLATE, ASR-1` |
 | `H.MEM.9` | Every frame an address space, a VMO or a process holds shall return to the frame allocator when the last reference to it goes. | After each memory and program check, the free frame count is what it was before: 0 frames leaked, per check (the `objects`, `uaccess` and `exits` lines). | `O.QUOTA` |
 | `H.MEM.10` | Every interface that maps a physical range a caller names shall refuse a range that touches the kernel image. | Requests naming the image's first page, its last page and a range straddling its end are each refused, 0 accepted, at stages 1, 2 and 6. | `O.ISOLATE, O.WXN` |
@@ -760,7 +760,7 @@ Every architecture supplies each of these; generic kernel code reaches the CPU t
 | `identityRoot` | — | — |  |
 | `prepareUserRoot` | — | 6 | Make a freshly allocated user root usable. x86-64 keeps both halves in one root, so it shares the kernel's top-level slots into it — shared, not copied, so a later kernel mapping appears in every space without walking any. |
 | `installUserRoot` | — | 6 | Translate this processor's user half through a given root. x86-64 is one CR3 write, whose own side effect is to drop every non-global entry while the kernel's global ones — set because the loader enables CR4.PGE — survive. |
-| `uninstallUserRoot` | — | 6 | Stop translating user addresses, which is the state a kernel thread runs in. x86-64 goes back to the kernel's own root; the Arm pair set EPD0 and invalidate, because EPD0 governs walks and not the TLB. |
+| `uninstallUserRoot` | — | 6 | Stop translating user addresses, which is the state a kernel thread runs in. x86-64 goes back to the kernel's own root; AArch64 sets EPD0 and invalidates, because EPD0 governs walks and not the TLB; ARMv7-A sets EPD0 and writes TTBR0 with ASID 0, which no… |
 | `describeCpus` | — | — |  |
 | `hardwareId` | — | — |  |
 | `cpuLocal` | — | — |  |
@@ -4139,6 +4139,8 @@ flowchart LR
 | `L.mm.62` | `onlyRamHasACheckedDirectMapAlias` | — | — | — |
 | `L.mm.63` | `aLibraryMapInsertRunsInASection` | — | — | — |
 | `L.mm.64` | `refusedFillsStayOnOneProcessor` | — | — | — |
+| `L.mm.69` | `oneNumberOneSpaceInAGeneration` | — | — | — |
+| `L.mm.70` | `aRolloverOnlyWhenNoneIsFree` | — | — | — |
 | `L.user.1` | `aReservationCostsNothing` | — | — | — |
 | `L.user.2` | `aCommittedPageIsZeroed` | — | — | — |
 | `L.user.3` | `aFirstWriteCommitsAZeroedPage` | — | — | — |
@@ -4209,6 +4211,7 @@ flowchart LR
 | `L.user.68` | `aDeviceMappingReachesTheDevicesOwnPages` | — | — | — |
 | `L.user.108` | `aPrefetchableApertureMapsWriteCombining` | — | — | — |
 | `L.user.109` | `oneMemoryTypePerDevicePage` | — | — | — |
+| `L.user.125` | `aRemapBreaksBeforeItMakes` | — | — | — |
 | `L.user.107` | `aCopyThroughADevicePageIsRefused` | — | — | — |
 | `L.user.69` | `mremapRefusesWhatItShould` | — | — | — |
 | `L.user.70` | `aRegionGrowsWhereItHasRoom` | — | — | — |
@@ -4504,6 +4507,14 @@ flowchart LR
 | `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.armv7a.3` | `nothingInsideADomain` | — | — | — |
+| `L.armv7a.13` | `anInstallWritesRootAndNumberAtOnce` | — | — | — |
+| `L.armv7a.14` | `aProcessorFlushesBeforeANewGeneration` | — | — | — |
+| `L.armv7a.15` | `aKernelThreadRunsWithAsidZero` | — | — | — |
+| `L.armv7a.16` | `shootdownsReachEveryProcessor` | — | — | — |
+| `L.armv7a.17` | `userLeavesAreNotGlobal` | — | — | — |
+| `L.armv7a.18` | `aDroppedSpacesNumberWaitsForAFlush` | — | — | — |
+| `L.armv7a.19` | `theFastPathIsOrderedAgainstARollover` | — | — | — |
+| `L.armv7a.20` | `theFlushFollowsTheCore` | — | — | — |
 | `L.armv7a.4` | `programsReadTheCounter` | — | — | — |
 | `L.armv7a.5` | `theSvcMarksTheThreeBlockingCalls` | — | — | — |
 | `L.armv7a.6` | `aBlockedNativeCallKeepsItsCalleeSaved` | — | — | — |

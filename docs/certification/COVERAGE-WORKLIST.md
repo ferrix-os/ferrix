@@ -187,7 +187,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1367 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1408 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---
