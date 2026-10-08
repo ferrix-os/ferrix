@@ -744,7 +744,11 @@ fn handle_page_fault(frame: &mut arch::TrapFrame, fault: PageFault) {
                 &trap,
                 (ferrix_linux_abi::types::SIGBUS, BUS_ADRERR, address),
             ),
-            _ => user_fault(frame, &trap),
+            _ => {
+                // HUNT (os07-phunt, never lands): why the fault was refused.
+                println!("  hunt     user fault at {:#x} refused: {:?}", fault.address, resolved);
+                user_fault(frame, &trap)
+            }
         }
         return;
     }
