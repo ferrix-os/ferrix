@@ -5375,7 +5375,7 @@ round trip, measured by os-76's long bench with perf against main
 523fc3d50, the median 819 to 858 ns on both sides, no p50 change resolved
 (`~/.local/share/ferrix/logs/po10-obj/perf/f65b-*`).
 
-### 9.13 ASIDs on ARMv7-A (B6 step 4; design for the consultant, 2026-10-08, os07-asid)
+### 9.13 ASIDs on ARMv7-A (B6 step 4; design for the consultant, second reading, 2026-10-08, os07-asid)
 
 **Why.** On ARMv7-A every user space runs with ASID 0.
 - `install_user_root` writes `TTBR0` and runs `TLBIASID 0`
@@ -5389,108 +5389,159 @@ empties the whole local TLB, the kernel's global entries included. Skill §6
 calls ASIDs likely the largest Arm win **(guessed)**. This step is item B6's
 step 4 for the DK1 matrix (`docs/BOARD-BENCH.md` on `os4b/board-matrix`).
 The kernel uses LPAE's long descriptors with `TTBCR.A1 = 0` (the loader's
-`TTBCR`), so the ASID is `TTBR0` bits 55 to 48, written with the root in one
-`mcrr`.
+`TTBCR`), so the ASID is `TTBR0[55:48]` (DDI 0406C.d B4.1.154) and is written
+with the root in one `mcrr`.
 
-**Not measured under TCG.** QEMU 10.2.1 flushes a vCPU's whole TLB whenever a
-64-bit `TTBR0` write changes the ASID field (`target/arm/helper.c`,
-`vmsa_ttbr_write`). Its `TLBIASID` empties everything, and its `TLBIMVA` and
-`TLBIMVAA` drop a page for every ASID (`target/arm/tcg/tlb-insns.c`)
-**(read from the source on nazuna)**. So under TCG:
-- a switch between two spaces costs the same with ASIDs or without;
-- an entry that survives a change of ASID can never be seen.
+**The reference.** Architecture citations are to the ARM Architecture
+Reference Manual, ARMv7-A and ARMv7-R edition, ARM DDI 0406C.d
+(Non-Confidential), whose text is kept on the gate host at
+`~/.local/share/ferrix/logs/os07-asid/armarm/` (sha256 of the PDF
+c7e38cd9…). The Cortex-A7's identification values are QEMU 10.2.1's
+`cortex-a7` model (`target/arm/tcg/cpu32.c`: `ID_MMFR1` 0x40000000, `CTR`
+0x84448003) **(read; to be confirmed on the board by the `asid` line, which
+prints both)**; the Cortex-A7 TRM was not readable from here.
 
+**The first design was wrong, and why.** The first reading (ledger line 590)
+reviewed an allocator per processor, where a space could have a different
+number on each processor. DDI 0406C.d B3.9.1 forbids that: "For a symmetric
+multiprocessor cluster where a single operating system is running on the set
+of processing elements, ARMv7 requires all ASID values to be assigned
+uniquely within any single Inner Shareable domain. In other words, each ASID
+value must have the same meaning to all processing elements in the system."
+Neither the author nor the first reading had the manual. This reading
+replaces item 1 with one allocator for the machine, Linux's shape
+(`arch/arm/mm/context.c`, read, not copied); the rest of the first design
+carries over where it says so.
+
+**Not measured under TCG.** QEMU 10.2.1 empties a vCPU's whole TLB:
+- whenever a 64-bit `TTBR0` write changes the ASID field
+  (`target/arm/helper.c`, `vmsa_ttbr_write`);
+- at every `TTBCR` write under LPAE (`vmsa_ttbcr_write`, lines 2728 to 2758:
+  the first reading's N1);
+- at `TLBIASID`; its `TLBIMVA` and `TLBIMVAA` drop a page for every ASID
+  (`target/arm/tcg/tlb-insns.c`).
+
+So under TCG a switch between two spaces costs the same with ASIDs or
+without, and an entry that survives a change of ASID can never be seen.
 Every cost figure for this step comes from the board. TCG runs show
-correctness only, and only for faults that do not need an entry to survive a
-change of ASID. The checks below say which control can fire where.
+correctness only, and only for faults that need no entry to survive a change
+of ASID; the table of checks says which control fires where.
 
 **FX-0009, the lazy TLB, is not on `main`.** `user/space.rs` says "There is
-no lazy TLB", and os-35's branches are WIP. Nothing here depends on it.
-Item 10 says what it must keep when it lands.
+no lazy TLB", and os-35's branches are WIP. Nothing here depends on it; item
+10 says what it must keep when it lands.
 
 #### The design
 
-1. **An allocator per processor, with generations.** This is §9.5 step 3's
-   plan for PCIDs, rather than Linux's one allocator for the machine.
-   - Each processor keeps a generation, a `u64` that starts at 1, and the
-     next number to give, from 1 to 255. Number 0 is never given: it means
-     "no space" (5).
-   - A space keeps a tag per processor: `generation << 8 | number`, zero
-     until the space is first installed there.
-   - At an install, a tag of the processor's current generation gives its
-     number, and nothing else happens. Any other tag gets the next number,
-     and the tag is stored.
-   - When the numbers run out, the processor starts a generation. It flushes
-     its own TLB (2), adds one to the generation, and gives 1 next.
-   - A number is never given back within a generation, whether its space
-     lives or dies.
+1. **One allocator for the machine, with generations.** Each number means
+   one space on every processor at once (B3.9.1).
+   - A space keeps one tag, an `AtomicU64`: `generation << 8 | number`, 0
+     until it is first installed. Number 0 is never given: it means "no
+     space" (5).
+   - The machine keeps a generation (from 1), and, under one spin lock (a
+     leaf, taken inside the run queue lock), a map of the numbers given in
+     this generation, each processor's *reserved* tag, and each processor's
+     *flush pending* bit. Each processor keeps its *active* tag, an
+     `AtomicU64` that its own install writes and only a rollover writes from
+     elsewhere.
+   - *Fast path*, with no lock: the space's tag is of the current generation,
+     and swapping it into this processor's active tag returns non-zero. The
+     number is the tag's low byte.
+   - *Slow path*, under the lock: if the space's tag is not current, give it
+     a number (below) and store the new tag; if this processor's flush is
+     pending, run the flush of (2) and clear the bit; store the tag as this
+     processor's active tag.
+   - *Giving a number.* If the space's old number was reserved by a
+     processor at the last rollover, the space keeps it in the new
+     generation, and every reservation of the old tag is moved to the new
+     one. Otherwise, if its old number is free in the new generation, it
+     keeps that. Otherwise it takes the next free number, searching on from
+     the last one given, and wrapping to 1.
+   - *Rollover*, when no number is free: add one to the generation (checked
+     arithmetic: an overflow is fatal, never a wrap); clear the map; for
+     every processor, swap its active tag with 0 and reserve what it held,
+     or, if that was 0, keep the reservation it already had; mark the
+     reserved numbers taken; set every processor's flush pending. No
+     processor is interrupted or waited for.
+   - *Why the swap.* A processor on the fast path that read the old
+     generation either swaps its active tag before the rollover's swap of
+     the same word, so the rollover reserves its number and it keeps
+     meaning the same space in the new generation; or swaps after it, and
+     reads 0, and takes the slow path, where the lock orders it after the
+     rollover. Read-modify-writes of one location are totally ordered, so
+     there is no third case. That is the whole of the concurrency argument,
+     and a `loom` model holds it (checks below).
+   - *What a number costs.* A space's number is never given back while it
+     lives or after it dies. A number comes back only at a rollover, and
+     only to a processor that has flushed (2).
 
-   *Why one allocator per processor.* Linux (`arch/arm/mm/context.c`, read,
-   not copied) keeps one number per `mm` on every CPU because it scopes its
-   broadcast invalidations by ASID (`TLBIMVAIS` with the mm's ASID,
-   `TLBIASIDIS`). That forces its shared bitmap, the numbers reserved across
-   a rollover, the pending-flush mask, a lock, and the race its lock-free fast
-   path's `xchg` closes. Ferrix's ARMv7-A shootdowns are already by address
-   for every ASID (`TLBIMVAAIS`) or of everything (`TLBIALLIS`) (3). So a
-   space's number need not agree between processors, and each processor's
-   allocator touches nothing another reads: no lock, no protocol between
-   processors, nothing for loom to model. The price: a shootdown of one
-   space's page also drops every other space's entry at that address, on
-   every core, and a whole flush drops everything, both as today. Shootdowns
-   scoped by ASID would need the machine-wide allocator; that is a later step,
-   if the board shows shootdowns matter.
-
-   *Why the tag belongs to the space and not to the root.* The tags live in
-   the `AddressSpace`, beside its `CpuMask`, and go when it goes. A new space
-   made on a reused root frame starts with zero tags, so it never inherits a
-   number, just as `forget_root` keeps it from inheriting a predictor
+   *Why the tag belongs to the space and not to the root.* The tag lives in
+   the `AddressSpace`, beside its `CpuMask`, and goes when it goes. A new
+   space made on a reused root frame starts with tag 0, so it never inherits
+   a number, just as `forget_root` keeps it from inheriting a predictor
    decision.
 
-   *Storage.* Eight tags a space, 64 bytes, because ARMv7-A Ferrix runs on
-   GICv2, which has eight CPU interfaces. `describe_cpus` is to refuse a tree
-   that describes more (new code; today it does not), and the tag lookup is fallible, with a fatal panic behind
-   it. The per-processor state is two words a processor. Both are touched
-   only by their own processor, inside `install` with interrupts masked (its
-   contract): `Relaxed` loads and stores, no read-modify-write, no remote
-   reader (§9.8 2f's rule). The arithmetic is `ferrix_paging::asid`, a pure
-   type the host tests drive; the kernel keeps its state.
+   *Storage and atomics.* One `u64` per space. Per processor: the active and
+   reserved tags and the pending bit, in `[_; MAX_CPUS]` arrays (no eighth-
+   processor limit, unlike the first design). On ARMv7-A an `AtomicU64` load
+   or store compiles to an `ldrexd`/`strexd` pair, and a swap to an
+   `ldrexd`/`strexd` loop, all without a barrier at `Relaxed`. The fast path
+   is two loads and one swap of this processor's own word; §9.8 2f's table
+   gains these rows (the active tag: written by its processor and by the
+   rollover; the space's tag: written under the lock, read by any
+   processor).
 
-2. **The rollover flush, in this order.** Before the first number of a new
-   generation goes into `TTBR0`, the processor:
+   *The pure part is host code.* `ferrix_paging::asid` holds the numbers'
+   map, the reservations, the pending bits, the search and the rollover as a
+   plain type the host tests drive. The kernel keeps that type under its lock
+   and supplies the swaps of the active tags, which are its atomics.
+
+2. **A processor's flush after a rollover, in this order.** In its first slow
+   path after a rollover, before it writes any number of the new
+   generation, a processor:
    1. parks the lower half: sets `TTBCR.EPD0`, `isb`, writes `TTBR0 = 0`
-      (root 0, ASID 0), `isb`. Now no walk can run and no user entry can
-      match while it flushes.
-   2. runs a local `TLBIALL` and `BPIALL`, then `dsb nsh` and `isb`.
-   3. writes the new `TTBR0` (root and number) and clears `EPD0`, then `isb`.
+      (root 0, ASID 0), `isb`;
+   2. runs a local `TLBIALL` and `BPIALL`, and `ICIALLU` on a core whose
+      instruction cache is ASID-tagged VIVT (`CTR.L1Ip` 0b01, B4.1.42 Table
+      B4-3), then `dsb nsh`, `isb`;
+   3. installs as in (6).
 
-   Step 1 closes a window. Without it, a walk speculated through the
-   outgoing space between the flush and the write would cache an entry tagged
-   with that space's old number, which the new generation may give to another
-   space on this processor. Linux closes the same window another way: it
-   keeps the outgoing number reserved across its rollover.
+   - Step 1 is belt and braces: the processor's outgoing number was
+     reserved by the rollover, so a walk speculated through the outgoing
+     space before step 3 tags its entry with a number that still means that
+     space, which is Linux's argument. Parked, no walk runs at all.
+   - `BPIALL`: B2.2.4 asks for predictor maintenance when the instructions
+     at a virtual address change for a given ASID, which is what a reused
+     number is. Linux does the same there (`local_flush_bp_all`). On the
+     Cortex-A7 the predictor needs none (`ID_MMFR1.BPred` 0b0100, "requires
+     no flushing at any time", B4.1.90), so it costs nothing there. It is
+     not the switch barrier and is not counted as one.
+   - `ICIALLU`: Linux's `flush_context` empties an ASID-tagged VIVT
+     instruction cache at a rollover (`icache_is_vivt_asid_tagged`). The
+     Cortex-A7's is VIPT (`CTR` 0x84448003, L1Ip 0b10), as is every core
+     QEMU's `virt` gives this kernel; the bring-up reads `CTR` so a core
+     that differs gets the operation rather than an argument.
 
-   `BPIALL` is the architecture's predictor maintenance for a reused ASID;
-   Linux does the same there (`local_flush_bp_all`). On the Cortex-A7 it
-   costs nothing **(argued: its `ID_MMFR1` says the predictor needs no
-   maintenance)**. It is not the switch barrier and is not counted as one.
-
-3. **Shootdowns stay as they are, and must.** ARMv7-A's `flush_tlb_page` is
+3. **Shootdowns stay as they are.** ARMv7-A's `flush_tlb_page` is
    `TLBIMVAAIS` (by address, every ASID, inner shareable), and `flush_tlb` is
    `TLBIALLIS`. Each is followed by `dsb ish`, which completes the
-   invalidation on every core of the inner shareable domain before
+   invalidation on every processor of the inner shareable domain (B3.10.1,
+   "TLB maintenance operations and the memory order model") before
    `invalidate_pages` returns (`TLB_FLUSH_IS_BROADCAST`). That reaches every
    processor that may hold the space's entries, whatever the space's set
-   says, including one that switched away and keeps them under its own number
-   for the space. So `user/space.rs`'s take-down order holds as written:
-   tables and frames go back only after the `dsb ish`, which is the last
-   processor's answer.
+   says, including one that switched away and keeps them under the space's
+   number. So `user/space.rs`'s take-down order holds as written: tables and
+   frames go back only after the `dsb ish`, which is the last processor's
+   answer.
 
-   Per-processor numbers make two facts load-bearing that were incidental
-   before, and this design makes them conditions (L.armv7a.16):
-   - no invalidation on this architecture is scoped by an ASID, because a
-     number names a different space on each processor;
-   - shootdowns stay broadcast, because an IPI scheme scoped by the set would
-     miss a processor that left the set and still holds entries.
+   Shootdowns stay broadcast (L.armv7a.16): an IPI scheme scoped by the set
+   would miss a processor that left the set and still holds entries. They
+   stay by address for every ASID, as today. With one number per space on
+   every processor, an invalidation by ASID would now be sound too, so the
+   first reading's ban on operations that name an ASID (A9 (ii)) loses its
+   reason; this reading asks to drop it, keeps every operation as it is, and
+   deletes `flush_user_tlb`, which nothing calls any more. Shootdowns scoped
+   by ASID are a later step, if the board shows shootdowns matter.
 
 4. **The set's meaning.** `CpuMask` is kept, and kept up exactly as today:
    joined before the root write, left after the next one.
@@ -5500,16 +5551,19 @@ Item 10 says what it must keep when it lands.
      switch", which is no longer "may hold". Nothing on this architecture
      reads the set for a shootdown (3).
 
-   The header of `user/space.rs` says this per architecture. Keeping a
-   processor in the set until its rollover would restore the meaning, but
-   nothing would read it.
+   Every place that states the old meaning is changed per architecture (A7's
+   list). Keeping a processor in the set until its next flush would restore
+   the meaning, but nothing would read it.
 
 5. **Uninstall: a kernel thread runs with ASID 0 and `EPD0`, and nothing is
    flushed.** `uninstall_user_root` sets `EPD0`, `isb`, writes `TTBR0 = 0`,
-   `isb`, and invalidates nothing. The outgoing space's entries stay in the
-   TLB under its number. They cannot be hit while ASID 0 is current, and they
-   are hit again if the same space comes back before anything removes them:
-   the point of the step for a kernel thread between two programs.
+   `isb`, and invalidates nothing; the processor's active tag is left as it
+   is, as Linux leaves it. The outgoing space's entries stay in the TLB under
+   its number. They cannot be hit while ASID 0 is current, and they are hit
+   again if the same space comes back before anything removes them: the
+   point of the step for a kernel thread between two programs. The change of
+   `EPD0` is accompanied by a change of ASID, which is what B3.10.2 asks of a
+   change to `TTBCR.EPDn` made without a TLB invalidation.
 
    This rests on one fact: no TLB entry tagged ASID 0 exists while a kernel
    thread runs. ASID 0 is never given to a space (1). After a processor drops
@@ -5517,68 +5571,95 @@ Item 10 says what it must keep when it lands.
    - `disable_ttbr0` flushes with a local `TLBIALL`, at the drop and in
      `secondary_start`;
    - from then on `TTBR0` holds ASID 0 only while `EPD0` is set, and the
-     `isb` between the two writes makes `EPD0` take effect first.
+     `isb` between the two writes makes `EPD0` take effect first (B3.10.4,
+     Example B3-5's order).
 
    Before the drop, the ASID 0 entries are the identity map's own, and that
-   map is still live; the drop flushes them. Today's `disable_ttbr0` writes
-   both registers before its one `isb`, and keeps its `TLBIALL`, so it is not
-   changed.
+   map is still live; the drop flushes them. Today's `disable_ttbr0` keeps
+   its `TLBIALL` and is not changed.
 
-6. **Install.** `install_user_root(root, tags)`:
-   1. takes the number from (1), and runs the flush of (2) if the allocator
-      asks for it;
-   2. writes `TTBR0 = root | number << 48` in one `mcrr`, clears `EPD0`, then
-      `isb`;
-   3. runs no TLB maintenance;
-   4. calls `speculation::entered_space(root)`, as today.
+6. **Install** (`install_user_root(root, tag)`), one `asm!` block for the
+   register part:
+   1. the number from (1), and the flush of (2) if this processor's bit is
+      pending (both before the block);
+   2. `TTBR0 = root | number << 48`, one `mcrr`, then `isb`;
+   3. only if `EPD0` reads set: clear it, then `isb`. Where it is already
+      clear (a switch from program to program) `TTBCR` is not written at all.
+   4. no TLB maintenance;
+   5. `speculation::entered_space(root)`, as today.
 
-   A rollover is the only maintenance an install can make. The rest of
-   `AddressSpace::install` (the set, `left_space`, `entering_space`, the trip
-   count) does not change. x86-64's and AArch64's `install_user_root` are not
-   touched: `arch::mod` passes the tags only on ARMv7-A, and a zero-sized
-   `SpaceTags` stands in elsewhere.
+   - With `TTBCR.A1 = 0` and `TTBR0` the only base register for non-global
+     entries, "software can update the current translation table base
+     address and ASID atomically, by updating the appropriate TTBR, and does
+     not require a specific routine" (B3.10.4).
+   - The `isb` between the `TTBR0` write and the `EPD0` clear is Example
+     B3-5's order (`PD0 = 1`, `isb`, ASID and base, `isb`, `PD0 = 0`): no
+     walk can run with `EPD0` clear and the old `TTBR0`, which after an
+     uninstall is root 0 with ASID 0 (the first reading's A2).
+   - Skipping the `TTBCR` write saves an `mrc`, a `bic` and an `mcr` a switch
+     and is the only way a `spaces` control can fire under TCG, since
+     QEMU flushes at every `TTBCR` write.
+   - `TTBR0` bits [x-1:0] are reserved, SBZP (B4.1.154); `CnP` exists only
+     from ARMv8.2, at bit 0. A root is page aligned, so bit 0 is 0 by
+     construction, and the `asid` line asserts it after an install.
+
+   The rest of `AddressSpace::install` (the set, `left_space`,
+   `entering_space`, the trip count) does not change. x86-64's and AArch64's
+   `install_user_root` are not touched: `arch::mod` passes the tag only on
+   ARMv7-A, and a zero-sized stand-in elsewhere.
 
 7. **Why a dropped space's number is not reused while a processor may hold
-   its entries.**
-   - On ARMv7-A each processor's TLB holds only entries from its own walks.
-     There is no `CnP`, so no entry is shared between processors
-     **(argued from the ARM ARM; citation owed)**.
-   - A walk's entry is tagged with the ASID in `TTBR0` when the walk ran.
-   - Processor p gives its number n to one space in a generation (1). While
-     that space lives, p puts n in `TTBR0` only for it. Once the space is
-     dropped, no tag `(g, n)` is left on p, so p never writes n again in
-     generation g.
-   - n is next given out on p in a later generation, and by then p's rollover
-     (2) has emptied p's TLB with walks stopped.
+   its entries** (H.MEM.7, restated below).
+   - *Base case.* At generation 1, no TLB holds an entry tagged 1 to 255:
+     the loader runs `TLBIALL` before it turns the MMU on, its identity map
+     and every walk before `drop_identity_map` are ASID 0, and
+     `secondary_start` runs `disable_ttbr0` (`TLBIALL`) before its processor
+     installs anything. No processor starts with its flush pending.
+   - *A walk's entry is tagged* with the ASID in use when it was allocated
+     (Table B3-21, "Matches the ASID ... in use when the TLB entry was
+     assigned").
+   - *Within a generation* a number is given to at most one space (1), and
+     is never given back. While its space lives, every processor puts it in
+     `TTBR0` only for that space. Once the space is dropped, no live tag
+     names it, so no processor writes it again in that generation.
+   - *Across a rollover*, a number goes to a new space only if no processor
+     reserved it, and a processor writes a number of the new generation only
+     after its own flush (2). A processor that has not flushed yet runs only
+     its reserved number, which still means the space it meant.
+   - *The generation never goes back:* it only grows, under the lock, with
+     checked arithmetic; there is no hotplug or resume, and a later one
+     starts a new generation.
 
-   So an entry tagged n on p from a dropped space is never used, and it is
-   gone before n names anything else on p. Walk caches are covered by the
-   same argument, as long as a cached table entry is tagged with the ASID of
-   the walk that filled it. A switch of ASID without invalidation relies on
-   that, and Linux's no-flush switch on ARM LPAE and arm64 relies on it too
-   **(argued; citation owed)**.
+   So an entry tagged with a dropped space's number is never used, and it is
+   gone from each processor before that processor runs the number for
+   anything else. *Walk caches:* B3.10.6 lets a TLB cache table entries, and
+   a maintenance operation must reach every cached entry that "includes any
+   stage 1 information that would be used to translate the address". B3.10.4
+   says that with `A1 = 0` a single `TTBR0` write changes base and ASID with
+   no further routine, which would be false if a walk under the new ASID
+   could use table entries cached under the old one. So a cached table entry
+   is used only under the ASID it was cached with **(argued from those two
+   sections; the manual has no sentence saying so)**.
 
    `AddressSpace`'s drop still frees its tables and frames without a
    shootdown. On ARMv7-A its comment, and `mm::unmap_unwalked`'s, change from
    "every processor left through the root write that dropped its entries" to
    this argument.
 
-8. **Break-before-make.** ASIDs change no table write. Every take-down is
-   still: entries out, then the shootdown, then the free.
-   - Remaps (copy-on-write; `install_page` and `copy_shadow_page` with a
-     replace) write the old entry invalid, write the new one, then shoot down
-     before the fault returns. That is break, make, invalidate, where the
-     architecture asks for break, invalidate, make.
-   - The order is older than this step. Without ASIDs the old entry and the
-     new one could already be held at once: by another processor running a
-     thread of the space, or by this processor across a switch between two
-     threads of one process, which installs nothing.
-   - With ASIDs they can also be held at once across a switch to another
-     space and back before the shootdown completes.
-
-   The window still ends at the shootdown, before the faulting instruction
-   retries, so ASIDs widen it in length but not in kind. Question Q1 asks
-   whether the older order should become a backlog row.
+8. **Break-before-make: F-67.** ASIDs change no table write. Every take-down
+   is still: entries out, then the shootdown, then the free. Remaps
+   (copy-on-write in `fault`; `install_page` and `copy_shadow_page` with a
+   replace) write the old entry invalid, write the new one, then shoot down
+   before the fault returns. B3.10.1 ("Using break-before-make when updating
+   translation table entries") asks for invalid, `dsb`, broadcast
+   invalidation, `dsb`, new entry, when the output address changes and either
+   entry is writable. The order is older than this step, and without ASIDs
+   the two entries could already be held at once by another processor
+   running a thread of the space. The first reading filed it as **F-67**
+   (Moderate). This landing fixes it on the broadcast architectures: the
+   page's `TLBIMVAAIS` (`TLBI VAAE1IS` on AArch64) and `dsb ish` between the
+   break and the make, under the space lock (no IPI, so allowed there), with
+   the full shootdown after as today.
 
 9. **Speculation.** `entered_space(root)` runs after the `TTBR0` write, as
    today, keyed on the root and the domain. So the per-core record
@@ -5589,7 +5670,13 @@ Item 10 says what it must keep when it lands.
      `ICIALLU`) still get it at every switch between programs not in one
      domain. ASIDs do not tag their branch predictors, so the barrier stays
      keyed as it is.
-   - The rollover's `BPIALL` is maintenance, not the barrier.
+   - Separately, B2.2.4's correctness rule: a core whose `ID_MMFR1.BPred` is
+     0b0001 needs predictor maintenance at every change of ContextID, so on
+     such a core every install runs `BPIALL`. Today's kernel already breaks
+     B2.2.4 on a BPred 0b0010 core (A8, A9 report it), since every switch
+     changes `TTBR0` without a change of ContextID and a switch inside a
+     domain issues no `BPIALL`; with ASIDs every switch changes the ASID, so
+     only a reused number needs it, which (2) gives.
 
 10. **When the lazy TLB lands.** It is not needed for any of the above. Once
     it lands, a kernel thread keeps the outgoing space in `TTBR0`, with its
@@ -5598,144 +5685,145 @@ Item 10 says what it must keep when it lands.
       space loaded stays its own (F6), since a loaded space is walked;
     - (b) broadcast shootdowns already reach a processor that holds a space
       lazily (3);
-    - (c) a rollover happens only inside an install on the processor itself,
-      which replaces the lazily held space first, so a lazily held number is
-      never given out again under it.
+    - (c) a lazily held number stays reserved across a rollover through the
+      processor's active tag, so it keeps meaning that space, and the
+      processor flushes before it runs any other number of the new
+      generation.
 
     Its `switch_here` must go through this install and keep (2)'s order.
 
 11. **How AArch64 would follow (nothing changes there now).**
-    - The same `ferrix_paging::asid` allocator, per processor. With
+    - The same `ferrix_paging::asid` allocator. With
       `ID_AA64MMFR0_EL1.ASIDBits` it may give 16-bit numbers (`TCR_EL1.AS`).
-    - The number goes into `TTBR0_EL1[63:48]` with `TCR_EL1.A1 = 0`.
+    - The number goes into `TTBR0_EL1[63:48]` with `TCR_EL1.A1 = 0`, and
+      `CnP` stays 0.
     - Uninstall writes ASID 0 with `EPD0` set, `isb` between.
-    - The rollover parks the same way, then runs `TLBI VMALLE1`, `DSB NSH`
+    - A pending flush parks the same way, then runs `TLBI VMALLE1`, `DSB NSH`
       and `ISB`.
     - Its shootdowns are already `TLBI VAAE1IS` and `VMALLE1IS`: broadcast,
       for every ASID.
-    - Two differences. `TTBR0_EL1.CnP` must stay 0: with it set, PEs may
-      share entries for one ASID, and per-processor numbers would be unsound.
-      And GICv3 has no eight-processor limit, so the tags need a store sized
-      at the space's birth from the online count, or the machine-wide
-      allocator.
     - The predictor rule (`ARCH_WORKAROUND_1` keyed on the root) is
       unchanged.
     - It is measured on hardware for the same reason as here.
 
-#### Requirements (to reserve: L.mm.69-70, L.armv7a.13-20; 5 to 12 are os07/ustate's, §9.14)
+#### Requirements (reserved: L.mm.69-70, L.armv7a.13-20; os07/asid-reserve, 5f7686639)
 
-- **L.mm.69** (`ferrix_paging::asid`): the allocator shall give each
-  number from 1 to 255 to at most one tag in a generation, never give 0, and
-  give a tag of the current generation back its own number.
-- **L.mm.70**: the allocator shall ask for a flush exactly when it starts a
-  generation, which it does only when its numbers have run out; and no tag of
-  an earlier generation shall count as current.
-- **L.armv7a.13**: `install_user_root` shall write the space's number for this
-  processor and the root into `TTBR0` in one write, clear `EPD0`, and issue
-  no TLB maintenance unless the allocator started a generation.
-- **L.armv7a.14**: at the start of a generation, the processor shall park
-  `TTBR0` (`EPD0` set and synchronized, then ASID 0), then complete a local
-  `TLBIALL` and `BPIALL`, before it writes any number of the new generation.
+- **H.MEM.7**, restated for all three architectures: a page-table frame or a
+  frame an unmap or a drop releases shall not return to the frame allocator
+  until every TLB entry that can reach it has been invalidated, or (ARMv7-A,
+  a dropped space) is tagged with a number no processor will use before its
+  next full flush.
+- **L.mm.69** (`ferrix_paging::asid`): the allocator shall give each number
+  from 1 to 255 to at most one space in a generation, never give 0, give a
+  tag of the current generation back unchanged, and keep in the new
+  generation a number some processor reserved at the rollover, for the space
+  that held it.
+- **L.mm.70**: the allocator shall roll over exactly when no number is free,
+  then reserve each processor's active tag (or its earlier reservation),
+  mark every processor's flush pending, count no tag of an earlier
+  generation as current, and refuse a generation past its range.
+- **L.armv7a.13**: `install_user_root` shall write the root and the space's
+  number into `TTBR0` in one write, synchronize it before it clears
+  `EPD0`, write `TTBCR` only when `EPD0` is set, and run no TLB maintenance
+  but a pending flush.
+- **L.armv7a.14**: a processor whose flush is pending shall park `TTBR0`
+  (`EPD0` set and synchronized, then ASID 0), and complete a local
+  `TLBIALL`, `BPIALL`, and `ICIALLU` where `CTR.L1Ip` is AIVIVT, before it
+  writes any number of the new generation.
 - **L.armv7a.15**: `uninstall_user_root` shall set `EPD0` and synchronize it
   before it writes `TTBR0 = 0`, and invalidate nothing.
-- **L.armv7a.16**: on ARMv7-A, every shootdown shall be broadcast and by
-  address for every ASID, or of everything, and no invalidation shall name
-  an ASID.
-- **L.armv7a.17**: every processor ARMv7-A brings online shall have a tag in
-  every space: at most eight, refused at discovery beyond that.
-- **L.armv7a.18**: spare, for a condition the review adds.
-- **L.user.55**: the statement is unchanged. The criterion changes: each
-  round touches pages the earlier rounds did not, so on hardware a second
-  round must walk rather than hit the first round's entries.
-- **L.user.56**: unchanged. It becomes the TCG-visible check that two spaces
-  on one processor never share a number: QEMU does not flush when the ASID
-  is unchanged.
+- **L.armv7a.16**: on ARMv7-A every shootdown shall be broadcast to the inner
+  shareable domain, by address for every ASID or of everything, and
+  complete before what it covers is released.
+- **L.armv7a.17**: every leaf the kernel writes under a user root shall be
+  non-global.
+- **L.armv7a.18**: a space's drop on ARMv7-A may free its tables and frames
+  without a shootdown only because no processor writes its number into
+  `TTBR0` again before that processor's next full flush (under H.MEM.7).
+- **L.armv7a.19**: an install shall never run a number in a generation the
+  processor has not flushed for, unless it is the processor's own reserved
+  number: the fast path's swap and the rollover's swap of the same active
+  tag (the `loom` model).
+- **L.armv7a.20**: the bring-up shall read `CTR.L1Ip` and `ID_MMFR1.BPred`,
+  and add `ICIALLU` to the flush (AIVIVT) and `BPIALL` to every install
+  (BPred 0b0001) where they ask.
+- **L.user.55**: the statement is unchanged; the criterion: each round
+  touches pages the earlier rounds did not, so on hardware a second round
+  must walk. L.mm.19's criterion moves with the check.
+- **L.user.56**: unchanged; it becomes the TCG-visible check that two spaces
+  on one processor never share a number (QEMU does not flush when neither the
+  ASID nor `TTBCR` is written).
 
-Parents: H.MEM.1 for all of them.
+F-67's fix needs no new id: it is H.MEM.7's and the existing take-down rows'
+order, and gets an L row under H.MEM.7 only if the review asks (L.armv7a.20
+is the last reserved).
 
 #### Checks and controls
 
 | Condition | Check | Negative control (`gate.sh control`) | Fires on |
 |---|---|---|---|
-| L.mm.69 | host: `asid_numbers_are_unique_in_a_generation`, ten generations; `asid_model_tlb_never_hits_another_space`, 2 to 4 modelled processors, a TLB that keeps every entry until told, random new, drop, install, touch, uninstall over many rollovers | `next` not advanced | host |
-| L.mm.70 | the same two | the rollover asks for no flush; the generation not advanced | host |
-| L.armv7a.13 | boot `asid` line: after an install, `TTBR0[55:48]` is the tag's number, not 0, and the root is the space's; `spaces` (L.user.56) | install writes ASID 0, which also fails `spaces` under TCG | TCG |
-| L.armv7a.13, uniqueness in the kernel | `spaces` | the kernel's `next` not advanced | TCG |
-| L.armv7a.14 | `asid` line: a forced rollover adds one to the generation and one to the flush count, kept where the flush is issued; the stale probe: A gets number 1 at a rollover and reads its page, a second rollover gives B number 1, and B reads its own page at the same address | the rollover's flush call removed: the count fires under TCG, the probe on the DK1 only | TCG (count), board (probe) |
-| L.armv7a.15 | `asid` line: after an uninstall, `TTBR0 == 0` and `EPD0` set | uninstall that only sets `EPD0` | TCG |
-| L.armv7a.16 | `const` assertion that `TLB_FLUSH_IS_BROADCAST` holds where the tags are kept; the existing FX-0602 check | `TLB_FLUSH_IS_BROADCAST` false on ARMv7-A: the build stops on the assertion | build |
-| L.armv7a.17 | `asid` line on every processor (`run_everywhere`): `TTBCR.EAE` set, `A1` clear, a tag for its number | tags shrunk to one: fails at `--smp 2` | TCG `--smp 2` |
-| L.user.55 | `check_the_processor_walks_an_installed_space`, rounds on fresh pages | install leaves `EPD0` set (the existing cause) | TCG |
+| L.mm.69, 70 | host: `asid_numbers_are_unique_in_a_generation`; `asid_reserved_numbers_survive_a_rollover`; `asid_generation_refuses_overflow` (at the limit) | `next` not advanced; reservations ignored; the generation not advanced | host |
+| L.mm.69, 70, L.armv7a.16, 18 | host: `asid_model_tlb_never_hits_another_space`: 2 to 4 modelled processors, a TLB per processor that keeps every entry (table entries too) until told; random new space, drop with no shootdown then frame and table reuse, install, touch, uninstall, broadcast page shootdown, rollovers. Asserts no hit reaches another space or a freed frame | as above, and: no pending flush at a rollover; a shootdown scoped to the set (a processor that left is skipped) | host |
+| L.armv7a.19 | `loom` model in `src/tests/loom`: processor A's fast path for space S against processor B's rollover and new space T; asserts A never runs a number that B gave T in a generation A has not flushed for | the swap replaced by a load and a store; the rollover leaving active tags | host (loom) |
+| L.armv7a.13 | boot `asid` line: after an install, `TTBR0[55:48]` is the tag's number, not 0; the root is the space's; bit 0 is 0; `EPD0` clear; `spaces` (L.user.56) | install writes ASID 0 (also fails `spaces` under TCG); the kernel's `next` not advanced (`spaces`) | TCG |
+| L.armv7a.13, order | static check of the block's instruction order (`mcrr`, `isb`, then the conditional `TTBCR` write and `isb`) | the `isb` deleted, or the two writes swapped | check |
+| L.armv7a.14 | `asid` line: a forced rollover adds one to the generation, sets every processor's flush pending, and each processor's flush count (kept where the flush is issued) rises by one at its next install, at one processor and at `--smp 2`; the stale probe (A runs number n and reads its page; a rollover; B is given n and reads its own page at the same address); a static order check of the park and flush block | the flush call removed: the count fires under TCG, the probe on the DK1 only (A11) | TCG, board |
+| L.armv7a.15 | `asid` line: after an uninstall, `TTBR0 == 0` and `EPD0` set; the block's static order check | uninstall that only sets `EPD0` | TCG |
+| L.armv7a.16 | a `const` assertion that `TLB_FLUSH_IS_BROADCAST` holds where the tags are kept; the host model's scoped control; FX-0602's check | `TLB_FLUSH_IS_BROADCAST` false: the build stops | build, host |
+| L.armv7a.17 | `everything_but_execute_is_aarch64s_encoding` and `kernel_mappings_are_global_and_user_mappings_are_not`, tagged; a boot walk of a stage-6 space counting its global leaves, 0 | `user_page` global | TCG |
+| L.armv7a.18 | the host model (drop with no shootdown, then reuse) | as for L.mm.69 | host |
+| L.armv7a.20 | host test of the decision from `CTR` and `ID_MMFR1`; the `asid` line prints both | the AIVIVT case decided without `ICIALLU` | host |
+| L.user.55 | `check_the_processor_walks_an_installed_space`, rounds on fresh pages | install leaves `EPD0` set | TCG |
+| F-67 | the CoW checks (`fault_and_write_installed` and the rmap check) stay green; build evidence and the argument, with a hardware BACKLOG row, since no emulator shows a TLB conflict | the invalidation between break and make removed: shown only by the static order of the code, so the control is a reading, not a run (the review's call) | -- |
 
-The forced rollover uses a check-only `SpaceTags::forget_here`, which
-clears one tag, so one space can stand for 255 that were made and dropped;
-for the TLB that is the same thing. It runs on the boot processor with
-interrupts masked, in stage 6, before `drop_identity_map`.
+The forced rollover and the probe use a check-only `forget_tag` on the
+space, which takes no processor and sets the space's tag to 0, so its next
+install spends a number: one space stands for 255 made and dropped. It is
+safe on a live space, since it only spends a number (the first reading's
+A13), and a static check keeps its callers in check code. The probe runs on
+the boot processor with interrupts masked, in stage 6.
 
-Rows: `check` (host tests and the static checks), ARMv7-A boots at one
+Rows: `check` (host tests, loom, the static checks), ARMv7-A boots at one
 processor and at `--smp 2` under TCG, `test-threads --arch armv7a`, and
 whatever `cargo xtask gate-rows` names for `user/space.rs` (the x86-64 and
-AArch64 boots, which must stay identical).
+AArch64 boots, whose lines must not change).
 
-**Estimate:** 13 to 16 points, against 10 to 13 for x86-64's PCIDs. The
-extra is the boot probe and seven boot controls.
+**Estimate:** 25 to 30 points with the conditions; the machine-wide
+allocator and its loom model add about 5 to the first reading's 20 to 25.
 
-#### Questions for the consultant
+#### What changed since the first reading (line 590), condition by condition
 
-- **Q1.** The remap order of item 8 (break, make, invalidate) is older than
-  this step, and ASIDs widen its window only in length. Is a backlog row for
-  strict break-before-make on the Arm pair (break, shoot down, make) enough,
-  or must it come first?
-- **Q2.** One allocator per processor, with shootdowns by address for every
-  ASID, instead of Linux's machine-wide allocator. Accepted?
-- **Q3.** L.armv7a.14's flush can be shown under TCG only by its count; the
-  stale probe's control can fire only on the board. Is a counted control
-  under TCG, with the probe's control owed as a DK1 run, acceptable, under
-  the rule "only where no emulator can show it"?
-- **Q4.** Refusing more than eight processors at ARMv7-A discovery (GICv2).
-- **Q5.** The check-only `SpaceTags::forget_here`, which is reached from no
-  system call.
+- A1: ids reserved (5f7686639, for po11-win to land); the section keeps
+  §9.13 by os-07's word, os07/ustate's is §9.14.
+- A2: (6) and (5), with B3.10.4's Example B3-5 cited; one block each, with
+  static order checks.
+- A3: (7)'s base case and the generation's monotony.
+- A4: (2)'s `ICIALLU` and L.armv7a.20.
+- A5: citations to DDI 0406C.d throughout; `CnP` and bit 0 in (6). The
+  walk-cache tagging is argued from B3.10.4 and B3.10.6, not cited; the
+  Cortex-A7 TRM was not readable, and the A7's values are QEMU's model's
+  until the board prints them.
+- A6: H.MEM.7 restated, L.armv7a.18.
+- A9: (ii) dropped with its reason in (3); the ninth-processor split is gone
+  with the per-processor tags; L.armv7a.17 is the non-global row.
+- New: item 1 is the machine-wide allocator, with L.armv7a.19 and its
+  `loom` model; F-67's fix is in this landing (8).
+
+#### Questions for the consultant (second reading)
+
+- **Q6.** Item 1 replaces the reviewed design's core. Does Q2's acceptance
+  carry to the machine-wide allocator, under L.armv7a.19's loom model?
+- **Q7.** A9 (ii), the static ban on operations that name an ASID: drop it,
+  since a number now means the same on every processor?
+- **Q8.** F-67's fix here: is the control "a reading" acceptable, given
+  that no emulator shows a TLB conflict?
 
 #### Where it stands
 
-Design written 2026-10-08 on `os07/asid`. **Reviewed: OK IF (A1) to (A15)**
-(os07-asid-cert, ledger line 590, 2026-10-08). In short:
-- before code: (A1) reserve L.mm.69-70 and L.armv7a.13-20 on `main` (5 to 12
-  are os07/ustate's, whose design is §9.14); (A2) an `isb` between the
-  `TTBR0` write and the `EPD0` clear, the `TTBCR` write skipped when `EPD0`
-  is already clear -- QEMU 10.2.1's `vmsa_ttbcr_write` flushes the TLB on
-  every `TTBCR` write, so without the skip no `spaces` control can fire under
-  TCG -- and each sequence in one `asm!` block with a static order check and
-  its control; (A3) item 7's base case stated, generations never go back,
-  overflow fatal; (A4) `CTR.L1Ip` read at bring-up, `ICIALLU` at the rollover
-  or no ASIDs on an ASID-tagged VIVT instruction cache; (A5) ARM ARM (DDI
-  0406C.d) and Cortex-A7 TRM citations for every "citation owed", `CnP` (bit
-  0 of `TTBR0`) asserted 0; (A6) H.MEM.7 restated, with an L row for the
-  drop on ARMv7-A;
-- before `land.sh take`: (A7) the set's wording everywhere it appears;
-  (A8) the host model with drops, frame reuse and broadcast shootdowns, one
-  control a set-scoped shootdown; (A9) one check per row: L.armv7a.16 split
-  (broadcast; no maintenance names an ASID, `flush_user_tlb` deleted and a
-  static scan for c8 operations with opc2 1, 2 or 5), L.armv7a.17 split (a
-  tag per online processor; the refusal of a ninth, host-tested), a row that
-  no user leaf is global (a boot walk); (A10) the TCG controls fired with
-  counts, L.mm.19's criterion moved with L.user.55's; (A11) the stale probe
-  and its control run on the DK1 before any DK1 figure of this step is
-  recorded, a BACKLOG row until then; (A12) SAFETY lines, the asm allowlist
-  raised by the counted lines, the tags and per-processor words in §9.8 2f's
-  table; (A13) `forget_here` without a processor argument, check code only;
-  (A14) SPECULATION.md and VA V-06 name the TLB and walk caches as a timing
-  channel, TRACEABILITY rows, coverage carried, F-67 filed; (A15) gates,
-  x86-64 and AArch64 boot lines unchanged, every control fired, a code review.
-- Q1: **F-67** (Moderate, reserved): the remaps of item 8 write the new entry
-  before the old one is invalidated, on AArch64 and ARMv7-A alike. Filed with
-  a BACKLOG row for the fix, in or before this landing; it need not come
-  first. Q2 to Q5 accepted under the conditions.
-
-**Stopped after the verdict** (os07-asid, 2026-10-08): with the conditions
-the step is about 20 to 25 points, against the brief's limit of about 15, so
-no code is written. The design text above still needs A2 to A6 worked in
-before it goes back to the consultant.
+- 2026-10-08, first reading: OK IF (A1) to (A15) on the allocator per
+  processor (os07-asid-cert, ledger line 590), F-67 reserved.
+- 2026-10-08, the author found B3.9.1 against that allocator; this text is
+  the second reading's.
 
 ### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 
