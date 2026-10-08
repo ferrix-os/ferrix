@@ -1896,7 +1896,7 @@ Rebased onto `main` 4466212c3 on 2026-10-07 (po10-l13c, branch
 `po10-l13c/l13c`, the code unchanged: range-diff `=` for every code
 commit), with the data files' licences added to the generator's docstring
 (the consultant's C3). Rows on e12bca3b7: `check` (`po10-l13c-check2`),
-`test-init --arch all` (`po10-l13c-init2`), `test-vfs --arch x86_64 --init ferrousli` three times (`po10-l13c-vfs-1-3`, `-2-3`, `-3-3`), `build --arch all --release` (`po10-l13c-build-3`) and `test-boot --arch x86_64 --accel tcg` (`po10-l13c-x86-tcg-3`); the x86_64 kvm, aarch64, armv7a and armv7a `--smp 2` boots are still owed. The six
+`test-init --arch all` (`po10-l13c-init2`), `test-vfs --arch x86_64 --init ferrousli` three times (`po10-l13c-vfs-1-3`, `-2-3`, `-3-3`), `build --arch all --release` (`po10-l13c-build-3`) and `test-boot --arch x86_64 --accel tcg` (`po10-l13c-x86-tcg-3`). Rebased again onto `main` 523fc3d50 on 2026-10-08, the patch the same but for line offsets; on that tip, fe92cd859, `check` (`po10-l13c-r-check`) and the boots x86_64 kvm (`po10-l13c-r-x86-kvm`), aarch64 (`po10-l13c-r-a64-2`), armv7a (`po10-l13c-r-arm`) and armv7a `--smp 2` (`po10-l13c-r-arm-smp2`) passed. The six
 negative controls again, `gate.sh control` with `test-init --arch x86_64`,
 each fired on its own line:
 
