@@ -271,6 +271,134 @@ round that overlaps ends the check, a round that did not is printed with its
 shares, and only five rounds without overlap fail it -- the same shape as
 stage 7's three-attempt pair check.
 
+**A wait's last look is not preempted (F-69, L.sched.71-72).** A wait lists
+the task, marks it `BLOCKED`, makes its last look, and then either marks it
+runnable again or blocks (`WaitQueue::wait_sliced`, `wait_on_any`; the fast
+path's receive half, `Endpoint::park` and `direct::block_parked`, has the
+same shape). Interrupts are on throughout. `choose_next` takes any current
+task that is not runnable off its queue, so any switch that lands between
+`BLOCKED` and the end of the last look counts as the task's block. The
+wakeup is lost when two things happen in turn:
+
+1. A wake drains the task's entry while the task is still runnable, before
+   `BLOCKED`. The wake does nothing, because only a `BLOCKED` task is made
+   runnable.
+2. A switch then comes inside the window. It can be an interrupt's exit, or
+   the deferred decision at a `preempt_enable`, which `ready` itself reaches
+   when it lets go of the inbox lock it reads under.
+
+The task is then off its run queue and off its waiter list, with no deadline
+on a trusting wait. Its message waits in its inbox.
+
+The defect is old. It has stalled a trusting wait for good since 5d5b4f960
+(2026-10-01, `write_read` trusts its queue); before that, a recheck bounded
+it. It has lost an `END` posted before a park since 0edd644b2 (step 4), until
+a message came. Untrusting waits and `wait_on_any` lose only a recheck.
+
+ipc-bench stalled this way on ARMv7-A under QEMU at `--smp 1`, in 2 of 5 runs
+on main 9ed9e8428. The processor sat in `wait_then_enable_interrupts` under
+`idle_loop` with nothing armed.
+
+Widening the two windows by a build-time spin turned the stall into stage 9's
+"wait case 1: a thread blocked in channel_write_read was not woken by a
+message within 10 s", in 3 of 3 boots. The same spin with the window masked
+passed stage 9 and ran ipc-bench's call series in 3 of 3 boots. Each of those
+runs was then cut off by the run's time budget in the domain series, which
+the masked spin slows down.
+
+On two processors the drain needs no preemption at all: the peer drains from
+the other core.
+
+The window now holds off preemption, not interrupts. The count is raised
+before `BLOCKED` and lowered after the last look has set the task runnable
+again, or before `block`. In between, an interrupt's exit leaves its request
+pending (`preempt_on_irq_exit` returns while the count is raised). A lock
+released inside `ready` lowers the count to one, not zero, so it makes no
+decision. The request is decided at the lowering:
+
+* If the look found the condition, the task is runnable by then, so the
+  switch is a preemption and leaves it queued.
+* If it did not, the task is listed (or filed under its deadline), so the
+  switch is its block, which is what follows anyway.
+
+Linux closes the same window the other way round: `__schedule(SM_PREEMPT)`
+never dequeues a preempted task, whatever its state. That rule was weighed
+here and not taken. It would make a fourth task state, blocked and still
+queued, that every path would have to know. Those paths are:
+
+* `wake_onto`'s `asleep_at_home`;
+* the direct switch's `hand_over`, which takes the peer's run slot and would
+  find it held;
+* the steal and balance candidates;
+* `finish_switch`'s check that no dead task stays queued, which a task
+  preempted between `set_state(DEAD)` and its `schedule` would trip;
+* the job's load, which `set_state(BLOCKED)` has already let go for a task
+  that would go on running.
+
+The raised count changes none of them. The scheduler never sees a blocked
+task on a queue except the one running.
+
+**What the raised count leaves as it was:**
+
+* **The callers of `schedule_from` and `choose_next`.** These are the
+  interrupt exit, `call_left`, `decide_deferred`, `block`, `sleep_until`,
+  `yield_now`, `exit_counted`, the idle loop and `block_parked`. They are
+  unchanged, and `choose_next` still detaches by state. Inside the window
+  only the first three can be reached, and each already declines while the
+  count is raised.
+* **The direct switch.** Its `hand_over` runs masked under the home lock
+  and detaches the caller it has itself set blocked. It is no preemption,
+  and it is untouched.
+* **A wake that lands inside the window.** It can come from the other core,
+  or from an interrupt on this one. `wake_at_home` finds the task `BLOCKED`
+  and sets it runnable, but it does not insert it: the running task is in
+  the fair class and reads as queued. `wake_onto`'s `asleep_at_home`
+  declines a running task in the same way, so there is no double enqueue.
+  The last look's `set_state(RUNNABLE)` is then a swap from runnable to
+  runnable, which joins no group twice. If the look did not find the
+  condition, `block` switches with the task runnable, and nothing is
+  detached. This is main's behaviour before the change too. The count only
+  delays the decision the wake asked for (`resched_here`, or a remote
+  kick's interrupt exit) to the lowering.
+* **A kill or a signal.** `wake_posted` posts its bit, fences and wakes. It
+  either finds the task `BLOCKED` and makes it runnable as above, or finds
+  it still runnable. In that case the last look's fence-ordered load of the
+  bit (`END` through `ready`, or `has_end` in `block_parked`) sees it. That
+  look is the one the switch could cut short, and now cannot.
+* **Accounting.** Nothing is queued in a new state, so `account_in`, the
+  group's load and `cpu.max`'s charge see what they saw before. The task is
+  charged for the window as it runs it, as it always was.
+
+**How long preemption is held off.** For a wait, the window covers
+`set_state`, the fence (only for a trusting wait) and one call of `ready`.
+For the parked block, it covers `Endpoint::park`'s inbox lock, a fence and
+one load of `END`.
+
+The worst `ready` is `wait_on_any`'s for `poll` and `epoll_wait`, which asks
+each watched file once. A `channel_write_read` reads one inbox under its
+lock. Most of each look already ran under spin locks that raised the same
+count, so the new hold covers only the parts between those locks.
+Interrupts are taken all through it. MEMORY-AND-TIMING §2.2c has the bound.
+
+A `ready` that parks on a `SleepLock` now stops the machine with FX-0503
+rather than corrupting the outer wait. A debug build stops it on any
+`SleepLock` taken, through `may_park`'s assertion. An uncontended
+`SleepLock` never parks, so a quiet boot cannot show a latent one, and
+the audit is what shows none exists. It covered every `ready` and every
+`poll` that `poll`, `select` and `epoll_wait` reach, and found none that
+takes a `SleepLock`, waits for memory, touches user memory or nests a wait.
+A `ready` can drop the last reference to an object: a file closed under a
+`poll`, and through it a lazily unmounted `Mount` and its filesystem, or a
+pidfd's reaped process and its address space. Each of those drops takes
+only spin locks and frees without waiting, and the address space's asks
+for no shootdown. That is the rule `user/space.rs` already states for the
+reaper's preemption window, which drops the same objects.
+
+One thing improves: the console's `poll`, whose line discipline can echo
+inside the look, used to be able to wait for room in the console ring
+there. That was a nested wait. Inside the look, `may_block` is false, so
+it now writes synchronously instead.
+
 **Still missing against Linux**, none of it on stage 6's path: group scheduling
 and bandwidth control, which are stage 13; the real-time classes, which are
 stage 14; and NUMA and capacity awareness, which need a topology this kernel

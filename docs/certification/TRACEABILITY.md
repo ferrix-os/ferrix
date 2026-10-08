@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 130 | 79 | 51 |
-| Low (`L.*`) | 869 | 599 | 270 |
+| Low (`L.*`) | 871 | 601 | 270 |
 
-1829 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1832 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1831 |
+| Named by a low-level requirement | 1834 |
 | Accessors, covered by the requirement they serve | 900 |
-| Check code in a product file | 77 |
-| Named by none | 896 |
+| Check code in a product file | 80 |
+| Named by none | 895 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -85,7 +85,10 @@ Functions that are checks, or serve only checks, and live in a product file, so 
 | `object::process::Exit::for_check` | An end no process has, for object/pin/check.rs's budget checks; it needs Exit's private constructor. |
 | `object::quota::check_pending_charge` | Stage 13's check of the per-queue cpu.stat charge (Pending), on private records and two slots it claims; cpu_check.rs's pending() runs it. It needs Pending's private fields, claim and release, which are quota.rs's own, so it stays beside them. |
 | `object::quota::pending_cases` | The cases of check_pending_charge, and called by nothing else; in quota.rs for the same reason. |
+| `sched::ask_for_a_decision_here` | Marks this processor's reschedule flag without making the decision: only stage 9's parked-block case (check_an_end_before_the_park, L.sched.72) asks, to have the decision pending as it parks. mark_resched is sched's own, so it stays beside it. |
 | `sched::bandwidth_walks` | How many charges made the cpu.max walk, summed over the run queues under their locks: only cpu_check's walks_only_under_a_quota, a cost guard, asks. |
+| `sched::decision_pending_here` | Whether this processor's reschedule flag is still set: only stage 9's parked-block case asks, to count the tries that reached the park with the decision pending. resched_asked is sched's own, so it stays beside it. |
+| `sched::direct::uncount` | Takes back one count of the fast path's per-processor counters: only stage 9's parked-block case calls it, for the park it makes itself, so that test-ipc-equiv finds every count zero with the fast path off (L.sched.61). COUNTED is direct.rs's own, so it stays beside it. |
 | `sched::pending_group_here` | Which job this processor's run queue keeps processor time back for (quota::Pending): only quota_check's check_a_move_settles_the_pending_charge asks. It reads the queue under its lock, which is sched's own. |
 | `sched::trip::answered` | A stamp point of the seam's depth-1 trace (block_ring/trip_check.rs). Unarmed it loads TRACING and returns; only hop_check arms it. It sits in block_ring's complete() under the disk's state lock, which is what keeps it in product code. |
 | `sched::trip::arm` | Raises the seam's depth-1 trace and zeroes its counts; its only caller is block_ring/hop_check.rs. |
@@ -651,9 +654,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.58` | Direct::hand_over shall stop the machine with FX-0532 when either task is the processor's idle task (A4), and with FX-0530 when the task handed over to is running here, queued, not blocked, or not the pick (A1). | A record planted on a running task stops the machine with FX-0530 (the A1 control). | H.SCHED.13 | `sched::direct::Direct::hand_over` | `src/kernel/src/object/fast_path_check.rs::run` | not built | not built | not built |
 | `L.sched.59` | A task's reply cell shall be filled only by the commit that hands the processor to it, under its home's run-queue lock while it is asleep, and emptied only by the task itself. | ipc-equiv's case 1 and 2 with the fast path on: every length 0 to 24 and 1,000 trips in order. | H.OBJ.18 | `sched::task::Task::fill_reply`, `sched::task::Task::take_reply` | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | xtask gate | xtask gate | xtask gate |
 | `L.sched.60` | nothing_due_here shall answer true only when the running task's pending-work word is clear, no decision is asked of this processor and no move between jobs is unseen. | Case 14, the continuation's kill and case 15's signal leave through the general branch and act on their bit. | H.OBJ.18 | `sched::nothing_due_here`, `sched::work::peek` | `src/kernel/src/object/fast_path_check.rs::check_a_parked_caller_woken_by` | not built | not built | not built |
-| `L.sched.61` | The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits. | test-ipc-equiv requires trips with the fast path on and every count zero with it off. | H.OBJ.18 | `sched::direct::count`, `sched::direct::counts`, `fastpath::report_counts` | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | xtask gate | xtask gate | xtask gate |
+| `L.sched.61` | The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits; a park a boot check makes through the receive half itself (stage 9's parked-block case) is taken back by that check, so the counts are the programs' own. | test-ipc-equiv requires trips with the fast path on and every count zero with it off, stage 9's parked-block case having taken back the parks it made. | H.OBJ.18 | `sched::direct::count`, `sched::direct::counts`, `fastpath::report_counts` | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | xtask gate | xtask gate | xtask gate |
 | `L.sched.62` | The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908. | Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control). | H.OBJ.18 | `sched::work::fast_path_hook` | `src/kernel/src/object/fast_path_check.rs::check_an_end_in_the_last_looks_window` | not built | not built | not built |
 | `L.sched.63` | Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them. | The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test). | H.SCHED.13, H.FAIL.1 | `sched::task::Task::take_run_slot`, `sched::task::Task::return_run_slot`, `sched::task::Task::take_sleep_slot`, `sched::task::Task::return_sleep_slot`, `sched::task::Task::holds_slots`, `sched::task::Task::holds_sleep_slot` | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host test | host test | host test |
+| `L.sched.71` | No switch shall take place between a wait's setting its task blocked and the end of its last look (WaitQueue's single-queue and many-queue waits); an interrupt's exit, or a preempt_enable inside the look, shall leave the decision it asks for pending until the look is over, and that decision shall then be made. | Stage 5's last-look case: a waiter that drains its own entry while runnable, meets its condition and invites a switch inside its last look, once by a lock's release and once by a timer interrupt's exit, finishes its wait, stays queued and unswitched through the look, and has the decision made after it; with the hold off, or on main's code without it, the case fails with its sentence for a waiter left blocked on no run queue (F-69's controls). | H.OBJ.11, H.SCHED.2 | `sched::wait::LastLook::hold`, `sched::wait::LastLook::drop`, `sched::wait::WaitQueue::wait_sliced`, `sched::wait::WaitQueue::wait_on_any` | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | not reached | not reached | not reached |
+| `L.sched.72` | No switch shall take place between the receive half's park setting its task blocked and the end of its last look at END; an END posted while the task still ran shall be found by that look and end the park. | Stage 9's parked-block case: a reader that posts END to itself through the poster, asks for a decision and parks on an empty end comes back woken in every try, at least one try parking with the decision still pending; with the hold taken after the park, or off, the case fails with its sentence for a reader left blocked on no run queue (F-69's controls). | H.OBJ.11 | `syscall::native::park_for_reply`, `object::channel::Endpoint::park`, `sched::direct::block_parked` | `src/kernel/src/object/fast_path_check.rs::check_an_end_before_the_park` | not built | not built | not built |
 
 ### Discovery
 
@@ -1847,6 +1852,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/fast_path_check.rs::check_a_queued_write_takes_the_park` | kernel | L.object.165, L.object.166 |
 | `src/kernel/src/object/fast_path_check.rs::check_a_spinner_keeps_its_share` | kernel | L.sched.56 |
 | `src/kernel/src/object/fast_path_check.rs::check_an_echo_on_another_processor` | kernel | L.sched.56 |
+| `src/kernel/src/object/fast_path_check.rs::check_an_end_before_the_park` | kernel | L.sched.72 |
 | `src/kernel/src/object/fast_path_check.rs::check_an_end_in_the_last_looks_window` | kernel | L.sched.56, L.sched.62 |
 | `src/kernel/src/object/fast_path_check.rs::check_the_last_reference` | kernel | L.object.179 |
 | `src/kernel/src/object/fast_path_check.rs::check_the_reply_words` | kernel | L.object.167 |
@@ -1879,6 +1885,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/borrow_check.rs::installed` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.25 |
+| `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |

@@ -200,6 +200,8 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     if !on && after != before {
         return Err("a fast path counter moved on a boot without the fast path");
     }
+    // After the counters are judged: its park counts one, on every boot.
+    check_an_end_before_the_park()?;
     Ok(report)
 }
 
@@ -1299,4 +1301,126 @@ fn attempt_the_last_reference(how: LastDrop) -> Result<bool, &'static str> {
         LastDrop::Done => true,
     };
     Ok(parked && handed)
+}
+
+// ---------------------------------------------------------------------------
+// The parked block's last look (F-69)
+// ---------------------------------------------------------------------------
+
+/// Tries [`check_an_end_before_the_park`] makes. A try counts only when the
+/// decision it asked for was still pending just before the park, since an
+/// interrupt in between can make that decision first.
+const PARK_TRIES: u64 = 8;
+
+/// How long the checker waits for a try's reader before calling it lost.
+const PARK_PATIENCE_NANOS: u64 = 2_000_000_000;
+
+/// The end the try's reader parks on.
+static PARK_END: SpinLock<Option<Arc<Endpoint>>> = SpinLock::new(None);
+
+/// Tries whose reader has finished.
+static PARKS_DONE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Tries whose decision was still pending just before the reader parked.
+static PARKS_PENDING: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Tries whose reader came back from its park any way but `Parked::Woken`.
+static PARKS_ODD: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// The parked block's last look at `END` is never cut short by a switch
+/// (F-69).
+///
+/// A kill posted while the reader is still runnable wakes nobody, so only
+/// the last look at `END` after the park can find it. The reader here:
+/// 1. posts `END` to itself through the real poster (`work::notify`), whose
+///    wake does nothing to a running task;
+/// 2. asks its processor for a decision;
+/// 3. parks on an empty end through `park_for_reply`.
+///
+/// `Endpoint::park` sets the reader blocked under its inbox lock. The lock's
+/// release is the deferred decision, and it comes inside the window.
+///
+/// With the hold, the release decides nothing. The look finds `END`, and the
+/// reader comes back woken. Without the hold, the release switches the
+/// reader off its run queue, parked, with nothing left to wake it. The
+/// checker then wakes it by hand and fails with this case's sentence.
+///
+/// Verifies: L.sched.72
+fn check_an_end_before_the_park() -> Result<(), &'static str> {
+    let here = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
+    PARKS_DONE.store(0, core::sync::atomic::Ordering::Release);
+    PARKS_PENDING.store(0, core::sync::atomic::Ordering::Release);
+    PARKS_ODD.store(0, core::sync::atomic::Ordering::Release);
+    for tried in 1..=PARK_TRIES {
+        let (mine, theirs) =
+            Endpoint::pair().map_err(|_| "no memory for the parked block's channel")?;
+        *PARK_END.lock() = Some(mine);
+        let reader = crate::sched::spawn_on(
+            "check-park-end",
+            park_after_its_end,
+            0,
+            ferrix_sched::NICE_0_WEIGHT,
+            here,
+            ferrix_sched::CpuSet::of(here),
+        )?;
+        let deadline = crate::timer::now_nanos().saturating_add(PARK_PATIENCE_NANOS);
+        let finished = wait_until(deadline, "", || {
+            PARKS_DONE.load(core::sync::atomic::Ordering::Acquire) >= tried
+        })
+        .is_ok();
+        if !finished {
+            let lost = reader.is_blocked() && !reader.is_queued();
+            crate::sched::wake(&reader);
+            wait_until(
+                crate::timer::now_nanos().saturating_add(PATIENCE_NANOS),
+                "a reader lost in its park did not finish once woken by hand",
+                || PARKS_DONE.load(core::sync::atomic::Ordering::Acquire) >= tried,
+            )?;
+            drop((reader, theirs, PARK_END.lock().take()));
+            return Err(if lost {
+                "a kill posted before a park was missed: the parked reader's last look at END was \
+                 cut short at its lock's release, and it was left blocked on no run queue"
+            } else {
+                "a reader parked after its END never finished, and was not found blocked off \
+                 its run queue"
+            });
+        }
+        wait_dead(
+            &reader,
+            crate::timer::now_nanos().saturating_add(PATIENCE_NANOS),
+            "a reader that parked after its END never exited",
+        )?;
+        drop((reader, theirs, PARK_END.lock().take()));
+    }
+    if PARKS_ODD.load(core::sync::atomic::Ordering::Acquire) != 0 {
+        return Err("a reader parked after its END came back other than woken");
+    }
+    if PARKS_PENDING.load(core::sync::atomic::Ordering::Acquire) == 0 {
+        return Err("no try of the parked block's case parked with its decision still pending");
+    }
+    Ok(())
+}
+
+/// A try's reader: `END` posted to itself while running, a decision asked
+/// for, then the park on an empty end. `END` stays set, which is harmless:
+/// the reader is a kernel thread and exits next.
+fn park_after_its_end(_argument: usize) {
+    let end = PARK_END.lock().clone();
+    if let (Some(me), Some(end)) = (crate::sched::current(), end) {
+        crate::sched::work::notify(&me, crate::sched::work::END);
+        crate::sched::ask_for_a_decision_here();
+        if crate::sched::decision_pending_here() {
+            let _ = PARKS_PENDING.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        }
+        let parked = crate::syscall::native::park_for_reply(&end);
+        // The park counted one on this processor, which this task is pinned
+        // to; a boot without the fast path must show its counters unmoved.
+        if !matches!(parked, crate::syscall::native::Parked::Declined) {
+            direct::uncount(Count::Park);
+        }
+        if !matches!(parked, crate::syscall::native::Parked::Woken) {
+            let _ = PARKS_ODD.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        }
+    }
+    let _ = PARKS_DONE.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
 }

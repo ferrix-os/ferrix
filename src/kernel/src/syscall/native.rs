@@ -972,7 +972,7 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
 }
 
 /// What the receive half made of a wait.
-enum Parked {
+pub(crate) enum Parked {
     /// It could not park: the general wait runs.
     Declined,
     /// A commit handed it this reply.
@@ -988,14 +988,18 @@ enum Parked {
 /// interrupts on as the general wait blocks. Woken by a commit, it takes its
 /// reply; by anything else, it leaves its record and goes on as after the
 /// general wait.
-fn park_for_reply(endpoint: &Endpoint) -> Parked {
+pub(crate) fn park_for_reply(endpoint: &Endpoint) -> Parked {
     let Some(task) = crate::sched::current() else {
         return Parked::Declined;
     };
+    // No switch from the park's `BLOCKED` to the end of the last look at
+    // `END`, as the general wait (F-69): a kill posted while the task was
+    // still runnable woke nobody, and only that look finds it.
+    let last_look = crate::sched::LastLook::hold();
     if !endpoint.park(&task) {
         return Parked::Declined;
     }
-    if crate::sched::direct::block_parked(&task)
+    if crate::sched::direct::block_parked(&task, last_look)
         && let Some(answer) = task.take_reply()
     {
         return Parked::Replied(answer);

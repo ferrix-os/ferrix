@@ -33,6 +33,9 @@
     "vmap"
   ],
   "check_code_in_product": {
+    "sched::ask_for_a_decision_here": "Marks this processor's reschedule flag without making the decision: only stage 9's parked-block case (check_an_end_before_the_park, L.sched.72) asks, to have the decision pending as it parks. mark_resched is sched's own, so it stays beside it.",
+    "sched::decision_pending_here": "Whether this processor's reschedule flag is still set: only stage 9's parked-block case asks, to count the tries that reached the park with the decision pending. resched_asked is sched's own, so it stays beside it.",
+    "sched::direct::uncount": "Takes back one count of the fast path's per-processor counters: only stage 9's parked-block case calls it, for the park it makes itself, so that test-ipc-equiv finds every count zero with the fast path off (L.sched.61). COUNTED is direct.rs's own, so it stays beside it.",
     "sched::pending_group_here": "Which job this processor's run queue keeps processor time back for (quota::Pending): only quota_check's check_a_move_settles_the_pending_charge asks. It reads the queue under its lock, which is sched's own.",
     "sched::bandwidth_walks": "How many charges made the cpu.max walk, summed over the run queues under their locks: only cpu_check's walks_only_under_a_quota, a cost guard, asks.",
     "object::quota::check_pending_charge": "Stage 13's check of the per-queue cpu.stat charge (Pending), on private records and two slots it claims; cpu_check.rs's pending() runs it. It needs Pending's private fields, claim and release, which are quota.rs's own, so it stays beside them.",

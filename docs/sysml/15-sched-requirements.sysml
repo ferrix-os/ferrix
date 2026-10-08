@@ -523,9 +523,12 @@ package FerrixSchedRequirements {
         requirement <'L.sched.61'> theCountsAreTheKernels : ItemLowLevel {
             attribute :>> statement = "The fast path shall count its trips, parks and
                 each test's declines per processor, readable by no program, printed
-                as the shell exits.";
+                as the shell exits; a park a boot check makes through the receive
+                half itself (stage 9's parked-block case) is taken back by that
+                check, so the counts are the programs' own.";
             attribute :>> criterion = "test-ipc-equiv requires trips with the fast
-                path on and every count zero with it off.";
+                path on and every count zero with it off, stage 9's parked-block
+                case having taken back the parks it made.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = ("sched::direct::count", "sched::direct::counts",
                 "fastpath::report_counts");
@@ -559,6 +562,40 @@ package FerrixSchedRequirements {
                 "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
                 "sched::task::Task::return_sleep_slot", "sched::task::Task::holds_slots",
                 "sched::task::Task::holds_sleep_slot");
+        }
+        requirement <'L.sched.71'> aWaitsLastLookIsNotPreempted : ItemLowLevel {
+            attribute :>> statement = "No switch shall take place between a wait's
+                setting its task blocked and the end of its last look (WaitQueue's
+                single-queue and many-queue waits); an interrupt's exit, or a
+                preempt_enable inside the look, shall leave the decision it asks
+                for pending until the look is over, and that decision shall then be
+                made.";
+            attribute :>> criterion = "Stage 5's last-look case: a waiter that drains
+                its own entry while runnable, meets its condition and invites a switch
+                inside its last look, once by a lock's release and once by a timer
+                interrupt's exit, finishes its wait, stays queued and unswitched
+                through the look, and has the decision made after it; with the hold
+                off, or on main's code without it, the case fails with its sentence
+                for a waiter left blocked on no run queue (F-69's controls).";
+            attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
+            attribute :>> unit = ("sched::wait::LastLook::hold",
+                "sched::wait::LastLook::drop", "sched::wait::WaitQueue::wait_sliced",
+                "sched::wait::WaitQueue::wait_on_any");
+        }
+        requirement <'L.sched.72'> aParkedBlocksLastLookIsNotPreempted : ItemLowLevel {
+            attribute :>> statement = "No switch shall take place between the receive
+                half's park setting its task blocked and the end of its last look at
+                END; an END posted while the task still ran shall be found by that
+                look and end the park.";
+            attribute :>> criterion = "Stage 9's parked-block case: a reader that posts
+                END to itself through the poster, asks for a decision and parks on an
+                empty end comes back woken in every try, at least one try parking with
+                the decision still pending; with the hold taken after the park, or off,
+                the case fails with its sentence for a reader left blocked on no run
+                queue (F-69's controls).";
+            attribute :>> parent = "H.OBJ.11";
+            attribute :>> unit = ("syscall::native::park_for_reply",
+                "object::channel::Endpoint::park", "sched::direct::block_parked");
         }
     }
 }

@@ -33,7 +33,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sync::SpinLock;
+use ferrix_sync::{IrqControl, SpinLock};
 
 use super::queue::CpuQueue;
 use super::task::{BLOCKED, RUNNABLE, Task};
@@ -103,6 +103,21 @@ pub(crate) fn count(what: Count) {
             Ordering::Relaxed,
         );
     }
+}
+
+/// Take back one `what` this processor counted: for a check that parks
+/// through the receive half on a boot without the fast path, whose counters
+/// must not move there (L.sched.72's case). Masked, as [`count`] is made.
+pub(crate) fn uncount(what: Count) {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let row = this_cpu().map_or(0, |cpu| cpu.min(COUNTED_PROCESSORS - 1));
+    if let Some(cell) = COUNTED.get(row).and_then(|row| row.get(what as usize)) {
+        cell.store(
+            cell.load(Ordering::Relaxed).wrapping_sub(1),
+            Ordering::Relaxed,
+        );
+    }
+    <arch::Irq as IrqControl>::restore(saved);
 }
 
 /// Every count, summed over the processors, in [`Count`]'s order.
@@ -302,12 +317,17 @@ impl Drop for Direct {
 /// at `END`, then the general block. Answers whether it blocked; on `END`
 /// it is set runnable again and does not. With interrupts on, as
 /// `wait_trusting`'s block is made.
-pub(crate) fn block_parked(task: &Task) -> bool {
+///
+/// `last_look` was taken before the park set the task blocked, and is let go
+/// once the look is over (F-69, `super::LastLook`).
+pub(crate) fn block_parked(task: &Task, last_look: super::LastLook) -> bool {
     core::sync::atomic::fence(Ordering::SeqCst);
     if work::has_end(task) {
         task.set_state(RUNNABLE);
+        drop(last_look);
         return false;
     }
+    drop(last_look);
     super::schedule();
     true
 }

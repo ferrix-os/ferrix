@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "a05ce303d01f03ea423435ec914591fbfb4606bbc71f7c7bf726bdde70e3471f",
+  "digest": "24730a05d712cdab09dc76a76722a62bd20b8443188c4f4543652cf2869c9c91",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 137,
-    "elements": 6691,
+    "elements": 6701,
     "maturity": {
       "implemented": 280,
       "inProgress": 22,
@@ -36153,10 +36153,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theCountsAreTheKernels",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits.\"",
+                  "value": "\"The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits; a park a boot check makes through the receive half itself (stage 9's parked-block case) is taken back by that check, so the counts are the programs' own.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 526
+                    "line": 528
                   }
                 },
                 {
@@ -36164,10 +36164,10 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theCountsAreTheKernels",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"test-ipc-equiv requires trips with the fast path on and every count zero with it off.\"",
+                  "value": "\"test-ipc-equiv requires trips with the fast path on and every count zero with it off, stage 9's parked-block case having taken back the parks it made.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 528
+                    "line": 531
                   }
                 },
                 {
@@ -36178,7 +36178,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 529
+                    "line": 532
                   }
                 },
                 {
@@ -36189,7 +36189,7 @@
                   "value": "(\"sched::direct::count\", \"sched::direct::counts\", \"fastpath::report_counts\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 531
+                    "line": 534
                   }
                 }
               ]
@@ -36202,7 +36202,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 533
+                "line": 536
               },
               "children": [
                 {
@@ -36213,7 +36213,7 @@
                   "value": "\"The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 537
+                    "line": 540
                   }
                 },
                 {
@@ -36224,7 +36224,7 @@
                   "value": "\"Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 539
+                    "line": 542
                   }
                 },
                 {
@@ -36235,7 +36235,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 540
+                    "line": 543
                   }
                 },
                 {
@@ -36246,7 +36246,7 @@
                   "value": "\"sched::work::fast_path_hook\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 541
+                    "line": 544
                   }
                 }
               ]
@@ -36259,7 +36259,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 543
+                "line": 546
               },
               "children": [
                 {
@@ -36270,7 +36270,7 @@
                   "value": "\"Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 550
+                    "line": 553
                   }
                 },
                 {
@@ -36281,7 +36281,7 @@
                   "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 556
+                    "line": 559
                   }
                 },
                 {
@@ -36292,7 +36292,7 @@
                   "value": "(\"H.SCHED.13\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 557
+                    "line": 560
                   }
                 },
                 {
@@ -36303,7 +36303,121 @@
                   "value": "(\"sched::task::Task::take_run_slot\", \"sched::task::Task::return_run_slot\", \"sched::task::Task::take_sleep_slot\", \"sched::task::Task::return_sleep_slot\", \"sched::task::Task::holds_slots\", \"sched::task::Task::holds_sleep_slot\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 561
+                    "line": 564
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aWaitsLastLookIsNotPreempted",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWaitsLastLookIsNotPreempted",
+              "kind": "requirement",
+              "shortName": "L.sched.71",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 566
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWaitsLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"No switch shall take place between a wait's setting its task blocked and the end of its last look (WaitQueue's single-queue and many-queue waits); an interrupt's exit, or a preempt_enable inside the look, shall leave the decision it asks for pending until the look is over, and that decision shall then be made.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 572
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWaitsLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 5's last-look case: a waiter that drains its own entry while runnable, meets its condition and invites a switch inside its last look, once by a lock's release and once by a timer interrupt's exit, finishes its wait, stays queued and unswitched through the look, and has the decision made after it; with the hold off, or on main's code without it, the case fails with its sentence for a waiter left blocked on no run queue (F-69's controls).\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 579
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWaitsLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.OBJ.11\", \"H.SCHED.2\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 580
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWaitsLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::wait::LastLook::hold\", \"sched::wait::LastLook::drop\", \"sched::wait::WaitQueue::wait_sliced\", \"sched::wait::WaitQueue::wait_on_any\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 583
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aParkedBlocksLastLookIsNotPreempted",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aParkedBlocksLastLookIsNotPreempted",
+              "kind": "requirement",
+              "shortName": "L.sched.72",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 585
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aParkedBlocksLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"No switch shall take place between the receive half's park setting its task blocked and the end of its last look at END; an END posted while the task still ran shall be found by that look and end the park.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 589
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aParkedBlocksLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 9's parked-block case: a reader that posts END to itself through the poster, asks for a decision and parks on an empty end comes back woken in every try, at least one try parking with the decision still pending; with the hold taken after the park, or off, the case fails with its sentence for a reader left blocked on no run queue (F-69's controls).\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 595
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aParkedBlocksLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.OBJ.11\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 596
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aParkedBlocksLastLookIsNotPreempted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"syscall::native::park_for_reply\", \"object::channel::Endpoint::park\", \"sched::direct::block_parked\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 598
                   }
                 }
               ]
