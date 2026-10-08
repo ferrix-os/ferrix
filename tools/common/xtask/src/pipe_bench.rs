@@ -142,21 +142,6 @@ fn summary(lines: &[String], test: &str) -> Option<u64> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::summary;
-
-    #[test]
-    fn reads_the_summary_of_the_test_named_and_no_other() {
-        let lines = vec![
-            " 15.2 | LB summary name=pipe-pingpong-8B p50_ns=9340".to_owned(),
-            " 15.3 | LB summary name=pipe-pingpong-8Bx p50_ns=1".to_owned(),
-        ];
-        assert_eq!(summary(&lines, "pipe-pingpong-8B"), Some(9340));
-        assert_eq!(summary(&lines, "futex-pingpong"), None);
-    }
-}
-
 /// The lines `test-pipewait`'s program prints when every step passes.
 const PIPEWAIT_STEPS: &[&str] = &[
     "pipewait: eintr ok",
@@ -207,4 +192,19 @@ pub(crate) fn test_pipewait(args: &Args) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summary;
+
+    #[test]
+    fn reads_the_summary_of_the_test_named_and_no_other() {
+        let lines = vec![
+            " 15.2 | LB summary name=pipe-pingpong-8B p50_ns=9340".to_owned(),
+            " 15.3 | LB summary name=pipe-pingpong-8Bx p50_ns=1".to_owned(),
+        ];
+        assert_eq!(summary(&lines, "pipe-pingpong-8B"), Some(9340));
+        assert_eq!(summary(&lines, "futex-pingpong"), None);
+    }
 }
