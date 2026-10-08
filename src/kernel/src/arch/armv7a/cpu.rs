@@ -885,3 +885,43 @@ pub(crate) const CNTKCTL_PL0VCTEN: u32 = 1 << 1;
 /// What user mode is never given: `PL0PCTEN` (the physical counter),
 /// `PL0VTEN` and `PL0PTEN` (the virtual and physical timers' registers).
 pub(crate) const CNTKCTL_CLOSED: u32 = 1 | (1 << 8) | (1 << 9);
+
+/// MEASUREMENT ONLY (`bench_pmu`, never lands): `ID_DFR0.PerfMon`, bits 27
+/// to 24 -- 1 PMUv1, 2 PMUv2, 3 PMUv3; 0 and 0xF no PMU the architecture
+/// defines.
+pub(crate) fn pmu_version() -> u32 {
+    let value: u32;
+    // SAFETY: (SYSREG) reading an identification register has no side effects.
+    unsafe {
+        asm!("mrc p15, 0, {}, c0, c1, 2", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    (value >> 24) & 0xF
+}
+
+/// MEASUREMENT ONLY (`bench_pmu`): `PMCR`, for the line that says what a
+/// program finds. Only where [`pmu_version`] names a PMU.
+pub(crate) fn read_pmcr() -> u32 {
+    let value: u32;
+    // SAFETY: (SYSREG) reading `PMCR` has no side effects; the caller checked
+    // that the core has a PMU, so the encoding is defined.
+    unsafe {
+        asm!("mrc p15, 0, {}, c9, c12, 0", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
+/// MEASUREMENT ONLY (`bench_pmu`): set `PMUSERENR.EN`, so user mode may
+/// program and read this processor's PMU. Only where [`pmu_version`] names
+/// one.
+pub(crate) fn allow_user_pmu() {
+    // SAFETY: (SYSREG) `PMUSERENR` decides only what user mode may reach of
+    // the PMU, which the kernel does not use; no mapping, interrupt or timer
+    // of the kernel's changes. The `isb` makes the write take effect before
+    // a program runs.
+    unsafe {
+        asm!("mcr p15, 0, {}, c9, c14, 0", "isb", in(reg) PMUSERENR_EN, options(nostack, preserves_flags));
+    }
+}
+
+/// `PMUSERENR.EN`: user mode may reach the PMU.
+const PMUSERENR_EN: u32 = 1;

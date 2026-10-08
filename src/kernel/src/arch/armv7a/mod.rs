@@ -8,6 +8,7 @@
 //! directory is how this architecture finds them, and everything that is
 //! coprocessor 15 rather than a system register.
 
+mod bench_pmu;
 mod check;
 pub(crate) mod console;
 mod cpu;
@@ -1418,6 +1419,9 @@ pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'st
     if let Some(frame) = tree.gicv2m_frames().next() {
         let _ = gicv2::init_msi_frame(frame.region.address, frame.spi_base.zip(frame.spi_count));
     }
+    // MEASUREMENT ONLY (os4b/b3-ferrix): `ipc-bench.pmu`, read before
+    // `timer::init` gives the boot processor its counter access.
+    bench_pmu::read_option(view, &tree);
     timer::init(&tree)?;
     gicv2::enable(timer::irq());
     // And the inter-processor interrupt, whose enable bit is this core's own:

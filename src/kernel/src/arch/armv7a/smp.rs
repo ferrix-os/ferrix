@@ -552,6 +552,7 @@ extern "C" fn secondary_start(record: u32) -> ! {
     unsafe { super::trap::init() };
     gicv2::init_this_cpu();
     cpu::allow_user_counter();
+    super::bench_pmu::allow_user_pmu();
     note_coherency();
     crate::smp::install_secondary_record(u64::from(record));
     // The boot core's side-channel defences, before this one can run a
