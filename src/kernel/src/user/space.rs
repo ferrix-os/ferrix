@@ -578,7 +578,20 @@ fn copy_on_write(
     index: u64,
     shared: Frame,
 ) -> Result<(Frame, Option<Retired>), SpaceError> {
-    let copy = mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?;
+    let Some(copy) = mm::allocate_user_frame() else {
+        // HUNT (os07-phunt, never lands).
+        let owner = crate::sched::running_group();
+        let charged = crate::object::quota::charge_frame(owner);
+        if charged.is_ok() {
+            crate::object::quota::uncharge_frame(owner);
+        }
+        println!(
+            "  hunt     cow: no user frame; group {owner} charge {:?}, a raw frame {:?}",
+            charged.is_ok(),
+            mm::allocate_frames(0).inspect(|&f| mm::deallocate_frames(f, 0)).is_some()
+        );
+        return Err(SpaceError::OutOfMemory);
+    };
     mm::copy_frame(copy, shared);
     match vmo.take_page(index, copy) {
         Ok(retired) => Ok((copy, Some(retired))),
@@ -589,6 +602,7 @@ fn copy_on_write(
             Ok((vmo.page(index).unwrap_or(shared), None))
         }
         Err(Kept::NoMemory) => {
+            println!("  hunt     cow: take_page had no memory");
             let _ = mm::release_frame(copy);
             Err(SpaceError::OutOfMemory)
         }
