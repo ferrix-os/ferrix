@@ -113,6 +113,16 @@ pub(crate) struct PerCpu {
     /// `current`, written beside it: what `sched::with_current` lends without
     /// the queue's lock. `sched::borrow` argues it.
     pub(crate) running: crate::sched::RunningSlot,
+    /// x86-64: this processor's GDT, where its thread-local slots are, as
+    /// `SGDT` reported it at the last load of `GDTR` or `TR` made with this
+    /// record installed; zero for one this kernel did not build (Q4,
+    /// `docs/OPAQUE-KERNEL.md` §9.11). Read at every switch instead of
+    /// `SGDT`; written only by the x86-64 GDT code's `note_tables`. The Arm
+    /// architectures leave it zero, as they do `kernel_stack`.
+    pub(crate) gdt: AtomicU64,
+    /// x86-64: where this processor's TSS keeps `RSP0`, as `STR` and `SGDT`
+    /// found it at the same moment, or zero for no TSS. Kept as [`PerCpu::gdt`].
+    pub(crate) privilege_stack: AtomicU64,
 }
 
 /// Where in a [`PerCpu`] record its preemption word is, for
@@ -197,6 +207,8 @@ impl Topology {
                 gp_seen: AtomicU64::new(0),
                 preempt: crate::sched::PreemptState::new(),
                 running: crate::sched::RunningSlot::new(),
+                gdt: AtomicU64::new(0),
+                privilege_stack: AtomicU64::new(0),
             })
             // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
             .collect();

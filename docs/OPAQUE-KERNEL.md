@@ -5151,3 +5151,41 @@ are not yet, a design of their own.
   2,966 to 3,096); the floor, which switches no space, does not (319). No
   second native program was timed.
 - *U3:* no page, static or mapping is added or shared.
+
+#### Q4, the tables noted, not asked (po10-quick; ledger line 515, Q4-C1 to C7)
+
+Every switch to or from a task with user state asked the processor for its
+tables four times: `SGDT` in `gdt::read_tls` (the save), again in
+`gdt::write_tls` (the restore), and `STR` with a third `SGDT` in
+`set_privilege_stack`, which then decoded the TSS descriptor. Both
+instructions are microcoded; the timing-only probe (`po10-quick/probe`
+47afa304f, `~/.local/share/ferrix/logs/po10-quick/boot-probe1.log`) read
+`SGDT` at 31.4 ticks a loop iteration and `STR` at 22.5 against an empty loop
+of 16.9, the probe's figures only.
+
+Each processor's per-CPU record now holds two words, `gdt` and
+`privilege_stack`: what asking would answer, written by `gdt::note_tables`,
+which asks exactly as before (`live_table`, and `ask_privilege_stack`, the
+old body of `set_privilege_stack`). It is called at the only moments the
+answer can change while a record is installed: after `gdt::load`, the one
+`LGDT` and `LTR` the kernel makes, and as `set_cpu_local` installs the record
+(the boot processor's tables were loaded before any record existed; a
+secondary's are still the start-up trampoline's, which note as zero, and
+`init_secondary`'s load then notes the real ones). The trampoline's own
+`lgdtl` runs before any record. `cpu::load_gdt` and `cpu::load_tss` are
+narrowed to the x86-64 module, and their `# Safety` sections owe the note
+after a load made with a record installed. The readers take the record and
+ask past it only where it holds zero: zero means absent, never wrong.
+
+The hazard this accepts, argued: `RSP0`'s address and the thread-local slots'
+table now come from a stored pointer rather than from the processor at the
+moment of use. That is the class `PerCpu.kernel_stack` already is, which the
+`SYSCALL` entry trusts on every call; the two words are written only by
+`note_tables`, only by their own processor, with interrupts masked, and read
+only by that processor with interrupts masked. A note missing or misplaced is
+caught, not merely asked past: at every processor's bring-up, after its last
+note, `gdt::check::require_tables_noted` compares the record with a fresh
+`SGDT` and `STR` answer, requires both non-zero, and stops the machine with
+FX-0409 otherwise, in every build. That check verifies `L.x86_64.6`, which
+was baselined; `L.x86_64.59`'s two-programs check and `L.x86_64.7`'s
+thread-area check exercise the readers through the record.
