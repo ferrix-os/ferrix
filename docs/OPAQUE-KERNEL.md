@@ -5894,8 +5894,9 @@ allocator and its loom model add about 5 to the first reading's 20 to 25.
   and their `install_user_root` is untouched.
 - `cpu.rs`: `install_ttbr0`, `park_ttbr0`, `flush_for_new_generation`,
   `invalidate_predictor`, `read_ctr`, `read_id_mmfr1`; `write_ttbr0` and
-  `flush_user_tlb` are gone. Assembly 1619 to 1642 lines, `cpu.rs` 105 to
-  128 (os07/ustate raises the same cap; the second to land recounts).
+  `flush_user_tlb` are gone. Assembly +23 lines net: recounted after
+  os07/ustate landed (a1e6324c2), the cap 1638 to 1661 and `cpu.rs` 107 to
+  130.
 - F-67's three remaps call `break_page`, which adds the page to the
   shootdown and calls `arch::break_before_make`: one helper rather than two
   lines at each site, so that `resolve` stays within the complexity ratchet.
@@ -5979,6 +5980,15 @@ it (checks on, which every boot has):
   `os07a-<commit>-*`; the host, loom and static controls in
   `~/.local/share/ferrix/logs/os07-asid/ctl-host-*.log`. Owed: the
   consultant's code review, and the DK1 run above before any figure.
+- 2026-10-08, code review on cfd99de43: OK IF (C1) to (C4) (ledger line
+  610): every `os07a-cfd99de43-*` verdict in before the take, the landing
+  message citing lines 590, 594 and 610 with the counts and the three first
+  control variants that misfired (c2-same caught by the rollover check, not
+  `spaces`; c5-epd0 fired as the page fault at 0x50002000 with the wrong
+  expected text; c6-userglobal changed `user_page`, which the fault path does
+  not use), a rebase with coverage carried and the register recounted if
+  `main` moves, and this section's note on the shared assembly cap brought up
+  to date. Still owed: the DK1 run, before any DK1 figure.
 
 ### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 

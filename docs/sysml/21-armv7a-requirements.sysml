@@ -118,9 +118,9 @@ package FerrixArmv7aRequirements {
             attribute :>> statement = "Every leaf the kernel writes under a user root
                 shall be non-global, and once finish_memory has run the kernel's own
                 tree shall hold no non-global leaf.";
-            attribute :>> criterion = "A user space's leaves are all non-global (the
-                `asid` line), and after the loader's alias has gone every kernel leaf
-                is global (the `global` line).";
+            attribute :>> criterion = "A user space's leaves, put there by the fault
+                path, are all non-global (the `asid` line), and after the loader's
+                alias has gone every kernel leaf is global (the `global` line).";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("arch::armv7a::drop_identity_map",
                 "user::space::AddressSpace::map_anonymous");
