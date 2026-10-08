@@ -5742,3 +5742,71 @@ to review), the signal frame and `capture()` for a task whose state is not
 in the registers, `fork` and `execve` of such a task, and the bit's own
 checks and controls. It is os-07's to schedule. The eager cost it would
 remove is measured on the board, alternated, either way.
+
+**As built (2026-10-08, branch `os07/ustate`).** Two commits, (c) first so
+that F-66's fix can land alone: 3f1743600 (`TPIDRURO` kept in the task,
+`TPIDRURW` switched, `fork` and `execve`; `L.armv7a.10-12`) and 2105a31c0
+(the guard, the mark, the partial save and the reset; `L.armv7a.5-9`,
+AoU-27, AoU-26 before main gave that number to drvupdated). As R1 to R9 say, with these to note for the code review:
+- *The entry.* `trap::system_call` grew past the complexity floor, so
+  `set_tls`'s answer is `answer_set_tls` and the marked dispatch is
+  `dispatch_marked`; the mark is raised and lowered there, interrupts
+  masked at both.
+- *The assembly.* `ferrix_user_fpu_keep` (`vmrs`, `str`, `vstmia` of
+  `d8`-`d15`) and `ferrix_user_fpu_reset` (`vmsr`, `vldmia` of `d0`-`d7`
+  and, on a D32 core, `d16`-`d31` from `ZERO_DOUBLES`, a 256-byte
+  read-only block, and of `d8`-`d15` from the record): 17 lines; with the
+  two `TPIDRURW` accesses the cap is 1,638.
+- *The check* is `arch/armv7a/switch/check.rs`, two fixtures assembled by
+  GNU `as` (sources in their doc comments, logs and objects in
+  `~/.local/share/ferrix/logs/os07-ustate/fixtures/` on nazuna). The
+  `execve` case copies the fixture's own image to `/tmp/tls-exec` and runs
+  it with `argv[0]` "z". The cases run only on a D32 core and say so
+  otherwise.
+- *Boot lines* (armv7a TCG, one core and `--smp 2`): `vectors  3 wakes
+  from a blocking native call zeroed the caller-saved VFP registers and
+  kept FPSCR and d8-d15; 3 Linux sleeps, preemptions and calls after one
+  kept them all` and `tls  2000 switches between two programs' TPIDRURO
+  and TPIDRURW, each its own; ...`.
+- *Controls* (each a `gate.sh control` on an armv7a TCG boot, FIRED with
+  the check's own text): `os07u-ctl-u1` (the lowering removed: "the mark
+  outlived its call"), `-u2` (`vectors_dead` dropped from the save: "lost
+  its vector registers to a reset"), `-u3a2` (`d0`-`d7` not zeroed: "read
+  another program's vector registers"), `-u3b` (`d16`-`d31` not zeroed:
+  the same), `-u3c` (`vmsr fpscr` removed: "did not get its own FPSCR
+  back"), `-u3d` (`d8`-`d15` not stored: "lost its callee-saved VFP
+  registers"), `-u4` (`fp()` answering the raw doubles: "did not read as
+  zero with its own FPSCR and d8-d15"), `-r6` (`set_fp` leaving the mark:
+  "was still marked for a reset"), `-u6a2` (`set_tls` writing no record:
+  "did not get its own thread pointer back after a switch"), `-u6b` (the
+  restore's `TPIDRURO` write removed: "did not each read their own
+  TPIDRURO"), `-u7` (a "last written" skip of `TPIDRURW`: "ran on the value
+  another program left"), `-u8` (the restore's `TPIDRURW` write removed,
+  `main`'s switch: "did not each read their own TPIDRURW"), `-r3a`
+  (`execve` leaving the record: "got the old program's TPIDRURO back"),
+  `-r3b` (`execve` leaving `TPIDRURW`: "read the old program's TPIDRURW"),
+  `-r4` (`capture` leaving `TPIDRURW` out: "did not inherit its parent's
+  TPIDRURW"). Two first tries did not fire with their text and are kept:
+  `-u3a`, the whole reset skipped, which the check caught first on
+  `FPSCR` ("did not get its own FPSCR back"), replaced by `-u3a2`; and
+  `-u6a`, whose boot stopped earlier at stage 13's `cpu.max` check (a
+  program "held to 1050 thousandths of the wall clock" at load 23; the
+  same sabotage then FIRED as `-u6a2`), a timing flake under load to be
+  filed (log kept as `logs/os07-ustate/flake-cpumax-u6a.log`).
+- *Gates* on 8e9edd34d, whose source differs from the code tip 2105a31c0
+  only in two boot lines' text, and whose `check` (`os07u-check`) FAILED
+  because AoU-26 had no `safety-requirements.json` entry, added in
+  96cf002d8 (`os07u-check2` PASSED there; `-u3a2` and `-u6a2` also ran on
+  96cf002d8): armv7a at one core and `--smp 2`, x86-64 KVM and TCG,
+  AArch64, `test-threads`, `test-shell` and `test-ipc-equiv` on armv7a,
+  and the release build, each PASSED (`os07u-*`); on the code tip 2105a31c0,
+  `check` and the armv7a boots at one core and `--smp 2` with the lines
+  above PASSED (`os07u-check3`, `os07u-a7-r3`, `os07u-a7-smp2-r3`); the
+  commit of (c) alone passed `check` and booted armv7a (`os07u-c1-check3`,
+  `os07u-c1-a7-r3`).
+- *Rebased* onto `main` 9ac307691 for the consultant's C1 (ledger 598): the
+  two code commits are now 2b73f85ca and ecb5896ef, with the same source
+  patch-ids as 3f1743600 and 2105a31c0 (287af8c20556, f25c7418f06a); the
+  assumption of use is AoU-27; the evidence was carried again and the
+  generated documents remade; `check`, `check-docs` and the armv7a boots at
+  one core and `--smp 2` are rerun on the landing hash (`os07u-land-*`).

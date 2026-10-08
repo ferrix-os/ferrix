@@ -2569,10 +2569,13 @@ with interrupts masked (L.armv7a.12, L.armv7a.10). Stage 9's `tls` line on
 ARMv7-A requires two programs trading one core to read their own, a program
 whose value equals the one last written to read its own beside one that
 changed the register, a fork child its parent's and an `execve`d image zero.
-Negative controls on an ARMv7-A TCG boot: the restore's write removed --
-`main`'s switch for this register -- and `execve`'s zeroing removed each
-fail the boot by name (the commit that closes this names their `gate.sh`
-tags and texts).
+Negative controls on an ARMv7-A TCG boot, each FIRED: the restore's write
+removed -- `main`'s switch for this register -- "two programs trading one
+core did not each read their own TPIDRURW" (`os07u-ctl-u8`); `execve`'s
+zeroing removed, "an execve'd image read the old program's TPIDRURW"
+(`os07u-ctl-r3b`); and a "last written" skip, "a program whose TPIDRURW
+equals the one last written ran on the value another program left"
+(`os07u-ctl-u7`).
 
 ## F. Organisational
 
