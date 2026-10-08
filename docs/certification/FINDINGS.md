@@ -2656,7 +2656,22 @@ insert it (`is_queued`), as before. The direct switch, the steal and
 balance candidates and the accounting are unchanged.
 
 Its cost is one raise and one lower of the preemption count per blocking
-wait. No `ready` may block, and the audit of every `ready` and every
+wait. Since F-69's cheaper hold (os07-hold, ledger 2026-10-08 line 624), a
+blocking wait's lowering is made with interrupts masked inside its own
+switch (`block_ending_hold`) and decides nothing: the switch is the
+decision. Measured on x86-64 under KVM by the long bench with `perf`
+(fast path off), in instructions a round trip:
+- f42c1ede0, before F-69: 10,300;
+- d884add58, F-69: 10,442 and 10,443;
+- F-69 with the hold compiled out: 10,299;
+- with the cheaper hold: 10,363 (this landing's kernel code, one boot).
+
+Cycles are inside the layout band. The same base with 64 or 256 bytes of
+nops that never run read +131 and -112 cycles a trip. On ARMv7-A, from the
+object code (argued, not run), a blocking wait pays about 46 instructions
+for the hold where F-69 paid 84, and one `dmb ish` where it paid four.
+
+No `ready` may block, and the audit of every `ready` and every
 reachable `poll` found none that does (MEMORY-AND-TIMING §2.2c has the
 span's bound). L.sched.71 and L.sched.72 are new.
 

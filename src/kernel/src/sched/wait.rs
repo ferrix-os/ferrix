@@ -73,6 +73,19 @@ impl LastLook {
         }
         LastLook(())
     }
+
+    /// The look did not find the condition: block. The hold is let go inside
+    /// the switch's own interrupt mask, with no decision at the lowering,
+    /// since the switch is the decision (`super::block_ending_hold`).
+    pub(crate) fn block(self) {
+        // Its drop would lower the count and decide; this lowers it below.
+        let _ = core::mem::ManuallyDrop::new(self);
+        if LAST_LOOK_HOLDS {
+            super::block_ending_hold();
+        } else {
+            super::block();
+        }
+    }
 }
 
 impl Drop for LastLook {
@@ -348,8 +361,7 @@ impl WaitQueue {
                 }
                 return true;
             }
-            drop(last_look);
-            super::block();
+            last_look.block();
             // Running again, so not filed anywhere: whatever deadline is left
             // belongs to no sleep and must not reach the next switch.
             let _ = task.take_sleep_deadline();
@@ -432,8 +444,7 @@ impl WaitQueue {
                 count_wakes(queues, &drained);
                 return true;
             }
-            drop(last_look);
-            super::block();
+            last_look.block();
             let _ = task.take_sleep_deadline();
             for (index, queue) in queues.iter().enumerate() {
                 let was = !queue.unqueue(task.id);

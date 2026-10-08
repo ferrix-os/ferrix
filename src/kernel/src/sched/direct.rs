@@ -327,8 +327,7 @@ pub(crate) fn block_parked(task: &Task, last_look: super::LastLook) -> bool {
         drop(last_look);
         return false;
     }
-    drop(last_look);
-    super::schedule();
+    last_look.block();
     true
 }
 
