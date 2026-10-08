@@ -10,6 +10,9 @@
 mod aarch64;
 #[cfg(target_arch = "arm")]
 mod armv7a;
+// MEASUREMENT ONLY (os07-prof): the timing build's registers.
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::prof_pmu as armv7a_prof;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 

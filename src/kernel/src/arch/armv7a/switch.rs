@@ -799,26 +799,34 @@ unsafe extern "C" {
 /// with user state to run on this processor. `blocked` must say whether that
 /// task is switched out blocked rather than runnable.
 pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
-    state.user_rw = super::cpu::read_tpidrurw();
+    use crate::prof::{Ablation, ablate};
+    // MEASUREMENT ONLY (os07-prof): the ablations, inside a window only.
+    if !ablate(Ablation::SkipTls) && !ablate(Ablation::SkipTlsRead) {
+        state.user_rw = super::cpu::read_tpidrurw();
+    }
+    crate::prof::stamp(crate::prof::Point::STls);
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`
     // structure, which is the two words the assembly writes.
     unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
+    crate::prof::stamp(crate::prof::Point::SBanked);
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles == 0 || !state.vfp {
-        return;
+    // MEASUREMENT ONLY (os07-prof): no early return, so that the `Saved`
+    // stamp closes the VFP span on every path, the lazy one included.
+    if doubles != 0 && state.vfp && !ablate(Ablation::SkipVfp) {
+        if blocked && state.vectors_dead {
+            // SAFETY: (CONTEXT) the FPU exists and `EN` is set for a task with the
+            // bit (I1), and `state` is a live, exclusively borrowed `UserState`
+            // whose `d8` is at the offset asserted above; these are the outgoing
+            // task's registers.
+            unsafe { ferrix_user_fpu_keep(core::ptr::from_mut(state)) };
+            state.mark_unsaved();
+        } else {
+            // SAFETY: (CONTEXT) as above, with the layout asserted above.
+            unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(doubles == 32)) };
+        }
+        state.vfp_moves = state.vfp_moves.wrapping_add(1);
     }
-    if blocked && state.vectors_dead {
-        // SAFETY: (CONTEXT) the FPU exists and `EN` is set for a task with the
-        // bit (I1), and `state` is a live, exclusively borrowed `UserState`
-        // whose `d8` is at the offset asserted above; these are the outgoing
-        // task's registers.
-        unsafe { ferrix_user_fpu_keep(core::ptr::from_mut(state)) };
-        state.mark_unsaved();
-    } else {
-        // SAFETY: (CONTEXT) as above, with the layout asserted above.
-        unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(doubles == 32)) };
-    }
-    state.vfp_moves = state.vfp_moves.wrapping_add(1);
+    crate::prof::stamp(crate::prof::Point::Saved);
 }
 
 /// Load `state` onto this processor for the task about to run.
@@ -841,30 +849,38 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
 ///
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to.
 pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64) {
+    use crate::prof::{Ablation, ablate};
     let _ = entry_stack;
     // Both thread ID registers at every switch, never skipped (3b, F-66).
-    super::cpu::write_tpidruro(state.thread_pointer);
-    super::cpu::write_tpidrurw(state.user_rw);
+    // MEASUREMENT ONLY (os07-prof): except by the ablation, inside a window.
+    if !ablate(Ablation::SkipTls) {
+        super::cpu::write_tpidruro(state.thread_pointer);
+        super::cpu::write_tpidrurw(state.user_rw);
+    }
+    crate::prof::stamp(crate::prof::Point::RTls);
     // SAFETY: (CONTEXT) as in `save_user_state`, read rather than written.
     unsafe { ferrix_user_banked_restore(core::ptr::from_ref(&state.user_sp)) };
+    crate::prof::stamp(crate::prof::Point::RBanked);
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles == 0 {
-        return;
-    }
-    let on = vfp_on();
-    if state.vfp {
-        if !on {
-            // SAFETY: (SYSREG) a VFP exists; the switch runs with interrupts
-            // masked under the run queue lock.
-            unsafe { turn_on() };
+    // MEASUREMENT ONLY (os07-prof): no early return, so that the `Restored`
+    // stamp closes the VFP span on every path, the lazy one included.
+    if doubles != 0 && !ablate(Ablation::SkipVfp) {
+        let on = vfp_on();
+        if state.vfp {
+            if !on {
+                // SAFETY: (SYSREG) a VFP exists; the switch runs with interrupts
+                // masked under the run queue lock.
+                unsafe { turn_on() };
+            }
+            // SAFETY: (CONTEXT) `EN` is set, and `state` is the incoming task's.
+            unsafe { load_own(state, doubles) };
+        } else if on {
+            // SAFETY: (SYSREG) a VFP exists, `EN` is set, interrupts are masked.
+            unsafe { scrub_off(doubles) };
+            state.vfp_moves = state.vfp_moves.wrapping_add(1);
         }
-        // SAFETY: (CONTEXT) `EN` is set, and `state` is the incoming task's.
-        unsafe { load_own(state, doubles) };
-    } else if on {
-        // SAFETY: (SYSREG) a VFP exists, `EN` is set, interrupts are masked.
-        unsafe { scrub_off(doubles) };
-        state.vfp_moves = state.vfp_moves.wrapping_add(1);
     }
+    crate::prof::stamp(crate::prof::Point::Restored);
 }
 
 /// Set USR mode's banked stack pointer, as `execve` does for the new program.

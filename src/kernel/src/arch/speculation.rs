@@ -299,10 +299,13 @@ fn issue_barrier(cpu: usize) {
     if let Some(decided) = BARRIER_DECISIONS.get(cpu) {
         count_here(decided);
     }
-    if machine::switch_barrier(cpu)
-        && let Some(issued) = SWITCH_BARRIERS.get(cpu)
-    {
-        count_here(issued);
+    if machine::switch_barrier(cpu) {
+        // MEASUREMENT ONLY (os07-prof): a direction with a barrier is not
+        // the path the table is of.
+        crate::prof::taint();
+        if let Some(issued) = SWITCH_BARRIERS.get(cpu) {
+            count_here(issued);
+        }
     }
 }
 

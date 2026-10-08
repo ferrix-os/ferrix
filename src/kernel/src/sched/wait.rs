@@ -349,6 +349,7 @@ impl WaitQueue {
                 return true;
             }
             drop(last_look);
+            crate::prof::stamp(crate::prof::Point::Listed);
             super::block();
             // Running again, so not filed anywhere: whatever deadline is left
             // belongs to no sleep and must not reach the next switch.
@@ -364,6 +365,7 @@ impl WaitQueue {
             // timer, and the condition coming true.
             drained = !self.unqueue(task.id);
             super::trip::slept(self, drained);
+            crate::prof::stamp(crate::prof::Point::Unblocked);
         }
     }
 
@@ -517,6 +519,7 @@ impl WaitQueue {
             self.count.store(0, Ordering::Release);
             taken
         };
+        crate::prof::stamp(crate::prof::Point::WDrained);
         for task in few.iter().flatten().chain(&many) {
             super::wake_with(task, how);
         }

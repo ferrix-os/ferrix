@@ -1731,6 +1731,7 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
         let saved = <arch::Irq as IrqControl>::disable();
         let placed = this_cpu().map(|here| wake_onto(task, here));
         <arch::Irq as IrqControl>::restore(saved);
+        crate::prof::stamp(crate::prof::Point::WOnto);
         if matches!(placed, Some(Placed::Moved | Placed::NotBlocked)) {
             return;
         }
@@ -1899,6 +1900,7 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             queue.insert(task);
         }
+        crate::prof::stamp(crate::prof::Point::WInserted);
         kick_cpu = kick_after_wake(&mut queue, cpu, defer && here == Some(cpu));
         break;
     }
@@ -2199,7 +2201,9 @@ fn pick_and_switch(interrupted_user: bool) {
     // lock, which keeps every other processor off both until `finish_switch`
     // releases it.
     unsafe { arch::switch_to(save, resume) };
+    crate::prof::stamp(crate::prof::Point::Switched);
     finish_switch();
+    crate::prof::stamp(crate::prof::Point::Finished);
 }
 
 /// Choose what runs next, leaving the queue's lock held and returning where
@@ -2213,10 +2217,14 @@ fn choose_next(
     // SAFETY: (SHARED) released below when nothing is switched, and otherwise by the
     // context this switches to, in `finish_switch`.
     let queue = unsafe { lock.lock_manually() };
+    crate::prof::stamp(crate::prof::Point::Locked);
 
     let now = crate::timer::now_nanos();
+    crate::prof::stamp(crate::prof::Point::ANow);
     queue.account_in(now, interrupted_user);
+    crate::prof::stamp(crate::prof::Point::AAccount);
     queue.wake_sleepers(now);
+    crate::prof::stamp(crate::prof::Point::Accounted);
 
     let previous = queue.current.clone();
     if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
@@ -2236,6 +2244,7 @@ fn choose_next(
     }
 
     let next = queue.pick_next();
+    crate::prof::stamp(crate::prof::Point::Picked);
     if queue.stats.measuring {
         queue.note_pick(now);
     }
@@ -2333,7 +2342,9 @@ fn switch_chosen(
     // two stack pointers and whose whole job is register operations -- and not
     // after the switch either, because the incoming context resumes on its own
     // stack and would have to be told to do this before touching anything.
+    crate::prof::stamp(crate::prof::Point::Booked);
     swap_address_space(previous.address_space(), next.address_space());
+    crate::prof::stamp(crate::prof::Point::Spaced);
     switch_user_state(previous, next);
 
     // SAFETY: (SHARED) both tasks belong to this queue and this processor holds its
