@@ -5919,8 +5919,44 @@ allocator and its loom model add about 5 to the first reading's 20 to 25.
   pinned to each, since `run_everywhere`'s work is taken only before the
   scheduler starts.
 - The kernel tree's non-global walk prints its own line, `global`, on
-  ARMv7-A only, after the `w^x` line; x86-64's and AArch64's lines do not
-  change.
+  ARMv7-A only, after the `w^x` line, through `arch::check_kernel_tree_global`
+  (no `target_arch` conditional in generic code, which the crate-layering
+  gate refuses); x86-64's and AArch64's lines do not change. The space's tag
+  is a `pub(crate)` field, read by the ARMv7-A check, for the same reason.
+
+#### The DK1 run owed before any figure (A11, B7)
+
+On the board, with the image built from this branch as the matrix builds
+it (checks on, which every boot has):
+
+1. Boot it and read two lines. `asid` must end "number n reused by another
+   space, which read its own page" and print the board's `CTR` and
+   `ID_MMFR1` (QEMU's model: 0x84448003 and 0x40000000). `global` must say
+   every kernel leaf is global.
+2. The control, one line in `src/kernel/src/arch/armv7a/cpu.rs`,
+   `flush_for_new_generation`: the `TLBIALL` taken out of the rollover's
+   flush, its count kept, so only the probe can see it. Replace
+
+   ```
+               "mcr p15, 0, {zero}, c8, c7, 0",
+               "mcr p15, 0, {zero}, c7, c5, 6",
+   ```
+
+   (the pair is unique in the file) with
+
+   ```
+               "nop",
+               "mcr p15, 0, {zero}, c7, c5, 6",
+   ```
+
+   and boot again. On the board it must stop with "FERRIX-PANIC stage 6
+   self-check failed: asid: a space given a reused number read the page of
+   the space before it". Under QEMU the same image boots: QEMU empties its
+   TLB at every change of ASID, so the control cannot fire there.
+3. If the control boots on the board too, the probe's entry was evicted
+   before its number came back: the run is inconclusive, recorded as such,
+   and the BACKLOG row stays open.
+
 - Host, loom and static controls are run directly
   (`~/.local/share/ferrix/logs/os07-asid/ctlhost.sh`), since `gate.sh`'s
   verdict needs a `FERRIX-PANIC` or a guest's line: 14 of 14 FIRED on
@@ -5937,7 +5973,12 @@ allocator and its loom model add about 5 to the first reading's 20 to 25.
   per-processor numbers (its Q2) is withdrawn, with A3's per-processor
   generation, A9's ninth-processor split and Q4.
 - 2026-10-08, second reading of the machine-wide allocator: OK IF (B1) to
-  (B8) (ledger line 594). Code follows once 5a0210b00 is on `main`.
+  (B8) (ledger line 594).
+- 2026-10-08, code on `os07/asid`, rebased onto `main` 9ed9e8428 (the
+  reservations 4ea144230 and 9ed9e8428). Gated through `gate.sh`, tags
+  `os07a-<commit>-*`; the host, loom and static controls in
+  `~/.local/share/ferrix/logs/os07-asid/ctl-host-*.log`. Owed: the
+  consultant's code review, and the DK1 run above before any figure.
 
 ### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 

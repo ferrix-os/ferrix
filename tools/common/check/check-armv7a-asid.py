@@ -143,7 +143,7 @@ def check_forget_callers(problems: list[str]) -> int:
     callers = 0
     for path in KERNEL.rglob("*.rs"):
         text = path.read_text(encoding="utf-8")
-        if "address_space_tag().forget()" not in text:
+        if ".tag.forget()" not in text:
             continue
         callers += 1
         if not (path.name == "check.rs" or path.name.endswith("_check.rs")):

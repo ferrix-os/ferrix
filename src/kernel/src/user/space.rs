@@ -264,7 +264,7 @@ pub(crate) struct AddressSpace {
     /// Its address space identifier, on the architecture that gives one
     /// (ARMv7-A, `docs/OPAQUE-KERNEL.md` §9.13): the same on every processor,
     /// and gone with the space.
-    tag: arch::SpaceTag,
+    pub(crate) tag: arch::SpaceTag,
     /// Its shootdowns: those not yet returned, and those ever begun.
     flushes: Flushes,
     /// Held by each system call that changes which ranges are mapped, from
@@ -350,12 +350,6 @@ impl AddressSpace {
     /// The physical address of the root table, for whoever installs it.
     pub(crate) fn root_table(&self) -> u64 {
         self.root * PAGE_SIZE
-    }
-
-    /// Its address space identifier tag: for the architecture's boot check.
-    #[cfg(target_arch = "arm")]
-    pub(crate) fn address_space_tag(&self) -> &arch::SpaceTag {
-        &self.tag
     }
 
     /// Install this address space on the processor that is running, in place

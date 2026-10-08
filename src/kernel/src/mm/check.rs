@@ -51,8 +51,9 @@ pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
         "  w^x      {} mappings swept, {} executable, none writable",
         wx.leaves, wx.executable
     );
-    #[cfg(target_arch = "arm")]
-    check_kernel_tree_is_global()?;
+    // Whatever the architecture asks of the kernel's tree beyond W^X:
+    // ARMv7-A, that every leaf is global once the loader's alias has gone.
+    crate::arch::check_kernel_tree_global()?;
 
     // And the frames the image's text sits in, through every mapping of them:
     // the direct map aliases them, never executably, so the sweep above
@@ -80,27 +81,6 @@ pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
         sealed.bytes / 1024,
         sealed.mappings
     );
-    Ok(())
-}
-
-/// Once the loader's alias has gone, the kernel's own tree holds no
-/// non-global leaf, so `TTBR0`'s tables are the only ones whose entries an
-/// ASID tags: what lets one `TTBR0` write change root and ASID together
-/// (DDI 0406C.d B3.10.4; `docs/OPAQUE-KERNEL.md` §9.13, item 5's DK1
-/// exception).
-///
-/// Verifies: L.armv7a.17
-#[cfg(target_arch = "arm")]
-fn check_kernel_tree_is_global() -> Result<(), &'static str> {
-    let (leaves, global) = global_leaves(ROOT_TABLE.load(Ordering::Relaxed));
-    if leaves == 0 || global != leaves {
-        println_unlogged!(
-            "  global   {} of the kernel's {leaves} leaves are not global",
-            leaves - global
-        );
-        return Err("the kernel's tree holds a non-global leaf after the loader's alias went");
-    }
-    println!("  global   {leaves} kernel leaves, every one global");
     Ok(())
 }
 
@@ -278,25 +258,10 @@ pub(crate) fn check_sealed_image(view: &BootView<'_>) -> Result<SealReport, Writ
 /// Takes a root rather than going through [`with_tables`](super::with_tables) because the W^X
 /// sweep also walks the loader's identity map, which on `AArch64` is a second
 /// tree with a root of its own.
-fn sweep(root: u64, visit: impl FnMut(Leaf) -> bool) -> WalkOutcome {
+pub(crate) fn sweep(root: u64, visit: impl FnMut(Leaf) -> bool) -> WalkOutcome {
     let _held = TABLES.lock();
     let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
     mapper.for_each_leaf(&KernelPhysMem, visit)
-}
-
-/// The leaves under `root`, and how many of them are global: for ARMv7-A's
-/// ASIDs, whose every argument rests on a user leaf being non-global and,
-/// once the loader's alias has gone, a kernel leaf global (L.armv7a.17).
-#[cfg(target_arch = "arm")]
-pub(crate) fn global_leaves(root: u64) -> (u64, u64) {
-    let mut global = 0;
-    let outcome = sweep(root, |leaf| {
-        if leaf.flags.global {
-            global += 1;
-        }
-        true
-    });
-    (outcome.leaves, global)
 }
 
 /// What `virt` is mapped as, or `None` if it is not mapped.

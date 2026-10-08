@@ -350,9 +350,24 @@ pub(crate) fn break_before_make(page: u64) {
 #[cfg(target_arch = "x86_64")]
 pub(crate) const fn break_before_make(_page: u64) {}
 
-// The boot check of ARMv7-A's ASIDs, the `asid` line; nothing elsewhere.
+// The boot check of ARMv7-A's ASIDs, the `asid` line, and the kernel tree's
+// `global` line; nothing elsewhere.
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::check_address_space_ids;
+pub(crate) use armv7a::{check_address_space_ids, check_kernel_tree_global};
+
+/// Nothing to ask of the kernel's tree beyond W^X here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "arm"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "ARMv7-A's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_kernel_tree_global() -> Result<(), &'static str> {
+    Ok(())
+}
 
 /// No address space identifiers to check here.
 ///

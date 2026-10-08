@@ -143,7 +143,7 @@ fn spend_until(spender: &AddressSpace, mut stop: impl FnMut() -> bool) -> u64 {
         if stop() {
             break;
         }
-        spender.address_space_tag().forget();
+        spender.tag.forget();
         let _ = install_and_look(spender, false);
     }
     super::counts(0).rollovers - before
@@ -230,7 +230,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
 
     // An install and an uninstall, read back from the registers.
     let (number, root_right, bit0_clear, epd0_clear, seen) = install_and_look(&a, true);
-    if number == 0 || u64::from(number) != a.address_space_tag().get() & 0xFF {
+    if number == 0 || u64::from(number) != a.tag.get() & 0xFF {
         return Err("asid: an install did not write the space's ASID");
     }
     if !root_right || !bit0_clear || !epd0_clear {
@@ -244,7 +244,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
     }
 
     // Every leaf of a user space is non-global.
-    let (leaves, global) = mm::check::global_leaves(a.root_table());
+    let (leaves, global) = global_leaves(a.root_table());
     if leaves == 0 || global != 0 {
         return Err("asid: a user space has a global leaf, or none at all");
     }
@@ -281,20 +281,20 @@ pub(crate) fn run() -> Result<(), &'static str> {
     // a few tries; on one processor the first always reuses it.
     let mut reused = None;
     for _ in 0..PROBE_TRIES {
-        a.address_space_tag().forget();
+        a.tag.forget();
         let (n, _, _, _, seen) = install_and_look(&a, true);
         if seen != MARK_A {
             return Err("asid: a space read something else than its own page");
         }
-        let generation = generation_of(a.address_space_tag().get());
+        let generation = generation_of(a.tag.get());
         let _ = spend_until(&spender, || super::counts(0).generation > generation);
         let _ = spend_until(&spender, || super::counts(0).next_free == Some(n));
-        b.address_space_tag().forget();
+        b.tag.forget();
         let (given, _, _, _, seen) = install_and_look(&b, true);
         if seen != MARK_B {
             return Err("asid: a space given a reused number read the page of the space before it");
         }
-        if given == n && number_of(b.address_space_tag().get()) == n {
+        if given == n && number_of(b.tag.get()) == n {
             reused = Some(n);
             break;
         }
@@ -318,5 +318,43 @@ pub(crate) fn run() -> Result<(), &'static str> {
             ""
         },
     );
+    Ok(())
+}
+
+/// The leaves under `root`, and how many of them are global: every ASID
+/// argument rests on a user leaf being non-global and, once the loader's
+/// alias has gone, a kernel leaf global (L.armv7a.17).
+fn global_leaves(root: u64) -> (u64, u64) {
+    let mut global = 0;
+    let outcome = mm::check::sweep(root, |leaf| {
+        if leaf.flags.global {
+            global += 1;
+        }
+        true
+    });
+    (outcome.leaves, global)
+}
+
+/// Once the loader's alias has gone, the kernel's own tree holds no
+/// non-global leaf, so `TTBR0`'s tables are the only ones whose entries an
+/// ASID tags: what lets one `TTBR0` write change root and ASID together
+/// (DDI 0406C.d B3.10.4; `docs/OPAQUE-KERNEL.md` §9.13, item 5's DK1
+/// exception). The `global` line, after the W^X sweep.
+///
+/// # Errors
+///
+/// A non-global kernel leaf, or no leaf at all.
+///
+/// Verifies: L.armv7a.17
+pub(crate) fn kernel_tree_is_global() -> Result<(), &'static str> {
+    let (leaves, global) = global_leaves(mm::root_table());
+    if leaves == 0 || global != leaves {
+        crate::console::println_unlogged!(
+            "  global   {} of the kernel's {leaves} leaves are not global",
+            leaves - global
+        );
+        return Err("the kernel's tree holds a non-global leaf after the loader's alias went");
+    }
+    println!("  global   {leaves} kernel leaves, every one global");
     Ok(())
 }

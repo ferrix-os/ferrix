@@ -1265,6 +1265,16 @@ pub(crate) fn check_address_space_ids() -> Result<(), &'static str> {
     asid::check::run()
 }
 
+/// The `global` line: the kernel's tree holds only global leaves once the
+/// loader's alias has gone (`asid::check`).
+///
+/// # Errors
+///
+/// What did not hold.
+pub(crate) fn check_kernel_tree_global() -> Result<(), &'static str> {
+    asid::check::kernel_tree_is_global()
+}
+
 /// The order a remap needs between taking a user entry down and writing the
 /// one that replaces it (F-67, L.user.125): the page's broadcast
 /// invalidation, completed, which interrupts nobody and so may run under the
