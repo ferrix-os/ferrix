@@ -26,6 +26,100 @@ fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
 load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
 bootefi ${kernel_addr_r} ${fdtcontroladdr}
 
+# B6 step 6's profile (os07/prof-armv7, measurement only): 42 PMCCNTR
+# stamps on one channel_write_read direction; the tables print before
+# board-bench end ipc-bench. The ablation boots below read a piece's cost
+# by ABAB of prof=off against prof=off <ablation> (same image), on
+# ipc-bench's own call/domain-call cycles; the kernel prints the ablation
+# mask it took ("ablations 0x..") -- check it on every boot.
+[ferrix-prof]
+setenv bootargs
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-off]
+setenv bootargs prof=off
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-novfp]
+setenv bootargs prof=off prof.skip-vfp-UNSAFE
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-flush]
+setenv bootargs prof=off prof.extra-flush
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-notls]
+setenv bootargs prof=off prof.skip-tls-UNSAFE
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-nocharge]
+setenv bootargs prof=off prof.skip-cpu-charge-UNSAFE
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-nospec]
+setenv bootargs prof=off prof.skip-spec-record-UNSAFE
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+[ferrix-prof-noaudit]
+setenv bootargs prof=off prof.skip-audit-UNSAFE
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/prof/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
 # Level 4 (B5) on Ferrix: lmbench and speedtest1, the same binaries and
 # busybox as [linux-posix] (os07/ferrix-posix, measurement only).
 [ferrix-posix]
