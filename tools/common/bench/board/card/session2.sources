@@ -1,0 +1,19 @@
+# gather.sh sources for the second board session: every Ferrix image
+# rebuilt on one base, main d884add58 with F-69's fix (os07-images,
+# measurement only). <path on bootfs>  <directory on nazuna>, each with
+# SHA256SUMS. The Ferrix branches, all off d884add58:
+#   main      os07/images-main      B3's three measurement commits
+#   asid      os07/images-asid      main + os07/asid (merged)
+#   asid-ctl  os07/images-asid-ctl  asid with OPAQUE-KERNEL 9.13's A11 control
+#   prof      os07/images-prof      main + os07/prof-armv7, rebased
+#   posix     os07/images-posix     main + os07/ferrix-posix
+# Linux, seL4 and the card's empty CMDLINE.TXT are the first session's.
+bench/linux           ~/.local/share/ferrix/board-bench/linux/out/card/bench/linux
+bench/sel4            ~/.local/share/ferrix/board-bench/sel4/out/card/bench/sel4
+bench/ferrix/main     ~/.local/share/ferrix/board-bench/ferrix-v2/main/bench/ferrix/main
+bench/ferrix/asid     ~/.local/share/ferrix/board-bench/ferrix-v2/asid/bench/ferrix/asid
+bench/ferrix/asid-ctl ~/.local/share/ferrix/board-bench/ferrix-v2/asid-ctl/bench/ferrix/asid-ctl
+bench/ferrix/prof     ~/.local/share/ferrix/board-bench/ferrix-v2/prof/bench/ferrix/prof
+bench/ferrix/posix    ~/.local/share/ferrix/board-bench/ferrix-v2/posix/bench/ferrix/posix
+EFI/BOOT              ~/.local/share/ferrix/board-bench/ferrix-v2/main/EFI/BOOT
+FERRIX                ~/.local/share/ferrix/board-bench/card-extra/FERRIX

@@ -26,6 +26,41 @@ fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
 load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
 bootefi ${kernel_addr_r} ${fdtcontroladdr}
 
+# B6 step 4, ASIDs (os07/asid on main, branch os07/images-asid; measurement
+# only, session2.sources): the same ipc-bench card as [ferrix-main], to be
+# alternated with it. Check two boot lines on every boot: `asid` must end
+# "number n reused by another space, which read its own page" and print the
+# board's CTR and ID_MMFR1; `global` must say every kernel leaf is global.
+[ferrix-asid]
+setenv bootargs
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+# The A11 control for the run above (OPAQUE-KERNEL.md 9.13, "The DK1 run
+# owed"): the rollover's TLBIALL replaced by a nop. On the board it must stop
+# with "FERRIX-PANIC stage 6 self-check failed: asid: a space given a reused
+# number read the page of the space before it". Under QEMU it boots (QEMU
+# empties its TLB on every ASID change). If it boots on the board too, the
+# run is inconclusive, not passed. The panic comes before init, so
+# ferrix.onexit=reset need not apply: if the board does not come back by
+# itself, rotate.ps1 asks for a reset press.
+[ferrix-asid-ctl]
+setenv bootargs
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid-ctl/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid-ctl/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/asid-ctl/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
 # B6 step 6's profile (os07/prof-armv7, measurement only): 42 PMCCNTR
 # stamps on one channel_write_read direction; the tables print before
 # board-bench end ipc-bench. The ablation boots below read a piece's cost
