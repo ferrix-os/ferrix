@@ -68,3 +68,28 @@ Each invocation writes a new `run-NNN/` under `<logs>`:
 reads Ferrix's boots.
 
 `-DryRun` prints what would be sent and opens no port.
+
+## The first session, in order
+
+Each step needs the one before it; a step that fails stops the session
+there, and its logs say why.
+
+1. **Card.** `gather.sh` everything built; `stage-card.ps1` backs the card
+   up and writes it (`-ClearFerrix` if the desktop must make room).
+2. **Board check.** At U-Boot: `printenv kernel_addr_r fdt_addr_r
+   ramdisk_addr_r` against `card.plan`'s addresses; then each image boots
+   once with `-Rounds 1`: `linux`, `sel4test` (the port's correctness, debug
+   build), `sel4`, `ferrix-main`. Every boot must end in `board-bench end`
+   and come back to U-Boot by itself.
+3. **Main table, one core.** `-Order linux,sel4,ferrix-main -Rounds 5`.
+4. **Ferrix's profile.** `ferrix-prof` three times, beside one more
+   `ferrix-main` for the uninstrumented figure.
+5. **Both cores.** `linux-smp2`, seL4's SMP build and Ferrix without
+   `nosmp`, five rounds.
+6. **B6 changes,** each alternated with `ferrix-main` as its base, five
+   rounds a side.
+7. **Restore** the desktop with `stage-card.ps1 -Restore`.
+
+Every run directory stays as written. The records go through
+`bench-ipc --board stm32mp157d-dk1 --board-log … --record` for Ferrix,
+and the Linux and seL4 lines are kept beside them.
