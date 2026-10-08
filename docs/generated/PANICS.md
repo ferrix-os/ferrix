@@ -1383,16 +1383,24 @@ them, expecting 1:3 and 1:5 to act as /dev/null and /dev/zero and a number devfs
 lacks, or a block device, to be ENXIO. A failure means a program would be told
 something false about a file: a size read out of padding, a listing that skips
 or repeats a name, a working directory that is not where chdir put it, or a
-device node reaching the wrong device.
+device node reaching the wrong device. Then `syscall::check::run_seam_count`
+pins a caller to each processor to make 64 Linux calls through the whole
+dispatch, and the system call count, which each processor keeps in its own
+record, must rise by exactly that many times the processors.
 
-1. `arch::STAT_LAYOUT` names the wrong `struct stat` for this architecture, or a
+1. The system call count missed a processor (`fs::seam::syscalls_except` does
+   not sum every record), lost an add to a migration between finding the slot
+   and adding, or counted a call twice; or another Linux caller ran in the
+   check's window, where at that point of stage 8 nothing should
+   (`run_seam_count` says why).
+2. `arch::STAT_LAYOUT` names the wrong `struct stat` for this architecture, or a
    layout in `src/lib/proto/linux-abi` moved a field.
-2. An arm of `syscall::path::dispatch` reads its arguments in the wrong order or
+3. An arm of `syscall::path::dispatch` reads its arguments in the wrong order or
    at the wrong width.
-3. The namespace in `src/lib/fs/vfs` changed what a walk, a rename or a
+4. The namespace in `src/lib/fs/vfs` changed what a walk, a rename or a
    directory cursor does.
-4. /tmp is not mounted, or a previous run left /tmp/pathcheck behind.
-5. `fs::devfs::attach_device` is not called from `openat`, or
+5. /tmp is not mounted, or a previous run left /tmp/pathcheck behind.
+6. `fs::devfs::attach_device` is not called from `openat`, or
    `devfs::open_char_device` matches numbers in a different encoding from the
    one `mknodat` stores.
 
@@ -1494,7 +1502,12 @@ mount -t devtmpfs must each make a new instance on a directory under /tmp: the
 check process must be found through the procfs, zero must read zeros from the
 devtmpfs, /proc/mounts must list both, and both must unmount; mount -t sysfs
 must mount and unmount, and mount -t devpts, a type there is not, must be
-ENODEV. The whole run is done twice and must leave no frame behind.
+ENODEV. The whole run is done twice and must leave no frame behind. After it,
+`fs::pipe_check::run` blocks a kernel task in a pipe read, and in a write to a
+full pipe, and each waker the pipe has -- bytes written, room made by a read,
+the last writer and the last reader closing, bytes put back, a splice -- must
+end the wait by a wake within two seconds with the answer it says: a pipe's
+waits trust their queues, and have no recheck to end a wait a waker forgot.
 
 1. A pipe end's drop no longer counts it out of the buffer, so a reader never
    sees end of file and the pipe outlives its descriptors as leaked frames.
@@ -1508,6 +1521,10 @@ ENODEV. The whole run is done twice and must leave no frame behind.
 5. `splice` or `copy_file_range` in `src/kernel/src/syscall/pipe.rs` moved the
    wrong bytes or offset, or `fs::pipe::splice_pipes` lost bytes between two
    pipes.
+6. A pipe waker no longer wakes the queue its wait is on (`write_stream`,
+   `took`, `wake_both`, `unread_stream`, `splice_pipes`), or a new waker of a
+   pipe wait is missing from the list beside `End::wait_to_read`; the `pipewake
+   <waker>` line names it.
 
 See: src/kernel/src/fs/check.rs run_calls; src/kernel/src/fs/pipe.rs;
 src/kernel/src/syscall/pipe.rs; src/kernel/src/syscall/fsctl.rs;
