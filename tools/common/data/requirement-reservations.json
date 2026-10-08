@@ -59,6 +59,13 @@
       "branch": "os07/lazyvfp",
       "date": "2026-10-08",
       "purpose": "ARMv7-A lazy VFP for the DK1 IPC matrix: FPEXC.EN clear for a task that has not used VFP, its first use, SIGILL at the instruction's own address (F-68), the register file zero whenever EN is clear, the record as the VFP state while EN is clear, and a VFP user's state on whichever core resumes it (OPAQUE-KERNEL.md 9.15; consultant os07-lazyvfp-cert, ledger 2026-10-08 line 606, L1 and L6)"
+    },
+    {
+      "ids": ["L.sched.71-72"],
+      "owner": "os07-stall",
+      "branch": "os07/stall-fix",
+      "date": "2026-10-08",
+      "purpose": "The lost wakeup that stalls ipc-bench on ARMv7-A: no switch between a wait's set_state(BLOCKED) and the end of its last look, so a waiter whose entry a wake drained while it was still runnable is never left blocked off every queue; the general wait's and the parked block's last look, one check each (design to its consultant os07-stall-cert)"
     }
   ]
 }
