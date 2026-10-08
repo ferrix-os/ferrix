@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1619,
+  "max_total_lines": 1621,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -32,7 +32,10 @@
     "1619 since 2026-10-07 (po10-dk1, L.armv7a.4) for the user-readable",
     "counter: ARMv7-A cpu.rs's CNTKCTL read and write (+2), and the runtime's",
     "isb before AArch64's CNTVCT_EL0 read (+1) and ARMv7-A's isb and mrrc",
-    "(+2, inside its entry's 20); the tree went from 1614 to 1619."
+    "(+2, inside its entry's 20); the tree went from 1614 to 1619.",
+    "1621 since 2026-10-08 (os07-ustate, F-66, docs/OPAQUE-KERNEL.md §9.14) for",
+    "ARMv7-A cpu.rs's TPIDRURW read and write, the thread ID register USR mode",
+    "writes itself, which the switch now saves and loads at every switch."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -101,8 +104,8 @@
     },
     {
       "file": "src/kernel/src/arch/armv7a/cpu.rs",
-      "max_lines": 105,
-      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44); 105 for CNTKCTL's read and write (`allow_user_counter`, L.armv7a.4), what user mode may read of the generic timer, a coprocessor 15 register like the rest."
+      "max_lines": 107,
+      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44); 105 for CNTKCTL's read and write (`allow_user_counter`, L.armv7a.4), what user mode may read of the generic timer, a coprocessor 15 register like the rest; 107 for TPIDRURW's read and write (F-66, L.armv7a.11), the thread ID register a program writes itself and the switch moves at every switch."
     },
     {
       "file": "src/kernel/src/arch/armv7a/mmio.rs",

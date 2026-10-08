@@ -525,15 +525,19 @@ package FerrixItemRequirements {
         }
         requirement <'H.SCHED.8'> userRegisterStatePerTask : ItemHighLevel {
             attribute :>> statement = "The user-mode state a trap does not save --
-                the FS and GS bases and the x87 and SSE registers -- shall be the
-                running task's own whenever it runs in ring 3, inherited by a fork
-                child and reset by an execve, except that the vector registers of
-                a task resumed from a blocking native call may be the initial
-                state instead (H.SCHED.12).";
+                on x86-64 the FS and GS bases and the x87 and SSE registers; on
+                ARMv7-A the thread ID registers TPIDRURO and TPIDRURW, the VFP
+                registers and FPSCR, and user mode's banked sp and lr -- shall be
+                the running task's own whenever it runs in user mode, inherited by
+                a fork child and reset by an execve, except that the vector
+                registers of a task resumed from a blocking native call may be the
+                initial state instead (H.SCHED.12).";
             attribute :>> criterion = "Two programs pinned to one processor, each
-                with its own FS and GS bases and XMM, MXCSR and x87 control values,
-                read back their own across N yields: 0 mismatches; a fork child
-                reads its parent's, and an execve'd image the reset values.";
+                with its own FS and GS bases and XMM, MXCSR and x87 control values
+                on x86-64, or its own TPIDRURO and TPIDRURW on ARMv7-A, read back
+                their own across N yields: 0 mismatches; a fork child reads its
+                parent's, and an execve'd image the reset values (the ARMv7-A `tls`
+                line).";
             attribute :>> parent = ("O.ISOLATE", "G.1");
         }
         requirement <'H.SCHED.9'> vdsoClocksAnswerAsTheCall : ItemHighLevel {

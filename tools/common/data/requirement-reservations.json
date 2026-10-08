@@ -54,7 +54,7 @@
       "purpose": "IPC regression from cpu.max/cpu.stat: a processor's cpu.stat charge kept back per run queue and moved into the job's slots exactly once (consultant po11-cpumax-cert, ledger 2026-10-08 line 565, C7)"
     },
     {
-      "ids": ["L.armv7a.5-12"],
+      "ids": ["L.armv7a.5-9"],
       "owner": "os07-ustate",
       "branch": "os07/ustate",
       "date": "2026-10-08",

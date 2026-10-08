@@ -108,6 +108,23 @@ pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
     None
 }
 
+/// Stage 9: what the switch gives a program back, read by programs in USR
+/// mode -- the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3b
+/// and F-66). See `switch::check`.
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    let traded = switch::check::run_tls()?;
+    crate::console::println!(
+        "  tls      {traded} switches between two programs' TPIDRURO and TPIDRURW, each its \
+         own; a nanosleep, a value equal to the one last written, a fork child and an execve'd \
+         image each read theirs"
+    );
+    Ok(())
+}
+
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Stat64;
 
 /// ARMv7-A's `struct epoll_event`, 16 bytes: not packed, and the EABI aligns
