@@ -45,6 +45,13 @@
       "branch": "po10/f-endpoint-drop",
       "date": "2026-10-07",
       "purpose": "F-65: fast_write_read lets go of its endpoint reference only with interrupts open (po10-obj's consultant, ledger 2026-10-07 line 520, E8; L.object.171-178 stay po9-obj's until cut 3 lands)"
+    },
+    {
+      "ids": ["L.sched.69-70"],
+      "owner": "po11-slots",
+      "branch": "po11/slots",
+      "date": "2026-10-08",
+      "purpose": "IPC round trip toward under 700 ns: the direct switch's run-slot take and give-back as a load and a store under the home lock, and the outgoing task's current reference kept on the queue across direct switches (po11-slots, design to its consultant)"
     }
   ]
 }
