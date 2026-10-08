@@ -585,7 +585,7 @@ fn copy_on_write(
         if charged.is_ok() {
             crate::object::quota::uncharge_frame(owner);
         }
-        println!(
+        crate::println!(
             "  hunt     cow: no user frame; group {owner} charge {:?}, a raw frame {:?}",
             charged.is_ok(),
             mm::allocate_frames(0).inspect(|&f| mm::deallocate_frames(f, 0)).is_some()
@@ -602,7 +602,7 @@ fn copy_on_write(
             Ok((vmo.page(index).unwrap_or(shared), None))
         }
         Err(Kept::NoMemory) => {
-            println!("  hunt     cow: take_page had no memory");
+            crate::println!("  hunt     cow: take_page had no memory");
             let _ = mm::release_frame(copy);
             Err(SpaceError::OutOfMemory)
         }
