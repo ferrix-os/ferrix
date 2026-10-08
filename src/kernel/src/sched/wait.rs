@@ -20,7 +20,38 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sync::IrqSpinLock;
+use ferrix_sync::{IrqControl, IrqSpinLock};
+
+/// MEASUREMENT ONLY (os07-stall): spins added inside a trusting wait's two
+/// windows, from `FERRIX_STALL_WIDEN` at build time; 0 adds none.
+const STALL_WIDEN: u32 = parse_u32(option_env!("FERRIX_STALL_WIDEN"));
+/// MEASUREMENT ONLY (os07-stall): `FERRIX_STALL_MASK=1` masks interrupts from
+/// a trusting wait's `BLOCKED` through its last look and its switch.
+const STALL_MASK: bool = matches!(option_env!("FERRIX_STALL_MASK"), Some("1"));
+
+/// A decimal number, or 0.
+const fn parse_u32(text: Option<&str>) -> u32 {
+    let Some(text) = text else {
+        return 0;
+    };
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    let mut value: u32 = 0;
+    while at < bytes.len() {
+        value = value * 10 + (bytes[at] - b'0') as u32;
+        at += 1;
+    }
+    value
+}
+
+/// MEASUREMENT ONLY (os07-stall): the spin.
+fn stall_widen() {
+    let mut left = STALL_WIDEN;
+    while left > 0 {
+        core::hint::spin_loop();
+        left = core::hint::black_box(left) - 1;
+    }
+}
 
 use crate::arch;
 use crate::fallible;
@@ -248,6 +279,9 @@ impl WaitQueue {
                 self.count.store(waiters.len(), Ordering::Release);
                 listed
             };
+            if recheck.is_none() {
+                stall_widen();
+            }
             let wake_at = if listed || wake_at != u64::MAX {
                 wake_at
             } else {
@@ -256,12 +290,15 @@ impl WaitQueue {
             if wake_at != u64::MAX {
                 task.set_sleep_deadline(wake_at);
             }
+            let masked = (STALL_MASK && recheck.is_none())
+                .then(<arch::Irq as IrqControl>::disable);
             task.set_state(BLOCKED);
             // A wait that trusts its wakes has no recheck to find a wake it
             // missed, so the store above is ordered before `ready`'s loads
             // for the wakers that take no lock this wait takes: a kill and
             // an `execve`, whose own fence is in `sched::work::wake_posted`.
             if recheck.is_none() {
+                stall_widen();
                 core::sync::atomic::fence(Ordering::SeqCst);
             }
 
@@ -274,6 +311,9 @@ impl WaitQueue {
             // as one that found it asleep would be.
             if ready() {
                 task.set_state(RUNNABLE);
+                if let Some(saved) = masked {
+                    <arch::Irq as IrqControl>::restore(saved);
+                }
                 let _ = task.take_sleep_deadline();
                 if !self.unqueue(task.id) {
                     let _ = self.woken.fetch_add(1, Ordering::Relaxed);
@@ -281,6 +321,9 @@ impl WaitQueue {
                 return true;
             }
             super::block();
+            if let Some(saved) = masked {
+                <arch::Irq as IrqControl>::restore(saved);
+            }
             // Running again, so not filed anywhere: whatever deadline is left
             // belongs to no sleep and must not reach the next switch.
             let _ = task.take_sleep_deadline();
