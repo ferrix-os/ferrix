@@ -27,7 +27,7 @@ use ferrix_sync::{IrqControl, IrqSpinLock};
 const STALL_WIDEN: u32 = parse_u32(option_env!("FERRIX_STALL_WIDEN"));
 /// MEASUREMENT ONLY (os07-stall): `FERRIX_STALL_MASK=1` masks interrupts from
 /// a trusting wait's `BLOCKED` through its last look and its switch.
-const STALL_MASK: bool = matches!(option_env!("FERRIX_STALL_MASK"), Some("1"));
+const STALL_MASK: bool = parse_u32(option_env!("FERRIX_STALL_MASK")) == 1;
 
 /// A decimal number, or 0.
 const fn parse_u32(text: Option<&str>) -> u32 {
