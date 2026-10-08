@@ -6,7 +6,10 @@
 //! compare-exchange from null, FX-0534 when it fails), `SlotCell::holds`
 //! (a load); their callers `Task::take_run_slot`, `return_run_slot`,
 //! `take_sleep_slot`, `return_sleep_slot`, `holds_slots` and
-//! `holds_sleep_slot`.
+//! `holds_sleep_slot`; and the direct switch's `SlotCell::take_held` and
+//! `put_held` (`L.sched.69`), through `Task::take_run_slot_at_home` and
+//! `return_run_slot_at_home`, a load and a store each under the home
+//! queue's lock (`held_under_the_home_lock`).
 //!
 //! A node is a number here, never zero. The models assert the cell's two
 //! promises over every interleaving:
@@ -195,4 +198,81 @@ fn a_double_give_back_is_stopped() {
 #[should_panic(expected = "a node given back was lost")]
 fn control_a_double_give_back_without_the_assertion() {
     a_give_back_and_a_take(true, true);
+}
+
+/// `SlotCell::take_held` and `put_held` (`L.sched.69`): the direct switch's
+/// take of the peer's run slot and give-back of the caller's, each a load
+/// and a store, made under the home queue's lock -- here a `Mutex` -- which
+/// every other taker and giver of those two cells holds too: a waker of
+/// the peer taking its slot to queue it (a swap, `insert_at`), and a taker
+/// of the caller's cell that gives back what it got. With the lock, no
+/// node is lost or held twice. Without it -- the control -- the load and
+/// store race the swaps.
+fn held_under_the_home_lock(locked: bool) {
+    model(move || {
+        let peer = Arc::new(Cell::new(7, false, false));
+        let caller = Arc::new(Cell::new(0, false, false));
+        let home = Arc::new(loom::sync::Mutex::new(()));
+        let direct = {
+            let (peer, caller, home) = (Arc::clone(&peer), Arc::clone(&caller), Arc::clone(&home));
+            thread::spawn(move || {
+                let guard = locked.then(|| home.lock().unwrap());
+                // `take_held`: a load and, if a node was there, a store.
+                let node = peer.node.load(Ordering::Acquire);
+                if node != 0 {
+                    peer.node.store(0, Ordering::Release);
+                }
+                // `put_held`: a load that must read empty, and a store of
+                // the node the queue let go (9).
+                assert_eq!(
+                    caller.node.load(Ordering::Acquire),
+                    0,
+                    "the slot was given back into a full cell"
+                );
+                caller.node.store(9, Ordering::Release);
+                drop(guard);
+                (node != 0).then_some(node)
+            })
+        };
+        let waker = {
+            let (peer, home) = (Arc::clone(&peer), Arc::clone(&home));
+            thread::spawn(move || {
+                let _guard = home.lock().unwrap();
+                peer.take()
+            })
+        };
+        let looker = {
+            let (caller, home) = (Arc::clone(&caller), Arc::clone(&home));
+            thread::spawn(move || {
+                let _guard = home.lock().unwrap();
+                if let Some(node) = caller.take() {
+                    caller.put(node);
+                }
+            })
+        };
+        let by_direct = direct.join().unwrap();
+        let by_waker = waker.join().unwrap();
+        looker.join().unwrap();
+        let mut nodes: Vec<usize> = by_direct
+            .into_iter()
+            .chain(by_waker)
+            .chain(peer.take())
+            .chain(caller.take())
+            .collect();
+        nodes.sort_unstable();
+        assert_eq!(nodes, vec![7, 9], "the slot was lost or held twice");
+    });
+}
+
+#[test]
+fn a_held_take_and_give_back_under_the_home_lock() {
+    held_under_the_home_lock(true);
+}
+
+/// The control: the same load and store without the home lock lose a node
+/// or let two holders have one.
+#[test]
+#[should_panic(expected = "the slot was")]
+fn control_a_held_take_and_give_back_without_the_lock() {
+    held_under_the_home_lock(false);
 }

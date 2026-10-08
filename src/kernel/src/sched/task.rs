@@ -25,6 +25,7 @@ use core::sync::atomic::{
 use ferrix_sched::{CpuSet, EntityState, Node, Slot};
 use ferrix_sync::IrqControl;
 
+use super::queue::CpuQueue;
 use crate::arch;
 use crate::fallible::{self, AllocError};
 use crate::object::process::Host;
@@ -238,6 +239,40 @@ impl SlotCell {
                 "a task's slot was given back while its cell held one"
             );
         }
+    }
+
+    /// [`SlotCell::take`] as a load and a store, for a caller that holds
+    /// the lock every other taker and giver of this cell holds at this
+    /// moment (`L.sched.69`): the direct switch's peer, alive, blocked and
+    /// homed on the processor whose run-queue lock is held. Under that lock
+    /// no other access to the cell is in flight, so the pair is the swap.
+    fn take_held(&self) -> Option<TaskSlot> {
+        let node = self.0.load(Ordering::Acquire);
+        if node.is_null() {
+            return None;
+        }
+        self.0.store(core::ptr::null_mut(), Ordering::Release);
+        // SAFETY: (KMEM) a non-null pointer in the cell came from
+        // `Box::into_raw` in `new` or a give-back, and the store above took
+        // the cell's only copy of it: no other access to the cell is in
+        // flight under the lock the caller holds (`L.sched.69`), so this is
+        // the one box made from it.
+        Some(Slot::from_box(unsafe { Box::from_raw(node) }))
+    }
+
+    /// [`SlotCell::put`] as a load that must read empty and a store, for a
+    /// caller under the lock [`SlotCell::take_held`] names: the direct
+    /// switch's leaving caller, running on that processor. A cell that is
+    /// not empty stops the machine as `put` does (FX-0534).
+    fn put_held(&self, slot: TaskSlot) {
+        let node = Box::into_raw(slot.into_box());
+        if !self.0.load(Ordering::Acquire).is_null() {
+            crate::panic::fatal!(
+                crate::panic::catalog::TASK_SLOT_RETURNED_TWICE,
+                "a task's slot was given back while its cell held one"
+            );
+        }
+        self.0.store(node, Ordering::Release);
     }
 
     /// Whether the cell holds its slot.
@@ -484,6 +519,28 @@ impl Task {
     /// Have back the slot a run queue held this task in.
     pub(crate) fn return_run_slot(&self, slot: TaskSlot) {
         self.run_slot.put(slot);
+    }
+
+    /// [`Task::take_run_slot`] without a locked operation, for the direct
+    /// switch's peer only: alive, blocked and homed on the processor whose
+    /// run-queue lock the caller holds, which every other taker of a live
+    /// task's run slot holds too (`L.sched.69`).
+    ///
+    /// `_held` is the queue whose lock is held: only a holder of a queue's
+    /// lock can lend one, and only `CpuQueue::hand_over` calls this
+    /// (ledger line 566, P2).
+    pub(crate) fn take_run_slot_at_home(&self, _held: &mut CpuQueue) -> Option<TaskSlot> {
+        self.run_slot.take_held()
+    }
+
+    /// [`Task::return_run_slot`] without a locked operation, for the direct
+    /// switch's leaving caller only: running on the processor whose
+    /// run-queue lock the caller holds, its node just let go by that queue
+    /// (`L.sched.69`).
+    ///
+    /// `_held` as for [`Task::take_run_slot_at_home`].
+    pub(crate) fn return_run_slot_at_home(&self, slot: TaskSlot, _held: &mut CpuQueue) {
+        self.run_slot.put_held(slot);
     }
 
     /// Take the slot a sleeper set or the reaper holds this task in. `None`

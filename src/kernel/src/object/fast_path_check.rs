@@ -78,13 +78,23 @@ pub(crate) struct Report {
     pub(crate) trips: u64,
 }
 
-/// Run every case and print the boot line.
+/// Run every case and print the boot line; then require that no reference
+/// the direct switch kept broke its promise (`L.sched.70`), every trip
+/// having taken and given back its slots under the home lock
+/// (`L.sched.69`).
 ///
 /// # Errors
 ///
-/// As [`run`].
+/// As [`run`], and when a kept reference broke its promise.
+///
+/// Verifies: `L.sched.69`, `L.sched.70`
 pub(crate) fn run_and_report() -> Result<(), &'static str> {
     let fast = run()?;
+    // The direct switch's kept references (`L.sched.70`), after every case
+    // has parked, woken, killed and moved tasks the switch had kept.
+    if crate::sched::kept_broken() != 0 {
+        return Err("a task the direct switch kept was woken or moved still kept");
+    }
     if arch::FAST_WRITE_READ {
         crate::console::println!(
             "  fastcase {} cases of the fast path's tests answered as the general path answers \

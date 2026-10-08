@@ -80,10 +80,13 @@ pub(crate) enum Count {
     T12,
     /// T13: the caller or the peer has `END` posted.
     T13,
+    /// Not a test: a switch that moved the reference it kept into `current`
+    /// instead of counting a new one up (`L.sched.70`).
+    Kept,
 }
 
 /// How many [`Count`]s there are.
-const COUNTS: usize = Count::T13 as usize + 1;
+const COUNTS: usize = Count::Kept as usize + 1;
 
 /// The processors counted apart; any further ones share the last row.
 const COUNTED_PROCESSORS: usize = 64;
@@ -276,6 +279,12 @@ impl Direct {
                 "the direct switch's queue lost the tasks it was given"
             );
         };
+        // The outgoing task's reference is kept, not dropped, by the
+        // context switched to (`finish_switch`, `L.sched.70`). A flag still
+        // set is one a `finish_switch` never cleared: counted.
+        if core::mem::replace(&mut self.queue().keep_previous, true) {
+            super::note_kept_broken();
+        }
         // The lock goes with the switch, to the context switched to: this
         // `Direct`'s drop, which would let it go, never runs.
         let _ = core::mem::ManuallyDrop::new(self);

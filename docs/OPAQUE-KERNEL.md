@@ -2854,6 +2854,41 @@ send back:
     the pick is not the peer) and T11's control were fired again on this
     code.
 
+15. **The direct switch makes no locked operation on its slots or task
+    references (2026-10-08, po11-slots).** os-76's guest profile of `main`
+    put four locked read-modify-writes on every direction that the switch
+    does not need: the peer's run-slot swap, the caller's run-slot
+    compare-exchange, the count-up of the peer's reference for `current`,
+    and the count-down of the caller's old `current` reference in
+    `finish_switch`.
+    - *The slots (`L.sched.69`).* `CpuQueue::hand_over` takes the peer's
+      run slot with `take_run_slot_at_home` and gives back the caller's
+      with `return_run_slot_at_home`: a load and a store each, the
+      give-back's load required to read empty (FX-0534). Under this
+      processor's run-queue lock both cells are quiescent. The peer is
+      alive, blocked, homed here and unqueued (T11, A1), so no giver
+      holds its node, and every taker of a live blocked task's run slot
+      is a wake holding the home lock. The caller runs here, so its node
+      is this queue's to give back, and every taker of a running task's
+      slot holds this lock too. The `loom` model `held_under_the_home_lock`
+      checks the pair against a waker's swap and a taker of the caller's
+      cell under one lock, and its control without the lock fails.
+    - *The kept reference (`L.sched.70`).* `Direct::switch` marks the
+      switch (`keep_previous`), and `finish_switch` keeps the outgoing
+      task's `current` reference in `CpuQueue::kept` instead of dropping
+      it. The next direct switch, which in a round trip hands the
+      processor back to that task, moves it into `current`
+      (`running_reference`) instead of cloning. Any other switch lets it
+      go, after the lock as `previous` always was. While kept, the task is
+      parked here: blocked, homed here, unqueued, and its park holds
+      another reference. `insert_at`, `release` and `wake_onto` forget it
+      before the task is queued, let go or moved, and every wake holds a
+      reference of its own. So the kept reference is never a task's last,
+      and no task's drop comes later or elsewhere than before.
+      `finish_switch` counts in `KEPT_BROKEN` any kept reference it lets
+      go that broke this. `check_invariants` and the fast path's boot
+      check fail on it.
+
 ### 9.8 Steps 2 and 3: the designs (draft for the consultant)
 
 **Reviewed (2026-10-02): OK IF.** 2d is OK to build; 2a, 2b, 2c, 2e, 2f and

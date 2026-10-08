@@ -1520,140 +1520,140 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "904",
+      "lines": "924",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1314",
+      "lines": "1334",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1551",
+      "lines": "1571",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2167-2169",
+      "lines": "2195-2197",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2223",
+      "lines": "2251",
       "category": "defensive",
       "match": "queue.insert(previous);",
       "why": "A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3062-3063",
+      "lines": "3129-3130",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3067",
+      "lines": "3134",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3072-3073",
+      "lines": "3139-3140",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3076-3077",
+      "lines": "3143-3144",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3081",
+      "lines": "3148",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3084-3085",
+      "lines": "3151-3152",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3090",
+      "lines": "3157",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3094",
+      "lines": "3161",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3101",
+      "lines": "3168",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3106",
+      "lines": "3173",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3116",
+      "lines": "3183",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "250",
+      "lines": "268",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "262-263",
+      "lines": "280-281",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "344",
+      "lines": "362",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "462",
+      "lines": "483",
       "category": "defensive",
       "match": "task.return_run_slot(refused.slot);",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."

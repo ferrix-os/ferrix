@@ -547,7 +547,8 @@ package FerrixSchedRequirements {
                 compare-exchange from empty that stops the machine with FX-0534 when
                 the cell is not empty, asking whether it is held shall be one load,
                 and the task's drop shall free a node the cell holds; nothing shall
-                be allocated by any of them.";
+                be allocated by any of them. The direct switch's own take and
+                give-back of the run slot are L.sched.69's.";
             attribute :>> criterion = "The loom model of the cell finds no
                 interleaving of two takers, a give-back and a look where two
                 holders have the node or a node is lost, and fails both its controls
@@ -559,6 +560,38 @@ package FerrixSchedRequirements {
                 "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
                 "sched::task::Task::return_sleep_slot", "sched::task::Task::holds_slots",
                 "sched::task::Task::holds_sleep_slot");
+        }
+        requirement <'L.sched.69'> theDirectSwitchTakesItsSlotsUnderTheHomeLock : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall take the peer's run
+                slot and give back the caller's each by a load and a store, under the
+                run-queue lock of the processor both are homed on, which every other
+                taker and giver of those two cells holds at that moment; a give-back
+                into a cell that is not empty shall stop the machine with FX-0534.";
+            attribute :>> criterion = "The fast path's boot cases make their trips
+                through the two operations with every slot found again by the next
+                trip, the queue's invariants holding and FX-0534 never stopping the
+                machine; the loom model of the pair under one lock, beside a waker's
+                swap and a taker of the caller's cell, finds no node lost or held
+                twice, and fails its control without the lock.";
+            attribute :>> parent = ("H.SCHED.13", "H.FAIL.1");
+            attribute :>> unit = ("sched::task::Task::take_run_slot_at_home",
+                "sched::task::Task::return_run_slot_at_home");
+        }
+        requirement <'L.sched.70'> theDirectSwitchKeepsNoTasksLastReference : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall keep the outgoing
+                task's running reference on its processor's queue until the next
+                switch there, which moves it into the running task when it names
+                that task and lets it go otherwise; it shall be let go before that
+                task is queued, let go by its queue or moved, so that the kept
+                reference is never a task's last.";
+            attribute :>> criterion = "After every fast-path boot case, which park,
+                answer, kill, close and move tasks the switch kept, no kept reference
+                was let go naming a task that was not blocked on that processor,
+                was queued, or had no other reference (KEPT_BROKEN is zero), and the
+                check fails when the queue's insert does not let a kept task go.";
+            attribute :>> parent = ("H.SCHED.13", "H.FAIL.1");
+            attribute :>> unit = ("sched::queue::CpuQueue::forget_kept",
+                "sched::finish_switch");
         }
     }
 }

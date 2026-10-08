@@ -105,11 +105,13 @@ pub(crate) fn report_counts() {
         t11,
         t12,
         t13,
+        kept,
     ] = crate::sched::direct::counts();
+    let broken = crate::sched::kept_broken();
     println!(
         "  fastpath counts: trips={trips} parks={parks} declined T2={t2} T3={t3} T4={t4} \
          halves={halves} T6={t6} T7={t7} T8={t8} T9={t9} T10={t10} queue={queue} T11={t11} \
-         T12={t12} T13={t13}"
+         T12={t12} T13={t13} kept={kept} kept-broken={broken}"
     );
     // The selector skips are the switch's, so the direct switch takes them
     // too: DS or ES, FS, and GS, each counted apart.

@@ -154,6 +154,22 @@ pub(crate) struct CpuQueue {
     /// What was running before the last switch, for the incoming context to
     /// finish with.
     pub(crate) previous: Option<Arc<Task>>,
+    /// The reference `current` held to the task the last switch here left,
+    /// when that switch was a direct one: kept instead of dropped, so that
+    /// the next direct switch, which in a round trip hands the processor
+    /// straight back to it, moves it into `current` instead of counting a
+    /// new one up (`L.sched.70`). It names a task parked here, blocked and
+    /// homed on this processor, whose park holds another reference, so it
+    /// is never the task's last. Let go by the next switch here
+    /// (`finish_switch`), and before the task is queued here
+    /// ([`CpuQueue::insert_at`]), let go from here ([`CpuQueue::release`])
+    /// or moved away (`wake_onto`): a task is never woken still kept, so
+    /// its last reference is dropped where it was before.
+    pub(crate) kept: Option<Arc<Task>>,
+    /// Whether the switch in flight is a direct one, whose outgoing task
+    /// `finish_switch` keeps in [`CpuQueue::kept`]. Set by the direct
+    /// switch under this lock, read and cleared by `finish_switch`.
+    pub(crate) keep_previous: bool,
     /// Tasks asleep on this CPU, by the instant they wake, each in its own
     /// sleep slot: filing and waking allocate nothing.
     sleepers: Timeline<Arc<Task>>,
@@ -187,6 +203,8 @@ impl CpuQueue {
             current: None,
             idle: None,
             previous: None,
+            kept: None,
+            keep_previous: false,
             sleepers: Timeline::new(),
             load: Load::new(),
             load_updated: 0,
@@ -440,6 +458,9 @@ impl CpuQueue {
     /// is given, so that a caller that has read the clock once reads it no
     /// more: the direct switch's `hand_over`.
     pub(crate) fn insert_at(&mut self, task: &Arc<Task>, now: Option<u64>) {
+        // A kept task is let go before it is queued. The caller holds a
+        // reference, so this one is not the last.
+        drop(self.forget_kept(task));
         let Some(slot) = task.take_run_slot() else {
             super::note_missing_slot();
             return;
@@ -616,6 +637,12 @@ impl CpuQueue {
             self.account(crate::timer::now_nanos());
         }
         let (task, state, slot) = self.fair.remove(id)?;
+        // A queued task is never kept: one found kept was queued without
+        // being let go (`L.sched.70`, ledger line 566 P3).
+        if let Some(kept) = self.forget_kept(&task) {
+            super::note_kept_broken();
+            drop(kept);
+        }
         task.return_run_slot(slot);
         task.set_queued(false);
         self.rescale_slice();
@@ -676,7 +703,9 @@ impl CpuQueue {
         now: u64,
         between: impl FnOnce(Arc<Task>),
     ) -> Option<Arc<Task>> {
-        let Some(slot) = peer.take_run_slot() else {
+        // Without a locked operation: the peer is alive, blocked and homed
+        // here, and this queue's lock is held (`L.sched.69`).
+        let Some(slot) = peer.take_run_slot_at_home(self) else {
             super::note_missing_slot();
             return None;
         };
@@ -699,7 +728,10 @@ impl CpuQueue {
                     next.set_queued(true);
                 }
                 if let Some((_, task, state, slot)) = left {
-                    task.return_run_slot(slot);
+                    // Without a locked operation: the caller runs here, and
+                    // this queue, whose lock is held, let its node go
+                    // (`L.sched.69`).
+                    task.return_run_slot_at_home(slot, self);
                     task.store_entity_state(state);
                     task.set_queued(false);
                     // The caller set blocked and parked, its job's load let
@@ -714,7 +746,37 @@ impl CpuQueue {
                 return None;
             }
         }
-        self.fair.current().cloned()
+        self.running_reference()
+    }
+
+    /// A reference to the fair class's running task for `current`: the
+    /// kept one when it names that task (`L.sched.70`), moved; otherwise a
+    /// new one.
+    fn running_reference(&mut self) -> Option<Arc<Task>> {
+        let running = self.fair.current()?;
+        if self
+            .kept
+            .as_ref()
+            .is_some_and(|kept| Arc::ptr_eq(kept, running))
+        {
+            super::direct::count(super::direct::Count::Kept);
+            return self.kept.take();
+        }
+        Some(Arc::clone(running))
+    }
+
+    /// Let go of the kept reference if it names `task`, and answer it, for
+    /// the caller to drop: `task` is about to be queued, let go or moved
+    /// (`L.sched.70`).
+    pub(crate) fn forget_kept(&mut self, task: &Task) -> Option<Arc<Task>> {
+        if self
+            .kept
+            .as_ref()
+            .is_some_and(|kept| core::ptr::eq(Arc::as_ptr(kept), task))
+        {
+            return self.kept.take();
+        }
+        None
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.

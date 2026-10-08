@@ -550,6 +550,26 @@ const REAP_BATCH: usize = 16;
 /// would find nothing to object to.
 static DEAD_STILL_QUEUED: AtomicU64 = AtomicU64::new(0);
 
+/// Kept references (`CpuQueue::kept`, `L.sched.70`) let go by
+/// [`finish_switch`] that broke the keep's promise: the task was no longer
+/// blocked here, or was queued, or the reference was its last. Each would
+/// mean a wake or a move that did not let the task go first, and the
+/// task's last reference dropped later than it was before. Counted in
+/// [`finish_switch`], which sees every kept reference that a switch does
+/// not move into `current`, and reported by [`check_invariants`] and the
+/// fast path's check. Sticky, as [`DEAD_STILL_QUEUED`].
+static KEPT_BROKEN: AtomicU64 = AtomicU64::new(0);
+
+/// Count one kept reference that broke its promise ([`KEPT_BROKEN`]).
+pub(super) fn note_kept_broken() {
+    let _ = KEPT_BROKEN.fetch_add(1, Ordering::Relaxed);
+}
+
+/// How many kept references broke their promise ([`KEPT_BROKEN`]).
+pub(crate) fn kept_broken() -> u64 {
+    KEPT_BROKEN.load(Ordering::Relaxed)
+}
+
 /// Tasks that have exited and whose reaper has not yet dropped them.
 ///
 /// Raised in [`exit`] before the task is marked dead, so before anything can
@@ -1712,6 +1732,11 @@ enum Placed {
 /// its affinity allows ([`may_place`]) where nothing else is queued. Anything
 /// else is the wake at home, exactly as before.
 ///
+/// A task its home kept after a direct switch (`CpuQueue::kept`,
+/// `L.sched.70`) is in state 2; the move lets the kept reference go before
+/// the task leaves, and the wake at home before it is queued
+/// (`CpuQueue::insert_at`).
+///
 /// The move is os-35's `os-35/ipc-wake` (87675432). A task already at home
 /// on the waker's processor is woken there the same way, deferred
 /// (`wake_at_home`).
@@ -1791,6 +1816,9 @@ fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
         }
         // Whatever sleep it meant is over, as the wake at home ends it.
         let _ = task.take_sleep_deadline();
+        // A kept task is let go before it moves (`L.sched.70`); the caller
+        // holds a reference, so this one is not the last.
+        drop(home_queue.forget_kept(task));
         task.set_state(RUNNABLE);
         task.set_cpu(here);
         // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
@@ -2464,7 +2492,10 @@ pub(crate) unsafe fn with_own_user_state<R>(
     .flatten()
 }
 
-/// Release the lock the switch handed over, and dispose of what ran before.
+/// Release the lock the switch handed over, and dispose of what ran before:
+/// a dead task to the reaper; after a direct switch, a task parked here into
+/// the queue's kept reference (`L.sched.70`), letting the one it replaces
+/// go; otherwise its reference, and any kept one, dropped after the lock.
 fn finish_switch() {
     let Some(lock) = this_cpu().and_then(queue_of) else {
         return;
@@ -2479,6 +2510,7 @@ fn finish_switch() {
         borrow::audit(borrow::Site::Switch, queue.current.as_ref());
     }
     let previous = queue.previous.take();
+    let keep = core::mem::take(&mut queue.keep_previous);
     let dead = previous.as_ref().is_some_and(|task| task.is_dead());
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
@@ -2490,9 +2522,39 @@ fn finish_switch() {
     if dead && previous.as_ref().is_some_and(|task| task.is_queued()) {
         let _ = DEAD_STILL_QUEUED.fetch_add(1, Ordering::Relaxed);
     }
+    // **The outgoing task of a direct switch is kept, not dropped**
+    // (`L.sched.70`): the next direct switch here, which in a round trip
+    // hands the processor back to it, moves the reference into `current`
+    // instead of counting a new one up. Any other switch lets the kept one
+    // go, as does the keep that replaces it: dropped below, after the
+    // lock, where `previous` always was. A kept task let go here must still
+    // be asleep here, unqueued, with another reference.
+    // Kept only while it is parked here: blocked, unqueued, homed on this
+    // processor (ledger line 566, P3). Anything else is counted and dropped
+    // as before.
+    let keepable = previous.as_ref().is_some_and(|task| {
+        task.state() == task::BLOCKED && !task.is_queued() && Some(task.cpu()) == this_cpu()
+    });
+    if keep && !dead && !keepable {
+        note_kept_broken();
+    }
+    let (previous, released) = if keep && !dead && keepable {
+        (None, core::mem::replace(&mut queue.kept, previous))
+    } else {
+        (previous, queue.kept.take())
+    };
+    if released.as_ref().is_some_and(|task| {
+        task.state() != task::BLOCKED
+            || task.is_queued()
+            || Some(task.cpu()) != this_cpu()
+            || Arc::strong_count(task) < 2
+    }) {
+        note_kept_broken();
+    }
     // SAFETY: (SHARED) held as above, released exactly once, and the queue is not
     // touched afterwards.
     unsafe { lock.force_unlock() };
+    drop(released);
 
     if let Some(previous) = previous
         && dead
@@ -3054,6 +3116,11 @@ pub(crate) fn check_invariants() -> Result<(), &'static str> {
     <arch::Irq as IrqControl>::restore(saved);
     if DEAD_STILL_QUEUED.load(Ordering::Relaxed) != 0 {
         outcome = outcome.and(Err("a dead task is still queued"));
+    }
+    if KEPT_BROKEN.load(Ordering::Relaxed) != 0 {
+        outcome = outcome.and(Err(
+            "a task the direct switch kept was woken or moved still kept",
+        ));
     }
     outcome
 }

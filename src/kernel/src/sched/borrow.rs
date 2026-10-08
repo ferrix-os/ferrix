@@ -26,7 +26,9 @@
 //! the question is whether a task can be freed while its own code runs.
 //!
 //! 1. While a task runs, its processor's run queue holds an `Arc` to it as
-//!    `current`.
+//!    `current`. After a direct switch that `Arc` may be one the queue kept
+//!    from an earlier one (`CpuQueue::kept`, `L.sched.70`), moved rather
+//!    than counted up: a strong reference all the same.
 //! 2. A task stops running only at a switch, and when it is switched to again
 //!    it is `current` once more. A borrow held across a block inside the
 //!    closure is not used while the task is not running, and is valid again
@@ -34,7 +36,10 @@
 //! 3. A task is freed only when its last `Arc` goes. For a dead task that is
 //!    the reaper's, and the reaper takes a task only from `ZOMBIES`, where
 //!    `finish_switch` files it after the switch away from it for the last
-//!    time. After that switch none of its code runs.
+//!    time. After that switch none of its code runs. A reference the queue
+//!    keeps names only a task parked there, never a dead one, and is let go
+//!    before the task runs, moves or is queued again, so it never delays
+//!    that last `Arc`.
 //! 4. A task that migrates holds a reference to the task, not to a
 //!    processor's slot, so the move does not change what it names.
 //!
