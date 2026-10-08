@@ -314,6 +314,18 @@ pub(crate) fn cpu_hz() -> u64 {
     u64::from(c1.wrapping_sub(c0)).saturating_mul(frequency) / v1.wrapping_sub(v0).max(1)
 }
 
+/// A second of the system counter, spun: long enough for the console to
+/// send the 4 KiB its ring holds at 115200 baud (0.36 s), so no sample
+/// shares the processor with the transmit interrupt for lines already
+/// printed -- the boot's, or this program's own.
+pub(crate) fn settle() {
+    let frequency = u64::from(counters::cntfrq());
+    let start = counters::cntvct();
+    while counters::cntvct().wrapping_sub(start) < frequency {
+        core::hint::spin_loop();
+    }
+}
+
 /// One series: every sample kept, cycles and instructions apart, in memory
 /// mapped for them (a native program has no heap).
 pub(crate) struct Series {

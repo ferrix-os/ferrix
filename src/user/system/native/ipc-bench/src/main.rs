@@ -310,13 +310,29 @@ const END: &[u8] = b"END";
 /// MEASUREMENT ONLY: [`client`] timed by the PMU ([`pmu`]): the clock, the
 /// timer floor, the floor, the trip and the call here, then the domain run,
 /// whose client times `domain-call` and the after-the-call sweep. Nothing is
-/// printed until every series is measured.
+/// printed while a series is measured: this side's lines go out after its
+/// last series, the client's after its, and before each side starts the
+/// console is given a second to send what it holds ([`pmu::settle`]).
 fn pmu_client(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
     pmu::start().map_err(|why| {
         say(format_args!("ipc-bench pmu refused: {why}"));
         60
     })?;
     let mut text = pmu::Text::new().ok_or(61)?;
+    pmu::settle();
+    let measured = pmu_launcher_series(job, image, &mut text);
+    text.print();
+    let hz = measured?;
+    pmu::settle();
+    pmu_domain_run(job, image, hz)
+}
+
+/// MEASUREMENT ONLY: the launcher's series, into `text`; the measured clock.
+fn pmu_launcher_series(
+    job: &Job<Kernel>,
+    image: &Vmo<Kernel>,
+    text: &mut pmu::Text,
+) -> Result<u64, i32> {
     let mut series = pmu::Series::new().ok_or(61)?;
     let hz = pmu::cpu_hz();
     text.clock(hz);
@@ -342,22 +358,14 @@ fn pmu_client(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
     mine.write(FAST).map_err(|_| 23)?;
     pmu::run(&mut series, || call_trip(&mine, &message))?;
     text.series("call", &mut series, hz);
-    drop(mine);
-    pmu_domain_run(job, image, hz, &text)
+    Ok(hz)
 }
 
 /// MEASUREMENT ONLY: [`domain_run`] for the PMU run. The client is told the
-/// measured clock; this side's lines are printed once the client's first
-/// line comes (it sends none until it has measured everything), and then
-/// the client's, until its [`END`].
-fn pmu_domain_run(
-    job: &Job<Kernel>,
-    image: &Vmo<Kernel>,
-    hz: u64,
-    text: &pmu::Text,
-) -> Result<(), i32> {
+/// measured clock, and its lines, which it sends once it has measured
+/// everything, are printed as they come until its [`END`].
+fn pmu_domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>, hz: u64) -> Result<(), i32> {
     let domain = job.create_speculation_domain().map_err(|error| {
-        text.print();
         say(format_args!("ipc-bench: speculation domain: {error:?}"));
         50
     })?;
@@ -372,17 +380,9 @@ fn pmu_domain_run(
         .map_err(|_| 51)?;
     let mut bytes = [0_u8; 2048];
     let mut handles = [Handle::INVALID; 1];
-    let mut printed = false;
-    let mut print_once = || {
-        if !printed {
-            text.print();
-            printed = true;
-        }
-    };
     loop {
         match to_client.read(&mut bytes, &mut handles) {
             Ok(received) => {
-                print_once();
                 let line = bytes.get(..received.bytes).unwrap_or_default();
                 if line == END {
                     return Ok(());
@@ -390,18 +390,11 @@ fn pmu_domain_run(
                 pmu::put(line);
             }
             Err(ReadError::Failed(Error::ShouldWait)) => {
-                if to_client
+                let _ = to_client
                     .wait_one(Signals::READABLE | Signals::PEER_CLOSED, Deadline::Never)
-                    .is_err()
-                {
-                    print_once();
-                    return Err(52);
-                }
+                    .map_err(|_| 52)?;
             }
-            Err(_) => {
-                print_once();
-                return Err(53);
-            }
+            Err(_) => return Err(53),
         }
     }
 }
