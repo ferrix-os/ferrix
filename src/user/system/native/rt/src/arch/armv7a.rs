@@ -39,6 +39,8 @@ use ferrix_native::Raw;
 /// is brought to the multiple of 8 the AAPCS requires at a call, and
 /// `ferrix_rt_start` is called. The bootstrap handle's register, R0, is
 /// already the first argument.
+// SAFETY: (ENTRY) the body is the whole function and the process's first
+// instructions: nothing calls it, and it never returns.
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn _start() -> ! {

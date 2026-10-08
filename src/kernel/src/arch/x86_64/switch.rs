@@ -30,30 +30,51 @@ pub(super) mod check;
 /// Bytes the switch pushes: six registers and the return address.
 const FRAME_BYTES: u64 = 7 * 8;
 
+/// Save this context and resume another: six pushes, one store, one load,
+/// six pops and a return.
+///
+/// A naked function rather than a `global_asm!` symbol declared `extern "C"`
+/// (Q8, `docs/OPAQUE-KERNEL.md` §9.11): under the position-independent model
+/// the kernel is built with for KASLR, a call to an external symbol goes
+/// through the GOT (`call *slot(%rip)`, `R_X86_64_GOTPCREL`, which the linker
+/// may not relax), while a function of this crate is called directly, PC
+/// relative, with no relocation for KASLR to apply. The instructions are the
+/// same.
+///
+/// `rdi` is where to write this context's stack pointer, `rsi` the stack
+/// pointer to resume.
+///
+/// # Safety
+///
+/// (CONTEXT) As [`switch_to`], whose contract this is.
+// SAFETY: (CONTEXT) the body is the whole function: it keeps the SysV ABI
+// toward its callers -- the six callee-saved registers pushed and popped, the
+// arguments in rdi and rsi -- and returns on the stack `next` names.
+#[unsafe(naked)]
+unsafe extern "C" fn ferrix_switch(save: *mut u64, next: u64) {
+    core::arch::naked_asm!(
+        "pushq %rbp",
+        "pushq %rbx",
+        "pushq %r12",
+        "pushq %r13",
+        "pushq %r14",
+        "pushq %r15",
+        "movq  %rsp, (%rdi)",
+        "movq  %rsi, %rsp",
+        "popq  %r15",
+        "popq  %r14",
+        "popq  %r13",
+        "popq  %r12",
+        "popq  %rbx",
+        "popq  %rbp",
+        "retq",
+        options(att_syntax)
+    );
+}
+
 global_asm!(
     r#"
 .section .text
-
-// void ferrix_switch(u64 *save, u64 next)
-//   rdi = where to write this context's stack pointer
-//   rsi = the stack pointer to resume
-.globl ferrix_switch
-ferrix_switch:
-    pushq %rbp
-    pushq %rbx
-    pushq %r12
-    pushq %r13
-    pushq %r14
-    pushq %r15
-    movq  %rsp, (%rdi)
-    movq  %rsi, %rsp
-    popq  %r15
-    popq  %r14
-    popq  %r13
-    popq  %r12
-    popq  %rbx
-    popq  %rbp
-    retq
 
 // Where a task starts the first time it is switched to: `prepare_stack` left
 // its entry point in r12 and its argument in r13, and the stack is aligned as
@@ -68,8 +89,6 @@ ferrix_task_entry:
 );
 
 unsafe extern "C" {
-    /// Save this context and resume another. Declared here; defined above.
-    fn ferrix_switch(save: *mut u64, next: u64);
     /// The first instruction a new task runs.
     fn ferrix_task_entry();
 }

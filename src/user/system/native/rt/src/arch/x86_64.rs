@@ -35,6 +35,8 @@ pub use ferrix_linux_abi::nr::x86_64 as numbers;
 /// pushes the return address the ABI wants. RBP is zeroed so a frame-pointer
 /// walk ends here. The bootstrap handle's register, RDI, is already the first
 /// argument.
+// SAFETY: (ENTRY) the body is the whole function and the process's first
+// instructions: nothing calls it, and it never returns.
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn _start() -> ! {

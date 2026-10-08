@@ -5302,3 +5302,36 @@ Zen 5's 64-bit `DIV` is cheaper than the reciprocal's multiply chain.
 ARMv7-A, where a 64-bit division is a library call, was not measured. The
 kernel's clock arithmetic lives in `ferrix-vdso`, which the item manifest
 does not classify, with or without Q1 (`docs/BACKLOG.md`).
+
+#### Q8, calls through the GOT (po10-quick; ledger line 533, Q8-C1 to C7)
+
+The release kernel, a static PIE for KASLR, made 4,908 indirect calls through
+a `rip`-relative slot on `main` 390d5f278, 4,472 of them through a GOT slot:
+`memcpy` 1,621, `__udivti3` 1,201, `memmove` 922, `memset` 385, `memcmp`
+319, `__divti3` 17, and the context switch's 4. The cause is rustc's
+`x86_64-unknown-none` target, which has no PLT by default and does not ask
+for relaxable relocations, so LLVM emits `R_X86_64_GOTPCREL` for a call to a
+symbol it cannot prove local, and lld may not relax that form
+(SPECULATION.md §8 had said so; the figures there are restated). Shown on a
+five-line crate: `-Z plt=yes` gives `R_X86_64_PLT32` and
+`-Z relax-elf-relocations=yes` gives `R_X86_64_GOTPCRELX`; neither exists on
+the pinned stable toolchain. A kernel built with `-Z plt=yes` under
+`RUSTC_BOOTSTRAP` (an experiment, never landed) made the switch's calls
+direct but kept every library call in the GOT: the prebuilt sysroot carries
+the target's default through fat LTO.
+
+What Q8 changes: `ferrix_switch` is a naked function (`#[unsafe(naked)]`,
+stable since Rust 1.88) of the kernel crate instead of a `global_asm!`
+symbol declared `extern "C"`, so its four call sites are `call rel32`, with
+no slot and no relocation. Recorded by objdump
+(`~/.local/share/ferrix/logs/po10-quick/q8-objdump.txt`): the same fifteen
+instructions in the same order, with no prologue, epilogue or `endbr`; four
+direct call sites; 4,904 `rip`-relative indirect calls against 4,908, and
+`.rela.dyn` all `R_X86_64_RELATIVE`, 6,415 against 6,416, the switch's slot
+gone. `check-unsafe-audit.py` now counts `#[unsafe(naked)]` and
+`unsafe extern "ABI" fn` definitions, so the switch's obligation is traced.
+The library calls stay; the certification consultant's view of the ways to
+remove them (B1 an unstable flag, B2 a post-link rewriter, B3 the target
+changed upstream, preferred) and of mapping the GOT read-only meanwhile is at
+the ledger's line 533 and in `docs/BACKLOG.md`. po9-sched measured an
+indirect call at about 3.5 ns more than a direct one.
