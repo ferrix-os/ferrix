@@ -12,7 +12,7 @@
 [ferrousli]
 path = "src/user/system/linux/ferrousli"
 repo = "https://github.com/ferrix-os/ferrousli"
-commit = "ba6b96d80a3b3c09647228dcfd3b70f3007fb50a"
+commit = "93063b15677b4654d903986d719642146ada73b5"
 
 # The shell.
 [zinc]
