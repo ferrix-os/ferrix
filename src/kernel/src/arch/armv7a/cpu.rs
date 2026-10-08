@@ -887,7 +887,7 @@ pub(crate) const CNTKCTL_PL0VCTEN: u32 = 1 << 1;
 pub(crate) const CNTKCTL_CLOSED: u32 = 1 | (1 << 8) | (1 << 9);
 
 /// MEASUREMENT ONLY (`bench_pmu`, never lands): `ID_DFR0.PerfMon`, bits 27
-/// to 24 -- 1 PMUv1, 2 PMUv2, 3 PMUv3; 0 and 0xF no PMU the architecture
+/// to 24 -- 1 `PMUv1`, 2 `PMUv2`, 3 `PMUv3`; 0 and 0xF no PMU the architecture
 /// defines.
 pub(crate) fn pmu_version() -> u32 {
     let value: u32;
@@ -921,6 +921,18 @@ pub(crate) fn allow_user_pmu() {
     unsafe {
         asm!("mcr p15, 0, {}, c9, c14, 0", "isb", in(reg) PMUSERENR_EN, options(nostack, preserves_flags));
     }
+}
+
+/// MEASUREMENT ONLY (`bench_pmu`): `PMUSERENR`, read back after
+/// [`allow_user_pmu`]. Only where [`pmu_version`] names a PMU.
+pub(crate) fn read_pmuserenr() -> u32 {
+    let value: u32;
+    // SAFETY: (SYSREG) reading `PMUSERENR` has no side effects; the caller
+    // checked that the core has a PMU, so the encoding is defined.
+    unsafe {
+        asm!("mrc p15, 0, {}, c9, c14, 0", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
 }
 
 /// `PMUSERENR.EN`: user mode may reach the PMU.
