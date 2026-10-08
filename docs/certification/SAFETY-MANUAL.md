@@ -486,7 +486,7 @@ one finds those registers in their initial state, never another program's
 values. The native runtime (`ferrix_rt`) declares the loss on its trap, so
 code built on it keeps no value there; a program that issues these calls by
 other means shall declare the same clobbers, or it loses the values it kept,
-which harms only itself. No Linux call and no other architecture is affected.
+which harms only itself. No Linux call is affected.
 
 ### AoU-26 — a claimed configuration carries no driver update helper
 `drvupdated` lets root put a new driver image on a device while the machine
@@ -501,6 +501,22 @@ made, not which image ran. The integrator shall not put `drvupdated` in
 only in `cargo xtask test-restart --update`'s images, and xtask refuses any
 other image that does (`native::refuse_updater`; the certification
 consultant's C1, 2026-10-07).
+
+### AoU-27 — a program keeps no caller-saved VFP register live across a blocking native call (ARMv7-A)
+On ARMv7-A, `channel_write_read`, `object_wait_one` and `port_wait` made with
+`svc` -- by any program, native or Linux, since every program enters through
+the one `svc` -- lose `d0`-`d7` and `d16`-`d31`, the VFP registers the AAPCS
+makes caller-saved, and keep `d8`-`d15` and `FPSCR` (H.SCHED.12;
+`ferrix_native_abi::nr`; `docs/OPAQUE-KERNEL.md` §9.14). A program resumed
+from one finds zero there, never another program's values. A C program that
+makes them through `syscall()` loses nothing it may keep across a call. The
+native runtime declares no clobber, because a native program is built soft
+float, where the compiler holds no value in a VFP register; it refuses to
+build hard float until the clobbers are declared. The integrator shall build
+native programs as `xtask` does, with no `-C target-feature` that enables VFP
+code on the soft-float ABI; a program that keeps a caller-saved VFP value
+across one of these calls by other means loses it, which harms only itself.
+AArch64 keeps the whole state.
 
 ## 5. Element failure analysis
 

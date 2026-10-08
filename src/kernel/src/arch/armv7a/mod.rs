@@ -109,13 +109,26 @@ pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
 }
 
 /// Stage 9: what the switch gives a program back, read by programs in USR
-/// mode -- the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3b
-/// and F-66). See `switch::check`.
+/// mode -- the VFP registers of a task resumed from a blocking native call
+/// and the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3a's port,
+/// 3b and F-66). See `switch::check`.
 ///
 /// # Errors
 ///
 /// The first case that read what it must not.
 pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    let vectors = switch::check::run_vectors()?;
+    if vectors.ran {
+        crate::console::println!(
+            "  vectors  {} wakes from a blocking native call zeroed the caller-saved VFP \
+             registers and kept FPSCR and d8-d15; {} Linux sleeps, preemptions and calls after \
+             one kept them all",
+            vectors.reset,
+            vectors.kept
+        );
+    } else {
+        crate::console::println!("  vectors  no D32 VFP: the reset's cases are not run");
+    }
     let traded = switch::check::run_tls()?;
     crate::console::println!(
         "  tls      {traded} switches between two programs' TPIDRURO and TPIDRURW, each its \

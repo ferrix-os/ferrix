@@ -54,13 +54,6 @@
       "purpose": "IPC regression from cpu.max/cpu.stat: a processor's cpu.stat charge kept back per run queue and moved into the job's slots exactly once (consultant po11-cpumax-cert, ledger 2026-10-08 line 565, C7)"
     },
     {
-      "ids": ["L.armv7a.5-9"],
-      "owner": "os07-ustate",
-      "branch": "os07/ustate",
-      "date": "2026-10-08",
-      "purpose": "ARMv7-A user state for the DK1 IPC matrix (B6 steps 3 and 5): the blocking native calls' VFP reset, TPIDRURO kept in the task, TPIDRURW switched at every switch (OPAQUE-KERNEL.md 9.13, design to its consultant)"
-    },
-    {
       "ids": ["L.mm.69-70", "L.armv7a.13-20"],
       "owner": "os07-asid",
       "branch": "os07/asid",

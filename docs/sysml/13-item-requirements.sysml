@@ -577,17 +577,21 @@ package FerrixItemRequirements {
         }
         requirement <'H.SCHED.12'> blockedNativeCallVectorState : ItemHighLevel {
             attribute :>> statement = "A task resumed after blocking in
-                channel_write_read, object_wait_one or port_wait, made with SYSCALL,
-                shall hold in its vector registers either its own state or every
-                component's initial state with its own MXCSR and x87 control word,
-                never a value another program left. x86-64 only; every other call
-                and architecture keeps the whole state (H.SCHED.8).";
+                channel_write_read, object_wait_one or port_wait shall hold in its
+                vector registers either its own state or, on x86-64 (made with
+                SYSCALL), every component's initial state with its own MXCSR and x87
+                control word, and on ARMv7-A (made with svc), zero in d0-d7 and
+                d16-d31 with its own d8-d15 and FPSCR; never a value another program
+                left. Every other call, and AArch64, keeps the whole state
+                (H.SCHED.8).";
             attribute :>> criterion = "A program blocked in one of the calls, every
                 vector register its pattern, beside a second program filling them
-                with another on its processor, reads back neither pattern and its
-                own MXCSR and control word after a message, its peer's close and a
-                message with a signal pending; blocked in a Linux call, preempted,
-                or past the woken call, it reads its own (the `vectors` line).";
+                with another on its processor, reads back neither pattern where its
+                registers are lost, and its own MXCSR and control word, or its own
+                FPSCR and d8-d15, after a message, its peer's close and a message
+                with a signal pending; blocked in a Linux call, preempted, or past
+                the woken call, it reads its own (the `vectors` line on x86-64 and
+                on ARMv7-A).";
             attribute :>> parent = ("O.ISOLATE", "G.1");
         }
         requirement <'H.SCHED.13'> theDirectSwitchIsThePick : ItemHighLevel {
