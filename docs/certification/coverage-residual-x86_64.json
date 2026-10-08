@@ -809,9 +809,9 @@
     "arch/x86_64/switch.rs": {
       "ring": "core",
       "lines": [
-        321,
-        861,
-        870
+        340,
+        880,
+        889
       ]
     },
     "syscall/program.rs": {

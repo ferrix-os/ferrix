@@ -677,12 +677,27 @@ stage 7's cost lines in ms:
 
 In the reference profile KASLR costs nothing these can see. The release
 profile links with fat LTO, so every crate is one module and a call from one
-to another is internal: 3,142 calls go through the GOT against 3,152 in the
-static build. The debug profile has no LTO, and there the PIC model costs
-3 to 10%. rustc's `x86_64-unknown-none` emits a call into another crate as
-`call *sym@GOTPCREL(%rip)` with `R_X86_64_GOTPCREL`, not the `GOTPCRELX` lld
-could relax into a direct call. So 24,227 calls stay indirect against 3,102.
+to another is internal: 3,142 calls went through the GOT against 3,152 in the
+static build when this was measured. The debug profile has no LTO, and there
+the PIC model costs 3 to 10%. rustc's `x86_64-unknown-none` emits a call to a
+symbol it cannot prove local as `call *sym@GOTPCREL(%rip)` with
+`R_X86_64_GOTPCREL`, not the `GOTPCRELX` lld could relax into a direct call.
+So 24,227 calls stayed indirect against 3,102 in the debug build.
 `-Z relax-elf-relocations` and `-Z plt` would fix that and are nightly-only.
+
+Measured again on the release kernel of `main` 390d5f278 (2026-10-07,
+po10-quick, `docs/OPAQUE-KERNEL.md` §9.11, Q8): 4,472 calls go through a
+GOT slot, nearly all of them LLVM's library calls -- `memcpy` 1,621,
+`__udivti3` 1,201, `memmove` 922, `memset` 385, `memcmp` 319, `__divti3` 17
+-- which rustc routes through the GOT for a target without a PLT, and which
+`-Z plt` alone does not reach, since the prebuilt sysroot carries the
+target's default. The other four were the context switch's calls, which are
+direct since Q8: the switch is a naked function of the kernel crate, called
+PC-relative, with no relocation. Every remaining GOT call is an indirect
+branch, which only eIBRS or AutoIBRS covers here (§3, no retpolines), through
+a slot in `.data` that stays writable after the loader's fixups;
+`docs/BACKLOG.md` has the row to map those slots read-only and to remove the
+calls with a toolchain change.
 `off` is therefore the static fixed link. It is faster in the profile people
 debug in, it equals the other in the reference, and it is the kernel the
 tree built before KASLR. The rows also show that the side-channel defences no

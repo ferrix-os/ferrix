@@ -109,7 +109,13 @@ UNSAFE_IMPL = re.compile(r"(?<![\w:])unsafe\s+impl\b")
 # compiler does not check against their definitions (the `LINK` obligation).
 # The `extern "C"` blocks naming assembly are not counted here.
 UNSAFE_EXTERN_RUST = re.compile(r'(?<![\w:])unsafe\s+extern\s+"Rust"')
-UNSAFE_FN = re.compile(r"(?<![\w:])(?:pub(?:\([^)]*\))?\s+)?unsafe\s+fn\s+(\w+)")
+UNSAFE_FN = re.compile(
+    r"(?<![\w:])(?:pub(?:\([^)]*\))?\s+)?unsafe\s+(?:extern\s+\"[^\"]*\"\s+)?fn\s+(\w+)"
+)
+# `#[unsafe(naked)]`: a function whose body is assembly the compiler adds
+# nothing to -- no prologue, no epilogue -- so its ABI toward its callers is
+# the author's claim, not the compiler's (the consultant's Q8-C1).
+UNSAFE_NAKED = re.compile(r"#\[\s*unsafe\s*\(\s*naked\s*\)\s*\]")
 # `impl Trait for Type {`, whose methods implement someone else's contract.
 TRAIT_IMPL = re.compile(r"^\s*(?:unsafe\s+)?impl\s*(?:<[^>]*>)?\s+[^;{]*\bfor\b[^;{]*\{")
 SAFETY_COMMENT = re.compile(r"//\s*SAFETY:", re.IGNORECASE)
@@ -196,6 +202,10 @@ def safety_section(lines: list[str], index: int) -> int | None:
                 return scan
         elif line.startswith("#[") or line.startswith("#!["):
             pass
+        elif line.startswith("//") and not saw_doc:
+            # A `// SAFETY:` comment on an attribute between the doc comment
+            # and the item, as a naked function's has.
+            pass
         elif line == "" and not saw_doc:
             pass
         else:
@@ -269,6 +279,13 @@ def scan(source: str, label: str = "") -> tuple[list[str], list[Site], int]:
                 problems.append(f"{label}:{index + 1}: unsafe extern \"Rust\" with no `// SAFETY:` comment")
             else:
                 sites.append(Site(index + 1, "extern", comment_ids(lines[covering]), stripped))
+
+        if UNSAFE_NAKED.search(line):
+            covering = safety_line(lines, index)
+            if covering is None:
+                problems.append(f"{label}:{index + 1}: #[unsafe(naked)] with no `// SAFETY:` comment")
+            else:
+                sites.append(Site(index + 1, "naked", comment_ids(lines[covering]), stripped))
 
         if UNSAFE_IMPL.search(line):
             covering = safety_line(lines, index)
@@ -350,6 +367,13 @@ impl GlobalAlloc for A {
 unsafe extern "Rust" {
     safe fn hook() -> bool;
 }
+
+/// # Safety
+///
+/// (CONTEXT) The caller's stacks.
+// SAFETY: (CONTEXT) the whole body, to the ABI.
+#[unsafe(naked)]
+unsafe extern "C" fn switch() {}
 """
 
 _SELF_EXPECT = [
@@ -361,6 +385,8 @@ _SELF_EXPECT = [
     (22, "fn", ["TRANSLATE"]),
     (26, "fn", []),
     (33, "extern", ["LINK"]),
+    (41, "naked", ["CONTEXT"]),
+    (42, "fn", ["CONTEXT"]),
 ]
 
 
