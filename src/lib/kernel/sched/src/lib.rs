@@ -351,7 +351,9 @@ fn to_real(virtual_ns: u64, weight: u32) -> u64 {
 }
 
 /// `numerator.div_euclid(denominator)` for a positive denominator, in 64
-/// bits when both fit: the same quotient (see [`to_virtual`]).
+/// bits when both fit: the same quotient (see [`to_virtual`]). Inlined: it
+/// is on every round trip of the IPC fast path (`avg_vruntime`, `lag_at`).
+#[inline(always)]
 fn floor_div(numerator: i128, denominator: i128) -> i128 {
     if let (Ok(numerator), Ok(denominator)) = (i64::try_from(numerator), i64::try_from(denominator))
         && denominator > 0

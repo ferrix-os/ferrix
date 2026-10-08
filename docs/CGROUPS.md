@@ -654,6 +654,23 @@ of which it asks whether a kill, a signal or a stop is for it (a victim of
 a raised quota lets it go at the end of that period. `cpu.max` throttles a
 native task too, a ring-3 driver included. `cpu.idle` and `cpu.max.burst` are not built.
 
+**The charge kept back (po11-cpumax, 2026-10-08).** Walking the job's slots
+with a locked add a level on every charge cost the IPC round trip about 125
+instructions (os-76's profile: main 390d5f278 at 5,198 a trip against 5,011
+before the controllers). A run queue now keeps `cpu.stat`'s time back in a
+field of its own (`quota::Pending`), under its lock, and moves it into the
+slots when it charges another job, when it switches to a task of another job
+or to its idle task, when the running task moves itself to another job
+(`set_task_group`), and when `cpu.stat` is read (`charge_running` settles
+every queue first). It holds the slot it keeps time for, so a gone job's
+slot is not claimed again with time owed to it. `cpu.max`'s part of a charge
+is made at once, as before, and only while some `cpu.max` is set
+(`bandwidth_in_use`): with none set, its walk would find nothing. The
+consultant's verdict is ledger line 565 (2026-10-08). Checks: the pending
+charge's own cases on private records (`check_pending_charge`), a running
+task's move settling it (`quota_check`), and no `cpu.max` walk while none is
+set (`cpu_check::walks_only_under_a_quota`).
+
 ## 13. The `io` controller (B1, 2026-09-30)
 
 `src/kernel/src/fs/blkio.rs`. The disk the block ring registers is wrapped, so
@@ -717,7 +734,7 @@ changed (below).
 | io-ended | an entry is made for a job that has gone | a disk read by a task of a job that had gone kept the job's quota slot |
 | cpu-throttle | a throttled task is never put to sleep | a program under cpu.max 20000 100000 was not held to about a fifth of a processor |
 | cpu-kill | the throttle's wait never looks for a kill | a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL |
-| cpu-charge | the scheduler charges no slice to a job | the root's cpu.stat does not have its six keys and the machine's usage |
+| cpu-charge | the scheduler charges no slice to a job (since 2026-10-08 the run queue's pending add, `quota::Pending`) | a processor-time charge was not kept pending for its job (the pending check runs first in the cpu check; before, the root's cpu.stat does not have its six keys and the machine's usage) |
 | cpu-rearm-write | a `cpu.max` write arms no processor's timer | a running program was not held to a fifth of a processor by a cpu.max written under it |
 | cpu-rearm-move | a move beneath a `cpu.max` arms no timer | a running program moved beneath a cpu.max was not held to a fifth of a processor |
 | freeze-park | a frozen process does not park | cgroup.events never said frozen 1 for a frozen cgroup |

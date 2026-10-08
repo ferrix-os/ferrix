@@ -173,6 +173,9 @@ pub(crate) struct CpuQueue {
     pub(crate) trace: [Pick; TRACE_PICKS],
     /// Where the next one goes.
     pub(crate) trace_next: usize,
+    /// What its charges have kept back of `cpu.stat`'s time, for the slots
+    /// (`object::quota::Pending`): touched only under this queue's lock.
+    pub(crate) pending: crate::object::quota::Pending,
 }
 
 impl CpuQueue {
@@ -194,6 +197,7 @@ impl CpuQueue {
             stats: Stats::default(),
             trace: [Pick::default(); TRACE_PICKS],
             trace_next: 0,
+            pending: crate::object::quota::Pending::new(),
         })
     }
 
@@ -287,7 +291,7 @@ impl CpuQueue {
         if let Some(task) = self.fair.current() {
             self.stats.busy_ns += delta;
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
-            crate::object::quota::charge_cpu(task.group(), now, delta, user);
+            crate::object::quota::charge_cpu(&mut self.pending, task.group(), now, delta, user);
         } else {
             self.stats.idle_ns += delta;
         }

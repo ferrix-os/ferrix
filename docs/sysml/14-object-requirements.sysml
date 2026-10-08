@@ -1377,11 +1377,12 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.106'> cpuIsChargedUp : ItemLowLevel {
             attribute :>> statement = "charge_cpu shall charge the time a task ran
-                to its job and every job above it and to the machine, as user time
-                when the tick that ended the slice interrupted user mode and as
-                system time otherwise, and throttled_until shall report a job whose
-                subtree has used its cpu.max quota this period as throttled until
-                the period ends.";
+                to its job and every job above it and to the machine, counted in
+                their cpu.stat by the time cpu.stat is read, as user time when the
+                tick that ended the slice interrupted user mode and as system time
+                otherwise, and throttled_until shall report a job whose subtree has
+                used its cpu.max quota this period as throttled until the period
+                ends.";
             attribute :>> criterion = "A program of two counting threads in a job
                 with cpu.max 20000 100000 is held to between a twelfth and two
                 thirds of a processor, its cpu.stat counts at least 3 throttled
@@ -1390,7 +1391,8 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.10";
             attribute :>> unit = ("object::quota::charge_cpu",
                 "object::quota::throttled_until", "object::quota::refresh_period",
-                "object::quota::runtime_left", "object::quota::Quota::set_bandwidth");
+                "object::quota::runtime_left", "object::quota::Quota::set_bandwidth",
+                "object::quota::charge_bandwidth");
         }
         requirement <'L.object.107'> aFrozenProcessParks : ItemLowLevel {
             attribute :>> statement = "sync_freeze shall set a process frozen when
@@ -1834,6 +1836,29 @@ package FerrixObjectRequirements {
                 boots.";
             attribute :>> parent = "H.OBJ.18";
             attribute :>> unit = "syscall::write_read_outcome";
+        }
+        requirement <'L.object.180'> cpuTimeIsKeptBackOnce : ItemLowLevel {
+            attribute :>> statement = "A run queue's charge of processor time to a
+                job shall be kept back in the queue's Pending record, holding the
+                job's slot, and moved into the slots of the job and every job above
+                it and into the machine's exactly once: when the queue charges
+                another job, when it switches to a task of another job or to its
+                idle task, when its running task leaves its job, and when cpu.stat
+                is read; after the move it shall hold no slot it no longer charges.";
+            attribute :>> criterion = "On records of its own, two charges to a
+                child job stay pending and hold its slot; a charge to the parent
+                moves the first into both slots and the machine once; flushes to
+                no job settle child 1000 20, parent 1000 320, machine 1000 320,
+                leave nothing pending and give back both holds. A running task
+                moved into a job and charged has that time in the job's cpu.stat
+                once charge_running has run, with nothing switched; moved back,
+                it leaves its queue keeping nothing for that job, and the job
+                gone, its slot is free.";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("object::quota::add_cpu_time",
+                "object::quota::Pending::charge", "object::quota::Pending::flush",
+                "object::quota::switched", "object::quota::leaving",
+                "object::quota::settle");
         }
     }
 }
