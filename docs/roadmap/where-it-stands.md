@@ -1,6 +1,6 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-07, to `main` 4466212c3.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-08, to `main` 4b9f04043.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -60,7 +60,22 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   L.sched.63). On 4066f41dd the p50 is about 1,048 ns in the faster of the
   two modes a boot falls in (about 1,250 and 1,550 ns, §9.11); the slots
   (about -20 to -30 ns) and cut 2 (about -30 ns) are preliminary and there is
-  no figure yet on 7b06cef25. Redox, measured the same way, takes 1,965 ns
+  cut 2 (7b06cef25) read 1,028 against 1,078 in one boot each. Landed
+  since: 3c, FS and GS left unloaded 0 over 0 (27d3e23c8, 2026-10-07: 873 ns
+  in the faster mode in a quiet window against 998); the user-side inlining of
+  `write_read` and `decode` (7fd6c7a17, about -55 ns); the object side's cut 3
+  (ee58d3912, 2026-10-08), in which seccomp's `quiet` predicate, asked twice a
+  direction, reads `FILTERED_THREADS`, a live count of filtered threads, in
+  place of a flag every boot set (about -40 to -50 ns on a busy host,
+  preliminary); Q4 (dc5a3c495, each processor's GDT and RSP0 noted at the table
+  loads, not at every switch; preliminary, about -1.8% cycles) and Q8
+  (d3cbb0d55, the x86-64 context switch called directly, not through the GOT;
+  no figure claimed, inside the spread); and the fix of F-65 (9ac307691,
+  FX-0535): the fast path let the caller's endpoint go with interrupts masked,
+  and now lets it go open (about +40 to +50 instructions a round trip, no p50
+  change resolved). Each was measured on its own base and host load, so the
+  figures are not summed: [the round trip's page](ipc-round-trip.md) lists
+  them. Redox, measured the same way, takes 1,965 ns
   with no speculative defence. Left: step 5's rest (112a12b63 holds the ids
   of the user-space stream, and global pages have no session), PCIDs where
   hardware has them and step 4b; the handover is
@@ -73,6 +88,49 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   sleeping on after the timer had fired (10d6dbc60). The second keeps a P1
   flake row in `docs/BACKLOG.md` until 20 TCG boots of `main` under load show
   no hang.
+
+* **Landed on the evening of 2026-10-07 and on 2026-10-08** (4466212c3 to
+  9ed9e8428), besides the round trip's cuts above:
+  - **The cgroup controllers** (stage 13, 2026-10-07, batch
+    08984c2db..8ec24ef0e, `po6/cgctl` rebased by po10-cgctl): reclaim of a
+    read-only mount's clean pages and `memory.high`, `cgroup.freeze`, `cpu.max`
+    with `cpu.stat`, and the `io` controller with `io.max`, 23 negative controls
+    fired. The fast path's exits are held to `cpu.max` as the general way out is,
+    and a `cpu.max` cut is armed for the task a switch picks. `cgroup.controllers`
+    lists `cpu io memory pids`.
+  - **Init's L13c** (2026-10-08, aae4c0eb1): `SystemCallFilter=`,
+    `SystemCallErrorNumber=` and `SystemCallArchitectures=`, compiled by init to
+    a seccomp filter per ABI and installed as the child's last step. Every key
+    of L13 is carried out.
+  - **Live driver updates** (D1, D2 and D4 for the display kind, aae4c0eb1):
+    `devmgr` replaces a running driver with a new image and goes back to the
+    old one if the new one does not publish in 15 s (`docs/DEVMGR.md` §4.1).
+    The helper `drvupdated` is in test images only, until the customer answers
+    how an image is to be signed; D3 is owed.
+  - **Chromium on the DK1's architecture** (aae4c0eb1): Debian's armhf
+    Chromium runs headless on ARMv7-A under QEMU in 512 MiB, after ARM's `send`
+    and `recv`, `cacheflush` and `mmap` of a read-only btrfs were fixed. And the
+    **DK1's SD card** (03fce4f81): `sdmmc`, a ring-3 driver for SDMMC1 behind the
+    block ring, FIFO only, writing only inside `ferrix-*` partitions
+    (`docs/CHROME.md` §10.1). Nothing has run on the board; the card has host
+    tests against a model of the controller and a boot check, because no
+    emulator has the controller.
+  - **GPU step 4** (03fce4f81, `docs/GPU.md` §3.13): the render node takes
+    `PRIME_FD_TO_HANDLE`, `renderctl` has `ATTACH_OBJ`, and hyprix speaks
+    `zwp_linux_dmabuf_v1` version 3 with a GBM-shaped allocator, so a client's
+    GPU buffer is sampled where it lies.
+  - **Stage 19's small remainder** (2026-10-07, bab9eed1c): `xray`,
+    `no_screen_share`, `blur_popups` and the tiled drag's drop with
+    `dwindle:precise_mouse_move`. **The installer's I6a** (64f01d596): a GPT
+    live medium. **Windows' QEMU** takes patch 0002 too (7f2659bdc), so
+    x86-64 boots pass stage 10 there.
+  - **Boot flakes**: FX-0001 under a loaded host (90108e87a, stage 20's S-1): a
+    late shootdown answer is waited for and counted, and the machine stops only
+    past 10 s; stage 7's hand-off flake was the check misreading a right
+    outcome (88279f54b); FX-0309's check owed a `DMA_FAULT` record whenever a
+    unit translates and now owes one only for a fault read (c2c7a6e6d), and the
+    skipped entropy interrupt behind that boot is still an open row; a stage 3
+    tick-rate flake (6 of 37 loaded TCG boots) has a row (8c4edef98).
 
 * **Seven verification-audit rows closed by runs on `main`** (2026-10-07,
   f8b44e04c, the certification's C1, the debt landings leave behind). The
@@ -88,11 +146,26 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   the namespaces paragraph now reaches N4 and NP). The audit's other rows stay
   open: 37 code landings that name no gate, and the untriaged mutants.
 
-* **L.armv7a.4 reserved** (2026-10-07, 4466212c3) for the ARMv7-A user
-  counter: `CNTVCT` readable from PL0, so `bench-ipc` can take the native
-  channel round trip on the STM32MP157D-DK1. Only the id is on `main`
-  (`tools/common/data/requirement-reservations.json`); the code and the
-  `bench-ipc --board-log` records are on `po10-dk1/counter`, not landed.
+* **ARMv7-A user mode reads the virtual counter** (L.armv7a.4, reserved
+  4466212c3, landed 2026-10-07 in batch d44e7d1c3 as b17462efe): every
+  processor sets `CNTKCTL.PL0VCTEN` and closes the physical counter and both
+  timers to PL0 before it runs a program, and a stage 4 check reads the register
+  live on each processor. `bench-ipc --board-log <file>` (404d59fbf) files a
+  board's own serial log as a record. So `bench-ipc` can take the native channel
+  round trip on the STM32MP157D-DK1; nobody has run it there yet. AArch64's
+  counter mask is written the same way now (its check is a BACKLOG P2 row). The
+  user state followed on 2026-10-08 (a1e6324c2, `docs/OPAQUE-KERNEL.md` §9.14,
+  L.armv7a.5-12): `TPIDRURO` is kept in the task and `TPIDRURW`, which USR mode
+  writes itself and nothing used to move, is read at every switch out and
+  written at every switch in, carried by `fork` and zeroed by `execve`. That
+  closes F-66 (Major), where one program's `TPIDRURW` reached the next program
+  on the core; 15 negative controls fired. And 3a's reset: a task blocked in
+  `channel_write_read` (and two other native calls) keeps only FPSCR and
+  d8-d15, and the rest of the VFP registers are zeroed on resume, as on
+  x86-64. The ASID ids are reserved on `main`, not written
+  (`tools/common/data/requirement-reservations.json`): L.mm.69-70,
+  L.armv7a.13-20 and L.user.125, with F-67's break-before-make order, and
+  L.armv7a.21-26 (lazy VFP, 4b9f04043).
 
 * **Steam signs in and shows its store** on the `--everything` desktop,
   its 64-bit side on ferrousli (2026-09-30, `docs/STEAM.md` §5), and
@@ -323,8 +396,8 @@ test-init`). `run` and the desktop boot it, and the compositor is its service.
 Since 2026-10-04 a unit can be sandboxed with L13a's `NoNewPrivileges=`,
 `PrivateTmp=` and `ProtectSystem=` (1e1f2543a, `docs/INIT.md` §4.5);
 L13b's `PrivateNetwork=` landed on 2026-10-05 (3349682db); L13c's
-`SystemCallFilter=` is built on branch `po6/l13c` and waits to land (its batch
-failed one `test-vfs` cgroup `rmdir` that `main` passes, cause not known). `test-init` types each password once, when its prompt is
+`SystemCallFilter=`, with `SystemCallErrorNumber=` and `SystemCallArchitectures=`,
+landed on 2026-10-08 (aae4c0eb1), which finishes L13. `test-init` types each password once, when its prompt is
 on the console (`ferrix-auth-client` flushes before it shows the prompt), and
 judges the revoke reader on one look (2026-10-05).
 
@@ -351,15 +424,19 @@ Stage 13 is under way, cgroups first because init needs them: cgroup2 with
 mount, user, UTS, IPC, cgroup and pid namespaces, seccomp's checker and
 hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
 Seccomp filters (S3) landed on 2026-10-04 (248799bdd: `seccomp(2)`, `prctl(PR_SET_SECCOMP)`, chains per thread);
-reclaim, freezing, `cpu.max`, `io`, time namespaces and S4 to S6 are on
-branches (`stage-13-handover.md`).
+the cgroup controllers (reclaim of a read-only mount's clean pages,
+`memory.high`, freezing, `cpu.max`, `io`; 23 negative controls) landed on
+2026-10-07; time namespaces and S4 to S6 are on branches
+(`stage-13-handover.md`).
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
 headless and in a window on the compositor, on x86-64, and both on ferrousli's
 loader and C library in glibc's place (2026-09-26). Since 2026-09-26 it runs
 with its zygote, idles at 13% of a processor where it took 443%, turns a box
 at 60 frames a second where it managed 1.5, and plays sound (*Chrome*, after
-sysfs, and `docs/CHROME.md`).
+sysfs, and `docs/CHROME.md`). On ARMv7-A, Debian's armhf Chromium runs headless
+in 512 MiB under QEMU (2026-10-08) and the DK1's SD card has a driver; neither
+has run on the board.
 
 Sound is a ring-3 virtio-snd driver, an audio core in the kernel and
 `/dev/snd`, gated by `cargo xtask test-audio` on x86-64 and AArch64
@@ -392,10 +469,10 @@ software to 12 (`docs/GPU.md` §3.7 and §3.8; 60 fps is 16.7).
 
 Stage 19's X server is yserver (`docs/YSERVER.md`, 36 points against the
 stage's 40 for XWayland, done 2026-09-29). What the stage still owes is
-client pages as texture backing; `dwindle:precise_mouse_move` and the
-second-pass effects are built on branch `po10-win19/stage19` (2026-10-07)
-and wait for their gate; Mesa and `zwp_linux_dmabuf`, for clients that draw on
-the GPU themselves, are priced beside it.
+client pages as texture backing. `dwindle:precise_mouse_move`, `xray` and the
+second-pass effects landed on 2026-10-07 (bab9eed1c), and `zwp_linux_dmabuf_v1`
+with a GBM-shaped allocator on 2026-10-08 (`docs/GPU.md` §3.13); Mesa on
+ferrousli, for clients that draw on the GPU themselves, is priced beside it.
 
 The desktop's own clients -- waybar, fuzzel, hyprlock and hypridle, written in
 Rust -- are all on `main`. waybar and fuzzel are on `main` (2026-09-27):

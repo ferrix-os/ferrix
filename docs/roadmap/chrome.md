@@ -132,11 +132,12 @@ to 5.2 MB/s, and a Wikipedia article in 0.21 s instead of about 0.5
   `cacheflush` for V8's JIT, or `--js-flags=--jitless` (1–3); what running it
   finds (13 or more); and the board's Ethernet, if pages are to come from the
   network (8). Memory is the risk: 512 MiB may be too little whatever is
-  built. **2026-10-07** (branch `po10-chrome-a/dk1`): the armhf volume is
+  built. **2026-10-07, landed 2026-10-08** (aae4c0eb1): the armhf volume is
   made, and under QEMU on ARMv7-A headless Chromium runs in 512 MiB once
   ARM's `send`/`recv`, `cacheflush` and `mmap` of a read-only btrfs were
   fixed; the volume cannot live in the board's RAM (an initramfs costs
-  twice its size), so it waits for the card (`docs/CHROME.md` §10).
+  twice its size), so it waits for the card (`docs/CHROME.md` §10); the card's
+  driver, `sdmmc`, landed on 2026-10-08 (03fce4f81) and its board run is owed.
 
 ---
 

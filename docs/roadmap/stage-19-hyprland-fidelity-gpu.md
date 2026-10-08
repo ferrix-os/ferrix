@@ -1,4 +1,4 @@
-# Stage 19 — Hyprland fidelity, and the GPU  ·  *178 points, about 16 left*
+# Stage 19 — Hyprland fidelity, and the GPU  ·  *178 points, about 8 left*
 
 What makes it Hyprland rather than a tiling compositor: animations with its
 bezier curves, rounded corners, blur and shadows, dimming and opacity rules,
@@ -46,7 +46,7 @@ refresh or HDR (`immediate`, `no_vrr`, `no_auto_hdr`, `tonemap`,
 `force_rgbx`); `content`, `animation`, `idle_inhibit`, `no_anim`,
 `sync_fullscreen` and `render_unfocused`; and the input ones.
 `persistent_size` is done (2026-09-18). `xray` and `no_screen_share` are done
-(2026-10-07, branch `po10-win19/stage19`): `xray` follows Hyprland's
+(2026-10-07, bab9eed1c): `xray` follows Hyprland's
 `shouldUseNewBlurOptimizations` -- `xray 0` never reads the kept backdrop,
 `xray 1` or `decoration:blur:xray` always does -- and `no_screen_share` is
 what Hyprland's `CScreenshareFrame::renderMonitor` does, a black box over
@@ -470,7 +470,7 @@ The rest were read, kept and not acted on when this landed, and the module
 says why each. Since then `dim_around` and `xray` are drawn too, from the
 renderer's `Backdrop`. Still only kept: `no_anim`, which has nothing to turn
 off; and `ignore_alpha` and `animation`. `blur_popups` and
-`no_screen_share` were drawn on 2026-10-07 (branch `po10-win19/stage19`)
+`no_screen_share` were drawn on 2026-10-07 (bab9eed1c)
 without the second pass they were thought to need: popups are drawn last, so
 the blur of the canvas under one is the blur of what is behind it, and a
 screenshot is the frame with a black box drawn over the copy. They are
@@ -1401,8 +1401,7 @@ it feels it (`docs/GPU.md` §3.9) -- a client's own pages as its texture's
 backing, so its pixels are not copied in the guest (8), the device queue
 being done (§3.11) -- then the second-pass effects
 (`no_screen_share` and `blur_popups`), `dwindle:precise_mouse_move` and
-the window rule `xray`, which are built on branch `po10-win19/stage19`
-(2026-10-07) and wait for their gate: a tiled window dragged with
+the window rule `xray`, which landed on 2026-10-07 (bab9eed1c): a tiled window dragged with
 `movewindow` is lifted out of the tiling and dropped back in beside the box
 under the pointer, as Hyprland's drag controller does, which is the moment
 `precise_mouse_move` decides. Mesa on ferrousli and

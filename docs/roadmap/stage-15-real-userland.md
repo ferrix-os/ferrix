@@ -170,7 +170,7 @@ certified item.
 §4.5; b909a18e7, 7312a449d, e9bc4ab15, 90dbef5cc), gated by `test-init`'s
 sandboxing stage, which now looks at the namespace from inside.
 
-**Built for the init (2026-10-07, branch `po10-l13c/l13c` on `main`): L13c**,
+**Landed for the init (2026-10-08, aae4c0eb1): L13c**,
 `SystemCallFilter=` with `SystemCallErrorNumber=` and
 `SystemCallArchitectures=`, compiled by init to a seccomp filter per ABI
 over S3 and installed as the child's last step (`docs/INIT.md` §4.5), gated

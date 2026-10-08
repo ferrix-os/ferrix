@@ -431,9 +431,13 @@ package FerrixRoadmap {
              * 443%, after the futex, clock, munmap, shootdown and doorbell
              * fixes and a vDSO (cargo xtask bench-chrome); and playing
              * sound through /dev/snd (cargo xtask test-chrome-audio).
-             * Owed: inotify and the GPU; and the
-             * STM32MP157D-DK1, which needs an SDMMC driver and page-cache
-             * eviction first. */
+             * Owed: the GPU (inotify landed on 2026-09-27); and the
+             * STM32MP157D-DK1, where nothing has run yet. Debian's armhf
+             * Chromium runs headless on ARMv7-A under QEMU in 512 MiB
+             * (2026-10-08, after ARM's send and recv, cacheflush and mmap of
+             * a read-only btrfs were fixed); the SD card has a ring-3 SDMMC1
+             * driver (2026-10-08); the cgroup controllers (2026-10-07) let
+             * the page cache give back a read-only btrfs's clean pages. */
     }
 
     #implemented requirement <'S12'> stage12BtrfsWrite : Stage {
@@ -479,8 +483,9 @@ package FerrixRoadmap {
              * files over the same slot. M1's scoped OOM kill done on
              * 2026-09-26: a fault past a cgroup's memory.max kills the
              * process with the most resident pages in that cgroup, counted
-             * in memory.events with POLLPRI. Left: the rest of memory.stat,
-             * M2's reclaim, F1, S2 and B1.
+             * in memory.events with POLLPRI. M2's reclaim of a read-only mount's
+             * clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat
+             * and the io controller with io.max landed on 2026-10-07.
              *
              * Namespaces, for Steam's container, designed in
              * docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the
@@ -488,8 +493,14 @@ package FerrixRoadmap {
              * 2026-09-28: per-mount flags enforced, MS_REMOUNT and
              * mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH
              * of a subtree, and a superblock per filesystem so a plain
-             * remount reaches every bind of it. N3, mount namespaces
-             * themselves, is next; seccomp is not started. */
+             * remount reaches every bind of it. N3, mount
+             * namespaces with pivot_root and openat2, on 2026-09-30. The user,
+             * UTS, IPC, cgroup, pid and network namespaces are in too, and so
+             * are seccomp's classic-BPF checker and interpreter, its hook at
+             * the four system-call entries and its filters (S1 to S3, the
+             * last on 2026-10-04). Left: time namespaces, SECCOMP_RET_TRAP and
+             * TSYNC (S4 to S6), and test-container, the exit criterion as a
+             * program. */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {
@@ -537,8 +548,8 @@ package FerrixRoadmap {
              * devmgr through a kernel starter, on 2026-09-27; L13, the
              * sandboxing keys, over stage 13's namespaces: L13a
              * (2026-10-04) and L13b, PrivateNetwork= (2026-10-05), landed;
-             * L13c, SystemCallFilter= over seccomp's S3, is built and waits
-             * to land.
+             * L13c, SystemCallFilter= over seccomp's S3, landed on
+             * 2026-10-08.
              *
              * Next: authentication (docs/AUTH.md, approved by the customer
              * on 2026-09-26): authd, passwords checked by Argon2id, passwd,
@@ -602,7 +613,7 @@ package FerrixRoadmap {
     #inProgress requirement <'S19'> stage19HyprlandFidelity : Stage {
         attribute :>> number = 19;
         attribute :>> status = StageStatus::InProgress;
-        attribute :>> size = "178 points, about 16 left";
+        attribute :>> size = "178 points, about 8 left";
         doc /* What makes a Hyprland rather than a tiling compositor:
              * animations with bezier curves, rounded corners, blur, shadows,
              * opacity rules, special workspaces, groups, multiple monitors,
@@ -631,18 +642,18 @@ package FerrixRoadmap {
              * stream return once they are on their way, so a frame waits
              * once, for its flush (docs/GPU.md 3.11).
              *
-             * Of the 178, about 16 are left: the desktop's speed as it is
+             * Of the 178, about 8 are left: the desktop's speed as it is
              * watched (client pages as texture backing: 8 of 34, the cursor
-             * plane and the device queue spent), and the pointer-driven
-             * options and second-pass effects (no_screen_share,
-             * blur_popups, precise_mouse_move). The X server the stage
+             * plane and the device queue spent). The pointer-driven options
+             * and second-pass effects (xray, no_screen_share, blur_popups,
+             * precise_mouse_move) landed on 2026-10-07. The X server the stage
              * counted 40 for is yserver, a Rust X11 server with a rootless
              * Wayland backend of Ferrix's own, 36 points, done on
              * 2026-09-29 (docs/YSERVER.md). The rest
              * of the GPU road is for clients that render for themselves, not
              * for the compositor: zwp_linux_dmabuf_v1 in hyprix and a
              * GBM-shaped allocator, so a client's GPU buffer is shown where
-             * it lies, done on 2026-10-07 (docs/GPU.md 3.13), and a Mesa on
+             * it lies, built on 2026-10-07 and landed on 2026-10-08 (docs/GPU.md 3.13), and a Mesa on
              * ferrousli, which is left.
              *
              * Gears, the customer's order of 2026-09-24 (docs/GPU.md 6):
@@ -661,7 +672,7 @@ package FerrixRoadmap {
              * shared foundation of 21 points. waybar and fuzzel are on
              * main (2026-09-27) and run the customer's own configuration
              * on run-compositor --everything, and hypridle is on main
-             * (2026-09-26); hyprlock's program is on a branch. */
+             * (2026-09-26); hyprlock is on main too (2026-10-03), its lock over authd. */
     }
 
     #inProgress requirement <'S21'> stage21BareMetalGpu : Stage {

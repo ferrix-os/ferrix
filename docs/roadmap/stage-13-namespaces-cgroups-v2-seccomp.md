@@ -268,7 +268,7 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 
 | Branch (origin) | What | State at the wind-down |
 |---|---|---|
-| `stage13-cgctl` (`po6/cgctl`, `po10-cgctl/cgctl`) | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | **2026-10-05:** po6 fixed the consultant's D1 (the freeze posts `STOP` through the pending-work word; a parked process moved out of a frozen cgroup is released) and all 23 controls of `CGROUPS.md` §14 FIRED (`po6-cgctl-ctl-*`). **2026-10-07:** rebased onto main 4466212c3 by po10-cgctl; the fast path's exits now honour `cpu.max`, and the `cpu.max` cut is armed for the task a switch picks (main's 2f arms the timer before it stores the pick, which left a lone thread unthrottled on armv7a `--smp 2`); rows and the controls the rebase touched re-run (`po10-cgctl-*`); consultant OK IF (po10-cgctl-cert), its conditions met in the branch; then the landing batch |
+| `stage13-cgctl` (`po6/cgctl`, `po10-cgctl/cgctl`) | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | **2026-10-05:** po6 fixed the consultant's D1 (the freeze posts `STOP` through the pending-work word; a parked process moved out of a frozen cgroup is released) and all 23 controls of `CGROUPS.md` §14 FIRED (`po6-cgctl-ctl-*`). **2026-10-07:** rebased onto main 4466212c3 by po10-cgctl; the fast path's exits now honour `cpu.max`, and the `cpu.max` cut is armed for the task a switch picks (main's 2f arms the timer before it stores the pick, which left a lone thread unthrottled on armv7a `--smp 2`); rows and the controls the rebase touched re-run (`po10-cgctl-*`); consultant OK IF (po10-cgctl-cert), its conditions met; **landed 2026-10-07** (batch 08984c2db..8ec24ef0e) |
 | `stage13-s3-on-netns` 0527dd365 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions), on main 22384874f | **2026-10-04:** every row PASSED on 6c539b276 (`l13s3f-*`: check, three boots, `test-threads`, `test-init`, `test-shell`, `test-vfs`) and all 19 controls FIRED; consultant OK (ledger line 336). Rebased onto netns: k7, k13, k17 FIRED on 0527dd365 (`l13s3n2-*`), the other 16 carry by range-diff. Batch 20261004T135748Z stopped at the wind-down undecided: every gate PASSED but `test-selfhost` (red on main) and `test-shell` (QEMU killed from outside); owed: one batch re-run, then the consultant's final OK. `stage13-s3`, `-onmain`, `-rebase` are history |
 | `stage13-s4` 9ad2c718e | `SECCOMP_RET_TRAP` | consultant: OK if five conditions; three written; controls t2-t7 and the rows owed; lands after S3 |
 | `stage13-s5` 298399f1e | `TSYNC` | consultant: OK if; a new thread fails closed (written); owed: a measured bound for the TSYNC ancestor walk, the rows, four controls |
@@ -292,8 +292,8 @@ in 22384874f (batch 20261004T133714Z, every full-profile row PASSED). S3 landed
 later that night (248799bdd, from `stage13-s3-on-netns`); two blockers found on the rebase were fixed
 in it: the table-size checks counting seccomp on top of mincore, and the
 filters check listing its tasks (`check::spawn_in`), without which main's
-pending-work word stopped the boot with FX-0520. Init's L13a landed on top (stage 15); L13b landed on 2026-10-05 and L13c is on a branch (`po6/l13c`). The exit
-criterion still needs cgctl and `stage13-container`.
+pending-work word stopped the boot with FX-0520. Init's L13a landed on top (stage 15); L13b landed on 2026-10-05 and L13c on 2026-10-08. The cgroup controllers
+landed on 2026-10-07; the exit criterion still needs `stage13-container`.
 
 **Landed -- the small namespaces and `setns` (built 2026-09-30, landed
 2026-10-01 after the consultant's review):** UTS, IPC and cgroup
@@ -341,7 +341,7 @@ the namespace ends. Abstract unix names are per namespace. The `netns` boot line
 charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
 controls and what is open.
 
-**Done -- M2, F1, S2 and B1, the rest of the controllers (built 2026-09-30, landed 2026-10-05).** A
+**Done -- M2, F1, S2 and B1, the rest of the controllers (built 2026-09-30, landed 2026-10-07).** A
 charge past `memory.max` reclaims inside the job before it kills: the clean
 page cache of files on a read-only disk mount, charged to the job and never a
 sibling's, goes back the way a truncation's pages do and is read again from
