@@ -26,7 +26,7 @@ Outputs go to `~/.local/share/ferrix/board-bench/linux/` on nazuna (or
 | Device tree | `st/stm32mp157a-dk1.dtb`: mainline has no `stm32mp157d-dk1`. The firmware is the a-dk1 build, and OP-TEE reports "RCC is non-secure", which is what this tree (not `-scmi`) expects. |
 | CPU clock points | None. Neither CPU node names an OPP table and the tree has none, so there is no cpufreq driver: the CPUs carry `clock-frequency = 650000000`, and the MPU runs at the 650 MHz TF-A sets (U-Boot prints "MPU : 650 MHz"). |
 | Kernel targets | `zImage dtbs modules_prepare`; the defconfig's own modules are not built. `pmu-user.ko` is checked against `vmlinux.symvers`. |
-| `lbench` | `-O2 -static -marm -mcpu=cortex-a7`: ARM code. The C library's `syscall`, `read` and `write` in Ubuntu's `libc.a` are Thumb-2, so the timed calls switch mode into them. gcc's default here is Thumb-2. |
+| `lbench` | `-O2 -static -marm -mcpu=cortex-a7`: ARM code. Every timed call traps through lbench's own A32 `svc #0` stubs, as Ferrix's runtime and seL4's stubs do, so no C library code is inside a measurement (Ubuntu's `libc.a` wrappers are Thumb-2). gcc's default here is Thumb-2. |
 
 The card's files (bootfs, `mmc 0:4`), as built; zImage's hash changes with
 every build, because the build time is in it:

@@ -17,7 +17,11 @@
 #   collect  the card's files into $OUT/out/card/bench/linux, and the record
 #            (versions, hashes, sizes, the CPU clock points) into $OUT/out
 #   clean    remove the unpacked source and every build directory, keeping
-#            dl/ and out/ (run it only after collect)
+#            dl/ and out/ (run it only after collect); gen_init_cpio is kept
+#            in tools/ for repack
+#   repack   after clean: lbench and the initramfs again, the kernel and
+#            device tree as built; the card's initramfs and out/ updated,
+#            and a line for it appended to versions.txt
 #
 # Everything is written under $BB_LINUX_OUT (default
 # ~/.local/share/ferrix/board-bench/linux); nothing is written next to this
@@ -132,7 +136,8 @@ lbench() {
     mkdir -p "$OUT/lbench"
     "${CROSS}gcc" "${CFLAGS[@]}" -I"$common" -o "$OUT/lbench/lbench" "$here/lbench.c"
     # ARM or Thumb-2: the mode these flags compile in, and main's symbol (bit
-    # 0 set is a Thumb function). syscall() is the C library's.
+    # 0 set is a Thumb function). The timed calls trap through lbench's own
+    # svc stubs, in main's mode; the C library's syscall() is set-up only.
     local mode main libc
     if "${CROSS}gcc" "${CFLAGS[@]}" -dM -E - </dev/null | grep -q '__thumb2__'; then
         mode=thumb2
@@ -141,8 +146,28 @@ lbench() {
     fi
     main=$("${CROSS}readelf" -s "$OUT/lbench/lbench" | awk '$8 == "main" { print $2 }')
     libc=$("${CROSS}readelf" -s "$OUT/lbench/lbench" | awk '$8 == "syscall" { print $2 }')
-    echo "lbench: ${CFLAGS[*]} compiles as $mode; main at 0x$main, libc's syscall at 0x$libc" |
+    echo "lbench: ${CFLAGS[*]} compiles as $mode; main at 0x$main (timed calls: own svc stubs), libc's syscall at 0x$libc (set-up only)" |
         tee "$OUT/lbench/mode.txt"
+}
+
+# The build's gen_init_cpio, or the copy clean keeps.
+gen_init_cpio() {
+    if [ -x "$BUILD/usr/gen_init_cpio" ]; then
+        echo "$BUILD/usr/gen_init_cpio"
+    elif [ -x "$OUT/tools/gen_init_cpio" ]; then
+        echo "$OUT/tools/gen_init_cpio"
+    else
+        die "no gen_init_cpio: run kernel, or a clean that kept it"
+    fi
+}
+
+# The module as built, or the copy collect put in out/.
+module_ko() {
+    if [ -f "$OUT/module/pmu-user.ko" ]; then
+        echo "$OUT/module/pmu-user.ko"
+    else
+        echo "$OUT/out/pmu-user.ko"
+    fi
 }
 
 cpio() {
@@ -154,9 +179,9 @@ nod /dev/console 0600 0 0 c 5 1
 dir /proc 0755 0 0
 dir /sys 0755 0 0
 file /init $OUT/lbench/lbench 0755 0 0
-file /pmu-user.ko $OUT/module/pmu-user.ko 0644 0 0
+file /pmu-user.ko $(module_ko) 0644 0 0
 EOF
-    "$BUILD/usr/gen_init_cpio" -t 0 "$list" | gzip -9n >"$OUT/out/initramfs.cpio.gz"
+    "$(gen_init_cpio)" -t 0 "$list" | gzip -9n >"$OUT/out/initramfs.cpio.gz"
     ls -l "$OUT/out/initramfs.cpio.gz"
 }
 
@@ -219,17 +244,35 @@ collect() {
 
 clean() {
     [ -f "$OUT/out/versions.txt" ] || die "clean: run collect first"
+    mkdir -p "$OUT/tools"
+    [ ! -x "$BUILD/usr/gen_init_cpio" ] || cp "$BUILD/usr/gen_init_cpio" "$OUT/tools/"
     rm -rf "$OUT/build" "$OUT/module" "$OUT/lbench" "$SRC"
     rm -f "$OUT/src/.linux-$VER.unpacked"
     rmdir "$OUT/src" 2>/dev/null || true
     du -sh "$OUT"
 }
 
+repack() {
+    [ -f "$OUT/out/versions.txt" ] || die "repack: run collect first"
+    lbench
+    cpio
+    cp "$OUT/out/initramfs.cpio.gz" "$OUT/out/card/$CARD/"
+    cp "$OUT/lbench/lbench" "$OUT/lbench/mode.txt" "$OUT/out/"
+    {
+        echo
+        echo "# repacked $(date -u +%Y-%m-%dT%H:%MZ): lbench and the initramfs only"
+        cat "$OUT/lbench/mode.txt"
+        (cd "$OUT/out" && sha256sum lbench "card/$CARD/initramfs.cpio.gz")
+    } >>"$OUT/out/versions.txt"
+    rm -rf "$OUT/lbench"
+    tail -5 "$OUT/out/versions.txt"
+}
+
 steps=("$@")
 [ ${#steps[@]} -gt 0 ] || steps=(fetch config kernel module lbench cpio collect)
 for step in "${steps[@]}"; do
     case $step in
-    fetch | config | kernel | module | lbench | cpio | collect | clean)
+    fetch | config | kernel | module | lbench | cpio | collect | clean | repack)
         echo "== $step"
         (cd "$OUT" 2>/dev/null || true; "$step")
         ;;

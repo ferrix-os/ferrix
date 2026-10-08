@@ -37,8 +37,11 @@
  *
  * Build (tools/common/bench/board/linux/build.sh does it):
  *   arm-linux-gnueabihf-gcc -O2 -static -marm -mcpu=cortex-a7 -I../common -o lbench lbench.c
- * -marm makes this file ARM code; the libc.a wrappers it calls (syscall,
- * read, write) are whatever mode the C library was built in.
+ * -marm makes this file ARM code. Every call inside a timed series traps
+ * through this file's own `svc #0` stubs (sys0, sys3, sys4), as Ferrix's
+ * runtime and seL4's stubs trap from their own code. So no C library code
+ * is inside a measurement: Ubuntu's libc.a wrappers are Thumb-2, and a
+ * wrapper is not the kernel being compared.
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -102,6 +105,37 @@ static __attribute__((noreturn)) void die(const char *what)
     end_run(1);
 }
 
+/* The EABI's trap: the number in R7, the arguments in R0 to R3, the result
+ * (or a negative errno) in R0. A32 encodings, from this file. */
+static inline long sys0(long nr)
+{
+    register long r0 __asm__("r0");
+    register long r7 __asm__("r7") = nr;
+    __asm__ volatile("svc #0" : "=r"(r0) : "r"(r7) : "memory");
+    return r0;
+}
+
+static inline long sys3(long nr, long a0, long a1, long a2)
+{
+    register long r0 __asm__("r0") = a0;
+    register long r1 __asm__("r1") = a1;
+    register long r2 __asm__("r2") = a2;
+    register long r7 __asm__("r7") = nr;
+    __asm__ volatile("svc #0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r7) : "memory");
+    return r0;
+}
+
+static inline long sys4(long nr, long a0, long a1, long a2, long a3)
+{
+    register long r0 __asm__("r0") = a0;
+    register long r1 __asm__("r1") = a1;
+    register long r2 __asm__("r2") = a2;
+    register long r3 __asm__("r3") = a3;
+    register long r7 __asm__("r7") = nr;
+    __asm__ volatile("svc #0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r3), "r"(r7) : "memory");
+    return r0;
+}
+
 static void pin0(void)
 {
     cpu_set_t set;
@@ -113,14 +147,20 @@ static void pin0(void)
 
 static void xread(int fd, void *p, size_t n)
 {
-    if (read(fd, p, n) != (ssize_t)n)
+    long r = sys3(__NR_read, fd, (long)p, (long)n);
+    if (r != (long)n) {
+        errno = r < 0 ? (int)-r : EIO;
         die("read");
+    }
 }
 
 static void xwrite(int fd, const void *p, size_t n)
 {
-    if (write(fd, p, n) != (ssize_t)n)
+    long r = sys3(__NR_write, fd, (long)p, (long)n);
+    if (r != (long)n) {
+        errno = r < 0 ? (int)-r : EIO;
         die("write");
+    }
 }
 
 static pid_t xfork(void)
@@ -227,9 +267,10 @@ static inline void pp_rt(void)
 
 static volatile uint32_t *word;
 
+/* No timeout (R3 = NULL); WAIT and WAKE read no further argument. */
 static long futex(volatile uint32_t *addr, int op, uint32_t val)
 {
-    return syscall(SYS_futex, addr, op, val, NULL, NULL, 0);
+    return sys4(__NR_futex, (long)addr, op, (long)val, 0);
 }
 
 static inline void futex_rt(void)
@@ -286,7 +327,7 @@ static void bench_unix(int type, const char *what)
 
 static void null_call(void)
 {
-    syscall(SYS_getppid);
+    sys0(__NR_getppid);
 }
 
 static void after_series(const char *what, void (*call)(void), uint32_t w)
@@ -449,6 +490,13 @@ static void info(void)
     printf("%s info isa: arm\n", PROG);
 #endif
     printf("%s info compiler: gcc %s\n", PROG, __VERSION__);
+    printf("%s info timed-calls: own svc stubs, %s\n", PROG,
+#ifdef __thumb2__
+           "thumb2"
+#else
+           "arm"
+#endif
+    );
     printf("%s info contract: warmup=%u samples=%u\n", PROG, BB_WARMUP, BB_SAMPLES);
 }
 
@@ -517,7 +565,7 @@ int main(void)
 
     BB_RUN(&s, (void)0);
     bb_print(PROG, "timer-floor", &s, hz);
-    BB_RUN(&s, syscall(SYS_getppid));
+    BB_RUN(&s, sys0(__NR_getppid));
     bb_print(PROG, "null", &s, hz);
     bench_pipe(1, "pipe");
     bench_pipe(8, "pipe-8B");
