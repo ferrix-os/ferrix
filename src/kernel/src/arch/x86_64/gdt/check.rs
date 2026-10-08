@@ -135,3 +135,32 @@ pub(crate) fn run() -> Result<(), &'static str> {
     );
     Ok(())
 }
+
+/// Stop the machine unless `cpu`'s record holds what asking this processor
+/// for its tables answers now, both non-zero: its GDT and where its TSS
+/// keeps `RSP0` (Q4, `docs/OPAQUE-KERNEL.md` §9.11; the consultant's
+/// Q4-C1). Run in every build, at every processor's bring-up after its last
+/// note -- the boot processor's as its record is installed, a secondary's
+/// after `init_secondary` -- so that from then on the record answers as
+/// asking would, which the switch relies on in place of `SGDT` and `STR`. A
+/// record a note never reached reads zero and is caught here, not merely
+/// asked past.
+///
+/// Verifies: `L.x86_64.6`
+pub(crate) fn require_tables_noted(cpu: &crate::smp::PerCpu) {
+    use core::sync::atomic::Ordering;
+    let table = super::live_table().map_or(0, |table| table as u64);
+    // SAFETY: (ENTRY) a TSS is loaded on every caller's path; only the
+    // address is computed, nothing is written.
+    let rsp0 = unsafe { super::ask_privilege_stack() }.map_or(0, |rsp0| rsp0 as u64);
+    let noted_table = cpu.gdt.load(Ordering::Relaxed);
+    let noted_rsp0 = cpu.privilege_stack.load(Ordering::Relaxed);
+    if table == 0 || rsp0 == 0 || noted_table != table || noted_rsp0 != rsp0 {
+        crate::panic::fatal!(
+            crate::panic::catalog::TABLES_NOT_NOTED,
+            "processor {}'s record does not hold its tables: GDT noted {noted_table:#x}, asked \
+             {table:#x}; RSP0 noted {noted_rsp0:#x}, asked {rsp0:#x}",
+            cpu.logical
+        );
+    }
+}
