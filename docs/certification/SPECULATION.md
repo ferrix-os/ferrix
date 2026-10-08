@@ -685,10 +685,10 @@ symbol it cannot prove local as `call *sym@GOTPCREL(%rip)` with
 So 24,227 calls stayed indirect against 3,102 in the debug build.
 `-Z relax-elf-relocations` and `-Z plt` would fix that and are nightly-only.
 
-Measured again on the release kernel of `main` 390d5f278 (2026-10-07,
-po10-quick, `docs/OPAQUE-KERNEL.md` §9.11, Q8): 4,472 calls go through a
-GOT slot, nearly all of them LLVM's library calls -- `memcpy` 1,621,
-`__udivti3` 1,201, `memmove` 922, `memset` 385, `memcmp` 319, `__divti3` 17
+Measured again on the release kernel of `main` 523fc3d50 (2026-10-07,
+po10-quick, `docs/OPAQUE-KERNEL.md` §9.11, Q8): 4,475 calls go through a
+GOT slot, nearly all of them LLVM's library calls -- `memcpy` 1,620,
+`__udivti3` 1,208, `memmove` 922, `memset` 382, `memcmp` 319, `__divti3` 17
 -- which rustc routes through the GOT for a target without a PLT, and which
 `-Z plt` alone does not reach, since the prebuilt sysroot carries the
 target's default. The other four were the context switch's calls, which are
