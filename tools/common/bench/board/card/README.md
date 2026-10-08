@@ -19,6 +19,18 @@ files.
 The customer's desktop image (`FERRIX/` as it was) is copied off the card
 before anything is written, and put back when the bench round ends.
 
+## Putting files on the card
+
+1. `gather.sh <sources> <stage>` (Git Bash) copies each listed host directory
+   into a local stage laid out as bootfs. Every host directory carries its
+   own SHA256SUMS, checked after the copy, and the stage gets one
+   SHA256SUMS over all its files.
+2. With the card in a reader, `stage-card.ps1 -Drive <letter> -Stage <stage>`
+   reports what it would do. Add `-Backup <dir> -Apply` to back the card up
+   and write; add `-ClearFerrix` when the desktop image must make room.
+3. After the round, `stage-card.ps1 -Drive <letter> -Restore <backup> -Apply`
+   puts the card back as it was.
+
 ## The boot lines
 
 `card.plan` holds, per image, the U-Boot lines that boot it from the card.
