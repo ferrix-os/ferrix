@@ -9,6 +9,8 @@
 //! coprocessor 15 rather than a system register.
 
 mod bench_pmu;
+mod asid;
+pub(crate) use asid::SpaceTag;
 mod check;
 pub(crate) mod console;
 mod cpu;
@@ -198,6 +200,9 @@ pub(crate) unsafe fn init_traps() {
 /// Before the second core starts and before the first program.
 pub(crate) fn init_speculation(_view: &BootView<'_>) {
     speculation::init();
+    // The boot processor's ASID flush plan, decided with the rest of what
+    // it decides about itself before the first program.
+    asid::init_this_cpu(0);
 }
 
 /// Publish page table writes and invalidate the whole TLB — every core's.
@@ -1224,34 +1229,43 @@ pub(crate) fn prepare_user_root(root: u64) {
     crate::arch::speculation::forget_root(root);
 }
 
-/// Translate this processor's lower half through the tables at `root`.
+/// Translate this processor's lower half through the tables at `root`,
+/// tagged with its space's ASID (`docs/OPAQUE-KERNEL.md` §9.13, item 6).
 ///
-/// AArch64's version of this, in coprocessor 15's spelling and with one extra
-/// thing to get right: `TTBCR.EPD0` is *set* on this architecture from the
-/// moment the loader's identity map is dropped, so installing a user root is
-/// not only a register write but the re-enabling of a translation regime. A
-/// change that wrote `TTBR0` and left `EPD0` alone would fault on every user
-/// access and look exactly like page tables that are wrong — which they would
-/// not be. See [`cpu::write_ttbr0`].
+/// The number comes from `asid::number_for`, which makes this processor's
+/// flush first if a rollover left one pending; then root and number go into
+/// `TTBR0` in one write, and `EPD0` is cleared after it if an uninstall had
+/// set it ([`cpu::install_ttbr0`]). No TLB maintenance: the ASID keeps this
+/// space's entries apart from every other's, so a switch between two programs
+/// leaves both sets of entries in the TLB.
 ///
 /// # Safety
 ///
 /// (TRANSLATE) `root` must root a live set of tables for the lower half, and they must
-/// stay live until another root replaces them on this processor.
-pub(crate) unsafe fn install_user_root(root: u64) {
-    // SAFETY: (TRANSLATE) the caller guarantees the tables are live.
-    unsafe { cpu::write_ttbr0(root) };
-    cpu::flush_user_tlb();
+/// stay live until another root replaces them on this processor; `tag` must
+/// be the tag of the space `root` belongs to, and `cpu` this processor's
+/// logical number, with interrupts masked.
+pub(crate) unsafe fn install_user_root(root: u64, tag: &SpaceTag, cpu: usize) {
+    let number = asid::number_for(tag, cpu);
+    // SAFETY: (TRANSLATE) the caller guarantees the tables; `number_for` gave a number of
+    // a generation this processor has flushed for, or its own reserved one.
+    unsafe { cpu::install_ttbr0(root, number) };
+    if asid::predictor_every_install(cpu) {
+        cpu::invalidate_predictor();
+    }
     // The branch predictor invalidated, if this is another program's space
     // than the one this core last ran and the core is one that needs it.
     crate::arch::speculation::entered_space(root);
 }
 
-/// Stop translating the lower half at all.
+/// Stop translating the lower half, and invalidate nothing
+/// (`docs/OPAQUE-KERNEL.md` §9.13, item 5).
 ///
-/// What a processor picking up a kernel thread does; see AArch64's, whose
-/// argument is the same one. `EPD0` governs walks and not the `TLB`, so the
-/// cached user entries have to be invalidated as well.
+/// What a processor picking up a kernel thread does: `EPD0` set and
+/// synchronized, then `TTBR0` with root 0 and ASID 0 ([`cpu::park_ttbr0`]).
+/// The outgoing space's entries stay in the TLB under its number, where no
+/// walk under ASID 0 can reach them, and are hit again if the space comes
+/// back before anything removes them.
 ///
 /// # Safety
 ///
@@ -1259,8 +1273,35 @@ pub(crate) unsafe fn install_user_root(root: u64) {
 pub(crate) unsafe fn uninstall_user_root() {
     // SAFETY: (TRANSLATE) the caller guarantees no user address is wanted; the kernel is
     // reached entirely through `TTBR1`.
-    unsafe { cpu::disable_ttbr0() };
-    cpu::flush_user_tlb();
+    unsafe { cpu::park_ttbr0() };
+}
+
+/// The `asid` line: ARMv7-A's address space identifiers, checked
+/// (`asid::check`).
+///
+/// # Errors
+///
+/// What did not hold.
+pub(crate) fn check_address_space_ids() -> Result<(), &'static str> {
+    asid::check::run()
+}
+
+/// The `global` line: the kernel's tree holds only global leaves once the
+/// loader's alias has gone (`asid::check`).
+///
+/// # Errors
+///
+/// What did not hold.
+pub(crate) fn check_kernel_tree_global() -> Result<(), &'static str> {
+    asid::check::kernel_tree_is_global()
+}
+
+/// The order a remap needs between taking a user entry down and writing the
+/// one that replaces it (F-67, L.user.125): the page's broadcast
+/// invalidation, completed, which interrupts nobody and so may run under the
+/// space's lock.
+pub(crate) fn break_before_make(page: u64) {
+    flush_tlb_page(page);
 }
 
 /// Root of the loader's identity map, while it still exists.

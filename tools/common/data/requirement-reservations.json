@@ -52,6 +52,20 @@
       "branch": "os07/asid",
       "date": "2026-10-08",
       "purpose": "ARMv7-A ASIDs for the DK1 IPC matrix (B6 step 4): the per-processor generation allocator, the rollover flush, the uninstall to ASID 0, broadcast shootdowns, the drop of a space, and F-67's break-before-make order on the remap paths (OPAQUE-KERNEL.md 9.13; consultant os07-asid-cert, ledger 2026-10-08 lines 590 and 594, A1 and B5)"
+    },
+    {
+      "ids": ["L.object.180"],
+      "owner": "po11-cpumax",
+      "branch": "po11/cpumax",
+      "date": "2026-10-08",
+      "purpose": "IPC regression from cpu.max/cpu.stat: a processor's cpu.stat charge kept back per run queue and moved into the job's slots exactly once (consultant po11-cpumax-cert, ledger 2026-10-08 line 565, C7)"
+    },
+    {
+      "ids": ["L.armv7a.21-26"],
+      "owner": "os07-lazyvfp",
+      "branch": "os07/lazyvfp",
+      "date": "2026-10-08",
+      "purpose": "ARMv7-A lazy VFP for the DK1 IPC matrix: FPEXC.EN clear for a task that has not used VFP, its first use, SIGILL at the instruction's own address (F-68), the register file zero whenever EN is clear, the record as the VFP state while EN is clear, and a VFP user's state on whichever core resumes it (OPAQUE-KERNEL.md 9.15; consultant os07-lazyvfp-cert, ledger 2026-10-08 line 606, L1 and L6)"
     }
   ]
 }

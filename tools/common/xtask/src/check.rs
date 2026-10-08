@@ -236,6 +236,7 @@ fn run(args: &Args) -> Result<()> {
     steps_at_once(AUDITS)?;
     step("terminal font", terminal_font)?;
     step("btrfs allocates fallibly", item_crates_allocate_fallibly)?;
+    step("ARMv7-A ASID orders", armv7a_asid_orders)?;
 
     step("crate layering", || {
         let mut command = Command::new("bash");
@@ -286,6 +287,20 @@ fn run(args: &Args) -> Result<()> {
 
     println!("\nchecked");
     Ok(())
+}
+
+/// ARMv7-A's ASID register sequences and F-67's remap order, held by
+/// `tools/common/check/check-armv7a-asid.py`: orders no boot under QEMU can
+/// show, since QEMU empties its TLB at every change of ASID and every `TTBCR`
+/// write and shows no TLB conflict (`docs/OPAQUE-KERNEL.md` §9.13). Each of
+/// `cpu.rs`'s three sequences is exactly its instructions, each of
+/// `space.rs`'s three remaps calls `break_before_make` between its
+/// `forget_in` and its `map_in`, and a space's tag is forgotten only in check
+/// code.
+///
+/// Verifies: L.user.125
+fn armv7a_asid_orders() -> Result<()> {
+    python_with("tools/common/check/check-armv7a-asid.py", &[])
 }
 
 /// The item crates that must make every allocation fallibly, by package.
@@ -507,6 +522,7 @@ fn ferrousli(root: &std::path::Path) -> Result<()> {
 /// preemption bound of three.
 ///
 /// Verifies: L.sched.51
+/// Verifies: L.armv7a.19
 pub(crate) fn loom(root: &std::path::Path) -> Result<()> {
     let dir = root.join("src/tests/loom");
     let native = |arguments: &[&str]| {

@@ -43,6 +43,7 @@
 
 pub mod aarch64;
 pub mod armv7a;
+pub mod asid;
 pub mod coherence;
 pub mod stage2;
 pub mod vtd;

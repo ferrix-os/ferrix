@@ -418,70 +418,163 @@ pub(crate) unsafe fn disable_ttbr0() {
     }
 }
 
-/// Translate the lower half through the tables at `root`, with `ASID` zero.
+/// Translate the lower half through the tables at `root`, tagged with `asid`
+/// (`docs/OPAQUE-KERNEL.md` §9.13, item 6; L.armv7a.13).
 ///
-/// The inverse of [`disable_ttbr0`], and the two writes are in the order that
-/// order matters in: `TTBR0` first, `TTBCR.EPD0` second. `disable_ttbr0`
-/// zeroed the register precisely so that clearing `EPD0` on its own could not
-/// resurrect the loader's tables — this is the change it was guarding against,
-/// and the guard holds only if the root is in place before the regime is
-/// switched back on.
+/// One `mcrr` writes the root and the ASID together: with `TTBCR.A1` clear,
+/// `TTBR0` holds the ASID in bits 55 to 48, and "software can update the
+/// current translation table base address and ASID atomically, by updating
+/// the appropriate TTBR" (ARM DDI 0406C.d B3.10.4). Then an `isb`, and only
+/// then, if `EPD0` is set -- after an uninstall or a flush, which park the
+/// regime -- is it cleared and synchronized: the order of Example B3-5, so no
+/// walk runs with `EPD0` clear and the parked `TTBR0`, root 0 with ASID 0.
+/// When `EPD0` is already clear `TTBCR` is not written at all: a switch from
+/// one program to another is the `mcrr` and an `isb`, and QEMU, which
+/// empties its TLB at every `TTBCR` write, can then show a check what a
+/// shared number would do.
 ///
-/// `TTBR0` is a 64-bit register in the long-descriptor format and takes a
-/// `mcrr` pair. Its `ASID` field is bits 55 to 48 of the high word, left zero
-/// because stage 6 allocates no address space identifiers; see
-/// [`flush_user_tlb`].
+/// No TLB maintenance: the ASID tells this space's entries from every other
+/// space's. `tools/common/check/check-armv7a-asid.py` holds this block to its
+/// instructions and refuses any cache or TLB operation in it.
 ///
 /// # Safety
 ///
 /// (TRANSLATE) `root` must be the physical address of a live translation table for the
-/// lower half, and it must stay live until another root replaces it here.
-pub(crate) unsafe fn write_ttbr0(root: u64) {
+/// lower half, and stay live until another root replaces it here; `asid`
+/// must be the number the allocator gave this space in a generation this
+/// processor has flushed for (`asid::install`).
+pub(crate) unsafe fn install_ttbr0(root: u64, asid: u8) {
     let low = root as u32;
-    let high = (root >> 32) as u32;
-    // SAFETY: (TRANSLATE) the caller guarantees the tables. The `isb` makes both writes
-    // take effect before the next instruction is fetched.
+    let high = ((root >> 32) as u32) | (u32::from(asid) << 16);
+    // SAFETY: (TRANSLATE) the caller guarantees the tables and the number. Each
+    // `isb` makes the write before it take effect before the next
+    // instruction.
     unsafe {
         asm!(
             "mcrr p15, 0, {low}, {high}, c2",
+            "isb",
             "mrc p15, 0, {scratch}, c2, c0, 2",
+            "tst {scratch}, #{epd0}",
+            "beq 2f",
             "bic {scratch}, {scratch}, #{epd0}",
             "mcr p15, 0, {scratch}, c2, c0, 2",
             "isb",
+            "2:",
             low = in(reg) low,
             high = in(reg) high,
             scratch = out(reg) _,
+            epd0 = const TTBCR_EPD0,
+            options(nostack),
+        );
+    }
+}
+
+/// Stop translating the lower half, with nothing flushed: `EPD0` set and
+/// synchronized, then `TTBR0` zeroed, root 0 and ASID 0 (§9.13, item 5;
+/// L.armv7a.15).
+///
+/// What a processor picking up a kernel thread does. The outgoing space's
+/// entries stay in the TLB under its number, which no walk can reach while
+/// ASID 0 is current, and no entry is tagged ASID 0: no space is given it,
+/// and with `EPD0` synchronized first no walk runs while `TTBR0` holds it.
+/// Changing `EPDn` needs no TLB invalidation when the ASID changes with it
+/// (B3.10.2). `check-armv7a-asid.py` holds the block to its instructions.
+///
+/// # Safety
+///
+/// (TRANSLATE) Nothing on this processor may still need a user address.
+pub(crate) unsafe fn park_ttbr0() {
+    // SAFETY: (TRANSLATE) the caller guarantees no user address is wanted; the
+    // kernel is reached entirely through `TTBR1`.
+    unsafe {
+        asm!(
+            "mrc p15, 0, {scratch}, c2, c0, 2",
+            "orr {scratch}, {scratch}, #{epd0}",
+            "mcr p15, 0, {scratch}, c2, c0, 2",
+            "isb",
+            "mcrr p15, 0, {zero}, {zero}, c2",
+            "isb",
+            scratch = out(reg) _,
+            zero = in(reg) 0u32,
             epd0 = const TTBCR_EPD0,
             options(nostack, preserves_flags),
         );
     }
 }
 
-/// Drop this processor's cached user translations, and keep the kernel's.
+/// A processor's flush after an ASID rollover (§9.13, item 2; L.armv7a.14):
+/// park the lower half as [`park_ttbr0`] does, then a local `TLBIALL` and
+/// `BPIALL`, and `ICIALLU` where `instruction_cache` says the instruction
+/// cache is ASID-tagged, completed by `dsb nsh` and synchronized.
 ///
-/// `TLBIASID` invalidates the entries matching an `ASID`, which by definition
-/// are the ones not marked global — so the kernel's, all mapped global through
-/// `TTBR1`, survive. That is why this is not [`flush_tlb`]: that one is
-/// `TLBIALLIS`, which throws the global entries away too *and* broadcasts to
-/// every core, and an address space switch neither needs nor can afford
-/// either.
+/// Local, because the rollover made every processor's flush pending and each
+/// makes its own before it runs a number of the new generation. `BPIALL` is
+/// the predictor maintenance a reused ASID asks for (B2.2.4).
 ///
-/// `nsh` on the barrier for AArch64's reason: the invalidation is this
-/// processor's business, and a processor about to run this address space
-/// invalidates as it installs the root.
-pub(crate) fn flush_user_tlb() {
-    // SAFETY: (TRANSLATE) invalidating translations can only cost a re-walk. The `dsb`
-    // waits for it and the `isb` keeps the next instruction from being fetched
-    // through an entry it removed.
+/// # Safety
+///
+/// (TRANSLATE) Nothing on this processor may still need a user address; the caller
+/// installs a root after.
+pub(crate) unsafe fn flush_for_new_generation(instruction_cache: bool) {
+    // SAFETY: (TRANSLATE) parked as `park_ttbr0` is, and invalidating can only
+    // cost re-walks and re-fetches; the `dsb` completes it and the `isb` makes
+    // it visible to the next fetch.
     unsafe {
         asm!(
-            "mcr p15, 0, {asid}, c8, c7, 2",
+            "mrc p15, 0, {scratch}, c2, c0, 2",
+            "orr {scratch}, {scratch}, #{epd0}",
+            "mcr p15, 0, {scratch}, c2, c0, 2",
+            "isb",
+            "mcrr p15, 0, {zero}, {zero}, c2",
+            "isb",
+            "mcr p15, 0, {zero}, c8, c7, 0",
+            "mcr p15, 0, {zero}, c7, c5, 6",
+            "cmp {icache}, #0",
+            "beq 2f",
+            "mcr p15, 0, {zero}, c7, c5, 0",
+            "2:",
             "dsb nsh",
             "isb",
-            asid = in(reg) 0_u32,
-            options(nostack, preserves_flags),
+            scratch = out(reg) _,
+            zero = in(reg) 0u32,
+            icache = in(reg) u32::from(instruction_cache),
+            epd0 = const TTBCR_EPD0,
+            options(nostack),
         );
     }
+}
+
+/// `BPIALL` on this processor: the predictor maintenance a core whose
+/// `ID_MMFR1.BPred` is 0b0001 needs at every change of `ContextID` (B4.1.90,
+/// L.armv7a.20). No core this kernel is known to run on asks for it.
+pub(crate) fn invalidate_predictor() {
+    // SAFETY: (PROTECT) invalidating the branch predictor only costs time; the `isb`
+    // makes it take effect before the next branch.
+    unsafe {
+        asm!("mcr p15, 0, {zero}, c7, c5, 6", "isb", zero = in(reg) 0_u32, options(nostack, preserves_flags));
+    }
+}
+
+/// `CTR`, the cache type register: `L1Ip` in bits 15 and 14 says how the
+/// instruction cache is indexed and tagged (B4.1.42).
+pub(crate) fn read_ctr() -> u32 {
+    let value: u32;
+    // SAFETY: (SYSREG) reading an identification register has no side effects.
+    unsafe {
+        asm!("mrc p15, 0, {}, c0, c0, 1", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
+/// `ID_MMFR1`: `BPred` in bits 31 to 28 says when the branch predictor needs
+/// maintenance (B4.1.90).
+pub(crate) fn read_id_mmfr1() -> u32 {
+    let value: u32;
+    // SAFETY: (SYSREG) reading an identification register has no side effects.
+    unsafe {
+        asm!("mrc p15, 0, {}, c0, c1, 5", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
 }
 
 /// The frequency of the architected counter, in hertz.
@@ -660,12 +753,7 @@ pub(crate) fn read_sctlr() -> u32 {
 /// The smallest data cache line in bytes, from `CTR`'s `DminLine`, which is
 /// log2 of it in words.
 fn data_line() -> u64 {
-    let cache_type: u32;
-    // SAFETY: (SYSREG) reading `CTR` has no side effects.
-    unsafe {
-        asm!("mrc p15, 0, {}, c0, c0, 1", out(reg) cache_type, options(nomem, nostack, preserves_flags));
-    }
-    4u64 << ((cache_type >> 16) & 0xF)
+    4u64 << ((read_ctr() >> 16) & 0xF)
 }
 
 /// Write the data cache lines covering `start..start + len` back to the point

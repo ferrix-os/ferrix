@@ -244,10 +244,11 @@ package FerrixMemoryRequirements {
                 tree, the physical address the processor reaches through that address
                 while the tree is installed.";
             attribute :>> criterion = "In each of the 2 rounds
-                check_the_processor_walks_an_installed_space runs, a value written
-                through each of a two-page space's user addresses, the space installed,
-                is read back through it and at the frame translate_in names for it
-                through the direct map, 2 of 2 pages.";
+                check_the_processor_walks_an_installed_space runs, each on 2 pages of a
+                four-page space no earlier round touched, a value written through each
+                user address, the space installed, is read back through it and at the
+                frame translate_in names for it through the direct map, 2 of 2
+                pages.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("mm::translate_in", "mm::KernelPhysMem::read");
         }
@@ -787,6 +788,43 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::reserve::refuse_reserve_fills",
                 "mm::reserve::this_cpu_tag");
+        }
+    }
+
+
+    package AddressSpaceIdentifiers {
+        doc /* src/lib/kernel/paging/src/asid.rs, kept by ARMv7-A's
+             * src/kernel/src/arch/armv7a/asid.rs: one ASID allocator for the
+             * machine, in generations (docs/OPAQUE-KERNEL.md §9.13). */
+        requirement <'L.mm.69'> oneNumberOneSpaceInAGeneration : ItemLowLevel {
+            attribute :>> statement = "The ASID allocator shall give each number from 1
+                to 255 to at most one space in a generation, never give 0, give a tag
+                of the current generation back unchanged, and keep in the new
+                generation the number a processor reserved at a rollover for the
+                space whose tag it reserved.";
+            attribute :>> criterion = "Over ten generations every number from 1 to 255
+                is given once a generation and 0 never; a reserved tag keeps its number
+                after a rollover and every reservation of it moves on; and the model
+                of 2 to 4 processors with TLBs that keep every entry finds no hit
+                reaching another space or a freed frame over 8 seeds of 40000 steps
+                (ferrix-paging's asid tests).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = "arch::armv7a::asid::slow_path";
+        }
+        requirement <'L.mm.70'> aRolloverOnlyWhenNoneIsFree : ItemLowLevel {
+            attribute :>> statement = "The ASID allocator shall roll over exactly when
+                no number is free, then reserve each processor's active tag, or its
+                earlier reservation if the active tag is 0, set every processor's
+                flush pending, count no tag of an earlier generation as current, and
+                refuse a generation past its range or a rollover that leaves no
+                number free rather than give a number twice.";
+            attribute :>> criterion = "A rollover comes only with all 255 numbers
+                given, reserves processors 0 and 2's running numbers and sets 4 of 4
+                processors' flushes pending; at the generation's limit and with every
+                number reserved the allocator answers an error and changes nothing
+                (ferrix-paging's asid tests).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = "arch::armv7a::asid::slow_path";
         }
     }
 
@@ -1510,11 +1548,11 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "install shall make the running processor
                 translate user addresses through the space's own tables, on the
                 first installation and on every one after an uninstall.";
-            attribute :>> criterion = "Over 2 rounds of install, use and uninstall, a
-                write through each of 2 user addresses reads back through the address
-                and through the direct map's alias of the frame the space's tables
-                name, for both pages in both rounds; and the space dropped keeps 0
-                frames.";
+            attribute :>> criterion = "Over 2 rounds of install, use and uninstall, each
+                on 2 user addresses no earlier round touched, a write through each
+                reads back through the address and through the direct map's alias of
+                the frame the space's tables name, for both pages in both rounds; and
+                the space dropped keeps 0 frames.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("user::space::AddressSpace::install",
                 "user::space::AddressSpace::uninstall",
@@ -1762,6 +1800,22 @@ package FerrixMemoryRequirements {
                 "user::memory_type::Hold::drop", "user::memory_type::release",
                 "user::memory_type::claims", "user::space::WindowPages::all",
                 "user::space::WindowPages::check");
+        }
+        requirement <'L.user.125'> aRemapBreaksBeforeItMakes : ItemLowLevel {
+            attribute :>> statement = "A remap that replaces a valid user entry with one
+                to another frame -- the copy-on-write in fault, install_page with a
+                replace, copy_shadow_page -- shall write the old entry invalid, then
+                call break_before_make for the page (break_page), and only then
+                write the new entry, all under the space's lock (F-67).";
+            attribute :>> criterion = "Each of the three remaps in space.rs calls
+                break_page, which calls break_before_make, between its forget_in and
+                its map_in, and there are three (`cargo xtask check`, check-armv7a-asid.py); the copy-on-write
+                checks pass on x86-64, AArch64 and ARMv7-A.";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("user::space::break_page",
+                "user::space::AddressSpace::install_page",
+                "user::space::AddressSpace::copy_shadow_page",
+                "arch::armv7a::break_before_make");
         }
         requirement <'L.user.107'> aCopyThroughADevicePageIsRefused : ItemLowLevel {
             attribute :>> statement = "with_page and with_present_page shall refuse

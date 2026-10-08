@@ -62,6 +62,112 @@ package FerrixArmv7aRequirements {
         }
     }
 
+
+    package AddressSpaceIdentifiers {
+        doc /* src/kernel/src/arch/armv7a/asid.rs and cpu.rs: ASIDs, one
+             * allocator for the machine (docs/OPAQUE-KERNEL.md §9.13). */
+        requirement <'L.armv7a.13'> anInstallWritesRootAndNumberAtOnce : ItemLowLevel {
+            attribute :>> statement = "install_user_root shall write the root and the
+                space's ASID into TTBR0 in one write and synchronize it before it
+                clears EPD0, write TTBCR only when EPD0 is set, and make no cache or
+                TLB maintenance but a pending flush.";
+            attribute :>> criterion = "After an install TTBR0 holds the space's root
+                and its number, not 0, bit 0 clear and EPD0 clear (the `asid` line on
+                an ARMv7-A boot); the install's instructions are exactly its sequence,
+                with no c7 or c8 operation (check-armv7a-asid.py); two spaces on one
+                processor each read their own page (the `spaces` line).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::install_user_root",
+                "arch::armv7a::cpu::install_ttbr0", "arch::armv7a::asid::number_for");
+        }
+        requirement <'L.armv7a.14'> aProcessorFlushesBeforeANewGeneration : ItemLowLevel {
+            attribute :>> statement = "A processor whose flush a rollover left pending
+                shall park TTBR0, with EPD0 set and synchronized before TTBR0 becomes
+                0, and complete a local TLBIALL, a BPIALL and, where CTR.L1Ip says the
+                instruction cache is ASID-tagged, an ICIALLU, before it writes any
+                number of the new generation.";
+            attribute :>> criterion = "A forced rollover adds a generation and one
+                flush on this processor, and every other processor's flush count rises
+                at its next install; a space given a reused number reads its own page
+                at an address the space before it used (the `asid` line); the flush's
+                instructions are exactly its sequence (check-armv7a-asid.py).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::cpu::flush_for_new_generation",
+                "arch::armv7a::asid::slow_path");
+        }
+        requirement <'L.armv7a.15'> aKernelThreadRunsWithAsidZero : ItemLowLevel {
+            attribute :>> statement = "uninstall_user_root shall set EPD0 and
+                synchronize it before it writes TTBR0 to 0, and invalidate nothing.";
+            attribute :>> criterion = "After an uninstall TTBR0 reads 0 and EPD0 set
+                (the `asid` line); the park's instructions are exactly its sequence
+                (check-armv7a-asid.py).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::uninstall_user_root",
+                "arch::armv7a::cpu::park_ttbr0");
+        }
+        requirement <'L.armv7a.16'> shootdownsReachEveryProcessor : ItemLowLevel {
+            attribute :>> statement = "On ARMv7-A every TLB shootdown shall be broadcast
+                to the inner shareable domain and complete before what it covers is
+                released.";
+            attribute :>> criterion = "The model of the allocator with broadcast
+                shootdowns finds no stale hit, and the same model with a shootdown
+                scoped to the space's set finds one (ferrix-paging's asid tests).";
+            attribute :>> parent = "H.MEM.7";
+            attribute :>> unit = ("arch::armv7a::flush_tlb_page", "arch::armv7a::flush_tlb");
+        }
+        requirement <'L.armv7a.17'> userLeavesAreNotGlobal : ItemLowLevel {
+            attribute :>> statement = "Every leaf the kernel writes under a user root
+                shall be non-global, and once finish_memory has run the kernel's own
+                tree shall hold no non-global leaf.";
+            attribute :>> criterion = "A user space's leaves, put there by the fault
+                path, are all non-global (the `asid` line), and after the loader's
+                alias has gone every kernel leaf is global (the `global` line).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::drop_identity_map",
+                "user::space::AddressSpace::map_anonymous");
+        }
+        requirement <'L.armv7a.18'> aDroppedSpacesNumberWaitsForAFlush : ItemLowLevel {
+            attribute :>> statement = "No processor shall write a dropped space's ASID
+                into TTBR0 before its own next full flush.";
+            attribute :>> criterion = "The model of the allocator, whose spaces are
+                dropped with no shootdown and whose frames and tables are reused at
+                once, finds no hit reaching a freed frame or table, and no install
+                changing a processor's base while keeping its number
+                (ferrix-paging's asid tests).";
+            attribute :>> parent = "H.MEM.7";
+            attribute :>> unit = "arch::armv7a::asid::slow_path";
+        }
+        requirement <'L.armv7a.19'> theFastPathIsOrderedAgainstARollover : ItemLowLevel {
+            attribute :>> statement = "number_for shall take a space's number without
+                the lock only when the space's tag is of the generation it read and
+                swapping the tag into its processor's active tag answers non-zero, and
+                a rollover shall swap every processor's active tag with 0, so that no
+                processor runs a number in a generation it has not flushed for unless
+                it is its own reserved number.";
+            attribute :>> criterion = "The loom model of a fast path against another
+                processor's rollover finds no two processors running one number for
+                two spaces, no stale hit and no unflushed processor running a number
+                not reserved for it; its three controls each find one (`cargo xtask
+                loom`, src/tests/loom).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::asid::number_for",
+                "arch::armv7a::asid::slow_path");
+        }
+        requirement <'L.armv7a.20'> theFlushFollowsTheCore : ItemLowLevel {
+            attribute :>> statement = "Each processor shall read its own CTR and ID_MMFR1
+                before it installs a space, and add ICIALLU to its flush where CTR.L1Ip
+                is 0b01 and BPIALL to every install where ID_MMFR1.BPred is 0b0001.";
+            attribute :>> criterion = "The plan is decided as stated for the
+                Cortex-A7's values and the two cases that add an operation
+                (ferrix-paging's asid tests), and every processor has decided one
+                (the `asid` line, which prints the boot processor's CTR and
+                ID_MMFR1).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("arch::armv7a::asid::init_this_cpu",
+                "arch::armv7a::asid::predictor_every_install");
+        }
+    }
+
     package Timer {
         requirement <'L.armv7a.4'> programsReadTheCounter : ItemLowLevel {
             attribute :>> statement = "allow_user_counter shall set CNTKCTL.PL0VCTEN

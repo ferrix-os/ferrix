@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1648,
+  "max_total_lines": 1671,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -47,7 +47,12 @@
     "write that turns VFP on (1 line), ferrix_fpu_disable, the FPEXC write that",
     "turns it off for a program that has never used VFP (5 with its comment), and",
     "ferrix_fpu_exc, the PL1 read of FPEXC the checks compare the record with (4).",
-    "Two native programs trading a core then run no VFP instruction at all."
+    "Two native programs trading a core then run no VFP instruction at all.",
+    "1661 since 2026-10-08 (os07-asid, docs/OPAQUE-KERNEL.md §9.13, L.armv7a.13-15",
+    "and 20) for ARMv7-A cpu.rs's ASIDs: the install's TTBR0 write with its",
+    "conditional EPD0 clear, the park, the flush a processor makes after a",
+    "rollover, BPIALL for a core that asks for it at every install, and the CTR",
+    "and ID_MMFR1 reads; the per-install TLBIASID is gone (+23 net)."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -116,8 +121,8 @@
     },
     {
       "file": "src/kernel/src/arch/armv7a/cpu.rs",
-      "max_lines": 107,
-      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44); 105 for CNTKCTL's read and write (`allow_user_counter`, L.armv7a.4), what user mode may read of the generic timer, a coprocessor 15 register like the rest; 107 for TPIDRURW's read and write (F-66, L.armv7a.11), the thread ID register a program writes itself and the switch moves at every switch."
+      "max_lines": 130,
+      "reason": "CPU primitives, one instruction or one short sequence each. Every ARMv7-A system register is a coprocessor 15 transfer, which Rust has no syntax for -- VBAR, SCTLR, TTBCR, TTBR0 and the generic timer's four registers -- and so are the barriers, the TLB maintenance, the cache maintenance (by line to the point of coherency for devices, and ICIALLUIS and BPIALLIS for code a user page is mapped with), cpsid and cpsie, wfi, and the PSCI call, made with whichever of hvc or smc the device tree names. 102 rather than 100 for the code sync, after the three CTR reads became one; 103 for `dma_barrier`'s `dmb osh`, which orders what a DMA master sees and which `fence` does not emit (F-44); 105 for CNTKCTL's read and write (`allow_user_counter`, L.armv7a.4), what user mode may read of the generic timer, a coprocessor 15 register like the rest; 107 for TPIDRURW's read and write (F-66, L.armv7a.11), the thread ID register a program writes itself and the switch moves at every switch; 130 for ASIDs (docs/OPAQUE-KERNEL.md §9.13): the install's one TTBR0 write of root and number with its conditional EPD0 clear, the park of TTBR0 for a kernel thread, a processor's flush after a rollover (parked, TLBIALL, BPIALL, ICIALLU on an ASID-tagged instruction cache), BPIALL alone, and the CTR and ID_MMFR1 reads its flush plan is decided from, less the TLBIASID every switch used to run. Each sequence is one block because its order is the requirement, which tools/common/check/check-armv7a-asid.py holds."
     },
     {
       "file": "src/kernel/src/arch/armv7a/mmio.rs",

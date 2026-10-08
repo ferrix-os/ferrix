@@ -24,9 +24,17 @@
 //!
 //! # Which processors may still hold this space's translations
 //!
-//! Every space keeps a set of processors, and the set means *may still have
-//! this space's translations in its TLB* — not *has the root loaded now*. The
-//! difference is the whole of what makes a shootdown to the set enough:
+//! Every space keeps a set of processors. On x86-64 and `AArch64` the set
+//! means *may still have this space's translations in its TLB* — not *has
+//! the root loaded now* — and the difference is the whole of what makes a
+//! shootdown to the set enough on x86-64, where the shootdown interrupts the
+//! set. On ARMv7-A, which gives each space an ASID (`docs/OPAQUE-KERNEL.md`
+//! §9.13), a processor that switched away keeps the space's entries under
+//! its number, so there the set means only *has the space installed, or had
+//! it until its last switch*; nothing on that architecture reads it for a
+//! shootdown, which is a hardware broadcast to every processor whatever the
+//! set (`TLBIMVAAIS`, `TLBIALLIS`, then `dsb ish`). The rules the set is kept
+//! by are the same everywhere:
 //!
 //! * A processor **joins before** [`AddressSpace::install`] loads the root, so
 //!   no processor walks these tables and caches an entry while outside the
@@ -35,10 +43,12 @@
 //!   of its TLB: [`AddressSpace::uninstall`]'s, or the `install` of the next
 //!   space. On x86-64 that is the `CR3` write — without `PCID` it drops every
 //!   entry not marked global, and no user mapping is ever global: every
-//!   `map_in` in this file passes `global: false`. On `AArch64` and ARMv7-A a
-//!   write to `TTBR0` drops nothing and `EPD0` stops walks rather than TLB
-//!   hits, so both `install_user_root` and `uninstall_user_root` invalidate
-//!   `ASID` zero, which every user translation carries and no kernel one does.
+//!   `map_in` in this file passes `global: false`. On `AArch64` a write to
+//!   `TTBR0` drops nothing and `EPD0` stops walks rather than TLB hits, so
+//!   both `install_user_root` and `uninstall_user_root` invalidate `ASID`
+//!   zero, which every user translation carries and no kernel one does. On
+//!   ARMv7-A neither invalidates: the space's number keeps its entries apart
+//!   from every other space's, and the leave is bookkeeping.
 //! * There is no lazy TLB. The scheduler uninstalls a space when it switches
 //!   to a kernel thread rather than leaving the root loaded, so a processor
 //!   running a kernel thread is in no space's set.
@@ -247,8 +257,14 @@ pub(crate) struct AddressSpace {
     root: Frame,
     /// This space, as the objects it maps record it.
     me: Weak<AddressSpace>,
-    /// The processors whose TLB may still hold this space's translations.
+    /// The processors that have this space installed, or had it until their
+    /// last switch: on x86-64 and `AArch64` exactly those whose TLB may still
+    /// hold its translations (see the module).
     cpus: CpuMask,
+    /// Its address space identifier, on the architecture that gives one
+    /// (ARMv7-A, `docs/OPAQUE-KERNEL.md` §9.13): the same on every processor,
+    /// and gone with the space.
+    pub(crate) tag: arch::SpaceTag,
     /// Its shootdowns: those not yet returned, and those ever begun.
     flushes: Flushes,
     /// Held by each system call that changes which ranges are mapped, from
@@ -352,8 +368,10 @@ impl AddressSpace {
     ///
     /// The processor joins this space's set before the root is loaded, and
     /// leaves `replacing`'s only after, for the reasons the module gives. A
-    /// `replacing` that was not in fact installed here costs nothing: the
-    /// root write just made has dropped whatever of it this TLB held.
+    /// `replacing` that was not in fact installed here costs nothing: on
+    /// x86-64 and `AArch64` the root write just made has dropped whatever of
+    /// it this TLB held, and on ARMv7-A its entries stay under its own number,
+    /// where only its own install can reach them.
     ///
     /// # Safety
     ///
@@ -380,7 +398,7 @@ impl AddressSpace {
         // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
         // on it and the kernel is reachable through it on the architecture
         // that needs that; the caller guarantees it outlives the installation.
-        unsafe { arch::install_user_root(self.root * PAGE_SIZE) };
+        unsafe { arch::install_space_root(self.root * PAGE_SIZE, &self.tag, cpu) };
         crate::sched::trip::count(crate::sched::trip::Count::RootInstall);
         if let Some(previous) = replacing
             && !core::ptr::eq(previous, self)
@@ -393,7 +411,9 @@ impl AddressSpace {
     ///
     /// After this no user address translates here, which is the state a kernel
     /// thread runs in. The processor leaves the set after the root write,
-    /// which on every architecture drops the user translations it had cached.
+    /// which on x86-64 and `AArch64` drops the user translations it had
+    /// cached; on ARMv7-A they stay under the space's number, which no walk
+    /// can reach while the processor runs ASID 0.
     ///
     /// # Safety
     ///
@@ -420,6 +440,7 @@ impl AddressSpace {
             root,
             me: me.clone(),
             cpus: CpuMask::new(),
+            tag: arch::SpaceTag::new(),
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
             inner: SpinLock::new(inner),
@@ -499,6 +520,16 @@ fn this_logical_cpu() -> usize {
             );
         }
     }
+}
+
+/// Add `page`, whose entry a remap has just taken out of the tables, to the
+/// remap's shootdown, and invalidate it at once wherever that interrupts
+/// nobody, before the remap writes the entry that replaces it: the order the
+/// Arm architecture asks of a change of output address (F-67, L.user.125;
+/// `arch::break_before_make`). The shootdown after the make still runs.
+fn break_page(pages: &mut TlbPages, page: u64) {
+    pages.add(page);
+    arch::break_before_make(page);
 }
 
 /// How many times a fault fills a page that reclaim took again before it gives
@@ -1064,7 +1095,9 @@ impl AddressSpace {
             // reach.
             let mut pages = TlbPages::new();
             let _ = self.forget_in(&inner, id, &[(index, 1)], &mut pages);
-            pages.add(page);
+            // Break before make (F-67): the old entry out of every TLB that
+            // can be told without an interrupt, before the new one goes in.
+            break_page(&mut pages, page);
             let mapped = mm::map_in(
                 self.root * PAGE_SIZE,
                 page,
@@ -1334,7 +1367,8 @@ impl AddressSpace {
         let mut pages = TlbPages::new();
         if replace {
             let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
-            pages.add(at.page);
+            // Break before make (F-67), as in `fault`.
+            break_page(&mut pages, at.page);
         }
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
@@ -1381,7 +1415,8 @@ impl AddressSpace {
         };
         let mut pages = TlbPages::new();
         let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
-        pages.add(at.page);
+        // Break before make (F-67), as in `fault`.
+        break_page(&mut pages, at.page);
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
             at.page,
@@ -3716,7 +3751,11 @@ impl Drop for AddressSpace {
     /// is only safe because nothing is running in this address space — an
     /// `AddressSpace` is dropped when its last reference goes, and a running
     /// thread is a reference — and because every processor that ran it left
-    /// its set only after the root write that dropped its translations.
+    /// its set only after the root write that dropped its translations. On
+    /// ARMv7-A that write drops nothing: there the entries a processor kept
+    /// are under the space's number, which no processor runs again before
+    /// its own next full flush (`docs/OPAQUE-KERNEL.md` §9.13, item 7;
+    /// L.armv7a.18).
     ///
     /// Every object is detached before it is let go, taking only its mapper
     /// list: this runs with no lock of its own to hold.
@@ -3724,7 +3763,9 @@ impl Drop for AddressSpace {
         let me: *const AddressSpace = &raw const *self;
         let inner = self.inner.get_mut();
 
-        // Unwalked: no processor is in this space's set, and each left it
+        // Unwalked: no processor is in this space's set, and on ARMv7-A the
+        // entries a processor kept are under a number it will not run again
+        // before its next full flush. Elsewhere each left it
         // through the root write that dropped its entries, walk caches and
         // all -- the module's second rule.
         for region in inner.map.iter() {

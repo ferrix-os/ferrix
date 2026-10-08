@@ -127,7 +127,8 @@ pub(crate) static SPACE_SET_WITHOUT_RECORD: Explanation = Explanation {
     code: "FX-0004",
     title: "an address space was switched on a processor that cannot name itself",
     meaning: "Every address space keeps the set of processors whose TLB may still hold its \
-              translations, and a TLB shootdown for the space reaches exactly those. A \
+              translations (on ARMv7-A, whose shootdowns are a broadcast, the processors \
+              that have it installed), and a TLB shootdown for the space reaches those. A \
               processor joins the set before it loads the space's root and leaves it after the \
               root write that flushed it, by its logical number, read from its per-CPU record. \
               With no record there is no number, and any guess would leave a processor that \
@@ -1352,6 +1353,18 @@ pub(crate) static STAGE6_USER_MEMORY: Explanation = Explanation {
           docs/ROADMAP.md stage 6",
 };
 
+/// For ARMv7-A's `asid::number_for`, when the allocator can give no number.
+pub(crate) static ASID_EXHAUSTED: Explanation = Explanation {
+    code: "FX-0603",
+    title: "no address space identifier could be given",
+    meaning: "On ARMv7-A every address space is tagged in the TLB with an 8-bit ASID, one               allocator for the whole machine (docs/OPAQUE-KERNEL.md §9.13). Numbers are given               in generations; when none is free the allocator starts a new generation, keeping               the number each processor is running reserved. It stops the machine rather than               give a number twice: when the generation would pass 2^56, or when every number               is still reserved after a rollover, which needs 255 processors or more.",
+    causes: &[
+        "A machine with 255 or more processors running a space each, which no GICv2 machine          can be.",
+        "A generation counter that was overwritten: 2^56 rollovers cannot happen in the life          of a machine.",
+    ],
+    see: "src/kernel/src/arch/armv7a/asid.rs; src/lib/kernel/paging/src/asid.rs;           docs/OPAQUE-KERNEL.md §9.13",
+};
+
 /// For `check_reverse_map` in `stages_check.rs`, when `user::rmap_check::run` fails.
 pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
     code: "FX-0602",
@@ -1371,6 +1384,9 @@ pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
         "The scoped shootdown missed a processor holding a stale entry: a processor joined an \
          address space's set after loading its root, left before the root write that flushed \
          it, or answered a shootdown for a processor it was no longer running on.",
+        "On ARMv7-A, a shootdown that stopped being a broadcast to every processor: there a \
+         processor that left a space's set keeps its entries under the space's ASID, and only \
+         the broadcast reaches it (docs/OPAQUE-KERNEL.md §9.13, L.armv7a.16).",
         "The page-scoped invalidation is wrong for the architecture: `invlpg` not reaching the \
          entry, or `TLBI VAAE1IS` / `TLBIMVAAIS` given the wrong page number.",
         "A decommit, replace or move touched a held page, or backed off after already \
@@ -3281,6 +3297,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ENDPOINT_CLOSED_MASKED,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
+    &ASID_EXHAUSTED,
     &STAGE7_SYSCALLS,
     &STAGE7_SEMAPHORES,
     &STAGE7_SHARED_MEMORY,

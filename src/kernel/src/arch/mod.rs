@@ -105,11 +105,11 @@ pub(crate) use armv7a::{
     decode_compat_syscall, decode_syscall, describe_cpus, disable_interrupts, drain_console,
     drop_identity_map, enable_console_receive, enable_interrupts, enter_user, flush_tlb,
     forbid_user_access, frame_pointer, halt, hardware_id, hardware_random, identity_map_live,
-    identity_root, image_abi, init_console, init_interrupts, init_traps, install_user_root,
-    interrupts_enabled, ipi_irq, kernel_write_protected, mask_interrupt, msi_allocate,
-    msi_doorbell, permit_user_access, prepare_stack, prepare_user_root, read_console_byte,
-    report_trap, reset, reset_user_state, restore_user_state, resume_user, save_user_state,
-    send_ipi_to_others, service_interrupts, set_cpu_local, set_thread_area, shutdown, switch_to,
+    identity_root, image_abi, init_console, init_interrupts, init_traps, interrupts_enabled,
+    ipi_irq, kernel_write_protected, mask_interrupt, msi_allocate, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, read_console_byte, report_trap, reset,
+    reset_user_state, restore_user_state, resume_user, save_user_state, send_ipi_to_others,
+    service_interrupts, set_cpu_local, set_thread_area, shutdown, switch_to,
     syscall_rollback_value, system_call, take_console_byte, thread_area, timer_arm, timer_disarm,
     timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt, user_hwcaps,
     user_platform, wait_for_interrupt, wait_for_work,
@@ -290,6 +290,99 @@ pub(crate) use x86_64::{
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
     USER_XSTATE_PROGRAM, UserContext, fault_signal, restore_signal_frame, setup_signal_frame,
 };
+// A user root and the address space identifier it is installed with:
+// ARMv7-A's ASIDs (docs/OPAQUE-KERNEL.md §9.13). The other two architectures
+// install every space as ASID or PCID 0 and keep no tag; their
+// `install_user_root` takes the root alone.
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::SpaceTag;
+
+/// An address space's identifier tag: nothing on an architecture that
+/// allocates none.
+#[cfg(not(target_arch = "arm"))]
+#[derive(Debug)]
+pub(crate) struct SpaceTag;
+
+#[cfg(not(target_arch = "arm"))]
+impl SpaceTag {
+    /// No identifier.
+    pub(crate) const fn new() -> SpaceTag {
+        SpaceTag
+    }
+}
+
+/// Install the user root `root`, of the space `tag` belongs to, on processor
+/// `cpu`, which is this one.
+///
+/// # Safety
+///
+/// (TRANSLATE) As the architecture's `install_user_root`: the tables must stay live
+/// while installed, and interrupts must be masked.
+pub(crate) unsafe fn install_space_root(root: u64, tag: &SpaceTag, cpu: usize) {
+    #[cfg(target_arch = "arm")]
+    // SAFETY: (TRANSLATE) the caller's guarantees are `install_user_root`'s.
+    unsafe {
+        armv7a::install_user_root(root, tag, cpu);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        let _ = (tag, cpu);
+        // SAFETY: (TRANSLATE) the caller's guarantees are `install_user_root`'s.
+        unsafe { install_user_root(root) };
+    }
+}
+
+/// What a remap runs between taking a user entry down and writing the one
+/// that replaces it, under the space's lock (F-67, L.user.125): the page's
+/// broadcast invalidation on the Arm pair, which interrupts nobody. Nothing
+/// on x86-64, whose shootdown is by interrupt and may not run under the lock;
+/// the full shootdown after the make covers it there as everywhere.
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::break_before_make;
+
+/// See ARMv7-A's: the page's `TLBI VAAE1IS`, completed.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn break_before_make(page: u64) {
+    flush_tlb_page(page);
+}
+
+/// See ARMv7-A's: nothing here.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const fn break_before_make(_page: u64) {}
+
+// The boot check of ARMv7-A's ASIDs, the `asid` line, and the kernel tree's
+// `global` line; nothing elsewhere.
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::{check_address_space_ids, check_kernel_tree_global};
+
+/// Nothing to ask of the kernel's tree beyond W^X here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "arm"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "ARMv7-A's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_kernel_tree_global() -> Result<(), &'static str> {
+    Ok(())
+}
+
+/// No address space identifiers to check here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "arm"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "ARMv7-A's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_address_space_ids() -> Result<(), &'static str> {
+    Ok(())
+}
+
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.
 #[cfg(target_arch = "aarch64")]

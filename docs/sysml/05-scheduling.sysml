@@ -241,9 +241,10 @@ package FerrixScheduling {
                  * the architecture's switch, which takes two stack pointers and
                  * does register operations, and not after, where the incoming
                  * context has already resumed. Compared by pointer because two
-                 * threads of one process share a root and stage 6 allocates no
-                 * ASIDs, so installing one invalidates every user translation
-                 * the processor had: switching within a process must cost
+                 * threads of one process share a root and, on x86-64 and
+                 * AArch64, installing one invalidates every user translation
+                 * the processor had (ARMv7-A's ASIDs keep them, but its install
+                 * still writes TTBR0): switching within a process must cost
                  * nothing. A kernel thread has the user half switched off
                  * rather than left installed, which is the plain alternative to
                  * lazy TLB and does not oblige anyone to keep a space alive

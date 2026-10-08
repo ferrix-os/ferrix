@@ -51,6 +51,9 @@ pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
         "  w^x      {} mappings swept, {} executable, none writable",
         wx.leaves, wx.executable
     );
+    // Whatever the architecture asks of the kernel's tree beyond W^X:
+    // ARMv7-A, that every leaf is global once the loader's alias has gone.
+    crate::arch::check_kernel_tree_global()?;
 
     // And the frames the image's text sits in, through every mapping of them:
     // the direct map aliases them, never executably, so the sweep above
@@ -255,7 +258,7 @@ pub(crate) fn check_sealed_image(view: &BootView<'_>) -> Result<SealReport, Writ
 /// Takes a root rather than going through [`with_tables`](super::with_tables) because the W^X
 /// sweep also walks the loader's identity map, which on `AArch64` is a second
 /// tree with a root of its own.
-fn sweep(root: u64, visit: impl FnMut(Leaf) -> bool) -> WalkOutcome {
+pub(crate) fn sweep(root: u64, visit: impl FnMut(Leaf) -> bool) -> WalkOutcome {
     let _held = TABLES.lock();
     let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
     mapper.for_each_leaf(&KernelPhysMem, visit)

@@ -129,7 +129,10 @@ package FerrixItemRequirements {
         requirement <'H.MEM.7'> nothingFreedBeforeItsShootdown : ItemHighLevel {
             attribute :>> statement = "A page-table frame an unmap empties shall not
                 return to the frame allocator until the TLB invalidation that covers
-                the unmap has been made.";
+                the unmap has been made; and the tables and frames of a dropped
+                address space shall not return to it until every TLB entry that can
+                reach them has been invalidated or, on ARMv7-A, is tagged with an
+                ASID no processor uses again before its own next full flush.";
             attribute :>> criterion = "A page table an unmap empties is still held,
                 not freed, until the shootdown covering it completes: 0 tables freed
                 before it, and exactly the tables it emptied given back by it.";

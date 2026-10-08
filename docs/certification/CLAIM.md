@@ -156,7 +156,7 @@ pre-assessment (§5, M2).
 | Option | Isolates | SIL 2 | SIL 3 | Cost (*guess*) | Architectures |
 |---|---|---|---|---|---|
 | 1a. PKS / FEAT_S1POE domains in ring 0 | stray writes (and reads) | strengthens | doubtful: the load can rewrite the key register itself | 60–120, mostly partitioning data by owner | x86-64 with PKS only; AArch64 with S1POE, which no target has; not ARMv7-A (LPAE has no domains) |
-| 1b. Page-table switch on entry to the load | the same | strengthens | the same caveat | as 1a, and costly until PCIDs and ASIDs exist (none are used today) | all three |
+| 1b. Page-table switch on entry to the load | the same | strengthens | the same caveat | as 1a, and costly until PCIDs exist (ARMv7-A has ASIDs since `docs/OPAQUE-KERNEL.md` §9.13; x86-64 and AArch64 use none) | all three |
 | 2a. Item at EL2 / VMX root, Ferrix's load as a guest kernel | memory, time, faults, resources | yes | yes | 150+: the load becomes a second kernel | x86-64, AArch64 (nested virtualisation to develop on) |
 | 2b. Item as a separation kernel, **real Linux** as the guest | all four | yes | yes, with industry precedent | 80–150 | as 2a |
 | 3. Partial opaque: btrfs, then net, in ring 3 | all four, for the parts moved | yes, for those parts | yes, for those parts | btrfs 20–35 after 4; net 25–40 after 4 | all three |
@@ -171,7 +171,8 @@ Notes:
   network stack crosses on every send and receive, so it waits for 4.
 * **4's known causes** (OPAQUE-KERNEL.md): missed wake-ups rescued by the
   block ring's 50 ms recheck timer, no PCIDs or ASIDs so every switch
-  flushes the TLB, and data copies. The customer approved option 4 on
+  flushed the TLB (ARMv7-A has had ASIDs since §9.13 of OPAQUE-KERNEL.md;
+  x86-64 and AArch64 still have none), and data copies. The customer approved option 4 on
   2026-09-30. `ipc-measure` landed its instrument (5cc5ed38). Its baseline
   on x86-64 under KVM: trip p50 230 µs, 13 switches, 2.4 root writes and
   3.2 IPIs per read. `ipc-lazytlb` (reviewed with conditions), `ipc-ring`

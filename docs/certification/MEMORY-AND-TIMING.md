@@ -974,6 +974,33 @@ queued and the client goes on. These are waits on a driver, not work of the
 item, and no bound is claimed for them. The driver's HELLO is waited for at
 most 10 s by the control's own task, never by a client or the boot.
 
+
+### 2.2l ARMv7-A's ASID allocator (`arch::armv7a::asid`, core ring)
+
+`docs/OPAQUE-KERNEL.md` §9.13 gives every address space on ARMv7-A an 8-bit
+ASID from one allocator for the machine (the consultant's B2, ledger 594).
+
+Memory. Nothing is allocated, ever. A space carries one `u64` tag. The
+allocator is a static `Numbers<MAX_CPUS>` under one spin lock (a map of 256
+bits, a reserved tag and a pending bit per processor, about 2.3 KiB), and
+three static arrays of `MAX_CPUS` words: each processor's active tag, its
+flush count and its flush plan.
+
+Locks and time. An install takes the allocator's lock only on its slow path:
+the first install of a space in a generation, or the first install on a
+processor after a rollover. The lock is a leaf, taken inside the run queue's
+lock with interrupts masked, and nothing waits under it. The slow path does
+a bounded amount of work under it: a search of the 256 numbers and the
+`MAX_CPUS` reservations, and at most one rollover, which swaps every
+processor's active tag and marks the reserved numbers, O(`MAX_CPUS` + 256)
+steps, no processor interrupted or waited for. At most one local flush
+follows, the processor's own after a rollover (park, `TLBIALL`, `BPIALL`,
+`ICIALLU` on an ASID-tagged instruction cache, `dsb nsh`, `isb`), whose
+time is the core's and is bounded by the TLB's size. A rollover comes at
+most once per 255 spaces given numbers, so a processor flushes at most once
+per rollover. The fast path takes no lock: two loads and one swap of the
+processor's own word (`ldrexd`/`strexd` at `Relaxed`, no barrier), then
+the `TTBR0` write.
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
