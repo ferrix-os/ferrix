@@ -187,6 +187,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `tools/common/gen/` | Generators and their `--check` modes: brand images and release notes, the architecture document (with its `sysml/` reader), the panic catalogue, fonts, Wayland protocol tables, XKB tables, SOUP, coverage justification, fuzz corpus seeds. |
 | `tools/common/fetch/` | Fetch pinned downloads: the rustc sysroot, busybox, Chrome, Bad Apple!!, Steam's volumes, NVIDIA's driver. |
 | `tools/common/test/` | Test drivers run by hand: the self-host matrix, the host `btrfs check` oracle. |
+| `tools/common/bench/` | Benches for kernels other than Ferrix: `board/` holds Linux's and seL4's sides of the DK1 comparison and the timing contract all three follow (`docs/BOARD-BENCH.md`). |
 | `tools/common/steam/` | What `cargo xtask run-steam`, `test-steam-window` and `test-steam-store` carry into the guest: the scripts that start and watch Steam, its stand-ins, and in `workarounds/` the C shims for kernel gaps, each headed with its gap and the owner of the real fix (`docs/STEAM.md`). |
 | `tools/common/data/` | The allow-lists, baselines and registers the checks read. |
 | `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`). |
