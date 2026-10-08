@@ -527,7 +527,7 @@ pub(crate) unsafe fn flush_for_new_generation(instruction_cache: bool) {
             "isb",
             "mcrr p15, 0, {zero}, {zero}, c2",
             "isb",
-            "mcr p15, 0, {zero}, c8, c7, 0",
+            "nop",
             "mcr p15, 0, {zero}, c7, c5, 6",
             "cmp {icache}, #0",
             "beq 2f",
