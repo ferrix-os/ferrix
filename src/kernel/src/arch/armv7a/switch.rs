@@ -134,6 +134,16 @@ pub(crate) unsafe fn prepare_stack(
 /// because it equals what the processor last held: a program changes
 /// `TPIDRURW` without the kernel knowing, so a remembered value would name one
 /// no longer there (the consultant's condition 8).
+///
+/// # The vector-state contract (`docs/OPAQUE-KERNEL.md` §9.14, 3a's port)
+///
+/// Through `channel_write_read`, `object_wait_one` and `port_wait` a program
+/// keeps `d8`-`d15` and `FPSCR` of its VFP state, the AAPCS's callee-saved
+/// part, and loses the rest. The `svc` entry raises `vectors_dead` for the
+/// length of such a call; a switch away from the task while it is blocked in
+/// the call stores just those and marks the state `unsaved`; and the switch
+/// back loads them and zeroes every other VFP register the core has, whoever
+/// switches to it. Only that reset clears `unsaved`.
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub(crate) struct UserState {
@@ -159,7 +169,27 @@ pub(crate) struct UserState {
     user_lr: u32,
     /// `TPIDRURW`, which USR mode writes itself: read at every switch out.
     user_rw: u32,
+    /// Raised by the `svc` entry for the length of a blocking native call,
+    /// whose contract lets the caller-saved VFP registers go; lowered by it
+    /// alone.
+    vectors_dead: bool,
+    /// The record holds only `FPSCR` and `d8`-`d15`: the next switch to the
+    /// task resets the rest, and every reader sees them zero
+    /// ([`UserState::fp`]). Set by the partial save, cleared by the reset
+    /// and by a writer alone.
+    unsaved: bool,
 }
+
+/// The first callee-saved double, `d8`: where the partial save stores and
+/// the reset loads the eight the contract keeps.
+const KEPT_FIRST: usize = 8;
+/// One past the last, `d15`.
+const KEPT_END: usize = 16;
+
+/// What the reset loads into every VFP register a blocking native call
+/// loses: zeros, in read-only data, so the reset cannot be pointed at a
+/// program's memory.
+static ZERO_DOUBLES: [u64; 32] = [0; 32];
 
 const _: () = assert!(
     core::mem::offset_of!(UserState, fpscr) == 4,
@@ -168,6 +198,10 @@ const _: () = assert!(
 const _: () = assert!(
     core::mem::offset_of!(UserState, doubles) == 8,
     "the save sequence stores d0 at offset 8"
+);
+const _: () = assert!(
+    core::mem::offset_of!(UserState, doubles) + KEPT_FIRST * 8 == 72,
+    "the partial save and the reset move d8-d15 at offset 72"
 );
 const _: () = assert!(
     core::mem::offset_of!(UserState, user_lr) == core::mem::offset_of!(UserState, user_sp) + 4,
@@ -185,7 +219,28 @@ impl UserState {
             user_sp: 0,
             user_lr: 0,
             user_rw: 0,
+            vectors_dead: false,
+            unsaved: false,
         }
+    }
+
+    /// Raise or lower the vector-state contract's mark: raised by the `svc`
+    /// entry for a blocking native call, lowered as the call returns. Lowering
+    /// it does not touch `unsaved`, which only the reset clears.
+    pub(super) const fn set_vectors_dead(&mut self, dead: bool) {
+        self.vectors_dead = dead;
+    }
+
+    /// Mark the record as holding only `FPSCR` and `d8`-`d15`: what the
+    /// partial save does once it has stored them.
+    pub(super) const fn mark_unsaved(&mut self) {
+        self.unsaved = true;
+    }
+
+    /// Whether the record holds only `FPSCR` and `d8`-`d15`, and the next
+    /// switch to the task resets the rest.
+    pub(super) const fn is_unsaved(&self) -> bool {
+        self.unsaved
     }
 
     /// A copy of the user state this processor holds right now: what a fork
@@ -232,15 +287,36 @@ impl UserState {
         self.user_sp = stack;
     }
 
-    /// `FPSCR` and `d0` to `d31`, as a signal frame's VFP record carries them.
-    pub(super) const fn fp(&self) -> (u32, &[u64; 32]) {
-        (self.fpscr, &self.doubles)
+    /// `FPSCR` and `d0` to `d31`, as a signal frame's VFP record carries
+    /// them: the one way any reader looks at a saved VFP state.
+    ///
+    /// A state saved in full answers its own. An `unsaved` one answers its
+    /// `FPSCR`, its own `d8`-`d15` and zero in every other register, which is
+    /// what the task will hold when it next runs, never the stale doubles the
+    /// record still has. Today the signal frame reads a state `capture` took,
+    /// which is whole; a frame built from a saved state later, a core dump or
+    /// a register report reads it through here (§9.14, R6). The boot's check
+    /// (`check::check_unsaved_reads_as_reset`) holds it.
+    pub(super) fn fp(&self) -> (u32, [u64; 32]) {
+        if !self.unsaved {
+            return (self.fpscr, self.doubles);
+        }
+        let mut doubles = [0; 32];
+        if let (Some(kept), Some(own)) = (
+            doubles.get_mut(KEPT_FIRST..KEPT_END),
+            self.doubles.get(KEPT_FIRST..KEPT_END),
+        ) {
+            kept.copy_from_slice(own);
+        }
+        (self.fpscr, doubles)
     }
 
-    /// Replace the floating-point registers, as `sigreturn` does.
+    /// Replace the floating-point registers, as `sigreturn` does: the state
+    /// is whole after, so no reset follows at the next switch in.
     pub(super) const fn set_fp(&mut self, fpscr: u32, doubles: [u64; 32]) {
         self.fpscr = fpscr;
         self.doubles = doubles;
+        self.unsaved = false;
     }
 }
 
@@ -340,6 +416,29 @@ ferrix_user_fpu_save:
     vstmia r3!, {{d16-d31}}
 1:  bx     lr
 
+// void ferrix_user_fpu_keep(UserState *state): FPSCR and d8-d15 alone, what
+// a blocking native call keeps (3a's port).
+.globl ferrix_user_fpu_keep
+ferrix_user_fpu_keep:
+    vmrs   r2, fpscr
+    str    r2, [r0, #4]
+    add    r3, r0, #72
+    vstmia r3, {{d8-d15}}
+    bx     lr
+
+// void ferrix_user_fpu_reset(const UserState *state, u32 all_32, const u64 *zeros):
+// the task's own FPSCR and d8-d15, zero in every other register.
+.globl ferrix_user_fpu_reset
+ferrix_user_fpu_reset:
+    ldr    r3, [r0, #4]
+    vmsr   fpscr, r3
+    vldmia r2, {{d0-d7}}
+    add    r3, r0, #72
+    vldmia r3, {{d8-d15}}
+    cmp    r1, #0
+    vldmiane r2, {{d16-d31}}
+    bx     lr
+
 // void ferrix_user_fpu_restore(const UserState *state, u32 all_32)
 .globl ferrix_user_fpu_restore
 ferrix_user_fpu_restore:
@@ -369,6 +468,11 @@ unsafe extern "C" {
     fn ferrix_user_fpu_save(state: *mut UserState, all_32: u32);
     /// Load `state`'s floating-point registers onto this processor.
     fn ferrix_user_fpu_restore(state: *const UserState, all_32: u32);
+    /// Store `FPSCR` and `d8`-`d15` alone into `state`.
+    fn ferrix_user_fpu_keep(state: *mut UserState);
+    /// Load `state`'s `FPSCR` and `d8`-`d15`, and `zeros` into every other
+    /// VFP register.
+    fn ferrix_user_fpu_reset(state: *const UserState, all_32: u32, zeros: *const u64);
 }
 
 /// Turn the FPU on, on this core.
@@ -403,22 +507,36 @@ pub(super) unsafe fn fpu_features1() -> u32 {
     unsafe { ferrix_fpu_features1() }
 }
 
-/// Store the program state this processor holds into `state`, in full:
-/// whether the task leaves `_blocked` matters only to x86-64's vector-state
-/// contract (`docs/OPAQUE-KERNEL.md` §9.8, 3a), which this architecture does
-/// not have.
+/// Store the program state this processor holds into `state`.
+///
+/// `TPIDRURO` is not read (3b): it is the record's, which `set_tls` and
+/// `execve` keep. `TPIDRURW` is, at every switch out (F-66).
+///
+/// The VFP registers are saved in full, except for a task `blocked` in a
+/// native call whose contract lets the caller-saved ones go (`vectors_dead`,
+/// 3a's port): then only `FPSCR` and `d8`-`d15` are kept, and the state is
+/// marked `unsaved` for the switch back to reset. A task switched out
+/// runnable -- preempted, even inside one of those calls -- and one blocked
+/// in any other call keep everything.
 ///
 /// # Safety
 ///
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
-/// with user state to run on this processor.
-pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
+/// with user state to run on this processor. `blocked` must say whether that
+/// task is switched out blocked rather than runnable.
+pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.user_rw = super::cpu::read_tpidrurw();
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`
     // structure, which is the two words the assembly writes.
     unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
+    if doubles != 0 && blocked && state.vectors_dead {
+        // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live,
+        // exclusively borrowed `UserState` whose `d8` is at the offset asserted
+        // above; these are the outgoing task's registers.
+        unsafe { ferrix_user_fpu_keep(core::ptr::from_mut(state)) };
+        state.mark_unsaved();
+    } else if doubles != 0 {
         // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live,
         // exclusively borrowed `UserState` whose layout is asserted above.
         unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(doubles == 32)) };
@@ -430,10 +548,16 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
 /// `entry_stack` is for x86-64. Here an exception from USR mode lands on the
 /// SVC stack, which each task's own stack already is when it returns to USR.
 ///
+/// A state marked `unsaved` is reset rather than restored -- its own `FPSCR`
+/// and `d8`-`d15`, zero in every other VFP register the core has -- and the
+/// reset is the only thing that clears the mark (3a's condition 7): every way
+/// a task is resumed -- a message, a close, a kill, a signal -- switches to
+/// it through here.
+///
 /// # Safety
 ///
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to.
-pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
+pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64) {
     let _ = entry_stack;
     // Both thread ID registers at every switch, never skipped (3b, F-66).
     super::cpu::write_tpidruro(state.thread_pointer);
@@ -441,7 +565,19 @@ pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
     // SAFETY: (CONTEXT) as in `save_user_state`, read rather than written.
     unsafe { ferrix_user_banked_restore(core::ptr::from_ref(&state.user_sp)) };
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
+    if doubles != 0 && state.unsaved {
+        // SAFETY: (CONTEXT) the incoming task's registers; its record's `FPSCR` is one
+        // the processor held when the task blocked, and the zeros are 256
+        // bytes of read-only data.
+        unsafe {
+            ferrix_user_fpu_reset(
+                core::ptr::from_ref(state),
+                u32::from(doubles == 32),
+                ZERO_DOUBLES.as_ptr(),
+            );
+        }
+        state.unsaved = false;
+    } else if doubles != 0 {
         // SAFETY: (CONTEXT) as above; loading user registers cannot affect the kernel,
         // which uses none of them.
         unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(state), u32::from(doubles == 32)) };

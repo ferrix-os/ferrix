@@ -9,6 +9,14 @@
     "re-claimed for the code named here."
   ],
   "owed": [
+  {
+   "landing": "os07-ustate, ARMv7-A user state: 3a's VFP reset ported, TPIDRURO kept in the task, TPIDRURW switched (docs/OPAQUE-KERNEL.md §9.14; branch os07/ustate; os07-ustate's consultant, design verdict 2026-10-08 ledger line 582, R1-R9)",
+   "architectures": [
+    "armv7a"
+   ],
+   "dropped": "new code; no coverage run has measured it yet.",
+   "what": "arch/armv7a/switch.rs save_user_state's partial save and restore_user_state's reset, trap.rs answer_set_tls, dispatch_marked and mark_vectors_dead, cpu.rs read_tpidrurw and write_tpidrurw: measure them on the ARMv7-A coverage run (stage 9's vectors and tls lines reach them). Argued, not measured: the D16 branch of the reset (vldmia of d16-d31 skipped) and every `doubles == 0` branch, unreachable in the reference configurations (QEMU's cortex-a7 and the DK1's Cortex-A7 are VFPv4-D32) -- other-configuration rows, no BACKLOG row (answer 4); FPEXC, written once at bring-up and by neither the save nor the reset, is argued, not checked (answer 2)."
+  },
  {
   "landing": "po7-ipcM step 5, the vector reset by VZEROALL and the x87 by XINUSE (branch po7/step5-vec; po7-ipcM's consultant, design verdict of 2026-10-06, V6, and code verdict W1-W3)",
   "architectures": [

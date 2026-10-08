@@ -129,6 +129,26 @@ fn trap(number: usize, args: [usize; 6]) -> usize {
     trap_words(number, args).0
 }
 
+// The VFP registers (`docs/OPAQUE-KERNEL.md` §9.14): `channel_write_read`,
+// `object_wait_one` and `port_wait` lose `d0`-`d7` and `d16`-`d31`, AAPCS's
+// caller-saved VFP registers, as a function call does, and keep `d8`-`d15`
+// and `FPSCR` (`ferrix_native_abi::nr`, the vector-state contract). x86-64's
+// stub declares its set with `clobber_abi`; this one cannot and need not.
+// A native program is built for `armv7a-none-eabi`, soft float, where the
+// compiler has no VFP register to allocate -- rustc refuses even
+// `clobber_abi("C")` there ("couldn't allocate output register") -- so no
+// value of a native program lives in one across the trap. The `cfg` below
+// keeps that true: a hard-float build must first declare the set. It assumes
+// xtask's build, which enables no VFP code through `-C target-feature` on the
+// soft-float ABI (the Safety Manual's assumption for a native program built
+// elsewhere).
+#[cfg(target_abi = "eabihf")]
+compile_error!(
+    "ferrix_rt's ARMv7-A trap declares no VFP clobbers: before building it hard float, add \
+     clobber_abi(\"C\") to trap_words' asm!, since channel_write_read, object_wait_one and \
+     port_wait lose d0-d7 and d16-d31 (docs/OPAQUE-KERNEL.md 9.14)"
+);
+
 /// [`trap`], and the second, third and fourth argument registers as the call
 /// left them: where `channel_write_read` hands back the words of the message
 /// it received. Every other call leaves them as they went in.

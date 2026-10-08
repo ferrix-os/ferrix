@@ -254,7 +254,7 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "A program blocked in a native call is woken
                 by a message, by its peer's close and by a message with a signal
                 pending, each through its own path to choose_next, and reads the
-                reset state each time (the `vectors` line).";
+                reset state each time (the `vectors` line, x86-64 and ARMv7-A).";
             attribute :>> parent = "H.SCHED.12";
             attribute :>> unit = ("sched::switch_user_state", "sched::with_own_user_state");
         }

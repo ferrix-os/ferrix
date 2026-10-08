@@ -427,7 +427,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 /// A system call from SVC mode, which is a kernel bug, or an `execve` this path
 /// does not yet honour.
 pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
-    use crate::trap::{Outcome, SyscallArgs, system_call as dispatch};
+    use crate::trap::{Outcome, SyscallArgs};
     use ferrix_linux_abi::nr::Syscall;
 
     if !frame.came_from_user() {
@@ -480,11 +480,7 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
                 return Ok(());
             }
 
-            let regs = UserRegs(*frame);
-            super::enable_interrupts();
-            let outcome = dispatch(&args, Some(&regs));
-            super::disable_interrupts();
-            outcome
+            dispatch_marked(&args, &UserRegs(*frame))
         }
     };
 
@@ -527,6 +523,46 @@ fn answer_set_tls(frame: &mut TrapFrame, value: u32) {
     if let Some(result) = frame.r.first_mut() {
         *result = 0;
     }
+}
+
+/// Serve `args` with interrupts open, as every call that may block is.
+///
+/// A native call that blocks lets the caller-saved VFP registers go for its
+/// length (`docs/OPAQUE-KERNEL.md` §9.14, 3a's port): the mark tells the
+/// switch so, raised with interrupts still masked and lowered once they are
+/// masked again, before the outcome is written and before anything on the way
+/// out can block in a call that keeps them.
+fn dispatch_marked(args: &crate::trap::SyscallArgs, regs: &UserRegs) -> crate::trap::Outcome {
+    let blocking = vectors_die_in(args.number);
+    if blocking {
+        mark_vectors_dead(true);
+    }
+    super::enable_interrupts();
+    let outcome = crate::trap::system_call(args, Some(regs));
+    super::disable_interrupts();
+    if blocking {
+        mark_vectors_dead(false);
+    }
+    outcome
+}
+
+/// Whether `number` is one of the three native calls declared to lose the
+/// caller-saved VFP registers, as across a function call: `channel_write_read`,
+/// `object_wait_one` and `port_wait`, the native calls that block (§9.14). By
+/// number, at the one `svc` entry every program uses.
+pub(super) const fn vectors_die_in(number: usize) -> bool {
+    use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
+    matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)
+}
+
+/// Raise or lower the running task's `vectors_dead` mark.
+///
+/// Called by the entry with interrupts masked: before it opens them for the
+/// call, and after it closes them again.
+fn mark_vectors_dead(dead: bool) {
+    // SAFETY: (CONTEXT) interrupts are masked on this processor at both calls,
+    // in the running task's own system call.
+    let _ = unsafe { crate::sched::with_own_user_state(|state| state.set_vectors_dead(dead)) };
 }
 
 /// Put a call's answer in `r0` and on, the rest of the frame as it was: 32

@@ -43,21 +43,21 @@
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "188",
+      "lines": "201",
       "category": "defensive",
       "match": "Err(_) => cpu::flush_tlb(),",
       "why": "A page address past 4 GiB asked to be invalidated, which on this architecture cannot be a translation; everything is flushed rather than a truncated page. Every caller passes a virtual address, all of which are below 4 GiB here."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1342",
+      "lines": "1355",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU and the DK1 both reset."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1372",
+      "lines": "1385",
       "category": "defensive",
       "match": "return Err(\"this GIC is not a GICv2, and GICv3 support is not written yet\");",
       "why": "A device tree describing a GICv3 on ARMv7-A, which this kernel has no driver for here: interrupt bring-up is refused by name and the kernel stops (FX-0303). The machines it runs on -- QEMU's `virt` as the suite boots it, the STM32MP157 -- have a GICv2; a `virt` given a GICv3 would be a boot that stops, which is not coverage evidence."
@@ -99,7 +99,7 @@
     },
     {
       "file": "arch/armv7a/switch.rs",
-      "lines": "426",
+      "lines": "544",
       "category": "absent-hardware",
       "match": "}",
       "why": "The row is `save_user_state`'s return with no VFP registers to save (`user_fpu_doubles` zero): a core without VFP. Every ARMv7-A core the kernel boots on -- QEMU's Cortex-A7 and A15, the STM32MP157's A7 -- has VFP with 32 double registers, and the save path runs on every switch."
@@ -113,35 +113,35 @@
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "585",
+      "lines": "621",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`classify`'s arm for a vector entry that is neither an interrupt, an undefined instruction, a system call nor an abort: reset, hypervisor trap or FIQ. The stage 3 machine check classifies each from a built frame, in its own copy under other rows; the line's only statement row is in `dispatch`'s copy, which none of those entries reaches on a running kernel -- the stubs for them are the kernel's own failure, which it stops on."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "617",
+      "lines": "653",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`abort`'s arm for a fault status that is neither translation, access flag, permission, alignment nor debug: an external abort. The stage 3 machine check decodes data and prefetch external aborts from built frames, in its own copy; the line's only statement row is in `dispatch`'s copy, which runs it only when the memory system reports an external abort, which QEMU's does not."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "626, 640, 646, 656, 658, 662-668, 673, 679",
+      "lines": "662, 676, 682, 692, 694, 698-704, 709, 715",
       "category": "failure-path",
       "match": "match kind {",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`), and `kind_name` as it inlines it there; a passing run never prints it."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "627",
+      "lines": "663",
       "category": "credited-elsewhere",
       "match": "KIND_RESET => \"reset\",",
       "why": "`kind_name` for the reset entry, in `classify`'s arm above (line 550): named by the machine check's frame in its own copy, and in `dispatch`'s only when the kernel's reset stub is taken."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "632",
+      "lines": "668",
       "category": "credited-elsewhere",
       "match": "KIND_HYP_TRAP => \"hypervisor trap\",",
       "why": "`kind_name` for the hypervisor-trap entry, as line 592."
