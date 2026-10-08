@@ -227,6 +227,17 @@ pub(super) fn check_eventfd() {
          frames leaked",
         checked.reads, checked.refusals, checked.leaked,
     );
+    // A pipe's waits trust their queues, so each of its wakers must end one.
+    match fs::pipe_check::run() {
+        Ok(wakers) => println!(
+            "  pipewake {wakers} pipe waits, each ended by its own waker's wake: bytes written, \
+             room made, the last writer and reader closing, bytes put back, a splice"
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE8_EVENTFD,
+            "stage 8 pipe wake self-check failed: {problem}"
+        ),
+    }
 }
 
 /// System V semaphores: keys, values, operations, the layouts, `SEM_UNDO`
