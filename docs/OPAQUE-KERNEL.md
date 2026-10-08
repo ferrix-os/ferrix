@@ -5374,14 +5374,18 @@ more a direction: about +40 to +50 instructions and +20 to +40 cycles a
 round trip, measured by os-76's long bench with perf against main
 523fc3d50, the median 819 to 858 ns on both sides, no p50 change resolved
 (`~/.local/share/ferrix/logs/po10-obj/perf/f65b-*`).
-### 9.13 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
+
+### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 
 Steps 3 and 5 of the Arm port order (`.claude/skills/optimize-ipc-round-trip`
 §6; `docs/BOARD-BENCH.md` B6), for the DK1 matrix: (a) the runtime stub's
 clobbers, (b) 3a's vector reset, (c) 3b's thread pointer kept in the task.
 ARMv7-A only; AArch64 is the last paragraph and changes nothing. One design
 for the three, because they share the switch's two functions, one check
-file and one review.
+file and one review. Drafted as §9.13 and renumbered: §9.13 is the
+ARMv7-A ASIDs (os07-asid). The consultant's verdict changed the contract
+of (a) and (b); *After the review* at the end is the design as built, and
+where it differs from the draft below, it rules.
 
 **What was read and measured first.**
 - *F1. The callers hold no VFP value.* Every native program -- the only
@@ -5644,3 +5648,97 @@ configuration).
 5. The assembly cap to 1,632 (+13)?
 6. `H.SCHED.8` and `H.SCHED.12` restated, rather than new H ids?
 
+
+**After the review (os07-ustate's consultant, ledger line 582: OK IF R1 to
+R9).** F1 was wrong in one place, and that changed the contract.
+- *F1 corrected.* ARMv7-A enters every program as `Abi::Native`, and the
+  contract is keyed on the number at the one `svc` entry, so it binds every
+  program, not only the native ones. On `main` four Linux programs make
+  `port_wait` and `object_wait_one` through `libc::syscall` (init,
+  dirclient and authd, soft float; sessiond, built hard float for the
+  Cortex-A7). Across `libc::syscall`, an ordinary C call, a hard-float
+  compiler may keep values in `d8`-`d15`. "Every VFP register destroyed"
+  would silently corrupt such a caller.
+- *R1, the contract is AAPCS-VFP's, as x86-64's is System V's.* Through the
+  three calls `d0`-`d7` and `d16`-`d31` are lost and read zero; `d8`-`d15`
+  and `FPSCR`, whole, are the caller's own. The partial save stores `FPSCR`
+  and `d8`-`d15` (one `vstmia`, 64 bytes); the reset loads the task's own
+  `FPSCR` and `d8`-`d15` from the record and zeros into `d0`-`d7` and
+  `d16`-`d31` from the read-only zero block (`d0`-`d7` alone on a D16
+  core). The `ferrix_rt` guard stays for `target_abi = "eabihf"` and asks
+  only for `clobber_abi("C")`, which is exactly AAPCS's caller-saved set.
+  U3 also shows the victim's own `d8`-`d15` back, with a control U3-d
+  ("lost its callee-saved VFP registers"). The saving estimate shrinks: a
+  blocked direction still stores and loads 64 bytes, about a quarter of
+  today's 256.
+- *R2.* `vectors_dead` is raised and lowered only by the `svc` entry;
+  `unsaved` is set by the partial save and cleared only by the reset
+  (condition 7). `with_own_user_state` loses its `dead_code` expectation on
+  ARMv7-A.
+- *R3, `execve`.* `syscall/exec.rs` resets the user state with interrupts
+  open, so `reset_user_state` writes `TPIDRURO` 0 to the register and the
+  record, and `TPIDRURW` 0, in one window with interrupts masked. Check: a
+  program sets both and `execve`s an image which, switched out and in
+  beside a second program, reads 0 and 0. Controls R3-a (record not
+  zeroed: "an execve'd image got the old program's TPIDRURO back") and R3-b
+  (`TPIDRURW` not zeroed, `main`'s behaviour: "an execve'd image read the
+  old program's TPIDRURW").
+- *R4, `fork`.* A child, switched out and in, reads its parent's
+  `TPIDRURW`. Control R4-c (`capture()` leaves it out: "a fork child did not
+  inherit its parent's TPIDRURW").
+- *R5, one check per row.* `FPEXC` leaves `L.armv7a.8` and is argued
+  coverage. `L.armv7a.11` is `TPIDRURW` switched at every switch out and in
+  (U7, U8); `L.armv7a.12` is `TPIDRURW` inherited by `fork` and zeroed by
+  `execve` (R4, R3-b); `TPIDRURO`'s zeroing at `execve` joins
+  `L.armv7a.10` (R3-a).
+- *R6, the accessor.* `fp()` answers an `unsaved` state as its `FPSCR`,
+  its own `d8`-`d15` and zero elsewhere; a state written by `set_fp` is
+  whole, `unsaved` cleared, with a control of its own.
+- *R7.* One build of `ferrix_rt` for an eabihf target fails with the
+  guard's text, quoted in the commit; the Safety Manual records the
+  assumption that native programs are built with no `-C target-feature`.
+- *R8, evidence.* Every control fires with its own text on an armv7a TCG
+  boot: U1-c, U2-c, U3-a to U3-d, U4-c and R6's, U6-a, U6-b, U7-c, U8-c,
+  R3-a, R3-b, R4-c. The `vectors` and `tls` lines show at one core and at
+  `--smp 2`; `test-ipc-equiv`, `test-threads` and `test-shell` pass on
+  armv7a. The assembly cap moves by exactly the lines counted.
+- *R9, documents.* F5 is **F-66** (Major), filed in FINDINGS and closed by
+  U8 and R3-b; VULNERABILITY-ANALYSIS gains a resume path that skips the
+  reset and a user-writable register no switch moves; FDP_RIP.2 names
+  ARMv7-A's reset and both thread ID registers; `ferrix_native_abi::nr`
+  states the contract per architecture.
+
+*Landing order.* F-66 is a security fix and needs nothing of the reset, so
+(c) -- `TPIDRURO` kept in the task, `TPIDRURW` switched, R3, R4 -- is its
+own commit, gated and landable ahead of (a) and (b).
+
+**Next step, not this item: lazy VFP switching, as seL4 does it.** seL4 on
+ARMv7 keeps `FPEXC.EN` clear until a task's first VFP instruction traps
+(`KernelHaveFPU`), so a `Call`/`ReplyRecv` round trip between two tasks
+that never touch VFP pays no VFP save or restore at all. Ferrix's native
+programs never touch VFP (F1), so even with R1 every blocked direction pays
+a `vmrs`, a 64-byte store, a `vmsr`, a 64-byte load and 192 bytes of zeros,
+and every preempted one the full 256 bytes each way -- on equal hardware,
+work seL4 does not do. The design for it:
+- a per-task bit "has used VFP", set on its first VFP trap (an undefined
+  instruction with `FPEXC.EN` clear, which today ends the program with
+  `SIGILL`);
+- save and restore only for tasks with the bit; switching to a task
+  without it writes `FPEXC.EN` clear, so none of the register file is
+  readable to it;
+- the register file then still holds the last VFP user's values. Either
+  zero it when an owner switches out (a cost on every owner switch, and
+  nothing stale ever stays in the registers), or reset it on the first
+  trap of the next user (free until someone uses VFP, but another
+  program's values sit behind the trap meanwhile). The second is what
+  LazyFP (CVE-2018-3665) attacked on x86; whether any Cortex-A core reads
+  VFP registers speculatively past a disabled `FPEXC.EN` must be shown
+  before it is chosen, and until then the first is the one that keeps
+  FDP_RIP.2 by construction.
+
+It is larger than this item: an undefined-instruction path that tells a
+VFP trap from a real one, `FPEXC` written outside bring-up (U5 comes back
+to review), the signal frame and `capture()` for a task whose state is not
+in the registers, `fork` and `execve` of such a task, and the bit's own
+checks and controls. It is os-07's to schedule. The eager cost it would
+remove is measured on the board, alternated, either way.
