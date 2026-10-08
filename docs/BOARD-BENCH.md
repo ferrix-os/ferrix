@@ -74,7 +74,7 @@ lists. The records go through `bench-ipc --board-log ... --record`.
 
 | Item | Who | Points (estimate) |
 |---|---|---|
-| B1. Linux 7.2.9 for the DK1: kernel, device tree, initramfs, PMU module, `lbench` ported from `rdtsc` to `PMCCNTR` | os-4b's agent | 3–4 |
+| B1. Linux 7.2.9 for the DK1: kernel, device tree, initramfs, PMU module, `lbench` ported from `rdtsc` to `PMCCNTR`. Built 2026-10-08 (`tools/common/bench/board/linux/`); QEMU smoke passed; not yet on the board. | os-4b's agent | 3–4 |
 | B2. seL4 STM32MP1 platform; sel4test (debug) and sel4bench (release) images; the matched root task on ARMv7 | os-4b's agent | 8–12 |
 | B3. Bench suite: the after-the-call sweep for all three kernels, the Ferrix PMU switch (measurement only), and one output format | os-4b's agent | 8–10 |
 | B4. The card: firmware and the three kernels, the U-Boot selection script, and the serial driver for rotation | os-4b, once the card is in a reader | 4–5 |
