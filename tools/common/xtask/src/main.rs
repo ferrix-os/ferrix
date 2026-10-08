@@ -347,6 +347,7 @@ COMMANDS:
     flash         Copy the loader and kernel onto a board's boot partition
     watch-serial  Watch a real serial port for the kernel's boot report
     deploy        flash, then watch-serial: one command for a board
+    boot-stage    MEASUREMENT ONLY: boot a --stage directory's files under QEMU
 
 OPTIONS:
     --arch <x86_64|aarch64|armv7a|all>   Target architecture   [default: host]
@@ -695,6 +696,7 @@ fn run() -> Result<()> {
             flash::run(arch, &files, &args)
         }
         "watch-serial" => serial::watch(None, &args),
+        "boot-stage" => boot_stage(&args),
         // The whole of a board round-trip. Separate commands exist because
         // each half is useful alone — reflashing without watching, watching a
         // board someone else reset — but the common case is both, and a
@@ -1033,6 +1035,10 @@ fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
     if args.compositor {
         return compositor::board_files(arch, args);
     }
+    // MEASUREMENT ONLY (os07/ferrix-posix): a card that carries `--app`.
+    if !args.apps.is_empty() {
+        return bench_board_files(arch, args);
+    }
     let natives = native::build(arch, args.release)?;
     let Some(program) = optional_program(arch, args)? else {
         let (loader, kernel) = build_halves(arch, args)?;
@@ -1060,6 +1066,58 @@ fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
         initramfs,
         defaults: None,
     })
+}
+
+/// MEASUREMENT ONLY (os07/ferrix-posix, never lands): the card files for
+/// the DK1 board bench's level 4 (docs/BOARD-BENCH.md, B5): lmbench and
+/// speedtest1, carried as the apps `--app` names, under the busybox `--init`
+/// names as `/bin/busybox` and every applet's link -- `/bin/sh` among them,
+/// since no zinc is carried, so lat_proc's `/bin/sh -c` runs the shell
+/// Linux's image runs. The kernel is the plain one, built as B3's ipc-bench
+/// card's is, with no program of its own: pid 1 is `--init-path`'s file. The
+/// image's options -- `--init-path`, `--reset`, each `--kernel-option` -- go
+/// to `FERRIX/DEFAULTS.TXT`. The named apps are built afresh first, since a
+/// script app's package is otherwise the one built last.
+fn bench_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
+    let program = optional_program(arch, args)?
+        .ok_or_else(|| Error::new("flash --app needs --init, the busybox /bin/sh is"))?;
+    apps::build_apps(args)?;
+    let natives = native::build(arch, args.release)?;
+    let (loader, kernel) = build_halves(arch, args)?;
+    let carried = apps::named(arch, args)?;
+    let initramfs = initramfs::build_with_utilities(Some(&program), &natives, None, &[], &carried)?;
+    let defaults = image_cmdline(args).map(|text| &*Box::leak(text.into_boxed_str()));
+    Ok(flash::BoardFiles {
+        loader,
+        kernel,
+        initramfs,
+        defaults,
+    })
+}
+
+/// MEASUREMENT ONLY (os07/ferrix-posix): boot the files `flash --stage DIR`
+/// wrote, byte for byte -- the loader, the stripped kernel, the stripped
+/// initramfs and `FERRIX/DEFAULTS.TXT` -- in a FAT image under QEMU, with
+/// `--kernel-option`s, if any, in `CMDLINE.TXT` as a card owner's would be.
+fn boot_stage(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    let stage = PathBuf::from(
+        args.stage
+            .as_deref()
+            .ok_or_else(|| Error::new("boot-stage needs --stage DIR"))?,
+    );
+    let read = |path: &str| {
+        let path = stage.join(path);
+        std::fs::read(&path).map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
+    };
+    let loader = read(&format!("EFI/BOOT/{}", arch.removable_boot_name()))?;
+    let kernel = read("FERRIX/KERNEL.ELF")?;
+    let initramfs = read("FERRIX/INITRD.IMG")?;
+    let defaults = read(fat::DEFAULTS_PATH).ok();
+    let cmdline = (!args.kernel_options.is_empty())
+        .then(|| format!("{}\n", args.kernel_options.join(" ")));
+    let image = fat::write_files(arch, &loader, &kernel, &initramfs, cmdline.as_deref(), defaults.as_deref())?;
+    qemu::run(arch, &image, args)
 }
 
 /// The boot benchmarks: the seam's disk read against Linux's (`bench-seam`),

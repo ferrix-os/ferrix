@@ -589,5 +589,40 @@ pub(crate) fn write_image_carrying(
     Ok(image)
 }
 
+/// MEASUREMENT ONLY (os07/ferrix-posix): an image of files already made --
+/// a `flash --stage` directory's -- byte for byte, with nothing added to the
+/// initramfs and nothing stripped. For `boot-stage`.
+pub(crate) fn write_files(
+    arch: Arch,
+    loader: &[u8],
+    kernel: &[u8],
+    initramfs: &[u8],
+    cmdline: Option<&str>,
+    defaults: Option<&[u8]>,
+) -> Result<PathBuf> {
+    let mut fs = Fat32::new(IMAGE_BYTES)?;
+    fs.add_file(&format!("EFI/BOOT/{}", arch.removable_boot_name()), loader)?;
+    fs.add_file("FERRIX/KERNEL.ELF", kernel)?;
+    fs.add_file("FERRIX/INITRD.IMG", initramfs)?;
+    if let Some(cmdline) = cmdline {
+        fs.add_file("FERRIX/CMDLINE.TXT", cmdline.as_bytes())?;
+    }
+    if let Some(defaults) = defaults {
+        fs.add_file(DEFAULTS_PATH, defaults)?;
+    }
+    let directory = paths::build_dir(arch);
+    std::fs::create_dir_all(&directory)?;
+    let image = directory.join("ferrix-stage.img");
+    std::fs::write(&image, fs.finish())?;
+    println!(
+        "  image {} from a staged card ({} KiB loader, {} KiB kernel, {} KiB initramfs)",
+        image.display(),
+        loader.len() / 1024,
+        kernel.len() / 1024,
+        initramfs.len().div_ceil(1024)
+    );
+    Ok(image)
+}
+
 #[cfg(test)]
 mod tests;
