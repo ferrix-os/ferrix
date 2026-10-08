@@ -992,14 +992,10 @@ pub(crate) fn park_for_reply(endpoint: &Endpoint) -> Parked {
     let Some(task) = crate::sched::current() else {
         return Parked::Declined;
     };
-    // No switch from the park's `BLOCKED` to the end of the last look at
-    // `END`, as the general wait (F-69): a kill posted while the task was
-    // still runnable woke nobody, and only that look finds it.
-    let last_look = crate::sched::LastLook::hold();
     if !endpoint.park(&task) {
         return Parked::Declined;
     }
-    if crate::sched::direct::block_parked(&task, last_look)
+    if crate::sched::direct::block_parked(&task)
         && let Some(answer) = task.take_reply()
     {
         return Parked::Replied(answer);

@@ -36,67 +36,7 @@ const RECHECK_NANOS: u64 = 5_000_000;
 /// [`WaitQueue::wake_all_with`].
 const WAKE_BATCH: usize = 4;
 
-/// Whether [`LastLook`] holds preemption off. Always, in every build that
-/// lands: only the negative controls of L.sched.71 and L.sched.72 turn it
-/// off, to show their checks fire (F-69). False, it compiles to nothing.
-const LAST_LOOK_HOLDS: bool = true;
-
-/// No switch from a wait's `set_state(BLOCKED)` to the end of its last look
-/// (F-69, `docs/roadmap/stage-05-tasks-scheduler.md`).
-///
-/// `choose_next` takes a current task that is not runnable off its queue,
-/// so a switch inside that window counts as the task's block. If a wake had
-/// drained its entry while it was still runnable, a drain that did nothing,
-/// then nobody is left to wake it. The task stays blocked on no queue and on
-/// no list, with what it waited for already there. ipc-bench stalled so on
-/// ARMv7-A.
-///
-/// The preemption count is raised, not the interrupt mask. Interrupts are
-/// taken, and a decision one of them asks for waits for the drop:
-/// - if the look found the condition, the task is runnable by then and the
-///   switch is a preemption;
-/// - if it did not, the task is listed or filed, and the switch is the block
-///   that comes next anyway.
-///
-/// So `ready` runs unpreemptible and must not block. One that blocks stops
-/// the machine with FX-0503, where it would otherwise corrupt the outer wait.
-#[must_use = "dropping it at once leaves the last look preemptible"]
-pub(crate) struct LastLook(());
-
-impl LastLook {
-    /// Hold preemption off from here, before the task is marked blocked.
-    /// The wait's own line is the site FX-0503 names if `ready` blocks.
-    #[track_caller]
-    pub(crate) fn hold() -> LastLook {
-        if LAST_LOOK_HOLDS {
-            super::preempt::preempt_disable();
-        }
-        LastLook(())
-    }
-}
-
-impl Drop for LastLook {
-    /// The last look is over: the task is runnable again, or listed and
-    /// about to block. Makes any decision an interrupt asked for meanwhile.
-    fn drop(&mut self) {
-        if LAST_LOOK_HOLDS {
-            super::preempt::preempt_enable();
-        }
-    }
-}
-
 /// Tasks waiting for one thing.
-///
-/// **A wait's `ready` must not block.** Its last call runs under
-/// [`LastLook`], with the preemption count raised, so it may not:
-/// - take a `SleepLock`;
-/// - wait for memory;
-/// - touch user memory;
-/// - wait on anything itself.
-///
-/// Spin locks and atomics are what it may use. Every `ready`, and every
-/// `poll` that `poll`, `select` and `epoll_wait` reach through one, was
-/// audited against this when F-69 was fixed.
 #[derive(Debug)]
 pub(crate) struct WaitQueue {
     /// Who is waiting.
@@ -316,13 +256,6 @@ impl WaitQueue {
             if wake_at != u64::MAX {
                 task.set_sleep_deadline(wake_at);
             }
-            // **And no switch from `BLOCKED` to the end of the last look.** A
-            // wake can drain the entry above while the task is still runnable,
-            // and that drain does nothing. A switch inside the window would
-            // then take the task off its run queue with no entry left to wake
-            // it and, on a trusting wait, no deadline either. See `LastLook`
-            // (F-69).
-            let last_look = LastLook::hold();
             task.set_state(BLOCKED);
             // A wait that trusts its wakes has no recheck to find a wake it
             // missed, so the store above is ordered before `ready`'s loads
@@ -341,14 +274,12 @@ impl WaitQueue {
             // as one that found it asleep would be.
             if ready() {
                 task.set_state(RUNNABLE);
-                drop(last_look);
                 let _ = task.take_sleep_deadline();
                 if !self.unqueue(task.id) {
                     let _ = self.woken.fetch_add(1, Ordering::Relaxed);
                 }
                 return true;
             }
-            drop(last_look);
             super::block();
             // Running again, so not filed anywhere: whatever deadline is left
             // belongs to no sleep and must not reach the next switch.
@@ -415,14 +346,9 @@ impl WaitQueue {
                 let _ = fallible::try_push(&mut waiters, Arc::clone(&task));
                 queue.count.store(waiters.len(), Ordering::Release);
             }
-            // As the single queue's: no switch until the last look is over.
-            // Here a lost wake costs a recheck, not the task, since this
-            // wait is always filed under its deadline.
-            let last_look = LastLook::hold();
             task.set_state(BLOCKED);
             if ready() {
                 task.set_state(RUNNABLE);
-                drop(last_look);
                 let _ = task.take_sleep_deadline();
                 // Counted where a waker got there first, as the single
                 // queue's last look counts.
@@ -432,7 +358,6 @@ impl WaitQueue {
                 count_wakes(queues, &drained);
                 return true;
             }
-            drop(last_look);
             super::block();
             let _ = task.take_sleep_deadline();
             for (index, queue) in queues.iter().enumerate() {

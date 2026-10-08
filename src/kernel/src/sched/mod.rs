@@ -74,7 +74,7 @@ pub(crate) use preempt::{
 };
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
 pub(crate) use task::{Task, TaskId, UserThread};
-pub(crate) use wait::{LastLook, WaitQueue};
+pub(crate) use wait::WaitQueue;
 
 /// One run queue per logical processor.
 static QUEUES: Once<Vec<SpinLock<CpuQueue>>> = Once::new();

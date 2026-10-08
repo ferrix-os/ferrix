@@ -302,17 +302,12 @@ impl Drop for Direct {
 /// at `END`, then the general block. Answers whether it blocked; on `END`
 /// it is set runnable again and does not. With interrupts on, as
 /// `wait_trusting`'s block is made.
-///
-/// `last_look` was taken before the park set the task blocked, and is let go
-/// once the look is over (F-69, `super::LastLook`).
-pub(crate) fn block_parked(task: &Task, last_look: super::LastLook) -> bool {
+pub(crate) fn block_parked(task: &Task) -> bool {
     core::sync::atomic::fence(Ordering::SeqCst);
     if work::has_end(task) {
         task.set_state(RUNNABLE);
-        drop(last_look);
         return false;
     }
-    drop(last_look);
     super::schedule();
     true
 }
