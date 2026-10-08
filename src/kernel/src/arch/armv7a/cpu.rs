@@ -221,7 +221,9 @@ const CPACR_CP10_CP11_FULL: u32 = 0xF << 20;
 /// -- saves VFP registers in its first function prologue, and without this
 /// that instruction is undefined. Two switches, because the architecture has
 /// two: `CPACR` grants access to the coprocessors, and `FPEXC.EN` turns the
-/// FPU on.
+/// FPU on. `CPACR` is granted here for good; `EN` is left clear, to be set
+/// for a program at its first VFP instruction and at every switch to a
+/// program that has used VFP (`docs/OPAQUE-KERNEL.md` §9.15).
 ///
 /// `FPEXC` is written from the one assembly block that tells the assembler
 /// there is an FPU, which the soft-float kernel target does not declare. It is
@@ -251,17 +253,18 @@ pub(crate) fn enable_user_fpu() {
     if granted & CPACR_CP10_CP11_FULL != CPACR_CP10_CP11_FULL {
         return;
     }
+    // `EN` on, the feature registers read, the register file scrubbed of
+    // whatever firmware left in it, and `EN` off again: a program runs with
+    // the FPU off until its first VFP instruction (`docs/OPAQUE-KERNEL.md`
+    // §9.15, D8).
     // SAFETY: (SYSREG) access to coprocessor 10 was just granted and read back, so the
-    // FPU exists and `FPEXC` is accessible.
-    unsafe { super::switch::fpu_enable() };
+    // FPU exists and `FPEXC` is accessible; this runs before the core unmasks
+    // interrupts.
+    let (features, more) = unsafe { super::switch::bring_up_vfp() };
 
     // How many double registers a program's state has, which is what a switch
     // between programs has to save. `MVFR0`'s low four bits say: one for
     // sixteen, two for thirty-two.
-    // SAFETY: (SYSREG) as above; a read of an identification register.
-    let features = unsafe { super::switch::fpu_features() };
-    // SAFETY: (SYSREG) as above.
-    let more = unsafe { super::switch::fpu_features1() };
     USER_MVFR0.store(features, core::sync::atomic::Ordering::Relaxed);
     USER_MVFR1.store(more, core::sync::atomic::Ordering::Relaxed);
     let doubles = match features & 0xF {

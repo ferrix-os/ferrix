@@ -22,7 +22,7 @@
 //! | Offset | Exception | Return address is |
 //! |---|---|---|
 //! | `0x00` | reset | never taken through `VBAR` |
-//! | `0x04` | undefined instruction | `lr - 4`, the instruction |
+//! | `0x04` | undefined instruction | `lr - 4` in ARM state, `lr - 2` in Thumb (the stub takes 4, `point_at_undefined` the rest) |
 //! | `0x08` | supervisor call | `lr`, the one after it |
 //! | `0x0C` | prefetch abort, including `bkpt` | `lr - 4`, the instruction |
 //! | `0x10` | data abort | `lr - 8`, the instruction, so it retries |
@@ -584,7 +584,36 @@ unsafe extern "C" {
 /// Not called from Rust — the `bl` in the assembly above is its only caller.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
+    if frame.kind == KIND_UNDEFINED {
+        point_at_undefined(frame);
+        if frame.came_from_user() {
+            match super::switch::take_first_use() {
+                // Back through the stub's `rfeia`, onto the instruction, with
+                // interrupts masked from the entry until then.
+                super::switch::Undefined::FirstUse => return,
+                super::switch::Undefined::Disagree => crate::trap::fatal(
+                    frame,
+                    "a processor's FPEXC.EN record disagreed with the running task's use of VFP",
+                    &crate::panic::catalog::UNEXPECTED_EXCEPTION,
+                ),
+                super::switch::Undefined::Program => {}
+            }
+        }
+    }
     crate::trap::dispatch(frame);
+}
+
+/// Put an undefined instruction's frame `pc` on the instruction itself: the
+/// stub took four from `LR_und`, which is the instruction's address plus
+/// four in ARM state and plus two in Thumb state, a 32-bit Thumb instruction
+/// included (ARM ARM, the exception return offsets). Once, before both the
+/// first use's retry and the `SIGILL`, so that neither runs or names the
+/// halfword before a Thumb instruction (F-68; `docs/OPAQUE-KERNEL.md` §9.15,
+/// S3 and the consultant's L5).
+const fn point_at_undefined(frame: &mut TrapFrame) {
+    if frame.cpsr & CPSR_THUMB != 0 {
+        frame.pc = frame.pc.wrapping_add(2);
+    }
 }
 
 /// Fault status: the long-descriptor format's status field, bits 5:0. The

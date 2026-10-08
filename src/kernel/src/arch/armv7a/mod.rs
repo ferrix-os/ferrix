@@ -117,6 +117,26 @@ pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
 ///
 /// The first case that read what it must not.
 pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    // First, so that a sabotage of the lazy switch fires with the lazy
+    // check's own text rather than a later case's (`docs/OPAQUE-KERNEL.md`
+    // §9.15).
+    let lazy = switch::check::run_lazy()?;
+    if lazy.ran {
+        crate::console::println!(
+            "  lazy     {} round trips between two programs without VFP moved no VFP register \
+             and wrote no FPEXC; first uses in ARM, Thumb and an IT block, SIGILL at its own \
+             address, zero behind a clear FPEXC.EN at bring-up, handover and execve, the record \
+             through signals, fork and execve; {}",
+            lazy.trips,
+            if lazy.migrated {
+                "a program with VFP state resumed on another processor kept it"
+            } else {
+                "the migration case did not run on one processor"
+            }
+        );
+    } else {
+        crate::console::println!("  lazy     no D32 VFP: the lazy cases are not run");
+    }
     let vectors = switch::check::run_vectors()?;
     if vectors.ran {
         crate::console::println!(

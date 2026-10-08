@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1638,
+  "max_total_lines": 1648,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -41,7 +41,13 @@
     "a task blocked in a native call that loses the caller-saved VFP registers:",
     "vmrs, vstmia of d8-d15 (7 lines) and vmsr, three vldmia (10). The soft-float",
     "kernel has no Rust spelling for any of them, and the full save they replace",
-    "moves 256 bytes each way at every switch."
+    "moves 256 bytes each way at every switch.",
+    "1648 since 2026-10-08 (os07-lazyvfp, docs/OPAQUE-KERNEL.md §9.15, the",
+    "consultant's L11) for ARMv7-A switch.rs's lazy VFP: an isb after the FPEXC",
+    "write that turns VFP on (1 line), ferrix_fpu_disable, the FPEXC write that",
+    "turns it off for a program that has never used VFP (5 with its comment), and",
+    "ferrix_fpu_exc, the PL1 read of FPEXC the checks compare the record with (4).",
+    "Two native programs trading a core then run no VFP instruction at all."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -130,8 +136,8 @@
     },
     {
       "file": "src/kernel/src/arch/armv7a/switch.rs",
-      "max_lines": 84,
-      "reason": "The same again, and with one thing particular to this architecture: every exception is taken into a mode with its own banked stack pointer, and the trap path keeps everything on the SVC-mode stack -- so a task's context *is* its SVC stack pointer. A ninth register rides along with r4-r11 and the link register as padding, because nine words would leave the stack four-byte aligned where the ABI requires eight at a call. 67 rather than 30 since 2026-09-27, when check-asm-budget.py began counting every line of a raw-string global_asm! instead of the 4 its quotes were on: the file had not grown, the count had been short. 84 since 2026-10-08 (os07-ustate, docs/OPAQUE-KERNEL.md §9.14) for `ferrix_user_fpu_keep` and `ferrix_user_fpu_reset`: a task blocked in a native call that loses the caller-saved VFP registers keeps FPSCR and d8-d15 alone, and its switch back loads those and zeros into the rest -- VFP system register and multiple-register transfers, which the soft-float kernel cannot spell in Rust."
+      "max_lines": 94,
+      "reason": "The same again, and with one thing particular to this architecture: every exception is taken into a mode with its own banked stack pointer, and the trap path keeps everything on the SVC-mode stack -- so a task's context *is* its SVC stack pointer. A ninth register rides along with r4-r11 and the link register as padding, because nine words would leave the stack four-byte aligned where the ABI requires eight at a call. 67 rather than 30 since 2026-09-27, when check-asm-budget.py began counting every line of a raw-string global_asm! instead of the 4 its quotes were on: the file had not grown, the count had been short. 84 since 2026-10-08 (os07-ustate, docs/OPAQUE-KERNEL.md §9.14) for `ferrix_user_fpu_keep` and `ferrix_user_fpu_reset`: a task blocked in a native call that loses the caller-saved VFP registers keeps FPSCR and d8-d15 alone, and its switch back loads those and zeros into the rest -- VFP system register and multiple-register transfers, which the soft-float kernel cannot spell in Rust. 94 since 2026-10-08 (os07-lazyvfp, docs/OPAQUE-KERNEL.md §9.15) for `ferrix_fpu_disable` and `ferrix_fpu_exc` and the `isb` after `ferrix_fpu_enable`'s write: FPEXC.EN is cleared for a program that has never used VFP and set at its first VFP instruction, VFP system register transfers that have no Rust spelling either."
     },
     {
       "file": "src/kernel/src/arch/armv7a/trap.rs",

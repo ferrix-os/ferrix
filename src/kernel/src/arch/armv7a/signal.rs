@@ -65,7 +65,11 @@ const UC_FLAGS_PLAIN: u32 = 0x5ac3_c35a;
 const VFP_MAGIC: u32 = 0x5646_5001;
 /// Bytes in `struct vfp_sigframe`, which is eight-byte aligned.
 const VFP_BYTES: usize = 288;
-/// `FPEXC.EN`, as a frame reports the exception register.
+/// `FPEXC.EN`, as a frame reports the exception register: the program's view,
+/// as Linux reports its thread's `FPEXC`, with `EN` set, whether or not the
+/// program has used VFP yet and so whether or not this core's `EN` is set for
+/// it (`docs/OPAQUE-KERNEL.md` §9.15, the consultant's L12). No frame reads
+/// the register.
 const FPEXC_ENABLED: u32 = 1 << 30;
 
 /// `sigreturn`'s number, for the `retcode` a frame carries.
@@ -354,11 +358,9 @@ fn restore_vfp(frame: &FrameBytes, at: usize) -> Result<(), BadFrame> {
     for (index, slot) in doubles.iter_mut().enumerate() {
         *slot = frame.u64_at(at + 8 + index * 8)?;
     }
-    // SAFETY: (CONTEXT) inside the running task's own system call, so the registers are
-    // its own; captured to carry the new values in the layout the load expects.
-    let mut state = unsafe { UserState::capture() };
-    state.set_fp(frame.u32_at(at + 264)?, doubles);
-    // SAFETY: (CONTEXT) the running task's own registers.
-    unsafe { switch::load_user_fpu(&state) };
+    // SAFETY: (CONTEXT) inside the running task's own system call: into its
+    // registers if it has used VFP, else into its record, which its first use
+    // loads (`docs/OPAQUE-KERNEL.md` §9.15, D6).
+    unsafe { switch::load_user_fp(frame.u32_at(at + 264)?, doubles) };
     Ok(())
 }

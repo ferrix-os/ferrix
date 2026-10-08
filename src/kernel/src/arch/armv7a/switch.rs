@@ -15,6 +15,7 @@
 //! There is no floating-point state: the kernel is soft-float throughout.
 
 use core::arch::global_asm;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) mod check;
 
@@ -175,9 +176,19 @@ pub(crate) struct UserState {
     vectors_dead: bool,
     /// The record holds only `FPSCR` and `d8`-`d15`: the next switch to the
     /// task resets the rest, and every reader sees them zero
-    /// ([`UserState::fp`]). Set by the partial save, cleared by the reset
-    /// and by a writer alone.
+    /// ([`UserState::fp`]). Set by the partial save of a task with
+    /// [`UserState::vfp`], cleared by the reset and by a writer alone.
     unsaved: bool,
+    /// The task has used VFP (`docs/OPAQUE-KERNEL.md` §9.15, D1): set by its
+    /// first VFP instruction ([`take_first_use`]), copied by `capture`,
+    /// cleared by `execve` alone. Without it the task runs with `FPEXC.EN`
+    /// clear, no switch moves a VFP register for it, and this record is its
+    /// VFP state.
+    vfp: bool,
+    /// How many times a switch or a first use moved VFP state or wrote
+    /// `FPEXC` for this task: what the lazy check (C1) reads of two programs
+    /// that never use VFP. Counted on the VFP paths only.
+    vfp_moves: u32,
 }
 
 /// The first callee-saved double, `d8`: where the partial save stores and
@@ -221,7 +232,29 @@ impl UserState {
             user_rw: 0,
             vectors_dead: false,
             unsaved: false,
+            vfp: false,
+            vfp_moves: 0,
         }
+    }
+
+    /// Whether the task has used VFP (§9.15, D1).
+    pub(super) const fn uses_vfp(&self) -> bool {
+        self.vfp
+    }
+
+    /// How many times VFP state was moved or `FPEXC` written for the task.
+    pub(super) const fn vfp_moves(&self) -> u32 {
+        self.vfp_moves
+    }
+
+    /// The VFP part of a program's starting state, as `execve` leaves it: no
+    /// `FPSCR`, every double zero, nothing to reset, and no use of VFP yet
+    /// (§9.15, D7 and the consultant's L4).
+    const fn clear_vfp(&mut self) {
+        self.fpscr = 0;
+        self.doubles = [0; 32];
+        self.unsaved = false;
+        self.vfp = false;
     }
 
     /// Raise or lower the vector-state contract's mark: raised by the `svc`
@@ -253,13 +286,28 @@ impl UserState {
     /// `TPIDRURO` is read from the register here, not from the running task's
     /// record: a copy of what the processor holds, outside the switch, which
     /// is the one place that reads it no more (3b). `TPIDRURW` comes with the
-    /// save, so a fork child and a thread inherit it, as Linux's
+    /// copy, so a fork child and a thread inherit it, as Linux's
     /// `copy_thread` gives them.
+    ///
+    /// The VFP state comes from where it lives (§9.15, D6 and the
+    /// consultant's L3): the registers for a task that has used VFP, its
+    /// record for one that has not, decided by the running task's own bit and
+    /// read in one window with interrupts masked, so that no switch moves it
+    /// in between and no VFP instruction runs with `FPEXC.EN` clear. The copy
+    /// carries the bit: a fork child or a thread of a task that has used VFP
+    /// starts with it; one of a task that has not takes its first use on the
+    /// state copied here.
     pub(crate) unsafe fn capture() -> UserState {
         let mut state = UserState::new();
-        // SAFETY: (CONTEXT) the caller's guarantee.
-        unsafe { save_user_state(&mut state, false) };
+        state.user_rw = super::cpu::read_tpidrurw();
+        // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in
+        // a `repr(C)` structure, the two words the assembly writes.
+        unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
         state.thread_pointer = super::cpu::read_tpidruro();
+        let count = super::cpu::user_fpu_doubles();
+        if count != 0 {
+            masked(|| capture_vfp(&mut state, count));
+        }
         state
     }
 
@@ -341,20 +389,255 @@ pub(super) fn set_user_banked(sp: u32, lr: u32) {
     unsafe { ferrix_user_banked_restore(words.as_ptr()) };
 }
 
-/// Load `state`'s floating-point registers and nothing else, if this core has
-/// any: what `sigreturn` puts back.
+/// The VFP half of [`UserState::capture`], with interrupts masked: the
+/// registers when the running task has the bit (and so `EN`, I1), else its
+/// record, read without a VFP instruction.
+fn capture_vfp(state: &mut UserState, count: u8) {
+    // SAFETY: (CONTEXT) interrupts are masked by the caller, in the running
+    // task's own call.
+    let own = unsafe { crate::sched::with_own_user_state(|own| (own.vfp, own.fp())) };
+    match own {
+        Some((true, _)) if vfp_on() => {
+            // SAFETY: (CONTEXT) `EN` is set and the registers are the running
+            // task's own (I1, I3); `state` is a live local whose layout is
+            // asserted above.
+            unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(count == 32)) };
+            state.vfp = true;
+        }
+        Some((vfp, (fpscr, doubles))) => {
+            state.set_fp(fpscr, doubles);
+            state.vfp = vfp;
+        }
+        None => {}
+    }
+}
+
+/// Give the running task `fpscr` and `doubles` as its VFP state, if this core
+/// has a VFP: what `sigreturn` puts back.
+///
+/// Where the state lives decides where it goes (§9.15, D6 and the
+/// consultant's L3): into the registers for a task that has used VFP, into
+/// its record for one that has not, which its first use then loads. The
+/// running task's bit is read, and the state written, in one window with
+/// interrupts masked.
 ///
 /// # Safety
 ///
-/// (CONTEXT) The registers must be the calling task's own.
-pub(super) unsafe fn load_user_fpu(state: &UserState) {
-    let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
-        // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live
-        // `UserState` whose layout is asserted above; loading user registers
-        // cannot affect the kernel, which uses none of them.
-        unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(state), u32::from(doubles == 32)) };
+/// (CONTEXT) Must be called by the running user task, inside its own call.
+pub(super) unsafe fn load_user_fp(fpscr: u32, doubles: [u64; 32]) {
+    let count = super::cpu::user_fpu_doubles();
+    if count == 0 {
+        return;
     }
+    let put = |own: &mut UserState| {
+        if own.vfp && vfp_on() {
+            let mut loaded = UserState::new();
+            loaded.set_fp(fpscr, doubles);
+            // SAFETY: (CONTEXT) `EN` is set and the registers are the running
+            // task's own (I1); `loaded` is a live local whose layout is
+            // asserted above.
+            unsafe {
+                ferrix_user_fpu_restore(core::ptr::from_ref(&loaded), u32::from(count == 32));
+            }
+        } else {
+            own.set_fp(fpscr, doubles);
+        }
+    };
+    masked(|| {
+        // SAFETY: (CONTEXT) interrupts are masked for the window, in the
+        // running task's own call.
+        let _ = unsafe { crate::sched::with_own_user_state(put) };
+    });
+}
+
+/// Run `body` with interrupts masked on this processor, as they were after.
+fn masked<R>(body: impl FnOnce() -> R) -> R {
+    let open = super::interrupts_enabled();
+    super::disable_interrupts();
+    let result = body();
+    if open {
+        super::enable_interrupts();
+    }
+    result
+}
+
+/// `FPEXC.EN`.
+pub(super) const FPEXC_EN: u32 = 1 << 30;
+
+/// What each processor's `FPEXC.EN` was last written to (§9.15, D2), by
+/// logical number. Exact, because only the kernel writes `FPEXC`: no program
+/// can name it (S2), unlike `TPIDRURW`, so this is not condition 8's case.
+static VFP_ON: [AtomicBool; ferrix_sched::MAX_CPUS] =
+    [const { AtomicBool::new(false) }; ferrix_sched::MAX_CPUS];
+
+/// This processor's record, once its per-CPU register is installed.
+fn vfp_record() -> Option<&'static AtomicBool> {
+    VFP_ON.get(crate::smp::this_cpu()?.logical)
+}
+
+/// Whether this processor's `FPEXC.EN` is set: its record, or the register
+/// itself before the record can be named.
+pub(super) fn vfp_on() -> bool {
+    match vfp_record() {
+        Some(record) => record.load(Ordering::Relaxed),
+        None => fpexc() & FPEXC_EN != 0,
+    }
+}
+
+/// Write this processor's record.
+fn set_vfp_record(on: bool) {
+    if let Some(record) = vfp_record() {
+        record.store(on, Ordering::Relaxed);
+    }
+}
+
+/// `FPEXC`, read from the register: for the checks, which compare it with
+/// the record, and before the record exists. Zero on a core with no VFP.
+pub(super) fn fpexc() -> u32 {
+    if super::cpu::user_fpu_doubles() == 0 {
+        return 0;
+    }
+    // SAFETY: (SYSREG) a VFP exists, so `CPACR` granted cp10 and cp11, and a
+    // PL1 read of `FPEXC` is permitted whatever `EN` is.
+    unsafe { ferrix_fpu_exc() }
+}
+
+/// What a scrub loads: no `FPSCR` and every double zero, in read-only data.
+static ZERO_STATE: UserState = UserState::new();
+
+/// Turn this processor's VFP on: `FPEXC.EN`, an `isb`, the record.
+///
+/// # Safety
+///
+/// (SYSREG) This processor has a VFP and interrupts are masked.
+pub(super) unsafe fn turn_on() {
+    // SAFETY: (SYSREG) the caller's guarantee.
+    unsafe { ferrix_fpu_enable() };
+    set_vfp_record(true);
+}
+
+/// Zero every VFP register this processor has and `FPSCR`, then clear
+/// `FPEXC.EN` and the record (§9.15, I2): what stays behind a clear `EN` is
+/// nobody's.
+///
+/// # Safety
+///
+/// (SYSREG) This processor has `count` double registers, `EN` is set, and
+/// interrupts are masked.
+pub(super) unsafe fn scrub_off(count: u8) {
+    // SAFETY: (SYSREG) `EN` is set; the source is the read-only zero state.
+    unsafe { ferrix_user_fpu_restore(&raw const ZERO_STATE, u32::from(count == 32)) };
+    // SAFETY: (SYSREG) the caller's guarantee.
+    unsafe { ferrix_fpu_disable() };
+    set_vfp_record(false);
+}
+
+/// The VFP part of bring-up on this processor (§9.15, D8): `EN` on, the
+/// feature registers read, the register file scrubbed of whatever firmware
+/// left there, `EN` off. Answers `MVFR0` and `MVFR1`.
+///
+/// It writes no record: on a secondary processor the per-CPU register that
+/// names it is not installed yet. Every record starts off, from its
+/// initialiser, which is what this leaves the register as.
+///
+/// # Safety
+///
+/// (SYSREG) `CPACR` grants cp10 and cp11 on this core, and interrupts are
+/// masked.
+pub(super) unsafe fn bring_up_vfp() -> (u32, u32) {
+    // SAFETY: (SYSREG) the caller's guarantee.
+    unsafe { ferrix_fpu_enable() };
+    // SAFETY: (SYSREG) as above; reads of identification registers.
+    let features = (unsafe { ferrix_fpu_features() }, {
+        // SAFETY: (SYSREG) as above.
+        unsafe { ferrix_fpu_features1() }
+    });
+    if features.0 & 0xF == 2 {
+        // SAFETY: (SYSREG) `EN` was just set, and the core has 32 doubles.
+        unsafe { ferrix_user_fpu_restore(&raw const ZERO_STATE, 1) };
+    } else if features.0 & 0xF == 1 {
+        // SAFETY: (SYSREG) as above, 16 doubles.
+        unsafe { ferrix_user_fpu_restore(&raw const ZERO_STATE, 0) };
+    }
+    // SAFETY: (SYSREG) as above.
+    unsafe { ferrix_fpu_disable() };
+    features
+}
+
+/// Load a task's own record into the registers: its reset when it holds
+/// only `FPSCR` and `d8`-`d15`, the whole state otherwise. The switch's and
+/// the first use's one way to load (the consultant's L2).
+///
+/// # Safety
+///
+/// (CONTEXT) `EN` is set, and `state` is the task about to run here.
+unsafe fn load_own(state: &mut UserState, count: u8) {
+    if state.unsaved {
+        // SAFETY: (CONTEXT) the incoming task's registers; its record's
+        // `FPSCR` is one the processor held when the task blocked, and the
+        // zeros are 256 bytes of read-only data.
+        unsafe {
+            ferrix_user_fpu_reset(
+                core::ptr::from_ref(state),
+                u32::from(count == 32),
+                ZERO_DOUBLES.as_ptr(),
+            );
+        }
+        state.unsaved = false;
+    } else {
+        // SAFETY: (CONTEXT) as above; loading user registers cannot affect
+        // the kernel, which uses none of them.
+        unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(state), u32::from(count == 32)) };
+    }
+    state.vfp_moves = state.vfp_moves.wrapping_add(1);
+}
+
+/// What an undefined instruction from USR mode is, for the trap path
+/// (§9.15, D5 and the consultant's L2).
+pub(super) enum Undefined {
+    /// The running task's first VFP instruction, now taken: re-execute it.
+    FirstUse,
+    /// An undefined instruction of the program's: `SIGILL`.
+    Program,
+    /// The processor's record and the task's bit disagree (I1 broken): a
+    /// kernel fault, never a first use or a signal.
+    Disagree,
+}
+
+/// Take an undefined instruction from USR mode as the running task's first
+/// use of VFP when it is one: the core has a VFP, the task has user state
+/// and its bit is clear. Then, in the masked window the exception entered
+/// with, the bit is set, `EN` written with an `isb`, the record set, and the
+/// task's own record loaded through the switch's own load. With the bit set
+/// and `EN` set, the instruction was not a VFP one, or not one this core has:
+/// `SIGILL`. Old seL4's and Linux's way of telling the two apart without
+/// decoding the instruction.
+///
+/// Called from the exception entry, interrupts masked; takes no lock and
+/// calls nothing that blocks.
+pub(super) fn take_first_use() -> Undefined {
+    let count = super::cpu::user_fpu_doubles();
+    if count == 0 {
+        return Undefined::Program;
+    }
+    let on = vfp_on();
+    let take = |state: &mut UserState| match (state.vfp, on) {
+        (false, false) => {
+            // SAFETY: (SYSREG) a VFP exists and interrupts are masked.
+            unsafe { turn_on() };
+            state.vfp = true;
+            // SAFETY: (CONTEXT) `EN` was just set, and `state` is the running
+            // task's own record.
+            unsafe { load_own(state, count) };
+            Undefined::FirstUse
+        }
+        (true, true) => Undefined::Program,
+        _ => Undefined::Disagree,
+    };
+    // SAFETY: (CONTEXT) interrupts are masked from the exception entry, in
+    // the running task's own trap.
+    let taken = unsafe { crate::sched::with_own_user_state(take) };
+    taken.unwrap_or(Undefined::Program)
 }
 
 global_asm!(
@@ -385,11 +668,27 @@ ferrix_user_banked_restore:
     msr    cpsr_c, r3
     bx     lr
 
-// void ferrix_fpu_enable(void): FPEXC.EN
+// void ferrix_fpu_enable(void): FPEXC.EN, synchronised for the kernel's own
+// VFP instructions after it (9.15)
 .globl ferrix_fpu_enable
 ferrix_fpu_enable:
     mov    r0, #0x40000000
     vmsr   fpexc, r0
+    isb
+    bx     lr
+
+// void ferrix_fpu_disable(void): FPEXC.EN clear; the exception return that
+// follows synchronises it (9.15)
+.globl ferrix_fpu_disable
+ferrix_fpu_disable:
+    mov    r0, #0
+    vmsr   fpexc, r0
+    bx     lr
+
+// u32 ferrix_fpu_exc(void): FPEXC, which PL1 reads whatever EN is (9.15)
+.globl ferrix_fpu_exc
+ferrix_fpu_exc:
+    vmrs   r0, fpexc
     bx     lr
 
 // u32 ferrix_fpu_features(void): MVFR0
@@ -458,8 +757,12 @@ unsafe extern "C" {
     fn ferrix_user_banked_save(out: *mut u32);
     /// Load USR mode's banked stack pointer and link register from `from`.
     fn ferrix_user_banked_restore(from: *const u32);
-    /// Set `FPEXC.EN`.
+    /// Set `FPEXC.EN`, with an `isb`.
     fn ferrix_fpu_enable();
+    /// Clear `FPEXC.EN`.
+    fn ferrix_fpu_disable();
+    /// Read `FPEXC`.
+    fn ferrix_fpu_exc() -> u32;
     /// Read `MVFR0`.
     fn ferrix_fpu_features() -> u32;
     /// Read `MVFR1`.
@@ -475,49 +778,20 @@ unsafe extern "C" {
     fn ferrix_user_fpu_reset(state: *const UserState, all_32: u32, zeros: *const u64);
 }
 
-/// Turn the FPU on, on this core.
-///
-/// # Safety
-///
-/// (SYSREG) `CPACR` must grant access to coprocessors 10 and 11 on this core, which is
-/// what `cpu::enable_user_fpu` checks before calling this.
-pub(super) unsafe fn fpu_enable() {
-    // SAFETY: (SYSREG) the caller guarantees access; setting `EN` changes nothing the
-    // soft-float kernel uses.
-    unsafe { ferrix_fpu_enable() };
-}
-
-/// `MVFR0`, the FPU's feature register.
-///
-/// # Safety
-///
-/// (SYSREG) As [`fpu_enable`].
-pub(super) unsafe fn fpu_features() -> u32 {
-    // SAFETY: (SYSREG) the caller guarantees access; the read has no side effects.
-    unsafe { ferrix_fpu_features() }
-}
-
-/// `MVFR1`, the FPU's second feature register.
-///
-/// # Safety
-///
-/// (SYSREG) As [`fpu_enable`].
-pub(super) unsafe fn fpu_features1() -> u32 {
-    // SAFETY: (SYSREG) the caller guarantees access; the read has no side effects.
-    unsafe { ferrix_fpu_features1() }
-}
-
 /// Store the program state this processor holds into `state`.
 ///
 /// `TPIDRURO` is not read (3b): it is the record's, which `set_tls` and
 /// `execve` keep. `TPIDRURW` is, at every switch out (F-66).
 ///
-/// The VFP registers are saved in full, except for a task `blocked` in a
-/// native call whose contract lets the caller-saved ones go (`vectors_dead`,
-/// 3a's port): then only `FPSCR` and `d8`-`d15` are kept, and the state is
-/// marked `unsaved` for the switch back to reset. A task switched out
-/// runnable -- preempted, even inside one of those calls -- and one blocked
-/// in any other call keep everything.
+/// A task that has never used VFP (§9.15) runs with `FPEXC.EN` clear, and no
+/// VFP register is saved for it: its record is its state. One that has is
+/// saved in full, except when `blocked` in a native call whose contract lets
+/// the caller-saved registers go (`vectors_dead`, 3a's port): then only
+/// `FPSCR` and `d8`-`d15` are kept, and the state is marked `unsaved` for the
+/// switch back to reset. A task switched out runnable -- preempted, even
+/// inside one of those calls -- and one blocked in any other call keep
+/// everything. Saved at every switch out, so the state never stays in a
+/// processor another one would have to fetch it from (D9).
 ///
 /// # Safety
 ///
@@ -530,17 +804,21 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     // structure, which is the two words the assembly writes.
     unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 && blocked && state.vectors_dead {
-        // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live,
-        // exclusively borrowed `UserState` whose `d8` is at the offset asserted
-        // above; these are the outgoing task's registers.
+    if doubles == 0 || !state.vfp {
+        return;
+    }
+    if blocked && state.vectors_dead {
+        // SAFETY: (CONTEXT) the FPU exists and `EN` is set for a task with the
+        // bit (I1), and `state` is a live, exclusively borrowed `UserState`
+        // whose `d8` is at the offset asserted above; these are the outgoing
+        // task's registers.
         unsafe { ferrix_user_fpu_keep(core::ptr::from_mut(state)) };
         state.mark_unsaved();
-    } else if doubles != 0 {
-        // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live,
-        // exclusively borrowed `UserState` whose layout is asserted above.
+    } else {
+        // SAFETY: (CONTEXT) as above, with the layout asserted above.
         unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(doubles == 32)) };
     }
+    state.vfp_moves = state.vfp_moves.wrapping_add(1);
 }
 
 /// Load `state` onto this processor for the task about to run.
@@ -548,11 +826,16 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
 /// `entry_stack` is for x86-64. Here an exception from USR mode lands on the
 /// SVC stack, which each task's own stack already is when it returns to USR.
 ///
-/// A state marked `unsaved` is reset rather than restored -- its own `FPSCR`
-/// and `d8`-`d15`, zero in every other VFP register the core has -- and the
-/// reset is the only thing that clears the mark (3a's condition 7): every way
-/// a task is resumed -- a message, a close, a kill, a signal -- switches to
-/// it through here.
+/// A task that has used VFP gets `FPEXC.EN` set, if this core's is clear,
+/// and its state: a state marked `unsaved` is reset rather than restored --
+/// its own `FPSCR` and `d8`-`d15`, zero in every other VFP register the core
+/// has -- and the reset is the only thing that clears the mark (3a's
+/// condition 7): every way a task is resumed -- a message, a close, a kill, a
+/// signal -- switches to it through here. A task that has not gets `EN`
+/// clear: if it was set, every VFP register and `FPSCR` are zeroed first
+/// (§9.15, I2), whoever ran before, a dead task included; if it was clear,
+/// nothing happens at all, so two such tasks trade a core with no VFP
+/// instruction and no `FPEXC` access.
 ///
 /// # Safety
 ///
@@ -565,22 +848,22 @@ pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64)
     // SAFETY: (CONTEXT) as in `save_user_state`, read rather than written.
     unsafe { ferrix_user_banked_restore(core::ptr::from_ref(&state.user_sp)) };
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 && state.unsaved {
-        // SAFETY: (CONTEXT) the incoming task's registers; its record's `FPSCR` is one
-        // the processor held when the task blocked, and the zeros are 256
-        // bytes of read-only data.
-        unsafe {
-            ferrix_user_fpu_reset(
-                core::ptr::from_ref(state),
-                u32::from(doubles == 32),
-                ZERO_DOUBLES.as_ptr(),
-            );
+    if doubles == 0 {
+        return;
+    }
+    let on = vfp_on();
+    if state.vfp {
+        if !on {
+            // SAFETY: (SYSREG) a VFP exists; the switch runs with interrupts
+            // masked under the run queue lock.
+            unsafe { turn_on() };
         }
-        state.unsaved = false;
-    } else if doubles != 0 {
-        // SAFETY: (CONTEXT) as above; loading user registers cannot affect the kernel,
-        // which uses none of them.
-        unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(state), u32::from(doubles == 32)) };
+        // SAFETY: (CONTEXT) `EN` is set, and `state` is the incoming task's.
+        unsafe { load_own(state, doubles) };
+    } else if on {
+        // SAFETY: (SYSREG) a VFP exists, `EN` is set, interrupts are masked.
+        unsafe { scrub_off(doubles) };
+        state.vfp_moves = state.vfp_moves.wrapping_add(1);
     }
 }
 
@@ -605,19 +888,26 @@ pub(crate) unsafe fn reset_user_state() {
     // old thread pointer back at its next switch in. `TPIDRURW` is zeroed as
     // Linux's `flush_tls` zeroes it, so nothing of the old image reaches the
     // new one through it (F-66).
-    let open = super::interrupts_enabled();
-    super::disable_interrupts();
-    super::cpu::write_tpidruro(0);
-    super::cpu::write_tpidrurw(0);
-    // SAFETY: (CONTEXT) interrupts masked, inside the running task's own call.
-    let _ = unsafe { crate::sched::with_own_user_state(UserState::clear_thread_registers) };
-    if open {
-        super::enable_interrupts();
-    }
-    let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
-        let fresh = UserState::new();
-        // SAFETY: (CONTEXT) the FPU exists and is enabled; the state is all zeros.
-        unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(&fresh), u32::from(doubles == 32)) };
-    }
+    //
+    // The VFP state goes back to a program's start in the same window
+    // (§9.15, D7 and the consultant's L4): the record cleared, because the new
+    // image's first use loads it, and the registers scrubbed with `EN`
+    // cleared if this core had it set, so the image starts as a task that has
+    // never used VFP.
+    let count = super::cpu::user_fpu_doubles();
+    masked(|| {
+        super::cpu::write_tpidruro(0);
+        super::cpu::write_tpidrurw(0);
+        // SAFETY: (CONTEXT) interrupts masked, inside the running task's own call.
+        let _ = unsafe {
+            crate::sched::with_own_user_state(|state| {
+                state.clear_thread_registers();
+                state.clear_vfp();
+            })
+        };
+        if count != 0 && vfp_on() {
+            // SAFETY: (SYSREG) a VFP exists, `EN` is set, interrupts masked.
+            unsafe { scrub_off(count) };
+        }
+    });
 }

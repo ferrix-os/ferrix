@@ -8,7 +8,8 @@
  * barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9), and
  * what of the generic timer user mode may read (`CNTKCTL`), and what the
  * switch does with the two thread ID registers (`docs/OPAQUE-KERNEL.md`
- * §9.14, 3b and F-66). The rest of the
+ * §9.14, 3b and F-66), and how it leaves VFP off for a program that never
+ * uses it (§9.15). The rest of the
  * architecture waits in the baseline with the other architectures' unwritten
  * rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of
  * part 19 hold.
@@ -98,8 +99,9 @@ package FerrixArmv7aRequirements {
                 "arch::armv7a::trap::vectors_die_in", "arch::armv7a::trap::mark_vectors_dead");
         }
         requirement <'L.armv7a.6'> aBlockedNativeCallKeepsItsCalleeSaved : ItemLowLevel {
-            attribute :>> statement = "save_user_state shall, for a task switched out
-                blocked with vectors_dead raised on a core with a VFP, store only
+            attribute :>> statement = "save_user_state shall, for a task that has
+                used VFP switched out blocked with vectors_dead raised on a core
+                with a VFP, store only
                 FPSCR and d8-d15 and mark the state unsaved.";
             attribute :>> criterion = "A program blocked in channel_write_read or
                 object_wait_one, with every D register its pattern while a second
@@ -113,8 +115,9 @@ package FerrixArmv7aRequirements {
         }
         requirement <'L.armv7a.7'> aRunnableTaskIsSavedWhole : ItemLowLevel {
             attribute :>> statement = "save_user_state shall save the whole VFP state
-                of a task switched out runnable, or blocked in any call but the
-                three, and restore_user_state shall restore it whole.";
+                of a task that has used VFP switched out runnable, or blocked in any
+                call but the three, and restore_user_state shall restore it
+                whole.";
             attribute :>> criterion = "A program blocked in a Linux nanosleep, and one
                 preempted in user mode, beside a second program filling every D
                 register, read back their own pattern and FPSCR (the `vectors`
@@ -125,10 +128,11 @@ package FerrixArmv7aRequirements {
                 "arch::armv7a::switch::restore_user_state");
         }
         requirement <'L.armv7a.8'> anUnsavedStateIsReset : ItemLowLevel {
-            attribute :>> statement = "restore_user_state shall, for a state marked
-                unsaved, load the task's own FPSCR and d8-d15 and zero every other D
-                register the core has, and clear the mark; nothing else shall clear
-                it but a writer of the whole state.";
+            attribute :>> statement = "restore_user_state shall, for a task that has
+                used VFP whose state is marked unsaved, load the task's own FPSCR
+                and d8-d15 and zero every other D register the core has, and clear
+                the mark; nothing else shall clear it but a writer of the whole
+                state.";
             attribute :>> criterion = "The wakes of the `vectors` line read zero in
                 d0-d7 and d16-d31 and their own d8-d15 and FPSCR, never either
                 program's pattern elsewhere; with the zeroing of d0-d7 or of d16-d31
@@ -196,6 +200,112 @@ package FerrixArmv7aRequirements {
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::armv7a::switch::UserState::capture",
                 "arch::armv7a::switch::reset_user_state");
+        }
+        requirement <'L.armv7a.21'> aTaskWithoutVfpMovesNothing : ItemLowLevel {
+            attribute :>> statement = "A task that has not used VFP shall run with
+                FPEXC.EN clear; save_user_state shall move no VFP register for it,
+                and restore_user_state, switching to it on a core whose EN is clear,
+                shall execute no VFP instruction and write no FPEXC; each core's
+                record of EN shall equal the register.";
+            attribute :>> criterion = "Two native programs that never touch VFP make
+                1,000 channel_write_read round trips pinned to one core, and two
+                more trade it by sched_yield: each task's count of VFP moves and
+                FPEXC writes is 0, and the record equals FPEXC (the `lazy` line);
+                with a switch to a task that has not used VFP turning VFP on and
+                zeroing the registers every time the check fails by name.";
+            attribute :>> parent = ("H.SCHED.8", "H.SCHED.12");
+            attribute :>> unit = ("arch::armv7a::switch::save_user_state",
+                "arch::armv7a::switch::restore_user_state", "arch::armv7a::switch::vfp_on");
+        }
+        requirement <'L.armv7a.22'> theFirstUseIsTaken : ItemLowLevel {
+            attribute :>> statement = "An undefined instruction from user mode, on a
+                core with a VFP, by a task with user state that has not used VFP,
+                shall be taken with interrupts masked as its first use: the task
+                marked, FPEXC.EN set with an isb, the record set, the task's own
+                record loaded through the switch's own load, and the instruction
+                re-executed at its own address in ARM and Thumb state and inside an
+                IT block; a record that disagrees with the task's mark shall be a
+                kernel fault report.";
+            attribute :>> criterion = "Programs whose first VFP instruction is in ARM
+                state, in Thumb state after a 16-bit increment, and inside an IT
+                block, each run after a program that filled every register, read
+                zero in FPSCR and every D register and compute their sum, and a PL0
+                read of FPEXC, FPSID, MVFR0 or MVFR1 after the first use ends in
+                SIGILL (the `lazy` line); with the first use not taken in Thumb
+                state, the Thumb retry two bytes early, or the IT state cleared,
+                the check fails by name (with no first use at all, stage 3's
+                signal check, whose program uses VFP, fails first).";
+            attribute :>> parent = ("H.SCHED.8", "H.TRAP.4");
+            attribute :>> unit = ("arch::armv7a::switch::take_first_use",
+                "arch::armv7a::trap::ferrix_trap_entry");
+        }
+        requirement <'L.armv7a.23'> sigillNamesItsInstruction : ItemLowLevel {
+            attribute :>> statement = "The undefined-instruction path shall set the
+                frame's pc to the instruction's own address -- LR_und less 4 in ARM
+                state and less 2 in Thumb state -- once, before both the first use
+                and the SIGILL, so that a SIGILL's si_addr and the signal frame's pc
+                name the instruction.";
+            attribute :>> criterion = "An ARM udf, a 16-bit Thumb udf and a 32-bit
+                Thumb udf.w, in a program that has used VFP, each end in a SIGILL
+                whose handler reads si_addr and the ucontext pc equal to the
+                instruction's address (the `lazy` line); with the Thumb correction
+                removed, F-68's stub, the check fails by name.";
+            attribute :>> parent = "H.TRAP.4";
+            attribute :>> unit = ("arch::armv7a::trap::point_at_undefined",
+                "arch::armv7a::trap::ferrix_trap_entry");
+        }
+        requirement <'L.armv7a.24'> nothingStaysBehindAClearEnable : ItemLowLevel {
+            attribute :>> statement = "While a core's FPEXC.EN is clear, every VFP
+                register it has and FPSCR shall be zero: bring-up, a switch to a
+                task that has not used VFP from a core whose EN is set, and execve
+                on such a core shall zero them before clearing EN.";
+            attribute :>> criterion = "Bring-up's VFP sequence run over another
+                program's values, a program that never uses VFP switched in after
+                one that filled every register, and an image a program with VFP
+                state execve'd leave EN clear and every register and FPSCR zero, as
+                the kernel reads them with interrupts masked (the `lazy` line);
+                with any of the three zeroings removed the check fails by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::bring_up_vfp",
+                "arch::armv7a::switch::restore_user_state",
+                "arch::armv7a::switch::reset_user_state", "arch::armv7a::switch::scrub_off");
+        }
+        requirement <'L.armv7a.25'> theRecordIsTheStateWhileOff : ItemLowLevel {
+            attribute :>> statement = "While a task has not used VFP its record shall
+                be its VFP state: UserState::capture shall copy it, and its mark,
+                for a signal frame, a fork child or a thread, sigreturn shall write
+                it, and execve shall clear it with the mark, each deciding by the
+                running task's mark read with interrupts masked and executing no
+                VFP instruction with EN clear; for a task that has used VFP they
+                shall read and write the registers.";
+            attribute :>> criterion = "A program that never used VFP gets a state
+                into its record by a signal frame and reads it at its first use; a
+                second frame and a fork child's first use carry it; a fork child of
+                a program with VFP state reads its parent's registers; an image
+                execve'd by a program whose record held a state reads zero at its
+                first use (the `lazy` line); with sigreturn writing no record,
+                capture answering the initial state, a fork child of a program
+                with VFP state loaded with zeros at its first switch in, or execve
+                leaving the record, the check fails by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::UserState::capture",
+                "arch::armv7a::switch::load_user_fp",
+                "arch::armv7a::switch::reset_user_state");
+        }
+        requirement <'L.armv7a.26'> aVfpUserIsResumedWhole : ItemLowLevel {
+            attribute :>> statement = "A task that has used VFP shall run with
+                FPEXC.EN set and its own state on whichever core resumes it: its
+                state saved at every switch out, so no core holds a state another
+                must fetch.";
+            attribute :>> criterion = "A program with VFP state, unpinned, naps 20
+                times while a program pinned to the core it slept on keeps it busy,
+                runs on two cores, and reads its whole state after every nap (the
+                `lazy` line at --smp 2); the case says it did not run unless the
+                program ran on two cores.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::save_user_state",
+                "arch::armv7a::switch::restore_user_state",
+                "arch::armv7a::switch::turn_on");
         }
     }
 }

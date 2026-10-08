@@ -235,7 +235,18 @@ the null selector at bring-up, and the `FS` and `GS` bases are written from
 the record after, skipped or not); and on ARMv7-A both thread ID registers
 written at every switch, `TPIDRURO` from the task's record and `TPIDRURW`, which
 a program writes itself, as the switch out read it, carried by `fork` and zeroed
-by `execve` (§9.14, F-66).
+by `execve` (§9.14, F-66). On ARMv7-A a program that has not used VFP runs with
+`FPEXC.EN` clear (§9.15): every VFP and Advanced SIMD instruction, and every
+PL0 access to `FPSCR`, `FPEXC`, `FPSID` and the `MVFR` registers, is then
+UNDEFINED (§9.15, S2), so it has no read path to the register file, and its
+first VFP instruction loads its own state over every register before `EN` is
+set for it. And while a processor's `EN` is clear, every VFP register it has
+and `FPSCR` are zero -- at bring-up, at a switch to such a program and at
+`execve` (§9.15, I2) -- so nothing another program left stays behind the clear
+`EN` at all. The claim rests on that zeroing and on S2, not on any core's
+speculation; that the Cortex-A7, an in-order core Arm lists under no Spectre
+or Meltdown variant, would not forward a VFP register past a clear `EN` is
+argued in §9.15 as background only.
 
 **FDP_SDI.2** Stored data integrity monitoring and action. The TSF shall
 monitor user data stored in containers controlled by the TSF for **a
