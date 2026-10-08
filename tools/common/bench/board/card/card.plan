@@ -49,4 +49,18 @@ fdt set /reserved-memory/optee@de000000 no-map
 load mmc 0:4 0xc4400000 bench/linux/initramfs.cpio.gz
 bootz 0xc2000000 0xc4400000:${filesize} 0xc4000000
 
+# Level 4 (B5): lmbench and speedtest1 under Linux, one core. The same
+# kernel and tree; the initramfs runs posix-init.sh instead of lbench.
+[linux-posix]
+setenv bootargs console=ttySTM0,115200 maxcpus=1 cpufreq.off=1 panic=-1 ST_SIZE=60
+load mmc 0:4 0xc2000000 bench/linux/zImage
+load mmc 0:4 0xc4000000 bench/linux/stm32mp157a-dk1.dtb
+fdt addr 0xc4000000
+fdt resize 1024
+fdt mknode /reserved-memory optee@de000000
+fdt set /reserved-memory/optee@de000000 reg <0xde000000 0x2000000>
+fdt set /reserved-memory/optee@de000000 no-map
+load mmc 0:4 0xc4400000 bench/linux/initramfs-posix.cpio.gz
+bootz 0xc2000000 0xc4400000:${filesize} 0xc4000000
+
 # [sel4]: the lines B2 hands over, under bench/sel4/.
