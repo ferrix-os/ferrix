@@ -74,7 +74,7 @@ pub(crate) use preempt::{
 };
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
 pub(crate) use task::{Task, TaskId, UserThread};
-pub(crate) use wait::WaitQueue;
+pub(crate) use wait::{LastLook, WaitQueue};
 
 /// One run queue per logical processor.
 static QUEUES: Once<Vec<SpinLock<CpuQueue>>> = Once::new();
@@ -3207,4 +3207,25 @@ pub(crate) fn cpu_times() -> Result<Vec<CpuTime>, fallible::AllocError> {
 /// among them, as Linux's `total_forks` counts its idle tasks.
 pub(crate) fn tasks_made() -> u64 {
     NEXT_ID.load(Ordering::Relaxed).saturating_sub(1)
+}
+
+/// Ask this processor for a decision without making it: set the flag that an
+/// interrupt's exit, or a `preempt_enable` that brings the count to zero,
+/// acts on. For the parked block's check of F-69 (L.sched.72), which needs
+/// the decision pending as it parks.
+pub(crate) fn ask_for_a_decision_here() {
+    let saved = <arch::Irq as IrqControl>::disable();
+    if let Some(cpu) = this_cpu() {
+        mark_resched(cpu);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// Whether a decision asked of this processor is still pending: see
+/// [`ask_for_a_decision_here`].
+pub(crate) fn decision_pending_here() -> bool {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let pending = this_cpu().is_some_and(resched_asked);
+    <arch::Irq as IrqControl>::restore(saved);
+    pending
 }
