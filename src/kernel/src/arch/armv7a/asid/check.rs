@@ -150,8 +150,14 @@ fn spend_until(spender: &AddressSpace, mut stop: impl FnMut() -> bool) -> u64 {
 /// Set by [`flush_on`]'s task when it has run in its space.
 static RAN: AtomicBool = AtomicBool::new(false);
 
-/// The task [`flush_on`] starts: being installed is all it is for.
+/// The task [`flush_on`] starts: installed in its space, which is what
+/// makes its processor flush, it looks at its processor's registers.
 fn ran(_: usize) {
+    let saved = <arch::Irq as IrqControl>::disable();
+    if let Some(me) = crate::smp::this_cpu() {
+        look(me);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
     RAN.store(true, Ordering::Release);
 }
 
@@ -194,18 +200,19 @@ pub(crate) fn run() -> Result<(), &'static str> {
     for count in [&LOOKED, &WRONG] {
         count.store(0, Ordering::Relaxed);
     }
-    crate::smp::run_everywhere(look)?;
-    let processors = crate::smp::count();
-    if LOOKED.load(Ordering::Relaxed) != processors {
-        return Err("asid: a processor did not report its TTBCR");
+    // The other processors look at theirs from a task each, after the
+    // rollover below: `run_everywhere`'s work is taken only before the
+    // scheduler starts.
+    let saved = <arch::Irq as IrqControl>::disable();
+    let me = crate::smp::this_cpu().ok_or("asid: no per-CPU record");
+    if let Ok(me) = me {
+        look(me);
     }
-    if WRONG.load(Ordering::Relaxed) != 0 {
-        return Err("asid: a processor's TTBCR has EAE clear or A1 set, or no flush plan");
-    }
-    let me = crate::smp::this_cpu().ok_or("asid: no per-CPU record")?.logical;
-    if me != 0 {
+    <arch::Irq as IrqControl>::restore(saved);
+    if me?.logical != 0 {
         return Err("asid: the check runs on the boot processor only");
     }
+    let processors = crate::smp::count();
 
     let a = space_with(MARK_A)?;
     let b = space_with(MARK_B)?;
@@ -251,6 +258,12 @@ pub(crate) fn run() -> Result<(), &'static str> {
         if super::counts(cpu).flushes <= flushes {
             return Err("asid: another processor ran a new generation without its flush");
         }
+    }
+    if LOOKED.load(Ordering::Relaxed) != processors {
+        return Err("asid: a processor did not report its TTBCR");
+    }
+    if WRONG.load(Ordering::Relaxed) != 0 {
+        return Err("asid: a processor's TTBCR has EAE clear or A1 set, or no flush plan");
     }
 
     // The stale probe: `a` runs number n, a rollover, then `b` is given n.
