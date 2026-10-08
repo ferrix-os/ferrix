@@ -2,8 +2,8 @@
 
 The rule since 2026-09-26: hardware use needs the product owner's OK on the
 exact registers a boot writes, and a power-domain or PHY write needs the
-owner's own word. This is that list for the board matrix's card. It is a
-draft until B2's report confirms the seL4 rows.
+owner's own word. This is that list for the board matrix's card, complete with B2's seL4
+rows (2026-10-08).
 
 ## Firmware: unchanged
 
@@ -50,15 +50,19 @@ Its saved environment is not written (no `saveenv`).
 - It ends with `reboot -f`: PSCI SYSTEM_RESET through OP-TEE.
 - `cpufreq.off=1`, and the tree has no OPP table, so the MPU clock stays at TF-A's 650 MHz.
 
-## seL4 (B2): its STM32MP1 port, to be confirmed by B2's report
+## seL4 (B2): its STM32MP1 port (os4b/b2-sel4 bf916aff2, sel4/README.md)
 
-- The kernel's devices are:
-  - UART4 0x40010000, the console: transmit data and status only;
-  - GIC-400 distributor 0xA0021000 and CPU interface 0xA0022000;
-  - the generic timer (CP15) and the PMU (CP15; `KernelArmExportPMUUser` sets PMUSERENR.EN).
-- The bench root task resets the board after `board-bench end`:
-  - IWDG2 0x5A002000: one write of 0xCCCC to KR, which resets in about 0.5 s (prescaler /4, RLR 0xFFF, LSI 32 kHz);
-  - but only if its APB clock (RCC_MP_APB4ENSETR bit 15) is already on, which nothing on this firmware is known to do.
-  - So the fallback is one write of 1 to RCC_MP_GRSTCSETR (0x50000404) bit 0, MPSYSRST: a system reset, the RCC being non-secure under this OP-TEE.
-  - This is the only RCC write, and it is a reset, not a clock or power change.
-- It makes no clock, power or PHY write.
+- **Elfloader:** UART4 (0x40010000).
+  - CR1 is read-modify-written three times: UE off, TE and FIFOEN on, UE on.
+  - CR2 is written once, for one stop bit.
+  - TDR is written per character, polling ISR.
+  - Otherwise CP15 only. No GIC or PSCI in the one-core images.
+- **Kernel:**
+  - UART4 TDR, in the debug image (sel4test) only.
+  - GIC distributor 0xA0021000 at boot: CTLR, ICENABLER, ICPENDR, IPRIORITYR, ITARGETSR, ICFGR, IGROUPR (ignored from non-secure) and CPENDSGIR. At runtime, ISENABLER and ICENABLER.
+  - GIC CPU interface 0xA0022000: CTLR, PMR 0xF0, BPR 3, and IAR and EOIR per interrupt.
+  - CP15: the virtual timer, CNTKCTL and PMUSERENR. Not SDER, which is Secure-only and whose probe the port skips.
+- **Root tasks:** UART4 TDR from user mode, and the PMU from user mode.
+- **The reset:** sel4bench's root task, after `board-bench end sel4rt` and about 0.1 s, writes 0x1 to RCC_MP_GRSTCSETR (0x50000404, MPSYSRST): a system reset. It is the one RCC write, a reset rather than a clock or power change. IWDG2 is not used, because its APB clock may be off on this firmware.
+- sel4test does not reset: it ends with its summary, and the board needs a reset press.
+- **None:** no clock, power, PHY, PMIC or IWDG write.

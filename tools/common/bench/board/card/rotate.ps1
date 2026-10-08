@@ -57,6 +57,8 @@ $ErrorActionPreference = "Stop"
 $Prompt = "STM32MP> "
 $Autoboot = "Hit any key to stop autoboot"
 $EndMark = "board-bench end"
+# Runs that end without the bench's line: sel4test halts after its summary.
+$OtherEnds = @("Test suite passed", "Test suite failed")
 # A line from U-Boot that means the boot lines failed.
 $UbootErrors = @("Unable to read file", "Unknown command", "Failed to load", "Bad Linux ARM zImage",
     "Wrong Image Format", "Error: ", "** No partition", "Could not find", "## Error", "Invalid partition")
@@ -206,9 +208,12 @@ try {
             }
         }
         if ($null -eq $verdict) {
-            $marks = @($EndMark) + $KernelDeath
+            $marks = @($EndMark) + $OtherEnds + $KernelDeath
             $m = Wait-For $marks $BootTimeout
-            if ($m -eq $EndMark) {
+            if ($OtherEnds -contains $m) {
+                $null = Pump 2000
+                $verdict = "end: $m"
+            } elseif ($m -eq $EndMark) {
                 # The rest of the end line, then the reset the bench does.
                 $null = Pump 300
                 $verdict = "end"

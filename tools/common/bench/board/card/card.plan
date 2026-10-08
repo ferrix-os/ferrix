@@ -63,4 +63,23 @@ fdt set /reserved-memory/optee@de000000 no-map
 load mmc 0:4 0xc4400000 bench/linux/initramfs-posix.cpio.gz
 bootz 0xc2000000 0xc4400000:${filesize} 0xc4000000
 
-# [sel4]: the lines B2 hands over, under bench/sel4/.
+# seL4 (B2, tools/common/bench/board/sel4/ on os4b/b2-sel4): ELF images
+# loaded at 0xc2000000 and unpacked by bootelf -p (load only), caches off
+# first because this U-Boot's bootelf no longer turns them off, then the
+# elfloader's entry. sel4bench's root task ends with board-bench end sel4rt
+# and resets through RCC MPSYSRST.
+[sel4]
+load mmc 0:4 0xc2000000 bench/sel4/sel4bench.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0147000
+
+# sel4test (debug) checks the port. It ends with "Test suite passed" (or
+# failed) and the kernel halts: no reset, so rotate.ps1 asks for a press.
+[sel4test]
+load mmc 0:4 0xc2000000 bench/sel4/sel4test.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0498000
