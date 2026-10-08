@@ -209,6 +209,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     made_runnable_here_runs_without_another_interrupt()?;
     super::preempt_check::run(topology)?;
     a_running_processor_is_not_idle_across_switches(topology)?;
+    a_drained_waiter_survives_its_last_look()?;
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;
@@ -1490,4 +1491,188 @@ fn switch_and_look(_index: usize) {
     }
     drop(me);
     finish();
+}
+
+/// How long the checker waits for a waiter in [`a_drained_waiter_survives_its_last_look`]
+/// before it calls the waiter lost.
+const LAST_LOOK_PATIENCE_NANOS: u64 = 2_000_000_000;
+
+/// How long the interrupt case spins inside the last look, with interrupts
+/// on, after arming this processor's timer [`LAST_LOOK_ARM_NANOS`] out.
+const LAST_LOOK_SPIN_NANOS: u64 = 20_000_000;
+
+/// How far out the interrupt case arms this processor's timer.
+const LAST_LOOK_ARM_NANOS: u64 = 1_000_000;
+
+/// The queue the last look's waiter waits on, and nothing else does.
+static LAST_LOOK_QUEUE: WaitQueue = WaitQueue::new();
+
+/// The waiter's condition.
+static LAST_LOOK_READY: AtomicBool = AtomicBool::new(false);
+
+/// How many times the waiter's `ready` has been called.
+static LAST_LOOK_LOOKS: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the waiter, at the end of its last look, was still on its run
+/// queue, not switched out, and still blocked: what the hold promises.
+static LAST_LOOK_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Whether a timer interrupt was taken during the interrupt case's spin.
+static LAST_LOOK_TICKED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the decision asked for inside the look was made once it was over.
+static LAST_LOOK_DECIDED: AtomicBool = AtomicBool::new(false);
+
+/// The case's switch: a lock let go inside the look, which is the decision
+/// `preempt_enable` defers to.
+const LAST_LOOK_BY_LOCK: usize = 0;
+
+/// The case's switch: a timer interrupt's exit inside the look.
+const LAST_LOOK_BY_INTERRUPT: usize = 1;
+
+/// A wait's last look is never cut short by a switch (F-69).
+///
+/// The race needs two things in turn. First, a wake drains the waiter's entry
+/// while the waiter is still runnable, and that drain does nothing. Then a
+/// switch comes between the waiter's `BLOCKED` and the end of its last look.
+/// `choose_next` takes a task that is not runnable off its queue, and nothing
+/// is left to wake it. On a trusting wait there is no deadline either, so the
+/// task is lost with its condition met.
+///
+/// The waiter here plays both steps inside its own last look, so the window
+/// is hit every time:
+/// 1. it sets itself runnable, wakes its queue (draining itself, to no
+///    effect) and sets itself blocked again;
+/// 2. it makes the condition true;
+/// 3. it asks this processor for a decision, and makes the switch possible:
+///    - in the first case, by letting go of a lock;
+///    - in the second, by spinning with interrupts on through a timer
+///      interrupt it armed.
+///
+/// With the hold, nothing switches. The task stays queued and is not switched
+/// out, and the decision is made once the look is over. Without the hold, the
+/// task is lost. The checker then wakes it by hand so the boot goes on, and
+/// fails with the case's own sentence.
+///
+/// Verifies: L.sched.71
+fn a_drained_waiter_survives_its_last_look() -> Result<(), &'static str> {
+    last_look_case(
+        LAST_LOOK_BY_LOCK,
+        "a wait's last look was cut short at a lock's release: a waiter whose entry a wake drained \
+         while it ran was left blocked on no run queue",
+    )?;
+    last_look_case(
+        LAST_LOOK_BY_INTERRUPT,
+        "a wait's last look was cut short at an interrupt's exit: a waiter whose entry a wake \
+         drained while it ran was left blocked on no run queue",
+    )
+}
+
+/// One case of [`a_drained_waiter_survives_its_last_look`], `how` saying which
+/// switch the waiter invites, and `lost` the sentence for a waiter lost.
+fn last_look_case(how: usize, lost: &'static str) -> Result<(), &'static str> {
+    let allocations = crate::vmap::usage().allocations;
+    let here = super::current()
+        .ok_or("the checking task is not running")?
+        .cpu();
+    DONE.store(0, Ordering::Release);
+    LAST_LOOK_READY.store(false, Ordering::Release);
+    LAST_LOOK_LOOKS.store(0, Ordering::Release);
+    LAST_LOOK_HELD.store(false, Ordering::Release);
+    LAST_LOOK_TICKED.store(false, Ordering::Release);
+    LAST_LOOK_DECIDED.store(false, Ordering::Release);
+
+    // On this processor, so that the switch the waiter invites is this
+    // processor's, and a lost waiter has no other processor to be found on.
+    let waiter = super::spawn_on(
+        "check-last-look",
+        drained_in_its_last_look,
+        how,
+        NICE_0_WEIGHT,
+        here,
+        CpuSet::of(here),
+    )?;
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_LOOK_PATIENCE_NANOS);
+    let finished = FINISHED.wait_until_deadline(|| DONE.load(Ordering::Acquire) >= 1, deadline);
+    if !finished {
+        // Blocked on no queue: only a direct wake brings it back, and then
+        // its wait returns, since its condition was met all along.
+        let blocked_off_its_queue = waiter.state() == BLOCKED && !waiter.is_queued();
+        super::wake(&waiter);
+        wait_for(
+            || DONE.load(Ordering::Acquire) >= 1,
+            "a waiter lost in its last look did not finish once woken by hand",
+        )?;
+        reap_to(allocations, "a waiter lost in its last look")?;
+        drop(waiter);
+        return Err(if blocked_off_its_queue {
+            lost
+        } else {
+            "a waiter never finished its wait, and was not found blocked off its run queue"
+        });
+    }
+
+    reap_to(allocations, "a waiter's last look")?;
+    drop(waiter);
+    if LAST_LOOK_LOOKS.load(Ordering::Acquire) < 2 {
+        return Err("the last look's waiter never reached its last look");
+    }
+    if how == LAST_LOOK_BY_INTERRUPT && !LAST_LOOK_TICKED.load(Ordering::Acquire) {
+        return Err("no timer interrupt came while the last look's waiter spun in its look");
+    }
+    if !LAST_LOOK_HELD.load(Ordering::Acquire) {
+        return Err("a waiter was taken off its run queue or switched out inside its last look");
+    }
+    if !LAST_LOOK_DECIDED.load(Ordering::Acquire) {
+        return Err("the decision asked for inside a wait's last look was never made");
+    }
+    Ok(())
+}
+
+/// The waiter of [`last_look_case`]: a trusting wait whose last look plays
+/// the race, then a look at whether the decision it asked for was made.
+fn drained_in_its_last_look(how: usize) {
+    let returned = LAST_LOOK_QUEUE.wait_trusting(|| {
+        let look = LAST_LOOK_LOOKS.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        if look == 2
+            && let Some(me) = super::current()
+        {
+            last_look_race(&me, how);
+        }
+        LAST_LOOK_READY.load(Ordering::Acquire)
+    });
+    // Made by now: the hold's drop, with the request pending and interrupts
+    // on, decides it, and nothing else asks this processor for one meanwhile.
+    let decided = super::current().is_some_and(|me| returned && !super::resched_asked(me.cpu()));
+    LAST_LOOK_DECIDED.store(decided, Ordering::Release);
+    finish();
+}
+
+/// Inside `me`'s last look, `BLOCKED` and listed: a wake drained while it was
+/// runnable, its condition met, and the switch `how` names invited.
+fn last_look_race(me: &Arc<Task>, how: usize) {
+    let switches = me.switches();
+    me.set_state(super::task::RUNNABLE);
+    LAST_LOOK_QUEUE.wake_all();
+    me.set_state(BLOCKED);
+    LAST_LOOK_READY.store(true, Ordering::Release);
+    let cpu = me.cpu();
+    if how == LAST_LOOK_BY_LOCK {
+        super::mark_resched(cpu);
+        super::preempt_disable();
+        super::preempt_enable();
+    } else {
+        let ticks = crate::timer::ticks();
+        let saved = <crate::arch::Irq as IrqControl>::disable();
+        super::mark_resched(cpu);
+        crate::timer::after(LAST_LOOK_ARM_NANOS);
+        <crate::arch::Irq as IrqControl>::restore(saved);
+        let until = crate::timer::now_nanos().saturating_add(LAST_LOOK_SPIN_NANOS);
+        while crate::timer::now_nanos() < until {
+            core::hint::spin_loop();
+        }
+        LAST_LOOK_TICKED.store(crate::timer::ticks() != ticks, Ordering::Release);
+    }
+    let held = me.is_queued() && me.switches() == switches && me.state() == BLOCKED;
+    LAST_LOOK_HELD.store(held, Ordering::Release);
 }

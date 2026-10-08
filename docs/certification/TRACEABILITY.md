@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 130 | 79 | 51 |
-| Low (`L.*`) | 863 | 593 | 270 |
+| Low (`L.*`) | 865 | 595 | 270 |
 
-1821 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1824 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1823 |
+| Named by a low-level requirement | 1826 |
 | Accessors, covered by the requirement they serve | 899 |
 | Check code in a product file | 77 |
-| Named by none | 893 |
+| Named by none | 895 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -654,6 +654,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.61` | The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits. | test-ipc-equiv requires trips with the fast path on and every count zero with it off. | H.OBJ.18 | `sched::direct::count`, `sched::direct::counts`, `fastpath::report_counts` | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | xtask gate | xtask gate | xtask gate |
 | `L.sched.62` | The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908. | Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control). | H.OBJ.18 | `sched::work::fast_path_hook` | `src/kernel/src/object/fast_path_check.rs::check_an_end_in_the_last_looks_window` | not built | not built | not built |
 | `L.sched.63` | Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them. | The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test). | H.SCHED.13, H.FAIL.1 | `sched::task::Task::take_run_slot`, `sched::task::Task::return_run_slot`, `sched::task::Task::take_sleep_slot`, `sched::task::Task::return_sleep_slot`, `sched::task::Task::holds_slots`, `sched::task::Task::holds_sleep_slot` | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host test | host test | host test |
+| `L.sched.71` | No switch shall take place between a wait's setting its task blocked and the end of its last look (WaitQueue's single-queue and many-queue waits); an interrupt's exit, or a preempt_enable inside the look, shall leave the decision it asks for pending until the look is over, and that decision shall then be made. | Stage 5's last-look case: a waiter that drains its own entry while runnable, meets its condition and invites a switch inside its last look, once by a lock's release and once by a timer interrupt's exit, finishes its wait, stays queued and unswitched through the look, and has the decision made after it; with the hold off, or on main's code without it, the case fails with its sentence for a waiter left blocked on no run queue (F-69's controls). | H.OBJ.11, H.SCHED.2 | `sched::wait::LastLook::hold`, `sched::wait::LastLook::drop`, `sched::wait::WaitQueue::wait_sliced`, `sched::wait::WaitQueue::wait_on_any` | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | not reached | not reached | not reached |
+| `L.sched.72` | No switch shall take place between the receive half's park setting its task blocked and the end of its last look at END; an END posted while the task still ran shall be found by that look and end the park. | Stage 9's parked-block case: a reader that posts END to itself through the poster, asks for a decision and parks on an empty end comes back woken in every try, at least one try parking with the decision still pending; with the hold taken after the park, or off, the case fails with its sentence for a reader left blocked on no run queue (F-69's controls). | H.OBJ.11 | `syscall::native::park_for_reply`, `object::channel::Endpoint::park`, `sched::direct::block_parked` | `src/kernel/src/object/fast_path_check.rs::check_an_end_before_the_park` | not built | not built | not built |
 
 ### Discovery
 
@@ -1832,6 +1834,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/fast_path_check.rs::check_a_queued_write_takes_the_park` | kernel | L.object.165, L.object.166 |
 | `src/kernel/src/object/fast_path_check.rs::check_a_spinner_keeps_its_share` | kernel | L.sched.56 |
 | `src/kernel/src/object/fast_path_check.rs::check_an_echo_on_another_processor` | kernel | L.sched.56 |
+| `src/kernel/src/object/fast_path_check.rs::check_an_end_before_the_park` | kernel | L.sched.72 |
 | `src/kernel/src/object/fast_path_check.rs::check_an_end_in_the_last_looks_window` | kernel | L.sched.56, L.sched.62 |
 | `src/kernel/src/object/fast_path_check.rs::check_the_last_reference` | kernel | L.object.179 |
 | `src/kernel/src/object/fast_path_check.rs::check_the_reply_words` | kernel | L.object.167 |
@@ -1864,6 +1867,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/borrow_check.rs::installed` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.24 |
 | `src/kernel/src/sched/borrow_check.rs::run` | kernel | L.sched.25 |
+| `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |

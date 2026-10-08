@@ -664,6 +664,41 @@ woken task's arrival arms the timer for at most one slice away: the woken
 task waits at most one slice, inside H.SCHED.2's bound of one slice plus
 the timer overruns served.
 
+Since F-69 (L.sched.71, L.sched.72), one more span decides nothing until
+it ends: a wait's last look. A wait raises the preemption count before it
+sets its task blocked and lowers it once the look is over, so that no
+switch can take the task off its run queue inside the look. An interrupt
+that asks for a decision inside the span is still taken; only the
+decision waits, until the lowering, where it is made.
+
+The span holds:
+* `set_state`;
+* the fence, made only for a trusting wait;
+* one call of the wait's `ready`;
+* for the receive half's park, `Endpoint::park`'s inbox lock and one load
+  of the task's `END` bit.
+
+Its worst case is `wait_on_any`'s look for `poll`, `select` and
+`epoll_wait`, which asks each watched file once. That is one `poll` per
+watched descriptor, each under the file's own spin locks, which already
+held the count up for most of the look before this change. The bound is
+linear in the number of descriptors a program watches, as that look
+always was.
+
+The one `poll` with more in it is the console's. Its line discipline can
+echo to the UART synchronously and send a signal to the foreground group
+(`fs/terminal.rs` `pump`). Inside the span `console::emit` takes its
+synchronous path (`may_block` is false), where before it could wait for
+room in the ring, a nested wait inside a wait's look.
+
+No `ready` may block, and the audit of every `ready` and every reachable
+`poll` found none that takes a `SleepLock`, waits for memory, touches user
+memory or nests a wait (os07-stall's audit of 2026-10-08). A `ready` that
+parked would stop the machine with FX-0503.
+
+So the deferral stays inside L.sched.7's bound, delayed by at most one
+look.
+
 The timer's skipped arm (`timer::after`, L.sched.5) adds no lateness: what
 it keeps is the clock read after the hardware was armed plus the delay, an
 upper bound on the interrupt, and a request is skipped only when that bound
