@@ -542,7 +542,7 @@ pub(crate) unsafe fn flush_for_new_generation(instruction_cache: bool) {
 }
 
 /// `BPIALL` on this processor: the predictor maintenance a core whose
-/// `ID_MMFR1.BPred` is 0b0001 needs at every change of ContextID (B4.1.90,
+/// `ID_MMFR1.BPred` is 0b0001 needs at every change of `ContextID` (B4.1.90,
 /// L.armv7a.20). No core this kernel is known to run on asks for it.
 pub(crate) fn invalidate_predictor() {
     // SAFETY: (PROTECT) invalidating the branch predictor only costs time; the `isb`

@@ -276,32 +276,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
         return Err("asid: a processor's TTBCR has EAE clear or A1 set, or no flush plan");
     }
 
-    // The stale probe: `a` runs number n, a rollover, then `b` is given n.
-    // A number another processor still holds reserved cannot come back, so
-    // a few tries; on one processor the first always reuses it.
-    let mut reused = None;
-    for _ in 0..PROBE_TRIES {
-        a.tag.forget();
-        let (n, _, _, _, seen) = install_and_look(&a, true);
-        if seen != MARK_A {
-            return Err("asid: a space read something else than its own page");
-        }
-        let generation = generation_of(a.tag.get());
-        let _ = spend_until(&spender, || super::counts(0).generation > generation);
-        let _ = spend_until(&spender, || super::counts(0).next_free == Some(n));
-        b.tag.forget();
-        let (given, _, _, _, seen) = install_and_look(&b, true);
-        if seen != MARK_B {
-            return Err("asid: a space given a reused number read the page of the space before it");
-        }
-        if given == n && number_of(b.tag.get()) == n {
-            reused = Some(n);
-            break;
-        }
-    }
-    let Some(n) = reused else {
-        return Err("asid: the probe never had a number reused by another space");
-    };
+    let n = stale_probe(&a, &b, &spender)?;
 
     let rollovers = super::counts(0).rollovers;
     drop((a, b, spender));
@@ -357,4 +332,41 @@ pub(crate) fn kernel_tree_is_global() -> Result<(), &'static str> {
     }
     println!("  global   {leaves} kernel leaves, every one global");
     Ok(())
+}
+
+/// The stale probe: `a` runs number n and reads its page, a rollover
+/// follows, and `b` is given n and must read its own page at the same
+/// address. A number another processor still holds reserved cannot come
+/// back, so a few tries; on one processor the first always reuses it. The
+/// number reused.
+///
+/// # Errors
+///
+/// A space that read another's page, or no number reused.
+fn stale_probe(
+    a: &AddressSpace,
+    b: &AddressSpace,
+    spender: &AddressSpace,
+) -> Result<u8, &'static str> {
+    let mut reused = None;
+    for _ in 0..PROBE_TRIES {
+        a.tag.forget();
+        let (n, _, _, _, seen) = install_and_look(a, true);
+        if seen != MARK_A {
+            return Err("asid: a space read something else than its own page");
+        }
+        let generation = generation_of(a.tag.get());
+        let _ = spend_until(spender, || super::counts(0).generation > generation);
+        let _ = spend_until(spender, || super::counts(0).next_free == Some(n));
+        b.tag.forget();
+        let (given, _, _, _, seen) = install_and_look(b, true);
+        if seen != MARK_B {
+            return Err("asid: a space given a reused number read the page of the space before it");
+        }
+        if given == n && number_of(b.tag.get()) == n {
+            reused = Some(n);
+            break;
+        }
+    }
+    reused.ok_or("asid: the probe never had a number reused by another space")
 }
