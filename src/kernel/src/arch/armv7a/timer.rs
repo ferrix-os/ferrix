@@ -45,6 +45,7 @@ pub(crate) fn init(tree: &Fdt<'_>) -> Result<(), &'static str> {
     }
     // The boot processor's; each secondary sets its own as it starts.
     cpu::allow_user_counter();
+    super::bench_pmu::allow_user_pmu();
     disarm();
     Ok(())
 }

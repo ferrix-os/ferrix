@@ -21,6 +21,14 @@
 //! p99=<ns> mean=<ns>`, the percentiles to an eighth of a power of two.
 //! Exit 0 is a run that finished; any other status names the step that did
 //! not.
+//!
+//! MEASUREMENT ONLY (branch `os4b/b3-ferrix`, never lands): with
+//! `ipc-bench.pmu=1` on the kernel command line, on ARMv7-A, every series is
+//! timed by the PMU as `docs/BOARD-BENCH.md`'s contract says ([`pmu`]): the
+//! `clock` line, a `timer-floor` series, each series' `.cycles`, `.ins` and
+//! `.cycles.pct` lines beside its ns line, and the after-the-call sweep
+//! (`base.w<W>` and `domain-call.after.w<W>`). Without the option the run
+//! is what it always was.
 
 #![no_std]
 #![no_main]
@@ -37,6 +45,8 @@ use ferrix_rt::native::{Deadline, Error, Handle, Object, OwnedHandle, Signals};
 use ferrix_rt::{Bootstrap, Kernel};
 
 ferrix_rt::entry!(main);
+
+mod pmu;
 
 /// Round trips timed, after [`WARMUP`] untimed ones.
 const ROUNDS: u32 = 20_000;
@@ -97,6 +107,13 @@ fn started(bootstrap: &Channel<Kernel>) -> i32 {
         && let Some(&handle) = handles.first()
     {
         let server = Channel::from_owned(OwnedHandle::from_raw(Kernel, handle));
+        // MEASUREMENT ONLY: `CLIENT` and the measured clock is the PMU run.
+        if let Some(hz) = message
+            .strip_prefix(CLIENT)
+            .and_then(|rest| <[u8; 8]>::try_from(rest).ok())
+        {
+            return pmu_domain_client(bootstrap, &server, u64::from_le_bytes(hz));
+        }
         return match domain_client(bootstrap, &server) {
             Ok(()) => 0,
             Err(step) => step,
@@ -191,6 +208,9 @@ fn serve_fast(channel: &Channel<Kernel>) -> i32 {
 /// domain.
 fn client() -> Result<(), i32> {
     let (image, job) = prepare()?;
+    if pmu::asked() {
+        return pmu_client(&job, &image);
+    }
     let mine = spawn(&job, &image, "ipc-echo")?;
 
     let mut floor = Histogram::new();
@@ -251,7 +271,7 @@ fn domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
     let to_server = spawn(&domain, image, "ipc-echo")?;
     let to_client = spawn(&domain, image, "ipc-client")?;
     to_client
-        .write_with(b"CLIENT", [to_server.into_owned()])
+        .write_with(CLIENT, [to_server.into_owned()])
         .map_err(|_| 51)?;
     let mut bytes = [0_u8; 160];
     let mut handles = [Handle::INVALID; 1];
@@ -270,6 +290,160 @@ fn domain_run(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
             Err(_) => return Err(53),
         }
     }
+}
+
+/// What the launcher sends the domain client, with the server's channel.
+const CLIENT: &[u8] = b"CLIENT";
+/// MEASUREMENT ONLY: what the PMU run's domain client sends after its last
+/// line.
+const END: &[u8] = b"END";
+
+/// MEASUREMENT ONLY: [`client`] timed by the PMU ([`pmu`]): the clock, the
+/// timer floor, the floor, the trip and the call here, then the domain run,
+/// whose client times `domain-call` and the after-the-call sweep. Nothing is
+/// printed until every series is measured.
+fn pmu_client(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
+    pmu::start().map_err(|why| {
+        say(format_args!("ipc-bench pmu refused: {why}"));
+        60
+    })?;
+    let mut text = pmu::Text::new().ok_or(61)?;
+    let mut series = pmu::Series::new().ok_or(61)?;
+    let hz = pmu::cpu_hz();
+    text.clock(hz);
+    pmu::run(&mut series, || Ok::<(), i32>(()))?;
+    text.series("timer-floor", &mut series, hz);
+
+    let mine = spawn(job, image, "ipc-echo")?;
+    pmu::run(&mut series, || {
+        mine.wait_one(Signals::WRITABLE, Deadline::Never)
+            .map(|_| ())
+            .map_err(|_| 10)
+    })?;
+    text.series("floor", &mut series, hz);
+
+    let message = 0x5EED_u64.to_ne_bytes();
+    let mut back = [0_u8; 64];
+    let mut handles = [Handle::INVALID; 1];
+    pmu::run(&mut series, || {
+        round_trip(&mine, &message, &mut back, &mut handles)
+    })?;
+    text.series("trip", &mut series, hz);
+
+    mine.write(FAST).map_err(|_| 23)?;
+    pmu::run(&mut series, || call_trip(&mine, &message))?;
+    text.series("call", &mut series, hz);
+    drop(mine);
+    pmu_domain_run(job, image, hz, &text)
+}
+
+/// MEASUREMENT ONLY: [`domain_run`] for the PMU run. The client is told the
+/// measured clock; this side's lines are printed once the client's first
+/// line comes (it sends none until it has measured everything), and then
+/// the client's, until its [`END`].
+fn pmu_domain_run(
+    job: &Job<Kernel>,
+    image: &Vmo<Kernel>,
+    hz: u64,
+    text: &pmu::Text,
+) -> Result<(), i32> {
+    let domain = job.create_speculation_domain().map_err(|error| {
+        text.print();
+        say(format_args!("ipc-bench: speculation domain: {error:?}"));
+        50
+    })?;
+    let to_server = spawn(&domain, image, "ipc-echo")?;
+    let to_client = spawn(&domain, image, "ipc-client")?;
+    let mut hello = [0_u8; 14];
+    let (name, clock) = hello.split_at_mut(CLIENT.len());
+    name.copy_from_slice(CLIENT);
+    clock.copy_from_slice(&hz.to_le_bytes());
+    to_client
+        .write_with(&hello, [to_server.into_owned()])
+        .map_err(|_| 51)?;
+    let mut bytes = [0_u8; 2048];
+    let mut handles = [Handle::INVALID; 1];
+    let mut printed = false;
+    let mut print_once = || {
+        if !printed {
+            text.print();
+            printed = true;
+        }
+    };
+    loop {
+        match to_client.read(&mut bytes, &mut handles) {
+            Ok(received) => {
+                print_once();
+                let line = bytes.get(..received.bytes).unwrap_or_default();
+                if line == END {
+                    return Ok(());
+                }
+                pmu::put(line);
+            }
+            Err(ReadError::Failed(Error::ShouldWait)) => {
+                if to_client
+                    .wait_one(Signals::READABLE | Signals::PEER_CLOSED, Deadline::Never)
+                    .is_err()
+                {
+                    print_once();
+                    return Err(52);
+                }
+            }
+            Err(_) => {
+                print_once();
+                return Err(53);
+            }
+        }
+    }
+}
+
+/// MEASUREMENT ONLY: the PMU run's domain client. It starts its own
+/// processor's counters, times `domain-call` and the sweep, and only then
+/// sends its lines, one message each, and [`END`]; a step that failed is
+/// sent as a line too.
+fn pmu_domain_client(launcher: &Channel<Kernel>, server: &Channel<Kernel>, hz: u64) -> i32 {
+    let Some(mut text) = pmu::Text::new() else {
+        return 61;
+    };
+    let outcome = pmu_domain_series(server, hz, &mut text);
+    if let Err(step) = outcome {
+        let _ = text.write_fmt(format_args!(
+            "ipc-bench pmu domain client failed at step {step}\n"
+        ));
+    }
+    for line in text.lines() {
+        if launcher.write(line).is_err() {
+            return 41;
+        }
+    }
+    if launcher.write(END).is_err() {
+        return 41;
+    }
+    outcome.map_or_else(|step| step, |()| 0)
+}
+
+/// MEASUREMENT ONLY: the domain client's series, into `text`: `domain-call`,
+/// then for each width of the sweep the touch alone (`base.w<W>`) and the
+/// touch right after a call, the call untimed (`domain-call.after.w<W>`).
+fn pmu_domain_series(server: &Channel<Kernel>, hz: u64, text: &mut pmu::Text) -> Result<(), i32> {
+    pmu::start().map_err(|_| 60)?;
+    let message = 0x5EED_u64.to_ne_bytes();
+    server.write(FAST).map_err(|_| 40)?;
+    let mut series = pmu::Series::new().ok_or(61)?;
+    let buffer = pmu::touch_buffer().ok_or(62)?;
+    pmu::run(&mut series, || call_trip(server, &message))?;
+    text.series("domain-call", &mut series, hz);
+    for (width, base, after) in pmu::SWEEP {
+        let touch = || {
+            pmu::touch(buffer, width, pmu::STRIDE);
+            Ok::<(), i32>(())
+        };
+        pmu::run(&mut series, touch)?;
+        text.series(base, &mut series, hz);
+        pmu::run_after(&mut series, || call_trip(server, &message), touch)?;
+        text.series(after, &mut series, hz);
+    }
+    Ok(())
 }
 
 /// One message there and back by `channel_write_read`, checked.
