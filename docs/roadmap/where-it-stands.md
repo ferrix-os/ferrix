@@ -1,6 +1,6 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-08, to `main` 4b9f04043.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-09, to `main` d884add58.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -73,8 +73,14 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   no figure claimed, inside the spread); and the fix of F-65 (9ac307691,
   FX-0535): the fast path let the caller's endpoint go with interrupts masked,
   and now lets it go open (about +40 to +50 instructions a round trip, no p50
-  change resolved). Each was measured on its own base and host load, so the
-  figures are not summed: [the round trip's page](ipc-round-trip.md) lists
+  change resolved); and, on the night of 2026-10-08, `cpu.stat`'s charge kept
+  back per run queue (df7ee418c, about 237 instructions fewer a round trip for
+  the same job, preliminary, measured on a loaded host so no ns is quoted: the
+  cgroup controllers had put a walk up the job tree into every direction of
+  the fast path) and F-69's fix (d884add58, a wait's last look holds
+  preemption off: about 60 ns dearer on the general path, a cost to be won
+  back by a cheaper hold). Each was measured on its own base and host load, so
+  the figures are not summed: [the round trip's page](ipc-round-trip.md) lists
   them. Redox, measured the same way, takes 1,965 ns
   with no speculative defence. Left: step 5's rest (112a12b63 holds the ids
   of the user-space stream, and global pages have no session), PCIDs where
@@ -132,6 +138,39 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
     skipped entropy interrupt behind that boot is still an open row; a stage 3
     tick-rate flake (6 of 37 loaded TCG boots) has a row (8c4edef98).
 
+* **Landed on the night of 2026-10-08** (9ed9e8428 to d884add58), besides the
+  round trip's two landings above:
+  - **A lost wake-up in a wait's last look** (d884add58, F-69, L.sched.71-72,
+    `docs/roadmap/stage-05-tasks-scheduler.md`). `bench-ipc` stalled on ARMv7-A
+    under TCG at one processor, 2 runs of 5 on `main` and 7 of 8 on another
+    tree, with every task blocked and none to be woken. Every wait lists the
+    task, sets it BLOCKED, makes its last look at the condition, and only then
+    blocks or goes on, and a switch inside that span counted as the task's
+    block: a wake that had drained the entry while the task still ran did
+    nothing, and the task was off its run queue and off every list. The defect
+    is older than the fast path (5d5b4f960 for a trusting wait, 0edd644b2 for
+    the parked block's END). A wait now raises the preemption count before
+    BLOCKED and lowers it when the look is over, so no task is ever blocked and
+    still queued. Stage 5's and stage 9's cases require it, with negative
+    controls that fired on x86-64 under KVM and on ARMv7-A. The boot gates
+    passed on x86-64 (KVM and TCG, the fast path on too), AArch64 and ARMv7-A
+    at one and two processors. The 0 stalls in 10 runs after the fix are
+    counts of finished runs under TCG, not a hardware timing.
+  - **ARMv7-A lazy VFP** (4e2f9024c, f42c1ede0, `docs/OPAQUE-KERNEL.md` §9.15,
+    L.armv7a.21-26, F-68): a task runs with `FPEXC.EN` clear until its first VFP
+    instruction, so a switch between two programs that never used VFP moves no
+    VFP register. F-68 (Minor) came with it: a Thumb program's undefined
+    instruction named the halfword before itself. Thirteen negative controls
+    fired. The DK1 run of stage 9's `lazy` line, and any timing, are owed.
+  - **`cpu.stat`'s charge** (df7ee418c, L.object.180): kept in a run queue's
+    own record and moved into the jobs' slots once, `cpu.max`'s walk made only
+    while a `cpu.max` is set, `floor_div` inline (above, under the round trip).
+  - **Windows** (c8d5bbad3 to 09086c4db, os-win): four processors under WHPX
+    with the patched QEMU that says `ferrix: whpx-gva`, the GPU by default in a
+    window, QEMU above normal priority, a stopped clone of a component cloned
+    again, ferrousli's busybox booted where Alpine's static one is missing, and
+    ferrousli pinned at 93063b1, whose uutils install where xtask looks.
+
 * **Seven verification-audit rows closed by runs on `main`** (2026-10-07,
   f8b44e04c, the certification's C1, the debt landings leave behind). The
   audit table in `docs/BACKLOG.md` listed landings whose gates had run only
@@ -164,8 +203,9 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   d8-d15, and the rest of the VFP registers are zeroed on resume, as on
   x86-64. The ASID ids are reserved on `main`, not written
   (`tools/common/data/requirement-reservations.json`): L.mm.69-70,
-  L.armv7a.13-20 and L.user.125, with F-67's break-before-make order, and
-  L.armv7a.21-26 (lazy VFP, 4b9f04043).
+  L.armv7a.13-20 and L.user.125, with F-67's break-before-make order; the lazy
+  VFP rows, L.armv7a.21-26, were reserved in 4b9f04043 and written on the night
+  of 2026-10-08 (4e2f9024c, below).
 
 * **Steam signs in and shows its store** on the `--everything` desktop,
   its 64-bit side on ferrousli (2026-09-30, `docs/STEAM.md` §5), and
@@ -249,7 +289,13 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
 * **Sound** is done: alsa-lib (U1) and `pulsed`, a PulseAudio-protocol
   server Chrome plays through on the desktop (U2a to U2d, 2026-09-27).
 * **Windows**: the desktop runs under WHPX with the TSC as its clock
-  (2026-09-29), where it had fallen back to TCG.
+  (2026-09-29), where it had fallen back to TCG. Since 2026-10-08 it has four
+  processors there (06253d284: QEMU 11.1's own x86 emulator could not walk a
+  guest's page tables with more than one, so a patch has it ask Hyper-V), draws
+  on the GPU in a window by default, and gets QEMU above normal priority
+  (the slowest frame of a window slide fell from 112-116 ms to 25-32 ms; a
+  busy PC held 60 frames a second at the 10th percentile, where normal priority
+  gave 10 to 45).
 * **The tree moved** into `src/`, `tools/` and `docs/` (2026-09-29,
   `docs/LAYOUT.md`), tests into `src/tests/`, and the kernel's interface
   cores and discovery code into `interfaces/` and `discovery/`.
@@ -426,7 +472,8 @@ hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
 Seccomp filters (S3) landed on 2026-10-04 (248799bdd: `seccomp(2)`, `prctl(PR_SET_SECCOMP)`, chains per thread);
 the cgroup controllers (reclaim of a read-only mount's clean pages,
 `memory.high`, freezing, `cpu.max`, `io`; 23 negative controls) landed on
-2026-10-07; time namespaces and S4 to S6 are on branches
+2026-10-07, and on 2026-10-08 `cpu.stat`'s charge moved off the fast path's
+every direction (df7ee418c); time namespaces and S4 to S6 are on branches
 (`stage-13-handover.md`).
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
@@ -516,7 +563,8 @@ register filed and closed F-62, a carry of the coverage evidence that nobody mad
 fails on it, and the anchors two landings had skipped were carried again; it filed and
 closed F-63 too, the queue from the chardev core to `nvrm` able to grow
 without bound, which abandoned requests now leave and admission counts. The
-register stands at 16 open and 48 closed, of 64. CI on `main` is green again (run
+register stood at 16 open and 48 closed, of 64; on 2026-10-08 it was 17 open and
+52 closed, of 69 (the register's own count), F-65, F-66, F-68 and F-69 among the closed. CI on `main` is green again (run
 37331100176, after a rerun of a flaky job), after the Windows gateway test
 `a_lost_segment_is_sent_again_alone` stopped racing the gateway's timer
 (39e520e31); another gateway test, `resets_a_connection_to_a_port_nothing_listens_on`,

@@ -357,6 +357,14 @@ and spaces them out to `io.max`. `cgroup.controllers` now lists
 `cpu` and an `io` line under it, each with negative controls, and
 `test-vfs` has a command for `cgroup.freeze` and one for `cpu.max`.
 `docs/CGROUPS.md` §10 to §13 say what each is and what it leaves out.
+On 2026-10-08 (df7ee418c, L.object.180) `cpu.stat`'s per-job charge, which had
+made every direction of the IPC fast path walk the job and every job above it,
+is kept back in a run queue's own record and moved into the jobs' slots once
+(when the queue charges another job, switches to a task of another job or to
+idle, moves its running task to another job, or `cpu.stat` is read), and
+`cpu.max`'s part of the charge is made only while some `cpu.max` is set; no
+quota changed. The `cpu.max` checks have flaked under load on ARMv7-A,
+AArch64 and x86-64 TCG; the rows are in `docs/BACKLOG.md` (*P1 flakes*).
 
 **Still to do:** reclaim of a writable btrfs mount's clean pages, of the
 dentry and inode caches, and `memory.reclaim`; `io.weight` and `io.latency`;

@@ -1,6 +1,6 @@
 # The native channel round trip
 
-*Reviewed 2026-10-08, to `main` 4b9f04043.* The customer's target for the
+*Reviewed 2026-10-09, to `main` d884add58.* The customer's target for the
 round trip is seL4's matched figure, 440 ns, and since 2026-10-06 under 400.
 This page is where its progress is kept: what is measured, the points so far,
 and what is in flight. The design, step by step, is
@@ -69,6 +69,9 @@ load, not with the code. The table gives each as its commit measured it.
 | 2026-10-08 18:56 | Q8: `ferrix_switch` a naked function, called with `call rel32`, not through the GOT | 3 boots a side: instructions unchanged (5,044), cycles 4,593 against 4,624 (-0.7%, inside the spread), 816 against 822 ns; no figure claimed | `d3cbb0d55` |
 | 2026-10-08 19:44 | ARMv7-A user state: `TPIDRURO` in the task, `TPIDRURW` switched (F-66), and 3a's VFP reset for a task blocked in a native call | none: nothing has been timed on ARMv7-A, and the DK1 measurement is owed | `1b50a9d49`, `df6ca167a` |
 | 2026-10-08 18:56 | F-65's fix: the caller's endpoint let go with interrupts open (FX-0535) | costs about +40 to +50 instructions and +20 to +40 cycles a round trip; the median 819 to 858 ns on both sides, no p50 change resolved | `9ac307691` |
+| 2026-10-08 20:32 | `cpu.stat`'s charge kept back per run queue (`quota::Pending`, L.object.180), `cpu.max`'s walk only while one is set, `floor_div` inline; the cgroup controllers had put `charge_cpu` into every direction (os-76's profile: 5,198 instructions a round trip on `390d5f278` against 5,011 on `08984c2db`, `account_in` +236 of it) | five rounds turn about, one 30 s long-bench boot each, fast clock mode, cores 11 and 23 at performance, against base `523fc3d50` with os-76's measurement commit, host not quiet (load 14 to 56, SMT sibling 8 to 77% busy): the same job (the bench) 4,804 instructions a trip against 5,041, median ratio 0.952 (0.943 to 0.960), cycles 4,522 against 4,709, 0.958 (0.902 to 1.028); across two jobs 5,042 against 5,041, 1.005: unchanged. About -237 instructions, preliminary; instructions decide and no ns is quoted | `df7ee418c` |
+| 2026-10-08 21:51 | ARMv7-A lazy VFP: a task runs with `FPEXC.EN` clear until its first VFP instruction, so a switch between two programs that never used VFP moves no VFP register (§9.15, F-68) | none: nothing has been timed on ARMv7-A; §9.15 estimates 100 to 160 cycles a round trip, about 125 to 200 ns at 800 MHz, and the DK1 run of stage 9's `lazy` line is owed | `4e2f9024c`, `f42c1ede0` |
+| 2026-10-08 23:08 | F-69's fix: a wait holds preemption off from BLOCKED to the end of its last look, so a wake that drained the entry while the task ran is not lost (L.sched.71-72) | a cost: `bench-ipc --alternate f42c1ede0 --rounds 5`, the general path (the fast path is off by default), mitigations on, one domain, KVM, core 11 at performance, host load 0.9 before and 0.5 after, SMT sibling 0% busy: `domain-call` p50 1,378 / 1,358 / 1,378 / 1,378 / 1,368 ns against 1,308 / 1,298 / 1,308 / 1,318 / 1,308, ratio 1.046 (median of 5, 1.046 to 1.054), about +60 ns, two waits each paying one raise and one lower of the count; `call` p50 5,603 against 5,473. No instruction counts, and no figure with the fast path on. A cheaper hold is os-07's to write | `d884add58` |
 
 The DK1 itself can now be measured: user mode reads the virtual counter
 (`b17462efe`) and `bench-ipc --board-log` files a board's own log
@@ -89,16 +92,21 @@ lower cluster, so the target is the faster mode's too.
 seL4's matched figure is 440 ns; the customer's target since 2026-10-06 is
 under 400. On `main` the faster mode read 873 ns in one quiet window after the FS and GS
 skip, about twice seL4's, and the landings since (above) are measured on other
-bases; there is no retake of the whole of `main` in a quiet window yet. The
-budget for what is left is §9.10.
+bases; there is no retake of the whole of `main` in a quiet window yet, and
+none since `df7ee418c` and `d884add58`, which move the figure in opposite
+directions. The budget for what is left is §9.10.
 
 ## In flight
 
 Not on `main`; none is written up above as landed.
 
 - The job-load fold, −10 to −25 ns by ablation.
+- A cheaper hold for F-69's last look, to win back about 60 ns on the general
+  path (os-07). The pipe's P2 and P3a, the scheduler's J and K and the slots
+  are branches too (`open-branches.md`).
 
 Ids reserved on `main` and not written: L.sched.69-70 (the direct switch's
 run-slot take and give-back, and the outgoing task's current reference kept on
-the queue) and L.object.180 (a processor's `cpu.stat` charge kept back per run
-queue, moved into the job's slots once).
+the queue). L.object.180 (a processor's `cpu.stat` charge kept back per run
+queue) was written in `df7ee418c` and L.sched.71-72 (the last look) in
+`d884add58`.

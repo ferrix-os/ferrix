@@ -53,7 +53,14 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   on 4066f41dd in the faster of a boot's two modes, 873 ns after the FS and GS
   skip in one quiet window, and the later figures were taken on other bases and
   are not summed ([the page](ipc-round-trip.md)); the rest of step 5 is left
-  (`docs/OPAQUE-KERNEL.md` §9.11).
+  (`docs/OPAQUE-KERNEL.md` §9.11). Two landings of 2026-10-08 evening are not
+  cuts: `cpu.stat`'s charge is kept back per run queue (the controllers had
+  made it a walk up the job tree at every direction; about 237 instructions
+  fewer a round trip, preliminary), and a wait holds preemption off through its
+  last look (F-69, a lost wake that stalled `bench-ipc` on ARMv7-A), which costs
+  about 60 ns on the general path until a cheaper hold is written. On
+  ARMv7-A a switch between two programs that never used VFP moves none
+  (lazy VFP, §9.15), not yet timed.
 - **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28).
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library. On ARMv7-A, Debian's armhf Chromium runs headless in 512 MiB
@@ -79,8 +86,8 @@ booting with `nvidia-smi`, are on `main`.
 
 ## Forecast
 
-- About **583 sized points** were left on 2026-10-07, the last count, at
-  the forecast rate of 20 a day: they end on 2026-11-06 (2026-10-18 at 56 a
+- About **518 sized points** were left on 2026-10-08, the last count, at
+  the forecast rate of 20 a day: they end on 2026-11-03 (2026-10-18 at 56 a
   day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
   recount and what moved it are in [Status](status.md).
 - Unsized work (self-hosting, bare metal, most of Steam) is not in any date.

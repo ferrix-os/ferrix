@@ -15,7 +15,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "img"
 
-TODAY = date(2026, 10, 7)
+TODAY = date(2026, 10, 8)
 
 # Points landed per day (docs/BACKLOG.md, *Velocity*). 09-18 to 09-23 were
 # sized afterwards from `git log`; 09-23 is what is left of that backfill.
@@ -52,22 +52,24 @@ AFTERWARDS = {date(2026, 9, 24): 27, date(2026, 9, 25): 26, date(2026, 9, 26): 1
               date(2026, 10, 3): 115, date(2026, 10, 4): 55,
               date(2026, 10, 5): 29}
 
-# The status table's sized, unfinished rows after 2026-10-07's landings.
+# The status table's sized, unfinished rows after 2026-10-08's landings.
 # The state says why a row is not moving: "unlanded" is built and waits on a
 # landing (controls, `check`, a batch), "idle" has had no session on it since
 # 2026-09-26 or longer, "added" came into scope after the 09-26 baseline.
 REMAINING = [
     ("Client pages as texture backing", 8, "idle"),
-    ("Second pass and xray", 8, ""),
     ("GC400, the rest", 21, "idle"),
-    ("Stage 13, the controllers' rest", 30, "unlanded"),
     ("Stage 15, auth's rest", 6, ""),
-    # L13b landed 2026-10-05; L13c is built (po10-l13c/l13c, rebased onto
-    # main 2026-10-07) and waits to land.
-    ("Stage 15, init L13c", 3, "added, unlanded"),
-    ("Chrome on the DK1", 50, "idle"),
+    # L13b landed 2026-10-05 and L13c 2026-10-08 (aae4c0eb1); the second pass
+    # and xray (8) landed 2026-10-07 (bab9eed1c) and the controllers (30) the
+    # same day (08984c2db..8ec24ef0e). Nothing sized is built and waiting now.
+    # Of 50: the armhf volume 3 and the SD card's driver 13 landed 2026-10-08
+    # (aae4c0eb1, 03fce4f81); the board run waits for the product owner.
+    ("Chrome on the DK1", 34, "idle"),
     ("Stage 14, real-time", 40, "idle"),
-    ("dmabuf and virgl", 48, "idle"),
+    # Of 48: zwp_linux_dmabuf_v1 and the GBM-shaped allocator (8) landed
+    # 2026-10-08 (03fce4f81); Mesa's virgl is not started.
+    ("dmabuf and virgl", 40, "idle"),
     # Re-sized 2026-10-05 from 5: the consultant found B1 and B2 (parked).
     ("Stage 22, bubblewrap's rest", 16, ""),
     ("Stage 22, the rest (guess)", 23, ""),
@@ -79,7 +81,8 @@ REMAINING = [
     # C1's five points spent 2026-10-07 (f8b44e04c, seven audit rows closed).
     ("Certification findings, in-repository work", 160, "added"),
     # Added 2026-10-05 at the customer's question; a first guess (D1-D5).
-    # Since 2026-10-07 on branch po10-drv/live-update, nothing landed.
+    # D1, D2 and D4 landed for the display kind 2026-10-08 (aae4c0eb1); D3 and
+    # the other kinds are left, so the 26 stand whole.
     ("Live driver update", 26, "added"),
     # OPAQUE-KERNEL.md §9.5/§9.7: 69 at 2026-10-05; 2f, step 3 without PCIDs
     # and step 4's fast path (59) landed 2026-10-06, so 10 are left, step 5's
@@ -122,6 +125,7 @@ DONE = [
     ("Installer MVP", D(2026, 9, 28), D(2026, 9, 28)),
     ("yserver, the X server (36)", D(2026, 9, 28), D(2026, 9, 29)),
     ("Mount namespaces N1 to N3 (19)", D(2026, 9, 28), D(2026, 9, 30)),
+    ("Stage 13: cgroup controllers (30)", D(2026, 10, 7), D(2026, 10, 7)),
     ("Claude Code on Ferrix", D(2026, 9, 29), D(2026, 10, 1)),
     ("Speculation domain, round trip", D(2026, 10, 1), D(2026, 10, 3)),
     ("btrfs in the certified item", D(2026, 10, 2), D(2026, 10, 2)),
@@ -129,6 +133,10 @@ DONE = [
     ("NVIDIA N2 to N4 and the TV (64)", D(2026, 10, 3), D(2026, 10, 5)),
     ("Round trip: 2f, step 3, step 4 (59)", D(2026, 10, 5), D(2026, 10, 7)),
     ("Certification C1: audit rows (5)", D(2026, 10, 7), D(2026, 10, 7)),
+    ("Stage 19: second pass, xray (8)", D(2026, 10, 7), D(2026, 10, 7)),
+    ("Init L13c (3)", D(2026, 10, 8), D(2026, 10, 8)),
+    ("dmabuf, GBM allocator (8)", D(2026, 10, 8), D(2026, 10, 8)),
+    ("Chrome on ARMv7-A, DK1 SD card (16)", D(2026, 10, 7), D(2026, 10, 8)),
     ("Authentication P1, P2 (desktop as a user)", D(2026, 9, 27), D(2026, 10, 4)),
     ("Network namespaces", D(2026, 10, 1), D(2026, 10, 4)),
     ("Components and apps in repositories", D(2026, 10, 3), D(2026, 10, 4)),
@@ -138,10 +146,9 @@ DONE = [
 # end of the last matching entry in the forecast queue, so the two agree.
 ACTIVE = [
     ("Stage 19, the rest", D(2026, 9, 17),
-     ["Client pages as texture backing", "Second pass and xray"]),
+     ["Client pages as texture backing"]),
     ("Stage 20, self-hosting", D(2026, 9, 22), ["Stage 20, self-hosting"]),
-    ("Stage 13: the controllers (S3 landed)", D(2026, 9, 23),
-     ["Stage 13, the controllers' rest"]),
+    ("Stage 13: controllers in; rest unsized", D(2026, 9, 23), None),
     ("Gears (50 of 71)", D(2026, 9, 24), ["GC400, the rest"]),
     ("Certification findings", D(2026, 9, 25),
      ["Certification findings, in-repository work"]),
@@ -149,12 +156,11 @@ ACTIVE = [
      ["Pixel 7, the USB driver's rest"]),
     ("Steam: the game step", D(2026, 9, 30),
      ["Stage 22, bubblewrap's rest", "Stage 22, the rest (guess)"]),
-    ("Init L13c (L13b landed)", D(2026, 10, 4), ["Stage 15, init L13c"]),
     ("Auth P2, the rest (P2.1 landed)", D(2026, 10, 4), ["Stage 15, auth's rest"]),
     ("IPC round trip (steps 1 to 4 landed)", D(2026, 10, 1),
      ["IPC round trip to seL4's figure"]),
-    ("Live driver update (on a branch)", D(2026, 10, 7), ["Live driver update"]),
-    ("Installer, the rest (I6a on a branch)", D(2026, 9, 28), None),
+    ("Live driver update (display kind landed)", D(2026, 10, 7), ["Live driver update"]),
+    ("Installer, the rest (I6a landed)", D(2026, 9, 28), None),
 ]
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"

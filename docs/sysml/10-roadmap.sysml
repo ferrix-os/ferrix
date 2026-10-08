@@ -180,6 +180,17 @@ package FerrixRoadmap {
                  * periodic balancing that pushes as well as pulls, and slice
                  * scaling. */
         }
+        #implemented requirement waitLastLook {
+            doc /* A wait holds preemption off from before it sets BLOCKED
+                 * to the end of its last look at its condition (F-69,
+                 * L.sched.71-72, 2026-10-08), so that a switch inside that
+                 * span cannot count as the task's block and a wake that
+                 * drained its entry while it ran is not lost: no task is ever
+                 * blocked and still queued. Found as a stall of bench-ipc on
+                 * ARMv7-A under TCG; the defect is older than the fast path.
+                 * Stage 5's and stage 9's cases require it. A cheaper hold
+                 * is owed (about 60 ns a round trip on the general path). */
+        }
     }
 
     #implemented requirement <'S6'> stage6UserMode : Stage {
@@ -496,7 +507,10 @@ package FerrixRoadmap {
              * process with the most resident pages in that cgroup, counted
              * in memory.events with POLLPRI. M2's reclaim of a read-only mount's
              * clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat
-             * and the io controller with io.max landed on 2026-10-07.
+             * and the io controller with io.max landed on 2026-10-07; on
+             * 2026-10-08 cpu.stat's charge is kept back in a run queue's own
+             * record and moved into the jobs' slots once, and cpu.max's walk
+             * is made only while one is set (L.object.180).
              *
              * Namespaces, for Steam's container, designed in
              * docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the

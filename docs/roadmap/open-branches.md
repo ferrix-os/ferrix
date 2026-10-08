@@ -6,7 +6,8 @@ the product owner's and the certification consultant's; the 2026-10-04
 wind-down's branches are in the sections after this introduction, and
 *2026-10-05: refreshed* and *2026-10-05, evening: refreshed* say what of them
 has landed since, and which branches origin no longer has; *2026-10-05,
-wind-down* and *2026-10-07* say the rest. It is where the next session starts.
+wind-down* and *2026-10-07* say the rest; *2026-10-09* says what landed on the
+night of 2026-10-08. It is where the next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -32,6 +33,40 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-09: what landed on the night of 2026-10-08
+
+Against `main` d884add58, by the product owner's landing log
+(`~/.local/share/ferrix/fleet/log`). These landed after 9ed9e8428:
+
+- `po11/cpumax` (po11-cpumax), as df7ee418c: `cpu.stat`'s charge kept back per
+  run queue, L.object.180.
+- `os07/lazyvfp-reserve` (4b9f04043, L.armv7a.21-26) and `os07/lazyvfp`
+  (f42c1ede0, with 4e2f9024c under it): ARMv7-A lazy VFP, `docs/OPAQUE-KERNEL.md`
+  §9.15 and F-68; `git cherry` counts 0 for both.
+- `os07/stall-reserve` (f12fcbb47, L.sched.71-72) and `os07/stall-fix`
+  (d884add58): F-69, a wait's last look. `os07/stall-nofix`,
+  `os07/stall-holdsoff` and their `-side` copies are the negative controls and
+  never land; `os07/stall` and `windows/os07/stall` are measurement only.
+- os-win's Windows commits, c8d5bbad3 to 09086c4db, taken under the landing lock
+  by os-win (four processors under WHPX, the GPU by default, priority, the
+  busybox fallback, the ferrousli pin).
+- `po11/docs-round` (0c4093191, the last docs round).
+
+L.object.180 and L.armv7a.21-26, which the 2026-10-08 section below lists as
+reserved with no code, are written. Among the ids still reserved on `main`
+(`tools/common/data/requirement-reservations.json`) and not written:
+L.sched.69-70 (`po11/slots`), L.sched.64-68, L.x86_64.162-164 and L.mm.65-68
+(the round trip's earlier streams), and the ASIDs, L.mm.69-70, L.armv7a.13-20
+and L.user.125 (`os07/asid`, 23 unlanded commits).
+
+Not on `main`, and not written up as landed anywhere in the roadmap: the
+pipe's P2 and P3a (`po10-pipe/side-p2`, `po10-pipe/side-p3`), the scheduler's
+J and K (`po10/sched-j-08984`, `po10/sched-k`) and the job-load fold
+(`po10/sched-r`), the slots (`po11/slots`, `po11/slots-trim`), the ASIDs
+(`os07/asid`), and the DK1 matrix's board branches (`os07/b1-linux`,
+`os07/b2-sel4`, `os07/b4-card`, `os07/b5-posix`, `os4b/b2-sel4`); the
+`os07/images-*` ones are measurement only and never land.
 
 ## 2026-10-08: the branches of 2026-10-07 that landed
 
