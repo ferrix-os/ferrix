@@ -71,7 +71,9 @@ const TTBCR_A1: u32 = 1 << 22;
 /// One processor's own registers.
 fn look(me: &'static crate::smp::PerCpu) {
     let ttbcr = cpu::read_ttbcr();
-    if ttbcr & TTBCR_EAE == 0 || ttbcr & TTBCR_A1 != 0 || super::plan(me.logical) & super::PLAN_DECIDED == 0
+    if ttbcr & TTBCR_EAE == 0
+        || ttbcr & TTBCR_A1 != 0
+        || super::plan(me.logical) & super::PLAN_DECIDED == 0
     {
         let _ = WRONG.fetch_add(1, Ordering::Relaxed);
     }
@@ -194,6 +196,7 @@ fn flush_on(cpu: usize, space: &Arc<AddressSpace>) -> Result<(), &'static str> {
 /// Verifies: L.armv7a.13
 /// Verifies: L.armv7a.14
 /// Verifies: L.armv7a.15
+/// Verifies: L.armv7a.16
 /// Verifies: L.armv7a.17
 /// Verifies: L.armv7a.20
 pub(crate) fn run() -> Result<(), &'static str> {
@@ -213,6 +216,13 @@ pub(crate) fn run() -> Result<(), &'static str> {
         return Err("asid: the check runs on the boot processor only");
     }
     let processors = crate::smp::count();
+    // L.armv7a.16: a processor that switched away keeps a space's entries
+    // under its number, and only a broadcast shootdown reaches it.
+    if !arch::TLB_FLUSH_IS_BROADCAST {
+        return Err(
+            "asid: shootdowns are not a broadcast, so a processor that left a space's set keeps its entries",
+        );
+    }
 
     let a = space_with(MARK_A)?;
     let b = space_with(MARK_B)?;
@@ -302,7 +312,11 @@ pub(crate) fn run() -> Result<(), &'static str> {
          the new generation; number {n} reused by another space, which read its own page",
         CTR.load(Ordering::Relaxed),
         MMFR1.load(Ordering::Relaxed),
-        if DIFFERENT.load(Ordering::Relaxed) { ", others differ" } else { "" },
+        if DIFFERENT.load(Ordering::Relaxed) {
+            ", others differ"
+        } else {
+            ""
+        },
     );
     Ok(())
 }

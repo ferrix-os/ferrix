@@ -98,8 +98,16 @@ const PLAN_DECIDED: u8 = 1 << 7;
 pub(crate) fn init_this_cpu(cpu: usize) {
     let plan = FlushPlan::for_core(cpu::read_ctr(), cpu::read_id_mmfr1());
     let bits = PLAN_DECIDED
-        | if plan.instruction_cache { PLAN_ICACHE } else { 0 }
-        | if plan.predictor_every_install { PLAN_PREDICTOR } else { 0 };
+        | if plan.instruction_cache {
+            PLAN_ICACHE
+        } else {
+            0
+        }
+        | if plan.predictor_every_install {
+            PLAN_PREDICTOR
+        } else {
+            0
+        };
     if let Some(slot) = PLANS.get(cpu) {
         slot.store(bits, Ordering::Relaxed);
     }
@@ -107,7 +115,9 @@ pub(crate) fn init_this_cpu(cpu: usize) {
 
 /// Processor `cpu`'s plan.
 fn plan(cpu: usize) -> u8 {
-    PLANS.get(cpu).map_or(0, |plan| plan.load(Ordering::Relaxed))
+    PLANS
+        .get(cpu)
+        .map_or(0, |plan| plan.load(Ordering::Relaxed))
 }
 
 /// Whether processor `cpu` runs `BPIALL` at every install.

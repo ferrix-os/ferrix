@@ -40,7 +40,10 @@ fn asid_numbers_are_unique_in_a_generation() {
     let mut generation = numbers.generation();
     for _ in 0..(NUMBERS - 1) * 10 {
         let given = numbers.assign(0, |_| 0).expect("a number");
-        assert_eq!(numbers.assign(given.tag, |_| 0).expect("kept").tag, given.tag);
+        assert_eq!(
+            numbers.assign(given.tag, |_| 0).expect("kept").tag,
+            given.tag
+        );
         if given.rolled_over {
             assert_eq!(numbers.generation(), generation + 1);
             generation += 1;
@@ -48,7 +51,10 @@ fn asid_numbers_are_unique_in_a_generation() {
         }
         let number = usize::from(number_of(given.tag));
         assert_ne!(number, usize::from(NO_SPACE), "number 0 was given");
-        assert!(!seen[number], "number {number} given twice in generation {generation}");
+        assert!(
+            !seen[number],
+            "number {number} given twice in generation {generation}"
+        );
         seen[number] = true;
         assert_eq!(generation_of(given.tag), numbers.generation());
     }
@@ -84,7 +90,10 @@ fn asid_reserved_numbers_survive_a_rollover() {
     assert_eq!(numbers.generation(), old_generation + 1);
     assert_eq!(active, [0; CPUS], "a rollover left an active tag");
     for cpu in 0..CPUS {
-        assert!(numbers.is_pending(cpu), "processor {cpu}'s flush is not pending");
+        assert!(
+            numbers.is_pending(cpu),
+            "processor {cpu}'s flush is not pending"
+        );
     }
     assert_eq!(numbers.reserved(0), tags[7]);
     assert_eq!(numbers.reserved(2), tags[200]);
@@ -93,7 +102,11 @@ fn asid_reserved_numbers_survive_a_rollover() {
     assert_ne!(number_of(fresh.tag), number_of(tags[200]));
     let kept = numbers.assign(tags[7], |_| unreachable!()).expect("kept");
     assert_eq!(number_of(kept.tag), number_of(tags[7]));
-    assert_eq!(numbers.reserved(0), kept.tag, "the reservation did not move on");
+    assert_eq!(
+        numbers.reserved(0),
+        kept.tag,
+        "the reservation did not move on"
+    );
     // A second rollover with processor 2 idle since keeps 2's reservation.
     for _ in 0..NUMBERS {
         let given = numbers.assign(0, |cpu| core::mem::replace(&mut active[cpu], 0));
@@ -119,7 +132,10 @@ fn asid_generation_refuses_overflow() {
         let _ = numbers.assign(0, |_| 0).expect("a number");
     }
     let before = numbers.clone();
-    assert_eq!(numbers.assign(0, |_| 0), Err(AsidError::GenerationExhausted));
+    assert_eq!(
+        numbers.assign(0, |_| 0),
+        Err(AsidError::GenerationExhausted)
+    );
     assert_eq!(numbers.generation(), before.generation());
     assert_eq!(numbers.taken, before.taken);
 }
@@ -280,8 +296,8 @@ impl Machine {
     /// The kernel's install, its fast path and its slow path.
     fn install(&mut self, cpu: usize, index: usize) {
         let tag = self.spaces[index].as_ref().expect("live").tag;
-        let fast = self.numbers.is_current(tag)
-            && core::mem::replace(&mut self.active[cpu], tag) != 0;
+        let fast =
+            self.numbers.is_current(tag) && core::mem::replace(&mut self.active[cpu], tag) != 0;
         if !fast {
             let active = &mut self.active;
             let assigned = self
@@ -335,7 +351,10 @@ impl Machine {
     fn touch(&mut self, cpu: usize, va: u64) {
         let Some(index) = self.cpus[cpu].running else {
             assert!(
-                self.cpus[cpu].tlb.iter().all(|entry| entry.asid != NO_SPACE),
+                self.cpus[cpu]
+                    .tlb
+                    .iter()
+                    .all(|entry| entry.asid != NO_SPACE),
                 "an entry is tagged ASID 0"
             );
             return;
@@ -346,7 +365,9 @@ impl Machine {
             .iter()
             .find(|entry| entry.asid == asid && entry.va == va)
             .copied();
-        let space = self.spaces[index].as_ref().expect("a running space is live");
+        let space = self.spaces[index]
+            .as_ref()
+            .expect("a running space is live");
         match hit {
             Some(entry) => {
                 self.hits += 1;
@@ -481,8 +502,19 @@ fn asid_model_tlb_never_hits_another_space() {
                 }
             }
         }
-        assert!(machine.rollovers >= 5, "seed {seed}: only {} rollovers", machine.rollovers);
-        assert!(machine.hits > 1_000, "seed {seed}: only {} hits", machine.hits);
-        assert!(machine.flushes >= machine.rollovers, "seed {seed}: fewer flushes than rollovers");
+        assert!(
+            machine.rollovers >= 5,
+            "seed {seed}: only {} rollovers",
+            machine.rollovers
+        );
+        assert!(
+            machine.hits > 1_000,
+            "seed {seed}: only {} hits",
+            machine.hits
+        );
+        assert!(
+            machine.flushes >= machine.rollovers,
+            "seed {seed}: fewer flushes than rollovers"
+        );
     }
 }

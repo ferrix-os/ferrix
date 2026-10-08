@@ -102,7 +102,6 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "unsafe audit",
         &[&["tools/common/check/check-unsafe-audit.py"]],
     ),
-
     (
         "panic audit",
         &[&["tools/common/check/check-panic-audit.py"]],
