@@ -56,5 +56,9 @@ Its saved environment is not written (no `saveenv`).
   - UART4 0x40010000, the console: transmit data and status only;
   - GIC-400 distributor 0xA0021000 and CPU interface 0xA0022000;
   - the generic timer (CP15) and the PMU (CP15; `KernelArmExportPMUUser` sets PMUSERENR.EN).
-- The bench root task: IWDG2 0x5A002000, one write of 0xCCCC to KR to start it. Its reset (prescaler /4, RLR 0xFFF at LSI 32 kHz) resets the board in about 0.5 s, after `board-bench end`.
+- The bench root task resets the board after `board-bench end`:
+  - IWDG2 0x5A002000: one write of 0xCCCC to KR, which resets in about 0.5 s (prescaler /4, RLR 0xFFF, LSI 32 kHz);
+  - but only if its APB clock (RCC_MP_APB4ENSETR bit 15) is already on, which nothing on this firmware is known to do.
+  - So the fallback is one write of 1 to RCC_MP_GRSTCSETR (0x50000404) bit 0, MPSYSRST: a system reset, the RCC being non-secure under this OP-TEE.
+  - This is the only RCC write, and it is a reset, not a clock or power change.
 - It makes no clock, power or PHY write.
