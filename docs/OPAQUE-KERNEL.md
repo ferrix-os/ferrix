@@ -5622,7 +5622,7 @@ Item 10 says what it must keep when it lands.
       unchanged.
     - It is measured on hardware for the same reason as here.
 
-#### Requirements (to reserve: L.mm.69-70, L.armv7a.13-10)
+#### Requirements (to reserve: L.mm.69-70, L.armv7a.13-20; 5 to 12 are os07/ustate's, §9.14)
 
 - **L.mm.69** (`ferrix_paging::asid`): the allocator shall give each
   number from 1 to 255 to at most one tag in a generation, never give 0, and
