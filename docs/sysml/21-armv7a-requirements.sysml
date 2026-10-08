@@ -6,7 +6,9 @@
  * beyond these: what the system call path does for the filter the core asks
  * about every call (seccomp, `docs/SECCOMP.md` §3.3), what its switch
  * barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9), and
- * what of the generic timer user mode may read (`CNTKCTL`). The rest of the
+ * what of the generic timer user mode may read (`CNTKCTL`), and what the
+ * switch does with the two thread ID registers (`docs/OPAQUE-KERNEL.md`
+ * §9.14, 3b and F-66). The rest of the
  * architecture waits in the baseline with the other architectures' unwritten
  * rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of
  * part 19 hold.
@@ -72,6 +74,60 @@ package FerrixArmv7aRequirements {
             attribute :>> parent = "H.MEM.2";
             attribute :>> unit = ("arch::armv7a::cpu::allow_user_counter",
                 "arch::armv7a::cpu::read_cntkctl");
+        }
+    }
+
+    package Switch {
+        doc /* src/kernel/src/arch/armv7a/switch.rs and trap.rs: the user state
+             * the switch moves that no trap saves (docs/OPAQUE-KERNEL.md §9.14;
+             * the consultant's verdict, ledger 2026-10-08 line 582, R1-R9). */
+
+        requirement <'L.armv7a.10'> theThreadPointerIsTheRecords : ItemLowLevel {
+            attribute :>> statement = "set_tls shall write TPIDRURO and the running
+                task's record together with interrupts masked, execve's
+                reset_user_state shall zero both in one window with interrupts
+                masked, save_user_state shall not read TPIDRURO, and
+                restore_user_state shall write the incoming task's recorded
+                TPIDRURO at every switch to a task with user state, never skipping
+                a write equal to what the processor last held.";
+            attribute :>> criterion = "A program reads its own thread pointer after
+                a nanosleep; two programs with different thread pointers trade one
+                core 1,000 times each, each reading its own; an execve'd image,
+                switched out and in, reads 0 (the `tls` line); with set_tls writing
+                no record, the restore's write removed, or execve leaving the record,
+                the check fails by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::save_user_state",
+                "arch::armv7a::switch::restore_user_state",
+                "arch::armv7a::switch::reset_user_state", "arch::armv7a::trap::answer_set_tls");
+        }
+        requirement <'L.armv7a.11'> theUserRegisterIsSwitched : ItemLowLevel {
+            attribute :>> statement = "save_user_state shall read TPIDRURW at every
+                switch out, blocked or not, and restore_user_state shall write the
+                incoming task's at every switch to a task with user state, never
+                skipping a write by comparing with any remembered value.";
+            attribute :>> criterion = "Two programs with different TPIDRURW trade one
+                core 1,000 times each, each reading its own; a program whose value
+                equals the one its core last had written reads its own beside one
+                that changed the register after that write (the `tls` line); with
+                the restore's write removed, as before F-66's fix, or skipped where
+                it equals the last one written, the check fails by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::save_user_state",
+                "arch::armv7a::switch::restore_user_state", "arch::armv7a::cpu::read_tpidrurw",
+                "arch::armv7a::cpu::write_tpidrurw");
+        }
+        requirement <'L.armv7a.12'> theUserRegisterIsInheritedAndReset : ItemLowLevel {
+            attribute :>> statement = "UserState::capture shall carry the caller's
+                TPIDRURW to a fork child or a new thread, and execve's
+                reset_user_state shall zero it.";
+            attribute :>> criterion = "A fork child, switched out and in, reads its
+                parent's TPIDRURW, and an execve'd image reads 0 (the `tls` line);
+                with capture leaving it out, or execve leaving it, the check fails
+                by name.";
+            attribute :>> parent = "H.SCHED.8";
+            attribute :>> unit = ("arch::armv7a::switch::UserState::capture",
+                "arch::armv7a::switch::reset_user_state");
         }
     }
 }

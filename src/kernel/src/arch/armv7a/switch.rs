@@ -16,6 +16,8 @@
 
 use core::arch::global_asm;
 
+pub(super) mod check;
+
 /// Bytes the switch pushes: nine registers and one word of padding.
 const FRAME_BYTES: u32 = 40;
 
@@ -113,17 +115,30 @@ pub(crate) unsafe fn prepare_stack(
     u64::from(stack_pointer)
 }
 
-/// What a program owns on this processor that no trap saves: its thread
-/// pointer, and its floating-point registers.
+/// What a program owns on this processor that no trap saves: its two thread
+/// ID registers, and its floating-point registers.
 ///
-/// The kernel is soft-float and never touches either, so a trap from USR mode
+/// The kernel is soft-float and never touches them, so a trap from USR mode
 /// leaves them as the program had them. Two programs taking turns need them
 /// saved and loaded by the scheduler whenever it switches between tasks that
 /// run user code.
+///
+/// # The thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3b and F-66)
+///
+/// `TPIDRURO`, which USR mode reads and cannot write, is kept here as the
+/// truth and never read back at a switch: `set_tls` writes the register and
+/// this record together, `execve` zeroes both, and the switch writes it at
+/// every switch to a task with user state. `TPIDRURW`, which USR mode writes
+/// itself with no call, is read at every switch out and written at every
+/// switch in, as Linux's `switch_tls` does. Neither write is ever skipped
+/// because it equals what the processor last held: a program changes
+/// `TPIDRURW` without the kernel knowing, so a remembered value would name one
+/// no longer there (the consultant's condition 8).
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub(crate) struct UserState {
-    /// `TPIDRURO`, which `set_tls` asks the kernel to write.
+    /// `TPIDRURO`, which `set_tls` asks the kernel to write: the record the
+    /// switch loads, never reads back.
     thread_pointer: u32,
     /// `FPSCR`.
     fpscr: u32,
@@ -142,6 +157,8 @@ pub(crate) struct UserState {
     user_sp: u32,
     /// USR mode's banked link register, for the same reason.
     user_lr: u32,
+    /// `TPIDRURW`, which USR mode writes itself: read at every switch out.
+    user_rw: u32,
 }
 
 const _: () = assert!(
@@ -167,6 +184,7 @@ impl UserState {
             doubles: [0; 32],
             user_sp: 0,
             user_lr: 0,
+            user_rw: 0,
         }
     }
 
@@ -176,17 +194,31 @@ impl UserState {
     /// # Safety
     ///
     /// (CONTEXT) The registers must be the calling task's own.
+    ///
+    /// `TPIDRURO` is read from the register here, not from the running task's
+    /// record: a copy of what the processor holds, outside the switch, which
+    /// is the one place that reads it no more (3b). `TPIDRURW` comes with the
+    /// save, so a fork child and a thread inherit it, as Linux's
+    /// `copy_thread` gives them.
     pub(crate) unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         // SAFETY: (CONTEXT) the caller's guarantee.
         unsafe { save_user_state(&mut state, false) };
+        state.thread_pointer = super::cpu::read_tpidruro();
         state
     }
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`
-    /// asks.
+    /// and `set_tls` ask.
     pub(crate) const fn set_thread_pointer(&mut self, pointer: u64) {
         self.thread_pointer = pointer as u32;
+    }
+
+    /// Zero both thread ID registers' records, as `execve` zeroes the
+    /// registers (3b, F-66).
+    const fn clear_thread_registers(&mut self) {
+        self.thread_pointer = 0;
+        self.user_rw = 0;
     }
 
     /// A 32-bit x86 program's thread-local segment: there are none on this
@@ -381,7 +413,7 @@ pub(super) unsafe fn fpu_features1() -> u32 {
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor.
 pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
-    state.thread_pointer = super::cpu::read_tpidruro();
+    state.user_rw = super::cpu::read_tpidrurw();
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`
     // structure, which is the two words the assembly writes.
     unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
@@ -403,7 +435,9 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to.
 pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
     let _ = entry_stack;
+    // Both thread ID registers at every switch, never skipped (3b, F-66).
     super::cpu::write_tpidruro(state.thread_pointer);
+    super::cpu::write_tpidrurw(state.user_rw);
     // SAFETY: (CONTEXT) as in `save_user_state`, read rather than written.
     unsafe { ferrix_user_banked_restore(core::ptr::from_ref(&state.user_sp)) };
     let doubles = super::cpu::user_fpu_doubles();
@@ -429,7 +463,21 @@ pub(crate) fn set_user_stack(stack: u32) {
 ///
 /// (CONTEXT) Must be called by the user task whose registers these are.
 pub(crate) unsafe fn reset_user_state() {
+    // Both thread ID registers and the record together, in one masked
+    // window (the consultant's R3): `execve` runs with interrupts open, and a
+    // switch between the register and the record would give the new image the
+    // old thread pointer back at its next switch in. `TPIDRURW` is zeroed as
+    // Linux's `flush_tls` zeroes it, so nothing of the old image reaches the
+    // new one through it (F-66).
+    let open = super::interrupts_enabled();
+    super::disable_interrupts();
     super::cpu::write_tpidruro(0);
+    super::cpu::write_tpidrurw(0);
+    // SAFETY: (CONTEXT) interrupts masked, inside the running task's own call.
+    let _ = unsafe { crate::sched::with_own_user_state(UserState::clear_thread_registers) };
+    if open {
+        super::enable_interrupts();
+    }
     let doubles = super::cpu::user_fpu_doubles();
     if doubles != 0 {
         let fresh = UserState::new();

@@ -460,10 +460,7 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             // trap path. It cannot fail: any value is a valid thread pointer
             // to hold, and Linux returns zero without looking at it.
             if let Some(Syscall::ArmSetTls) = super::decode_syscall(args.number) {
-                cpu::write_tpidruro(r0);
-                if let Some(result) = frame.r.first_mut() {
-                    *result = 0;
-                }
+                answer_set_tls(frame, r0);
                 return Ok(());
             }
 
@@ -513,6 +510,22 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
             super::switch::set_user_stack(stack as u32);
             Ok(())
         }
+    }
+}
+
+/// `set_tls`: the register and the running task's record together, with
+/// interrupts still masked from the `svc` entry. The record is the truth the
+/// switch loads, and is never read back from the register
+/// (`docs/OPAQUE-KERNEL.md` §9.14, 3b).
+fn answer_set_tls(frame: &mut TrapFrame, value: u32) {
+    cpu::write_tpidruro(value);
+    // SAFETY: (CONTEXT) interrupts are masked here, in the running task's own
+    // system call.
+    let _ = unsafe {
+        crate::sched::with_own_user_state(|state| state.set_thread_pointer(u64::from(value)))
+    };
+    if let Some(result) = frame.r.first_mut() {
+        *result = 0;
     }
 }
 

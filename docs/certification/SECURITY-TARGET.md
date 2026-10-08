@@ -230,7 +230,10 @@ holds, read in the same switch, and the record's are both exactly 0
 (`docs/OPAQUE-KERNEL.md` §9.8, 3b and 3c: a null load over a null selector
 leaves the hidden part as it is, every processor loads `FS` and `GS` with
 the null selector at bring-up, and the `FS` and `GS` bases are written from
-the record after, skipped or not).
+the record after, skipped or not); and on ARMv7-A both thread ID registers
+written at every switch, `TPIDRURO` from the task's record and `TPIDRURW`, which
+a program writes itself, as the switch out read it, carried by `fork` and zeroed
+by `execve` (§9.14, F-66).
 
 **FDP_SDI.2** Stored data integrity monitoring and action. The TSF shall
 monitor user data stored in containers controlled by the TSF for **a

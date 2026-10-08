@@ -331,6 +331,27 @@ pub(crate) fn read_tpidruro() -> u32 {
     value
 }
 
+/// Read `TPIDRURW`, the thread ID register USR mode reads and writes itself
+/// (`docs/OPAQUE-KERNEL.md` §9.14, F-66): what the switch saves at every
+/// switch out.
+pub(crate) fn read_tpidrurw() -> u32 {
+    let value: u32;
+    // SAFETY: (CONTEXT) reading a software register has no side effects.
+    unsafe {
+        asm!("mrc p15, 0, {}, c13, c0, 2", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
+/// Set `TPIDRURW`: the incoming task's own at every switch in, and zero at
+/// `execve`.
+pub(crate) fn write_tpidrurw(value: u32) {
+    // SAFETY: (CONTEXT) a software register the kernel keeps nothing of its own in.
+    unsafe {
+        asm!("mcr p15, 0, {}, c13, c0, 2", in(reg) value, options(nomem, nostack, preserves_flags));
+    }
+}
+
 /// Install the exception vector table.
 ///
 /// Also clears `SCTLR.V` and `SCTLR.TE`, which firmware may have left set and

@@ -2430,10 +2430,10 @@ fn switch_user_state(previous: &Arc<Task>, next: &Arc<Task>) {
 }
 
 #[cfg_attr(
-    not(target_arch = "x86_64"),
+    target_arch = "aarch64",
     expect(
         dead_code,
-        reason = "only x86-64's entry and arch_prctl keep a record this way"
+        reason = "x86-64's and ARMv7-A's entries keep a record this way; AArch64's not yet"
     )
 )]
 /// Run `change` on the running task's own saved user state, the record the
