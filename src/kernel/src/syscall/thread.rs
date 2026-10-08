@@ -373,10 +373,26 @@ impl Drop for Thread {
 
 /// The thread the running task runs, or `None` for a kernel thread.
 pub(crate) fn current() -> Option<Arc<Thread>> {
-    let task = sched::current()?;
-    let thread: Arc<dyn UserThread> = Arc::clone(task.thread()?);
-    let thread: Arc<dyn Any + Send + Sync> = thread;
-    thread.downcast().ok()
+    // The task lent, not cloned; the thread the caller keeps is (B1).
+    sched::with_current(|task| {
+        let thread: Arc<dyn UserThread> = Arc::clone(task.thread()?);
+        let thread: Arc<dyn Any + Send + Sync> = thread;
+        thread.downcast().ok()
+    })
+    .flatten()
+}
+
+/// The running task's thread, lent to `lend` by reference, or `None` for a
+/// kernel thread: what a caller that does not keep the thread asks instead of
+/// [`current`], whose clone and drop of the task and the thread are four
+/// locked operations a system call made several times (po10-pipe P2).
+///
+/// Only through `sched::with_current`'s closure, so the reference cannot
+/// leave it (`sched::borrow`'s argument; the consultant's B1): nothing lent
+/// here is stored, sent, or put on a list, a timer or a link. A caller that
+/// keeps the thread clones it inside the closure.
+pub(crate) fn with_current<R>(lend: impl FnOnce(&Thread) -> R) -> Option<R> {
+    sched::with_current(|task| of_task(task).map(lend)).flatten()
 }
 
 /// The thread `task` runs, if it runs one of this personality's.

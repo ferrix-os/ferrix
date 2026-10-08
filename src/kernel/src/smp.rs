@@ -113,7 +113,69 @@ pub(crate) struct PerCpu {
     /// `current`, written beside it: what `sched::with_current` lends without
     /// the queue's lock. `sched::borrow` argues it.
     pub(crate) running: crate::sched::RunningSlot,
+    /// Linux system calls this processor has answered: `fs::seam`'s count,
+    /// added to only by this processor through `arch::this_cpu_add`
+    /// ([`SYSCALLS_WORD_OFFSET`]) and summed over every record by the reader,
+    /// so that the count every call makes is no locked add on a line every
+    /// processor writes.
+    pub(crate) syscalls: OwnCount,
 }
+
+/// A count in a [`PerCpu`] record: added to by its own processor alone,
+/// through `arch::this_cpu_add` (one `xadd` without `lock` addressed through
+/// `GS` on x86-64; a load and a store with every exception masked on Arm,
+/// `arch::percpu`'s argument), and read by any.
+///
+/// On ARMv7-A it is two `u32` halves, low first, the shape `this_cpu_add`
+/// writes there; a reader on another processor that races the carry from the
+/// low half into the high one can read a number off by the carry, so the
+/// count is exact for a reader that reads after the counting it wants, as
+/// `/proc/ferrix-seam` and the boot check do.
+#[derive(Debug)]
+pub(crate) struct OwnCount {
+    /// The count.
+    #[cfg(target_pointer_width = "64")]
+    word: AtomicU64,
+    /// The count as two halves, low first.
+    #[cfg(not(target_pointer_width = "64"))]
+    word: [core::sync::atomic::AtomicU32; 2],
+}
+
+impl OwnCount {
+    /// Where [`Self::word`] is in the count, for the record's offsets.
+    pub(crate) const WORD_OFFSET: usize = core::mem::offset_of!(Self, word);
+
+    /// Zero.
+    const fn new() -> Self {
+        Self {
+            #[cfg(target_pointer_width = "64")]
+            word: AtomicU64::new(0),
+            #[cfg(not(target_pointer_width = "64"))]
+            word: [
+                core::sync::atomic::AtomicU32::new(0),
+                core::sync::atomic::AtomicU32::new(0),
+            ],
+        }
+    }
+
+    /// The count, from any processor.
+    pub(crate) fn read(&self) -> u64 {
+        #[cfg(target_pointer_width = "64")]
+        {
+            self.word.load(Ordering::Relaxed)
+        }
+        #[cfg(not(target_pointer_width = "64"))]
+        {
+            let [low, high] = &self.word;
+            u64::from(low.load(Ordering::Relaxed)) | (u64::from(high.load(Ordering::Relaxed)) << 32)
+        }
+    }
+}
+
+/// Where in a [`PerCpu`] record its Linux system call count is, for
+/// `arch::this_cpu_add`.
+pub(crate) const SYSCALLS_WORD_OFFSET: usize =
+    core::mem::offset_of!(PerCpu, syscalls) + OwnCount::WORD_OFFSET;
 
 /// Where in a [`PerCpu`] record its preemption word is, for
 /// `arch::this_cpu_add`, which raises and lowers it without first finding the
@@ -197,6 +259,7 @@ impl Topology {
                 gp_seen: AtomicU64::new(0),
                 preempt: crate::sched::PreemptState::new(),
                 running: crate::sched::RunningSlot::new(),
+                syscalls: OwnCount::new(),
             })
             // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
             .collect();

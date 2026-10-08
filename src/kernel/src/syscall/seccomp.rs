@@ -295,6 +295,11 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     if !EVER_FILTERED.load(Ordering::Acquire) {
         return Verdict::Continue;
     }
+    // An unfiltered thread, nearly every one, is asked through a lent
+    // reference; only a filtered one is cloned for the filter run below.
+    if !thread::with_current(Thread::is_filtered).unwrap_or(false) {
+        return Verdict::Continue;
+    }
     let Some(thread) = thread::current() else {
         return Verdict::Continue;
     };

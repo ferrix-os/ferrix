@@ -66,6 +66,33 @@ impl Personality for Linux {
 /// has to end in a value.
 fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     crate::fs::seam::syscall();
+    // The caller's thread, and through it its process, lent for the call
+    // rather than cloned: a clone and a drop of the task, the thread and the
+    // process were six locked operations a call (po10-pipe P2). The lend is
+    // `sched::with_current`'s, good for the closure's whole run, a block
+    // included, and nothing the call keeps is taken from it without a clone
+    // (the consultant's B1). A kernel caller lends no thread.
+    sched::with_current(|task| answer_as(call, args, regs, thread::of_task(task)))
+        .unwrap_or_else(|| answer_as(call, args, regs, None))
+}
+
+/// [`dispatch`] for the caller `thread` lends.
+///
+/// # The calls that do not return
+///
+/// `exit`, `exit_group`, `execve`'s failure past its point of no return, and
+/// below this a fatal signal's delivery and seccomp's kills end the task
+/// without coming back here. What this frame holds then is a lent reference
+/// and plain values, no `Arc` of the task, the thread or the process, so
+/// nothing is left uncounted on a stack that is never unwound (the
+/// consultant's B2). Before the lend, `exit` and `execve` dropped the
+/// process they had cloned first, for that reason.
+fn answer_as(
+    call: Syscall,
+    args: &SyscallArgs,
+    regs: Option<&arch::UserRegs>,
+    thread: Option<&thread::Thread>,
+) -> Outcome {
     // A 32-bit program's register pairs and 32-bit `off_t`s, rewritten into
     // the layout every handler below reads (`compat`).
     let normalized;
@@ -81,7 +108,10 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
     // Resolved once, here, rather than reached for inside each handler: the
     // handlers take `&Process` so that the boot self-check can call them
     // against a process it built itself, months before a program can.
-    let process = process::current();
+    // The caller's own process, lent with its thread: `Thread::process` is
+    // fixed when the thread is made, and `execve` keeps both.
+    let process: Option<&alloc::sync::Arc<Process>> = thread.map(thread::Thread::process);
+    let caller: Option<&Process> = process.map(|process| &**process);
 
     // What the entry registers held, which a restart puts back: for
     // `socketcall`, the sub-call and the block's address, not the call the
@@ -92,7 +122,7 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
     // from the program's block, is answered as that call (`compat`).
     let unpacked;
     let (call, args) = if call == Syscall::Socketcall {
-        let Some(caller) = process.as_deref() else {
+        let Some(caller) = caller else {
             return Outcome::Return(Errno::ESRCH.as_return_value());
         };
         match compat::socketcall(caller, args.args) {
@@ -116,11 +146,11 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
 
     // `exit` ends the calling thread and `exit_group` its whole process; both
     // end the task here and never come back, and with one thread they are the
-    // same. The reference is dropped first, because nothing after this line
-    // runs to drop it. A kernel thread has no process to end, and gets `ESRCH`
+    // same. Nothing is owned here to be left undropped: the process is lent
+    // ([`answer_as`]). A kernel thread has no process to end, and gets `ESRCH`
     // from the table like every other call that needs one.
     if matches!(call, Syscall::Exit | Syscall::ExitGroup) && process.is_some() {
-        drop(process);
+        // Nothing to drop first: the process is lent (B2).
         let status = truncate(args.args[0]) as i32 & 0xFF;
         if call == Syscall::Exit {
             process::exit_thread_current(status);
@@ -134,7 +164,7 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
         call,
         Syscall::Clone | Syscall::Clone3 | Syscall::Fork | Syscall::Vfork
     ) {
-        let (Some(parent), Some(regs)) = (process.as_ref(), regs) else {
+        let (Some(parent), Some(regs)) = (process, regs) else {
             return Outcome::Return(Errno::ESRCH.as_return_value());
         };
         return Outcome::Return(errno::encode(family::sys_clone(
@@ -143,10 +173,10 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
     }
 
     // `execve` resumes on a frame it built rather than returning, and a failure
-    // past its point of no return ends the process -- after the reference is
-    // dropped, for the reason above.
+    // past its point of no return ends the process, which leaves nothing
+    // owned behind for the reason above.
     if matches!(call, Syscall::Execve | Syscall::Execveat) {
-        let Some(caller) = process.as_deref() else {
+        let Some(caller) = caller else {
             return Outcome::Return(Errno::ESRCH.as_return_value());
         };
         let a = args.args;
@@ -161,7 +191,7 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
             Ok((entry, stack, abi)) => Outcome::Enter { entry, stack, abi },
             Err(exec::ExecveError::Refused(error)) => Outcome::Return(error.as_return_value()),
             Err(exec::ExecveError::Lost) => {
-                drop(process);
+                // Nothing to drop first: the process is lent (B2).
                 process::exit_current(exec::lost_status())
             }
         };
@@ -170,11 +200,10 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
     // The calls that act on the calling thread's own signal state go to their
     // own table, with the caller's stack pointer for `sigaltstack`; a kernel
     // caller, with no registers, passes zero, which is on no stack.
-    let thread = thread::current();
     let sp = regs.map_or(0, arch::UserRegs::stack_pointer);
-    let answer = match signal::dispatch(call, &args.args, thread.as_deref(), sp, args.abi) {
+    let answer = match signal::dispatch(call, &args.args, thread, sp, args.abi) {
         Some(answer) => answer,
-        None => handle(call, args, process.as_deref()),
+        None => handle(call, args, caller),
     };
     if answer == Err(Errno::ENOSYS) {
         unanswered(Some(call), args.number);
@@ -184,7 +213,7 @@ fn dispatch(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) ->
     // restart it or turn it into `EINTR`. The number and first argument are
     // captured from the entry registers here, because the return register is
     // about to overwrite one of them. See `deliver::return_to_user`.
-    if let (Err(error), Some(thread)) = (answer, thread.as_ref())
+    if let (Err(error), Some(thread)) = (answer, thread)
         && error.is_restart()
     {
         thread.with_own_signals(|signals| signals.mark_restart(args.number as u64, first_argument));

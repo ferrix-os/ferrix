@@ -11309,3 +11309,82 @@ pub(crate) fn native_child_image() -> Vec<u8> {
         arch::USER_ARGUMENT_PROGRAM,
     )
 }
+
+// ---------------------------------------------------------------------------
+// The system call count, per processor (po10-pipe P2, the consultant's B4)
+// ---------------------------------------------------------------------------
+
+/// Calls each processor's caller makes in [`run_seam_count`].
+const SEAM_CALLS: u64 = 64;
+
+/// The processor whose count [`run_seam_count`] leaves out of the sum: none.
+/// The negative control names one, and the check must then fail.
+const SEAM_LEFT_OUT: Option<usize> = None;
+
+/// Callers of [`run_seam_count`] finished.
+static SEAM_DONE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// One caller: [`SEAM_CALLS`] `getpid`s through the whole Linux dispatch, as
+/// a program's call goes, on the processor it was pinned to.
+fn seam_caller(number: usize) {
+    for _ in 0..SEAM_CALLS {
+        let _ = dispatch(
+            &SyscallArgs {
+                abi: crate::trap::Abi::Native,
+                number,
+                args: [0; 6],
+                ip: 0,
+            },
+            None,
+        );
+    }
+    let _ = SEAM_DONE.fetch_add(1, Ordering::Release);
+}
+
+/// `fs::seam`'s count of Linux system calls is exact with each processor
+/// counting its own: a caller pinned to each processor makes
+/// [`SEAM_CALLS`] calls, nothing else calls in the window, and the sum of the
+/// early count and every processor's must rise by exactly that many times
+/// the processors. A sum that missed a processor's count, a count lost to a
+/// migration between finding the slot and adding, or one counted twice
+/// fails by name. Answers the processors and the calls counted.
+///
+/// # Errors
+///
+/// A caller that could not start or did not finish, or a sum that is not
+/// exact.
+pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
+    let number = number_for(Call::Getpid).ok_or("getpid has no number here")?;
+    let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
+    SEAM_DONE.store(0, Ordering::Release);
+    let before = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT);
+    for cpu in 0..online {
+        let mut only = ferrix_sched::CpuSet::empty();
+        only.insert(cpu)
+            .map_err(|_| "no such processor for a seam caller")?;
+        let _ = crate::sched::spawn_on(
+            "seam-count",
+            seam_caller,
+            number,
+            ferrix_sched::NICE_0_WEIGHT,
+            cpu,
+            only,
+        )?;
+    }
+    let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
+    while SEAM_DONE.load(Ordering::Acquire) < online {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("a seam caller did not finish in 10 s");
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    let counted = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT).wrapping_sub(before);
+    let made = SEAM_CALLS * online as u64;
+    if counted != made {
+        println!("  seamcnt  {made} calls made on {online} processors, {counted} counted");
+        return Err(
+            "the system call count is not the calls made: a processor's count was missed or lost",
+        );
+    }
+    Ok((online, counted))
+}

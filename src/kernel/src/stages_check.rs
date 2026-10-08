@@ -717,6 +717,16 @@ pub(super) fn check_path_calls() {
             "stage 8 path call self-check failed: {problem}"
         );
     }
+    match syscall::check::run_seam_count() {
+        Ok((cpus, counted)) => println!(
+            "  seamcnt  {counted} Linux calls on {cpus} processors counted exactly, each \
+             processor counting its own"
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE8_PATH_CALLS,
+            "stage 8 path call self-check failed: {problem}"
+        ),
+    }
     println!(
         "  paths    {} path calls under /tmp, {} names listed in {} getdents64 calls, \
          {} device nodes opened by number, {} frames leaked, dentry cache {:+}",
