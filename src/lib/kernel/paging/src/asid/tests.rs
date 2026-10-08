@@ -74,7 +74,7 @@ fn asid_reserved_numbers_survive_a_rollover() {
     let mut active = [0_u64; CPUS];
     let mut tags = Vec::new();
     for _ in 1..NUMBERS {
-        let given = numbers.assign(0, |_| unreachable!()).expect("a number");
+        let given = numbers.assign(0, |_| 0).expect("a number");
         assert!(!given.rolled_over, "rolled over with a number still free");
         tags.push(given.tag);
     }
@@ -100,7 +100,8 @@ fn asid_reserved_numbers_survive_a_rollover() {
     assert!(!numbers.is_current(tags[7]));
     assert_ne!(number_of(fresh.tag), number_of(tags[7]));
     assert_ne!(number_of(fresh.tag), number_of(tags[200]));
-    let kept = numbers.assign(tags[7], |_| unreachable!()).expect("kept");
+    let kept = numbers.assign(tags[7], |_| 0).expect("kept");
+    assert!(!kept.rolled_over);
     assert_eq!(number_of(kept.tag), number_of(tags[7]));
     assert_eq!(
         numbers.reserved(0),
@@ -115,7 +116,7 @@ fn asid_reserved_numbers_survive_a_rollover() {
         }
     }
     assert_eq!(number_of(numbers.reserved(2)), number_of(tags[200]));
-    let still = numbers.assign(tags[200], |_| unreachable!()).expect("kept");
+    let still = numbers.assign(tags[200], |_| 0).expect("kept");
     assert_eq!(number_of(still.tag), number_of(tags[200]));
     assert!(numbers.take_pending(1));
     assert!(!numbers.take_pending(1));
@@ -148,8 +149,8 @@ fn asid_generation_refuses_overflow() {
 fn asid_rollover_with_every_number_reserved_is_refused() {
     let mut numbers: Numbers<NUMBERS> = Numbers::new();
     let mut active = [0_u64; NUMBERS];
-    for cpu in 1..NUMBERS {
-        active[cpu] = numbers.assign(0, |_| 0).expect("a number").tag;
+    for slot in active.iter_mut().skip(1) {
+        *slot = numbers.assign(0, |_| 0).expect("a number").tag;
     }
     assert_eq!(
         numbers.assign(0, |cpu| core::mem::replace(&mut active[cpu], 0)),

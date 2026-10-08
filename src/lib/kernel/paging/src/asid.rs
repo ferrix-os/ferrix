@@ -288,7 +288,7 @@ pub struct FlushPlan {
     /// (`CTR.L1Ip` 0b01, DDI 0406C.d B4.1.42).
     pub instruction_cache: bool,
     /// `BPIALL` at every install, not only in the flush: the predictor needs
-    /// maintenance at every change of ContextID (`ID_MMFR1.BPred` 0b0001,
+    /// maintenance at every change of `ContextID` (`ID_MMFR1.BPred` 0b0001,
     /// B4.1.90; 0b0000 is a core with no predictor).
     pub predictor_every_install: bool,
 }
