@@ -5447,8 +5447,8 @@ Item 10 says what it must keep when it lands.
    decision.
 
    *Storage.* Eight tags a space, 64 bytes, because ARMv7-A Ferrix runs on
-   GICv2, which has eight CPU interfaces. `describe_cpus` refuses a tree that
-   describes more, and the tag lookup is fallible, with a fatal panic behind
+   GICv2, which has eight CPU interfaces. `describe_cpus` is to refuse a tree
+   that describes more (new code; today it does not), and the tag lookup is fallible, with a fatal panic behind
    it. The per-processor state is two words a processor. Both are touched
    only by their own processor, inside `install` with interrupts masked (its
    contract): `Relaxed` loads and stores, no read-modify-write, no remote
@@ -5486,7 +5486,7 @@ Item 10 says what it must keep when it lands.
    processor's answer.
 
    Per-processor numbers make two facts load-bearing that were incidental
-   before, and this design makes them conditions (L.armv7a.8):
+   before, and this design makes them conditions (L.armv7a.16):
    - no invalidation on this architecture is scoped by an ASID, because a
      number names a different space on each processor;
    - shootdowns stay broadcast, because an IPI scheme scoped by the set would
@@ -5622,7 +5622,7 @@ Item 10 says what it must keep when it lands.
       unchanged.
     - It is measured on hardware for the same reason as here.
 
-#### Requirements (to reserve: L.mm.69-70, L.armv7a.5-10)
+#### Requirements (to reserve: L.mm.69-70, L.armv7a.13-10)
 
 - **L.mm.69** (`ferrix_paging::asid`): the allocator shall give each
   number from 1 to 255 to at most one tag in a generation, never give 0, and
@@ -5630,20 +5630,20 @@ Item 10 says what it must keep when it lands.
 - **L.mm.70**: the allocator shall ask for a flush exactly when it starts a
   generation, which it does only when its numbers have run out; and no tag of
   an earlier generation shall count as current.
-- **L.armv7a.5**: `install_user_root` shall write the space's number for this
+- **L.armv7a.13**: `install_user_root` shall write the space's number for this
   processor and the root into `TTBR0` in one write, clear `EPD0`, and issue
   no TLB maintenance unless the allocator started a generation.
-- **L.armv7a.6**: at the start of a generation, the processor shall park
+- **L.armv7a.14**: at the start of a generation, the processor shall park
   `TTBR0` (`EPD0` set and synchronized, then ASID 0), then complete a local
   `TLBIALL` and `BPIALL`, before it writes any number of the new generation.
-- **L.armv7a.7**: `uninstall_user_root` shall set `EPD0` and synchronize it
+- **L.armv7a.15**: `uninstall_user_root` shall set `EPD0` and synchronize it
   before it writes `TTBR0 = 0`, and invalidate nothing.
-- **L.armv7a.8**: on ARMv7-A, every shootdown shall be broadcast and by
+- **L.armv7a.16**: on ARMv7-A, every shootdown shall be broadcast and by
   address for every ASID, or of everything, and no invalidation shall name
   an ASID.
-- **L.armv7a.9**: every processor ARMv7-A brings online shall have a tag in
+- **L.armv7a.17**: every processor ARMv7-A brings online shall have a tag in
   every space: at most eight, refused at discovery beyond that.
-- **L.armv7a.10**: spare, for a condition the review adds.
+- **L.armv7a.18**: spare, for a condition the review adds.
 - **L.user.55**: the statement is unchanged. The criterion changes: each
   round touches pages the earlier rounds did not, so on hardware a second
   round must walk rather than hit the first round's entries.
@@ -5659,12 +5659,12 @@ Parents: H.MEM.1 for all of them.
 |---|---|---|---|
 | L.mm.69 | host: `asid_numbers_are_unique_in_a_generation`, ten generations; `asid_model_tlb_never_hits_another_space`, 2 to 4 modelled processors, a TLB that keeps every entry until told, random new, drop, install, touch, uninstall over many rollovers | `next` not advanced | host |
 | L.mm.70 | the same two | the rollover asks for no flush; the generation not advanced | host |
-| L.armv7a.5 | boot `asid` line: after an install, `TTBR0[55:48]` is the tag's number, not 0, and the root is the space's; `spaces` (L.user.56) | install writes ASID 0, which also fails `spaces` under TCG | TCG |
-| L.armv7a.5, uniqueness in the kernel | `spaces` | the kernel's `next` not advanced | TCG |
-| L.armv7a.6 | `asid` line: a forced rollover adds one to the generation and one to the flush count, kept where the flush is issued; the stale probe: A gets number 1 at a rollover and reads its page, a second rollover gives B number 1, and B reads its own page at the same address | the rollover's flush call removed: the count fires under TCG, the probe on the DK1 only | TCG (count), board (probe) |
-| L.armv7a.7 | `asid` line: after an uninstall, `TTBR0 == 0` and `EPD0` set | uninstall that only sets `EPD0` | TCG |
-| L.armv7a.8 | `const` assertion that `TLB_FLUSH_IS_BROADCAST` holds where the tags are kept; the existing FX-0602 check | `TLB_FLUSH_IS_BROADCAST` false on ARMv7-A: the build stops on the assertion | build |
-| L.armv7a.9 | `asid` line on every processor (`run_everywhere`): `TTBCR.EAE` set, `A1` clear, a tag for its number | tags shrunk to one: fails at `--smp 2` | TCG `--smp 2` |
+| L.armv7a.13 | boot `asid` line: after an install, `TTBR0[55:48]` is the tag's number, not 0, and the root is the space's; `spaces` (L.user.56) | install writes ASID 0, which also fails `spaces` under TCG | TCG |
+| L.armv7a.13, uniqueness in the kernel | `spaces` | the kernel's `next` not advanced | TCG |
+| L.armv7a.14 | `asid` line: a forced rollover adds one to the generation and one to the flush count, kept where the flush is issued; the stale probe: A gets number 1 at a rollover and reads its page, a second rollover gives B number 1, and B reads its own page at the same address | the rollover's flush call removed: the count fires under TCG, the probe on the DK1 only | TCG (count), board (probe) |
+| L.armv7a.15 | `asid` line: after an uninstall, `TTBR0 == 0` and `EPD0` set | uninstall that only sets `EPD0` | TCG |
+| L.armv7a.16 | `const` assertion that `TLB_FLUSH_IS_BROADCAST` holds where the tags are kept; the existing FX-0602 check | `TLB_FLUSH_IS_BROADCAST` false on ARMv7-A: the build stops on the assertion | build |
+| L.armv7a.17 | `asid` line on every processor (`run_everywhere`): `TTBCR.EAE` set, `A1` clear, a tag for its number | tags shrunk to one: fails at `--smp 2` | TCG `--smp 2` |
 | L.user.55 | `check_the_processor_walks_an_installed_space`, rounds on fresh pages | install leaves `EPD0` set (the existing cause) | TCG |
 
 The forced rollover uses a check-only `SpaceTags::forget_here`, which
@@ -5688,7 +5688,7 @@ extra is the boot probe and seven boot controls.
   or must it come first?
 - **Q2.** One allocator per processor, with shootdowns by address for every
   ASID, instead of Linux's machine-wide allocator. Accepted?
-- **Q3.** L.armv7a.6's flush can be shown under TCG only by its count; the
+- **Q3.** L.armv7a.14's flush can be shown under TCG only by its count; the
   stale probe's control can fire only on the board. Is a counted control
   under TCG, with the probe's control owed as a DK1 run, acceptable, under
   the rule "only where no emulator can show it"?
@@ -5698,8 +5698,44 @@ extra is the boot probe and seven boot controls.
 
 #### Where it stands
 
-Design written 2026-10-08 on `os07/asid` (from `main` 2032638fa); not yet
-reviewed.
+Design written 2026-10-08 on `os07/asid`. **Reviewed: OK IF (A1) to (A15)**
+(os07-asid-cert, ledger line 590, 2026-10-08). In short:
+- before code: (A1) reserve L.mm.69-70 and L.armv7a.13-20 on `main` (5 to 12
+  are os07/ustate's, whose design is §9.14); (A2) an `isb` between the
+  `TTBR0` write and the `EPD0` clear, the `TTBCR` write skipped when `EPD0`
+  is already clear -- QEMU 10.2.1's `vmsa_ttbcr_write` flushes the TLB on
+  every `TTBCR` write, so without the skip no `spaces` control can fire under
+  TCG -- and each sequence in one `asm!` block with a static order check and
+  its control; (A3) item 7's base case stated, generations never go back,
+  overflow fatal; (A4) `CTR.L1Ip` read at bring-up, `ICIALLU` at the rollover
+  or no ASIDs on an ASID-tagged VIVT instruction cache; (A5) ARM ARM (DDI
+  0406C.d) and Cortex-A7 TRM citations for every "citation owed", `CnP` (bit
+  0 of `TTBR0`) asserted 0; (A6) H.MEM.7 restated, with an L row for the
+  drop on ARMv7-A;
+- before `land.sh take`: (A7) the set's wording everywhere it appears;
+  (A8) the host model with drops, frame reuse and broadcast shootdowns, one
+  control a set-scoped shootdown; (A9) one check per row: L.armv7a.16 split
+  (broadcast; no maintenance names an ASID, `flush_user_tlb` deleted and a
+  static scan for c8 operations with opc2 1, 2 or 5), L.armv7a.17 split (a
+  tag per online processor; the refusal of a ninth, host-tested), a row that
+  no user leaf is global (a boot walk); (A10) the TCG controls fired with
+  counts, L.mm.19's criterion moved with L.user.55's; (A11) the stale probe
+  and its control run on the DK1 before any DK1 figure of this step is
+  recorded, a BACKLOG row until then; (A12) SAFETY lines, the asm allowlist
+  raised by the counted lines, the tags and per-processor words in §9.8 2f's
+  table; (A13) `forget_here` without a processor argument, check code only;
+  (A14) SPECULATION.md and VA V-06 name the TLB and walk caches as a timing
+  channel, TRACEABILITY rows, coverage carried, F-67 filed; (A15) gates,
+  x86-64 and AArch64 boot lines unchanged, every control fired, a code review.
+- Q1: **F-67** (Moderate, reserved): the remaps of item 8 write the new entry
+  before the old one is invalidated, on AArch64 and ARMv7-A alike. Filed with
+  a BACKLOG row for the fix, in or before this landing; it need not come
+  first. Q2 to Q5 accepted under the conditions.
+
+**Stopped after the verdict** (os07-asid, 2026-10-08): with the conditions
+the step is about 20 to 25 points, against the brief's limit of about 15, so
+no code is written. The design text above still needs A2 to A6 worked in
+before it goes back to the consultant.
 
 ### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 
