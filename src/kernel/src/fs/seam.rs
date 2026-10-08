@@ -21,8 +21,11 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-/// Linux system calls answered.
-static SYSCALLS: AtomicU64 = AtomicU64::new(0);
+/// Linux system calls answered before every processor's record is kept;
+/// after that each processor counts its own (`smp::PerCpu::syscalls`), so
+/// the add every call makes is no locked add on a line every processor
+/// writes (po10-pipe P2, the consultant's B4).
+static EARLY_SYSCALLS: AtomicU64 = AtomicU64::new(0);
 /// File pages read or faulted in from a page cache's VMO without a fill.
 static SERVED: AtomicU64 = AtomicU64::new(0);
 /// File pages filled from a source.
@@ -36,7 +39,33 @@ static COMPLETED: AtomicU64 = AtomicU64::new(0);
 
 /// One Linux system call answered.
 pub(crate) fn syscall() {
-    let _ = SYSCALLS.fetch_add(1, Ordering::Relaxed);
+    if crate::sched::records_kept() {
+        // SAFETY: (SHARED) the records are kept, so this processor's is
+        // installed, and the offset is its system call count's, an aligned
+        // word only this processor writes.
+        let _ = unsafe { crate::arch::this_cpu_add(crate::smp::SYSCALLS_WORD_OFFSET, 1) };
+    } else {
+        let _ = EARLY_SYSCALLS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Linux system calls answered so far: the early count and every
+/// processor's own. `leave_out` names a processor whose count is not added,
+/// for the negative control of the check that requires the sum exact.
+pub(crate) fn syscalls_except(leave_out: Option<usize>) -> u64 {
+    let early = EARLY_SYSCALLS.load(Ordering::Relaxed);
+    let cpus = crate::smp::topology().map_or(&[][..], crate::smp::Topology::cpus);
+    cpus.iter()
+        .enumerate()
+        .filter(|&(cpu, _)| Some(cpu) != leave_out)
+        .fold(early, |sum, (_, record)| {
+            sum.wrapping_add(record.syscalls.read())
+        })
+}
+
+/// Linux system calls answered so far.
+pub(crate) fn syscalls() -> u64 {
+    syscalls_except(None)
 }
 
 /// `pages` file pages served from a page cache without a fill.
@@ -68,7 +97,7 @@ pub(crate) fn render() -> Vec<u8> {
     let _ = writeln!(
         line,
         "seam syscalls {} served {} filled {} from-disk {} submitted {} completed {}",
-        SYSCALLS.load(Ordering::Relaxed),
+        syscalls(),
         SERVED.load(Ordering::Relaxed),
         FILLED.load(Ordering::Relaxed),
         FROM_DISK.load(Ordering::Relaxed),
