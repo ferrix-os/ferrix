@@ -70,7 +70,12 @@ mitigation on, both programs in one domain, compared with seL4 built with the
 same protections. `--mitigations off`, the `call` line (outside a domain,
 with the switch barrier) and IBPB at every switch are reported, not gated.
 
-**The target:** under 400 ns p50 matched, on nazuna (customer, 2026-10-06).
+**The main target since 2026-10-08** (customer): the STM32MP157D-DK1,
+bare metal, against Linux 7.2.9 and seL4 on the same board, with the same
+resources (`docs/BOARD-BENCH.md`). The rule is unchanged: at or below seL4.
+nazuna, below, is a side target.
+
+**The x86-64 target:** under 400 ns p50 matched, on nazuna (customer, 2026-10-06).
 seL4 matched is 440 ns there, 400 to 410 without its refill **(measured,
 §9.6)**. Redox 0.9.0's scheme round trip is 1,965 ns with no speculative
 defence at all **(measured, §9.6a)**.
