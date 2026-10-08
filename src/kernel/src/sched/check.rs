@@ -1565,7 +1565,8 @@ fn a_drained_waiter_survives_its_last_look() -> Result<(), &'static str> {
         LAST_LOOK_BY_INTERRUPT,
         "a wait's last look was cut short at an interrupt's exit: a waiter whose entry a wake \
          drained while it ran was left blocked on no run queue",
-    )
+    )?;
+    a_blocking_look_ends_in_its_switch()
 }
 
 /// One case of [`a_drained_waiter_survives_its_last_look`], `how` saying which
@@ -1677,4 +1678,123 @@ fn last_look_race(me: &Arc<Task>, how: usize) {
     }
     let held = me.is_queued() && me.switches() == switches && me.state() == BLOCKED;
     LAST_LOOK_HELD.store(held, Ordering::Release);
+}
+
+/// Whether the blocking case's waker found its waiter blocked and off its run
+/// queue, as a waiter that really blocked is.
+static BLOCKING_FOUND_ASLEEP: AtomicBool = AtomicBool::new(false);
+
+/// Whether the blocking case's wait returned true, with the count at zero
+/// and interrupts on.
+static BLOCKING_RETURNED_CLEAN: AtomicBool = AtomicBool::new(false);
+
+/// The last look of a wait that blocks ends in its own switch (F-69's cheaper
+/// hold, `docs/roadmap/stage-05-tasks-scheduler.md`).
+///
+/// The waiter's last look asks this processor for a decision by a lock's
+/// release and does not find its condition, and nothing drains it. With the
+/// hold, the look is not cut short: the waiter stays queued, unswitched and
+/// blocked to its end. The hold is then let go inside the block's own mask
+/// (`block_ending_hold`), and the block is the decision. The checker, on the
+/// same processor, must then find the waiter blocked and off its run queue,
+/// make its condition true and wake it. The wait must return true, with this
+/// processor's count back at zero and interrupts on.
+///
+/// Without the hold, the lock's release switches the waiter out inside its
+/// look, and the case fails with its own sentence. A waiter the wake did not
+/// bring back is woken by hand so the boot goes on.
+///
+/// Verifies: L.sched.71
+fn a_blocking_look_ends_in_its_switch() -> Result<(), &'static str> {
+    let allocations = crate::vmap::usage().allocations;
+    let here = super::current()
+        .ok_or("the checking task is not running")?
+        .cpu();
+    DONE.store(0, Ordering::Release);
+    LAST_LOOK_READY.store(false, Ordering::Release);
+    LAST_LOOK_LOOKS.store(0, Ordering::Release);
+    LAST_LOOK_HELD.store(false, Ordering::Release);
+    BLOCKING_FOUND_ASLEEP.store(false, Ordering::Release);
+    BLOCKING_RETURNED_CLEAN.store(false, Ordering::Release);
+
+    let waiter = super::spawn_on(
+        "check-blocking-look",
+        blocks_after_its_last_look,
+        0,
+        NICE_0_WEIGHT,
+        here,
+        CpuSet::of(here),
+    )?;
+    // The waiter runs while this task sleeps: both are on this processor.
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_LOOK_PATIENCE_NANOS);
+    while !(LAST_LOOK_LOOKS.load(Ordering::Acquire) >= 2
+        && waiter.state() == BLOCKED
+        && !waiter.is_queued())
+        && crate::timer::now_nanos() < deadline
+    {
+        super::sleep_for(1_000_000);
+    }
+    let asleep = waiter.state() == BLOCKED && !waiter.is_queued();
+    BLOCKING_FOUND_ASLEEP.store(asleep, Ordering::Release);
+    LAST_LOOK_READY.store(true, Ordering::Release);
+    LAST_LOOK_QUEUE.wake_all();
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_LOOK_PATIENCE_NANOS);
+    let finished = FINISHED.wait_until_deadline(|| DONE.load(Ordering::Acquire) >= 1, deadline);
+    if !finished {
+        super::wake(&waiter);
+        wait_for(
+            || DONE.load(Ordering::Acquire) >= 1,
+            "a blocking waiter its wake did not bring back did not finish once woken by hand",
+        )?;
+        reap_to(allocations, "a blocking waiter lost")?;
+        drop(waiter);
+        return Err("a waiter that blocked after its last look was not brought back by its wake");
+    }
+    reap_to(allocations, "a blocking waiter's last look")?;
+    drop(waiter);
+    if LAST_LOOK_LOOKS.load(Ordering::Acquire) < 2 {
+        return Err("the blocking case's waiter never reached its last look");
+    }
+    if !LAST_LOOK_HELD.load(Ordering::Acquire) {
+        return Err(
+            "a blocking wait's last look was cut short at a lock's release: the waiter was \
+             switched out or taken off its run queue inside its look",
+        );
+    }
+    if !BLOCKING_FOUND_ASLEEP.load(Ordering::Acquire) {
+        return Err("a wait whose last look failed was not found blocked off its run queue");
+    }
+    if !BLOCKING_RETURNED_CLEAN.load(Ordering::Acquire) {
+        return Err(
+            "a wait that blocked after its last look came back without its condition, with the \
+             preemption count raised or with interrupts masked",
+        );
+    }
+    Ok(())
+}
+
+/// The waiter of [`a_blocking_look_ends_in_its_switch`]: a trusting wait
+/// whose last look invites a decision and fails, then a look at the state it
+/// came back in.
+fn blocks_after_its_last_look(_: usize) {
+    let returned = LAST_LOOK_QUEUE.wait_trusting(|| {
+        let look = LAST_LOOK_LOOKS
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        if look == 2
+            && let Some(me) = super::current()
+        {
+            let switches = me.switches();
+            super::mark_resched(me.cpu());
+            super::preempt_disable();
+            super::preempt_enable();
+            let held = me.is_queued() && me.switches() == switches && me.state() == BLOCKED;
+            LAST_LOOK_HELD.store(held, Ordering::Release);
+        }
+        LAST_LOOK_READY.load(Ordering::Acquire)
+    });
+    let count_zero = super::preempt::word_here().is_some_and(|(_, count, _)| count == 0);
+    let clean = returned && count_zero && crate::arch::interrupts_enabled();
+    BLOCKING_RETURNED_CLEAN.store(clean, Ordering::Release);
+    finish();
 }
