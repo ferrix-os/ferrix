@@ -187,6 +187,16 @@ icache off
 bootelf -p 0xc2000000
 go 0xc0147000
 
+# seL4's best case beside the matched row: the client's FPU off too
+# (os07/b2-sel4, -DSel4rtClientFpu=OFF); its build line says client_fpu=off.
+# Both sel4bench images carry patches 3c7d1fe6e283.
+[sel4-nofpu]
+load mmc 0:4 0xc2000000 bench/sel4/sel4bench-nofpu.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0147000
+
 # sel4test (debug) checks the port. It ends with "Test suite passed" (or
 # failed) and the kernel halts: no reset, so rotate.ps1 asks for a press.
 [sel4test]
