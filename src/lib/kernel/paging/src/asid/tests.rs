@@ -124,6 +124,23 @@ fn asid_generation_refuses_overflow() {
     assert_eq!(numbers.taken, before.taken);
 }
 
+/// A machine with as many processors as numbers, each running one, leaves
+/// nothing free after a rollover: refused, never a number given twice.
+///
+/// Verifies: L.mm.70
+#[test]
+fn asid_rollover_with_every_number_reserved_is_refused() {
+    let mut numbers: Numbers<NUMBERS> = Numbers::new();
+    let mut active = [0_u64; NUMBERS];
+    for cpu in 1..NUMBERS {
+        active[cpu] = numbers.assign(0, |_| 0).expect("a number").tag;
+    }
+    assert_eq!(
+        numbers.assign(0, |cpu| core::mem::replace(&mut active[cpu], 0)),
+        Err(AsidError::NoneFree)
+    );
+}
+
 /// The flush plan from `CTR` and `ID_MMFR1`: QEMU's and the Cortex-A7's
 /// values, and the two cases that add an operation.
 ///
@@ -176,6 +193,8 @@ struct Entry {
 struct Cpu {
     running: Option<usize>,
     asid: u8,
+    /// `TTBR0` as last written: the space's index plus one, 0 for none.
+    base: usize,
     tlb: Vec<Entry>,
 }
 
@@ -289,8 +308,15 @@ impl Machine {
             space.set[cpu] = false;
         }
         self.spaces[index].as_mut().expect("live").set[cpu] = true;
+        // B3.10.2: a new base needs a TLB invalidation unless the ASID
+        // changes with it, and an install invalidates nothing.
+        assert!(
+            self.cpus[cpu].asid != number || self.cpus[cpu].base == index + 1,
+            "processor {cpu} changed its base and kept number {number}"
+        );
         self.cpus[cpu].running = Some(index);
         self.cpus[cpu].asid = number;
+        self.cpus[cpu].base = index + 1;
         self.check_numbers_mean_one_space();
     }
 
@@ -301,6 +327,7 @@ impl Machine {
             space.set[cpu] = false;
         }
         self.cpus[cpu].asid = NO_SPACE;
+        self.cpus[cpu].base = 0;
     }
 
     /// A use of `va`, or a walk speculated through it: a hit must reach the

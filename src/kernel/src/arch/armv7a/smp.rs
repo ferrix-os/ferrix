@@ -557,5 +557,10 @@ extern "C" fn secondary_start(record: u32) -> ! {
     // The boot core's side-channel defences, before this one can run a
     // program: after the record, which is where it says what it applied.
     super::speculation::apply_this_cpu();
+    // Its own ASID flush plan, from its own registers, before it can run a
+    // program.
+    if let Some(me) = crate::smp::this_cpu() {
+        super::asid::init_this_cpu(me.logical);
+    }
     crate::smp::secondary_main(u64::from(record))
 }

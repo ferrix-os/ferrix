@@ -69,6 +69,10 @@ pub const fn generation_of(tag: u64) -> u64 {
 pub enum AsidError {
     /// The generation would pass [`MAX_GENERATION`].
     GenerationExhausted,
+    /// Every number is reserved by a processor even after a rollover: a
+    /// machine with 255 processors or more running a space each, which no
+    /// machine this allocator serves can be.
+    NoneFree,
 }
 
 /// A number given to a space.
@@ -166,7 +170,8 @@ impl<const CPUS: usize> Numbers<CPUS> {
     /// # Errors
     ///
     /// [`AsidError::GenerationExhausted`] if a rollover would pass
-    /// [`MAX_GENERATION`]; nothing changes.
+    /// [`MAX_GENERATION`]; nothing changes. [`AsidError::NoneFree`] if a
+    /// rollover leaves every number reserved.
     pub fn assign(
         &mut self,
         old: u64,
@@ -207,11 +212,9 @@ impl<const CPUS: usize> Numbers<CPUS> {
             Some(number) => (number, false),
             None => {
                 self.roll_over(swap_active)?;
-                // The rollover reserves at most one number a processor, and
-                // with fewer processors than numbers one is always free; a
-                // machine with more would have nowhere to go, which `CPUS`'s
-                // bound below rules out at compile time.
-                (self.find_free().unwrap_or(NO_SPACE), true)
+                // The rollover reserves at most one number a processor, so
+                // with fewer than 255 processors one is always free.
+                (self.find_free().ok_or(AsidError::NoneFree)?, true)
             }
         };
         let _ = self.take(number);
@@ -251,7 +254,6 @@ impl<const CPUS: usize> Numbers<CPUS> {
 
     /// Start a generation: see the module's rules.
     fn roll_over(&mut self, mut swap_active: impl FnMut(usize) -> u64) -> Result<(), AsidError> {
-        const { assert!(CPUS < NUMBERS - 1, "more processors than numbers to reserve") };
         let generation = self
             .generation
             .checked_add(1)

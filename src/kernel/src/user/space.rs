@@ -247,8 +247,14 @@ pub(crate) struct AddressSpace {
     root: Frame,
     /// This space, as the objects it maps record it.
     me: Weak<AddressSpace>,
-    /// The processors whose TLB may still hold this space's translations.
+    /// The processors that have this space installed, or had it until their
+    /// last switch: on x86-64 and `AArch64` exactly those whose TLB may still
+    /// hold its translations (see the module).
     cpus: CpuMask,
+    /// Its address space identifier, on the architecture that gives one
+    /// (ARMv7-A, `docs/OPAQUE-KERNEL.md` §9.13): the same on every processor,
+    /// and gone with the space.
+    tag: arch::SpaceTag,
     /// Its shootdowns: those not yet returned, and those ever begun.
     flushes: Flushes,
     /// Held by each system call that changes which ranges are mapped, from
@@ -336,6 +342,12 @@ impl AddressSpace {
         self.root * PAGE_SIZE
     }
 
+    /// Its address space identifier tag: for the architecture's boot check.
+    #[cfg(target_arch = "arm")]
+    pub(crate) fn address_space_tag(&self) -> &arch::SpaceTag {
+        &self.tag
+    }
+
     /// Install this address space on the processor that is running, in place
     /// of `replacing` if that was installed there.
     ///
@@ -380,7 +392,7 @@ impl AddressSpace {
         // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
         // on it and the kernel is reachable through it on the architecture
         // that needs that; the caller guarantees it outlives the installation.
-        unsafe { arch::install_user_root(self.root * PAGE_SIZE) };
+        unsafe { arch::install_space_root(self.root * PAGE_SIZE, &self.tag, cpu) };
         crate::sched::trip::count(crate::sched::trip::Count::RootInstall);
         if let Some(previous) = replacing
             && !core::ptr::eq(previous, self)
@@ -420,6 +432,7 @@ impl AddressSpace {
             root,
             me: me.clone(),
             cpus: CpuMask::new(),
+            tag: arch::SpaceTag::new(),
             flushes: Flushes::new(),
             layout: SleepLock::new((), &crate::sync::SchedParker),
             inner: SpinLock::new(inner),
@@ -1065,6 +1078,9 @@ impl AddressSpace {
             let mut pages = TlbPages::new();
             let _ = self.forget_in(&inner, id, &[(index, 1)], &mut pages);
             pages.add(page);
+            // Break before make (F-67): the old entry out of every TLB that
+            // can be told without an interrupt, before the new one goes in.
+            arch::break_before_make(page);
             let mapped = mm::map_in(
                 self.root * PAGE_SIZE,
                 page,
@@ -1335,6 +1351,8 @@ impl AddressSpace {
         if replace {
             let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
             pages.add(at.page);
+            // Break before make (F-67), as in `fault`.
+            arch::break_before_make(at.page);
         }
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
@@ -1382,6 +1400,8 @@ impl AddressSpace {
         let mut pages = TlbPages::new();
         let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
         pages.add(at.page);
+        // Break before make (F-67), as in `fault`.
+        arch::break_before_make(at.page);
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
             at.page,

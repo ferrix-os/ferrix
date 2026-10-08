@@ -94,6 +94,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let copied = check_fork_shares_pages_and_a_write_copies_one()?;
     check_a_page_made_writable_after_fork_is_copied()?;
     let swapped = check_two_tasks_keep_their_own_address_spaces()?;
+    arch::check_address_space_ids()?;
     let refused = crate::user::edge_check::run()?;
     crate::console::println!(
         "  edges    {refused} refusals of an address space, an object and the kernel arena, each \
@@ -729,9 +730,9 @@ fn check_the_processor_walks_an_installed_space() -> Result<u64, &'static str> {
 
     let space = AddressSpace::new().map_err(|_| "could not make an address space")?;
     let _ = space
-        .map_anonymous(base, pages * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_anonymous(base, ROUNDS * pages * PAGE_SIZE, VmaFlags::READ_WRITE)
         .map_err(|_| "mapping failed")?;
-    for index in 0..pages {
+    for index in 0..ROUNDS * pages {
         space
             .fault(base + index * PAGE_SIZE, Access::WRITE)
             .map_err(|_| "a fault in a mapped region was not resolved")?;
@@ -745,7 +746,11 @@ fn check_the_processor_walks_an_installed_space() -> Result<u64, &'static str> {
 
     let mut walked = Ok(());
     for round in 0..ROUNDS {
-        walked = walk_through_installed(&space, base, pages, round);
+        // Each round on pages no earlier round touched: with ASIDs a round's
+        // entries outlive its uninstall, and a second round on the same pages
+        // could hit them rather than walk (`docs/OPAQUE-KERNEL.md` §9.13).
+        let first = base + round * pages * PAGE_SIZE;
+        walked = walk_through_installed(&space, first, pages, round);
 
         // Unconditionally, and before the mask is lifted or `space` is
         // dropped: a processor left translating through tables that are then

@@ -1352,6 +1352,18 @@ pub(crate) static STAGE6_USER_MEMORY: Explanation = Explanation {
           docs/ROADMAP.md stage 6",
 };
 
+/// For ARMv7-A's `asid::number_for`, when the allocator can give no number.
+pub(crate) static ASID_EXHAUSTED: Explanation = Explanation {
+    code: "FX-0603",
+    title: "no address space identifier could be given",
+    meaning: "On ARMv7-A every address space is tagged in the TLB with an 8-bit ASID, one               allocator for the whole machine (docs/OPAQUE-KERNEL.md §9.13). Numbers are given               in generations; when none is free the allocator starts a new generation, keeping               the number each processor is running reserved. It stops the machine rather than               give a number twice: when the generation would pass 2^56, or when every number               is still reserved after a rollover, which needs 255 processors or more.",
+    causes: &[
+        "A machine with 255 or more processors running a space each, which no GICv2 machine          can be.",
+        "A generation counter that was overwritten: 2^56 rollovers cannot happen in the life          of a machine.",
+    ],
+    see: "src/kernel/src/arch/armv7a/asid.rs; src/lib/kernel/paging/src/asid.rs;           docs/OPAQUE-KERNEL.md §9.13",
+};
+
 /// For `check_reverse_map` in `stages_check.rs`, when `user::rmap_check::run` fails.
 pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
     code: "FX-0602",
@@ -3239,6 +3251,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &GRACE_PERIOD_TIMEOUT,
     &SHOOTDOWN_TURN_TIMEOUT,
     &SPACE_SET_WITHOUT_RECORD,
+    &ASID_EXHAUSTED,
     &PRIVATE_OBJECT_SHARED,
     &LOAD_REGISTRATION,
     &BOOT_OUT_OF_MEMORY,
