@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "1da816551561336e065d3d47ef2ca829ea8ecdb6021129695ac8d612dcde38f0",
+  "digest": "4d4178ba0771ea9e71c4c960db8bcac621c3a46797f82db40a67dbcb56879bd2",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -64997,7 +64997,7 @@
                   "qualifiedName": "FerrixArmv7aRequirements::AddressSpaceIdentifiers::userLeavesAreNotGlobal",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"A user space's leaves are all non-global (the `asid` line), and after the loader's alias has gone every kernel leaf is global (the `global` line).\"",
+                  "value": "\"A user space's leaves, put there by the fault path, are all non-global (the `asid` line), and after the loader's alias has gone every kernel leaf is global (the `global` line).\"",
                   "source": {
                     "file": "docs/sysml/21-armv7a-requirements.sysml",
                     "line": 123
