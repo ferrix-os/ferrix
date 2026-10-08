@@ -5879,6 +5879,55 @@ allocator and its loom model add about 5 to the first reading's 20 to 25.
 - B8: below.
 - Q6 yes, Q7 yes (A9 (ii) dropped), Q8 no: a static check, not a reading.
 
+#### As built (os07/asid), and where it differs from the text above
+
+- `ferrix_paging::asid` holds `Numbers` (the map, the reservations, the
+  pending bits, the search that wraps to 1, the rollover) and `FlushPlan`.
+  A rollover that leaves no number free is refused (`AsidError::NoneFree`),
+  not ruled out at compile time, so the kernel's `Numbers<MAX_CPUS>` needs no
+  limit on processors; the kernel stops with FX-0603 on either refusal.
+- `arch/armv7a/asid.rs` keeps it under one spin lock beside the active
+  tags, the generation, the flush counts and each processor's plan, decided
+  by `init_this_cpu` from `init_speculation` on the boot processor and from
+  `secondary_start` on the others. `SpaceTag` is the space's `AtomicU64`;
+  other architectures get a zero-sized one through `arch::install_space_root`,
+  and their `install_user_root` is untouched.
+- `cpu.rs`: `install_ttbr0`, `park_ttbr0`, `flush_for_new_generation`,
+  `invalidate_predictor`, `read_ctr`, `read_id_mmfr1`; `write_ttbr0` and
+  `flush_user_tlb` are gone. Assembly 1619 to 1642 lines, `cpu.rs` 105 to
+  128 (os07/ustate raises the same cap; the second to land recounts).
+- F-67's three remaps call `break_page`, which adds the page to the
+  shootdown and calls `arch::break_before_make`: one helper rather than two
+  lines at each site, so that `resolve` stays within the complexity ratchet.
+- L.armv7a.16's check is a boot check (the `asid` line refuses a kernel
+  whose shootdowns are not a broadcast) rather than a `const` assertion, so
+  that its control stops a boot on its own message instead of a build.
+- `check-armv7a-asid.py` runs as an xtask check step, the function that
+  verifies L.user.125, since a `Verifies:` tag must sit on a check
+  function; the loom model is verified through `cargo xtask loom`
+  (L.armv7a.19), as L.sched.51 is.
+- The loom oracle takes a processor in its install to run no program until
+  its `TTBR0` write. In that window its old number is still in `TTBR0` and
+  may mean another space on another processor for a few instructions: the
+  install's swap has already replaced its active tag, so a rollover there
+  reserves the new tag, not the old. Linux's allocators have the same window.
+  What the old number can do there is a speculative walk, whose entries the
+  oracle's TLB keeps and which are never hit for another space: the
+  processor's flush is pending, and it flushes before it runs any number of
+  the new generation **(argued; the model holds the TLB half)**.
+- The boot check's other processors look at their registers from a task
+  pinned to each, since `run_everywhere`'s work is taken only before the
+  scheduler starts.
+- The kernel tree's non-global walk prints its own line, `global`, on
+  ARMv7-A only, after the `w^x` line; x86-64's and AArch64's lines do not
+  change.
+- Host, loom and static controls are run directly
+  (`~/.local/share/ferrix/logs/os07-asid/ctlhost.sh`), since `gate.sh`'s
+  verdict needs a `FERRIX-PANIC` or a guest's line: 14 of 14 FIRED on
+  c9c7364bd (`ctl-host-c9c7364bd.log`, the two order controls rerun with the
+  right expected text in `ctl-host2-c9c7364bd.log`). Boot controls go
+  through `gate.sh`, tags `os07a-<commit>-c*`.
+
 #### Where it stands
 
 - 2026-10-08, first reading: OK IF (A1) to (A15) on the allocator per
