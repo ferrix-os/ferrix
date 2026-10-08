@@ -565,6 +565,21 @@ pub(super) fn note_kept_broken() {
     let _ = KEPT_BROKEN.fetch_add(1, Ordering::Relaxed);
 }
 
+/// How many times a direct switch moved a kept reference into `current`
+/// (`L.sched.70`), over every processor.
+pub(crate) fn kept_moves() -> u64 {
+    let Some(queues) = QUEUES.get() else {
+        return 0;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let moves = queues
+        .iter()
+        .map(|lock| lock.lock().stats.kept_moves)
+        .fold(0_u64, u64::wrapping_add);
+    <arch::Irq as IrqControl>::restore(saved);
+    moves
+}
+
 /// How many kept references broke their promise ([`KEPT_BROKEN`]).
 pub(crate) fn kept_broken() -> u64 {
     KEPT_BROKEN.load(Ordering::Relaxed)
@@ -2497,7 +2512,10 @@ pub(crate) unsafe fn with_own_user_state<R>(
 /// the queue's kept reference (`L.sched.70`), letting the one it replaces
 /// go; otherwise its reference, and any kept one, dropped after the lock.
 fn finish_switch() {
-    let Some(lock) = this_cpu().and_then(queue_of) else {
+    let Some(cpu) = this_cpu() else {
+        return;
+    };
+    let Some(lock) = queue_of(cpu) else {
         return;
     };
     // SAFETY: (SHARED) this processor holds this lock — either it took it in
@@ -2511,7 +2529,11 @@ fn finish_switch() {
     }
     let previous = queue.previous.take();
     let keep = core::mem::take(&mut queue.keep_previous);
-    let dead = previous.as_ref().is_some_and(|task| task.is_dead());
+    // Its state and queue membership, each read once.
+    let (state, queued) = previous
+        .as_ref()
+        .map_or((DEAD, false), |task| (task.state(), task.is_queued()));
+    let dead = previous.is_some() && state == DEAD;
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
     // queued will pick it again, on a stack the reaper is about to free. Read
@@ -2519,7 +2541,7 @@ fn finish_switch() {
     // `choose_next`, and recorded rather than returned: nothing here can
     // report, and a check that looked at `previous` later always found it
     // already taken, so it could not fail.
-    if dead && previous.as_ref().is_some_and(|task| task.is_queued()) {
+    if dead && queued {
         let _ = DEAD_STILL_QUEUED.fetch_add(1, Ordering::Relaxed);
     }
     // **The outgoing task of a direct switch is kept, not dropped**
@@ -2532,21 +2554,21 @@ fn finish_switch() {
     // Kept only while it is parked here: blocked, unqueued, homed on this
     // processor (ledger line 566, P3). Anything else is counted and dropped
     // as before.
-    let keepable = previous.as_ref().is_some_and(|task| {
-        task.state() == task::BLOCKED && !task.is_queued() && Some(task.cpu()) == this_cpu()
-    });
-    if keep && !dead && !keepable {
-        note_kept_broken();
-    }
-    let (previous, released) = if keep && !dead && keepable {
+    let (previous, released) = if !keep {
+        (previous, queue.kept.take())
+    } else if state == task::BLOCKED
+        && !queued
+        && previous.as_ref().is_some_and(|task| task.cpu() == cpu)
+    {
         (None, core::mem::replace(&mut queue.kept, previous))
     } else {
+        note_kept_broken();
         (previous, queue.kept.take())
     };
     if released.as_ref().is_some_and(|task| {
         task.state() != task::BLOCKED
             || task.is_queued()
-            || Some(task.cpu()) != this_cpu()
+            || task.cpu() != cpu
             || Arc::strong_count(task) < 2
     }) {
         note_kept_broken();

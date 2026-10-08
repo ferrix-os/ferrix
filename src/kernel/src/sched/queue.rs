@@ -71,6 +71,9 @@ pub(crate) const MIN_ARM_NS: u64 = 20_000;
 pub(crate) struct Stats {
     /// Context switches.
     pub(crate) switches: u64,
+    /// Direct switches that moved the kept reference into `current`
+    /// (`CpuQueue::kept`, `L.sched.70`).
+    pub(crate) kept_moves: u64,
     /// Tasks taken from another CPU's queue.
     pub(crate) stolen_in: u64,
     /// Tasks another CPU took from this one.
@@ -759,7 +762,7 @@ impl CpuQueue {
             .as_ref()
             .is_some_and(|kept| Arc::ptr_eq(kept, running))
         {
-            super::direct::count(super::direct::Count::Kept);
+            self.stats.kept_moves = self.stats.kept_moves.wrapping_add(1);
             return self.kept.take();
         }
         Some(Arc::clone(running))

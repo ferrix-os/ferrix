@@ -105,8 +105,8 @@ pub(crate) fn report_counts() {
         t11,
         t12,
         t13,
-        kept,
     ] = crate::sched::direct::counts();
+    let kept = crate::sched::kept_moves();
     let broken = crate::sched::kept_broken();
     println!(
         "  fastpath counts: trips={trips} parks={parks} declined T2={t2} T3={t3} T4={t4} \

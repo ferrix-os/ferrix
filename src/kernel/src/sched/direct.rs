@@ -80,13 +80,10 @@ pub(crate) enum Count {
     T12,
     /// T13: the caller or the peer has `END` posted.
     T13,
-    /// Not a test: a switch that moved the reference it kept into `current`
-    /// instead of counting a new one up (`L.sched.70`).
-    Kept,
 }
 
 /// How many [`Count`]s there are.
-const COUNTS: usize = Count::Kept as usize + 1;
+const COUNTS: usize = Count::T13 as usize + 1;
 
 /// The processors counted apart; any further ones share the last row.
 const COUNTED_PROCESSORS: usize = 64;
