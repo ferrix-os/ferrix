@@ -827,6 +827,10 @@ mod tests {
     /// The opener hands Chrome the address as one word, `&`s and all, with
     /// the profile it is given: run here with `printf` for Chrome.
     #[test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "runs the opener with the host's `sh`, which Windows has not got"
+    )]
     fn the_opener_hands_chrome_the_address_whole() {
         let file = opener(Arch::X86_64, "/data/home/chrome", false);
         assert_eq!((file.path.as_str(), file.mode), ("bin/xdg-open", 0o755));
