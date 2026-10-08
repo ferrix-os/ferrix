@@ -2544,20 +2544,44 @@ fn finish_switch() {
     if dead && queued {
         let _ = DEAD_STILL_QUEUED.fetch_add(1, Ordering::Relaxed);
     }
-    // **The outgoing task of a direct switch is kept, not dropped**
-    // (`L.sched.70`): the next direct switch here, which in a round trip
-    // hands the processor back to it, moves the reference into `current`
-    // instead of counting a new one up. Any other switch lets the kept one
-    // go, as does the keep that replaces it: dropped below, after the
-    // lock, where `previous` always was. A kept task let go here must still
-    // be asleep here, unqueued, with another reference.
-    // Kept only while it is parked here: blocked, unqueued, homed on this
-    // processor (ledger line 566, P3). Anything else is counted and dropped
-    // as before.
+    let (previous, released) = settle_kept(queue, cpu, previous, keep, (state, queued));
+    // SAFETY: (SHARED) held as above, released exactly once, and the queue is not
+    // touched afterwards.
+    unsafe { lock.force_unlock() };
+    drop(released);
+
+    if let Some(previous) = previous
+        && dead
+    {
+        // NOALLOC: `Zombies::push` files the task in its run slot.
+        ZOMBIES.lock().push(previous);
+    }
+}
+
+/// `finish_switch`'s keep (`L.sched.70`): answers what is left of `previous`
+/// to drop or file and the kept reference let go, both for after the lock.
+///
+/// **The outgoing task of a direct switch is kept, not dropped**: the next
+/// direct switch here, which in a round trip hands the processor back to
+/// it, moves the reference into `current` instead of counting a new one up.
+/// It is kept only while it is parked here -- blocked, unqueued, homed on
+/// this processor (ledger line 566, P3) -- and anything else is counted
+/// and dropped as before. Any other switch lets the kept one go, as does
+/// the keep that replaces it. A kept task let go here must still be asleep
+/// here, unqueued, with another reference: counted otherwise.
+///
+/// `seen` is `previous`'s state and queue membership as `finish_switch`
+/// read them. Under `queue`'s lock.
+fn settle_kept(
+    queue: &mut CpuQueue,
+    cpu: usize,
+    previous: Option<Arc<Task>>,
+    keep: bool,
+    seen: (u8, bool),
+) -> (Option<Arc<Task>>, Option<Arc<Task>>) {
     let (previous, released) = if !keep {
         (previous, queue.kept.take())
-    } else if state == task::BLOCKED
-        && !queued
+    } else if seen == (task::BLOCKED, false)
         && previous.as_ref().is_some_and(|task| task.cpu() == cpu)
     {
         (None, core::mem::replace(&mut queue.kept, previous))
@@ -2573,17 +2597,7 @@ fn finish_switch() {
     }) {
         note_kept_broken();
     }
-    // SAFETY: (SHARED) held as above, released exactly once, and the queue is not
-    // touched afterwards.
-    unsafe { lock.force_unlock() };
-    drop(released);
-
-    if let Some(previous) = previous
-        && dead
-    {
-        // NOALLOC: `Zombies::push` files the task in its run slot.
-        ZOMBIES.lock().push(previous);
-    }
+    (previous, released)
 }
 
 /// Take a task from the busiest other processor in this domain, if one will
