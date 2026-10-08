@@ -5,7 +5,7 @@ each given the same firmware, clock, cores, memory and bench code. This file
 says what runs, how the board is shared fairly, what is measured, and who
 builds what.
 
-**Status:** plan (2026-10-08). Nothing below is built yet unless it says so.
+**Status:** being built (2026-10-08). Nothing has run on the board yet. os-07, the IPC benchmark agent, owns items B1 to B6 from os-4b's handover; the Who column says who did or does each.
 
 ## Decision (customer, 2026-10-08)
 
@@ -74,12 +74,12 @@ lists. The records go through `bench-ipc --board-log ... --record`.
 
 | Item | Who | Points (estimate) |
 |---|---|---|
-| B1. Linux 7.2.9 for the DK1: kernel, device tree, initramfs, PMU module, `lbench` ported from `rdtsc` to `PMCCNTR` | os-4b's agent | 3–4 |
+| B1. Linux 7.2.9 for the DK1: kernel, device tree, initramfs, PMU module, `lbench` ported from `rdtsc` to `PMCCNTR` | os-4b's agent; os-07 since. Built, QEMU smoke passed (os4b/b1-linux); timed calls through lbench's own A32 svc (os07/b1-linux) | 3–4 |
 | B2. seL4 STM32MP1 platform; sel4test (debug) and sel4bench (release) images; the matched root task on ARMv7 | os-4b's agent | 8–12 |
 | B3. Bench suite: the after-the-call sweep for all three kernels, the Ferrix PMU switch (measurement only), and one output format | os-4b's agent | 8–10 |
-| B4. The card: firmware and the three kernels, the U-Boot selection script, and the serial driver for rotation | os-4b, once the card is in a reader | 4–5 |
-| B5. lmbench and SQLite static ARMv7 builds, run on Linux and Ferrix | after B1 | 3–4, more if Ferrix lacks a syscall |
-| B6. Ferrix's ARMv7 round trip, in skill §6's order: counter (landed, b17462efe), baseline on the board, stub clobbers and reset, ASIDs with the lazy TLB, 3b, profile, then the fast path's Arm design | product owner's agents; the consultant first for each kernel change | 25–40 |
+| B4. The card: firmware and the three kernels, the U-Boot selection script, and the serial driver for rotation | os-07: the driver, staging and plan are written (os07/b4-card, tools/common/bench/board/card/); the card waits for the customer | 4–5 |
+| B5. lmbench and SQLite static ARMv7 builds, run on Linux and Ferrix | os-07's agent (os07/b5-posix), musl 1.2.5 static, -marm | 3–4, more if Ferrix lacks a syscall |
+| B6. Ferrix's ARMv7 round trip, in skill §6's order: counter (landed, b17462efe), baseline on the board, stub clobbers and reset, ASIDs with the lazy TLB, 3b, profile, then the fast path's Arm design | os-07's agents, the consultant first for each kernel change: ASIDs (os07/asid, OPAQUE-KERNEL §9.13), user state (os07/ustate, §9.14), the profile build (os07/prof-armv7, measurement only) | 25–40 |
 
 B1 to B3 need no board: they build on nazuna and are smoke-tested under
 QEMU where a machine exists. B4 onward needs the card in a reader, done by
