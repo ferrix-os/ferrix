@@ -5374,3 +5374,273 @@ more a direction: about +40 to +50 instructions and +20 to +40 cycles a
 round trip, measured by os-76's long bench with perf against main
 523fc3d50, the median 819 to 858 ns on both sides, no p50 change resolved
 (`~/.local/share/ferrix/logs/po10-obj/perf/f65b-*`).
+### 9.13 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
+
+Steps 3 and 5 of the Arm port order (`.claude/skills/optimize-ipc-round-trip`
+§6; `docs/BOARD-BENCH.md` B6), for the DK1 matrix: (a) the runtime stub's
+clobbers, (b) 3a's vector reset, (c) 3b's thread pointer kept in the task.
+ARMv7-A only; AArch64 is the last paragraph and changes nothing. One design
+for the three, because they share the switch's two functions, one check
+file and one review.
+
+**What was read and measured first.**
+- *F1. The callers hold no VFP value.* Every native program -- the only
+  programs that link `ferrix_rt`, and the only ones that make native calls
+  on ARMv7-A (the one other stub in the tree, `nvrm`'s `nv_call`, is an
+  x86-64 `syscall`) -- is built for `armv7a-none-eabi`, soft float
+  (`tools/common/xtask/src/native.rs`).
+  On that target rustc 1.97.1 cannot allocate a VFP register at all:
+  `clobber_abi("C")` in `trap_words` fails to build ("couldn't allocate
+  output register for constraint '{s0}'"), and so does an explicit
+  `out("d8") _` **(measured, scratch build, 2026-10-08)**. Rust exposes no
+  Arm floating-point `target_feature` to `cfg` on stable, but `target_abi`
+  is `eabi` there and `eabihf` on the hard-float targets.
+- *F2. AAPCS* makes `s16`-`s31` (`d8`-`d15`) callee-saved, `d0`-`d7` and
+  `d16`-`d31` caller-saved; `FPSCR`'s condition and cumulative flags are not
+  preserved by a call, its mode bits (rounding, `FZ`, `DN`) are the
+  program's own. rustc's `clobber_abi("C")` on Arm names `r0`-`r3`, `r12`,
+  `lr`, `s0`-`s15` and `d16`-`d31`, not `d8`-`d15`.
+- *F3. `FPEXC` is not program state.* A PL0 `vmrs`/`vmsr` of any VFP system
+  register but `FPSCR` is UNDEFINED (ARM ARM v7-A/R, `VMRS`/`VMSR`). The
+  kernel writes `FPEXC` once per core, `EN` set, at bring-up
+  (`cpu::enable_user_fpu`), and never again. Cortex-A7 takes no trapped or
+  asynchronous VFP exceptions: `FPEXC.EX` and `FPSCR`'s trap-enable bits are
+  RAZ/WI (Cortex-A7 MPCore TRM; QEMU's model does the same).
+- *F4. Today's switch* (`arch/armv7a/switch.rs`) saves `FPSCR` and
+  `d0`-`d31` (256 bytes, `d0`-`d15` on a D16 core) at every switch out and
+  loads them at every switch in, reads `TPIDRURO` at save and writes it at
+  restore, and moves USR's banked `sp` and `lr`. `_blocked` is ignored.
+- *F5. Finding: `TPIDRURW` is not switched.* It is the thread ID register
+  USR mode reads **and writes** (`mcr p15, 0, rX, c13, c0, 2`). Nothing in
+  the kernel saves, loads or resets it, so a value one program writes there
+  is read by the next program on that core, across processes, and survives
+  `execve`. That breaks H.SCHED.8 (the user state no trap saves is the
+  running task's own) and FDP_RIP.2 as widened on 2026-10-02 **(argued from
+  the code; control U8-c below shows it on `main`'s switch)**. Linux
+  switches it at every switch out and in, inherits it at `fork` and zeroes
+  it at `execve` (`arch/arm/include/asm/tls.h`: `switch_tls`, `set_tpuser`,
+  `flush_tls`: "TPIDRURW is fully context-switched (unlike TPIDRURO)"). It
+  is fixed here, under (c), and is for the consultant to number.
+- *F6.* The kernel is soft float: no kernel code touches a VFP register but
+  `switch.rs`'s save, restore and `FPEXC` enable. ARMv7-A has no fast path
+  (`FAST_WRITE_READ` is false), so every resume is `choose_next`'s, through
+  `sched::switch_user_state` (L.sched.54).
+
+**(a) The contract and the stub.** Through `channel_write_read` (0x1013),
+`object_wait_one` (0x1008) and `port_wait` (0x101A), made with `svc`, a
+program on ARMv7-A must assume that **every** VFP register is lost --
+`d0`-`d31` (`d0`-`d15` on a D16 core), `d8`-`d15` included -- and keeps
+`FPSCR` whole. What it finds instead is zero in every one of them and its
+own `FPSCR`. Why every register rather than AAPCS's caller-saved set, with
+`d8`-`d15` kept by the kernel:
+1. *The callers pay nothing.* No caller can hold a value in a VFP register
+   (F1), so declaring all 32 dead costs them nothing, while keeping
+   `d8`-`d15` would cost the kernel a 64-byte store at every blocked switch
+   out and a 64-byte load at every switch in, for registers no caller uses.
+2. *One rule for the reset*: every register the core has is zero, as
+   `VZEROALL` makes every `YMM` register zero; no mixture of the task's own
+   and initial values for a reader to reason about.
+3. *A hard-float caller* would pay, per call of the function holding the
+   trap, a `vpush {d8-d15}`/`vpop {d8-d15}` (the compiler saves a clobbered
+   callee-saved register in that function's prologue) and a spill and
+   reload of each value live across the trap. Measured on
+   `armv7-unknown-linux-musleabihf` with `clobber_abi("C")` plus
+   `d8`-`d15`, a loop keeping one double across the trap: `vpush`/`vpop` of
+   eight registers and two more core registers in the prologue and
+   epilogue, and per trap a `vstr`/`vldr` of the live value and one
+   constant rematerialised, three instructions **(measured, scratch build)**.
+
+The stub cannot declare a VFP clobber on its own target (F1), and needs
+none. Instead `rt/src/arch/armv7a.rs` refuses to build hard float:
+`#[cfg(target_abi = "eabihf")] compile_error!(..)`, whose text says to
+declare `clobber_abi("C")` and `out("d8") _` to `out("d15") _` first. A
+soft-float ABI with VFP code enabled by `-C target-feature` (softfp) is not
+caught by that `cfg`; xtask builds native programs with no target features,
+which the guard's comment records as an assumption. `ferrix_native_abi`'s
+contract text gains ARMv7-A; AArch64 stays "keeps the whole state".
+
+**(b) 3a's reset, ported.**
+- *The mark.* `trap::system_call` raises `vectors_dead` in the running
+  task's `UserState` (`sched::with_own_user_state`, with interrupts still
+  masked from the `svc` entry) after the seccomp filter returned nothing and
+  before it opens interrupts for the dispatch, for exactly the three numbers
+  (`vectors_die_in`, by number, as on x86-64); and lowers it after it closes
+  them again, before the outcome is written and before the generic way out
+  (`regroup`, `throttle_current`, signal delivery). The early answers
+  (`set_tls`, the signal returns) never raise it.
+- *The save.* `save_user_state(state, blocked)`: where `blocked` and
+  `vectors_dead` and the core has a VFP, only `FPSCR` is read (`vmrs`) into
+  the record and the state is marked `unsaved`; `d0`-`d31` are not stored.
+  Every other switch out -- runnable (preempted, even inside one of the
+  three), or blocked in any other call -- saves in full, as today. So is a
+  task reset and then preempted before it left the call: its registers are
+  zero, saved in full.
+- *The reset.* `restore_user_state(state, ..)`, for a state marked
+  `unsaved`: `vmsr fpscr` with the task's own `FPSCR`, then `vldmia` of
+  `d0`-`d15`, and of `d16`-`d31` on a D32 core, from a block of zeros in
+  read-only data; then the mark is cleared. Nothing else clears it. Every
+  resume -- a message, a close, a kill, a signal -- reaches the task through
+  this one restore (F6). Loading zeros from read-only data rather than 32
+  `vmov dN, rZ, rZ`: the same state, 7 assembly lines instead of 36, and
+  the block is the kernel's own, so the reset cannot be pointed at a
+  program's memory.
+- *`FPSCR` whole* (x86-64's V1): the reset loads the task's own `FPSCR`
+  every time, never compared with anything, so no other program's
+  cumulative flags, condition flags or rounding mode reach it.
+- *`FPEXC`* needs nothing (F3): it is no register a program can read or
+  write, it stays `EN` from bring-up, and neither the save nor the reset
+  touches it. No lazy switching: clearing `FPEXC.EN` to defer the reset to a
+  first use would leave another program's values in the register file
+  behind a trap, the LazyFP pattern (CVE-2018-3665).
+- *The accessor.* `UserState::fp()`, the one reader of a saved VFP state
+  (a signal frame's VFP record), answers an `unsaved` state as its `FPSCR`
+  and 32 zero doubles, never the stale bytes; `set_fp()` (`sigreturn`)
+  leaves the state whole. Today both run only on `capture()`d states, which
+  are saved whole.
+- *D16 and no VFP.* A D16 core's reset zeroes `d0`-`d15`, every register it
+  has; a core with no VFP saves and resets nothing. QEMU's `cortex-a7` and
+  the DK1's Cortex-A7 are VFPv4-D32, so both branches are unreachable in the
+  reference configurations: argued coverage, as V6.
+- *No `PKRU` analogue*: nothing in `FPSCR` widens a program's rights.
+
+**(c) 3b on ARMv7-A, and `TPIDRURW`.**
+- *`TPIDRURO` is the record's.* `set_tls` writes the register and the
+  running task's record together, with interrupts masked (they are, from
+  the `svc` entry, where it is answered); `execve`'s `reset_user_state`
+  zeroes both with interrupts masked; `clone`'s `CLONE_SETTLS` writes the
+  child's record, as today. `save_user_state` reads it no more (the `mrc`
+  at save goes); `restore_user_state` writes it at every switch to a task
+  with user state, never skipped (condition 8). `UserState::capture()` (a
+  fork child, a signal frame), which is not the switch, reads the register,
+  as x86-64's reads the MSRs.
+- *`TPIDRURW` is switched (F5).* `save_user_state` reads it at every switch
+  out, blocked or not; `restore_user_state` writes it at every switch in,
+  never skipped by a comparison with anything: a program writes it with no
+  call, so a per-processor "last written" record would name a value no
+  longer held, which is condition 8's leak exactly. `capture()` carries it
+  to a fork child and a thread; `execve` zeroes it, as Linux's `flush_tls`.
+- *Saving:* one `mrc` less and one `mrc` and one `mcr` more a switch. (c)
+  costs about two coprocessor accesses a direction against today
+  **(argued)**; it is a fix, not a saving.
+
+**Conditions, each with its check and a negative control that fires**
+(stage 9, ARMv7-A, a new `arch/armv7a/switch/check.rs`, its `vectors` and
+`tls` lines; programs assembled by GNU `as` for ARMv7-A, pinned with a
+second program to the check's core, as x86-64's `switch::check`):
+- *U1, the mark is the call's.* Check: the entry's test names exactly the
+  three numbers in the native range, Linux's first 1,024 and the Arm private
+  range; a program woken from 0x1013 by a message that then blocks in a
+  Linux `nanosleep` keeps its pattern. Control U1-c: the lowering removed --
+  "the mark outlived its call".
+- *U2, only a blocked marked task is saved in part.* Check: the same program
+  blocked in a Linux `nanosleep`, and preempted in user mode while it spins,
+  beside a program filling every register, reads back its own pattern and
+  `FPSCR`. Control U2-c: the `vectors_dead` test dropped from the save --
+  "lost its vector registers to a reset".
+- *U3, the reset.* Check: a victim with its pattern in `d0`-`d31` and its own
+  `FPSCR` (round toward zero, `DN`, `IXC`, `Z`) blocks in 0x1013 (woken by a
+  message; by `SIGUSR1` then a message, whose handler must have run) and in
+  0x1008 (woken by its peer's close); a second program fills every register
+  with another pattern and another `FPSCR` (round down, `FZ`, `DZC`, `N`) and
+  runs; the victim reads zero in all 32 and exactly its own `FPSCR`.
+  Controls: U3-a the reset replaced by clearing the mark alone -- "read
+  another program's vector registers"; U3-b the second `vldmia` (`d16`-`d31`)
+  removed -- the same text, from `d16` up; U3-c the `vmsr fpscr` removed --
+  "did not get its own FPSCR back".
+- *U4, every reader sees the reset state.* Check (boot, no program): a state
+  whose doubles hold other bytes, kept with only its `FPSCR`, reads through
+  `fp()` as its `FPSCR` and 32 zeros, and is whole after `set_fp`. Control
+  U4-c: `fp()` answers the raw doubles -- "did not read as zero with its own
+  FPSCR".
+- *U5, `FPEXC`* is argued (F3), with no check: no program can name it, and
+  the only write is bring-up's. A future write of it outside bring-up
+  (lazy switching, trapped exceptions) comes back to review.
+- *U6, `TPIDRURO` is the record's.* Checks: two programs with different
+  thread pointers (`set_tls`) trade one core 1,000 times each, each reading
+  its own with `mrc` after every `sched_yield`; one reads its own after a
+  `nanosleep`. Controls: U6-a `set_tls` writes no record -- "did not get its
+  own thread pointer back"; U6-b the restore's `TPIDRURO` write removed --
+  "did not each read their own TPIDRURO".
+- *U7, the write is never skipped (condition 8).* Check: one program writes
+  `TPIDRURW` to W, yields, reads W, writes Z, yields, reads Z, in a loop; a
+  second whose own value is W reads W after every yield. With a "last
+  written" skip, the first's switch-in writes W and records it, the first
+  then writes Z itself, and the second's switch-in compares W with W and
+  skips: it runs on Z. Control U7-c: that skip, as one line -- "a program
+  whose TPIDRURW equals the one last written ran on the value another
+  program left".
+- *U8, `TPIDRURW` is switched.* Check: the trading programs of U6 also each
+  write their own `TPIDRURW` and read it back after every yield. Control
+  U8-c: the restore's `TPIDRURW` write removed, which is `main`'s switch for
+  this register -- "did not each read their own TPIDRURW". That is the
+  finding shown open without the fix and closed with it.
+
+Besides: `test-ipc-equiv --arch armv7a` (the general path's results with
+the mark and the reset in it), the armv7a boots at one core and at
+`--smp 2`, `test-threads` and `test-shell` on armv7a.
+
+**Rows.** Reserve `L.armv7a.5-12` on `main` first.
+- `H.SCHED.12` restated: ARMv7-A joins, with "zero in every VFP register and
+  its own `FPSCR`"; AArch64 keeps the whole state.
+- `H.SCHED.8` restated to name ARMv7-A's state: `TPIDRURO`, `TPIDRURW`, the
+  VFP registers and `FPSCR`, USR's banked `sp` and `lr`.
+- `L.armv7a.5` the `svc` entry marks the three (U1); `.6` a blocked marked
+  task keeps only `FPSCR` (U3); `.7` every other switch saves and restores
+  whole (U2); `.8` an `unsaved` state is reset -- every VFP register the
+  core has zero, its own `FPSCR`, the mark cleared only there, `FPEXC` not
+  written (U3, U5); `.9` the accessor (U4); `.10` `TPIDRURO` the record's,
+  written at every switch (U6, U7); `.11` `TPIDRURW` saved at every switch
+  out and written at every switch in, inherited by `fork`, zeroed by
+  `execve` (U7, U8); `.12` held for the review.
+- `L.sched.54`'s criterion names the ARMv7-A `vectors` line beside x86-64's.
+
+**Assembly budget.** The tree is at its cap, 1,619 of 1,619. (b) needs
+`vmrs` at a blocked save and `vmsr` and two `vldmia` at the reset, which the
+soft-float kernel has no Rust spelling for: `switch.rs`'s `global_asm!`
+gains `ferrix_user_fpscr` (4 lines) and `ferrix_user_fpu_reset` (7), and
+`cpu.rs` the `TPIDRURW` read and write (2). The cap goes to 1,632,
+`switch.rs` to 78, `cpu.rs` to 107, each entry's reason extended. The
+runtime's file gains no line: its guard is Rust.
+
+**What it saves, and how it will be measured.** Per direction, the blocked
+switch out drops the 256-byte `vstmia` pair (and the cache traffic of the
+task's area); the switch in loads zeros from a block both cores keep hot
+instead of the task's 256 bytes. On a Cortex-A7, whose VFP moves 64 bits a
+cycle, that is about 30 to 60 cycles a direction, 75 to 150 ns a round trip
+at 800 MHz **(guessed)**. Instructions per round trip are a poor proxy here:
+a 16-register `vstmia` is one instruction, so (b) removes about five
+instructions a direction and (c) adds two; TCG's instruction count can show
+that nothing else moved, not the saving. The figure is the board's,
+alternated with `main` (os-07, B6).
+
+**AArch64 would follow the same way, and nothing changes there now.** Its
+native programs are built for `aarch64-unknown-none-softfloat`, so the stub
+again cannot and need not declare a vector clobber, and would get the same
+hard-float guard (`clobber_abi("C")` plus `v8`-`v15`, whose low halves
+AAPCS64 keeps). The entry would mark the three, the save of a blocked
+marked task would keep `FPCR` and `FPSR` only, and the reset would zero
+`v0`-`v31` (a load from a zero block, or 32 `movi`) and load the task's own
+`FPCR` and `FPSR`, only while no SVE or SME state is enabled (the analogue
+of V2), with no `XINUSE` arm. `TPIDR_EL0` is written by EL0, so it stays
+read at every save, as AArch64's switch already does; `TPIDRRO_EL0` is
+never written by the kernel, so there is no 3b to port and no `TPIDRURW`-like
+gap. Its own design goes to its own review when an AArch64 target is
+measured.
+
+**Documents.** Security Target FDP_RIP.2: ARMv7-A's reset (zero VFP
+registers, own `FPSCR`) and its two thread ID registers.
+VULNERABILITY-ANALYSIS: a resume path that skips the reset; a user-writable
+register no switch moves (F5's class). FINDINGS: F5, numbered by the
+consultant, closed by U8. `ferrix_native_abi::nr`: the contract per
+architecture. Coverage: the D16 and no-VFP branches argued (other
+configuration).
+
+**Questions for the consultant.**
+1. Is "every VFP register destroyed" the right contract, against AAPCS's
+   `d8`-`d15` kept by the kernel, given F1 and the guard?
+2. Is `FPEXC` acceptable as argued (U5), without a check?
+3. F5: its number, and is U8 with its control the closing evidence?
+4. The D16 and no-VFP branches as argued coverage?
+5. The assembly cap to 1,632 (+13)?
+6. `H.SCHED.8` and `H.SCHED.12` restated, rather than new H ids?
+
