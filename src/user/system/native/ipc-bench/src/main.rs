@@ -27,8 +27,9 @@
 //! timed by the PMU as `docs/BOARD-BENCH.md`'s contract says ([`pmu`]): the
 //! `clock` line, a `timer-floor` series, each series' `.cycles`, `.ins` and
 //! `.cycles.pct` lines beside its ns line, and the after-the-call sweep
-//! (`base.w<W>` and `domain-call.after.w<W>`). Without the option the run
-//! is what it always was.
+//! (`base.w<W>` and `domain-call.after.w<W>`), and then
+//! `board-bench end ipc-bench`. Without the option the run is what it
+//! always was.
 
 #![no_std]
 #![no_main]
@@ -71,13 +72,21 @@ const SEEK_END: usize = 2;
 fn main(bootstrap: Bootstrap) -> i32 {
     match bootstrap {
         Some(channel) => started(&channel),
-        None => match client() {
-            Ok(()) => 0,
-            Err(step) => {
-                say(format_args!("ipc-bench failed at step {step}"));
-                step
+        None => {
+            let pmu = pmu::asked();
+            let status = match client(pmu) {
+                Ok(()) => 0,
+                Err(step) => {
+                    say(format_args!("ipc-bench failed at step {step}"));
+                    step
+                }
+            };
+            // MEASUREMENT ONLY: the board's driver waits for this line.
+            if pmu {
+                say(format_args!("{}", pmu::END_LINE));
             }
-        },
+            status
+        }
     }
 }
 
@@ -206,9 +215,9 @@ fn serve_fast(channel: &Channel<Kernel>) -> i32 {
 /// Start the server, time the floor and the trips, print them; then the
 /// same `channel_write_read` trip between two processes of one speculation
 /// domain.
-fn client() -> Result<(), i32> {
+fn client(pmu: bool) -> Result<(), i32> {
     let (image, job) = prepare()?;
-    if pmu::asked() {
+    if pmu {
         return pmu_client(&job, &image);
     }
     let mine = spawn(&job, &image, "ipc-echo")?;

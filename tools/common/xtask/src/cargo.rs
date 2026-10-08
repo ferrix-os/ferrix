@@ -122,6 +122,9 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     } else {
         build("ferrix-kernel", target, release)?
     };
+    // MEASUREMENT ONLY (os4b/b3-ferrix): the commit, which a board-bench boot
+    // prints (`src/kernel/src/arch/armv7a/bench_pmu.rs`).
+    let build = build.env("FERRIX_COMMIT", commit());
     if !MITIGATIONS_OFF.load(Ordering::Relaxed) {
         let made = paths::target_dir()
             .join(target)
@@ -136,6 +139,27 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
         .args(["--config", &mitigations_off_config(target)])
         .args([std::ffi::OsStr::new("--target-dir"), directory.as_os_str()]);
     Ok((build, made))
+}
+
+/// MEASUREMENT ONLY (os4b/b3-ferrix): the tree's commit, `-dirty` when a
+/// tracked file differs from it, or `unknown` without git.
+fn commit() -> String {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(paths::workspace_root())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let Some(head) = git(&["rev-parse", "HEAD"]) else {
+        return "unknown".to_owned();
+    };
+    match git(&["status", "--porcelain", "--untracked-files=no"]) {
+        Some(changes) if changes.is_empty() => head,
+        _ => format!("{head}-dirty"),
+    }
 }
 
 /// A built kernel, and what the initramfs of an image of it must carry for

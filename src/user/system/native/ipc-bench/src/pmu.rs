@@ -19,9 +19,10 @@
 //! - [`touch`] is `bb_touch`'s loop, the same four instructions.
 //!
 //! ARMv7-A only, and only with `ipc-bench.pmu=1` (or `on`) on the kernel
-//! command line, which also makes the kernel set `PMUSERENR.EN`; [`start`]
-//! refuses to run without it. Elsewhere [`start`] refuses by name and the
-//! other functions are never reached.
+//! command line, which makes the kernel set `PMUSERENR.EN` ([`asked`]);
+//! [`start`] refuses to run without it. Elsewhere [`start`] refuses by name
+//! and the other functions are never reached. The run ends with
+//! [`END_LINE`], which the board's serial driver waits for.
 
 use core::fmt::Write as _;
 
@@ -47,6 +48,11 @@ pub(crate) const STRIDE: u32 = 4096;
 /// The touched buffer: the widest sweep's pages.
 const TOUCH_BYTES: usize = 256 * 4096;
 
+/// The line after the last result, in this mode only, whether the run
+/// finished or not: what the board's serial driver waits for before the
+/// board resets (`ferrix.onexit=reset`).
+pub(crate) const END_LINE: &str = "board-bench end ipc-bench";
+
 /// The kernel option that asks for this mode.
 const OPTION: &[u8] = b"ipc-bench.pmu=";
 /// `/proc/cmdline`.
@@ -56,10 +62,19 @@ const AT_FDCWD: usize = -100_isize as usize;
 /// `O_RDONLY | O_CLOEXEC`.
 const O_READ: usize = 0o2_000_000;
 
-/// Whether `ipc-bench.pmu=1` (or `on`) is on the kernel command line, read
-/// from `/proc/cmdline`, which is mounted here if it is not. False when it
-/// cannot be read: then nothing of the PMU is touched.
+/// Whether this run is the PMU's: on ARMv7-A when the kernel gave user mode
+/// the PMU (`PMUSERENR.EN`, which it sets only under `ipc-bench.pmu`, from
+/// the loader's command line or U-Boot's `bootargs`), and anywhere when
+/// `ipc-bench.pmu=1` (or `on`) is in `/proc/cmdline`, so that an option the
+/// kernel could not honour is refused by [`start`] rather than ignored.
 pub(crate) fn asked() -> bool {
+    counters::user_access() || command_line_asks()
+}
+
+/// Whether `ipc-bench.pmu=1` (or `on`) is on the kernel command line, read
+/// from `/proc/cmdline` (the loader's line, not `bootargs`), which is
+/// mounted here if it is not. False when it cannot be read.
+fn command_line_asks() -> bool {
     let open = || {
         // SAFETY: `CMDLINE` is NUL-terminated and borrowed for the call.
         unsafe {
@@ -128,6 +143,16 @@ mod counters {
             asm!("mrc p15, 0, {}, c9, c14, 0", out(reg) value, options(nomem, nostack, preserves_flags));
         }
         value
+    }
+
+    /// Whether the kernel left `PMUSERENR.EN` set on this processor.
+    pub(crate) fn user_access() -> bool {
+        pmuserenr() & 1 != 0
+    }
+
+    /// `PMUSERENR` as this processor has it, for the run's record.
+    pub(crate) fn user_enable() -> u32 {
+        pmuserenr()
     }
 
     /// `bb_pmu_start`: the cycle counter and event counter 0 (instructions)
@@ -231,6 +256,16 @@ mod counters {
 #[cfg(not(target_arch = "arm"))]
 mod counters {
     //! No PMU bench here: [`start`] refuses, so nothing else is called.
+
+    /// No PMU to be given.
+    pub(crate) fn user_access() -> bool {
+        false
+    }
+
+    /// Never called.
+    pub(crate) fn user_enable() -> u32 {
+        0
+    }
 
     /// Refused by name.
     pub(crate) fn start() -> Result<(), &'static str> {
@@ -436,12 +471,18 @@ impl Text {
         Some(Text { bytes, len: 0 })
     }
 
-    /// `bb_print_clock`.
+    /// `bb_print_clock`, then `PMUSERENR` as this processor has it.
     pub(crate) fn clock(&mut self, hz: u64) {
         let _ = writeln!(
             self,
             "ipc-bench clock cpu_hz={hz} cntfrq={}",
             counters::cntfrq()
+        );
+        let enable = counters::user_enable();
+        let _ = writeln!(
+            self,
+            "ipc-bench pmuserenr value={enable:#010x} en={}",
+            enable & 1
         );
     }
 
