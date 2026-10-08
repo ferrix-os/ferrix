@@ -450,14 +450,26 @@ impl Carried {
 
 /// The static busybox the gates boot as `--init`, at
 /// `~/.local/share/ferrix/busybox/<arch>/bin/busybox.static` (Alpine's
-/// `busybox-static`), if this machine has one.
+/// `busybox-static`), if this machine has one; and otherwise ferrousli's,
+/// where one is installed (`--init ferrousli`'s, [`crate::busybox`]).
+///
+/// Alpine's package is a Linux host's: Windows has none, and `bench-chrome`,
+/// `test-xwindow` and `run-steam` refused to start there until somebody
+/// copied ferrousli's busybox to Alpine's path by hand. Windows builds
+/// ferrousli's itself, and it is what the gates boot where it runs.
 fn gates_busybox(arch: Arch) -> Option<String> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    let path = Path::new(&home)
-        .join(".local/share/ferrix/busybox")
-        .join(arch.name())
-        .join("bin/busybox.static");
-    path.is_file().then(|| path.to_string_lossy().into_owned())
+    let alpine = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(|home| {
+            Path::new(&home)
+                .join(".local/share/ferrix/busybox")
+                .join(arch.name())
+                .join("bin/busybox.static")
+        })
+        .filter(|path| path.is_file());
+    alpine
+        .or_else(|| crate::busybox::installed_program(arch))
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 /// Every boot `test-compositor` makes, in the order it makes them.

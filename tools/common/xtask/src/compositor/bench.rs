@@ -91,7 +91,7 @@ pub(crate) fn bench_chrome(args: &Args) -> Result<()> {
         args.memory = crate::chrome::MEMORY;
     }
     let busybox = gates_busybox(arch).ok_or_else(|| {
-        Error::new("bench-chrome needs ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static")
+        Error::new("bench-chrome needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
     let programs = Programs::build(arch)?;
     let mut ports = crate::rustc::files(crate::chrome::LINKS);
@@ -549,7 +549,7 @@ pub(crate) fn bench_chrome_video(args: &Args) -> Result<()> {
     }
     let busybox = gates_busybox(arch).ok_or_else(|| {
         Error::new(
-            "bench-chrome-video needs ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static",
+            "bench-chrome-video needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`",
         )
     })?;
     let programs = Programs::build(arch)?;

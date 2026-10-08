@@ -508,7 +508,7 @@ pub(crate) fn test_xwindow(args: &Args) -> Result<()> {
     }
     let args = xwindow_args(args)?;
     let busybox = gates_busybox(arch).ok_or_else(|| {
-        Error::new("test-xwindow needs ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static")
+        Error::new("test-xwindow needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
     let programs = Programs::build(arch)?;
     let ports = xwindow_ports(arch)?;

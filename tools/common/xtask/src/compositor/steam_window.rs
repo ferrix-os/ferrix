@@ -251,7 +251,7 @@ pub(crate) fn run(args: &Args, gate: bool) -> Result<()> {
         args.timeout = TIMEOUT;
     }
     let busybox = gates_busybox(arch).ok_or_else(|| {
-        Error::new("run-steam needs ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static")
+        Error::new("run-steam needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
     let programs = Programs::build(arch)?;
     let carried = Carried {
