@@ -5279,3 +5279,26 @@ note, `gdt::check::require_tables_noted` compares the record with a fresh
 FX-0409 otherwise, in every build. That check verifies `L.x86_64.6`, which
 was baselined; `L.x86_64.59`'s two-programs check and `L.x86_64.7`'s
 thread-area check exercise the readers through the record.
+
+**Q4 measured (preliminary: 3 boots a side, below G8's 5, so §9.10 does not count it yet).** Measured with os-76's long bench (`os76/p0-measure` 712cec722 on each tree, measurement only; `~/.local/share/ferrix/logs/po10-quick/perf/v2-*-join.txt`): host perf on the vCPU thread, 60 s of 50,000-trip blocks a boot, turn about with `main` 523fc3d50, 3 boots a side, the fast clock mode's blocks (core 11's SMT sibling 1 to 10% busy in them). `main`: 5,045, 5,045 and 5,041 instructions and 4,608, 4,656 and 4,608 cycles a round trip, 820, 825 and 820 ns. Q4: 5,020, 5,038 and 5,019 instructions (about -18, -0.4%) and 4,560, 4,558 and 4,510 cycles (about -80, -1.8%), 809 ns in all three (about -12 ns a round trip). Branch misses (14.0 against 14.0) do not move; the saving is the four microcoded `SGDT`/`STR` a switch.
+
+**Q6, dead end** (no code; ledger line 507). Skipping the `FS_BASE` or
+`KERNEL_GS_BASE` `WRMSR` when an `RDMSR` of the same register already reads
+the target would have kept condition 8, but under KVM on the Zen 5 reference
+host the read costs more than the write: the timing-only probe
+(`po10-quick/probe` 47afa304f, `~/.local/share/ferrix/logs/po10-quick/boot-probe1.log`)
+read `RDMSR FS_BASE` at 128.7 TSC ticks a loop iteration against 89.8 for the
+`WRMSR`, and `KERNEL_GS_BASE` at 129.6 against 90.7. Bare metal and Intel
+were not measured.
+
+**Q1, withdrawn** (ledger lines 507 and 574). `now_nanos` by the counter
+rate's exact reciprocal instead of two 64-bit divisions (branch
+`po10-quick/q1-v2` dc97f19d1, not landed) measured slower on the reference
+host, the same long bench, 3 boots a side: 5,086, 5,086 and 5,090
+instructions (about +44) and 4,836, 4,810 and 4,782 cycles (about +4%) a
+round trip, 851 to 869 ns, against `main`'s figures above. The probe's
+estimate, about 6 ns of division a reading, is refuted by that measurement:
+Zen 5's 64-bit `DIV` is cheaper than the reciprocal's multiply chain.
+ARMv7-A, where a 64-bit division is a library call, was not measured. The
+kernel's clock arithmetic lives in `ferrix-vdso`, which the item manifest
+does not classify, with or without Q1 (`docs/BACKLOG.md`).
