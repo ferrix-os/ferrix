@@ -102,9 +102,16 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "At 12 counter rates from 1 Hz to u64::MAX
                 and 10 tick values at each, from 0 to u64::MAX across a second's
                 boundaries and the saturation point, the two-division conversion
-                equals the 128-bit formula (ferrix-vdso's host test).";
+                and the kernel's reciprocal (ferrix_vdso::CounterScale::new and
+                nanos, which the same host test verifies) each equal the 128-bit
+                formula; and the reciprocal equals it across a sweep of every
+                power of two and its neighbours, the PIT's, an HPET's, a 19.2 MHz
+                Arm's and the reference machine's TSC rates and 1,000 drawn rates,
+                each at k*hz-1, k*hz and k*hz+1 for k below 100 and at 2,000 drawn
+                readings (ferrix-vdso's host test).";
             attribute :>> parent = "H.SCHED.9";
-            attribute :>> unit = ("timer::now_nanos", "timer::ticks_to_nanos");
+            attribute :>> unit = ("timer::now_nanos", "timer::ticks_to_nanos",
+                "timer::publish_scale");
         }
         requirement <'L.sched.7'> aDeferredDecisionIsBounded : ItemLowLevel {
             attribute :>> statement = "A wake made inside a system call shall

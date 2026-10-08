@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8c0bfb3bccba99ce68808d61a703506880286607263d50563a9538c84c701a7a",
+  "digest": "59738ee8c1c82053f86e0f330716a39a35d56e2fc9e83e8e5a125d6ddc159c6c",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -34471,10 +34471,10 @@
                   "qualifiedName": "FerrixSchedRequirements::Wakes::theClockIsTheWideFormula",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"At 12 counter rates from 1 Hz to u64::MAX and 10 tick values at each, from 0 to u64::MAX across a second's boundaries and the saturation point, the two-division conversion equals the 128-bit formula (ferrix-vdso's host test).\"",
+                  "value": "\"At 12 counter rates from 1 Hz to u64::MAX and 10 tick values at each, from 0 to u64::MAX across a second's boundaries and the saturation point, the two-division conversion and the kernel's reciprocal (ferrix_vdso::CounterScale::new and nanos, which the same host test verifies) each equal the 128-bit formula; and the reciprocal equals it across a sweep of every power of two and its neighbours, the PIT's, an HPET's, a 19.2 MHz Arm's and the reference machine's TSC rates and 1,000 drawn rates, each at k*hz-1, k*hz and k*hz+1 for k below 100 and at 2,000 drawn readings (ferrix-vdso's host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 105
+                    "line": 111
                   }
                 },
                 {
@@ -34485,7 +34485,7 @@
                   "value": "\"H.SCHED.9\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 106
+                    "line": 112
                   }
                 },
                 {
@@ -34493,10 +34493,10 @@
                   "qualifiedName": "FerrixSchedRequirements::Wakes::theClockIsTheWideFormula",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"timer::now_nanos\", \"timer::ticks_to_nanos\")",
+                  "value": "(\"timer::now_nanos\", \"timer::ticks_to_nanos\", \"timer::publish_scale\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 107
+                    "line": 114
                   }
                 }
               ]
@@ -34509,7 +34509,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 109
+                "line": 116
               },
               "children": [
                 {
@@ -34520,7 +34520,7 @@
                   "value": "\"A wake made inside a system call shall leave its decision to the call's end (sched::call_left), the next preempt_enable that brings the count to zero, or the next interrupt exit, whichever comes first; and a Sync wake shall arm the waker's processor's timer for its next decision, so that a waker that does not block leaves the woken task waiting at most one slice.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 115
+                    "line": 122
                   }
                 },
                 {
@@ -34531,7 +34531,7 @@
                   "value": "\"Argued in MEMORY-AND-TIMING §2.2c: no check times the deferral, which sits inside H.SCHED.2's bound of one slice plus the timer overruns served.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 118
+                    "line": 125
                   }
                 },
                 {
@@ -34542,7 +34542,7 @@
                   "value": "\"H.SCHED.2\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 119
+                    "line": 126
                   }
                 },
                 {
@@ -34553,7 +34553,7 @@
                   "value": "(\"sched::resched_here\", \"sched::call_entered\", \"sched::call_left\", \"sched::carry_in_call\", \"sched::kick_after_wake\", \"sched::wake_at_home\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 122
+                    "line": 129
                   }
                 }
               ]
@@ -34566,7 +34566,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 124
+                "line": 131
               },
               "children": [
                 {
@@ -34577,7 +34577,7 @@
                   "value": "\"A Sync wake shall move the task it wakes onto the waker's processor only when the task is asleep at its home and in nothing else, its affinity allows the waker's processor, and nothing else is queued there, deciding under both processors' queue locks, and shall otherwise wake it where it is.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 129
+                    "line": 136
                   }
                 },
                 {
@@ -34588,7 +34588,7 @@
                   "value": "\"At two processors or more, a reader blocked in channel_write_read and free to move, woken by a Sync write from another processor, answers every time and is moved in at least one of 8 rounds; a reader pinned to processor 1 woken from processor 0 answers on processor 1 in each of 8 rounds (the `sync` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 134
+                    "line": 141
                   }
                 },
                 {
@@ -34599,7 +34599,7 @@
                   "value": "(\"H.SCHED.4\", \"H.SCHED.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 135
+                    "line": 142
                   }
                 },
                 {
@@ -34610,7 +34610,7 @@
                   "value": "(\"sched::wake_with\", \"sched::wake_onto\", \"sched::may_place\", \"sched::asleep_at_home\", \"sched::task::Task::holds_slots\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 138
+                    "line": 145
                   }
                 }
               ]
@@ -34623,7 +34623,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 140
+                "line": 147
               },
               "children": [
                 {
@@ -34634,7 +34634,7 @@
                   "value": "\"attention_due, asked at every way out to ring 3 on every architecture -- a call's, an interrupt's, a fault's, and the last look of the personality's return_to_user -- with interrupts masked, shall read the running task's pending-work word once, clear STOP and SIGNAL in it if they are set before anything reads what they stand for, and ask the personality's needs_attention when END, STOP, SIGNAL or TRACE was set; FILTERED shall not be read there.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 147
+                    "line": 154
                   }
                 },
                 {
@@ -34645,7 +34645,7 @@
                   "value": "\"A program of three threads stopped by its stop alone, which posts STOP and no signal, has both counting threads park and stay still, and runs again after SIGCONT (stage 7's stop check, its second stop); every boot, test-shell, test-threads, test-vfs and test-init pass with the self-checks on, where L.sched.33's look runs at every clear word.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 153
+                    "line": 160
                   }
                 },
                 {
@@ -34656,7 +34656,7 @@
                   "value": "(\"H.OBJ.9\", \"H.TRAP.4\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 154
+                    "line": 161
                   }
                 },
                 {
@@ -34667,7 +34667,7 @@
                   "value": "(\"trap::attention_due\", \"sched::work::look\", \"sched::work::wants_attention\", \"sched::work::with_running\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 156
+                    "line": 163
                   }
                 }
               ]
@@ -34680,7 +34680,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 158
+                "line": 165
               },
               "children": [
                 {
@@ -34691,7 +34691,7 @@
                   "value": "\"notify shall post its bits to the task's word with a Release read-modify-write before it wakes the task and interrupts its processor; post and post_own shall only set bits; and only the task's own look shall clear any, with an Acquire read-modify-write, and END never.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 163
+                    "line": 170
                   }
                 },
                 {
@@ -34702,7 +34702,7 @@
                   "value": "\"The stop check's second stop, posted by notify's half under the list's lock and woken after it, parks both counting threads; with the post removed the same check fails by name. The loom model of a post against the task's clear and read finds the state read or the bit kept, and its control, the clear after the read, finds neither (`cargo xtask loom`).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 169
+                    "line": 176
                   }
                 },
                 {
@@ -34713,7 +34713,7 @@
                   "value": "(\"H.OBJ.9\", \"H.SCHED.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 170
+                    "line": 177
                   }
                 },
                 {
@@ -34724,7 +34724,7 @@
                   "value": "(\"sched::work::notify\", \"sched::work::wake_posted\", \"sched::work::post\", \"sched::work::post_own\", \"sched::work::has_end\", \"sched::task::Task::work\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 173
+                    "line": 180
                   }
                 }
               ]
@@ -34737,7 +34737,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 175
+                "line": 182
               },
               "children": [
                 {
@@ -34748,7 +34748,7 @@
                   "value": "\"A wake shall read its target's state only under the run-queue lock of the processor that owns the target, after reading which processor that is again under that lock, with no way out before it that reads the state without the lock.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 179
+                    "line": 186
                   }
                 },
                 {
@@ -34759,7 +34759,7 @@
                   "value": "\"At two processors or more, a blocker that holds its own run-queue lock while a poster on another processor reaches its wake, then marks itself blocked and lets the lock go, is woken within 100 ms (the `wakerow` line); with a lock-free exit in wake_at_home the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 184
+                    "line": 191
                   }
                 },
                 {
@@ -34770,7 +34770,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 185
+                    "line": 192
                   }
                 },
                 {
@@ -34781,7 +34781,7 @@
                   "value": "(\"sched::wake_at_home\", \"sched::wake_onto\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 186
+                    "line": 193
                   }
                 }
               ]
@@ -34794,7 +34794,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 188
+                "line": 195
               },
               "children": [
                 {
@@ -34805,7 +34805,7 @@
                   "value": "\"With the self-checks on, attention_due shall ask needs_attention at a clear word too, and audit shall stop the machine with FX-0520 when it answers yes while no poster is between its write and its post and the word is still clear; every poster shall bracket its write and its post in a Posting.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 193
+                    "line": 200
                   }
                 },
                 {
@@ -34816,7 +34816,7 @@
                   "value": "\"Every boot, test-shell, test-threads, test-vfs and test-init reach their marker with the look on; with enter_stop's STOP to the other tasks removed, test-threads stops with FX-0520's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 197
+                    "line": 204
                   }
                 },
                 {
@@ -34827,7 +34827,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 198
+                    "line": 205
                   }
                 },
                 {
@@ -34838,7 +34838,7 @@
                   "value": "(\"sched::work::audit\", \"sched::work::posting\", \"sched::work::set_auditing\", \"sched::work::auditing\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 200
+                    "line": 207
                   }
                 }
               ]
@@ -34851,7 +34851,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 202
+                "line": 209
               },
               "children": [
                 {
@@ -34862,7 +34862,7 @@
                   "value": "\"The hook in notify shall be armed only by stage 9's checks, record which check armed it and the task it watches, be disarmed by that check whatever the check found, and be required disarmed before the boot's marker, with F-60's leave hook, which stops with FX-0908 naming the check if it is not.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 207
+                    "line": 214
                   }
                 },
                 {
@@ -34873,7 +34873,7 @@
                   "value": "\"The `wakerow` line, then the marker; with the check's disarm removed the boot stops with FX-0908's message naming the wake row.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 210
+                    "line": 217
                   }
                 },
                 {
@@ -34884,7 +34884,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 211
+                    "line": 218
                   }
                 },
                 {
@@ -34895,7 +34895,7 @@
                   "value": "(\"sched::work::arm\", \"sched::work::disarm\", \"sched::work::armed_by\", \"sched::work::hook_armed_by\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 213
+                    "line": 220
                   }
                 }
               ]
@@ -34908,7 +34908,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 215
+                "line": 222
               },
               "children": [
                 {
@@ -34919,7 +34919,7 @@
                   "value": "\"end_record shall store the process's end and then, after a SeqCst fence, post END to every task its list holds, waking each and interrupting its processor, with nothing allocated and no task let go under the list's lock; list_task shall list a task before it can run, failing its start with AllocError when the list cannot grow.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 221
+                    "line": 228
                   }
                 },
                 {
@@ -34930,7 +34930,7 @@
                   "value": "\"A program past its cgroup's memory.max is OOM-killed and ends (the `cgroups` line's OOM case, which no signal reaches first); with end_record's post removed it never ends and the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 225
+                    "line": 232
                   }
                 },
                 {
@@ -34941,7 +34941,7 @@
                   "value": "(\"H.OBJ.9\", \"H.QUOTA.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 226
+                    "line": 233
                   }
                 },
                 {
@@ -34952,7 +34952,7 @@
                   "value": "(\"object::process::Process::end_record\", \"object::process::Process::list_task\", \"object::process::Process::post_to_tasks\", \"object::process::Process::with_tasks\", \"object::process::Exit::record\", \"object::process::Process::take_listed\", \"object::process::take_batch\", \"object::process::next_live\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 232
+                    "line": 239
                   }
                 }
               ]
@@ -34965,7 +34965,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 234
+                "line": 241
               },
               "children": [
                 {
@@ -34976,7 +34976,7 @@
                   "value": "\"wake_posted, the wake of every notify and of post_to_tasks, shall make a SeqCst fence after the bits are posted and before the wake reads the task's state, paired with a trusting wait's fence after it stores BLOCKED, so that a wait that reads the bit itself is found blocked or reads it.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 239
+                    "line": 246
                   }
                 },
                 {
@@ -34987,7 +34987,7 @@
                   "value": "\"A thread blocked in channel_write_read is ended by its process's kill (the `wrread` line); with that wait reading no END it stays blocked and the check fails by name. The loom model of an end posted against a waiter listed and not yet blocked finds no lost wake (`cargo xtask loom`).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 244
+                    "line": 251
                   }
                 },
                 {
@@ -34998,7 +34998,7 @@
                   "value": "(\"H.OBJ.9\", \"H.OBJ.11\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 245
+                    "line": 252
                   }
                 },
                 {
@@ -35009,7 +35009,7 @@
                   "value": "\"sched::work::wake_posted\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 246
+                    "line": 253
                   }
                 }
               ]
@@ -35022,7 +35022,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 248
+                "line": 255
               },
               "children": [
                 {
@@ -35033,7 +35033,7 @@
                   "value": "\"Every switch to a task with user state shall restore it through switch_user_state, which shall tell the save whether the outgoing task leaves blocked, so that a state saved only in part is reset before the task runs, on every path that resumes it; the reset alone clears the mark.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 253
+                    "line": 260
                   }
                 },
                 {
@@ -35044,7 +35044,7 @@
                   "value": "\"A program blocked in a native call is woken by a message, by its peer's close and by a message with a signal pending, each through its own path to choose_next, and reads the reset state each time (the `vectors` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 257
+                    "line": 264
                   }
                 },
                 {
@@ -35055,7 +35055,7 @@
                   "value": "\"H.SCHED.12\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 258
+                    "line": 265
                   }
                 },
                 {
@@ -35066,7 +35066,7 @@
                   "value": "(\"sched::switch_user_state\", \"sched::with_own_user_state\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 259
+                    "line": 266
                   }
                 }
               ]
@@ -35080,7 +35080,7 @@
           "doc": "src/kernel/src/sched/preempt.rs and src/kernel/src/sched/mod.rs: the preemption count every crate::sync::SpinLock raises, kept in each processor's record without a locked operation (docs/OPAQUE-KERNEL.md §9.8, 2b; the consultant's OK IF of 2026-10-02, condition 2).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 263
+            "line": 270
           },
           "children": [
             {
@@ -35091,7 +35091,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 270
+                "line": 277
               },
               "children": [
                 {
@@ -35102,7 +35102,7 @@
                   "value": "\"A preemption-disabling lock, and a raise by hand, shall raise and lower the preemption count and, for a lock, the locks held of the processor its holder runs on, in that processor's record and without a locked operation, so that no update is lost to an interrupt and none lands on another processor's record: on x86-64 in one GS-relative instruction, with every entry that can reach it running on the kernel's GS base; on AArch64 and ARMv7-A with every exception that can take a lock masked; and a report reading another processor's count shall read each of the count and the locks held whole.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 280
+                    "line": 287
                   }
                 },
                 {
@@ -35113,7 +35113,7 @@
                   "value": "\"At two processors or more, two tasks per processor, preempted by the timer and moving between processors, take and let go of a lock 100000 times each with raises by hand among them and move at least once (the `preempt` line). The stress provokes a lost or misplaced update; what detects one is FX-0503's test at the release, which stops the boot when the locks held or the count it lowers is already zero, and, behind it, every processor's count and locks held read zero there by a task that holds nothing. The three atomicity controls (x86-64's record found before the add, the Arm mask removed on aarch64 and on armv7a at two processors) each stop the boot on FX-0503's held-zero message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 292
+                    "line": 299
                   }
                 },
                 {
@@ -35124,7 +35124,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.2\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 293
+                    "line": 300
                   }
                 },
                 {
@@ -35135,7 +35135,7 @@
                   "value": "(\"sched::preempt::raise\", \"sched::preempt::lower\", \"sched::preempt::Preempt::disable\", \"sched::preempt::preempt_disable\", \"sched::preempt::PreemptState::note\", \"sched::preempt::preempt_count\", \"sched::preempt::locks_held\", \"smp::record\", \"arch::percpu::this_cpu_add\", \"arch::x86_64::cpu::gs_xadd\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 298
+                    "line": 305
                   }
                 }
               ]
@@ -35148,7 +35148,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 300
+                "line": 307
               },
               "children": [
                 {
@@ -35159,7 +35159,7 @@
                   "value": "\"The scheduler shall stop the machine (FX-0503), naming the site that last raised the count, when it is asked to switch with its processor's count raised, and when a release finds the count, or for a lock the locks held, already at zero, having put the word back first; a release that brings the count to zero shall make the decision an interrupt deferred, if interrupts are on.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 307
+                    "line": 314
                   }
                 },
                 {
@@ -35170,7 +35170,7 @@
                   "value": "\"The release's cover test refuses a word whose count, or for a lock whose locks held, is zero, and passes one that covers the release (the stage-5 checks). That held-zero test is the detector L.sched.20's stress relies on; the negative controls of a task that sleeps holding a lock and of a release with nothing raised each stop the boot on FX-0503's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 313
+                    "line": 320
                   }
                 },
                 {
@@ -35181,7 +35181,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.2\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 314
+                    "line": 321
                   }
                 },
                 {
@@ -35192,7 +35192,7 @@
                   "value": "(\"sched::preempt::preempt_enable\", \"sched::preempt::Preempt::enable\", \"sched::preempt::enable_from\", \"sched::preempt::unmatched\", \"sched::preempt::covers\", \"sched::preempt::decide_deferred\", \"sched::schedule_from\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 318
+                    "line": 325
                   }
                 }
               ]
@@ -35205,7 +35205,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 320
+                "line": 327
               },
               "children": [
                 {
@@ -35216,7 +35216,7 @@
                   "value": "\"may_block shall answer true only when the scheduler runs, interrupts are on, a task is running, and the count of the processor it runs on, read so that the processor and its count are one processor's (one instruction on x86-64, interrupts masked on Arm), is zero.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 325
+                    "line": 332
                   }
                 },
                 {
@@ -35227,7 +35227,7 @@
                   "value": "\"A task holding nothing may block; holding a preemption-disabling lock, or with the count raised by hand, it may not; once it lets go it may again (the stage-5 checks).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 328
+                    "line": 335
                   }
                 },
                 {
@@ -35238,7 +35238,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 329
+                    "line": 336
                   }
                 },
                 {
@@ -35249,7 +35249,7 @@
                   "value": "(\"sched::may_block\", \"sched::preempt::count_here\", \"arch::percpu::this_cpu_read\", \"arch::x86_64::cpu::read_gs_at\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 331
+                    "line": 338
                   }
                 }
               ]
@@ -35262,7 +35262,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 333
+                "line": 340
               },
               "children": [
                 {
@@ -35273,7 +35273,7 @@
                   "value": "\"A try_lock of a preemption-disabling lock that fails shall leave its processor's count and locks held as it found them, and with interrupts masked shall not switch; one that succeeds shall raise both by one until its guard drops; and ferrix_sync::SpinLock::try_lock_manually shall take no ticket when it fails.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 339
+                    "line": 346
                   }
                 },
                 {
@@ -35284,7 +35284,7 @@
                   "value": "\"With a lock held, a try_lock of it with interrupts on and with them masked leaves the count and the locks held unchanged and, masked, the task's switches unchanged; a try_lock_manually of a held plain lock fails and changes neither; a successful try_lock raises both by one until it drops (the stage-5 checks, and ferrix-sync's host test of try_lock_manually).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 345
+                    "line": 352
                   }
                 },
                 {
@@ -35295,7 +35295,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 346
+                    "line": 353
                   }
                 },
                 {
@@ -35306,7 +35306,7 @@
                   "value": "(\"sched::preempt::Preempt::disable\", \"sched::preempt::Preempt::enable\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 348
+                    "line": 355
                   }
                 }
               ]
@@ -35320,7 +35320,7 @@
           "doc": "src/kernel/src/sched/borrow.rs and src/kernel/src/sched/mod.rs: the running task borrowed from the processor's record (docs/OPAQUE-KERNEL.md §9.8, 2a; the consultant's OK IF of 2026-10-02, condition 1, and Q1).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 352
+            "line": 359
           },
           "children": [
             {
@@ -35331,7 +35331,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 358
+                "line": 365
               },
               "children": [
                 {
@@ -35342,7 +35342,7 @@
                   "value": "\"Whenever interrupts are on, each processor's record shall name, as Arc::as_ptr, the task its run queue's current holds; the scheduler shall write the two together, on that processor with interrupts masked and its queue lock held, at the boot task's adoption, at an idle task's installation and at every switch, and nowhere else.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 364
+                    "line": 371
                   }
                 },
                 {
@@ -35353,7 +35353,7 @@
                   "value": "\"From boot to the end of stage 5, an audit compares the record with the queue's current, read under its lock, once the boot task is adopted, as each processor's idle task first runs, in the incoming context of every switch and at every interrupt exit, and finds no mismatch at any site; and two tasks per processor, yielding to each other, resume after a switch 10000 times, each time with the record naming the queue's current and the task itself (the `borrow` line). Removing the record's write at the adoption, at the idle installation or at the switch stops the boot on that site's message.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 374
+                    "line": 381
                   }
                 },
                 {
@@ -35364,7 +35364,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 375
+                    "line": 382
                   }
                 },
                 {
@@ -35375,7 +35375,7 @@
                   "value": "(\"sched::set_current\", \"sched::adopt_boot_task\", \"sched::enter_idle\", \"sched::choose_next\", \"sched::borrow::RunningSlot::set\", \"sched::audit_here\", \"sched::borrow::audit\", \"sched::borrow::end_audit\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 379
+                    "line": 386
                   }
                 }
               ]
@@ -35388,7 +35388,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 381
+                "line": 388
               },
               "children": [
                 {
@@ -35399,7 +35399,7 @@
                   "value": "\"with_current shall lend the running task only to a closure, by a reference its result cannot name, read from the processor's record so that the processor and its record are one processor's (one instruction on x86-64, interrupts masked on Arm); current() shall answer the running task as an Arc of the caller's own without taking the run queue's lock; and before the records are kept both shall answer none.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 388
+                    "line": 395
                   }
                 },
                 {
@@ -35410,7 +35410,7 @@
                   "value": "\"Each of the borrow check's 10000 resumptions borrows the running task and finds the task itself, and every audit's borrowed pointer equals the queue's current (the `borrow` line); every boot, shell and bench gate runs on current() made this way.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 393
+                    "line": 400
                   }
                 },
                 {
@@ -35421,7 +35421,7 @@
                   "value": "(\"H.SCHED.1\", \"H.SCHED.6\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 394
+                    "line": 401
                   }
                 },
                 {
@@ -35432,7 +35432,7 @@
                   "value": "(\"sched::borrow::with_current\", \"sched::borrow::current_arc\", \"sched::borrow::current_ptr\", \"sched::borrow::running\", \"sched::current\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 397
+                    "line": 404
                   }
                 }
               ]
@@ -35446,7 +35446,7 @@
           "doc": "src/kernel/src/sched/mod.rs: the words the switch and every way out write, by plain loads and stores where only their own processor writes them (docs/OPAQUE-KERNEL.md §9.8, 2f; the consultant's OK IF of 2026-10-02, condition 6).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 401
+            "line": 408
           },
           "children": [
             {
@@ -35457,7 +35457,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 407
+                "line": 414
               },
               "children": [
                 {
@@ -35468,7 +35468,7 @@
                   "value": "\"At a switch, choose_next shall write the processor's bit in IDLE only when the bit differs from whether the incoming task is the processor's idle task, so that the bit is clear whenever another task runs.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 411
+                    "line": 418
                   }
                 },
                 {
@@ -35479,7 +35479,7 @@
                   "value": "\"Two tasks a processor, yielding to each other and every 16th turn sleeping, so that a processor whose tasks both sleep switches from its idle task at a timer interrupt's exit, resume after a switch 10000 times between them and never read their processor as idle (the `idle` line); with the switch's clear skipped, the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 417
+                    "line": 424
                   }
                 },
                 {
@@ -35490,7 +35490,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 418
+                    "line": 425
                   }
                 },
                 {
@@ -35501,7 +35501,7 @@
                   "value": "(\"sched::set_idle_at_switch\", \"sched::set_idle\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 419
+                    "line": 426
                   }
                 }
               ]
@@ -35514,7 +35514,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 421
+                "line": 428
               },
               "children": [
                 {
@@ -35525,7 +35525,7 @@
                   "value": "\"note_moved shall count a move with a SeqCst increment of MOVES after the move has stored the process's new job; regroup_current shall load MOVES with Acquire, compare it with its processor's RUNNING_SEEN by a load, store RUNNING_SEEN only when they differ, and then make a SeqCst fence before it reads the job, so that a way out that sees a move counted reads the job it moved to.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 427
+                    "line": 434
                   }
                 },
                 {
@@ -35536,7 +35536,7 @@
                   "value": "\"The loom model of a move against a way out finds every way out that sees the move counted reading the new job, and its control, the count's load Relaxed and the fence removed, finds one reading the old job (`cargo xtask loom`, src/tests/loom).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 431
+                    "line": 438
                   }
                 },
                 {
@@ -35547,7 +35547,7 @@
                   "value": "\"H.OBJ.12\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 432
+                    "line": 439
                   }
                 },
                 {
@@ -35558,7 +35558,7 @@
                   "value": "(\"sched::note_moved\", \"sched::regroup_current\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 433
+                    "line": 440
                   }
                 }
               ]
@@ -35571,7 +35571,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 435
+                "line": 442
               },
               "children": [
                 {
@@ -35582,7 +35582,7 @@
                   "value": "\"take_resched shall read its own processor's reschedule request by a load, and clear it by a swap only when the load finds it set.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 438
+                    "line": 445
                   }
                 },
                 {
@@ -35593,7 +35593,7 @@
                   "value": "\"A task spawned onto its spawner's processor and a task woken onto the waker's, by a spinning task that leaves through no interrupt exit, each run within 200 ms (stage 5); with take_resched loading another processor's request, the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 443
+                    "line": 450
                   }
                 },
                 {
@@ -35604,7 +35604,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 444
+                    "line": 451
                   }
                 },
                 {
@@ -35615,7 +35615,7 @@
                   "value": "\"sched::take_resched\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 445
+                    "line": 452
                   }
                 }
               ]
@@ -35629,7 +35629,7 @@
           "doc": "src/kernel/src/sched/direct.rs, sched/queue.rs and src/lib/kernel/sched: the direct switch of channel_write_read's fast path (docs/OPAQUE-KERNEL.md §9.7, part 1).",
           "source": {
             "file": "docs/sysml/15-sched-requirements.sysml",
-            "line": 449
+            "line": 456
           },
           "children": [
             {
@@ -35640,7 +35640,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 454
+                "line": 461
               },
               "children": [
                 {
@@ -35651,7 +35651,7 @@
                   "value": "\"CpuQueue::hand_over shall charge the running task and weigh the arriving one as insert does, at one clock reading, and RunQueue::hand_over shall leave the queue, the arriving entity and the leaving entity's state exactly as enqueue, set_slice_ns, remove_curr and pick_next leave them on a queue with one entity running and nothing waiting.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 460
+                    "line": 467
                   }
                 },
                 {
@@ -35662,7 +35662,7 @@
                   "value": "\"hand_over_is_the_general_sequence: 200,000 random queues, weights and lags at and past the clamp, virtual times either side of the wrap, every field compared; its control changes one field of the result and fails.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 464
+                    "line": 471
                   }
                 },
                 {
@@ -35673,7 +35673,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 465
+                    "line": 472
                   }
                 },
                 {
@@ -35684,7 +35684,7 @@
                   "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::queue::CpuQueue::insert_at\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 467
+                    "line": 474
                   }
                 }
               ]
@@ -35697,7 +35697,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 469
+                "line": 476
               },
               "children": [
                 {
@@ -35708,7 +35708,7 @@
                   "value": "\"direct::begin shall take this processor's run-queue lock only if it is free, and decline unless the task to switch to has this processor as its home and holds both its slots (T11), nothing waits in the fair class and no sleeper is due (T12), and neither task has END posted (T13), leaving the queue unchanged when it declines.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 475
+                    "line": 482
                   }
                 },
                 {
@@ -35719,7 +35719,7 @@
                   "value": "\"Stage 9's cases 9, 10 and 14 reach T11, T12 and T13 with the fast path on and get the general path's results; each test's control fails its case (the `fastcase` line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 478
+                    "line": 485
                   }
                 },
                 {
@@ -35730,7 +35730,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 479
+                    "line": 486
                   }
                 },
                 {
@@ -35741,7 +35741,7 @@
                   "value": "(\"sched::direct::begin\", \"sched::queue::CpuQueue::sleeper_due\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 481
+                    "line": 488
                   }
                 }
               ]
@@ -35754,7 +35754,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 483
+                "line": 490
               },
               "children": [
                 {
@@ -35765,7 +35765,7 @@
                   "value": "\"The direct switch shall make FX-0503's check and then the switch through switch_chosen, the tail choose_next makes after its pick, switch_to and finish_switch.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 486
+                    "line": 493
                   }
                 },
                 {
@@ -35776,7 +35776,7 @@
                   "value": "\"choose_next and Direct::switch both call switch_chosen (review); every boot runs choose_next through it, and the fast path's trips through Direct::switch (the counts line).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 489
+                    "line": 496
                   }
                 },
                 {
@@ -35787,7 +35787,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 490
+                    "line": 497
                   }
                 },
                 {
@@ -35798,7 +35798,7 @@
                   "value": "(\"sched::switch_chosen\", \"sched::direct::Direct::switch\", \"sched::require_preemption_on\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 492
+                    "line": 499
                   }
                 }
               ]
@@ -35811,7 +35811,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 494
+                "line": 501
               },
               "children": [
                 {
@@ -35822,7 +35822,7 @@
                   "value": "\"Direct::hand_over shall stop the machine with FX-0532 when either task is the processor's idle task (A4), and with FX-0530 when the task handed over to is running here, queued, not blocked, or not the pick (A1).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 498
+                    "line": 505
                   }
                 },
                 {
@@ -35833,7 +35833,7 @@
                   "value": "\"A record planted on a running task stops the machine with FX-0530 (the A1 control).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 500
+                    "line": 507
                   }
                 },
                 {
@@ -35844,7 +35844,7 @@
                   "value": "\"H.SCHED.13\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 501
+                    "line": 508
                   }
                 },
                 {
@@ -35855,7 +35855,7 @@
                   "value": "\"sched::direct::Direct::hand_over\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 502
+                    "line": 509
                   }
                 }
               ]
@@ -35868,7 +35868,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 504
+                "line": 511
               },
               "children": [
                 {
@@ -35879,7 +35879,7 @@
                   "value": "\"A task's reply cell shall be filled only by the commit that hands the processor to it, under its home's run-queue lock while it is asleep, and emptied only by the task itself.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 507
+                    "line": 514
                   }
                 },
                 {
@@ -35890,7 +35890,7 @@
                   "value": "\"ipc-equiv's case 1 and 2 with the fast path on: every length 0 to 24 and 1,000 trips in order.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 509
+                    "line": 516
                   }
                 },
                 {
@@ -35901,7 +35901,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 510
+                    "line": 517
                   }
                 },
                 {
@@ -35912,7 +35912,7 @@
                   "value": "(\"sched::task::Task::fill_reply\", \"sched::task::Task::take_reply\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 512
+                    "line": 519
                   }
                 }
               ]
@@ -35925,7 +35925,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 514
+                "line": 521
               },
               "children": [
                 {
@@ -35936,7 +35936,7 @@
                   "value": "\"nothing_due_here shall answer true only when the running task's pending-work word is clear, no decision is asked of this processor and no move between jobs is unseen.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 517
+                    "line": 524
                   }
                 },
                 {
@@ -35947,7 +35947,7 @@
                   "value": "\"Case 14, the continuation's kill and case 15's signal leave through the general branch and act on their bit.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 519
+                    "line": 526
                   }
                 },
                 {
@@ -35958,7 +35958,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 520
+                    "line": 527
                   }
                 },
                 {
@@ -35969,7 +35969,7 @@
                   "value": "(\"sched::nothing_due_here\", \"sched::work::peek\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 521
+                    "line": 528
                   }
                 }
               ]
@@ -35982,7 +35982,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 523
+                "line": 530
               },
               "children": [
                 {
@@ -35993,7 +35993,7 @@
                   "value": "\"The fast path shall count its trips, parks and each test's declines per processor, readable by no program, printed as the shell exits.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 526
+                    "line": 533
                   }
                 },
                 {
@@ -36004,7 +36004,7 @@
                   "value": "\"test-ipc-equiv requires trips with the fast path on and every count zero with it off.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 528
+                    "line": 535
                   }
                 },
                 {
@@ -36015,7 +36015,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 529
+                    "line": 536
                   }
                 },
                 {
@@ -36026,7 +36026,7 @@
                   "value": "(\"sched::direct::count\", \"sched::direct::counts\", \"fastpath::report_counts\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 531
+                    "line": 538
                   }
                 }
               ]
@@ -36039,7 +36039,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 533
+                "line": 540
               },
               "children": [
                 {
@@ -36050,7 +36050,7 @@
                   "value": "\"The fast path's hook before T13 shall post END to the caller only while stage 9's case 14 has armed it on that task, and cost one load otherwise; a boot with it armed after stage 9 stops with FX-0908.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 537
+                    "line": 544
                   }
                 },
                 {
@@ -36061,7 +36061,7 @@
                   "value": "\"Case 14 answers EINTR within the bound; with T13 removed it stays blocked past it (the T13 control).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 539
+                    "line": 546
                   }
                 },
                 {
@@ -36072,7 +36072,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 540
+                    "line": 547
                   }
                 },
                 {
@@ -36083,7 +36083,7 @@
                   "value": "\"sched::work::fast_path_hook\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 541
+                    "line": 548
                   }
                 }
               ]
@@ -36096,7 +36096,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
-                "line": 543
+                "line": 550
               },
               "children": [
                 {
@@ -36107,7 +36107,7 @@
                   "value": "\"Each of a task's two slots shall be held in one atomic cell: taking it shall swap the cell with empty and answer the node only to that swap, giving it back shall be a compare-exchange from empty that stops the machine with FX-0534 when the cell is not empty, asking whether it is held shall be one load, and the task's drop shall free a node the cell holds; nothing shall be allocated by any of them.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 550
+                    "line": 557
                   }
                 },
                 {
@@ -36118,7 +36118,7 @@
                   "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 556
+                    "line": 563
                   }
                 },
                 {
@@ -36129,7 +36129,7 @@
                   "value": "(\"H.SCHED.13\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 557
+                    "line": 564
                   }
                 },
                 {
@@ -36140,7 +36140,7 @@
                   "value": "(\"sched::task::Task::take_run_slot\", \"sched::task::Task::return_run_slot\", \"sched::task::Task::take_sleep_slot\", \"sched::task::Task::return_sleep_slot\", \"sched::task::Task::holds_slots\", \"sched::task::Task::holds_sleep_slot\")",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 561
+                    "line": 568
                   }
                 }
               ]

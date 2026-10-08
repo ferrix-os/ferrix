@@ -265,12 +265,18 @@ fn wide(ticks: u64, hz: u64) -> u64 {
 /// MHz Arm, a 3.4 GHz TSC), just under and just over the 18.4 GHz past which
 /// the remainder's product no longer fits, and the widest; each at zero, one
 /// short of a second, a second, a second and one, the last tick before the
-/// answer saturates and the first after, and `u64::MAX`.
+/// answer saturates and the first after, and `u64::MAX`. The kernel's
+/// clock, [`crate::CounterScale`]'s multiplications by the rate's reciprocal
+/// (`docs/OPAQUE-KERNEL.md` §9.11, Q1), answers the same at every one of
+/// those, and across a sweep: every power of two and its neighbours, the
+/// rates of a PIT, an HPET, a 19.2 MHz Arm and this machine's TSC, and a
+/// thousand drawn rates, each at the boundaries of up to a hundred seconds
+/// and at a thousand drawn readings.
 ///
 /// Verifies: L.sched.6
 #[test]
 fn counter_nanos_is_the_wide_formula_exactly() {
-    use crate::counter_nanos;
+    use crate::{CounterScale, counter_nanos};
     let rates = [
         1,
         3,
@@ -300,11 +306,17 @@ fn counter_nanos_is_the_wide_formula_exactly() {
             u64::MAX - 1,
             u64::MAX,
         ];
+        let scale = CounterScale::new(hz);
         for tick in ticks {
             assert_eq!(
                 counter_nanos(tick, hz),
                 wide(tick, hz),
                 "{tick} ticks at {hz} Hz"
+            );
+            assert_eq!(
+                scale.nanos(tick),
+                wide(tick, hz),
+                "{tick} ticks at {hz} Hz, by the reciprocal"
             );
         }
     }
@@ -313,4 +325,55 @@ fn counter_nanos_is_the_wide_formula_exactly() {
         0,
         "a counter of no rate counts nothing"
     );
+    assert_eq!(
+        CounterScale::new(0).nanos(12_345),
+        0,
+        "a counter of no rate counts nothing, by the reciprocal"
+    );
+    scale_sweep();
+}
+
+/// The sweep of [`counter_nanos_is_the_wide_formula_exactly`]: the
+/// reciprocal against `wide` at every power of two and its neighbours, the
+/// reference counters' rates, and a thousand drawn rates, each at the second
+/// boundaries up to a hundred seconds and at a thousand drawn readings.
+fn scale_sweep() {
+    use crate::CounterScale;
+    // A 64-bit linear congruential generator (Knuth's MMIX constants): the
+    // same draws every run, so a failure names a reproducible rate.
+    let mut state: u64 = 0x005E_ED0F_C10C;
+    let mut draw = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        state
+    };
+    let mut rates = vec![1_193_182, 14_318_180, 19_200_000, 4_400_268_381];
+    for bit in 0..64 {
+        let power = 1_u64 << bit;
+        rates.extend([power.wrapping_sub(1), power, power.wrapping_add(1)]);
+    }
+    for _ in 0..1000 {
+        let width = draw() % 64 + 1;
+        rates.push(draw() >> (64 - width));
+    }
+    rates.retain(|hz| *hz != 0);
+    for hz in rates {
+        let scale = CounterScale::new(hz);
+        let mut ticks: Vec<u64> = (0..100_u64)
+            .flat_map(|second| {
+                let at = hz.saturating_mul(second);
+                [at.saturating_sub(1), at, at.saturating_add(1)]
+            })
+            .collect();
+        ticks.extend((0..1000).map(|_| draw()));
+        ticks.extend((0..1000).map(|_| draw() % hz.saturating_mul(1000).max(1)));
+        for tick in ticks {
+            assert_eq!(
+                scale.nanos(tick),
+                wide(tick, hz),
+                "{tick} ticks at {hz} Hz, by the reciprocal"
+            );
+        }
+    }
 }

@@ -13,6 +13,9 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use ferrix_sync::Once;
+use ferrix_vdso::CounterScale;
+
 use crate::arch;
 use crate::irq::{self, IrqError};
 
@@ -49,7 +52,25 @@ const MAX_CATCH_UP: u64 = 16;
 /// Whatever [`irq::register`] reports, which at this point can only mean two
 /// subsystems claimed the same line.
 pub(crate) fn init() -> Result<(), IrqError> {
+    publish_scale();
     irq::register(arch::timer_irq(), on_tick)
+}
+
+/// The counter's rate and its reciprocal, which [`now_nanos`] multiplies by
+/// rather than dividing (`docs/OPAQUE-KERNEL.md` §9.11, Q1): published once,
+/// by the boot processor, before anything is scheduled.
+static SCALE: Once<CounterScale> = Once::new();
+
+/// Work out the counter's reciprocal, once its rate is known: after
+/// `arch::init_interrupts` has chosen and measured the counter, which is
+/// where [`init`] is called. A rate of zero is not published; nor is a rate
+/// that differs from the counter's when [`now_nanos`] reads it later, which
+/// then divides, with the same answer.
+fn publish_scale() {
+    let hz = arch::counter_hz();
+    if hz != 0 {
+        let _ = SCALE.call_once(|| CounterScale::new(hz));
+    }
 }
 
 /// What a timer interrupt does.
@@ -291,16 +312,24 @@ pub(crate) fn ticks() -> u64 {
 
 /// Nanoseconds since the counter started, which is some point inside firmware.
 ///
-/// Only differences between two of these mean anything. The arithmetic is done
-/// in 128 bits because the obvious 64-bit form overflows after about eighteen
-/// seconds at a 1 `GHz` counter, which is exactly long enough to pass every
-/// test and fail on a real machine.
+/// Only differences between two of these mean anything. The answer is the
+/// 128-bit `ticks * 10^9 / hz` exactly, because the obvious 64-bit form
+/// overflows after about eighteen seconds at a 1 `GHz` counter, which is
+/// exactly long enough to pass every test and fail on a real machine; it is
+/// reached without a division, by the rate's reciprocal ([`CounterScale`]),
+/// split at whole seconds as `ferrix_vdso::counter_nanos` is.
 pub(crate) fn now_nanos() -> u64 {
     let hz = arch::counter_hz();
     if hz == 0 {
         return 0;
     }
-    ticks_to_nanos(arch::counter_now(), hz)
+    let ticks = arch::counter_now();
+    // The reciprocal's answer is `ticks_to_nanos`'s exactly (ferrix-vdso's
+    // host test), so which arm answers changes no reading.
+    match SCALE.get() {
+        Some(scale) if scale.hz() == hz => scale.nanos(ticks),
+        _ => ticks_to_nanos(ticks, hz),
+    }
 }
 
 /// `ticks` of a `hz` counter in nanoseconds: `ferrix_vdso::counter_nanos`,

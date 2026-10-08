@@ -5151,3 +5151,48 @@ are not yet, a design of their own.
   2,966 to 3,096); the floor, which switches no space, does not (319). No
   second native program was timed.
 - *U3:* no page, static or mapping is added or shared.
+
+#### Quick wins (po10-quick; ledger lines 507 and 515)
+
+Small cuts sized from os-76's static read of the path, each its own branch.
+Their costs were first measured by a timing-only probe (branch
+`po10-quick/probe` 47afa304f, never lands; release, KVM, nazuna; log
+`~/.local/share/ferrix/logs/po10-quick/boot-probe1.log`): TSC ticks a loop
+iteration, best of seven loops of 4,096, the empty loop's 16.9 not
+subtracted. Those are the probe's figures only; a saving is the A/B run's.
+
+**Q6, dead end.** Skipping the `FS_BASE` or `KERNEL_GS_BASE` `WRMSR` when an
+`RDMSR` of the same register already reads the target would have kept
+condition 8 (a register compared, never a record), but the read costs more
+than the write: `RDMSR FS_BASE` 128.7 ticks, `WRMSR` 89.8 (same value) and
+89.3 (alternating), `KERNEL_GS_BASE` 129.6, 90.7 and 90.0, the
+read-compare-skip 128.8. Under KVM on the Zen 5 reference host both pass
+through, and the skip would add about 9 ns a register. Bare metal and Intel
+were not measured. No code; the consultant noted it at line 507.
+
+**Q1, the clock without a division** (`po10-quick/q1`, OK IF Q1-C1 to C7).
+`timer::now_nanos` divided twice a reading (`ferrix_vdso::counter_nanos`:
+the seconds and the remainder's nanoseconds); the fast path reads it once a
+direction (`sched/direct.rs` `begin`), the general path more often. The
+probe read `now_nanos` at 76.4 ticks against `rdtsc` alone at 50.7, about
+6 ns of division a reading. `ferrix_vdso::CounterScale` divides by the
+rate's reciprocal instead, Granlund and Montgomery's round-up method in
+libdivide's unsigned 64-bit form, and is exact: bit for bit
+`counter_nanos`, which L.sched.6's host test holds at its 12 rates by 10
+readings and across a sweep of 1,196 rates by 2,300 readings each. So the
+kernel still agrees with the vDSO, which keeps its division, to the
+nanosecond. `timer::init` publishes the scale once, on the boot processor,
+after `arch::init_interrupts` has chosen the counter and before anything is
+scheduled; `now_nanos` uses it when its rate is the counter's and divides
+otherwise, with the same answer. The arithmetic lives in `ferrix-vdso`,
+which `certification-item.json` does not classify; it stays so until the
+BACKLOG row (Q1-C4) moves it. ARMv7-A, where a 64-bit division is a library
+call, should gain more; not measured.
+
+A/B against `main` 08984c2db, 5 rounds, fast path on, on a loaded host (load
+21 to 34, SMT sibling 32 to 86% busy;
+`~/.local/share/ferrix/logs/po10-quick/abab-q1-1.log`), preliminary: in the
+low mode 868 and 868 ns (2 boots) against 868 to 888 (3 boots); in the high
+mode 1,068 to 1,108 (3 boots) against 1,058 to 1,088 (2 boots). No mode had
+5 boots a side and the host was not quiet, so no saving is claimed from it;
+the expected 10 to 12 ns a round trip is at the bench's resolution.
