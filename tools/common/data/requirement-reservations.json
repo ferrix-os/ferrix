@@ -68,11 +68,11 @@
       "purpose": "ARMv7-A user state for the DK1 IPC matrix (B6 steps 3 and 5): the blocking native calls' VFP reset, TPIDRURO kept in the task, TPIDRURW switched at every switch (OPAQUE-KERNEL.md 9.13, design to its consultant)"
     },
     {
-      "ids": ["L.mm.69-70", "L.armv7a.13-20"],
+      "ids": ["L.mm.69-70", "L.armv7a.13-20", "L.user.125"],
       "owner": "os07-asid",
       "branch": "os07/asid",
       "date": "2026-10-08",
-      "purpose": "ARMv7-A ASIDs for the DK1 IPC matrix (B6 step 4): the per-processor generation allocator, the rollover flush, the uninstall to ASID 0, broadcast all-ASID shootdowns, a tag per processor, the drop of a space (OPAQUE-KERNEL.md 9.13; consultant os07-asid-cert, ledger 2026-10-08 line 590, A1)"
+      "purpose": "ARMv7-A ASIDs for the DK1 IPC matrix (B6 step 4): the per-processor generation allocator, the rollover flush, the uninstall to ASID 0, broadcast shootdowns, the drop of a space, and F-67's break-before-make order on the remap paths (OPAQUE-KERNEL.md 9.13; consultant os07-asid-cert, ledger 2026-10-08 lines 590 and 594, A1 and B5)"
     }
   ]
 }
