@@ -329,11 +329,22 @@ pub(crate) fn set_current_group(index: u32) {
 }
 
 /// Move `task`, the running one, to `index`, and say so where charges look.
+///
+/// Under this processor's run queue lock, so that what the queue kept back
+/// of `cpu.stat`'s time for the job being left goes to it, and the queue's
+/// hold on it with it, before the task names another (`quota::leaving`): a
+/// task alone on its processor may not be charged again for a long time.
 fn set_task_group(task: &Arc<Task>, index: u32) {
-    task.set_group(index);
     let saved = <arch::Irq as IrqControl>::disable();
-    if let Some(slot) = this_cpu().and_then(|cpu| RUNNING_GROUP.get()?.get(cpu)) {
-        slot.store(index, Ordering::Release);
+    if let Some((cpu, lock)) = this_cpu().and_then(|cpu| Some((cpu, queue_of(cpu)?))) {
+        let mut queue = lock.lock();
+        quota::leaving(&mut queue.pending);
+        task.set_group(index);
+        if let Some(slot) = RUNNING_GROUP.get().and_then(|running| running.get(cpu)) {
+            slot.store(index, Ordering::Release);
+        }
+    } else {
+        task.set_group(index);
     }
     <arch::Irq as IrqControl>::restore(saved);
     // A task alone on its processor gets no tick, and its timer was armed
@@ -2284,6 +2295,7 @@ fn switch_chosen(
     queue.stats.switches += 1;
     carry_in_call(cpu, &previous, &next);
     note_running(cpu, next.id, next.group(), next.moves_seen());
+    quota::switched(&mut queue.pending, next.group());
     // Idle to the rest of the machine exactly while the idle task is what
     // runs: cleared here, before any other task can, and set again when the
     // idle task comes back. The idle loop's own clear came too late for the
@@ -2981,6 +2993,8 @@ pub(crate) fn charge_running() {
     for lock in queues {
         let mut queue = lock.lock();
         queue.account_in(crate::timer::now_nanos(), true);
+        // What it charged and kept back goes to the slots `cpu.stat` reads.
+        quota::settle(&mut queue.pending);
     }
     <arch::Irq as IrqControl>::restore(saved);
 }
@@ -3207,4 +3221,31 @@ pub(crate) fn cpu_times() -> Result<Vec<CpuTime>, fallible::AllocError> {
 /// among them, as Linux's `total_forks` counts its idle tasks.
 pub(crate) fn tasks_made() -> u64 {
     NEXT_ID.load(Ordering::Relaxed).saturating_sub(1)
+}
+
+/// The job this processor's run queue keeps processor time back for
+/// (`quota::Pending`), for a check: `quota::NONE` when none.
+pub(crate) fn pending_group_here() -> u32 {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let group = this_cpu()
+        .and_then(queue_of)
+        .map_or(quota::NONE, |lock| lock.lock().pending.group());
+    <arch::Irq as IrqControl>::restore(saved);
+    group
+}
+
+/// How many charges, on every processor, made the `cpu.max` walk
+/// (`quota::charge_cpu`): for stage 13's check that none does while no
+/// `cpu.max` is set.
+pub(crate) fn bandwidth_walks() -> u64 {
+    let Some(queues) = QUEUES.get() else {
+        return 0;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let walks = queues
+        .iter()
+        .map(|lock| lock.lock().pending.walks())
+        .fold(0, u64::wrapping_add);
+    <arch::Irq as IrqControl>::restore(saved);
+    walks
 }

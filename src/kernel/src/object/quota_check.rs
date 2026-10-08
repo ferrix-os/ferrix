@@ -64,6 +64,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         report.alone_share = check_the_processor(&tree)?;
         check_the_weight(&tree)?;
         check_an_ended_victim_is_emptied(&tree)?;
+        check_a_move_settles_the_pending_charge(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -523,6 +524,51 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
     checked?;
     if used(&job) != 0 {
         return Err("the OOM check's processes gone and their memory still charged");
+    }
+    Ok(())
+}
+
+/// A running task that moves to another job leaves nothing of its processor
+/// time kept back for the job it left (`quota::Pending`), and no hold on that
+/// job's slot: the job gone, its slot is free, though the task was charged to
+/// it a moment before it moved and is not charged again yet. And a read of
+/// `cpu.stat` (`sched::charge_running`) counts what the queue keeps back
+/// before anything else moves it: nothing switches while this runs masked.
+///
+/// Verifies: L.object.180
+fn check_a_move_settles_the_pending_charge(tree: &Arc<Job>) -> Result<(), &'static str> {
+    use ferrix_sync::IrqControl;
+    let slots = quota::live_slots();
+    let job = tree.new_child().map_err(|_| "a job refused a child")?;
+    let index = job.quota_index();
+    let own = sched::running_group();
+    // Masked, so that the task stays on the processor whose queue it asks.
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    sched::set_current_group(index);
+    let start = crate::timer::now_nanos();
+    while crate::timer::now_nanos() == start {
+        core::hint::spin_loop();
+    }
+    // Charges the running task, to `job`, and keeps it back.
+    let _ = sched::current_runtime();
+    let named = sched::pending_group_here();
+    sched::charge_running();
+    let (user, system) = job.cpu_times();
+    sched::set_current_group(own);
+    let after = sched::pending_group_here();
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    drop(job);
+    if named != index {
+        return Err("a running task's processor time was not kept back for its job");
+    }
+    if user.saturating_add(system) == 0 {
+        return Err("a read of cpu.stat did not count the processor time a run queue kept back");
+    }
+    if after == index {
+        return Err("a running task that left a job left its processor time kept back for it");
+    }
+    if quota::live_slots() != slots {
+        return Err("a job a running task left is gone and its quota slot is not");
     }
     Ok(())
 }

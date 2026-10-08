@@ -57,7 +57,9 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u64> {
         .mkdir(b"/check-c")
         .map_err(|_| "cpu check: mkdir of a cgroup failed")?;
     harness.report.made += 1;
-    let outcome = files(harness).and_then(|()| throttling(harness));
+    let outcome = pending()
+        .and_then(|()| files(harness))
+        .and_then(|()| throttling(harness));
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
     let removed = harness.rmdir(b"/check-c");
     let disabled = harness.write(b"/cgroup.subtree_control", b"-cpu\n");
@@ -227,7 +229,7 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let killed = killed_throttled(harness)?;
     let late = quota_comes_late(harness)?;
-    let beneath = beneath(harness)?;
+    let beneath = beneath(harness)? + walks_only_under_a_quota(harness)?;
     Ok(throttled + killed + late + beneath)
 }
 
@@ -442,4 +444,70 @@ fn held_beneath(harness: &Harness, program: &Running) -> Checked<u64> {
         return Err("a cgroup's cpu.stat counts nothing of the program in it");
     }
     number(harness, b"/check-c/cpu.stat", "nr_throttled")
+}
+
+/// A processor's charge of processor time to a job is kept pending and moved
+/// into the job's slots, exactly once, when it charges another job, switches
+/// to one, or `cpu.stat` is read (`object::quota::Pending`).
+///
+/// Verifies: L.object.180
+fn pending() -> Checked<()> {
+    crate::object::quota::check_pending_charge()
+}
+
+/// The `cpu.max` part of a charge, the walk up the job's slots for a quota,
+/// is made only while some `cpu.max` is set (`object::quota::charge_cpu`): a
+/// program running with none set makes no walk, and the same program under
+/// one does. What keeps a charge with no `cpu.max` anywhere to a load: a
+/// guard of the cost, which verifies no requirement.
+fn walks_only_under_a_quota(harness: &mut Harness) -> Checked<u64> {
+    if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
+        return Ok(0);
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"max 100000\n")
+        .map_err(|_| "cpu.max refused max")?;
+    if crate::object::quota::bandwidth_in_use() {
+        return Err("cpu check: a cpu.max is still set somewhere before the walk check");
+    }
+    let program = freeze_check::start(harness, b"/check-c")?;
+    let outcome = walks_while(harness, &program);
+    kill::send(&program.process, SIGKILL, Origin::Kernel);
+    let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
+    let _ = program.process.wait_for_exit(deadline);
+    drop(program);
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
+    outcome?;
+    emptied?;
+    Ok(0)
+}
+
+/// The window of [`walks_only_under_a_quota`]: the program runs with no
+/// `cpu.max`, then under one.
+fn walks_while(harness: &mut Harness, program: &Running) -> Checked<()> {
+    use crate::sched::bandwidth_walks;
+    freeze_check::wait_running(&program.process)?;
+    let (walks, used) = (bandwidth_walks(), usage(harness, b"/check-c/cpu.stat")?);
+    crate::sched::sleep_for(100_000_000);
+    let used_after = usage(harness, b"/check-c/cpu.stat")?;
+    let walks_after = bandwidth_walks();
+    if used_after <= used {
+        return Err("cpu check: a program with no cpu.max was charged nothing");
+    }
+    if walks_after != walks {
+        crate::console::println!(
+            "  cpu      {} charges looked for a cpu.max with none set",
+            walks_after.wrapping_sub(walks)
+        );
+        return Err("a processor-time charge looked for a cpu.max with none set");
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"20000 100000\n")
+        .map_err(|_| "cpu.max refused 20000 100000")?;
+    crate::sched::sleep_for(100_000_000);
+    if bandwidth_walks() == walks_after {
+        return Err("a processor-time charge under a cpu.max did not look for it");
+    }
+    Ok(())
 }

@@ -520,7 +520,8 @@ pub(crate) fn bandwidth_in_use() -> bool {
 }
 
 /// Nanoseconds all tasks have used the processor in user mode and in kernel
-/// mode, since boot.
+/// mode, since boot: exact after `sched::charge_running`, which moves what
+/// each processor kept back ([`Pending`]) here.
 pub(crate) fn machine_cpu() -> (u64, u64) {
     (
         MACHINE_CPU[0].load(Ordering::Relaxed),
@@ -582,19 +583,29 @@ fn bump(slot: &Slot, counter: Counter, amount: u64) {
 
 /// Charge `delta` nanoseconds of processor time, used at `now` in user mode
 /// (`user`) or in kernel mode, to slot `index` and every slot above it, and
-/// to the machine. A slot under a quota whose use reaches it is throttled
-/// until its period ends. Atomics only: the scheduler calls this under a run
-/// queue's lock.
-pub(crate) fn charge_cpu(index: u32, now: u64, delta: u64, user: bool) {
-    let mode = usize::from(!user);
-    if let Some(total) = MACHINE_CPU.get(mode) {
-        let _ = total.fetch_add(delta, Ordering::Relaxed);
+/// to the machine, through `pending`, the charging processor's own, under its
+/// run queue's lock. A slot under a quota whose use reaches it is throttled
+/// until its period ends. Atomics only.
+///
+/// The `cpu.stat` part goes to `pending` ([`Pending`]), which a flush moves
+/// into the slots: when a charge is for another job, when the processor
+/// switches to a task of another job ([`switched`]), when the running task
+/// leaves its job ([`leaving`]), and before `cpu.stat` is read ([`settle`]).
+/// The `cpu.max` part is made at once, as a quota must be, and only while
+/// some `cpu.max` is set: a machine with none pays a load.
+pub(crate) fn charge_cpu(pending: &mut Pending, index: u32, now: u64, delta: u64, user: bool) {
+    pending.charge(&MACHINE_CPU, index, usize::from(!user), delta);
+    if bandwidth_in_use() {
+        pending.walks = pending.walks.wrapping_add(1);
+        charge_bandwidth(index, now, delta);
     }
+}
+
+/// The `cpu.max` part of [`charge_cpu`]: `delta` to the quota of every slot
+/// from `index` up that has one.
+fn charge_bandwidth(index: u32, now: u64, delta: u64) {
     let mut at = index;
     while let Some(slot) = slot(at) {
-        if let Some(time) = slot.cpu_time.get(mode) {
-            let _ = time.fetch_add(delta, Ordering::Relaxed);
-        }
         let quota = slot.bw_quota.load(Ordering::Acquire);
         if quota != UNLIMITED {
             refresh_period(slot, now);
@@ -1028,7 +1039,8 @@ impl Quota {
     }
 
     /// Nanoseconds its tasks used the processor in user mode and in kernel
-    /// mode, its descendants' included.
+    /// mode, its descendants' included: exact after `sched::charge_running`,
+    /// which moves what each processor kept back ([`Pending`]) here.
     pub(crate) fn cpu_times(&self) -> (u64, u64) {
         slot(self.index).map_or((0, 0), |slot| {
             (
@@ -1176,4 +1188,184 @@ const _: () = assert!(
 /// The load of `index`, for a check.
 pub(crate) fn load(index: u32) -> i64 {
     slot(index).map_or(0, |slot| slot.load.load(Ordering::Acquire))
+}
+
+/// Add `delta` nanoseconds in `mode` (0 user, 1 kernel) to `machine` and to
+/// the `cpu.stat` time of slot `index` and every slot above it: what a flush
+/// of a [`Pending`] charge does.
+fn add_cpu_time(machine: &[AtomicU64; 2], index: u32, mode: usize, delta: u64) {
+    if let Some(total) = machine.get(mode) {
+        let _ = total.fetch_add(delta, Ordering::Relaxed);
+    }
+    let mut at = index;
+    while let Some(slot) = slot(at) {
+        if let Some(time) = slot.cpu_time.get(mode) {
+            let _ = time.fetch_add(delta, Ordering::Relaxed);
+        }
+        at = slot.parent.load(Ordering::Acquire);
+    }
+}
+
+/// The processor time one processor has charged to one job and not yet
+/// added to the job's slots: [`charge_cpu`]'s `cpu.stat` part, made with an
+/// add to a field where the walk up the slots costs a locked add a level.
+///
+/// A field of the processor's run queue (`sched::queue::CpuQueue`), so only
+/// ever touched under that queue's lock: by the queue's charges, by the
+/// switch ([`switched`]), by the running task's own move to another job
+/// (`sched::set_task_group`), and by `sched::charge_running` ([`settle`]),
+/// which the only reader of the slots' time, `cpu.stat`, calls first. So
+/// nothing charged is counted twice or lost, and a read counts everything
+/// charged before it, as when each charge walked the slots itself.
+#[derive(Debug)]
+pub(crate) struct Pending {
+    /// The slot the time is charged to, held while it is (so that it is not
+    /// freed, and its index claimed again, with time owed to it), or
+    /// [`NONE`]: the machine's alone.
+    group: u32,
+    /// Nanoseconds in user mode and in kernel mode.
+    time: [u64; 2],
+    /// How many charges made the `cpu.max` walk ([`charge_bandwidth`]), for
+    /// the check that none does while no `cpu.max` is set.
+    walks: u64,
+}
+
+impl Pending {
+    /// Nothing pending.
+    pub(crate) const fn new() -> Pending {
+        Pending {
+            group: NONE,
+            time: [0; 2],
+            walks: 0,
+        }
+    }
+
+    /// Charge `delta` nanoseconds in `mode` to slot `index`: flushed first
+    /// into `machine` and the slots if what is pending is another job's.
+    fn charge(&mut self, machine: &[AtomicU64; 2], index: u32, mode: usize, delta: u64) {
+        if self.group != index {
+            self.flush(machine, index);
+        }
+        if let Some(time) = self.time.get_mut(mode) {
+            *time = time.wrapping_add(delta);
+        }
+    }
+
+    /// Move what is pending into `machine` and its job's slots, and charge
+    /// to `to` from now on, holding its slot instead of the one it held.
+    fn flush(&mut self, machine: &[AtomicU64; 2], to: u32) {
+        let from = self.group;
+        for (mode, time) in self.time.iter_mut().enumerate() {
+            if *time != 0 {
+                add_cpu_time(machine, from, mode, *time);
+                *time = 0;
+            }
+        }
+        if to != from {
+            // `to` is held by the task being charged to it, so it is live.
+            hold_group(to);
+            self.group = to;
+            release_group(from);
+        }
+    }
+
+    /// How many charges made the `cpu.max` walk.
+    pub(crate) fn walks(&self) -> u64 {
+        self.walks
+    }
+
+    /// The slot it keeps time back for, or [`NONE`].
+    pub(crate) fn group(&self) -> u32 {
+        self.group
+    }
+}
+
+/// The processor whose pending charge `pending` is switched to a task charged
+/// to `group`: what it has pending for another job goes to that job's slots
+/// now, so that a processor gone idle owes nothing and holds no gone job's
+/// slot. One compare when the job is the same.
+pub(crate) fn switched(pending: &mut Pending, group: u32) {
+    if pending.group != group {
+        pending.flush(&MACHINE_CPU, group);
+    }
+}
+
+/// The running task on the processor whose pending charge this is leaves the
+/// job it was charged to: what is pending goes to that job's slots, and the
+/// hold on it goes, before the task's group changes.
+pub(crate) fn leaving(pending: &mut Pending) {
+    pending.flush(&MACHINE_CPU, NONE);
+}
+
+/// Move everything `pending` holds into the slots, for a reader of
+/// `cpu.stat`.
+pub(crate) fn settle(pending: &mut Pending) {
+    let keep = pending.group;
+    pending.flush(&MACHINE_CPU, keep);
+}
+
+/// Stage 13's check of the [`Pending`] charge, on records and machine
+/// counters of its own and two slots claimed for it, a job and its child: a
+/// charge stays pending and holds its slot; a charge to another job moves
+/// the first into the slots, once; a flush settles everything and lets go
+/// of what it held.
+///
+/// # Errors
+///
+/// The first thing that was not so, by name.
+pub(crate) fn check_pending_charge() -> Result<(), &'static str> {
+    let parent = claim(NONE).map_err(|_| "pending charge check: no slot to claim")?;
+    let outcome = match claim(parent) {
+        Ok(child) => {
+            let outcome = pending_cases(parent, child);
+            release(child);
+            outcome
+        }
+        Err(_) => Err("pending charge check: no slot to claim"),
+    };
+    release(parent);
+    outcome
+}
+
+/// The cases of [`check_pending_charge`].
+fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
+    let machine = [const { AtomicU64::new(0) }; 2];
+    let (mut one, mut two) = (Pending::new(), Pending::new());
+    let pair = |held: &[AtomicU64; 2]| {
+        [
+            held[0].load(Ordering::Relaxed),
+            held[1].load(Ordering::Relaxed),
+        ]
+    };
+    let times = |index: u32| slot(index).map_or([u64::MAX; 2], |slot| pair(&slot.cpu_time));
+    let holds = |index: u32| slot(index).map_or(0, |slot| slot.holds.load(Ordering::Acquire));
+    let (child_holds, parent_holds) = (holds(child), holds(parent));
+
+    one.charge(&machine, child, 0, 1_000);
+    two.charge(&machine, child, 1, 20);
+    if (times(child), pair(&machine)) != ([0, 0], [0, 0]) {
+        return Err("a pending processor-time charge reached the slots before a flush");
+    }
+    if (one.time, two.time, one.group, two.group) != ([1_000, 0], [0, 20], child, child) {
+        return Err("a processor-time charge was not kept pending for its job");
+    }
+    if holds(child) != child_holds + 2 {
+        return Err("a pending processor-time charge does not hold its job's slot");
+    }
+    one.charge(&machine, parent, 1, 300);
+    if (times(child), times(parent), pair(&machine)) != ([1_000, 0], [1_000, 0], [1_000, 0]) {
+        return Err("a charge to another job did not move what was pending into the slots once");
+    }
+    one.flush(&machine, NONE);
+    two.flush(&machine, NONE);
+    if (times(child), times(parent), pair(&machine)) != ([1_000, 20], [1_000, 320], [1_000, 320]) {
+        return Err("a flush did not settle every pending processor-time charge exactly once");
+    }
+    if (one.time, two.time) != ([0, 0], [0, 0]) {
+        return Err("a flush left processor time pending");
+    }
+    if (holds(child), holds(parent)) != (child_holds, parent_holds) {
+        return Err("a flush did not let go of the slot the pending charge held");
+    }
+    Ok(())
 }
