@@ -156,3 +156,55 @@ mod tests {
         assert_eq!(summary(&lines, "futex-pingpong"), None);
     }
 }
+
+/// The lines `test-pipewait`'s program prints when every step passes.
+const PIPEWAIT_STEPS: &[&str] = &[
+    "pipewait: eintr ok",
+    "pipewait: restart ok",
+    "pipewait: kill ok",
+    "pipewait: stop ok",
+    "pipewait: freeze ok",
+    "pipewait: all ok",
+];
+
+/// `test-pipewait`: boot `src/tests/pipewait` as init on every architecture
+/// asked for, and require a process blocked in a pipe's read to be ended by
+/// a caught signal (`EINTR`, and a restart under `SA_RESTART`), `SIGKILL`, a
+/// stop and continue, and a freeze and thaw, each within two seconds. A
+/// pipe's waits trust their queues, so a wake missing here hangs a program
+/// for good rather than costing it a recheck.
+///
+/// # Errors
+///
+/// A build or boot that fails, a step missing from the output, or a status
+/// other than 0.
+pub(crate) fn test_pipewait(args: &Args) -> Result<()> {
+    for arch in args.arches()? {
+        let log = paths::build_dir(arch).join("serial.log");
+        let program = sem::build_test("pipewait", arch, None, false)?;
+        let lines = sem::boot(arch, &program, args)?;
+        let mut remaining = lines.iter();
+        for want in PIPEWAIT_STEPS {
+            if !remaining.any(|line| sem::says(line, want)) {
+                let failed = lines.iter().find(|line| line.contains("pipewait: FAILED"));
+                return Err(Error::new(format!(
+                    "{arch}: the pipe wait test did not print `{want}` in order{}.\n  Serial \
+                     output is in {}",
+                    failed.map_or(String::new(), |line| format!("; it said `{}`", line.trim())),
+                    log.display()
+                )));
+            }
+        }
+        if sem::status(&lines) != Some(0) {
+            return Err(Error::new(format!(
+                "{arch}: the pipe wait test did not exit with 0.\n  Serial output is in {}",
+                log.display()
+            )));
+        }
+        println!(
+            "  {arch}: a pipe read was ended by a caught signal, restarted under SA_RESTART, \
+             ended by SIGKILL, stopped and continued, and frozen and thawed, exit 0"
+        );
+    }
+    Ok(())
+}

@@ -148,6 +148,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     match command {
         "test-sem" => test_sem(args),
         "test-shm" => crate::shm::test_shm(args),
+        "test-pipewait" => crate::pipe_bench::test_pipewait(args),
         "test-procfs" => crate::procfs::test_procfs(args),
         "test-uvm" => crate::uvm::test_uvm(args),
         "test-nvrm" => crate::nvrm::test_nvrm(args),
