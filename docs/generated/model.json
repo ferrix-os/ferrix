@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "cf55ee86e6bedb9af100f38de5248b914caa4854c0a9049f2f32013e9a589e3d",
+  "digest": "ec7a25c05bd73d458086bcf5ecf8482dc83bcd55caebd18f78539f1394dae040",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 136,
-    "elements": 6621,
+    "elements": 6626,
     "maturity": {
       "implemented": 277,
       "inProgress": 16,
@@ -36312,6 +36312,63 @@
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 611
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theFairClassDividesExactly",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFairClassDividesExactly",
+              "kind": "requirement",
+              "shortName": "L.sched.67",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 613
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFairClassDividesExactly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every quotient the fair class computes -- virtual time from real time, the queue's average, an entity's lag, a placement's scaled lag and a reweigh's owed lag -- shall equal the 128-bit formula's for every input, whether it is divided, multiplied by a weight's reciprocal or written down.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 618
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFairClassDividesExactly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"ferrix-sched's host test compares the division by a weight's reciprocal, virtual time by it, truncation by it of negative, zero, i64::MIN and wider numerators, the lag on queues whose sum is inside and outside 0..load, and a placement on a queue running one entity with 128-bit expressions written in the test, at every boundary and 200,000 random cases; its controls (the correction step removed, the reciprocal one low, the lag's range test removed, a negative placement rounded down) each fail it.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 626
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFairClassDividesExactly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.SCHED.3\", \"H.SCHED.13\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 627
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFairClassDividesExactly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::queue::CpuQueue::hand_over\", \"sched::queue::CpuQueue::account_with\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 629
                   }
                 }
               ]

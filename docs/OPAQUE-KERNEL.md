@@ -5248,3 +5248,52 @@ between them: within D1, not the memo it forbids (ledger 461 (e)).
 - L.sched.55 now states only what `hand_over_is_the_general_sequence`
   proves, `RunQueue::hand_over`; its charge-and-weigh clause is L.sched.65.
 
+#### The scheduler side: the fair class's divisions by exact reciprocals (po10-sched; ledger line 528, K1 to K5)
+
+**Where the divisions were.** On the direct switch's queue (one entity
+running, nothing waiting, normalized) a direction made eight 64-bit
+divisions in `ferrix_sched`: `update_curr`'s virtual time by the caller's
+weight; in `RunQueue::hand_over`, the peer's slice by its weight twice (the
+lag limit and the deadline), the placement's scaling by the load, the
+average of a sum that is 0, `normalize`'s average by the two weights, the
+caller's slice at the new slice length and its lag by the load. Outside the
+fair class the trip still divides in `slice_for` (its target by the count)
+and once per job level in `carried_weight` (J2's one walk).
+
+**K1, a weight with its reciprocal.** `Weight`, private to the crate, pairs
+a weight with `inv = (2^64 - 1) / max(w, 1)`, made by its one constructor
+where a weight is set on a queue (`enqueue`, `hand_over`, `set_weight`'s two
+arms; never written apart). `Weight::divide` is a widening multiply, a
+multiply and one correction: exact for every 64-bit numerator, since
+`2^64 / w - inv = (r + 1) / w <= 1` for the remainder `r < w`, so the
+multiply falls short of `n / w` by less than `n / 2^64 < 1`. Not Linux's
+`inv_weight`, which rounds and so moves the policy's numbers (s9.8 answer
+7). Numerators of 2^64 or more keep the 128-bit division. The pair lives
+only in the queue's entity: the kernel's task and `EntityState` carry the
+weight alone, so no reciprocal can be read apart from its weight outside the
+queue's lock (ledger 528 (k6), K-C1 met by having no second copy); the
+price is one division where an entity arrives (`Weight::new`), in place of
+two.
+**K2.** `floor_div` and `truncating_div` answer 0 for a numerator of 0.
+**K3.** The arriving entity's slice is made once and serves its lag limit
+and its deadline.
+**K4.** `lag_at` on a queue with `0 <= sum < load` -- which `normalize`
+leaves and `check_sums` requires -- answers `-rel(v)`, by
+`floor((sum - rel * load) / load) = floor(sum / load) - rel`; elsewhere it
+divides.
+**K5.** `placement_lag`'s scaling, where nothing waits and the load is the
+running entity's weight alone, truncates by that weight's reciprocal (the
+magnitude divided, the sign restored); elsewhere it divides.
+A direction now divides twice in the fair class: the arriving weight's
+reciprocal and `normalize`'s average of two weights.
+
+**Checks.** `the_fair_class_divides_by_a_weight_as_the_wide_formula_does`
+(L.sched.67) holds every new form to 128-bit expressions written in the
+test: the reciprocal division at every boundary of numerator and weight and
+200,000 random pairs, virtual time by it, truncation by it of negative,
+zero, `i64::MIN` and wider numerators, the lag on built queues with the sum
+at 0, `load - 1`, -1, `load` and far outside, and the placement on a queue
+running one entity. `hand_over_is_the_general_sequence` and the randomized
+queue tests pass unchanged; they are not the evidence for a shared helper's
+exactness, since both their sides use it (ledger 528 (k4)).
+

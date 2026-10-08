@@ -100,7 +100,7 @@ impl<T> Slot<T> {
         ferrix_fallible::try_box(Node {
             entity: Entity {
                 id: 0,
-                weight: 0,
+                weight: crate::Weight::new(0),
                 vruntime: 0,
                 deadline: 0,
                 sum_exec: 0,

@@ -1751,6 +1751,163 @@ fn the_narrow_arithmetic_is_the_wide_arithmetic() {
     }
 }
 
+/// The fair class's quotients by a weight's reciprocal, and its shortcuts
+/// that divide nothing (`docs/OPAQUE-KERNEL.md` §9.11, K1-K5), answer what
+/// the 128-bit formulas written here answer, never the crate's helpers: the
+/// reciprocal division at every boundary of numerator and weight and at
+/// random; virtual time by it; truncation by it of negative, zero, `i64::MIN`
+/// and wider numerators; floor and truncating division of zero; a lag on
+/// queues whose sum is at, inside and outside `0..load`; and a placement on a
+/// queue running one entity.
+///
+/// Verifies: L.sched.67
+#[test]
+fn the_fair_class_divides_by_a_weight_as_the_wide_formula_does() {
+    let mut rng = Rng(0x5EED_0FC0_FFEE);
+    let numerators = [
+        0,
+        1,
+        2,
+        1023,
+        1024,
+        u64::from(u32::MAX),
+        1 << 32,
+        (1 << 54) - 1,
+        1 << 54,
+        1 << 63,
+        u64::MAX - 1,
+        u64::MAX,
+    ];
+    let weights = [
+        1,
+        2,
+        3,
+        15,
+        1023,
+        1024,
+        1025,
+        88_761,
+        1 << 31,
+        u32::MAX - 1,
+        u32::MAX,
+    ];
+    for &weight in &weights {
+        let reciprocal = Weight::new(weight);
+        for &numerator in &numerators {
+            for near in [
+                numerator,
+                numerator.wrapping_sub(1),
+                numerator.wrapping_add(1),
+            ] {
+                let multiple = near.wrapping_mul(u64::from(weight));
+                for value in [
+                    near,
+                    multiple,
+                    multiple.wrapping_sub(1),
+                    multiple.wrapping_add(1),
+                ] {
+                    assert_eq!(
+                        u128::from(reciprocal.divide(value)),
+                        u128::from(value) / u128::from(weight),
+                        "{value} / {weight}"
+                    );
+                }
+            }
+        }
+    }
+    for case in 0..200_000_u64 {
+        let weight = match case % 3 {
+            0 => 1 + rng.next() as u32 % 200_000,
+            1 => (rng.next() as u32).max(1),
+            _ => weights[rng.below(weights.len() as u64) as usize],
+        };
+        let value = rng.next() >> rng.below(64);
+        let reciprocal = Weight::new(weight);
+        assert_eq!(
+            u128::from(reciprocal.divide(value)),
+            u128::from(value) / u128::from(weight),
+            "{value} / {weight}"
+        );
+        assert_eq!(
+            u128::from(to_virtual_by(value, reciprocal)),
+            (u128::from(value) * u128::from(NICE_0_WEIGHT) / u128::from(weight))
+                .min(u128::from(u64::MAX)),
+            "virtual time of {value} at {weight}"
+        );
+        let signed = match case % 5 {
+            0 => 0,
+            1 => i128::from(i64::MIN),
+            2 => -(i128::from(rng.next())),
+            3 => i128::from(rng.next()) << rng.below(60),
+            _ => i128::from(rng.next() as i64),
+        };
+        assert_eq!(
+            reciprocal.truncating(signed),
+            signed / i128::from(weight),
+            "{signed} / {weight}, truncated"
+        );
+    }
+    assert_eq!(floor_div(0, 7), 0);
+    assert_eq!(truncating_div(0, 7), 0);
+    check_lags_and_placements(&mut rng);
+}
+
+/// [`RunQueue::lag_at`] on queues built here, its sum in `0..load` and out of
+/// it, against `floor((sum - rel * load) / load)` in 128 bits; and
+/// [`RunQueue::placement_lag`] on a queue running one entity, against
+/// `trunc(clamp(vlag) * (load + w) / load)`.
+fn check_lags_and_placements(rng: &mut Rng) {
+    for case in 0..100_000_u64 {
+        let mut queue = queue();
+        let load = 1 + rng.next() % 1_000_000;
+        queue.load = load;
+        queue.zero = rng.next();
+        queue.sum = match case % 6 {
+            0 => 0,
+            1 => i128::from(load - 1),
+            2 => -1,
+            3 => i128::from(load),
+            4 => i128::from(rng.next() as i64) * i128::from(load),
+            _ => i128::from(rng.below(load)),
+        };
+        let vruntime = queue.zero.wrapping_add(rng.next() >> rng.below(64));
+        let relative = i128::from(vruntime.wrapping_sub(queue.zero) as i64);
+        let wanted = (queue.sum - relative * i128::from(load)).div_euclid(i128::from(load)) as i64;
+        assert_eq!(queue.lag_at(vruntime), wanted, "case {case}: the lag");
+    }
+    for case in 0..100_000_u64 {
+        let mut queue = queue();
+        let running = drawn_weight(rng);
+        queue
+            .enqueue(1, 1, EntityState::new(running), slot())
+            .map_err(|_| ())
+            .unwrap();
+        let _ = queue.pick_next();
+        let weight = drawn_weight(rng);
+        let vlag = match case % 4 {
+            0 => 0,
+            1 => i64::MIN,
+            2 => -(rng.next() as i64 >> rng.below(63)),
+            _ => rng.next() as i64 >> rng.below(63),
+        };
+        let state = EntityState {
+            weight,
+            vlag,
+            sum_exec: 0,
+        };
+        let vslice = to_virtual(SLICE, weight);
+        let limit = i64::try_from(vslice.saturating_mul(2)).unwrap_or(i64::MAX);
+        let clamped = i128::from(vlag.clamp(-limit, limit));
+        let load = i128::from(running);
+        let wanted = (clamped * (load + i128::from(weight)) / load) as i64;
+        assert_eq!(
+            queue.placement_lag(state, vslice),
+            wanted,
+            "case {case}: the placement"
+        );
+    }
+}
+
 /// A slot taken apart into its node and put together again
 /// (`Slot::into_box`, `Slot::from_box`, the kernel's `SlotCell`) is the same
 /// node and serves a queue as one never taken apart: enqueued, picked and

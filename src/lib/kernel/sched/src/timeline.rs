@@ -49,7 +49,7 @@ impl<T> Timeline<T> {
         let Slot(mut node) = slot;
         node.entity = Entity {
             id,
-            weight: 0,
+            weight: crate::Weight::new(0),
             vruntime: 0,
             deadline: at,
             sum_exec: 0,

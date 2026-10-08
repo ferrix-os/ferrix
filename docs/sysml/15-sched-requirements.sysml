@@ -610,5 +610,23 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::direct::Direct::hand_over",
                 "sched::queue::PendingJoin::settle");
         }
+        requirement <'L.sched.67'> theFairClassDividesExactly : ItemLowLevel {
+            attribute :>> statement = "Every quotient the fair class computes -- virtual
+                time from real time, the queue's average, an entity's lag, a placement's
+                scaled lag and a reweigh's owed lag -- shall equal the 128-bit formula's
+                for every input, whether it is divided, multiplied by a weight's
+                reciprocal or written down.";
+            attribute :>> criterion = "ferrix-sched's host test compares the division
+                by a weight's reciprocal, virtual time by it, truncation by it of
+                negative, zero, i64::MIN and wider numerators, the lag on queues whose
+                sum is inside and outside 0..load, and a placement on a queue running
+                one entity with 128-bit expressions written in the test, at every
+                boundary and 200,000 random cases; its controls (the correction step
+                removed, the reciprocal one low, the lag's range test removed, a
+                negative placement rounded down) each fail it.";
+            attribute :>> parent = ("H.SCHED.3", "H.SCHED.13");
+            attribute :>> unit = ("sched::queue::CpuQueue::hand_over",
+                "sched::queue::CpuQueue::account_with");
+        }
     }
 }
