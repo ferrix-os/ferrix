@@ -1,0 +1,28 @@
+# posixbench: MEASUREMENT ONLY (os07/ferrix-posix, never lands). The DK1
+# board bench's level 4 (docs/BOARD-BENCH.md, B5) on Ferrix: B5's static musl
+# lmbench and speedtest1 from ~/.local/share/ferrix/board-bench/posix, and
+# posix-init.sh, the twin of Linux's tools/common/bench/board/linux/posix-init.sh,
+# all under /opt/posixbench.
+
+[package]
+name = "posixbench"
+version = "0.1.0"
+description = "Board bench level 4: lmbench and speedtest1 (measurement only)"
+license = "GPL-2.0-only AND blessing AND MIT"
+abi = "linux"
+arches = ["armv7a"]
+depends = []
+
+[[package.files]]
+from = "bundle"
+tree = true
+to = "opt/posixbench"
+
+[build]
+kind = "script"
+
+[image]
+default = false
+
+[check]
+host-tests = false
