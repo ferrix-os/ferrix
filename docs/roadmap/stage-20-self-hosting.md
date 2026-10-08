@@ -180,8 +180,8 @@ The rest of the stage was 50 points (range 40-75), sized on 2026-10-04's
 evening, and is 45 since S-2 landed on 2026-10-05; S-0, CI green, is the
 first bullet above and is met too. A guess is marked.
 
-* **S-1, FX-0001 under a loaded host, 8** (3 to 13, a guess), **fixed on
-  branch `po10-selfhost/fx0001` (2026-10-07)**. A shootdown wait on x86-64
+* **S-1, FX-0001 under a loaded host, 8** (3 to 13, a guess), **fixed
+  (2026-10-07, 90108e87a)**. A shootdown wait on x86-64
   ended when the host ran the waiter and not the processor waited for.
   Reproduced without loading the host, by making one QEMU vCPU thread
   `SCHED_IDLE` beside busy loops on its core: every one of 257 waits past

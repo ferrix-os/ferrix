@@ -53,7 +53,7 @@ what is left:
 | Chrome on the desktop's persistent btrfs root | **done** 2026-09-26: `/dev/shm` was not mounted there; `cargo xtask test-chrome-window --btrfs-root` (§9) |
 | Chrome's text, its name for the system, and Chrome for Testing's bar | **done** 2026-09-26: Inter and Liberation from the tree with slight hinting, Ferrix in the user agent, no bar; `navigator.platform` and the client hints are Chrome's build's and say Linux (§9) |
 | Chrome on ferrousli's `libc.so.6` in glibc's place | **done** 2026-09-26, x86-64, headless and in a window: `cargo xtask test-chrome` and `test-chrome-window`, each with `--interpreter ferrousli --library ferrousli` (§8); `run-compositor --chrome` does not take the flags |
-| Chrome on the STM32MP157D-DK1: an armhf Chromium, an SDMMC driver, page-cache eviction | not started, ≈ 45–55 points (§10) |
+| Chrome on the STM32MP157D-DK1: an armhf Chromium, an SDMMC driver, page-cache eviction | under way (§10), ≈ 45–55 points: the armhf Chromium runs headless on ARMv7-A under QEMU in 512 MiB, the card has a driver and a read-only btrfs gives back clean pages; nothing has run on the board |
 | Chromium built against ferrousli, with Alpine's musl patches rebased | not needed for a first Chrome: the prebuilt one runs (§5, §8) |
 | A guest with the ~2 GiB a page wants | `test-chrome` boots 4 GiB, as `test-rustc` does (§2.3) |
 
@@ -1142,7 +1142,7 @@ too little whatever is built.
 
 ### Where it stands, 2026-10-07
 
-Branch `po10-chrome-a/dk1` (po10-chrome-a), not on `main` yet.
+Landed on `main` on 2026-10-08 (aae4c0eb1, from branch `po10-chrome-a/dk1`).
 
 **Chromium runs on ARMv7-A under QEMU, in 512 MiB.** Debian 13's armhf
 Chromium 150.0.7871.181 (Debian's armhf build is a version behind its amd64

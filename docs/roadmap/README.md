@@ -22,20 +22,21 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 
 - **Stage 13:** cgroups with pids, memory, OOM kill and CPU weight. The
   mount, user, UTS, IPC, cgroup, pid and network namespaces are in, and so
-  are seccomp's filters (S3, 2026-10-04). The cgroup controllers (reclaim,
-  freezing, `cpu.max`, `io`) are built and gated, and wait for the
-  certification consultant's review, not landed.
-- **Stage 15:** the init is done (L1 to L12), and its sandboxing keys are
-  half in: L13a (`NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=`) and L13b
-  (`PrivateNetwork=`, 2026-10-05). L13c, `SystemCallFilter=`, is built and
-  waits to land. `/sbin/init` boots every image, starts `devmgr` and runs the
+  are seccomp's filters (S3, 2026-10-04). The cgroup controllers (reclaim and
+  `memory.high`, freezing, `cpu.max`, `io`) landed on 2026-10-07; time
+  namespaces, seccomp's S4 to S6 and the exit program are left.
+- **Stage 15:** the init is done (L1 to L13), its sandboxing keys all in:
+  L13a (`NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=`), L13b
+  (`PrivateNetwork=`, 2026-10-05) and L13c (`SystemCallFilter=`, 2026-10-08).
+  `/sbin/init` boots every image, starts `devmgr` and runs the
   desktop as a service; logins go through `authd` (`docs/AUTH.md` phases 1 and
   2 but for K-C), hyprlock's lock over it included.
 - **Stage 19:** the desktop composites on the GPU, and yserver, an X server
-  in Rust, shows X windows on it; client pages as texture backing and the
-  second-pass effects are left. waybar, fuzzel, hypridle and hyprlock,
+  in Rust, shows X windows on it; client pages as texture backing are left (the
+  second-pass effects, `xray` and `no_screen_share`, landed on 2026-10-07, and
+  `zwp_linux_dmabuf_v1` with a GBM-shaped allocator on 2026-10-08). waybar, fuzzel, hypridle and hyprlock,
   rewritten in Rust, run the customer's own config on `run-compositor
-  --everything` (a fix to that command's X11 link is on a branch, not landed).
+  --everything` (its X11 link landed on 2026-10-05).
 - **Stage 20:** Ferrix builds its own x86-64 image, and since 2026-10-03 its
   own AArch64 image on Arm hardware: inside Ferrix on a Pixel 7, in crosvm.
   Its matrix's plan mode is complete since 2026-10-05 (S-2).
@@ -47,12 +48,19 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 - **The channel round trip, toward seL4 (440 ns):** 2,556 ns at the
   2026-10-05 wind-down, from 37 us; step 1, step 2, step 3, step 4's fast path
   (behind `ferrix.fastpath=on`, x86-64) and step 5's ERAPS and vector reset
-  are in, and so are the 2026-10-07 cuts, about 1,048 ns on 4066f41dd in the
-  faster of a boot's two modes; the rest of step 5 is left
+  are in, and so are the cuts of 2026-10-07 and 2026-10-08 (the FS and GS
+  skip, user-side inlining, a live count of filtered threads): about 1,048 ns
+  on 4066f41dd in the faster of a boot's two modes, 873 ns after the FS and GS
+  skip in one quiet window, and the later figures were taken on other bases and
+  are not summed ([the page](ipc-round-trip.md)); the rest of step 5 is left
   (`docs/OPAQUE-KERNEL.md` §9.11).
 - **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28).
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
-  own C library.
+  own C library. On ARMv7-A, Debian's armhf Chromium runs headless in 512 MiB
+  under QEMU, and the DK1's SD card has a driver; neither has run on the board.
+- **Live driver updates:** `devmgr` replaces the display driver with a new
+  image while the machine runs, and goes back to the old one if the new one
+  does not publish (2026-10-08, test images only: `docs/DEVMGR.md` §4.1).
 - **Pixel 7:** boots natively on all eight cores, runs the desktop in a VM,
   and streams its log over USB.
 
@@ -126,7 +134,7 @@ single file across.
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |
 | 17 | [Display and input](stage-17-display-input.md) | ✓ done | 74 points, spent |
 | 18 | [The compositor](stage-18-compositor.md) | ✓ done | 96 points, spent |
-| 19 | [Hyprland fidelity, and the GPU](stage-19-hyprland-fidelity-gpu.md) | ◐ in progress | 178 points, about 16 left |
+| 19 | [Hyprland fidelity, and the GPU](stage-19-hyprland-fidelity-gpu.md) | ◐ in progress | 178 points, about 8 left |
 | 20 | [Self-hosting](stage-20-self-hosting.md) | ◐ in progress |  |
 | 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ◐ in progress | unsized, over 100 points |
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |

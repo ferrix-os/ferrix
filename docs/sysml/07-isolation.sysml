@@ -5,9 +5,12 @@
  * Stage 13, designed in from the start so that no global table has to be
  * found later. The credentials exist since stage 7, and cgroup v2 since
  * 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces,
- * mount namespaces are in (docs/NAMESPACES.md, N1 to N3): unshare and clone
- * copy one, and bubblewrap runs as root. The other kinds still answer as a
- * Linux built without them does, and setns refuses. Seccomp is not built.
+ * mount, user, UTS, IPC, cgroup, pid and network namespaces are in
+ * (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as
+ * root. Time namespaces answer as a Linux built without them does. Seccomp's
+ * classic-BPF checker and interpreter, its hook at the four system-call
+ * entries and its filters are built (S1 to S3, docs/SECCOMP.md);
+ * SECCOMP_RET_TRAP and TSYNC are not.
  */
 package FerrixIsolation {
     private import ScalarValues::*;
@@ -17,7 +20,7 @@ package FerrixIsolation {
         Pid; Mount; Uts; Ipc; Net; User; Cgroup; Time;
     }
 
-    #planned part def Namespace {
+    #inProgress part def Namespace {
         @stage { number = 13; }
         attribute kind : NamespaceKind;
         part parent : Namespace[0..1];
@@ -81,18 +84,22 @@ package FerrixIsolation {
         part root : Cgroup;
     }
 
-    #planned part def Seccomp {
+    #inProgress part def Seccomp {
         @stage { number = 13; }
         doc /* Classic BPF filters evaluated on syscall entry. The interpreter
-             * is a pure function over bytes in src/lib/, fuzzable and Miri-able. */
+             * is a pure function over bytes in src/lib/, fuzzable and Miri-able.
+             * Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per
+             * thread, the actions but SECCOMP_RET_TRAP, and the hook at all
+             * four entries; the fast path's quiet predicate reads a live count
+             * of filtered threads. */
         part interpreter : ClassicBpfInterpreter;
         action installFilter;
         action evaluate;
     }
 
-    #planned part def ClassicBpfInterpreter {
+    #implemented part def ClassicBpfInterpreter {
         @stage { number = 13; }
-        doc /* src/lib/kernel/seccomp, owed before seccomp is built. */
+        doc /* src/lib/kernel/seccomp: the checker and the interpreter. */
     }
 
     #implemented attribute def Credentials {

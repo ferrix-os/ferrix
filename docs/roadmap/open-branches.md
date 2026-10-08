@@ -33,6 +33,24 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
 
+## 2026-10-08: the branches of 2026-10-07 that landed
+
+Against `main` 9ed9e8428, by the product owner's landing log (the names are
+the log's and the documents'; a branch may still be on origin, and
+`git cherry` says whether it holds more than what landed). These lines of work
+landed: `po6/cgctl`
+as rebased by po10-cgctl (the cgroup controllers, batch 08984c2db..8ec24ef0e,
+2026-10-07); `po10-install/live-gpt` (I6a, 64f01d596); `po10/fsgs` and
+`po10-win19/stage19` (batch 64f01d596..eb4c8dc2e); `po9/user`,
+`po10-dk1/counter` and `po10-selfhost/fx0001` (batch d44e7d1c3); `po10/obj3`,
+cut 3 (ee58d3912); `po10-l13c/l13c`, `po10-drv/live-update` and
+`po10-chrome-a/dk1` (batch aae4c0eb1); `po10-quick/q4`, `po10-quick/q8`, the
+F-65 fix, FX-0309 and the stage 7 hand-off flake (batch 9ac307691); and
+the GPU step 4 and DK1 SD-card work (batch 03fce4f81); and `os07/ustate`, ARMv7-A user state and the F-66 fix (batch a1e6324c2). `po6/l13c` and
+`po6/cgctl-n6` in the tables below were superseded by those. Also reserved on
+`main`, with no code yet: L.sched.69-70, L.object.180, L.armv7a.21-26, L.mm.69-70,
+L.armv7a.13-20 and L.user.125.
+
 ## 2026-10-07: two landings, and branches opened since
 
 `main` is 4466212c3. Two landings changed what branches hold:

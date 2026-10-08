@@ -512,7 +512,7 @@ leaves unset.
 **Where it stands (2026-10-07).** The certification consultant's design
 verdict (po10-drv-cert, the ledger's 2026-10-07 entry): OK if C1 to C10
 hold, building D1, D2 and D4 now for `test-restart --update`'s images only.
-As built on branch `po10-drv/live-update`, for the display kind:
+As built (landed 2026-10-08, aae4c0eb1), for the display kind:
 `src/lib/proto/drvupdate-proto` (the request, the answer and the
 fingerprint, a crate the kernel does not link, C8),
 `src/user/system/native/drvupdated`, `devmgr`'s update and rollback, and

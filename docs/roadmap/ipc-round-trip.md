@@ -1,6 +1,6 @@
 # The native channel round trip
 
-*Reviewed 2026-10-07, to `main` 64f01d596.* The customer's target for the
+*Reviewed 2026-10-08, to `main` 4b9f04043.* The customer's target for the
 round trip is seL4's matched figure, 440 ns, and since 2026-10-06 under 400.
 This page is where its progress is kept: what is measured, the points so far,
 and what is in flight. The design, step by step, is
@@ -55,6 +55,25 @@ its rebase onto 2f, against 2,546), and 1,028 for cut 2 (the first form of the
 cut, which was not what landed, read 1,008 to 1,018). The 37,191 and 6,508 are the
 logged figures behind §9.1's rounded 37 us and 6.5 us. The fsgs figure is from the session's log, not from a commit message.
 
+## Landed since the chart's last point
+
+Each of these has a figure of its own, taken on its own base and host load, so
+none is a point on the chart: joined to the 873, the line would step with the
+load, not with the code. The table gives each as its commit measured it.
+
+| Landed | Change | Figure | Commit |
+|---|---|---|---|
+| 2026-10-07 23:47 | user-side inlining: `write_read` and `decode` inline, `Words::of` without a `memcpy` call, so the echo server's steady loop is one text page | alternated, fast path on, KVM, one processor: fast mode 988 to 1,018 ns (6 boots) against 1,048 to 1,088 (6), about -55 ns; slow mode 1,218 (2) against 1,238 to 1,298 (3) | `7fd6c7a17` |
+| 2026-10-08 17:02 | the object side's cut 3: T2's `quiet` predicate and `seccomp::check` read `FILTERED_THREADS`, a live count of filtered threads, in place of a flag set once | low mode 958 to 968 ns (5 boots) against 988 to 1,008 (7), -40 to -50 ns, on a busy host (load 16 to 69), preliminary; to retake on a quiet host | `ee58d3912` |
+| 2026-10-08 18:56 | Q4: each processor's GDT and RSP0 noted at the table loads, not read at every switch | 3 boots a side, below the five the protocol asks for, preliminary: 5,026 instructions a round trip against 5,044, cycles 4,543 against 4,624 (-1.8%), 809 against 822 ns | `dc5a3c495` |
+| 2026-10-08 18:56 | Q8: `ferrix_switch` a naked function, called with `call rel32`, not through the GOT | 3 boots a side: instructions unchanged (5,044), cycles 4,593 against 4,624 (-0.7%, inside the spread), 816 against 822 ns; no figure claimed | `d3cbb0d55` |
+| 2026-10-08 19:44 | ARMv7-A user state: `TPIDRURO` in the task, `TPIDRURW` switched (F-66), and 3a's VFP reset for a task blocked in a native call | none: nothing has been timed on ARMv7-A, and the DK1 measurement is owed | `1b50a9d49`, `df6ca167a` |
+| 2026-10-08 18:56 | F-65's fix: the caller's endpoint let go with interrupts open (FX-0535) | costs about +40 to +50 instructions and +20 to +40 cycles a round trip; the median 819 to 858 ns on both sides, no p50 change resolved | `9ac307691` |
+
+The DK1 itself can now be measured: user mode reads the virtual counter
+(`b17462efe`) and `bench-ipc --board-log` files a board's own log
+(`404d59fbf`). No such record exists yet.
+
 ## Two boot modes
 
 `domain-call` p50 on `main` falls in one of two modes a boot, about 1,250 ns
@@ -68,13 +87,18 @@ lower cluster, so the target is the faster mode's too.
 ## Target
 
 seL4's matched figure is 440 ns; the customer's target since 2026-10-06 is
-under 400. On `main` the faster mode reads about 1,030 ns (preliminary): about
-2.3 times seL4's. The budget for what is left is §9.10.
+under 400. On `main` the faster mode read 873 ns in one quiet window after the FS and GS
+skip, about twice seL4's, and the landings since (above) are measured on other
+bases; there is no retake of the whole of `main` in a quiet window yet. The
+budget for what is left is §9.10.
 
 ## In flight
 
 Not on `main`; none is written up above as landed.
 
-- User-side inlining, about −55 ns.
 - The job-load fold, −10 to −25 ns by ablation.
-- The object side's cut 3, not measured yet.
+
+Ids reserved on `main` and not written: L.sched.69-70 (the direct switch's
+run-slot take and give-back, and the outgoing task's current reference kept on
+the queue) and L.object.180 (a processor's `cpu.stat` charge kept back per run
+queue, moved into the job's slots once).

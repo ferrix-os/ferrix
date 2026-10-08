@@ -278,7 +278,7 @@ package FerrixStructure {
         #implemented part netCore : NetCore;
         #inProgress part namespaces : Namespaces;
         #inProgress part cgroups : Cgroups;
-        #planned part seccomp : Seccomp;
+        #inProgress part seccomp : Seccomp;
         #implemented part devices : DeviceEnumeration;
         #implemented part iommu : IommuDomains;
 
@@ -1459,8 +1459,8 @@ package FerrixStructure {
                  * cargo xtask test-clipboard drives it (2026-09-27). */
         }
 
-        // Owed by later stages.
-        #planned part seccompBpf : LibraryCrate {
+        // Stage 13's classic-BPF checker and interpreter.
+        #implemented part seccompBpf : LibraryCrate {
             attribute :>> path = "src/lib/kernel/seccomp";
             attribute :>> forbidsUnsafe = true;
             @stage { number = 13; }

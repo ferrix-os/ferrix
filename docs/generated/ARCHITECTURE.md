@@ -99,7 +99,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixMemory` | `04-memory.sysml` | docs/ARCHITECTURE.md §4. The physical allocator, the heap, the page-table arithmetic and the kernel arena since stage 2; VMOs, process address spaces, demand paging and copy-on-write since stage 6, file mappings since stage 8. Reclaim is stage 13's and not built. |
 | `FerrixScheduling` | `05-scheduling.sysml` | Stages 3 to 5 run today: interrupts, a clock, every processor online, IPIs, TLB shootdown, grace periods, fair locks, and tasks scheduled by EEVDF in one Throughput domain. Stage 14's real-time domains are designed here (docs/ARCHITECTURE.md §5) and not yet written. |
 | `FerrixObjects` | `06-objects.sysml` | docs/ARCHITECTURE.md §2 and §3. The constants for the Linux half are in src/lib/proto/linux-abi and for the native half in src/lib/proto/native-abi. The objects a handle can name exist in src/kernel/src/object, the core half of a process among them; the POSIX half and threads in src/kernel/src/syscall. No handle names an address space or a thread yet. |
-| `FerrixIsolation` | `07-isolation.sysml` | docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount namespaces are in (docs/NAMESPACES.md, N1 to N3): unshare and clone copy one, and bubblewrap runs as root. The other kinds still answer as a Linux built without them does, and setns refuses. Seccomp is not built. |
+| `FerrixIsolation` | `07-isolation.sysml` | docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters are built (S1 to S3, docs/SECCOMP.md); SECCOMP_RET_TRAP and TSYNC are not. |
 | `FerrixDrivers` | `08-drivers.sysml` | docs/ARCHITECTURE.md §7. The kernel enumerates buses because that needs ACPI or a device tree and privileged access; it does not drive devices. Everything from the device node outward is stage 10, which is done: the drivers are processes devmgr starts. What it still owes is named on the part that owes it. |
 | `FerrixStorage` | `09-storage.sysml` | docs/ARCHITECTURE.md §8. Block core, VFS, the small in-kernel filesystems and btrfs in three stages. What exists today is marked on each part. |
 | `FerrixRoadmap` | `10-roadmap.sysml` | docs/ROADMAP.md as requirements: one per stage, each with its exit criterion, its status, the boot test that verifies it, and the part of the system that satisfies or will satisfy it. Each stage's status keyword says whether it is done; docs/ROADMAP.md's "Where it stands" is the prose this follows. |
@@ -119,14 +119,14 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 137 packages, 6659 elements, 215 relations. Model digest `17784e2786069ac4`.
+26 files, 137 packages, 6660 elements, 215 relations. Model digest `91a6a7613af0902e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 277 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 18 | The owning stage has started; part of the element runs. |
+| `#implemented` | 279 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#inProgress` | 22 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
-| `#planned` | 29 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
+| `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
 
 An element carries its own keyword or none; a keyword is never inherited from a parent, so a `#planned` field inside an `#implemented` part still reads as planned.
@@ -425,7 +425,7 @@ kernel : Kernel
       parent : Namespace
   cgroups : Cgroups  [in progress]
     root : Cgroup
-  seccomp : Seccomp  [planned]
+  seccomp : Seccomp  [in progress]
     interpreter : ClassicBpfInterpreter
   devices : DeviceEnumeration  [implemented]
     nodes : DeviceNode
@@ -572,7 +572,7 @@ src/kernel/: monolithic core, capability seams, userspace device drivers. Entere
 | `netCore` | `NetCore` | `#implemented` | — |  |
 | `namespaces` | `Namespaces` | `#inProgress` | — |  |
 | `cgroups` | `Cgroups` | `#inProgress` | — |  |
-| `seccomp` | `Seccomp` | `#planned` | — |  |
+| `seccomp` | `Seccomp` | `#inProgress` | — |  |
 | `devices` | `DeviceEnumeration` | `#implemented` | — |  |
 | `iommu` | `IommuDomains` | `#implemented` | — |  |
 
@@ -641,10 +641,8 @@ flowchart LR
   n0_FerrixStructure_Kernel -- "part of" --> n30_FerrixStructure_Kernel_iommu
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
-  classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
   class n2_FerrixStructure_Kernel_printer,n3_FerrixStructure_Kernel_early,n4_FerrixStructure_Kernel_trap,n5_FerrixStructure_Kernel_mm,n6_FerrixStructure_Kernel_vmap,n7_FerrixStructure_Kernel_mmio,n8_FerrixStructure_Kernel_irq,n9_FerrixStructure_Kernel_timer,n10_FerrixStructure_Kernel_smp,n11_FerrixStructure_Kernel_acpi,n12_FerrixStructure_Kernel_fdt,n13_FerrixStructure_Kernel_tasks,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_vm,n16_FerrixStructure_Kernel_syscalls,n17_FerrixStructure_Kernel_native,n18_FerrixStructure_Kernel_futex,n19_FerrixStructure_Kernel_signals,n20_FerrixStructure_Kernel_ipc,n21_FerrixStructure_Kernel_vfs,n22_FerrixStructure_Kernel_pageCache,n23_FerrixStructure_Kernel_filesystems,n24_FerrixStructure_Kernel_blockCore,n25_FerrixStructure_Kernel_netCore,n29_FerrixStructure_Kernel_devices,n30_FerrixStructure_Kernel_iommu implemented
-  class n26_FerrixStructure_Kernel_namespaces,n27_FerrixStructure_Kernel_cgroups inProgress
-  class n28_FerrixStructure_Kernel_seccomp planned
+  class n26_FerrixStructure_Kernel_namespaces,n27_FerrixStructure_Kernel_cgroups,n28_FerrixStructure_Kernel_seccomp inProgress
 ```
 
 **Figure 4 — Kernel and its parts.** The parts `Kernel` is made of, coloured by the lifecycle keyword each carries. [SVG](diagrams/ferrix-structure-kernel.svg) Source: `02-structure.sysml`.
@@ -2161,13 +2159,13 @@ The item answers every call on the core's objects in a match the compiler holds 
 
 ### Isolation
 
-docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount namespaces are in (docs/NAMESPACES.md, N1 to N3): unshare and clone copy one, and bubblewrap runs as root. The other kinds still answer as a Linux built without them does, and setns refuses. Seccomp is not built.
+docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters are built (S1 to S3, docs/SECCOMP.md); SECCOMP_RET_TRAP and TSYNC are not.
 
 **NamespaceKind** — `Pid`, `Mount`, `Uts`, `Ipc`, `Net`, `User`, `Cgroup` and `Time`. 
 
 #### Namespace
 
-`#planned`  ·  stage 13
+`#inProgress`  ·  stage 13
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2224,9 +2222,9 @@ Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup
 
 #### Seccomp
 
-`#planned`  ·  stage 13
+`#inProgress`  ·  stage 13
 
-Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able.
+Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, the actions but SECCOMP_RET_TRAP, and the hook at all four entries; the fast path's quiet predicate reads a live count of filtered threads.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2236,9 +2234,9 @@ Classic BPF filters evaluated on syscall entry. The interpreter is a pure functi
 
 #### ClassicBpfInterpreter
 
-`#planned`  ·  stage 13
+`#implemented`  ·  stage 13
 
-src/lib/kernel/seccomp, owed before seccomp is built.
+src/lib/kernel/seccomp: the checker and the interpreter.
 
 #### Credentials
 
@@ -2269,19 +2267,21 @@ flowchart TB
   n4_FerrixDrivers_VirtioInputDriver["VirtioInputDriver<br>stage 17"]
   n5_FerrixDrivers_UsbHidDriver["UsbHidDriver<br>stage 17"]
   n6_FerrixDrivers_Gc400Driver["Gc400Driver<br>stage 19"]
+  n7_FerrixDrivers_Stm32SdmmcDriver["Stm32SdmmcDriver<br>stage 10"]
   n1_FerrixDrivers_VirtioBlkDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n2_FerrixDrivers_VirtioNetDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n3_FerrixDrivers_VirtioGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n4_FerrixDrivers_VirtioInputDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n5_FerrixDrivers_UsbHidDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n6_FerrixDrivers_Gc400Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n7_FerrixDrivers_Stm32SdmmcDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   class n0_FerrixDrivers_DriverProcess,n1_FerrixDrivers_VirtioBlkDriver,n2_FerrixDrivers_VirtioNetDriver,n3_FerrixDrivers_VirtioGpuDriver,n4_FerrixDrivers_VirtioInputDriver,n5_FerrixDrivers_UsbHidDriver implemented
-  class n6_FerrixDrivers_Gc400Driver inProgress
+  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver inProgress
 ```
 
-**Figure 13 — Driver process and its subtypes.** 6 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
+**Figure 13 — Driver process and its subtypes.** 7 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
 
 ```mermaid
 flowchart TB
@@ -2396,7 +2396,7 @@ Where the hardware is: src/lib/platform/acpi's dmar module (VT-d units and their
 
 `#implemented`  ·  stage 10
 
-An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Eight exist, native programs on src/user/system/native/rt under /lib/drivers: blk, net, gpu, ltdc, input, usbhid, gc400 and vport, each a thin layer of handles over its src/lib/ crates.
+An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Eleven exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2476,6 +2476,12 @@ src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the
 `#inProgress`  ·  stage 19  ·  specialises `DriverProcess`
 
 src/user/system/native/drivers/gpu/gc400 over src/lib/drivers/gpu/gc400: the STM32MP157's Vivante GC400T, the G2 step of the board's gears (docs/GPU.md §6.3). It prints the core's identity, soft-resets and initialises it as etnaviv does, starts the front end on a WAIT/LINK loop in one page pinned PIN_COHERENT, splices in two blocks that each raise an event, and takes each as the interrupt. devmgr starts it as an engine, which serves no kernel subsystem yet, and does not wait for it. No QEMU machine has the core; its gates are src/lib/drivers/gpu/gc400's tests against models of the host interface and the front end, and on the board, on 2026-09-24, both events arrived by interrupt (G2 done). Drawing is G3 to G5.
+
+#### Stm32SdmmcDriver
+
+`#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/block/stm32-sdmmc over src/lib/drivers/block/stm32-sdmmc: the STM32MP157's SDMMC1 as a disk behind the block ring, so the kernel's GPT scan publishes the card's partitions and btrfs mounts from one (docs/CHROME.md 10.1). The kernel publishes the controller as a device tree node and writes none of its registers: U-Boot left it running. The driver moves every word through the FIFO with hardware flow control and never turns the internal DMA on, and serves a write only inside a partition named ferrix-\*. Its gates are the library's host tests against a model of the controller and a card, and the boot check of the one tree disk; no emulator has the controller, and it has not run on the board (2026-10-08).
 
 #### DriverBootstrap
 
@@ -2776,7 +2782,7 @@ docs/ARCHITECTURE.md §9. src/lib/ is host-testable by design and is the only co
 | `src/lib/kernel/qr` | `#implemented` | — | `forbid` | 20 | A QR code encoder with no heap, ported from Linux's drm_panic_qr.rs, for the panic screen's report. |
 | `src/lib/drivers/console/vdagent` | `#implemented` | — | `forbid` | 17 | SPICE's vdagent protocol as bytes, the chunk framing and the clipboard messages (docs/CLIPBOARD.md §4). |
 | `src/lib/drivers/console/virtio-console` | `#implemented` | — | allowed | 15 | The virtio-console driver: bring-up, the control conversation until a named port is open, and that port's bytes (docs/CLIPBOARD.md §3). |
-| `src/lib/kernel/seccomp` | `#planned` | 13 | `forbid` | — | The classic-BPF interpreter as a pure function over bytes. |
+| `src/lib/kernel/seccomp` | `#implemented` | 13 | `forbid` | — | The classic-BPF interpreter as a pure function over bytes. |
 | `src/boot/common/uefi` | `#implemented` | — | allowed | — |  |
 | `src/kernel` | `#implemented` | — | allowed | — |  |
 | `tools/common/xtask` | `#implemented` | — | allowed | 395 | Cross-compiles both halves and the native programs, writes the FAT32 image and the initramfs with its own writers, converts the ARMv7-A loader ELF to PE32, drives QEMU, runs the NAT gateway the network tests sit behind, and runs every gate. |
@@ -2957,9 +2963,7 @@ flowchart LR
   n26_FerrixStructure_Workspace_virtioSnd -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
   n24_FerrixStructure_Workspace_virtioNet -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
-  classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
-  class n0_FerrixStructure_Workspace_bootinfo,n1_FerrixStructure_Workspace_elf,n2_FerrixStructure_Workspace_frameCrate,n3_FerrixStructure_Workspace_heap,n4_FerrixStructure_Workspace_paging,n5_FerrixStructure_Workspace_acpi,n6_FerrixStructure_Workspace_fdt,n7_FerrixStructure_Workspace_sync,n8_FerrixStructure_Workspace_crng,n9_FerrixStructure_Workspace_sched,n10_FerrixStructure_Workspace_vma,n11_FerrixStructure_Workspace_linuxAbi,n12_FerrixStructure_Workspace_ustack,n13_FerrixStructure_Workspace_cpio,n14_FerrixStructure_Workspace_vfs,n15_FerrixStructure_Workspace_procfs,n16_FerrixStructure_Workspace_sysfs,n17_FerrixStructure_Workspace_virtio,n18_FerrixStructure_Workspace_netwire,n19_FerrixStructure_Workspace_nettcp,n20_FerrixStructure_Workspace_netCore,n21_FerrixStructure_Workspace_netServe,n22_FerrixStructure_Workspace_netRing,n23_FerrixStructure_Workspace_netlink,n24_FerrixStructure_Workspace_virtioNet,n25_FerrixStructure_Workspace_virtioGpu,n26_FerrixStructure_Workspace_virtioSnd,n27_FerrixStructure_Workspace_virtioInput,n28_FerrixStructure_Workspace_displayctl,n29_FerrixStructure_Workspace_inputctl,n30_FerrixStructure_Workspace_sndctl,n31_FerrixStructure_Workspace_logctl,n32_FerrixStructure_Workspace_audit,n33_FerrixStructure_Workspace_pci,n34_FerrixStructure_Workspace_nativeAbi,n35_FerrixStructure_Workspace_objects,n36_FerrixStructure_Workspace_btrfs,n37_FerrixStructure_Workspace_btrfsWrite,n38_FerrixStructure_Workspace_btrfsVfs,n39_FerrixStructure_Workspace_blockQueue,n40_FerrixStructure_Workspace_blkRing,n41_FerrixStructure_Workspace_blkServe,n42_FerrixStructure_Workspace_virtioBlk,n43_FerrixStructure_Workspace_devmgrProto,n44_FerrixStructure_Workspace_nativeCrate,n45_FerrixStructure_Workspace_renderctl,n46_FerrixStructure_Workspace_gc400,n47_FerrixStructure_Workspace_fbtext,n48_FerrixStructure_Workspace_qr,n49_FerrixStructure_Workspace_vdagent,n50_FerrixStructure_Workspace_virtioConsole,n52_FerrixStructure_Workspace_bootCrate,n53_FerrixStructure_Workspace_kernelCrate,n54_FerrixStructure_Workspace_xtask,n55_FerrixStructure_Workspace_fuzz implemented
-  class n51_FerrixStructure_Workspace_seccompBpf planned
+  class n0_FerrixStructure_Workspace_bootinfo,n1_FerrixStructure_Workspace_elf,n2_FerrixStructure_Workspace_frameCrate,n3_FerrixStructure_Workspace_heap,n4_FerrixStructure_Workspace_paging,n5_FerrixStructure_Workspace_acpi,n6_FerrixStructure_Workspace_fdt,n7_FerrixStructure_Workspace_sync,n8_FerrixStructure_Workspace_crng,n9_FerrixStructure_Workspace_sched,n10_FerrixStructure_Workspace_vma,n11_FerrixStructure_Workspace_linuxAbi,n12_FerrixStructure_Workspace_ustack,n13_FerrixStructure_Workspace_cpio,n14_FerrixStructure_Workspace_vfs,n15_FerrixStructure_Workspace_procfs,n16_FerrixStructure_Workspace_sysfs,n17_FerrixStructure_Workspace_virtio,n18_FerrixStructure_Workspace_netwire,n19_FerrixStructure_Workspace_nettcp,n20_FerrixStructure_Workspace_netCore,n21_FerrixStructure_Workspace_netServe,n22_FerrixStructure_Workspace_netRing,n23_FerrixStructure_Workspace_netlink,n24_FerrixStructure_Workspace_virtioNet,n25_FerrixStructure_Workspace_virtioGpu,n26_FerrixStructure_Workspace_virtioSnd,n27_FerrixStructure_Workspace_virtioInput,n28_FerrixStructure_Workspace_displayctl,n29_FerrixStructure_Workspace_inputctl,n30_FerrixStructure_Workspace_sndctl,n31_FerrixStructure_Workspace_logctl,n32_FerrixStructure_Workspace_audit,n33_FerrixStructure_Workspace_pci,n34_FerrixStructure_Workspace_nativeAbi,n35_FerrixStructure_Workspace_objects,n36_FerrixStructure_Workspace_btrfs,n37_FerrixStructure_Workspace_btrfsWrite,n38_FerrixStructure_Workspace_btrfsVfs,n39_FerrixStructure_Workspace_blockQueue,n40_FerrixStructure_Workspace_blkRing,n41_FerrixStructure_Workspace_blkServe,n42_FerrixStructure_Workspace_virtioBlk,n43_FerrixStructure_Workspace_devmgrProto,n44_FerrixStructure_Workspace_nativeCrate,n45_FerrixStructure_Workspace_renderctl,n46_FerrixStructure_Workspace_gc400,n47_FerrixStructure_Workspace_fbtext,n48_FerrixStructure_Workspace_qr,n49_FerrixStructure_Workspace_vdagent,n50_FerrixStructure_Workspace_virtioConsole,n51_FerrixStructure_Workspace_seccompBpf,n52_FerrixStructure_Workspace_bootCrate,n53_FerrixStructure_Workspace_kernelCrate,n54_FerrixStructure_Workspace_xtask,n55_FerrixStructure_Workspace_fuzz implemented
 ```
 
 **Figure 16 — The crate graph.** 114 `dependency` statements; an arrow points from the thing that needs to the thing it needs. [SVG](diagrams/crate-dependencies.svg) Source: `02-structure.sysml`.
@@ -3030,7 +3034,7 @@ flowchart TB
   n21_FerrixRoadmap_stage16Rustc["S16  Stage 16 rustc<br>Done · the goal; about 40 guessed, 8 spent"]
   n22_FerrixRoadmap_stage17DisplayAndInput["S17  Stage 17 display and input<br>Done · 74 points, spent"]
   n23_FerrixRoadmap_stage18Compositor["S18  Stage 18 compositor<br>Done · 96 points, spent"]
-  n24_FerrixRoadmap_stage19HyprlandFidelity["S19  Stage 19 hyprland fidelity<br>InProgress · 178 points, about 16 left"]
+  n24_FerrixRoadmap_stage19HyprlandFidelity["S19  Stage 19 hyprland fidelity<br>InProgress · 178 points, about 8 left"]
   n25_FerrixRoadmap_stage21BareMetalGpu["S21  Stage 21 bare metal gpu<br>InProgress · unsized, over 100 points"]
   n26_FerrixRoadmap_stage22Steam["S22  Stage 22 steam<br>InProgress · unsized, over 300 points"]
   n27_FerrixRoadmap_stage20SelfHosting["S20  Stage 20 self hosting<br>InProgress · longer"]
@@ -3109,7 +3113,7 @@ flowchart TB
 | `S16` | 16 | Stage 16 rustc | Done | the goal; about 40 guessed, 8 spent | `#implemented` |
 | `S17` | 17 | Stage 17 display and input | Done | 74 points, spent | `#implemented` |
 | `S18` | 18 | Stage 18 compositor | Done | 96 points, spent | `#implemented` |
-| `S19` | 19 | Stage 19 hyprland fidelity | InProgress | 178 points, about 16 left | `#inProgress` |
+| `S19` | 19 | Stage 19 hyprland fidelity | InProgress | 178 points, about 8 left | `#inProgress` |
 | `S21` | 21 | Stage 21 bare metal gpu | InProgress | unsized, over 100 points | `#inProgress` |
 | `S22` | 22 | Stage 22 steam | InProgress | unsized, over 300 points | `#inProgress` |
 | `S20` | 20 | Stage 20 self hosting | InProgress | longer | `#inProgress` |
@@ -3286,7 +3290,7 @@ Placed after stage 12 without a number of its own, built on 2026-09-24 in the sh
 
 **InProgress**  ·  size headless and a window spent; the DK1 about 45 to 55 points  ·  `#inProgress`
 
-Placed after sysfs without a number of its own, asked for by the customer on 2026-09-23 (docs/CHROME.md). Google's prebuilt Chrome for Testing on Debian's glibc from a btrfs volume, by the customer's choice of 2026-09-24. Exit met on x86-64: cargo xtask test-chrome runs it headless, and cargo xtask test-chrome-window in a window on the compositor. On ferrousli in glibc's place, headless and in a window, since 2026-09-26: cargo xtask test-chrome and test-chrome-window with --interpreter ferrousli --library ferrousli. On the persistent btrfs root since 2026-09-26. With its zygote since 2026-09-26, once SCM_CREDENTIALS carried its children's pids; idle at 13% of a processor where it took 443%, after the futex, clock, munmap, shootdown and doorbell fixes and a vDSO (cargo xtask bench-chrome); and playing sound through /dev/snd (cargo xtask test-chrome-audio). Owed: inotify and the GPU; and the STM32MP157D-DK1, which needs an SDMMC driver and page-cache eviction first.
+Placed after sysfs without a number of its own, asked for by the customer on 2026-09-23 (docs/CHROME.md). Google's prebuilt Chrome for Testing on Debian's glibc from a btrfs volume, by the customer's choice of 2026-09-24. Exit met on x86-64: cargo xtask test-chrome runs it headless, and cargo xtask test-chrome-window in a window on the compositor. On ferrousli in glibc's place, headless and in a window, since 2026-09-26: cargo xtask test-chrome and test-chrome-window with --interpreter ferrousli --library ferrousli. On the persistent btrfs root since 2026-09-26. With its zygote since 2026-09-26, once SCM_CREDENTIALS carried its children's pids; idle at 13% of a processor where it took 443%, after the futex, clock, munmap, shootdown and doorbell fixes and a vDSO (cargo xtask bench-chrome); and playing sound through /dev/snd (cargo xtask test-chrome-audio). Owed: the GPU (inotify landed on 2026-09-27); and the STM32MP157D-DK1, where nothing has run yet. Debian's armhf Chromium runs headless on ARMv7-A under QEMU in 512 MiB (2026-10-08, after ARM's send and recv, cacheflush and mmap of a read-only btrfs were fixed); the SD card has a ring-3 SDMMC1 driver (2026-10-08); the cgroup controllers (2026-10-07) let the page cache give back a read-only btrfs's clean pages.
 
 **Allocated to: **`ferrix.userland`
 
@@ -3302,9 +3306,9 @@ btrfs stage B. Exit, strict: Ferrix writes a tree and host btrfs check finds not
 
 All eight namespaces, the unified cgroup hierarchy with cpu, memory, io and pids, cgroupfs, classic-BPF seccomp with the interpreter in src/lib/. Exit: an unprivileged user namespace runs pid 1 under a memory limit that triggers scoped reclaim and a scoped OOM kill, with a seccomp filter blocking a syscall.
 
-Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. Left: the rest of memory.stat, M2's reclaim, F1, S2 and B1.
+Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. M2's reclaim of a read-only mount's clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat and the io controller with io.max landed on 2026-10-07.
 
-Namespaces, for Steam's container, designed in docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the certification consultant on 2026-09-28. N1 done on 2026-09-28: per-mount flags enforced, MS_REMOUNT and mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem so a plain remount reaches every bind of it. N3, mount namespaces themselves, is next; seccomp is not started.
+Namespaces, for Steam's container, designed in docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the certification consultant on 2026-09-28. N1 done on 2026-09-28: per-mount flags enforced, MS_REMOUNT and mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem so a plain remount reaches every bind of it. N3, mount namespaces with pivot_root and openat2, on 2026-09-30. The user, UTS, IPC, cgroup, pid and network namespaces are in too, and so are seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters (S1 to S3, the last on 2026-10-04). Left: time namespaces, SECCOMP_RET_TRAP and TSYNC (S4 to S6), and test-container, the exit criterion as a program.
 
 **Allocated to: **`ferrix.kernel.namespaces`, `ferrix.kernel.cgroups` and `ferrix.kernel.seccomp`
 
@@ -3326,7 +3330,7 @@ Most of it arrived under other stages' names: /bin is the uutils family and zinc
 
 Job control landed on 2026-09-19, in the shell rather than the kernel: every call it is made of -- setpgid, TIOCSPGRP, TIOCSCTTY, the line discipline's SIGTSTP, wait4's WUNTRACED -- had been answered since stage 7 with nothing using them. src/user/system/linux/zinc/src/jobs.rs puts a pipeline in one process group, hands the terminal to the foreground job and takes it back, and keeps the table jobs, fg, bg, wait, disown and kill %1 name. Verified by jobsSession and by zinc's pty gate.
 
-A working init landed on 2026-09-26 (L1 to L4 of docs/INIT.md): /sbin/init over src/lib/init/svc's manager, a cgroup per service, a getty on the console, shutdown by SIGTERM; the same day svc and its control socket, readiness, socket activation and resource limits (L5 to L7, L9) and the directory with native services (L8), and the images booting it with the compositor as its service (L10). Verified by initSession. devmgr on the restart policy (L11) the same day; the customer counts the init done there. L12, pid 1 starting devmgr through a kernel starter, on 2026-09-27; L13, the sandboxing keys, over stage 13's namespaces: L13a (2026-10-04) and L13b, PrivateNetwork= (2026-10-05), landed; L13c, SystemCallFilter= over seccomp's S3, is built and waits to land.
+A working init landed on 2026-09-26 (L1 to L4 of docs/INIT.md): /sbin/init over src/lib/init/svc's manager, a cgroup per service, a getty on the console, shutdown by SIGTERM; the same day svc and its control socket, readiness, socket activation and resource limits (L5 to L7, L9) and the directory with native services (L8), and the images booting it with the compositor as its service (L10). Verified by initSession. devmgr on the restart policy (L11) the same day; the customer counts the init done there. L12, pid 1 starting devmgr through a kernel starter, on 2026-09-27; L13, the sandboxing keys, over stage 13's namespaces: L13a (2026-10-04) and L13b, PrivateNetwork= (2026-10-05), landed; L13c, SystemCallFilter= over seccomp's S3, landed on 2026-10-08.
 
 Next: authentication (docs/AUTH.md, approved by the customer on 2026-09-26): authd, passwords checked by Argon2id, passwd, authctl and a real hyprlock, phase 1, 27 points, not started; its P0, process_create giving a child root's credentials rather than its creator's, 2 points, fixed.
 
@@ -3364,7 +3368,7 @@ The compositor itself: the Wayland wire protocol and its server, xdg-shell, wl_s
 
 ### S19 — Stage 19 hyprland fidelity
 
-**InProgress**  ·  size 178 points, about 16 left  ·  `#inProgress`
+**InProgress**  ·  size 178 points, about 8 left  ·  `#inProgress`
 
 What makes a Hyprland rather than a tiling compositor: animations with bezier curves, rounded corners, blur, shadows, opacity rules, special workspaces, groups, multiple monitors, plugins -- and the GPU behind them.
 
@@ -3372,11 +3376,11 @@ Well under way: every one of Hyprland's globals, dispatchers and hyprctl command
 
 The GPU path, decided on 2026-09-18 and built on 2026-09-19 (docs/GPU.md 3.7 and 3.8), is Path A: the host's driver through virtio-gpu 3D. All four of its pieces are in -- the ring-3 driver's 3D commands, a render node with the virtgpu ioctls and 3D scanout, the host half in xtask, and a Rust virgl encoder behind a renderer trait with the software renderer still under it. The desktop composites on the GPU: a 1920x1080 frame of a video wallpaper behind a blurred translucent terminal went from 39 ms to 12, where 60 fps is 16.7. A card of Ferrix's own is stage 21. Since 2026-09-23 a served desktop takes the 3D card by default (docs/GPU.md 3.9) and the pointer is on virtio-gpu's cursor plane, so moving it draws no frame (docs/GPU.md 3.10). The driver keeps eight commands in flight on the control queue and has the device read a command stream where it lies, and an upload and a stream return once they are on their way, so a frame waits once, for its flush (docs/GPU.md 3.11).
 
-Of the 178, about 16 are left: the desktop's speed as it is watched (client pages as texture backing: 8 of 34, the cursor plane and the device queue spent), and the pointer-driven options and second-pass effects (no_screen_share, blur_popups, precise_mouse_move). The X server the stage counted 40 for is yserver, a Rust X11 server with a rootless Wayland backend of Ferrix's own, 36 points, done on 2026-09-29 (docs/YSERVER.md). The rest of the GPU road is for clients that render for themselves, not for the compositor: zwp_linux_dmabuf_v1 in hyprix and a GBM-shaped allocator, so a client's GPU buffer is shown where it lies, done on 2026-10-07 (docs/GPU.md 3.13), and a Mesa on ferrousli, which is left.
+Of the 178, about 8 are left: the desktop's speed as it is watched (client pages as texture backing: 8 of 34, the cursor plane and the device queue spent). The pointer-driven options and second-pass effects (xray, no_screen_share, blur_popups, precise_mouse_move) landed on 2026-10-07. The X server the stage counted 40 for is yserver, a Rust X11 server with a rootless Wayland backend of Ferrix's own, 36 points, done on 2026-09-29 (docs/YSERVER.md). The rest of the GPU road is for clients that render for themselves, not for the compositor: zwp_linux_dmabuf_v1 in hyprix and a GBM-shaped allocator, so a client's GPU buffer is shown where it lies, built on 2026-10-07 and landed on 2026-10-08 (docs/GPU.md 3.13), and a Mesa on ferrousli, which is left.
 
 Gears, the customer's order of 2026-09-24 (docs/GPU.md 6): vkgears through Venus -- Mesa's Vulkan driver in the guest, the host's GPU under virglrenderer's render server -- on the Linux host, 39 points, done the same day: vkgears draws on the host's RADV (cargo xtask test-vkgears); and gears drawn by the DK1's own Vivante GC400T, an OpenGL ES 2.0 core with no Vulkan in any driver, through a ring-3 driver of Ferrix's own, 32 points, of which G1 and G2 (11) ran on the board the same day: the core runs a command buffer, its events by interrupt.
 
-The desktop's own clients, begun on 2026-09-26 at the customer's request: waybar, fuzzel, hyprlock and hypridle in Rust, reading their own configuration files unchanged, over a shared foundation of 21 points. waybar and fuzzel are on main (2026-09-27) and run the customer's own configuration on run-compositor --everything, and hypridle is on main (2026-09-26); hyprlock's program is on a branch.
+The desktop's own clients, begun on 2026-09-26 at the customer's request: waybar, fuzzel, hyprlock and hypridle in Rust, reading their own configuration files unchanged, over a shared foundation of 21 points. waybar and fuzzel are on main (2026-09-27) and run the customer's own configuration on run-compositor --everything, and hypridle is on main (2026-09-26); hyprlock is on main too (2026-10-03), its lock over authd.
 
 ### S21 — Stage 21 bare metal gpu
 
@@ -3645,8 +3649,8 @@ flowchart LR
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
   class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n28_FerrixRoadmap_stage9NativeAbi,n29_FerrixStructure_Kernel_native,n30_FerrixRoadmap_stage10UserspaceDrivers,n33_FerrixRoadmap_stage11BtrfsRead,n34_FerrixStructure_Kernel_blockCore,n35_FerrixRoadmap_stageNetworking,n36_FerrixStructure_Kernel_netCore,n37_FerrixRoadmap_stageDynamicLinking,n44_FerrixRoadmap_stage16Rustc,n45_FerrixStructure_Userland_rustc implemented
-  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n38_FerrixRoadmap_stage13Isolation,n39_FerrixStructure_Kernel_namespaces,n40_FerrixStructure_Kernel_cgroups,n43_FerrixRoadmap_stage15Userland inProgress
-  class n41_FerrixStructure_Kernel_seccomp,n42_FerrixRoadmap_stage14RealTime planned
+  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n38_FerrixRoadmap_stage13Isolation,n39_FerrixStructure_Kernel_namespaces,n40_FerrixStructure_Kernel_cgroups,n41_FerrixStructure_Kernel_seccomp,n43_FerrixRoadmap_stage15Userland inProgress
+  class n42_FerrixRoadmap_stage14RealTime planned
 ```
 
 **Figure 19 — Stages and the parts that answer them.** Each line carries the word the model wrote: `satisfy` where the part exists, `allocate` where it is one the stage still owes. [SVG](diagrams/stages-and-parts.svg) Source: `10-roadmap.sysml`.
@@ -4879,6 +4883,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::DevMgr` | part | `#implemented` |
 | 10 | `FerrixDrivers::DrvUpdated` | part | `#inProgress` |
 | 10 | `FerrixDrivers::VirtioBlkDriver` | part | `#implemented` |
+| 10 | `FerrixDrivers::Stm32SdmmcDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
 | 11 | `FerrixStructure::Workspace::btrfs` | part | `#implemented` |
@@ -4894,17 +4899,17 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 12 | `FerrixStorage::BtrfsWrite` | part | `#implemented` |
 | 12 | `FerrixAssurance::BtrfsCheck` | verification | `#implemented` |
 | 12 | `FerrixAssurance::PowerFailInjection` | verification | `#implemented` |
-| 13 | `FerrixStructure::Workspace::seccompBpf` | part | `#planned` |
+| 13 | `FerrixStructure::Workspace::seccompBpf` | part | `#implemented` |
 | 13 | `FerrixMemory::Reclaim` | part | `#planned` |
 | 13 | `FerrixObjects::JobQuota` | part | `#implemented` |
 | 13 | `FerrixObjects::LinuxSyscallLayer::seccompCheck` | action | `#planned` |
-| 13 | `FerrixIsolation::Namespace` | part | `#planned` |
+| 13 | `FerrixIsolation::Namespace` | part | `#inProgress` |
 | 13 | `FerrixIsolation::NsSet` | part | `#planned` |
 | 13 | `FerrixIsolation::Namespaces` | part | `#inProgress` |
 | 13 | `FerrixIsolation::Cgroup` | part | `#inProgress` |
 | 13 | `FerrixIsolation::Cgroups` | part | `#inProgress` |
-| 13 | `FerrixIsolation::Seccomp` | part | `#planned` |
-| 13 | `FerrixIsolation::ClassicBpfInterpreter` | part | `#planned` |
+| 13 | `FerrixIsolation::Seccomp` | part | `#inProgress` |
+| 13 | `FerrixIsolation::ClassicBpfInterpreter` | part | `#implemented` |
 | 13 | `FerrixStorage::Cgroupfs` | part | `#implemented` |
 | 14 | `FerrixScheduling::Task::schedClass` | attribute | `#planned` |
 | 14 | `FerrixScheduling::Task::priority` | attribute | `#planned` |
@@ -4933,7 +4938,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 19 | `FerrixDrivers::Gc400Driver` | part | `#inProgress` |
 | 19 | `FerrixAssurance::VideoTest` | verification | `#implemented` |
 
-186 elements across 18 stages.
+187 elements across 18 stages.
 
 ## Figures
 
@@ -4953,7 +4958,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 10 | Demand fault | 5 nodes, 4 edges | `04-memory.sysml` | [ferrix-memory-demand-fault.svg](diagrams/ferrix-memory-demand-fault.svg) |
 | 11 | Domain lifecycle | 5 nodes, 5 edges | `05-scheduling.sysml` | [ferrix-scheduling-domain-lifecycle.svg](diagrams/ferrix-scheduling-domain-lifecycle.svg) |
 | 12 | Kernel object and its subtypes | 10 nodes, 9 edges | `06-objects.sysml` | [ferrix-objects-kernel-object.svg](diagrams/ferrix-objects-kernel-object.svg) |
-| 13 | Driver process and its subtypes | 7 nodes, 6 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
+| 13 | Driver process and its subtypes | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |

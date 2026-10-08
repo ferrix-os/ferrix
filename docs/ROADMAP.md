@@ -110,7 +110,7 @@ Now [`docs/roadmap/stage-17-display-input.md`](roadmap/stage-17-display-input.md
 
 Now [`docs/roadmap/stage-18-compositor.md`](roadmap/stage-18-compositor.md).
 
-## Stage 19 — Hyprland fidelity, and the GPU  ·  *178 points, about 16 left*
+## Stage 19 — Hyprland fidelity, and the GPU  ·  *178 points, about 8 left*
 
 Now [`docs/roadmap/stage-19-hyprland-fidelity-gpu.md`](roadmap/stage-19-hyprland-fidelity-gpu.md).
 

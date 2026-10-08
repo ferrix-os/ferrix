@@ -137,10 +137,11 @@ package FerrixDrivers {
         @stage { number = 10; }
         doc /* An ordinary user process in its own Job, holding exactly the
              * capabilities devmgr gave it. A driver fault is a process fault;
-             * a wedged driver is a Job kill. Eight exist, native programs on
-             * src/user/system/native/rt under /lib/drivers: blk, net, gpu, ltdc, input,
-             * usbhid, gc400 and vport, each a thin layer of handles over its
-             * src/lib/ crates. */
+             * a wedged driver is a Job kill. Eleven exist, native programs on
+             * src/user/system/native/rt under /lib/drivers: virtio-blk,
+             * stm32-sdmmc, virtio-net, virtio-gpu, stm32-ltdc, gc400,
+             * virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin
+             * layer of handles over its src/lib/ crates. */
         ref part job : Job;
         part ioMappings : IoMapping[0..*] {
             doc /* One per BAR or MMIO window, and nothing outside it. */
@@ -286,6 +287,22 @@ package FerrixDrivers {
              * src/lib/drivers/gpu/gc400's tests against models of the host interface and
              * the front end, and on the board, on 2026-09-24, both events
              * arrived by interrupt (G2 done). Drawing is G3 to G5. */
+    }
+
+    #inProgress part def Stm32SdmmcDriver :> DriverProcess {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drivers/block/stm32-sdmmc over
+             * src/lib/drivers/block/stm32-sdmmc: the STM32MP157's SDMMC1 as
+             * a disk behind the block ring, so the kernel's GPT scan publishes
+             * the card's partitions and btrfs mounts from one (docs/CHROME.md
+             * 10.1). The kernel publishes the controller as a device tree node
+             * and writes none of its registers: U-Boot left it running. The
+             * driver moves every word through the FIFO with hardware flow
+             * control and never turns the internal DMA on, and serves a write
+             * only inside a partition named ferrix-*. Its gates are the
+             * library's host tests against a model of the controller and a
+             * card, and the boot check of the one tree disk; no emulator has
+             * the controller, and it has not run on the board (2026-10-08). */
     }
 
     #implemented action def DriverBootstrap {
