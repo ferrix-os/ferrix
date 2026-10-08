@@ -1,0 +1,25 @@
+# The DK1 card's boot lines, one [section] per kernel image (rotate.ps1).
+#
+# Every line is typed at U-Boot's prompt and the next one waits for the
+# prompt to come back; the last line of a section boots. Addresses are the
+# board's U-Boot defaults: kernel_addr_r 0xc2000000, fdt_addr_r 0xc4000000,
+# ramdisk_addr_r 0xc4400000. OP-TEE owns 0xde000000 to the end of the
+# 512 MiB.
+#
+# Ferrix's loader reads FERRIX/KERNEL.ELF, INITRD.IMG and DEFAULTS.TXT at
+# fixed paths, so a Ferrix image is made the active one by copying it there
+# from its bench/ferrix/<tag>/ directory with fatwrite before bootefi. This
+# writes the card on each Ferrix boot; nothing else is written.
+
+[ferrix-main]
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/main/KERNEL.ELF
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/main/INITRD.IMG
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/INITRD.IMG ${filesize}
+load mmc 0:4 ${kernel_addr_r} bench/ferrix/main/DEFAULTS.TXT
+fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/DEFAULTS.TXT ${filesize}
+load mmc 0:4 ${kernel_addr_r} EFI/BOOT/BOOTARM.EFI
+bootefi ${kernel_addr_r} ${fdtcontroladdr}
+
+# [linux] and [sel4]: the lines B1 and B2 hand over, under bench/linux/
+# and bench/sel4/.
