@@ -1,0 +1,29 @@
+seL4_tools f1f63d93: the elfloader prints the mode it was entered in, and
+SCTLR and ACTLR as entered (AArch32). GPL-2.0-only. The STM32MP1's UART is the
+elfloader's existing st,stm32h7-uart driver; its image is the default ELF.
+
+diff --git a/elfloader-tool/src/arch-arm/sys_boot.c b/elfloader-tool/src/arch-arm/sys_boot.c
+index a222acd..f51a20f 100644
+--- a/elfloader-tool/src/arch-arm/sys_boot.c
++++ b/elfloader-tool/src/arch-arm/sys_boot.c
+@@ -115,6 +115,20 @@ void main(UNUSED void *arg)
+     printf("\nELF-loader started on ");
+     print_cpuid();
+     printf("  paddr=[%p..%p]\n", _text, (uintptr_t)_end - 1);
++#if defined(CONFIG_ARCH_AARCH32)
++    {
++        /* The mode the boot loader left, and SCTLR and ACTLR as entered (the
++         * elfloader and the kernel then set SCTLR's MMU and cache bits; a
++         * single-core build leaves ACTLR as it is). */
++        word_t cpsr, sctlr, actlr;
++        asm volatile("mrs %0, cpsr" : "=r"(cpsr));
++        asm volatile("mrc p15, 0, %0, c1, c0, 0" : "=r"(sctlr));
++        asm volatile("mrc p15, 0, %0, c1, c0, 1" : "=r"(actlr));
++        printf("  entered in mode 0x%x (%s), SCTLR=0x%x ACTLR=0x%x\n", (unsigned int)(cpsr & 0x1f),
++               (cpsr & 0x1f) == 0x1a ? "HYP" : (cpsr & 0x1f) == 0x13 ? "SVC" : "other",
++               (unsigned int)sctlr, (unsigned int)actlr);
++    }
++#endif
+ 
+ #if defined(CONFIG_IMAGE_UIMAGE)
+ 

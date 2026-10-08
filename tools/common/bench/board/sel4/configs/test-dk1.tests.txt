@@ -1,0 +1,175 @@
+BIND0001 on Test that a bound tcb waiting on a sync endpoint receives normal sync ipc and notification notifications.
+BIND0002 on Test that a bound tcb waiting on its bound notification recieves notifications
+BIND0003 on Test IPC ordering 1) bound tcb waits on bound notification 2, true) another tcb sends a message
+BIND0004 on Test IPC ordering 2) bound tcb waits on bound notification 1, true) another tcb sends a message
+BIND005 off Test passing thread notification binding with no scheduling context
+BIND006 off Test passing thread notification binding with a scheduling context
+CACHEFLUSH0001 on Test a cache maintenance on pages
+CACHEFLUSH0002 on Test a cache maintenance on page directories
+CACHEFLUSH0003 on Test that cache maintenance can be done on large pages
+CACHEFLUSH0004 on Test that mapping a frame uncached doesn't see stale data after retype
+CANCEL_BADGED_SENDS_0001 on Basic endpoint cancelBadgedSends testing.
+CANCEL_BADGED_SENDS_0002 on cancelBadgedSends deletes caps
+CNODEOP0001 on Basic seL4_CNode_Copy() testing
+CNODEOP0002 on Basic seL4_CNode_Delete() testing
+CNODEOP0003 on Basic seL4_CNode_Mint() testing
+CNODEOP0004 on Basic seL4_CNode_Move() testing
+CNODEOP0005 on Basic seL4_CNode_Mutate() testing
+CNODEOP0006 on Basic seL4_CNode_CancelBadgedSends() testing
+CNODEOP0007 on Basic seL4_CNode_Revoke() testing
+CNODEOP0008 on Basic seL4_CNode_Rotate() testing
+CNODEOP0009 on Basic seL4_CNode_SaveCaller() testing
+CSPACE0001 on Test full cspace resolution
+DOMAINS0000 off Configure domain schedule
+DOMAINS0001 on Change domain successfully()
+DOMAINS0002 on Try non-existant domain()
+DOMAINS0003 on Invoke non-domain cap()
+DOMAINS0004 off Run threads in domains()
+DOMAINS0005 off Move thread between domains()
+DOMAINS9999 off Reset domain schedule
+FPU0000 on Ensure that simple FPU operations work
+FPU0001 on Ensure multiple threads can use FPU simultaneously
+FPU0002 off Test FPU remain valid across core migration
+FPU0003 on Test seL4_TCB_SetFlags
+FPU0004 on Test disabling and re-enabling FPU
+FRAMEDIPC0001 on Test that we cannot create a thread with an IPC buffer that is a frame
+FRAMEDIPC0002 on Test that we cannot switch a threads IPC buffer to a device frame
+FRAMEDIPC0003 on Test that deleting a frame cap unmaps the frame
+FRAMEEXPORTS0001 on Test that we can access all exported frames
+FRAMEXN0001 on Test that we can map a small frame XN
+FRAMEXN0002 on Test that we can map a large frame XN
+INTERRUPT0002 off Test interrupts with scheduling context donation from notification object
+INTERRUPT0003 off Test interrupts with scheduling context donation from notification object and without (two clients)
+INTERRUPT0004 off Test interrupts with no scheduling context at all
+INTERRUPT0005 off Test the same scheduling context cannot be loaned to different threads
+INTERRUPT0006 off Test interrupts after deleting scheduling context bound to notification
+IPC0001 on Test SMP seL4_Send + seL4_Recv
+IPC0002 on Test SMP seL4_Call + seL4_ReplyRecv
+IPC0003 on Test SMP seL4_Send + seL4_Reply + seL4_Recv
+IPC0004 on Test seL4_NBSend + seL4_Recv
+IPC0010 on Test suspending an IPC mid-Call()
+IPC1001 on Test SMP inter-AS seL4_Send + seL4_Recv
+IPC1002 on Test SMP inter-AS seL4_Call + seL4_ReplyRecv
+IPC1003 on Test SMP inter-AS seL4_Send + seL4_Reply + seL4_Recv
+IPC1004 on Test inter-AS seL4_NBSend + seL4_Recv
+IPCRIGHTS0001 on seL4_Send needs write
+IPCRIGHTS0002 on seL4_Recv needs read
+IPCRIGHTS0003 on seL4_Send with caps needs grant
+IPCRIGHTS0004 on seL4_Call needs grant or grant-reply
+IPCRIGHTS0005 on seL4_Reply grant depends of the grant of previous seL4_Recv
+MULTICORE0001 off Test suspending and resuming a thread on different core
+MULTICORE0002 off Test thread is runnable on all available cores (0 + other)
+MULTICORE0003 off Test TLB invalidated cross cores
+MULTICORE0004 off Test core stalling is behaving properly (flaky)
+MULTICORE0005 off Test remote delete thread running on other cores
+NBWAIT0001 on Test seL4_NBRecv
+PAGEFAULT0001 on Test read page fault
+PAGEFAULT0002 on Test write page fault
+PAGEFAULT0003 on Test execute page fault
+PAGEFAULT0004 on Test unknown system call
+PAGEFAULT0005 on Test undefined instruction
+PAGEFAULT1001 on Test read page fault (inter-AS)
+PAGEFAULT1002 on Test write page fault (inter-AS)
+PAGEFAULT1003 on Test execute page fault (inter-AS)
+PAGEFAULT1004 on Test unknown system call (inter-AS)
+PAGEFAULT1005 off Test undefined instruction (inter-AS)
+PREEMPT_REVOKE off Test preemption path in revoke
+PT0001 on Fun with page tables on ARM
+PT0002 on Reusing virtual addresses flushes TLB
+REGRESSIONS0001 on Ensure WriteRegisters functions correctly
+REGRESSIONS0002 on Test the load-exclusive monitor is cleared on context switch
+RETYPE0000 on Retype test
+RETYPE0001 on Incremental retype test
+RETYPE0002 on Incremental retype test #2
+SCHED0000 off Test suspending and resuming a thread (flaky)
+SCHED0002 on Test resuming ourselves
+SCHED0003 on Test TCB suspend/resume
+SCHED0004 on Test threads at all priorities
+SCHED0005 on Test set priority
+SCHED0006 on Test IPC priorities for Send
+SCHED0007 off Test IPC priorities
+SCHED0008 off Test changing prio while in endpoint queues results in correct message order
+SCHED0009 off Test ordered ipc on reply wait fastpath
+SCHED0010 off Test resuming a thread with empty or missing scheduling context
+SCHED0011 off Test scheduler accuracy
+SCHED0012 off Test one periodic thread
+SCHED0013 off Test two periodic threads
+SCHED0014 off Test periodic thread ordering
+SCHED0016 off Test resume cannot be used to exceed budget
+SCHED0020 on test set prio to a higher prio runs higher prio thread
+SCHED0021 on Test for pre-emption during running of many threads with equal prio
+SCHED0022 off test changing a helper threads core
+SCHED_CONTEXT_0001 off Test api_sched_ctrl_configure
+SCHED_CONTEXT_0002 off Test reconfiguring a thread
+SCHED_CONTEXT_0003 off Basic api_sc_bind/UnbindObject testing
+SCHED_CONTEXT_0005 off Test deleting a scheduling context prevents the bound tcb from running
+SCHED_CONTEXT_0006 off Test deleting a tcb running on a notifications scheduling context returns it
+SCHED_CONTEXT_0007 off test resuming a passive thread and binding scheduling context
+SCHED_CONTEXT_0008 off Test deleting a tcb running on donated sc
+SCHED_CONTEXT_0009 off Test scheduling context goes to caller if reply cap deleted
+SCHED_CONTEXT_0010 off Test unbinding scheduling context from server
+SCHED_CONTEXT_0011 off Test revoking a reply on a call chain returns scheduling context along chain
+SCHED_CONTEXT_0012 off Test revoking a reply on a call chain unorderd
+SCHED_CONTEXT_0013 off Test revoking a scheduling context on a call chain
+SCHED_CONTEXT_0014 off Test deleting a scheduling context while it runs out of budget on another core
+SERSERV_CLIENT_001 on Connect from client threads
+SERSERV_CLIENT_002 on Printf from client threads
+SERSERV_CLIENT_003 on Write from client threads
+SERSERV_CLIENT_004 on Printf, then write, then reset connection, and Printf, then write again, from client threads
+SERSERV_CLIENT_005 on Connect, then disconnect from server on all threads, then kill server from parent thread
+SERSERV_CLI_PROC_001 on Connect to server from a client in another VSpace and CSpace
+SERSERV_CLI_PROC_002 on Connect to server and printf(, true), from a client in another VSpace and CSpace
+SERSERV_CLI_PROC_003 on Connect to server and write(, true), from a client in another VSpace and CSpace
+SERSERV_CLI_PROC_004 on Connect to server, printf(), write(, true), then disconnect, then reconnect and printf() and write() again, from clients in other VSpaces and CSpaces
+SERSERV_CLI_PROC_005 on Connect to server then disconnect on all clients (in different VSpace/CSpace containers), and finally kill the server from the parent
+SERSERV_PARENT_001 on Serial server spawn test
+SERSERV_PARENT_002 on Test connecting to the server from a parent thread
+SERSERV_PARENT_003 on Printf() from a connected parent thread
+SERSERV_PARENT_004 on Write() from a connected parent thread
+SERSERV_PARENT_005 on Test printf() and write() from a parent thread when after a connection reset (disconnect/reconnect)
+SERSERV_PARENT_006 on Kill the Server from the Parent thread
+SERSERV_PARENT_007 on Test a series of unexpected input values to spawn_thread
+SERSERV_PARENT_008 on Test a series of unexpected input values to connect()
+SERSERV_PARENT_009 on Test a series of unexpected input values to printf()
+SERSERV_PARENT_010 on Test a series of unexpected input values to write()
+SYNC001 on libsel4sync Test binary semaphores
+SYNC002 on libsel4sync Test semaphores
+SYNC003 on libsel4sync Test monitors
+SYNC004 on libsel4sync Test monitors - broadcast
+SYSCALL0000 on Basic seL4_Yield() testing
+SYSCALL0001 on Basic seL4_Send() testing
+SYSCALL0002 on Basic seL4_NBSend() testing
+SYSCALL0003 on Basic api_reply() testing
+SYSCALL0004 on Basic seL4_Signal() testing
+SYSCALL0005 on Basic seL4_Call() testing
+SYSCALL0006 on Basic seL4_DebugPutChar() testing
+SYSCALL0010 on Basic seL4_Recv() testing
+SYSCALL0011 on Basic seL4_ReplyRecv() testing
+SYSCALL0012 on Basic seL4_NBRecv() testing
+SYSCALL0013 on Basic seL4_Wait() testing
+SYSCALL0014 on Basic seL4_SendWithMRs() testing
+SYSCALL0015 on Basic seL4_NBSendWithMRs() testing
+SYSCALL0016 on Basic seL4_ReplyWithMRs() testing
+SYSCALL0017 on Basic seL4_CallWithMRs() testing
+THREADS0004 on seL4_TCB_Configure with a NULL CSpace should fail
+THREADS0005 on seL4_TCB_SetSpace with a NULL CSpace should fail
+TIMEOUTFAULT0001 off Test timeout fault
+TIMEOUTFAULT0002 off Handle a timeout fault in a server
+TIMEOUTFAULT0003 off Nested timeout fault
+TIMER0001 off Basic timer testing
+TIMER0002 off Test that the timer moves between gettime and timeout calls
+TLS0001 on Test root thread accessing __thread variables
+TLS0002 on Test multiple threads using __thread variables
+TLS0006 on sel4utils_thread with distinct TLS should not interfere
+TRIVIAL0000 on Ensure the test framework functions
+TRIVIAL0001 on Ensure the allocator works
+TRIVIAL0002 on Ensure the allocator works more than once
+UNKNOWN_SYSCALL_001 off Test seL4_VMEnter in a non-vm thread
+VSPACE0000 on Test threads in different cspace/vspace
+VSPACE0001 on Test unmapping a page after deleting the PD
+VSPACE0002 on Test create ASID pool
+VSPACE0003 on Test create multiple ASID pools
+VSPACE0004 on Test running out of ASID pools
+VSPACE0005 on Test overassigning ASID pool
+VSPACE0006 on Test touching all available ASID pools
+# 125 enabled, 49 disabled

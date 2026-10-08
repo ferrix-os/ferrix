@@ -1,0 +1,35 @@
+# kernel configuration values that differ from the kernel's own defaults
+ARM_TLS_REG tpidru -> tpidruro
+ARM_TLS_REG_TPIDRU True -> False
+ARM_TLS_REG_TPIDRURO False -> True
+EXPORT_PMU_USER False -> True
+EXPORT_VCNT_USER False -> True
+KERNEL_FWHOLE_PROGRAM False -> True
+ROOT_CNODE_SIZE_BITS 12 -> 15
+SET_TLS_BASE_SELF False -> True
+TIMER_TICK_MS 2 -> 1000
+TIME_SLICE 5 -> 500
+VERIFICATION_BUILD True -> False
+
+# configuration values that differ from bench-dk1.defaults
+apps/sel4bench/gen_config/sel4benchapp/gen_config.json ALLOW_UNSTABLE_OVERHEAD False -> True
+apps/sel4bench/irquser/gen_config/sel4benchirquser/gen_config.json APP_IRQUSERBENCH True -> False
+apps/sel4bench/page_mapping/gen_config/sel4benchpagemapping/gen_config.json APP_PAGEMAPPINGBENCH True -> False
+apps/sel4bench/projects_libs/libusbdrivers/gen_config/usbdrivers/gen_config.json ALLOW_UNSTABLE_OVERHEAD False -> True
+apps/sel4bench/scheduler/gen_config/sel4benchscheduler/gen_config.json APP_SCHEDULERBENCH True -> False
+apps/sel4bench/seL4_libs/libsel4serialserver/gen_config/sel4serialserver/gen_config.json SERIAL_SERVER_COLOURED_OUTPUT True -> False
+apps/sel4bench/seL4_libs/libsel4utils/gen_config/sel4utils/gen_config.json SEL4UTILS_STACK_SIZE 65536 -> 1048576
+apps/sel4bench/sel4_projects_libs/libsel4vmmplatsupport/gen_config/sel4vmmplatsupport/gen_config.json ALLOW_UNSTABLE_OVERHEAD False -> True
+apps/sel4bench/signal/gen_config/sel4benchsignal/gen_config.json APP_SIGNALBENCH True -> False
+apps/sel4bench/sync/gen_config/sel4benchsync/gen_config.json APP_SYNCBENCH True -> False
+kernel/gen_config/kernel/gen_config.json EXPORT_VCNT_USER False -> True
+# cache entries that differ
+CMakeCache AppIrqUserBench ON -> OFF
+CMakeCache AppPageMappingBench ON -> OFF
+CMakeCache AppSchedulerBench ON -> OFF
+CMakeCache AppSignalBench ON -> OFF
+CMakeCache AppSyncBench ON -> OFF
+CMakeCache KernelArmExportVCNTUser OFF -> ON
+CMakeCache LibSel4SerialServerColoredOutput ON -> OFF
+CMakeCache LibSel4UtilsStackSize 65536 -> 1048576
+CMakeCache Sel4rtSources unknown -> seL4-c6ce4d2a0c33+patches-a1eeb694df47

@@ -1,0 +1,251 @@
+util_libs 8dd23f73: libplatsupport for stm32mp1: the U(S)ARTs (UART4 the
+console, the STM32MP2's polled driver) and the generic timer's ltimer (CNTP,
+PPI 30) when the kernel exports the physical counter and timer. BSD-2-Clause.
+
+diff --git a/libplatsupport/CMakeLists.txt b/libplatsupport/CMakeLists.txt
+index 5e3b989..c79ea93 100644
+--- a/libplatsupport/CMakeLists.txt
++++ b/libplatsupport/CMakeLists.txt
+@@ -46,7 +46,8 @@ config_choice(
+ mark_as_advanced(CLEAR LibPlatSupportX86ConsoleDevice LibPlatSupportLPTMRclock)
+ 
+ # Some platforms don't have a platform timer.
+-if((KernelPlatformQEMUArmVirt AND NOT (KernelArmExportPCNTUser AND KernelArmExportPTMRUser))
++if(((KernelPlatformQEMUArmVirt OR KernelPlatformStm32mp1)
++    AND NOT (KernelArmExportPCNTUser AND KernelArmExportPTMRUser))
+    OR KernelPlatformRocketchip OR KernelPlatformRocketchipZCU102 OR KernelPlatformCheshire
+    OR (SIMULATION AND (KernelArchRiscV OR KernelArchARM)))
+   set(LibPlatSupportHaveTimer OFF)
+@@ -107,7 +108,7 @@ else()
+   message(FATAL_ERROR "Unsupported KernelArch '${KernelArch}'")
+ endif()
+ 
+-if(KernelPlatformQEMUArmVirt OR KernelPlatformQuartz64 OR KernelPlatformIMX93)
++if(KernelPlatformQEMUArmVirt OR KernelPlatformQuartz64 OR KernelPlatformIMX93 OR KernelPlatformStm32mp1)
+   if(KernelArmExportPCNTUser AND KernelArmExportPTMRUser)
+     list(APPEND deps src/arch/arm/generic_ltimer.c)
+   endif()
+diff --git a/libplatsupport/plat_include/stm32mp1/platsupport/plat/clock.h b/libplatsupport/plat_include/stm32mp1/platsupport/plat/clock.h
+new file mode 100644
+index 0000000..f6d9391
+--- /dev/null
++++ b/libplatsupport/plat_include/stm32mp1/platsupport/plat/clock.h
+@@ -0,0 +1,21 @@
++/*
++ * Copyright 2019, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++/* No clock driver: the firmware (TF-A, OP-TEE) sets the clock tree. */
++enum clk_id {
++    CLK_MASTER,
++    /* ----- */
++    NCLOCKS,
++    /* Custom clock */
++    CLK_CUSTOM,
++};
++
++enum clock_gate {
++    NCLKGATES
++};
+diff --git a/libplatsupport/plat_include/stm32mp1/platsupport/plat/i2c.h b/libplatsupport/plat_include/stm32mp1/platsupport/plat/i2c.h
+new file mode 100644
+index 0000000..7979eda
+--- /dev/null
++++ b/libplatsupport/plat_include/stm32mp1/platsupport/plat/i2c.h
+@@ -0,0 +1,13 @@
++/*
++ * Copyright 2019, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++/* No I2C driver. */
++enum i2c_id {
++    NI2C
++};
+diff --git a/libplatsupport/plat_include/stm32mp1/platsupport/plat/serial.h b/libplatsupport/plat_include/stm32mp1/platsupport/plat/serial.h
+new file mode 100644
+index 0000000..d5a8994
+--- /dev/null
++++ b/libplatsupport/plat_include/stm32mp1/platsupport/plat/serial.h
+@@ -0,0 +1,35 @@
++/*
++ * Copyright 2026, STMicroelectronics
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++/* STM32MP15x U(S)ARTs, the same "st,stm32h7-uart" block as the STM32MP2's.
++ * Addresses from Linux's stm32mp151.dtsi. */
++#define USART1_PADDR 0x5c000000
++#define USART2_PADDR 0x4000e000
++#define USART3_PADDR 0x4000f000
++#define UART4_PADDR  0x40010000
++#define UART5_PADDR  0x40011000
++#define USART6_PADDR 0x44003000
++#define UART7_PADDR  0x40018000
++#define UART8_PADDR  0x40019000
++
++/* official device names */
++enum chardev_id {
++    USART1,
++    USART2,
++    USART3,
++    UART4,
++    UART5,
++    USART6,
++    UART7,
++    UART8,
++    /* defaults: UART4 is the DK1's console, on the ST-LINK's virtual COM port */
++    PS_SERIAL_DEFAULT = UART4
++};
++
++#define DEFAULT_SERIAL_PADDR UART4_PADDR
+diff --git a/libplatsupport/src/plat/stm32mp1/chardev.c b/libplatsupport/src/plat/stm32mp1/chardev.c
+new file mode 100644
+index 0000000..01e1814
+--- /dev/null
++++ b/libplatsupport/src/plat/stm32mp1/chardev.c
+@@ -0,0 +1,49 @@
++/*
++ * Copyright 2026, STMicroelectronics
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++/* The STM32MP15x U(S)ARTs, after the STM32MP2's chardev.c. */
++
++#include "../../chardev.h"
++#include "../../common.h"
++#include <utils/util.h>
++
++#define UART_DEFN(devid) {          \
++    .id      = UART##devid,         \
++    .paddr   = UART##devid##_PADDR, \
++    .size    = BIT(12),             \
++    .init_fn = &uart_init           \
++}
++
++#define USART_DEFN(devid) {          \
++    .id      = USART##devid,         \
++    .paddr   = USART##devid##_PADDR, \
++    .size    = BIT(12),              \
++    .init_fn = &uart_init            \
++}
++
++static const struct dev_defn dev_defn[] = {
++    USART_DEFN(1),
++    USART_DEFN(2),
++    USART_DEFN(3),
++    UART_DEFN(4),
++    UART_DEFN(5),
++    USART_DEFN(6),
++    UART_DEFN(7),
++    UART_DEFN(8),
++};
++
++struct ps_chardevice *
++ps_cdev_init(enum chardev_id id, const ps_io_ops_t *o, struct ps_chardevice *d)
++{
++    unsigned int i;
++    for (i = 0; i < ARRAY_SIZE(dev_defn); i++) {
++        if (dev_defn[i].id == id) {
++            return (dev_defn[i].init_fn(dev_defn + i, o, d)) ? NULL : d;
++        }
++    }
++    return NULL;
++}
+diff --git a/libplatsupport/src/plat/stm32mp1/serial.c b/libplatsupport/src/plat/stm32mp1/serial.c
+new file mode 100644
+index 0000000..cb1195f
+--- /dev/null
++++ b/libplatsupport/src/plat/stm32mp1/serial.c
+@@ -0,0 +1,76 @@
++/*
++ * Copyright 2026, STMicroelectronics
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++/* The STM32MP2's polled U(S)ART driver: the STM32MP15x has the same block
++ * ("st,stm32h7-uart"). U-Boot leaves the console UART set up (115200 8N1),
++ * so nothing is configured here. */
++
++#include <string.h>
++#include <stdlib.h>
++#include <platsupport/serial.h>
++#include "../../chardev.h"
++
++#define REG_PTR(base, off)     ((volatile uint32_t *)((base) + (off)))
++
++#define USART_ISR      0x1C
++#define USART_RDR      0x24
++#define USART_TDR      0x28
++#define USART_ISR_RXNE BIT(5)
++#define USART_ISR_TXE  BIT(7)
++
++int uart_getchar(ps_chardevice_t *d)
++{
++    int ch = EOF;
++
++    while ((*REG_PTR(d->vaddr, USART_ISR) & USART_ISR_RXNE) == 0);
++
++    ch = *REG_PTR(d->vaddr, USART_RDR) & 0x7f;
++
++    return ch;
++}
++
++int uart_putchar(ps_chardevice_t *d, int c)
++{
++    /* CR before LF: each line ends "\r\n", for the board bench's log reader. */
++    if (c == '\n' && (d->flags & SERIAL_AUTO_CR)) {
++        uart_putchar(d, '\r');
++    }
++
++    while ((*REG_PTR(d->vaddr, USART_ISR) & USART_ISR_TXE) == 0);
++
++    *REG_PTR(d->vaddr, USART_TDR) = c;
++
++    return c;
++}
++
++static void uart_handle_irq(ps_chardevice_t *dev)
++{
++
++}
++
++int uart_init(const struct dev_defn *defn,
++              const ps_io_ops_t *ops,
++              ps_chardevice_t *dev)
++{
++    memset(dev, 0, sizeof(*dev));
++    char *vaddr = chardev_map(defn, ops);
++    if (vaddr == NULL) {
++        return -1;
++    }
++
++    /* Set up all the  device properties. */
++    dev->id         = defn->id;
++    dev->vaddr      = (void *)vaddr;
++    dev->read       = &uart_read;
++    dev->write      = &uart_write;
++    dev->handle_irq = &uart_handle_irq;
++    dev->irqs       = defn->irqs;
++    dev->ioops      = *ops;
++    dev->flags      = SERIAL_AUTO_CR;
++
++    return 0;
++}

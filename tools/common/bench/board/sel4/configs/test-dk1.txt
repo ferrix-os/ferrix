@@ -1,0 +1,15 @@
+# kernel configuration values that differ from the kernel's own defaults
+ARM_TLS_REG tpidru -> tpidruro
+ARM_TLS_REG_TPIDRU True -> False
+ARM_TLS_REG_TPIDRURO False -> True
+COLOUR_PRINTING False -> True
+DEBUG_BUILD False -> True
+IRQ_REPORTING False -> True
+PRINTING False -> True
+ROOT_CNODE_SIZE_BITS 12 -> 13
+SET_TLS_BASE_SELF False -> True
+USER_STACK_TRACE_LENGTH 0 -> 16
+VERIFICATION_BUILD True -> False
+
+# configuration values that differ from test-dk1.defaults
+# cache entries that differ

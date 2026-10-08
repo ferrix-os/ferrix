@@ -1,0 +1,3540 @@
+seL4 c6ce4d2a: the STM32MP1 platform (STM32MP157, two Cortex-A7, GIC-400,
+generic timer) for the STM32MP157D-DK1, and SCTLR/ACTLR printed at boot by
+debug kernels; on stm32mp1 the PMU export skips the Secure-only SDER probe
+(seL4 runs non-secure under OP-TEE). Kernel files GPL-2.0-only; libsel4's
+constants.h BSD-2-Clause; the device tree is Linux v7.2.9's stm32mp157a-dk1,
+GPL-2.0-only (gen-dts.py).
+
+diff --git a/libsel4/sel4_plat_include/stm32mp1/sel4/plat/api/constants.h b/libsel4/sel4_plat_include/stm32mp1/sel4/plat/api/constants.h
+new file mode 100644
+index 00000000..2bbac2d0
+--- /dev/null
++++ b/libsel4/sel4_plat_include/stm32mp1/sel4/plat/api/constants.h
+@@ -0,0 +1,19 @@
++/*
++ * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <sel4/config.h>
++#include <sel4/arch/constants_cortex_a7.h>
++
++/* (Deprecated) First address in the virtual address space that is not accessible to user level.
++ * The kernel window starts here: 0xe0000000 to 0xfff00000 holds the DK1's
++ * 480 MiB of RAM below OP-TEE (0xc0000000 to 0xde000000). */
++#define seL4_UserTop 0xe0000000
++
++/* Last address in the virtual address space that is accessible to user level */
++#define seL4_UserVSpaceTop (seL4_UserTop - 1)
+diff --git a/src/arch/arm/armv/armv7-a/user_access.c b/src/arch/arm/armv/armv7-a/user_access.c
+index c758a787..eddcb73f 100644
+--- a/src/arch/arm/armv/armv7-a/user_access.c
++++ b/src/arch/arm/armv/armv7-a/user_access.c
+@@ -64,12 +64,15 @@ static void check_export_pmu(void)
+     v |= PMUSERENR_ENABLE;
+     MCR(PMUSERENR, v);
+ 
++#ifndef CONFIG_PLAT_STM32MP1
+     /* enable user-level pmu event counter if we're in secure mode */
+     if (!(readDscrCp() & DBGDSCR_SECURE_MODE_DISABLED)) {
+         MRC(DBGSDER, v);
+         v |= DBGSDER_ENABLE_SECURE_USER_NON_INVASIVE_DEBUG;
+         MCR(DBGSDER, v);
+     }
++#endif /* !CONFIG_PLAT_STM32MP1: always non-secure there (OP-TEE is the
++        * monitor), where SDER is UNDEFINED; skip the debug-register probe */
+ #endif
+ }
+ 
+diff --git a/src/arch/arm/kernel/boot.c b/src/arch/arm/kernel/boot.c
+index 98598d24..67569fdd 100644
+--- a/src/arch/arm/kernel/boot.c
++++ b/src/arch/arm/kernel/boot.c
+@@ -385,6 +385,15 @@ static BOOT_CODE bool_t try_init_kernel(
+ 
+     /* debug output via serial port is only available from here */
+     printf("Bootstrapping kernel\n");
++#if defined(CONFIG_ARCH_AARCH32) && defined(CONFIG_PRINTING)
++    {
++        /* The caches, predictors and coherency the kernel runs with, for
++         * boards that compare kernels. */
++        word_t sctlr;
++        asm volatile("mrc p15, 0, %0, c1, c0, 0" : "=r"(sctlr));
++        printf("SCTLR 0x%"SEL4_PRIx_word" ACTLR 0x%"SEL4_PRIx_word"\n", sctlr, getACTLR());
++    }
++#endif
+ 
+     /* initialise the platform */
+     init_plat();
+diff --git a/src/plat/stm32mp1/config.cmake b/src/plat/stm32mp1/config.cmake
+new file mode 100644
+index 00000000..612eb42c
+--- /dev/null
++++ b/src/plat/stm32mp1/config.cmake
+@@ -0,0 +1,45 @@
++#
++# Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
++# Copyright 2026, Sebastian Dauenhauer
++#
++# SPDX-License-Identifier: GPL-2.0-only
++#
++
++# STM32MP157 (two Cortex-A7, GIC-400, Arm generic timer) on the STM32MP157D-DK1,
++# modelled on imx7 and allwinnerA20. The board boots TF-A, OP-TEE as the
++# secure monitor and U-Boot, so seL4 runs in the non-secure world.
++declare_platform(stm32mp1 KernelPlatformStm32mp1 PLAT_STM32MP1 KernelSel4ArchAarch32)
++
++if(KernelPlatformStm32mp1)
++    declare_seL4_arch(aarch32)
++    set(KernelArmCortexA7 ON)
++    set(KernelArchArmV7a ON)
++    config_set(KernelARMPlatform ARM_PLAT stm32mp157a-dk1)
++    # Linux's stm32mp157a-dk1.dts (the D-DK1 is electrically the DK1; mainline
++    # has no stm32mp157d-dk1.dts), then the overlay: the kernel's devices and
++    # OP-TEE's reserved memory.
++    list(APPEND KernelDTSList "tools/dts/stm32mp157a-dk1.dts")
++    list(APPEND KernelDTSList "src/plat/stm32mp1/overlay-stm32mp1.dts")
++    # The system counter runs at 24 MHz on the DK1 (Ferrix measures its
++    # generic timer at 24.000 MHz there). MAX_IRQ leaves room for 256 shared
++    # interrupts; the device tree's highest is SPI 200 (IRQ 232, the PMU), and
++    # the GIC driver sizes its set-up from GICD_TYPER. CLK_MAGIC / 2^CLK_SHIFT
++    # is 1/24, ticks to microseconds (MCS only).
++    declare_default_headers(
++        TIMER_FREQUENCY 24000000
++        MAX_IRQ 287
++        NUM_PPI 32
++        TIMER drivers/timer/arm_generic.h
++        INTERRUPT_CONTROLLER arch/machine/gic_v2.h
++        CLK_MAGIC 2863311531llu
++        CLK_SHIFT 36u
++        KERNEL_WCET 10u
++    )
++endif()
++
++# The Cortex-A7's L2 cache is inside the core cluster, maintained by the
++# architectural set/way operations: no outer cache controller to drive.
++add_sources(
++    DEP "KernelPlatformStm32mp1"
++    CFILES src/arch/arm/machine/gic_v2.c src/arch/arm/machine/l2c_nop.c
++)
+diff --git a/src/plat/stm32mp1/overlay-stm32mp1.dts b/src/plat/stm32mp1/overlay-stm32mp1.dts
+new file mode 100644
+index 00000000..537caded
+--- /dev/null
++++ b/src/plat/stm32mp1/overlay-stm32mp1.dts
+@@ -0,0 +1,47 @@
++/*
++ * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++/ {
++	chosen {
++		/* serial0 is UART4 at 0x40010000, the DK1's ST-LINK console. */
++		seL4,elfloader-devices =
++		    "serial0",
++		    &{/psci},
++		    &{/timer};
++
++		seL4,kernel-devices =
++		    "serial0",
++		    &{/interrupt-controller@a0021000},
++		    &{/timer};
++	};
++
++	/* The elfloader starts the second core through OP-TEE's PSCI (SMP
++	 * builds only; a single-core build never calls it). */
++	cpus {
++		cpu@0 {
++			enable-method = "psci";
++		};
++		cpu@1 {
++			enable-method = "psci";
++		};
++	};
++
++	/*
++	 * OP-TEE's secure DDR: CFG_TZDRAM_START 0xde000000, CFG_TZDRAM_SIZE
++	 * 32 MiB in the DK1 firmware's optee-conf.mk. Linux's stm32mp157a-dk1
++	 * tree does not reserve it, and seL4 boots with its own tree, so it is
++	 * reserved here. hardware_gen takes no-map regions out of RAM, so the
++	 * kernel never hands it out as memory and the elfloader places nothing
++	 * in it.
++	 */
++	reserved-memory {
++		optee@de000000 {
++			reg = <0xde000000 0x2000000>;
++			no-map;
++		};
++	};
++};
+diff --git a/tools/dts/stm32mp157a-dk1.dts b/tools/dts/stm32mp157a-dk1.dts
+new file mode 100644
+index 00000000..f7bf7b21
+--- /dev/null
++++ b/tools/dts/stm32mp157a-dk1.dts
+@@ -0,0 +1,3358 @@
++/*
++ * Copyright Linux Kernel Team
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ *
++ * This file is derived from an intermediate build stage of the
++ * Linux kernel. The licenses of all input files to this process
++ * are compatible with GPL-2.0-only.
++ */
++
++/dts-v1/;
++
++/ {
++	#address-cells = <0x01>;
++	#size-cells = <0x01>;
++	model = "STMicroelectronics STM32MP157A-DK1 Discovery Board";
++	compatible = "st,stm32mp157a-dk1", "st,stm32mp157";
++
++	cpus {
++		#address-cells = <0x01>;
++		#size-cells = <0x00>;
++
++		cpu@0 {
++			compatible = "arm,cortex-a7";
++			clock-frequency = <0x26be3680>;
++			device_type = "cpu";
++			reg = <0x00>;
++			phandle = <0x01>;
++		};
++
++		cpu@1 {
++			compatible = "arm,cortex-a7";
++			clock-frequency = <0x26be3680>;
++			device_type = "cpu";
++			reg = <0x01>;
++			phandle = <0x02>;
++		};
++	};
++
++	arm-pmu {
++		compatible = "arm,cortex-a7-pmu";
++		interrupts = <0x00 0xc8 0x04 0x00 0xc9 0x04>;
++		interrupt-affinity = <0x01 0x02>;
++		interrupt-parent = <0x03>;
++	};
++
++	psci {
++		compatible = "arm,psci-1.0";
++		method = "smc";
++	};
++
++	interrupt-controller@a0021000 {
++		compatible = "arm,cortex-a7-gic";
++		#interrupt-cells = <0x03>;
++		interrupt-controller;
++		reg = <0xa0021000 0x1000 0xa0022000 0x2000>;
++		phandle = <0x03>;
++	};
++
++	timer {
++		compatible = "arm,armv7-timer";
++		interrupts = <0x01 0x0d 0x308 0x01 0x0e 0x308 0x01 0x0b 0x308 0x01 0x0a 0x308>;
++		interrupt-parent = <0x03>;
++		arm,no-tick-in-suspend;
++	};
++
++	clocks {
++
++		clk-hse {
++			#clock-cells = <0x00>;
++			compatible = "fixed-clock";
++			clock-frequency = <0x16e3600>;
++			phandle = <0x6f>;
++		};
++
++		clk-hsi {
++			#clock-cells = <0x00>;
++			compatible = "fixed-clock";
++			clock-frequency = <0x3d09000>;
++		};
++
++		clk-lse {
++			#clock-cells = <0x00>;
++			compatible = "fixed-clock";
++			clock-frequency = <0x8000>;
++		};
++
++		clk-lsi {
++			#clock-cells = <0x00>;
++			compatible = "fixed-clock";
++			clock-frequency = <0x7d00>;
++		};
++
++		clk-csi {
++			#clock-cells = <0x00>;
++			compatible = "fixed-clock";
++			clock-frequency = "", "=\t";
++		};
++	};
++
++	thermal-zones {
++
++		cpu-thermal {
++			polling-delay-passive = <0x00>;
++			polling-delay = <0x00>;
++			thermal-sensors = <0x04>;
++
++			trips {
++
++				cpu-alert1 {
++					temperature = <0x14c08>;
++					hysteresis = <0x00>;
++					type = "passive";
++				};
++
++				cpu-crit {
++					temperature = <0x1d4c0>;
++					hysteresis = <0x00>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++			};
++		};
++	};
++
++	regulator-booster {
++		compatible = "st,stm32mp1-booster";
++		st,syscfg = <0x05>;
++		status = "disabled";
++	};
++
++	soc {
++		compatible = "simple-bus";
++		#address-cells = <0x01>;
++		#size-cells = <0x01>;
++		interrupt-parent = <0x03>;
++		ranges;
++
++		sram@10050000 {
++			compatible = "mmio-sram";
++			reg = <0x10050000 0x10000>;
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++			ranges = <0x00 0x10050000 0x10000>;
++		};
++
++		mailbox@4c001000 {
++			compatible = "st,stm32mp1-ipcc";
++			#mbox-cells = <0x01>;
++			reg = <0x4c001000 0x400>;
++			st,proc-id = <0x00>;
++			interrupts-extended = <0x06 0x3d 0x04 0x03 0x00 0x65 0x04>;
++			interrupt-names = "rx", "tx";
++			clocks = <0x07 0x53>;
++			wakeup-source;
++			status = "okay";
++			phandle = <0x78>;
++		};
++
++		rcc@50000000 {
++			compatible = "st,stm32mp1-rcc", "syscon";
++			reg = <0x50000000 0x1000>;
++			#clock-cells = <0x01>;
++			#reset-cells = <0x01>;
++			phandle = <0x07>;
++		};
++
++		pwr@50001000 {
++			compatible = "st,stm32mp1,pwr-reg";
++			reg = <0x50001000 0x10>;
++			vdd-supply = <0x08>;
++			vdd_3v3_usbfs-supply = <0x09>;
++
++			reg11 {
++				regulator-name = "reg11";
++				regulator-min-microvolt = <0x10c8e0>;
++				regulator-max-microvolt = <0x10c8e0>;
++				phandle = <0x22>;
++			};
++
++			reg18 {
++				regulator-name = "reg18";
++				regulator-min-microvolt = <0x1b7740>;
++				regulator-max-microvolt = <0x1b7740>;
++				phandle = <0x23>;
++			};
++
++			usb33 {
++				regulator-name = "usb33";
++				regulator-min-microvolt = <0x325aa0>;
++				regulator-max-microvolt = <0x325aa0>;
++				phandle = <0x5d>;
++			};
++		};
++
++		pwr_mcu@50001014 {
++			compatible = "st,stm32mp151-pwr-mcu", "syscon";
++			reg = <0x50001014 0x04>;
++			phandle = <0x70>;
++		};
++
++		interrupt-controller@5000d000 {
++			compatible = "st,stm32mp1-exti", "syscon";
++			interrupt-controller;
++			#interrupt-cells = <0x02>;
++			reg = <0x5000d000 0x400>;
++			interrupts-extended = <0x03 0x00 0x06 0x04 0x03 0x00 0x07 0x04 0x03 0x00 0x08 0x04 0x03 0x00 0x09 0x04 0x03 0x00 0x0a 0x04 0x03 0x00 0x17 0x04 0x03 0x00 0x40 0x04 0x03 0x00 0x41 0x04 0x03 0x00 0x42 0x04 0x03 0x00 0x43 0x04 0x03 0x00 0x28 0x04 0x03 0x00 0x2a 0x04 0x03 0x00 0x4c 0x04 0x03 0x00 0x4d 0x04 0x03 0x00 0x79 0x04 0x03 0x00 0x7f 0x04 0x03 0x00 0x01 0x04 0x00 0x00 0x03 0x00 0x03 0x04 0x00 0x03 0x00 0x1f 0x04 0x03 0x00 0x21 0x04 0x03 0x00 0x48 0x04 0x03 0x00 0x5f 0x04 0x03 0x00 0x6b 0x04 0x03 0x00 0x25 0x04 0x03 0x00 0x26 0x04 0x03 0x00 0x27 0x04 0x03 0x00 0x47 0x04 0x03 0x00 0x34 0x04 0x03 0x00 0x35 0x04 0x03 0x00 0x52 0x04 0x03 0x00 0x53 0x04 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03 0x00 0x97 0x04 0x03 0x00 0x5d 0x04 0x03 0x00 0x8a 0x04 0x00 0x03 0x00 0x8b 0x04 0x00 0x03 0x00 0x8c 0x04 0x03 0x00 0x8d 0x04 0x03 0x00 0x87 0x04 0x00 0x00 0x00 0x00 0x00 0x00 0x03 0x00 0x64 0x04 0x00 0x00 0x00 0x03 0x00 0x90 0x04 0x00 0x00 0x03 0x00 0x8f 0x04 0x00 0x03 0x00 0x3e 0x04 0x00 0x00 0x03 0x00 0x81 0x04>;
++			phandle = <0x06>;
++		};
++
++		syscon@50020000 {
++			compatible = "st,stm32mp157-syscfg", "syscon";
++			reg = <0x50020000 0x400>;
++			clocks = <0x07 0x33>;
++			phandle = <0x05>;
++		};
++
++		thermal@50028000 {
++			compatible = "st,stm32-thermal";
++			reg = <0x50028000 0x100>;
++			interrupts = <0x00 0x93 0x04>;
++			clocks = <0x07 0x35>;
++			clock-names = "pclk";
++			#thermal-sensor-cells = <0x00>;
++			status = "okay";
++			phandle = <0x04>;
++		};
++
++		pinctrl@5002a000 {
++			compatible = "st,stm32mp151-hdp";
++			reg = <0x5002a000 0x400>;
++			clocks = <0x07 0x37>;
++			access-controllers = <0x0a 0x01>;
++			status = "disabled";
++		};
++
++		bus@50080000 {
++			compatible = "st,stm32mp151-dbg-bus";
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++			#access-controller-cells = <0x01>;
++			ranges = <0x50080000 0x50080000 0x3f80000 0x90000000 0x90000000 0x1000000>;
++			status = "okay";
++			phandle = <0x0a>;
++
++			funnel@50091000 {
++				compatible = "arm,coresight-dynamic-funnel", "arm,primecell";
++				reg = <0x50091000 0x1000>;
++				clocks = <0x07 0xd6 0x07 0xd7>;
++				clock-names = "apb_pclk", "atclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				in-ports {
++					#address-cells = <0x01>;
++					#size-cells = <0x00>;
++
++					port@0 {
++						reg = <0x00>;
++
++						endpoint {
++							remote-endpoint = <0x0b>;
++							phandle = <0x12>;
++						};
++					};
++
++					port@1 {
++						reg = <0x01>;
++
++						endpoint {
++							remote-endpoint = <0x0c>;
++							phandle = <0x14>;
++						};
++					};
++
++					port@2 {
++						reg = <0x02>;
++
++						endpoint {
++							remote-endpoint = <0x0d>;
++							phandle = <0x16>;
++						};
++					};
++				};
++
++				out-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x0e>;
++							phandle = <0x0f>;
++						};
++					};
++				};
++			};
++
++			etf@50092000 {
++				compatible = "arm,coresight-tmc", "arm,primecell";
++				reg = <0x50092000 0x1000>;
++				clocks = <0x07 0xd6>;
++				clock-names = "apb_pclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				in-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x0f>;
++							phandle = <0x0e>;
++						};
++					};
++				};
++
++				out-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x10>;
++							phandle = <0x11>;
++						};
++					};
++				};
++			};
++
++			tpiu@50093000 {
++				compatible = "arm,coresight-tpiu", "arm,primecell";
++				reg = <0x50093000 0x1000>;
++				clocks = <0x07 0xd6 0x07 0xd7>;
++				clock-names = "apb_pclk", "atclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				in-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x11>;
++							phandle = <0x10>;
++						};
++					};
++				};
++			};
++
++			cti@50094000 {
++				compatible = "arm,coresight-cti", "arm,primecell";
++				reg = <0x50094000 0x1000>;
++				clocks = <0x07 0xd6>;
++				clock-names = "apb_pclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++			};
++
++			stm@500a0000 {
++				compatible = "arm,coresight-stm", "arm,primecell";
++				reg = <0x500a0000 0x1000 0x90000000 0x1000000>;
++				reg-names = "stm-base", "stm-stimulus-base";
++				clocks = <0x07 0xd6 0x07 0xd7>;
++				clock-names = "apb_pclk", "atclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				out-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x12>;
++							phandle = <0x0b>;
++						};
++					};
++				};
++			};
++
++			cti@500d8000 {
++				compatible = "arm,coresight-cti", "arm,primecell";
++				reg = <0x500d8000 0x1000>;
++				clocks = <0x07 0xd6>;
++				clock-names = "apb_pclk";
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				trig-conns@0 {
++					reg = <0x00>;
++					arm,trig-in-sigs = <0x00 0x04 0x05>;
++					arm,trig-in-types = <0x09 0x00 0x00>;
++					arm,trig-out-sigs = <0x00 0x07>;
++					arm,trig-out-types = <0x05 0x06>;
++					cpu = <0x01>;
++				};
++
++				trig-conns@2 {
++					reg = <0x02>;
++					arm,trig-in-sigs = <0x02 0x03 0x06>;
++					arm,trig-in-types = <0x0a 0x0a 0x0a>;
++					arm,trig-out-sigs = <0x01 0x02 0x03 0x04>;
++					arm,trig-out-types = <0x0b 0x0b 0x0b 0x0b>;
++					arm,cs-dev-assoc = <0x13>;
++				};
++			};
++
++			etm@500dc000 {
++				compatible = "arm,coresight-etm3x", "arm,primecell";
++				reg = <0x500dc000 0x1000>;
++				cpu = <0x01>;
++				clocks = <0x07 0xd6 0x07 0xd7>;
++				clock-names = "apb_pclk", "atclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++				phandle = <0x13>;
++
++				out-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x14>;
++							phandle = <0x0c>;
++						};
++					};
++				};
++			};
++
++			cti@500d9000 {
++				compatible = "arm,coresight-cti", "arm,primecell";
++				reg = <0x500d9000 0x1000>;
++				clocks = <0x07 0xd6>;
++				clock-names = "apb_pclk";
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++
++				trig-conns@0 {
++					reg = <0x00>;
++					arm,trig-in-sigs = <0x00 0x04 0x05>;
++					arm,trig-in-types = <0x09 0x00 0x00>;
++					arm,trig-out-sigs = <0x00 0x07>;
++					arm,trig-out-types = <0x05 0x06>;
++					cpu = <0x02>;
++				};
++
++				trig-conns@2 {
++					reg = <0x02>;
++					arm,trig-in-sigs = <0x02 0x03 0x06>;
++					arm,trig-in-types = <0x0a 0x0a 0x0a>;
++					arm,trig-out-sigs = <0x01 0x02 0x03 0x04>;
++					arm,trig-out-types = <0x0b 0x0b 0x0b 0x0b>;
++					arm,cs-dev-assoc = <0x15>;
++				};
++			};
++
++			etm@500dd000 {
++				compatible = "arm,coresight-etm3x", "arm,primecell";
++				reg = <0x500dd000 0x1000>;
++				cpu = <0x02>;
++				clocks = <0x07 0xd6 0x07 0xd7>;
++				clock-names = "apb_pclk", "atclk";
++				access-controllers = <0x0a 0x00>;
++				status = "okay";
++				phandle = <0x15>;
++
++				out-ports {
++
++					port {
++
++						endpoint {
++							remote-endpoint = <0x16>;
++							phandle = <0x0d>;
++						};
++					};
++				};
++			};
++		};
++
++		dma-controller@58000000 {
++			compatible = "st,stm32h7-mdma";
++			reg = <0x58000000 0x1000>;
++			interrupts = <0x00 0x7a 0x04>;
++			clocks = <0x07 0x64>;
++			resets = <0x07 0xd00>;
++			#dma-cells = <0x05>;
++			dma-channels = <0x20>;
++			dma-requests = <0x30>;
++			phandle = <0x60>;
++		};
++
++		mmc@58005000 {
++			compatible = "st,stm32-sdmmc2", "arm,pl18x", "arm,primecell";
++			arm,primecell-periphid = <0x253180>;
++			reg = <0x58005000 0x1000>;
++			interrupts = <0x00 0x31 0x04>;
++			clocks = <0x07 0x76>;
++			clock-names = "apb_pclk";
++			resets = <0x07 0xcd0>;
++			cap-sd-highspeed;
++			cap-mmc-highspeed;
++			max-frequency = <0x7270e00>;
++			status = "okay";
++			pinctrl-names = "default", "opendrain", "sleep";
++			pinctrl-0 = <0x17>;
++			pinctrl-1 = <0x18>;
++			pinctrl-2 = <0x19>;
++			cd-gpios = <0x1a 0x07 0x11>;
++			disable-wp;
++			st,neg-edge;
++			bus-width = <0x04>;
++			vmmc-supply = <0x1b>;
++		};
++
++		mmc@58007000 {
++			compatible = "st,stm32-sdmmc2", "arm,pl18x", "arm,primecell";
++			arm,primecell-periphid = <0x253180>;
++			reg = <0x58007000 0x1000>;
++			interrupts = <0x00 0x7c 0x04>;
++			clocks = <0x07 0x77>;
++			clock-names = "apb_pclk";
++			resets = <0x07 0xcd1>;
++			cap-sd-highspeed;
++			cap-mmc-highspeed;
++			max-frequency = <0x7270e00>;
++			status = "disabled";
++		};
++
++		crc@58009000 {
++			compatible = "st,stm32f7-crc";
++			reg = <0x58009000 0x400>;
++			clocks = <0x07 0x6e>;
++			status = "okay";
++		};
++
++		usb@5800c000 {
++			compatible = "generic-ohci";
++			reg = <0x5800c000 0x1000>;
++			clocks = <0x1c 0x07 0x6f>;
++			resets = <0x07 0xcd8>;
++			interrupts = <0x00 0x4a 0x04>;
++			phys = <0x1d>;
++			phy-names = "usb";
++			status = "disabled";
++			phandle = <0x1e>;
++		};
++
++		usb@5800d000 {
++			compatible = "generic-ehci";
++			reg = <0x5800d000 0x1000>;
++			clocks = <0x1c 0x07 0x6f>;
++			resets = <0x07 0xcd8>;
++			interrupts = <0x00 0x4b 0x04>;
++			companion = <0x1e>;
++			phys = <0x1d>;
++			phy-names = "usb";
++			status = "okay";
++			#address-cells = <0x01>;
++			#size-cells = <0x00>;
++
++			hub@1 {
++				compatible = "usb424,2514";
++				reg = <0x01>;
++				vdd-supply = <0x1b>;
++			};
++		};
++
++		display-controller@5a001000 {
++			compatible = "st,stm32-ltdc";
++			reg = <0x5a001000 0x400>;
++			interrupts = <0x00 0x58 0x04 0x00 0x59 0x04>;
++			clocks = <0x07 0xa7>;
++			clock-names = "lcd";
++			resets = <0x07 0xc00>;
++			status = "okay";
++			pinctrl-names = "default", "sleep";
++			pinctrl-0 = <0x1f>;
++			pinctrl-1 = <0x20>;
++
++			port {
++
++				endpoint {
++					remote-endpoint = <0x21>;
++					phandle = <0x3f>;
++				};
++			};
++		};
++
++		watchdog@5a002000 {
++			compatible = "st,stm32mp1-iwdg";
++			reg = <0x5a002000 0x400>;
++			clocks = <0x07 0x3a 0x07 0x02>;
++			clock-names = "pclk", "lsi";
++			interrupts-extended = <0x06 0x2e 0x04>;
++			wakeup-source;
++			status = "okay";
++			timeout-sec = <0x20>;
++		};
++
++		usbphyc@5a006000 {
++			#address-cells = <0x01>;
++			#size-cells = <0x00>;
++			#clock-cells = <0x00>;
++			compatible = "st,stm32mp1-usbphyc";
++			reg = <0x5a006000 0x1000>;
++			clocks = <0x07 0x7f>;
++			resets = <0x07 0xc10>;
++			vdda1v1-supply = <0x22>;
++			vdda1v8-supply = <0x23>;
++			status = "okay";
++			phandle = <0x1c>;
++
++			usb-phy@0 {
++				#phy-cells = <0x00>;
++				reg = <0x00>;
++				phy-supply = <0x09>;
++				st,tune-hs-dc-level = <0x02>;
++				st,enable-fs-rftime-tuning;
++				st,enable-hs-rftime-reduction;
++				st,trim-hs-current = <0x0f>;
++				st,trim-hs-impedance = <0x01>;
++				st,tune-squelch-level = <0x03>;
++				st,tune-hs-rx-offset = <0x02>;
++				st,no-lsfs-sc;
++				phandle = <0x1d>;
++			};
++
++			usb-phy@1 {
++				#phy-cells = <0x01>;
++				reg = <0x01>;
++				phy-supply = <0x09>;
++				st,tune-hs-dc-level = <0x02>;
++				st,enable-fs-rftime-tuning;
++				st,enable-hs-rftime-reduction;
++				st,trim-hs-current = <0x0f>;
++				st,trim-hs-impedance = <0x01>;
++				st,tune-squelch-level = <0x03>;
++				st,tune-hs-rx-offset = <0x02>;
++				st,no-lsfs-sc;
++				phandle = <0x5e>;
++			};
++		};
++
++		rtc@5c004000 {
++			compatible = "st,stm32mp1-rtc";
++			reg = <0x5c004000 0x400>;
++			clocks = <0x07 0x41 0x07 0xc0>;
++			clock-names = "pclk", "rtc_ck";
++			interrupts-extended = <0x06 0x13 0x04>;
++			status = "okay";
++		};
++
++		efuse@5c005000 {
++			compatible = "st,stm32mp15-bsec";
++			reg = <0x5c005000 0x400>;
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++
++			part-number-otp@4 {
++				reg = <0x04 0x01>;
++			};
++
++			vrefin-cal@52 {
++				reg = <0x52 0x02>;
++				phandle = <0x59>;
++			};
++
++			calib@5c {
++				reg = <0x5c 0x02>;
++			};
++
++			calib@5e {
++				reg = <0x5e 0x02>;
++			};
++		};
++
++		bus@5c007000 {
++			compatible = "st,stm32-etzpc", "simple-bus";
++			reg = <0x5c007000 0x400>;
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++			#access-controller-cells = <0x01>;
++			ranges;
++			phandle = <0x25>;
++
++			timer@40000000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40000000 0x400>;
++				interrupts = <0x00 0x1c 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xc5>;
++				clock-names = "int";
++				dmas = <0x24 0x12 0x400 0x01 0x24 0x13 0x400 0x01 0x24 0x14 0x400 0x01 0x24 0x15 0x400 0x01 0x24 0x16 0x400 0x01>;
++				dma-names = "ch1", "ch2", "ch3", "ch4", "up";
++				access-controllers = <0x25 0x10>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@1 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x01>;
++					status = "disabled";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++			};
++
++			timer@40001000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40001000 0x400>;
++				interrupts = <0x00 0x1d 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xc6>;
++				clock-names = "int";
++				access-controllers = <0x25 0x11>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "okay";
++					pinctrl-0 = <0x26>;
++					pinctrl-1 = <0x27>;
++					pinctrl-names = "default", "sleep";
++				};
++
++				timer@2 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x02>;
++					status = "okay";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++			};
++
++			timer@40002000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40002000 0x400>;
++				interrupts = <0x00 0x1e 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xc7>;
++				clock-names = "int";
++				access-controllers = <0x25 0x12>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "okay";
++					pinctrl-0 = <0x28 0x29>;
++					pinctrl-1 = <0x2a 0x2b>;
++					pinctrl-names = "default", "sleep";
++				};
++
++				timer@3 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x03>;
++					status = "okay";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++			};
++
++			timer@40003000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40003000 0x400>;
++				interrupts = <0x00 0x32 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xc8>;
++				clock-names = "int";
++				access-controllers = <0x25 0x13>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "okay";
++					pinctrl-0 = <0x2c>;
++					pinctrl-1 = <0x2d>;
++					pinctrl-names = "default", "sleep";
++				};
++
++				timer@4 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x04>;
++					status = "okay";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++			};
++
++			timer@40004000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40004000 0x400>;
++				interrupts = <0x00 0x36 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xc9>;
++				clock-names = "int";
++				access-controllers = <0x25 0x14>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++
++				timer@5 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x05>;
++					status = "okay";
++				};
++			};
++
++			timer@40005000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40005000 0x400>;
++				interrupts = <0x00 0x37 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xca>;
++				clock-names = "int";
++				dmas = <0x24 0x46 0x400 0x01>;
++				dma-names = "up";
++				access-controllers = <0x25 0x15>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				timer@6 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x06>;
++					status = "disabled";
++				};
++			};
++
++			timer@40006000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40006000 0x400>;
++				interrupts = <0x00 0x77 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xcb>;
++				clock-names = "int";
++				access-controllers = <0x25 0x16>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "okay";
++					pinctrl-0 = <0x2e>;
++					pinctrl-1 = <0x2f>;
++					pinctrl-names = "default", "sleep";
++				};
++
++				timer@11 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x0b>;
++					status = "okay";
++				};
++			};
++
++			timer@40007000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40007000 0x400>;
++				interrupts = <0x00 0x82 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xcc>;
++				clock-names = "int";
++				access-controllers = <0x25 0x17>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@12 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x0c>;
++					status = "disabled";
++				};
++			};
++
++			timer@40008000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x40008000 0x400>;
++				interrupts = <0x00 0x83 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xcd>;
++				clock-names = "int";
++				access-controllers = <0x25 0x18>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@13 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x0d>;
++					status = "disabled";
++				};
++			};
++
++			timer@40009000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-lptimer";
++				reg = <0x40009000 0x400>;
++				interrupts-extended = <0x06 0x2f 0x04>;
++				clocks = <0x07 0x8f>;
++				clock-names = "mux";
++				wakeup-source;
++				access-controllers = <0x25 0x19>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm-lp";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				trigger@0 {
++					compatible = "st,stm32-lptimer-trigger";
++					reg = <0x00>;
++					status = "disabled";
++				};
++
++				counter {
++					compatible = "st,stm32-lptimer-counter";
++					status = "disabled";
++				};
++			};
++
++			audio-controller@4000b000 {
++				compatible = "st,stm32h7-i2s";
++				#sound-dai-cells = <0x00>;
++				reg = <0x4000b000 0x400>;
++				interrupts = <0x00 0x24 0x04>;
++				dmas = <0x24 0x27 0x400 0x01 0x24 0x28 0x400 0x01>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1b>;
++				status = "okay";
++				clocks = <0x07 0x10 0x07 0x83 0x07 0xbb 0x07 0xbc>;
++				clock-names = "pclk", "i2sclk", "x8k", "x11k";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x30>;
++				pinctrl-1 = <0x31>;
++
++				port {
++					phandle = <0x7e>;
++
++					endpoint {
++						remote-endpoint = <0x32>;
++						dai-format = "i2s";
++						mclk-fs = <0x100>;
++						phandle = <0x40>;
++					};
++				};
++			};
++
++			spi@4000b000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x4000b000 0x400>;
++				interrupts = <0x00 0x24 0x04>;
++				clocks = <0x07 0x83>;
++				resets = <0x07 0x4c0b>;
++				dmas = <0x24 0x27 0x400 0x05 0x24 0x28 0x400 0x05>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1b>;
++				status = "disabled";
++			};
++
++			audio-controller@4000c000 {
++				compatible = "st,stm32h7-i2s";
++				#sound-dai-cells = <0x00>;
++				reg = <0x4000c000 0x400>;
++				interrupts = <0x00 0x33 0x04>;
++				dmas = <0x24 0x3d 0x400 0x01 0x24 0x3e 0x400 0x01>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1c>;
++				status = "disabled";
++			};
++
++			spi@4000c000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x4000c000 0x400>;
++				interrupts = <0x00 0x33 0x04>;
++				clocks = <0x07 0x84>;
++				resets = <0x07 0x4c0c>;
++				dmas = <0x24 0x3d 0x400 0x05 0x24 0x3e 0x400 0x05>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1c>;
++				status = "disabled";
++			};
++
++			audio-controller@4000d000 {
++				compatible = "st,stm32h7-spdifrx";
++				#sound-dai-cells = <0x00>;
++				reg = <0x4000d000 0x400>;
++				clocks = <0x07 0x81>;
++				clock-names = "kclk";
++				interrupts = <0x00 0x61 0x04>;
++				dmas = <0x24 0x5d 0x400 0x01 0x24 0x5e 0x400 0x01>;
++				dma-names = "rx", "rx-ctrl";
++				access-controllers = <0x25 0x1d>;
++				status = "disabled";
++			};
++
++			serial@4000e000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x4000e000 0x400>;
++				interrupts-extended = <0x06 0x1b 0x04>;
++				clocks = <0x07 0x95>;
++				wakeup-source;
++				dmas = <0x24 0x2b 0x400 0x15 0x24 0x2c 0x400 0x11>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1e>;
++				status = "disabled";
++			};
++
++			serial@4000f000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x4000f000 0x400>;
++				interrupts-extended = <0x06 0x1c 0x04>;
++				clocks = <0x07 0x96>;
++				wakeup-source;
++				dmas = <0x24 0x2d 0x400 0x15 0x24 0x2e 0x400 0x11>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x1f>;
++				status = "disabled";
++				pinctrl-names = "default", "sleep", "idle";
++				pinctrl-0 = <0x33>;
++				pinctrl-1 = <0x34>;
++				pinctrl-2 = <0x35>;
++				uart-has-rtscts;
++			};
++
++			serial@40010000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x40010000 0x400>;
++				interrupts-extended = <0x06 0x1e 0x04>;
++				clocks = <0x07 0x97>;
++				wakeup-source;
++				access-controllers = <0x25 0x20>;
++				status = "okay";
++				pinctrl-names = "default", "sleep", "idle";
++				pinctrl-0 = <0x36>;
++				pinctrl-1 = <0x37>;
++				pinctrl-2 = <0x38>;
++			};
++
++			serial@40011000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x40011000 0x400>;
++				interrupts-extended = <0x06 0x1f 0x04>;
++				clocks = <0x07 0x98>;
++				wakeup-source;
++				dmas = <0x24 0x41 0x400 0x15 0x24 0x42 0x400 0x11>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x21>;
++				status = "disabled";
++			};
++
++			i2c@40012000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x40012000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x15 0x04 0x03 0x00 0x20 0x04>;
++				clocks = <0x07 0x89>;
++				resets = <0x07 0x4c15>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				st,syscfg-fmp = <0x05 0x04 0x01>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x22>;
++				status = "okay";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x39>;
++				pinctrl-1 = <0x3a>;
++				i2c-scl-rising-time-ns = <0x64>;
++				i2c-scl-falling-time-ns = <0x07>;
++
++				hdmi-transmitter@39 {
++					compatible = "sil,sii9022";
++					reg = <0x39>;
++					iovcc-supply = <0x3b>;
++					cvcc12-supply = <0x3c>;
++					reset-gpios = <0x3d 0x0a 0x01>;
++					interrupts = <0x01 0x02>;
++					interrupt-parent = <0x3e>;
++					#sound-dai-cells = <0x00>;
++					status = "okay";
++
++					ports {
++						#address-cells = <0x01>;
++						#size-cells = <0x00>;
++
++						port@0 {
++							reg = <0x00>;
++
++							endpoint {
++								remote-endpoint = <0x3f>;
++								phandle = <0x21>;
++							};
++						};
++
++						port@3 {
++							reg = <0x03>;
++
++							endpoint {
++								remote-endpoint = <0x40>;
++								phandle = <0x32>;
++							};
++						};
++					};
++				};
++
++				cs42l51@4a {
++					compatible = "cirrus,cs42l51";
++					reg = <0x4a>;
++					#sound-dai-cells = <0x00>;
++					VL-supply = <0x1b>;
++					VD-supply = <0x41>;
++					VA-supply = <0x41>;
++					VAHP-supply = <0x41>;
++					reset-gpios = <0x3e 0x09 0x01>;
++					clocks = <0x42>;
++					clock-names = "MCLK";
++					status = "okay";
++
++					port {
++						#address-cells = <0x01>;
++						#size-cells = <0x00>;
++
++						endpoint@0 {
++							reg = <0x00>;
++							remote-endpoint = <0x43>;
++							frame-master = <0x44>;
++							bitclock-master = <0x44>;
++							phandle = <0x44>;
++						};
++
++						endpoint@1 {
++							reg = <0x01>;
++							remote-endpoint = <0x45>;
++							frame-master = <0x46>;
++							bitclock-master = <0x46>;
++							phandle = <0x46>;
++						};
++					};
++				};
++			};
++
++			i2c@40013000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x40013000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x16 0x04 0x03 0x00 0x22 0x04>;
++				clocks = <0x07 0x8a>;
++				resets = <0x07 0x4c16>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				dmas = <0x24 0x23 0x400 0x01 0x24 0x24 0x400 0x01>;
++				dma-names = "rx", "tx";
++				st,syscfg-fmp = <0x05 0x04 0x02>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x23>;
++				status = "disabled";
++			};
++
++			i2c@40014000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x40014000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x17 0x04 0x03 0x00 0x49 0x04>;
++				clocks = <0x07 0x8b>;
++				resets = <0x07 0x4c17>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				dmas = <0x24 0x49 0x400 0x01 0x24 0x4a 0x400 0x01>;
++				dma-names = "rx", "tx";
++				st,syscfg-fmp = <0x05 0x04 0x04>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x24>;
++				status = "disabled";
++			};
++
++			i2c@40015000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x40015000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x19 0x04 0x03 0x00 0x6c 0x04>;
++				clocks = <0x07 0x8d>;
++				resets = <0x07 0x4c18>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				st,syscfg-fmp = <0x05 0x04 0x10>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x25>;
++				status = "disabled";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x47>;
++				pinctrl-1 = <0x48>;
++				i2c-scl-rising-time-ns = <0xb9>;
++				i2c-scl-falling-time-ns = <0x14>;
++				clock-frequency = <0x61a80>;
++			};
++
++			cec@40016000 {
++				compatible = "st,stm32-cec";
++				reg = <0x40016000 0x400>;
++				interrupts = <0x00 0x5e 0x04>;
++				clocks = <0x07 0x88 0x07 0x1d>;
++				clock-names = "cec", "hdmi-cec";
++				access-controllers = <0x25 0x26>;
++				status = "okay";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x49>;
++				pinctrl-1 = <0x4a>;
++			};
++
++			dac@40017000 {
++				compatible = "st,stm32h7-dac-core";
++				reg = <0x40017000 0x400>;
++				clocks = <0x07 0x1e>;
++				clock-names = "pclk";
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x25 0x27>;
++				status = "disabled";
++
++				dac@1 {
++					compatible = "st,stm32-dac";
++					#io-channel-cells = <0x01>;
++					reg = <0x01>;
++					status = "disabled";
++				};
++
++				dac@2 {
++					compatible = "st,stm32-dac";
++					#io-channel-cells = <0x01>;
++					reg = <0x02>;
++					status = "disabled";
++				};
++			};
++
++			serial@40018000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x40018000 0x400>;
++				interrupts-extended = <0x06 0x20 0x04>;
++				clocks = <0x07 0x9a>;
++				wakeup-source;
++				access-controllers = <0x25 0x28>;
++				status = "disabled";
++				pinctrl-names = "default", "sleep", "idle";
++				pinctrl-0 = <0x4b>;
++				pinctrl-1 = <0x4c>;
++				pinctrl-2 = <0x4d>;
++			};
++
++			serial@40019000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x40019000 0x400>;
++				interrupts-extended = <0x06 0x21 0x04>;
++				clocks = <0x07 0x9b>;
++				wakeup-source;
++				dmas = <0x24 0x51 0x400 0x15 0x24 0x52 0x400 0x11>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x29>;
++				status = "disabled";
++			};
++
++			timer@44000000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x44000000 0x400>;
++				interrupts = <0x00 0x18 0x04 0x00 0x19 0x04 0x00 0x1a 0x04 0x00 0x1b 0x04>;
++				interrupt-names = "brk", "up", "trg-com", "cc";
++				clocks = <0x07 0xce>;
++				clock-names = "int";
++				access-controllers = <0x25 0x30>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "okay";
++					pinctrl-0 = <0x4e>;
++					pinctrl-1 = <0x4f>;
++					pinctrl-names = "default", "sleep";
++				};
++
++				timer@0 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x00>;
++					status = "okay";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "okay";
++				};
++			};
++
++			timer@44001000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x44001000 0x400>;
++				interrupts = <0x00 0x2b 0x04 0x00 0x2c 0x04 0x00 0x2d 0x04 0x00 0x2e 0x04>;
++				interrupt-names = "brk", "up", "trg-com", "cc";
++				clocks = <0x07 0xcf>;
++				clock-names = "int";
++				dmas = <0x24 0x2f 0x400 0x01 0x24 0x30 0x400 0x01 0x24 0x31 0x400 0x01 0x24 0x32 0x400 0x01 0x24 0x33 0x400 0x01 0x24 0x34 0x400 0x01 0x24 0x35 0x400 0x01>;
++				dma-names = "ch1", "ch2", "ch3", "ch4", "up", "trig", "com";
++				access-controllers = <0x25 0x31>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@7 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x07>;
++					status = "disabled";
++				};
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++			};
++
++			serial@44003000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x44003000 0x400>;
++				interrupts-extended = <0x06 0x1d 0x04>;
++				clocks = <0x07 0x99>;
++				wakeup-source;
++				dmas = <0x24 0x47 0x400 0x15 0x24 0x48 0x400 0x11>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x33>;
++				status = "disabled";
++			};
++
++			audio-controller@44004000 {
++				compatible = "st,stm32h7-i2s";
++				#sound-dai-cells = <0x00>;
++				reg = <0x44004000 0x400>;
++				interrupts = <0x00 0x23 0x04>;
++				dmas = <0x24 0x25 0x400 0x01 0x24 0x26 0x400 0x01>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x34>;
++				status = "disabled";
++			};
++
++			spi@44004000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x44004000 0x400>;
++				interrupts = <0x00 0x23 0x04>;
++				clocks = <0x07 0x82>;
++				resets = <0x07 0x4c48>;
++				dmas = <0x24 0x25 0x400 0x05 0x24 0x26 0x400 0x05>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x34>;
++				status = "disabled";
++			};
++
++			spi@44005000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x44005000 0x400>;
++				interrupts = <0x00 0x54 0x04>;
++				clocks = <0x07 0x85>;
++				resets = <0x07 0x4c49>;
++				dmas = <0x24 0x53 0x400 0x05 0x24 0x54 0x400 0x05>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x35>;
++				status = "disabled";
++			};
++
++			timer@44006000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x44006000 0x400>;
++				interrupts = <0x00 0x74 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xd0>;
++				clock-names = "int";
++				dmas = <0x24 0x69 0x400 0x01 0x24 0x6a 0x400 0x01 0x24 0x6b 0x400 0x01 0x24 0x6c 0x400 0x01>;
++				dma-names = "ch1", "up", "trig", "com";
++				access-controllers = <0x25 0x36>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@14 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x0e>;
++					status = "disabled";
++				};
++			};
++
++			timer@44007000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x44007000 0x400>;
++				interrupts = <0x00 0x75 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xd1>;
++				clock-names = "int";
++				dmas = <0x24 0x6d 0x400 0x01 0x24 0x6e 0x400 0x01>;
++				dma-names = "ch1", "up";
++				access-controllers = <0x25 0x37>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@15 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x0f>;
++					status = "disabled";
++				};
++			};
++
++			timer@44008000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-timers";
++				reg = <0x44008000 0x400>;
++				interrupts = <0x00 0x76 0x04>;
++				interrupt-names = "global";
++				clocks = <0x07 0xd2>;
++				clock-names = "int";
++				dmas = <0x24 0x6f 0x400 0x01 0x24 0x70 0x400 0x01>;
++				dma-names = "ch1", "up";
++				access-controllers = <0x25 0x38>;
++				status = "disabled";
++
++				counter {
++					compatible = "st,stm32-timer-counter";
++					status = "disabled";
++				};
++
++				pwm {
++					compatible = "st,stm32-pwm";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				timer@16 {
++					compatible = "st,stm32h7-timer-trigger";
++					reg = <0x10>;
++					status = "disabled";
++				};
++			};
++
++			spi@44009000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x44009000 0x400>;
++				interrupts = <0x00 0x55 0x04>;
++				clocks = <0x07 0x86>;
++				resets = <0x07 0x4c4a>;
++				dmas = <0x24 0x55 0x400 0x05 0x24 0x56 0x400 0x05>;
++				dma-names = "rx", "tx";
++				access-controllers = <0x25 0x39>;
++				status = "disabled";
++			};
++
++			sai@4400a000 {
++				compatible = "st,stm32h7-sai";
++				#address-cells = <0x01>;
++				#size-cells = <0x01>;
++				ranges = <0x00 0x4400a000 0x400>;
++				reg = <0x4400a000 0x04 0x4400a3f0 0x10>;
++				interrupts = <0x00 0x57 0x04>;
++				resets = <0x07 0x4c50>;
++				access-controllers = <0x25 0x3a>;
++				status = "disabled";
++
++				audio-controller@4400a004 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-a";
++					reg = <0x04 0x20>;
++					clocks = <0x07 0x9e>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x57 0x400 0x01>;
++					status = "disabled";
++				};
++
++				audio-controller@4400a024 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-b";
++					reg = <0x24 0x20>;
++					clocks = <0x07 0x9e>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x58 0x400 0x01>;
++					status = "disabled";
++				};
++			};
++
++			sai@4400b000 {
++				compatible = "st,stm32h7-sai";
++				#address-cells = <0x01>;
++				#size-cells = <0x01>;
++				ranges = <0x00 0x4400b000 0x400>;
++				reg = <0x4400b000 0x04 0x4400b3f0 0x10>;
++				interrupts = <0x00 0x5b 0x04>;
++				resets = <0x07 0x4c51>;
++				access-controllers = <0x25 0x3b>;
++				status = "okay";
++				clocks = <0x07 0x2a 0x07 0xbb 0x07 0xbc>;
++				clock-names = "pclk", "x8k", "x11k";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x50 0x51>;
++				pinctrl-1 = <0x52 0x53>;
++
++				audio-controller@4400b004 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-a";
++					reg = <0x04 0x20>;
++					clocks = <0x07 0x9f>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x59 0x400 0x01>;
++					status = "okay";
++					#clock-cells = <0x00>;
++					dma-names = "tx";
++					phandle = <0x42>;
++
++					port {
++						phandle = <0x7c>;
++
++						endpoint {
++							remote-endpoint = <0x44>;
++							dai-format = "i2s";
++							mclk-fs = <0x100>;
++							system-clock-direction-out;
++							dai-tdm-slot-num = <0x02>;
++							dai-tdm-slot-width = <0x20>;
++							phandle = <0x43>;
++						};
++					};
++				};
++
++				audio-controller@4400b024 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-b";
++					reg = <0x24 0x20>;
++					clocks = <0x07 0x9f 0x42>;
++					clock-names = "sai_ck", "MCLK";
++					dmas = <0x24 0x5a 0x400 0x01>;
++					status = "okay";
++					dma-names = "rx";
++					st,sync = <0x42 0x02>;
++
++					port {
++						phandle = <0x7d>;
++
++						endpoint {
++							remote-endpoint = <0x46>;
++							dai-format = "i2s";
++							mclk-fs = <0x100>;
++							dai-tdm-slot-num = <0x02>;
++							dai-tdm-slot-width = <0x20>;
++							phandle = <0x45>;
++						};
++					};
++				};
++			};
++
++			sai@4400c000 {
++				compatible = "st,stm32h7-sai";
++				#address-cells = <0x01>;
++				#size-cells = <0x01>;
++				ranges = <0x00 0x4400c000 0x400>;
++				reg = <0x4400c000 0x04 0x4400c3f0 0x10>;
++				interrupts = <0x00 0x72 0x04>;
++				resets = <0x07 0x4c52>;
++				access-controllers = <0x25 0x3c>;
++				status = "disabled";
++
++				audio-controller@4400c004 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-a";
++					reg = <0x04 0x20>;
++					clocks = <0x07 0xa0>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x71 0x400 0x01>;
++					status = "disabled";
++				};
++
++				audio-controller@4400c024 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-b";
++					reg = <0x24 0x20>;
++					clocks = <0x07 0xa0>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x72 0x400 0x01>;
++					status = "disabled";
++				};
++			};
++
++			dfsdm@4400d000 {
++				compatible = "st,stm32mp1-dfsdm";
++				reg = <0x4400d000 0x800>;
++				clocks = <0x07 0x9c>;
++				clock-names = "dfsdm";
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x25 0x3d>;
++				status = "disabled";
++
++				filter@0 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x00>;
++					interrupts = <0x00 0x6e 0x04>;
++					dmas = <0x24 0x65 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++
++				filter@1 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x01>;
++					interrupts = <0x00 0x6f 0x04>;
++					dmas = <0x24 0x66 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++
++				filter@2 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x02>;
++					interrupts = <0x00 0x70 0x04>;
++					dmas = <0x24 0x67 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++
++				filter@3 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x03>;
++					interrupts = <0x00 0x71 0x04>;
++					dmas = <0x24 0x68 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++
++				filter@4 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x04>;
++					interrupts = <0x00 0x73 0x04>;
++					dmas = <0x24 0x5b 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++
++				filter@5 {
++					compatible = "st,stm32-dfsdm-adc";
++					#io-channel-cells = <0x01>;
++					reg = <0x05>;
++					interrupts = <0x00 0x7e 0x04>;
++					dmas = <0x24 0x5c 0x400 0x01>;
++					dma-names = "rx";
++					status = "disabled";
++				};
++			};
++
++			dma-controller@48000000 {
++				compatible = "st,stm32-dma";
++				reg = <0x48000000 0x400>;
++				interrupts = <0x00 0x0b 0x04 0x00 0x0c 0x04 0x00 0x0d 0x04 0x00 0x0e 0x04 0x00 0x0f 0x04 0x00 0x10 0x04 0x00 0x11 0x04 0x00 0x2f 0x04>;
++				clocks = <0x07 0x47>;
++				resets = <0x07 0x4cc0>;
++				#dma-cells = <0x04>;
++				st,mem2mem;
++				dma-requests = <0x08>;
++				access-controllers = <0x25 0x58>;
++				phandle = <0x54>;
++			};
++
++			dma-controller@48001000 {
++				compatible = "st,stm32-dma";
++				reg = <0x48001000 0x400>;
++				interrupts = <0x00 0x38 0x04 0x00 0x39 0x04 0x00 0x3a 0x04 0x00 0x3b 0x04 0x00 0x3c 0x04 0x00 0x44 0x04 0x00 0x45 0x04 0x00 0x46 0x04>;
++				clocks = <0x07 0x48>;
++				resets = <0x07 0x4cc1>;
++				#dma-cells = <0x04>;
++				st,mem2mem;
++				dma-requests = <0x08>;
++				access-controllers = <0x25 0x59>;
++				phandle = <0x55>;
++			};
++
++			dma-router@48002000 {
++				compatible = "st,stm32h7-dmamux";
++				reg = <0x48002000 0x40>;
++				#dma-cells = <0x03>;
++				dma-requests = <0x80>;
++				dma-masters = <0x54 0x55>;
++				dma-channels = <0x10>;
++				clocks = <0x07 0x49>;
++				resets = <0x07 0x4cc2>;
++				access-controllers = <0x25 0x5a>;
++				phandle = <0x24>;
++			};
++
++			adc@48003000 {
++				compatible = "st,stm32mp1-adc-core";
++				reg = <0x48003000 0x400>;
++				interrupts = <0x00 0x12 0x04 0x00 0x5a 0x04>;
++				clocks = <0x07 0x4a 0x07 0xa2>;
++				clock-names = "bus", "adc";
++				interrupt-controller;
++				st,syscfg = <0x05>;
++				#interrupt-cells = <0x01>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x25 0x48>;
++				status = "okay";
++				pinctrl-names = "default";
++				pinctrl-0 = <0x56>;
++				vdd-supply = <0x08>;
++				vdda-supply = <0x08>;
++				vref-supply = <0x57>;
++				phandle = <0x58>;
++
++				adc@0 {
++					compatible = "st,stm32mp1-adc";
++					#io-channel-cells = <0x01>;
++					#address-cells = <0x01>;
++					#size-cells = <0x00>;
++					reg = <0x00>;
++					interrupt-parent = <0x58>;
++					interrupts = <0x00>;
++					dmas = <0x24 0x09 0x400 0x01>;
++					dma-names = "rx";
++					status = "okay";
++
++					channel@18 {
++						reg = <0x12>;
++						st,min-sample-time-ns = <0x1388>;
++					};
++
++					channel@19 {
++						reg = <0x13>;
++						st,min-sample-time-ns = <0x1388>;
++					};
++				};
++
++				adc@100 {
++					compatible = "st,stm32mp1-adc";
++					#io-channel-cells = <0x01>;
++					#address-cells = <0x01>;
++					#size-cells = <0x00>;
++					reg = <0x100>;
++					interrupt-parent = <0x58>;
++					interrupts = <0x01>;
++					dmas = <0x24 0x0a 0x400 0x01>;
++					dma-names = "rx";
++					nvmem-cells = <0x59>;
++					nvmem-cell-names = "vrefint";
++					status = "okay";
++
++					channel@13 {
++						reg = <0x0d>;
++						label = "vrefint";
++					};
++
++					channel@14 {
++						reg = <0x0e>;
++						label = "vddcore";
++					};
++
++					channel@18 {
++						reg = <0x12>;
++						st,min-sample-time-ns = <0x1388>;
++					};
++
++					channel@19 {
++						reg = <0x13>;
++						st,min-sample-time-ns = <0x1388>;
++					};
++				};
++			};
++
++			mmc@48004000 {
++				compatible = "st,stm32-sdmmc2", "arm,pl18x", "arm,primecell";
++				arm,primecell-periphid = <0x253180>;
++				reg = <0x48004000 0x400>;
++				interrupts = <0x00 0x89 0x04>;
++				clocks = <0x07 0x78>;
++				clock-names = "apb_pclk";
++				resets = <0x07 0x4cd0>;
++				cap-sd-highspeed;
++				cap-mmc-highspeed;
++				max-frequency = <0x7270e00>;
++				access-controllers = <0x25 0x56>;
++				status = "disabled";
++				pinctrl-names = "default", "opendrain", "sleep";
++				pinctrl-0 = <0x5a>;
++				pinctrl-1 = <0x5b>;
++				pinctrl-2 = <0x5c>;
++				broken-cd;
++				st,neg-edge;
++				bus-width = <0x04>;
++				vmmc-supply = <0x1b>;
++			};
++
++			usb-otg@49000000 {
++				compatible = "st,stm32mp15-hsotg", "snps,dwc2";
++				reg = <0x49000000 0x10000>;
++				clocks = <0x07 0xa6 0x1c>;
++				clock-names = "otg", "utmi";
++				resets = <0x07 0x4cc8>;
++				reset-names = "dwc2";
++				interrupts = <0x00 0x62 0x04>;
++				g-rx-fifo-size = <0x200>;
++				g-np-tx-fifo-size = <0x20>;
++				g-tx-fifo-size = <0x100 0x10 0x10 0x10 0x10 0x10 0x10 0x10>;
++				dr_mode = "otg";
++				otg-rev = <0x200>;
++				usb33d-supply = <0x5d>;
++				access-controllers = <0x25 0x55>;
++				status = "okay";
++				phys = <0x5e 0x00>;
++				phy-names = "usb2-phy";
++				usb-role-switch;
++
++				port {
++
++					endpoint {
++						remote-endpoint = <0x5f>;
++						phandle = <0x6a>;
++					};
++				};
++			};
++
++			dcmi@4c006000 {
++				compatible = "st,stm32-dcmi";
++				reg = <0x4c006000 0x400>;
++				interrupts = <0x00 0x4e 0x04>;
++				resets = <0x07 0x4d00>;
++				clocks = <0x07 0x4d>;
++				clock-names = "mclk";
++				dmas = <0x24 0x4b 0x400 0x01>;
++				dma-names = "tx";
++				access-controllers = <0x25 0x46>;
++				status = "disabled";
++			};
++
++			timer@50021000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-lptimer";
++				reg = <0x50021000 0x400>;
++				interrupts-extended = <0x06 0x30 0x04>;
++				clocks = <0x07 0x90>;
++				clock-names = "mux";
++				wakeup-source;
++				access-controllers = <0x25 0x40>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm-lp";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				trigger@1 {
++					compatible = "st,stm32-lptimer-trigger";
++					reg = <0x01>;
++					status = "disabled";
++				};
++
++				counter {
++					compatible = "st,stm32-lptimer-counter";
++					status = "disabled";
++				};
++			};
++
++			timer@50022000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32-lptimer";
++				reg = <0x50022000 0x400>;
++				interrupts-extended = <0x06 0x32 0x04>;
++				clocks = <0x07 0x91>;
++				clock-names = "mux";
++				wakeup-source;
++				access-controllers = <0x25 0x41>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm-lp";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++
++				trigger@2 {
++					compatible = "st,stm32-lptimer-trigger";
++					reg = <0x02>;
++					status = "disabled";
++				};
++			};
++
++			timer@50023000 {
++				compatible = "st,stm32-lptimer";
++				reg = <0x50023000 0x400>;
++				interrupts-extended = <0x06 0x34 0x04>;
++				clocks = <0x07 0x92>;
++				clock-names = "mux";
++				wakeup-source;
++				access-controllers = <0x25 0x42>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm-lp";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++			};
++
++			timer@50024000 {
++				compatible = "st,stm32-lptimer";
++				reg = <0x50024000 0x400>;
++				interrupts-extended = <0x06 0x35 0x04>;
++				clocks = <0x07 0x93>;
++				clock-names = "mux";
++				wakeup-source;
++				access-controllers = <0x25 0x43>;
++				status = "disabled";
++
++				pwm {
++					compatible = "st,stm32-pwm-lp";
++					#pwm-cells = <0x03>;
++					status = "disabled";
++				};
++			};
++
++			vrefbuf@50025000 {
++				compatible = "st,stm32-vrefbuf";
++				reg = <0x50025000 0x08>;
++				regulator-min-microvolt = <0x2625a0>;
++				regulator-max-microvolt = <0x2625a0>;
++				clocks = <0x07 0x34>;
++				access-controllers = <0x25 0x45>;
++				status = "okay";
++				vdda-supply = <0x08>;
++				phandle = <0x57>;
++			};
++
++			sai@50027000 {
++				compatible = "st,stm32h7-sai";
++				#address-cells = <0x01>;
++				#size-cells = <0x01>;
++				ranges = <0x00 0x50027000 0x400>;
++				reg = <0x50027000 0x04 0x500273f0 0x10>;
++				interrupts = <0x00 0x92 0x04>;
++				resets = <0x07 0x4c88>;
++				access-controllers = <0x25 0x44>;
++				status = "disabled";
++
++				audio-controller@50027004 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-a";
++					reg = <0x04 0x20>;
++					clocks = <0x07 0xa1>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x63 0x400 0x01>;
++					status = "disabled";
++				};
++
++				audio-controller@50027024 {
++					#sound-dai-cells = <0x00>;
++					compatible = "st,stm32-sai-sub-b";
++					reg = <0x24 0x20>;
++					clocks = <0x07 0xa1>;
++					clock-names = "sai_ck";
++					dmas = <0x24 0x64 0x400 0x01>;
++					status = "disabled";
++				};
++			};
++
++			hash@54002000 {
++				compatible = "st,stm32f756-hash";
++				reg = <0x54002000 0x400>;
++				interrupts = <0x00 0x50 0x04>;
++				clocks = <0x07 0x61>;
++				resets = <0x07 0xc85>;
++				dmas = <0x60 0x1f 0x02 0x1000a02 0x00 0x00>;
++				dma-names = "in";
++				dma-maxburst = <0x02>;
++				access-controllers = <0x25 0x08>;
++				status = "okay";
++			};
++
++			rng@54003000 {
++				compatible = "st,stm32-rng";
++				reg = <0x54003000 0x400>;
++				clocks = <0x07 0x7c>;
++				resets = <0x07 0xc86>;
++				access-controllers = <0x25 0x07>;
++				status = "okay";
++			};
++
++			memory-controller@58002000 {
++				#address-cells = <0x02>;
++				#size-cells = <0x01>;
++				compatible = "st,stm32mp1-fmc2-ebi";
++				reg = <0x58002000 0x1000>;
++				clocks = <0x07 0x79>;
++				resets = <0x07 0xccc>;
++				access-controllers = <0x25 0x5b>;
++				status = "disabled";
++				ranges = <0x00 0x00 0x60000000 0x4000000 0x01 0x00 0x64000000 0x4000000 0x02 0x00 0x68000000 0x4000000 0x03 0x00 0x6c000000 0x4000000 0x04 0x00 0x80000000 0x10000000>;
++
++				nand-controller@4,0 {
++					#address-cells = <0x01>;
++					#size-cells = <0x00>;
++					compatible = "st,stm32mp1-fmc2-nfc";
++					reg = <0x04 0x00 0x1000 0x04 0x8010000 0x1000 0x04 0x8020000 0x1000 0x04 0x1000000 0x1000 0x04 0x9010000 0x1000 0x04 0x9020000 0x1000>;
++					interrupts = <0x00 0x30 0x04>;
++					dmas = <0x60 0x14 0x02 0x12000a02 0x00 0x00 0x60 0x14 0x02 0x12000a08 0x00 0x00 0x60 0x15 0x02 0x12000a0a 0x00 0x00>;
++					dma-names = "tx", "rx", "ecc";
++					status = "disabled";
++				};
++			};
++
++			spi@58003000 {
++				compatible = "st,stm32f469-qspi";
++				reg = <0x58003000 0x1000 0x70000000 0x10000000>;
++				reg-names = "qspi", "qspi_mm";
++				interrupts = <0x00 0x5c 0x04>;
++				dmas = <0x60 0x16 0x02 0x10100002 0x00 0x00 0x60 0x16 0x02 0x10100008 0x00 0x00>;
++				dma-names = "tx", "rx";
++				clocks = <0x07 0x7a>;
++				resets = <0x07 0xcce>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				access-controllers = <0x25 0x5c>;
++				status = "disabled";
++			};
++
++			ethernet@5800a000 {
++				compatible = "st,stm32mp1-dwmac", "snps,dwmac-4.20a";
++				reg = <0x5800a000 0x2000>;
++				reg-names = "stmmaceth";
++				interrupts-extended = <0x03 0x00 0x3d 0x04>;
++				interrupt-names = "macirq";
++				clock-names = "stmmaceth", "mac-clk-tx", "mac-clk-rx", "eth-ck", "ptp_ref", "ethstp";
++				clocks = <0x07 0x69 0x07 0x67 0x07 0x68 0x07 0x7b 0x07 0xa9 0x07 0x70>;
++				st,syscon = <0x05 0x04>;
++				snps,mixed-burst;
++				snps,pbl = <0x02>;
++				snps,axi-config = <0x61>;
++				snps,tso;
++				access-controllers = <0x25 0x5e>;
++				status = "okay";
++				pinctrl-0 = <0x62>;
++				pinctrl-1 = <0x63>;
++				pinctrl-names = "default", "sleep";
++				phy-mode = "rgmii-id";
++				max-speed = <0x3e8>;
++				phy-handle = <0x64>;
++
++				stmmac-axi-config {
++					snps,wr_osr_lmt = <0x07>;
++					snps,rd_osr_lmt = <0x07>;
++					snps,blen = <0x00 0x00 0x00 0x00 0x10 0x08 0x04>;
++					phandle = <0x61>;
++				};
++
++				mdio {
++					#address-cells = <0x01>;
++					#size-cells = <0x00>;
++					compatible = "snps,dwmac-mdio";
++
++					ethernet-phy@0 {
++						reg = <0x00>;
++						phandle = <0x64>;
++					};
++				};
++			};
++
++			serial@5c000000 {
++				compatible = "st,stm32h7-uart";
++				reg = <0x5c000000 0x400>;
++				interrupts-extended = <0x06 0x1a 0x04>;
++				clocks = <0x07 0x94>;
++				wakeup-source;
++				access-controllers = <0x25 0x03>;
++				status = "disabled";
++			};
++
++			spi@5c001000 {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				compatible = "st,stm32h7-spi";
++				reg = <0x5c001000 0x400>;
++				interrupts = <0x00 0x56 0x04>;
++				clocks = <0x07 0x87>;
++				resets = <0x07 0xc40>;
++				dmas = <0x60 0x22 0x00 0x40008 0x00 0x00 0x60 0x23 0x00 0x40002 0x00 0x00>;
++				access-controllers = <0x25 0x04>;
++				dma-names = "rx", "tx";
++				status = "disabled";
++			};
++
++			i2c@5c002000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x5c002000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x18 0x04 0x03 0x00 0x60 0x04>;
++				clocks = <0x07 0x8c>;
++				resets = <0x07 0xc42>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				st,syscfg-fmp = <0x05 0x04 0x08>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x05>;
++				status = "okay";
++				pinctrl-names = "default", "sleep";
++				pinctrl-0 = <0x65>;
++				pinctrl-1 = <0x66>;
++				i2c-scl-rising-time-ns = <0xb9>;
++				i2c-scl-falling-time-ns = <0x14>;
++				clock-frequency = <0x61a80>;
++
++				typec@28 {
++					compatible = "st,stusb1600";
++					reg = <0x28>;
++					interrupts = <0x0b 0x08>;
++					interrupt-parent = <0x67>;
++					pinctrl-names = "default";
++					pinctrl-0 = <0x68>;
++					status = "okay";
++					vdd-supply = <0x69>;
++
++					connector {
++						compatible = "usb-c-connector";
++						label = "USB-C";
++						power-role = "dual";
++						typec-power-opmode = "default";
++
++						port {
++
++							endpoint {
++								remote-endpoint = <0x6a>;
++								phandle = <0x5f>;
++							};
++						};
++					};
++				};
++
++				stpmic@33 {
++					compatible = "st,stpmic1";
++					reg = <0x33>;
++					interrupts-extended = <0x3d 0x00 0x02>;
++					interrupt-controller;
++					#interrupt-cells = <0x02>;
++					status = "okay";
++
++					regulators {
++						compatible = "st,stpmic1-regulators";
++						buck1-supply = <0x69>;
++						buck2-supply = <0x69>;
++						buck3-supply = <0x69>;
++						buck4-supply = <0x69>;
++						ldo1-supply = <0x1b>;
++						ldo2-supply = <0x69>;
++						ldo3-supply = <0x6b>;
++						ldo4-supply = <0x69>;
++						ldo5-supply = <0x69>;
++						ldo6-supply = <0x1b>;
++						vref_ddr-supply = <0x69>;
++						boost-supply = <0x69>;
++						pwr_sw1-supply = <0x6c>;
++						pwr_sw2-supply = <0x6c>;
++
++						buck1 {
++							regulator-name = "vddcore";
++							regulator-min-microvolt = <0x124f80>;
++							regulator-max-microvolt = <0x149970>;
++							regulator-always-on;
++							regulator-initial-mode = <0x00>;
++							regulator-over-current-protection;
++						};
++
++						buck2 {
++							regulator-name = "vdd_ddr";
++							regulator-min-microvolt = <0x149970>;
++							regulator-max-microvolt = <0x149970>;
++							regulator-always-on;
++							regulator-initial-mode = <0x00>;
++							regulator-over-current-protection;
++							phandle = <0x6b>;
++						};
++
++						buck3 {
++							regulator-name = "vdd";
++							regulator-min-microvolt = <0x325aa0>;
++							regulator-max-microvolt = <0x325aa0>;
++							regulator-always-on;
++							st,mask-reset;
++							regulator-initial-mode = <0x00>;
++							regulator-over-current-protection;
++							phandle = <0x08>;
++						};
++
++						buck4 {
++							regulator-name = "v3v3";
++							regulator-min-microvolt = <0x325aa0>;
++							regulator-max-microvolt = <0x325aa0>;
++							regulator-always-on;
++							regulator-over-current-protection;
++							regulator-initial-mode = <0x00>;
++							phandle = <0x1b>;
++						};
++
++						ldo1 {
++							regulator-name = "v1v8_audio";
++							regulator-min-microvolt = <0x1b7740>;
++							regulator-max-microvolt = <0x1b7740>;
++							regulator-always-on;
++							interrupts = <0x10 0x00>;
++							phandle = <0x41>;
++						};
++
++						ldo2 {
++							regulator-name = "v3v3_hdmi";
++							regulator-min-microvolt = <0x325aa0>;
++							regulator-max-microvolt = <0x325aa0>;
++							regulator-always-on;
++							interrupts = <0x11 0x00>;
++							phandle = <0x3b>;
++						};
++
++						ldo3 {
++							regulator-name = "vtt_ddr";
++							regulator-min-microvolt = <0x7a120>;
++							regulator-max-microvolt = <0xb71b0>;
++							regulator-always-on;
++							regulator-over-current-protection;
++						};
++
++						ldo4 {
++							regulator-name = "vdd_usb";
++							interrupts = <0x13 0x00>;
++							phandle = <0x09>;
++						};
++
++						ldo5 {
++							regulator-name = "vdda";
++							regulator-min-microvolt = <0x2c4020>;
++							regulator-max-microvolt = <0x2c4020>;
++							interrupts = <0x14 0x00>;
++							regulator-boot-on;
++						};
++
++						ldo6 {
++							regulator-name = "v1v2_hdmi";
++							regulator-min-microvolt = <0x124f80>;
++							regulator-max-microvolt = <0x124f80>;
++							regulator-always-on;
++							interrupts = <0x15 0x00>;
++							phandle = <0x3c>;
++						};
++
++						vref_ddr {
++							regulator-name = "vref_ddr";
++							regulator-always-on;
++						};
++
++						boost {
++							regulator-name = "bst_out";
++							interrupts = <0x0e 0x00>;
++							phandle = <0x6c>;
++						};
++
++						pwr_sw1 {
++							regulator-name = "vbus_otg";
++							interrupts = <0x0c 0x00>;
++						};
++
++						pwr_sw2 {
++							regulator-name = "vbus_sw";
++							interrupts = <0x0d 0x00>;
++							regulator-active-discharge = <0x01>;
++						};
++					};
++
++					onkey {
++						compatible = "st,stpmic1-onkey";
++						interrupts = <0x00 0x00 0x01 0x00>;
++						interrupt-names = "onkey-falling", "onkey-rising";
++						power-off-time-sec = <0x0a>;
++						status = "okay";
++					};
++
++					watchdog {
++						compatible = "st,stpmic1-wdt";
++						status = "disabled";
++					};
++				};
++			};
++
++			i2c@5c009000 {
++				compatible = "st,stm32mp15-i2c";
++				reg = <0x5c009000 0x400>;
++				interrupt-names = "event", "error";
++				interrupts-extended = <0x06 0x36 0x04 0x03 0x00 0x88 0x04>;
++				clocks = <0x07 0x8e>;
++				resets = <0x07 0xc43>;
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++				dmas = <0x60 0x26 0x00 0x40008 0x00 0x00 0x60 0x27 0x00 0x40002 0x00 0x00>;
++				dma-names = "rx", "tx";
++				st,syscfg-fmp = <0x05 0x04 0x20>;
++				wakeup-source;
++				i2c-analog-filter;
++				access-controllers = <0x25 0x0c>;
++				status = "disabled";
++			};
++
++			can@4400e000 {
++				compatible = "bosch,m_can";
++				reg = <0x4400e000 0x400 0x44011000 0x1400>;
++				reg-names = "m_can", "message_ram";
++				interrupts = <0x00 0x13 0x04 0x00 0x15 0x04>;
++				interrupt-names = "int0", "int1";
++				clocks = <0x07 0x00 0x07 0x9d>;
++				clock-names = "hclk", "cclk";
++				resets = <0x07 0x4c58>;
++				bosch,mram-cfg = <0x00 0x00 0x00 0x20 0x00 0x00 0x02 0x02>;
++				access-controllers = <0x25 0x3e>;
++				status = "disabled";
++			};
++
++			can@4400f000 {
++				compatible = "bosch,m_can";
++				reg = <0x4400f000 0x400 0x44011000 0x2800>;
++				reg-names = "m_can", "message_ram";
++				interrupts = <0x00 0x14 0x04 0x00 0x16 0x04>;
++				interrupt-names = "int0", "int1";
++				clocks = <0x07 0x00 0x07 0x9d>;
++				clock-names = "hclk", "cclk";
++				resets = <0x07 0x4c58>;
++				bosch,mram-cfg = <0x1400 0x00 0x00 0x20 0x00 0x00 0x02 0x02>;
++				access-controllers = <0x25 0x3e>;
++				status = "disabled";
++			};
++		};
++
++		tamp@5c00a000 {
++			compatible = "st,stm32-tamp", "syscon", "simple-mfd";
++			reg = <0x5c00a000 0x400>;
++			phandle = <0x71>;
++		};
++
++		pinctrl@50002000 {
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++			compatible = "st,stm32mp157-pinctrl";
++			ranges = <0x00 0x50002000 0xa400>;
++			interrupt-parent = <0x06>;
++			st,syscfg = <0x06 0x60 0xff>;
++			st,package = <0x04>;
++			phandle = <0x6d>;
++
++			gpio@50002000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x00 0x400>;
++				clocks = <0x07 0x54>;
++				st,bank-name = "GPIOA";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x00 0x10>;
++				phandle = <0x3d>;
++			};
++
++			gpio@50003000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x1000 0x400>;
++				clocks = <0x07 0x55>;
++				st,bank-name = "GPIOB";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x10 0x10>;
++				phandle = <0x1a>;
++			};
++
++			gpio@50004000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x2000 0x400>;
++				clocks = <0x07 0x56>;
++				st,bank-name = "GPIOC";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x20 0x10>;
++			};
++
++			gpio@50005000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x3000 0x400>;
++				clocks = <0x07 0x57>;
++				st,bank-name = "GPIOD";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x30 0x10>;
++				phandle = <0x7a>;
++			};
++
++			gpio@50006000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x4000 0x400>;
++				clocks = <0x07 0x58>;
++				st,bank-name = "GPIOE";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x40 0x10>;
++			};
++
++			gpio@50007000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x5000 0x400>;
++				clocks = <0x07 0x59>;
++				st,bank-name = "GPIOF";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x50 0x10>;
++			};
++
++			gpio@50008000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x6000 0x400>;
++				clocks = <0x07 0x5a>;
++				st,bank-name = "GPIOG";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x60 0x10>;
++				phandle = <0x3e>;
++			};
++
++			gpio@50009000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x7000 0x400>;
++				clocks = <0x07 0x5b>;
++				st,bank-name = "GPIOH";
++				status = "okay";
++				ngpios = <0x10>;
++				gpio-ranges = <0x6d 0x00 0x70 0x10>;
++			};
++
++			gpio@5000a000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x8000 0x400>;
++				clocks = <0x07 0x5c>;
++				st,bank-name = "GPIOI";
++				status = "okay";
++				ngpios = <0x0c>;
++				gpio-ranges = <0x6d 0x00 0x80 0x0c>;
++				phandle = <0x67>;
++			};
++
++			gpio@5000b000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x9000 0x400>;
++				clocks = <0x07 0x5d>;
++				st,bank-name = "GPIOJ";
++				status = "disabled";
++			};
++
++			gpio@5000c000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0xa000 0x400>;
++				clocks = <0x07 0x5e>;
++				st,bank-name = "GPIOK";
++				status = "disabled";
++			};
++
++			adc12-usb-cc-pins-0 {
++				phandle = <0x56>;
++
++				pins {
++					pinmux = <0x411 0x511>;
++				};
++			};
++
++			cec-1 {
++				phandle = <0x49>;
++
++				pins {
++					pinmux = <0x1606>;
++					bias-disable;
++					drive-open-drain;
++					slew-rate = <0x00>;
++				};
++			};
++
++			cec-sleep-1 {
++				phandle = <0x4a>;
++
++				pins {
++					pinmux = <0x1611>;
++				};
++			};
++
++			rgmii-0 {
++				phandle = <0x62>;
++
++				pins1 {
++					pinmux = <0x650c 0x640c 0x6d0c 0x6e0c 0x220c 0x420c 0x1b0c 0x210c>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x02>;
++				};
++
++				pins2 {
++					pinmux = <0x20c>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++
++				pins3 {
++					pinmux = <0x240c 0x250c 0x100c 0x110c 0x10c 0x70c>;
++					bias-disable;
++				};
++			};
++
++			rgmii-sleep-0 {
++				phandle = <0x63>;
++
++				pins1 {
++					pinmux = <0x6511 0x6411 0x6d11 0x6e11 0x2211 0x4211 0x1b11 0x211 0x2111 0x2411 0x2511 0x1011 0x1111 0x111 0x711>;
++				};
++			};
++
++			i2c1-0 {
++				phandle = <0x39>;
++
++				pins {
++					pinmux = <0x3c06 0x5f06>;
++					bias-disable;
++					drive-open-drain;
++					slew-rate = <0x00>;
++				};
++			};
++
++			i2c1-sleep-0 {
++				phandle = <0x3a>;
++
++				pins {
++					pinmux = <0x3c11 0x5f11>;
++				};
++			};
++
++			i2c5-0 {
++				phandle = <0x47>;
++
++				pins {
++					pinmux = <0xb05 0xc05>;
++					bias-disable;
++					drive-open-drain;
++					slew-rate = <0x00>;
++				};
++			};
++
++			i2c5-sleep-0 {
++				phandle = <0x48>;
++
++				pins {
++					pinmux = <0xb11 0xc11>;
++				};
++			};
++
++			i2s2-0 {
++				phandle = <0x30>;
++
++				pins {
++					pinmux = <0x8306 0x1906 0x906>;
++					slew-rate = <0x01>;
++					drive-push-pull;
++					bias-disable;
++				};
++			};
++
++			i2s2-sleep-0 {
++				phandle = <0x31>;
++
++				pins {
++					pinmux = <0x8311 0x1911 0x911>;
++				};
++			};
++
++			ltdc-0 {
++				phandle = <0x1f>;
++
++				pins {
++					pinmux = <0x670f 0x8a0f 0x890f 0x5a0f 0x720f 0x730f 0x780f 0x790f 0x7a0f 0x200f 0x7c0f 0x4f0f 0x450f 0x460f 0x7d0f 0x7e0f 0x7f0f 0x800f 0x810f 0x820f 0x390f 0x6c0f 0x6a0f 0x3a0f 0x840f 0x30f 0x180f 0x380f>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x01>;
++				};
++			};
++
++			ltdc-sleep-0 {
++				phandle = <0x20>;
++
++				pins {
++					pinmux = <0x6711 0x8a11 0x8911 0x5a11 0x7211 0x7311 0x7811 0x7911 0x7a11 0x2011 0x7c11 0x4f11 0x4511 0x4611 0x7d11 0x7e11 0x7f11 0x8011 0x8111 0x8211 0x3911 0x6c11 0x6a11 0x3a11 0x8411 0x311 0x1811 0x3811>;
++				};
++			};
++
++			m4-leds-orange-0 {
++				phandle = <0x79>;
++
++				pins {
++					pinmux = <0x7712>;
++				};
++			};
++
++			pwm1-0 {
++				phandle = <0x4e>;
++
++				pins {
++					pinmux = <0x4902 0x4b02 0x4e02>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm1-sleep-0 {
++				phandle = <0x4f>;
++
++				pins {
++					pinmux = <0x4911 0x4b11 0x4e11>;
++				};
++			};
++
++			pwm3-0 {
++				phandle = <0x26>;
++
++				pins {
++					pinmux = <0x2703>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm3-sleep-0 {
++				phandle = <0x27>;
++
++				pins {
++					pinmux = <0x2711>;
++				};
++			};
++
++			pwm4-0 {
++				phandle = <0x28>;
++
++				pins {
++					pinmux = <0x3e03 0x3f03>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm4-sleep-0 {
++				phandle = <0x2a>;
++
++				pins {
++					pinmux = <0x3e11 0x3f11>;
++				};
++			};
++
++			pwm4-1 {
++				phandle = <0x29>;
++
++				pins {
++					pinmux = <0x3d03>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm4-sleep-1 {
++				phandle = <0x2b>;
++
++				pins {
++					pinmux = <0x3d11>;
++				};
++			};
++
++			pwm5-0 {
++				phandle = <0x2c>;
++
++				pins {
++					pinmux = <0x7b03>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm5-sleep-0 {
++				phandle = <0x2d>;
++
++				pins {
++					pinmux = <0x7b11>;
++				};
++			};
++
++			pwm12-0 {
++				phandle = <0x2e>;
++
++				pins {
++					pinmux = <0x7603>;
++					bias-pull-down;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++			};
++
++			pwm12-sleep-0 {
++				phandle = <0x2f>;
++
++				pins {
++					pinmux = <0x7611>;
++				};
++			};
++
++			sai2a-0 {
++				phandle = <0x50>;
++
++				pins {
++					pinmux = <0x850b 0x860b 0x870b 0x400b>;
++					slew-rate = <0x00>;
++					drive-push-pull;
++					bias-disable;
++				};
++			};
++
++			sai2a-sleep-0 {
++				phandle = <0x52>;
++
++				pins {
++					pinmux = <0x8511 0x8611 0x8711 0x4011>;
++				};
++			};
++
++			sai2b-1 {
++				phandle = <0x51>;
++
++				pins {
++					pinmux = <0x5b0b>;
++					bias-disable;
++				};
++			};
++
++			sai2b-sleep-1 {
++				phandle = <0x53>;
++
++				pins {
++					pinmux = <0x5b11>;
++				};
++			};
++
++			sdmmc1-b4-0 {
++				phandle = <0x17>;
++
++				pins1 {
++					pinmux = <0x280d 0x290d 0x2a0d 0x2b0d 0x320d>;
++					slew-rate = <0x01>;
++					drive-push-pull;
++					bias-disable;
++				};
++
++				pins2 {
++					pinmux = <0x2c0d>;
++					slew-rate = <0x02>;
++					drive-push-pull;
++					bias-disable;
++				};
++			};
++
++			sdmmc1-b4-od-0 {
++				phandle = <0x18>;
++
++				pins1 {
++					pinmux = <0x280d 0x290d 0x2a0d 0x2b0d>;
++					slew-rate = <0x01>;
++					drive-push-pull;
++					bias-disable;
++				};
++
++				pins2 {
++					pinmux = <0x2c0d>;
++					slew-rate = <0x02>;
++					drive-push-pull;
++					bias-disable;
++				};
++
++				pins3 {
++					pinmux = <0x320d>;
++					slew-rate = <0x01>;
++					drive-open-drain;
++					bias-disable;
++				};
++			};
++
++			sdmmc1-b4-sleep-0 {
++				phandle = <0x19>;
++
++				pins {
++					pinmux = <0x2811 0x2911 0x2a11 0x2b11 0x2c11 0x3211>;
++				};
++			};
++
++			sdmmc3-b4-0 {
++				phandle = <0x5a>;
++
++				pins1 {
++					pinmux = <0x500a 0x540a 0x550a 0x370b 0x510a>;
++					slew-rate = <0x01>;
++					drive-push-pull;
++					bias-pull-up;
++				};
++
++				pins2 {
++					pinmux = <0x6f0b>;
++					slew-rate = <0x02>;
++					drive-push-pull;
++					bias-pull-up;
++				};
++			};
++
++			sdmmc3-b4-od-0 {
++				phandle = <0x5b>;
++
++				pins1 {
++					pinmux = <0x500a 0x540a 0x550a 0x370b>;
++					slew-rate = <0x01>;
++					drive-push-pull;
++					bias-pull-up;
++				};
++
++				pins2 {
++					pinmux = <0x6f0b>;
++					slew-rate = <0x02>;
++					drive-push-pull;
++					bias-pull-up;
++				};
++
++				pins3 {
++					pinmux = <0x510a>;
++					slew-rate = <0x01>;
++					drive-open-drain;
++					bias-pull-up;
++				};
++			};
++
++			sdmmc3-b4-sleep-0 {
++				phandle = <0x5c>;
++
++				pins {
++					pinmux = <0x5011 0x5411 0x5511 0x3711 0x6f11 0x5111>;
++				};
++			};
++
++			stusb1600-0 {
++				phandle = <0x68>;
++
++				pins {
++					pinmux = <0x8b00>;
++					bias-pull-up;
++				};
++			};
++
++			uart4-0 {
++				phandle = <0x36>;
++
++				pins1 {
++					pinmux = <0x6b07>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++
++				pins2 {
++					pinmux = <0x1209>;
++					bias-disable;
++				};
++			};
++
++			uart4-idle-0 {
++				phandle = <0x38>;
++
++				pins1 {
++					pinmux = <0x6b11>;
++				};
++
++				pins2 {
++					pinmux = <0x1209>;
++					bias-disable;
++				};
++			};
++
++			uart4-sleep-0 {
++				phandle = <0x37>;
++
++				pins {
++					pinmux = <0x6b11 0x1211>;
++				};
++			};
++
++			uart7-2 {
++				phandle = <0x4b>;
++
++				pins1 {
++					pinmux = <0x4808>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++
++				pins2 {
++					pinmux = <0x4708>;
++					bias-pull-up;
++				};
++			};
++
++			uart7-idle-2 {
++				phandle = <0x4d>;
++
++				pins1 {
++					pinmux = <0x4811>;
++				};
++
++				pins2 {
++					pinmux = <0x4708>;
++					bias-pull-up;
++				};
++			};
++
++			uart7-sleep-2 {
++				phandle = <0x4c>;
++
++				pins {
++					pinmux = <0x4811 0x4711>;
++				};
++			};
++
++			usart3-2 {
++				phandle = <0x33>;
++
++				pins1 {
++					pinmux = <0x1a08 0x6809>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++
++				pins2 {
++					pinmux = <0x1c09 0x1d08>;
++					bias-pull-up;
++				};
++			};
++
++			usart3-idle-2 {
++				phandle = <0x35>;
++
++				pins1 {
++					pinmux = <0x1a11 0x1d11>;
++				};
++
++				pins2 {
++					pinmux = <0x6809>;
++					bias-disable;
++					drive-push-pull;
++					slew-rate = <0x00>;
++				};
++
++				pins3 {
++					pinmux = <0x1c09>;
++					bias-pull-up;
++				};
++			};
++
++			usart3-sleep-2 {
++				phandle = <0x34>;
++
++				pins {
++					pinmux = <0x1a11 0x6811 0x1d11 0x1c11>;
++				};
++			};
++		};
++
++		pinctrl@54004000 {
++			#address-cells = <0x01>;
++			#size-cells = <0x01>;
++			compatible = "st,stm32mp157-z-pinctrl";
++			ranges = <0x00 0x54004000 0x400>;
++			interrupt-parent = <0x06>;
++			st,syscfg = <0x06 0x60 0xff>;
++			st,package = <0x04>;
++			phandle = <0x6e>;
++
++			gpio@54004000 {
++				gpio-controller;
++				#gpio-cells = <0x02>;
++				interrupt-controller;
++				#interrupt-cells = <0x02>;
++				reg = <0x00 0x400>;
++				clocks = <0x07 0x5f>;
++				st,bank-name = "GPIOZ";
++				st,bank-ioport = <0x0b>;
++				status = "okay";
++				ngpios = <0x08>;
++				gpio-ranges = <0x6e 0x00 0x190 0x08>;
++			};
++
++			i2c4-0 {
++				phandle = <0x65>;
++
++				pins {
++					pinmux = <0x19407 0x19507>;
++					bias-disable;
++					drive-open-drain;
++					slew-rate = <0x00>;
++				};
++			};
++
++			i2c4-sleep-0 {
++				phandle = <0x66>;
++
++				pins {
++					pinmux = <0x19411 0x19511>;
++				};
++			};
++		};
++
++		gpu@59000000 {
++			compatible = "vivante,gc";
++			reg = <0x59000000 0x800>;
++			interrupts = <0x00 0x6d 0x04>;
++			clocks = <0x07 0x65 0x07 0x7e>;
++			clock-names = "bus", "core";
++			resets = <0x07 0xcc5>;
++		};
++
++		dsi@5a000000 {
++			compatible = "st,stm32-dsi";
++			reg = <0x5a000000 0x800>;
++			clocks = <0x07 0x39 0x6f 0x07 0xa4>;
++			clock-names = "pclk", "ref", "px_clk";
++			phy-dsi-supply = <0x23>;
++			resets = <0x07 0xc04>;
++			reset-names = "apb";
++			status = "disabled";
++
++			ports {
++				#address-cells = <0x01>;
++				#size-cells = <0x00>;
++
++				port@0 {
++					reg = <0x00>;
++
++					endpoint {
++					};
++				};
++
++				port@1 {
++					reg = <0x01>;
++
++					endpoint {
++					};
++				};
++			};
++		};
++	};
++
++	ahb {
++		compatible = "st,mlahb", "simple-bus";
++		#address-cells = <0x01>;
++		#size-cells = <0x01>;
++		ranges;
++		dma-ranges = <0x00 0x38000000 0x10000 0x10000000 0x10000000 0x60000 0x30000000 0x30000000 0x60000>;
++
++		m4@10000000 {
++			compatible = "st,stm32mp1-m4";
++			reg = <0x10000000 0x40000 0x30000000 0x40000 0x38000000 0x10000>;
++			resets = <0x07 0x2021>;
++			reset-names = "mcu_rst";
++			st,syscfg-holdboot = <0x07 0x10c 0x01>;
++			st,syscfg-pdds = <0x70 0x00 0x01>;
++			st,syscfg-rsc-tbl = <0x71 0x144 0xffffffff>;
++			st,syscfg-m4-state = <0x71 0x148 0xffffffff>;
++			status = "okay";
++			memory-region = <0x72 0x73 0x74 0x75 0x76 0x77>;
++			mboxes = <0x78 0x00 0x78 0x01 0x78 0x02 0x78 0x03>;
++			mbox-names = "vq0", "vq1", "shutdown", "detach";
++			pinctrl-names = "default";
++			pinctrl-0 = <0x79>;
++			interrupt-parent = <0x06>;
++			interrupts = <0x44 0x01>;
++		};
++	};
++
++	aliases {
++		serial0 = "/soc/bus@5c007000/serial@40010000";
++		serial1 = "/soc/bus@5c007000/serial@4000f000";
++		serial2 = "/soc/bus@5c007000/serial@40018000";
++		ethernet0 = "/soc/bus@5c007000/ethernet@5800a000";
++	};
++
++	memory@c0000000 {
++		device_type = "memory";
++		reg = <0xc0000000 0x20000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <0x01>;
++		#size-cells = <0x01>;
++		ranges;
++
++		mcuram2@10000000 {
++			compatible = "shared-dma-pool";
++			reg = <0x10000000 0x40000>;
++			no-map;
++			phandle = <0x74>;
++		};
++
++		vdev0vring0@10040000 {
++			compatible = "shared-dma-pool";
++			reg = <0x10040000 0x1000>;
++			no-map;
++			phandle = <0x75>;
++		};
++
++		vdev0vring1@10041000 {
++			compatible = "shared-dma-pool";
++			reg = <0x10041000 0x1000>;
++			no-map;
++			phandle = <0x76>;
++		};
++
++		vdev0buffer@10042000 {
++			compatible = "shared-dma-pool";
++			reg = <0x10042000 0x4000>;
++			no-map;
++			phandle = <0x77>;
++		};
++
++		mcuram@30000000 {
++			compatible = "shared-dma-pool";
++			reg = <0x30000000 0x40000>;
++			no-map;
++			phandle = <0x73>;
++		};
++
++		retram@38000000 {
++			compatible = "shared-dma-pool";
++			reg = <0x38000000 0x10000>;
++			no-map;
++			phandle = <0x72>;
++		};
++	};
++
++	led {
++		compatible = "gpio-leds";
++
++		led-blue {
++			function = "heartbeat";
++			color = <0x03>;
++			gpios = <0x7a 0x0b 0x00>;
++			linux,default-trigger = "heartbeat";
++			default-state = "off";
++			phandle = <0x7b>;
++		};
++
++		led-red {
++			function = "status";
++			color = <0x01>;
++			gpios = <0x3d 0x0d 0x01>;
++		};
++	};
++
++	options {
++
++		u-boot {
++			compatible = "u-boot,config";
++			boot-led = <0x7b>;
++		};
++	};
++
++	sound {
++		compatible = "audio-graph-card";
++		label = "STM32MP15-DK";
++		routing = "Playback", "MCLK", "Capture", "MCLK", "MICL", "Mic Bias";
++		dais = <0x7c 0x7d 0x7e>;
++		status = "okay";
++	};
++
++	vin {
++		compatible = "regulator-fixed";
++		regulator-name = "vin";
++		regulator-min-microvolt = <0x4c4b40>;
++		regulator-max-microvolt = <0x4c4b40>;
++		regulator-always-on;
++		phandle = <0x69>;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++};

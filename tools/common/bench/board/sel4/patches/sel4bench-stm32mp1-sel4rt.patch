@@ -1,0 +1,492 @@
+sel4bench 18f9d5f0: sel4rt, the matched round trip timed with Ferrix's
+board-bench.h (fetch.sh copies it to apps/ipc/src/), run first in the IPC app;
+the run's last line, and on stm32mp1 a reset through RCC MPSYSRST; SMP
+on stm32mp1 is two cores, as on the STM32MP2.
+apps/ipc BSD-2-Clause, apps/sel4bench/src/main.c GPL-2.0-only.
+
+diff --git a/apps/ipc/CMakeLists.txt b/apps/ipc/CMakeLists.txt
+index 1884712..f3a3beb 100644
+--- a/apps/ipc/CMakeLists.txt
++++ b/apps/ipc/CMakeLists.txt
+@@ -95,3 +95,9 @@ if(AppIpcBench)
+ endif()
+ 
+ general_regs_only(ipc)
++
++# sel4rt (src/sel4rt.c), Ferrix's board bench: timed code in ARM state, never
++# Thumb-2, and the sources it was built from, which it prints first.
++set(Sel4rtSources "unknown" CACHE STRING "What sel4rt reports it was built from (build.sh sets it)")
++target_compile_options(ipc PRIVATE -marm)
++target_compile_definitions(ipc PRIVATE SEL4RT_SOURCES="${Sel4rtSources}")
+diff --git a/apps/ipc/src/main.c b/apps/ipc/src/main.c
+index e29e4b0..a022973 100644
+--- a/apps/ipc/src/main.c
++++ b/apps/ipc/src/main.c
+@@ -25,6 +25,8 @@
+ #include <benchmark.h>
+ #include <ipc.h>
+ 
++#include "sel4rt.h"
++
+ /* arch/ipc.h requires these defines */
+ #define NOPS ""
+ 
+@@ -381,9 +383,6 @@ int main(int argc, char **argv)
+     }
+     vka_cspace_make_path(&env->slab_vka, result_ep.cptr, &result_ep_path);
+ 
+-    /* measure benchmarking overhead */
+-    measure_overhead(results);
+-
+     helper_thread_t client, server_thread, server_process;
+ 
+     benchmark_shallow_clone_process(env, &client.process, seL4_MinPrio, 0, "client");
+@@ -405,6 +404,17 @@ int main(int argc, char **argv)
+     sel4utils_create_word_args(server_thread.argv_strings, server_thread.argv, NUM_ARGS,
+                                server_thread.ep, server_thread.result_ep, SEL4UTILS_REPLY_SLOT);
+ 
++    /* Ferrix's board bench (sel4rt.c) first, so nothing else has run in the
++     * two address spaces; it rewrites the client's arguments, put them back. */
++    sel4rt_run(env, &client.process, client.argv, client.argv_strings, client.ep,
++               client.result_ep, &server_process.process, server_process.argv,
++               result_ep_path.capPtr, NUM_ARGS);
++    sel4utils_create_word_args(client.argv_strings, client.argv, NUM_ARGS, client.ep,
++                               client.result_ep, 0);
++
++    /* measure benchmarking overhead (after sel4rt, which it does not touch) */
++    measure_overhead(results);
++
+     /* run the benchmark */
+     seL4_CPtr auth = simple_get_tcb(&env->simple);
+     ccnt_t start, end;
+diff --git a/apps/ipc/src/sel4rt.c b/apps/ipc/src/sel4rt.c
+new file mode 100644
+index 0000000..09e1c1c
+--- /dev/null
++++ b/apps/ipc/src/sel4rt.c
+@@ -0,0 +1,315 @@
++/*
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++/*
++ * sel4rt: seL4's round trip timed the way docs/BOARD-BENCH.md times every
++ * kernel on the STM32MP157D-DK1, through board-bench.h (unchanged). It is the
++ * ARMv7 port of the x86-64 root task in sel4bench-ferrix-rt.patch: a client
++ * and a server, each a process of its own (two address spaces), at one
++ * priority on one core; the client seL4_Calls with one word in a register and
++ * the server answers with seL4_ReplyRecv.
++ *
++ * Series, each BB_WARMUP untimed then BB_SAMPLES timed:
++ *   timer-floor        the counter reads around nothing
++ *   call               one round trip
++ *   call.after.w<W>    one round trip, then the caller's own work:
++ *                      bb_touch(buf, W, 4096) over W pages, W = 1, 16, 64, 256
++ *   base.w<W>          the same touch without a call
++ *
++ * The client is a shallow clone (text only: no data, no bss, no printf), so it
++ * keeps each series on its stack (LibSel4UtilsStackSize 1 MiB) and ships it to
++ * this process over the result endpoint, 60 (cycles, instructions) pairs a
++ * message; it then waits for an acknowledgement, so nothing is printed while it
++ * measures. This process prints each series with bb_print().
++ */
++
++#include <autoconf.h>
++#include <sel4benchipc/gen_config.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <utils/util.h>
++#include <sel4/sel4.h>
++#include <vka/vka.h>
++#include <vspace/vspace.h>
++#include <sel4utils/gen_config.h>
++#include <sel4utils/process.h>
++#include <sel4utils/api.h>
++
++#include <benchmark.h>
++
++#include "board-bench.h"
++#include "sel4rt.h"
++
++#ifdef __thumb__
++#error "sel4rt is timed code: build it -marm (docs/BOARD-BENCH.md)"
++#endif
++#ifdef CONFIG_KERNEL_MCS
++#error "sel4rt uses the non-MCS IPC calls"
++#endif
++
++#ifndef SEL4RT_SOURCES
++#define SEL4RT_SOURCES "unknown"
++#endif
++
++#define RT_PROG "sel4rt"
++#define RT_LABEL_HEADER 1
++#define RT_LABEL_DATA 2
++/* (cycles, instructions) pairs in one message of seL4_MsgMaxLength words */
++#define RT_PAIRS (seL4_MsgMaxLength / 2)
++#define RT_PAGES 256
++#define RT_ECHO 0x5EEDu
++
++enum rt_series_id {
++    RT_TIMER_FLOOR,
++    RT_CALL,
++    RT_CALL_AFTER_W1,
++    RT_BASE_W1,
++    RT_CALL_AFTER_W16,
++    RT_BASE_W16,
++    RT_CALL_AFTER_W64,
++    RT_BASE_W64,
++    RT_CALL_AFTER_W256,
++    RT_BASE_W256,
++    RT_NUM_SERIES
++};
++
++/* ---- the client and the server: text only, no globals, no strings ---- */
++
++static seL4_Word rt_parse_word(const char *s)
++{
++    seL4_Word v = 0;
++    while (*s >= '0' && *s <= '9') {
++        v = v * 10 + (seL4_Word)(*s - '0');
++        s++;
++    }
++    return v;
++}
++
++/* Ship one series to the printer, then wait until it has printed it. */
++static void rt_ship(seL4_CPtr result_ep, seL4_Word id, struct bb_series *s, seL4_Word bad)
++{
++    seL4_SetMR(0, id);
++    seL4_SetMR(1, s->n);
++    seL4_SetMR(2, bad);
++    seL4_Send(result_ep, seL4_MessageInfo_new(RT_LABEL_HEADER, 0, 0, 3));
++    for (uint32_t i = 0; i < s->n; i += RT_PAIRS) {
++        uint32_t len = s->n - i < RT_PAIRS ? s->n - i : RT_PAIRS;
++        for (uint32_t j = 0; j < len; j++) {
++            seL4_SetMR(2 * j, s->cyc[i + j]);
++            seL4_SetMR(2 * j + 1, s->ins[i + j]);
++        }
++        seL4_Send(result_ep, seL4_MessageInfo_new(RT_LABEL_DATA, 0, 0, 2 * len));
++    }
++    api_wait(result_ep, NULL);
++}
++
++/* One round trip: one word out in a register, the same word back. */
++#define RT_CALL_STMT                                                    \
++    do {                                                                \
++        mr0 = RT_ECHO + k;                                              \
++        back = seL4_CallWithMRs(ep, tag, &mr0, &mr1, &mr2, &mr3);       \
++    } while (0)
++
++#define RT_CHECK                                                        \
++    do {                                                                \
++        if (mr0 != RT_ECHO + k || seL4_MessageInfo_get_length(back) != 1) \
++            bad++;                                                      \
++        k++;                                                            \
++    } while (0)
++
++/* BB_RUN with a check of the echo after each sample, outside the timed part. */
++#define RT_RUN_CALLS(series, STMT)                                      \
++    do {                                                                \
++        for (uint32_t w = 0; w < BB_WARMUP; w++) {                      \
++            STMT;                                                       \
++            RT_CHECK;                                                   \
++        }                                                               \
++        bb_reset(series);                                               \
++        for (uint32_t n = 0; n < BB_SAMPLES; n++) {                     \
++            BB_TIME((series), STMT);                                    \
++            RT_CHECK;                                                   \
++        }                                                               \
++    } while (0)
++
++#define RT_SWEEP(W, ID_CALL, ID_BASE)                                                   \
++    do {                                                                                \
++        RT_RUN_CALLS(&s, { RT_CALL_STMT; bb_touch(buf, (W), 4096); });                  \
++        rt_ship(result_ep, (ID_CALL), &s, bad);                                         \
++        BB_RUN(&s, bb_touch(buf, (W), 4096));                                           \
++        rt_ship(result_ep, (ID_BASE), &s, bad);                                         \
++    } while (0)
++
++seL4_Word sel4rt_client(int argc, char *argv[])
++{
++    seL4_CPtr ep = rt_parse_word(argv[0]);
++    seL4_CPtr result_ep = rt_parse_word(argv[1]);
++    const void *buf = (const void *)rt_parse_word(argv[2]);
++    seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 1);
++    seL4_MessageInfo_t back;
++    seL4_Word mr0 = 0, mr1 = 0, mr2 = 0, mr3 = 0;
++    seL4_Word bad = 0, k = 0;
++    struct bb_series s;
++
++    BB_RUN(&s, (void)0);
++    rt_ship(result_ep, RT_TIMER_FLOOR, &s, bad);
++
++    RT_RUN_CALLS(&s, RT_CALL_STMT);
++    rt_ship(result_ep, RT_CALL, &s, bad);
++
++    RT_SWEEP(1, RT_CALL_AFTER_W1, RT_BASE_W1);
++    RT_SWEEP(16, RT_CALL_AFTER_W16, RT_BASE_W16);
++    RT_SWEEP(64, RT_CALL_AFTER_W64, RT_BASE_W64);
++    RT_SWEEP(256, RT_CALL_AFTER_W256, RT_BASE_W256);
++
++    api_wait(result_ep, NULL); /* block for ever: the printer suspends us */
++    return 0;
++}
++
++seL4_Word sel4rt_server(int argc, char *argv[])
++{
++    seL4_CPtr ep = rt_parse_word(argv[0]);
++    seL4_Word badge, mr0 = 0, mr1 = 0, mr2 = 0, mr3 = 0;
++    seL4_MessageInfo_t tag = seL4_MessageInfo_new(0, 0, 0, 1);
++
++    seL4_RecvWithMRs(ep, &badge, &mr0, &mr1, &mr2, &mr3);
++    for (;;) {
++        seL4_ReplyRecvWithMRs(ep, tag, &badge, &mr0, &mr1, &mr2, &mr3);
++    }
++    return 0;
++}
++
++/* ---- the printer: this process ---- */
++
++static struct bb_series rt_series;
++
++static const char *const rt_names[RT_NUM_SERIES] = {
++    [RT_TIMER_FLOOR] = "timer-floor",
++    [RT_CALL] = "call",
++    [RT_CALL_AFTER_W1] = "call.after.w1",
++    [RT_BASE_W1] = "base.w1",
++    [RT_CALL_AFTER_W16] = "call.after.w16",
++    [RT_BASE_W16] = "base.w16",
++    [RT_CALL_AFTER_W64] = "call.after.w64",
++    [RT_BASE_W64] = "base.w64",
++    [RT_CALL_AFTER_W256] = "call.after.w256",
++    [RT_BASE_W256] = "base.w256",
++};
++
++/* Receive one series, print it, let the client go on. Returns the client's
++ * count of echo mismatches so far. */
++static seL4_Word rt_receive(seL4_CPtr result_ep, uint64_t hz)
++{
++    seL4_MessageInfo_t info = api_wait(result_ep, NULL);
++    ZF_LOGF_IF(seL4_MessageInfo_get_label(info) != RT_LABEL_HEADER, "sel4rt: expected a header");
++    seL4_Word id = seL4_GetMR(0), n = seL4_GetMR(1), bad = seL4_GetMR(2);
++    ZF_LOGF_IF(id >= RT_NUM_SERIES || n > BB_SAMPLES, "sel4rt: bad header");
++    bb_reset(&rt_series);
++    while (rt_series.n < n) {
++        info = api_wait(result_ep, NULL);
++        ZF_LOGF_IF(seL4_MessageInfo_get_label(info) != RT_LABEL_DATA, "sel4rt: expected data");
++        seL4_Word len = seL4_MessageInfo_get_length(info);
++        for (seL4_Word j = 0; j + 1 < len; j += 2) {
++            bb_add(&rt_series, seL4_GetMR(j), seL4_GetMR(j + 1));
++        }
++    }
++    bb_print(RT_PROG, rt_names[id], &rt_series, hz);
++    seL4_Send(result_ep, seL4_MessageInfo_new(0, 0, 0, 0));
++    return bad;
++}
++
++static const char *rt_platform(void)
++{
++#if defined(CONFIG_PLAT_STM32MP1)
++    return "stm32mp1";
++#elif defined(CONFIG_PLAT_QEMU_ARM_VIRT)
++    return "qemu-arm-virt";
++#else
++    return "other";
++#endif
++}
++
++static const char *rt_cpu(void)
++{
++#if defined(CONFIG_ARM_CORTEX_A7)
++    return "cortex-a7";
++#elif defined(CONFIG_ARM_CORTEX_A15)
++    return "cortex-a15";
++#else
++    return "other";
++#endif
++}
++
++/* The first lines: what was built, from what, and the counters' state. */
++static void rt_print_build(void)
++{
++    printf(RT_PROG " build sources=%s platform=%s cpu=%s kernel=%s fastpath=%d nodes=%d"
++           " mcs=%d hyp=%d printing=%d pmu_user=%d vcnt_user=%d tick_ms=%d timeslice=%d"
++           " stack=%d isa=%s\n",
++           SEL4RT_SOURCES, rt_platform(), rt_cpu(),
++           config_set(CONFIG_DEBUG_BUILD) ? "debug" : "release",
++           config_set(CONFIG_FASTPATH), CONFIG_MAX_NUM_NODES,
++           config_set(CONFIG_KERNEL_MCS), config_set(CONFIG_ARM_HYPERVISOR_SUPPORT),
++           config_set(CONFIG_PRINTING), config_set(CONFIG_EXPORT_PMU_USER),
++           config_set(CONFIG_EXPORT_VCNT_USER), CONFIG_TIMER_TICK_MS, CONFIG_TIME_SLICE,
++           CONFIG_SEL4UTILS_STACK_SIZE, "arm");
++    printf(RT_PROG " sctlr unavailable: user mode cannot read SCTLR or ACTLR; the elfloader"
++           " prints ACTLR and SCTLR as it was entered, a debug kernel prints both at boot\n");
++    uint32_t pmuserenr = bb_pmuserenr();
++    printf(RT_PROG " pmuserenr=0x%08lx en=%lu\n", (unsigned long)pmuserenr,
++           (unsigned long)(pmuserenr & 1u));
++}
++
++void sel4rt_run(env_t *env, sel4utils_process_t *client, char **client_argv,
++                char (*client_argv_strings)[WORD_STRING_SIZE], seL4_CPtr client_ep,
++                seL4_CPtr client_result_ep, sel4utils_process_t *server, char **server_argv,
++                seL4_CPtr result_ep, int num_args)
++{
++    rt_print_build();
++    if (bb_pmu_start() != 0) {
++        printf(RT_PROG " error pmu-user-access-off\n");
++        printf("RT done\n");
++        return;
++    }
++    uint64_t hz = bb_cpu_hz();
++    bb_print_clock(RT_PROG, hz);
++
++    /* The client's own pages for its work between calls, 4 KiB each. */
++    void *buf = vspace_new_pages(&client->vspace, seL4_AllRights, RT_PAGES, seL4_PageBits);
++    ZF_LOGF_IF(buf == NULL, "sel4rt: no pages for the touch buffer");
++    sel4utils_create_word_args(client_argv_strings, client_argv, num_args, client_ep,
++                               client_result_ep, (seL4_Word)buf);
++
++    seL4_CPtr auth = simple_get_tcb(&env->simple);
++    seL4_CPtr ctcb = client->thread.tcb.cptr;
++    seL4_CPtr stcb = server->thread.tcb.cptr;
++    /* As on x86-64: the client with the FPU, the server without, both at
++     * one priority. */
++    configure_fpu(ctcb, true);
++    configure_fpu(stcb, false);
++    int error = seL4_TCB_SetPriority(ctcb, auth, seL4_MaxPrio - 1);
++    ZF_LOGF_IF(error, "sel4rt: client priority");
++    error = seL4_TCB_SetPriority(stcb, auth, seL4_MaxPrio - 1);
++    ZF_LOGF_IF(error, "sel4rt: server priority");
++    server->entry_point = sel4rt_server;
++    client->entry_point = sel4rt_client;
++    error = benchmark_spawn_process(server, &env->slab_vka, &env->vspace, num_args, server_argv, 1);
++    ZF_LOGF_IF(error, "sel4rt: spawn server");
++    error = benchmark_spawn_process(client, &env->slab_vka, &env->vspace, num_args, client_argv, 1);
++    ZF_LOGF_IF(error, "sel4rt: spawn client");
++
++    seL4_Word bad = 0;
++    for (int i = 0; i < RT_NUM_SERIES; i++) {
++        bad = rt_receive(result_ep, hz);
++    }
++    seL4_TCB_Suspend(ctcb);
++    seL4_TCB_Suspend(stcb);
++    printf(RT_PROG " echo-mismatches %lu\n", (unsigned long)bad);
++    printf("RT done\n");
++}
+diff --git a/apps/ipc/src/sel4rt.h b/apps/ipc/src/sel4rt.h
+new file mode 100644
+index 0000000..1eba042
+--- /dev/null
++++ b/apps/ipc/src/sel4rt.h
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <utils/util.h>
++#include <sel4/sel4.h>
++#include <sel4utils/process.h>
++#include <benchmark.h>
++
++/* Run sel4rt (see sel4rt.c) with two processes already configured, before
++ * anything else has run in them, and print its lines, ending with `RT done`.
++ * The client's arguments are rewritten: ep, result ep, touch buffer. */
++void sel4rt_run(env_t *env, sel4utils_process_t *client, char **client_argv,
++                char (*client_argv_strings)[WORD_STRING_SIZE], seL4_CPtr client_ep,
++                seL4_CPtr client_result_ep, sel4utils_process_t *server, char **server_argv,
++                seL4_CPtr result_ep, int num_args);
+diff --git a/apps/sel4bench/src/main.c b/apps/sel4bench/src/main.c
+index c9a94ed..ffa3ff6 100644
+--- a/apps/sel4bench/src/main.c
++++ b/apps/sel4bench/src/main.c
+@@ -272,6 +272,52 @@ static void add_iteration_tag(json_t *result, int run)
+     }
+ }
+ 
++#ifdef CONFIG_PLAT_STM32MP1
++/*
++ * Reset the STM32MP157 with one register write: 1 to RCC_MP_GRSTCSETR
++ * (0x50000404) bit 0, MPSYSRST, a system reset. The DK1 firmware's OP-TEE
++ * leaves the RCC non-secure ("RCC is non-secure" in its boot log). Not the
++ * IWDG2 watchdog: its APB clock (RCC_MP_APB4ENSETR bit 15) may be off on this
++ * firmware (OP-TEE CFG_STM32_IWDG=n, U-Boot WDT_STM32MP=n), and enabling it
++ * would be a clock write. First about 100 ms on the virtual counter
++ * (KernelArmExportVCNTUser), so the UART's FIFO sends the last line.
++ */
++#include <platsupport/io.h>
++#include <sel4platsupport/io.h>
++
++#ifndef CONFIG_EXPORT_VCNT_USER
++#error "board_bench_reset waits on the virtual counter: KernelArmExportVCNTUser"
++#endif
++
++#define BB_RCC_PADDR            0x50000000u
++#define BB_RCC_MP_GRSTCSETR     0x404u
++#define BB_RCC_MPSYSRST         BIT(0)
++
++static uint64_t bb_reset_cntvct(void)
++{
++    uint32_t lo, hi;
++    __asm__ volatile("isb\n\tmrrc p15, 1, %0, %1, c14" : "=r"(lo), "=r"(hi) : : "memory");
++    return ((uint64_t)hi << 32) | lo;
++}
++
++static void board_bench_reset(env_t *env)
++{
++    ps_io_mapper_t io;
++    int error = sel4platsupport_new_io_mapper(&env->vspace, &env->vka, &io);
++    ZF_LOGF_IF(error, "board-bench reset: no I/O mapper");
++    volatile uint32_t *rcc = ps_io_map(&io, BB_RCC_PADDR, PAGE_SIZE_4K, false, PS_MEM_NORMAL);
++    ZF_LOGF_IF(rcc == NULL, "board-bench reset: cannot map the RCC");
++    uint32_t frq;
++    __asm__ volatile("mrc p15, 0, %0, c14, c0, 0" : "=r"(frq));
++    uint64_t t0 = bb_reset_cntvct();
++    while (bb_reset_cntvct() - t0 < frq / 10u) {
++    }
++    rcc[BB_RCC_MP_GRSTCSETR / 4] = BB_RCC_MPSYSRST;
++    for (;;) {
++    }
++}
++#endif
++
+ void *main_continued(void *arg)
+ {
+ 
+@@ -323,6 +369,13 @@ void *main_continued(void *arg)
+     printf("All is well in the universe.\n");
+     printf("\n\nFin\n");
+ 
++    /* Ferrix's board bench: the run's last line, then (on the DK1) a reset,
++     * so a run needs no hand at the board. */
++    printf("board-bench end sel4rt\n");
++#ifdef CONFIG_PLAT_STM32MP1
++    board_bench_reset(&global_env);
++#endif
++
+     return 0;
+ }
+ 
+diff --git a/settings.cmake b/settings.cmake
+index f63308a..5d8f770 100644
+--- a/settings.cmake
++++ b/settings.cmake
+@@ -103,7 +103,7 @@ if(NOT Sel4benchAllowSettingsOverride)
+ 
+   if(SMP)
+     if(RELEASE)
+-      if(KernelPlatformIMX93 OR KernelPlatformMP2)
++      if(KernelPlatformIMX93 OR KernelPlatformMP2 OR KernelPlatformStm32mp1)
+         set(KernelMaxNumNodes 2 CACHE STRING "" FORCE)
+       else()
+         set(KernelMaxNumNodes 4 CACHE STRING "" FORCE)

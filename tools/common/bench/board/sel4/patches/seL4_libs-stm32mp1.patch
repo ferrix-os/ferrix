@@ -1,0 +1,85 @@
+seL4_libs 262a34dc: libsel4bench's Cortex-A7 PMU events (sel4bench had
+none, so no Cortex-A7 platform could build it). BSD-2-Clause.
+
+diff --git a/libsel4bench/arch_include/arm/cpu/cortex-a7/sel4bench/cpu/events.h b/libsel4bench/arch_include/arm/cpu/cortex-a7/sel4bench/cpu/events.h
+new file mode 100644
+index 0000000..1dc6e1d
+--- /dev/null
++++ b/libsel4bench/arch_include/arm/cpu/cortex-a7/sel4bench/cpu/events.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright 2017, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++#pragma once
++/*
++ * event definitions
++ * events specific to the Cortex-A7 (Cortex-A7 MPCore TRM, DDI 0464, PMU
++ * events; the architectural events 0x00-0x1D are in armv/events.h)
++ */
++
++#define SEL4BENCH_EVENT_BUS_ACCESS_LD             0x60 /* Bus access, read */
++#define SEL4BENCH_EVENT_BUS_ACCESS_ST             0x61 /* Bus access, write */
++#define SEL4BENCH_EVENT_EXC_IRQ                   0x86 /* Exception taken, IRQ */
++#define SEL4BENCH_EVENT_EXC_FIQ                   0x87 /* Exception taken, FIQ */
++#define SEL4BENCH_EVENT_EXT_MEM_REQ               0xC0 /* External memory request */
++#define SEL4BENCH_EVENT_EXT_MEM_REQ_NC            0xC1 /* Non-cacheable external memory request */
++#define SEL4BENCH_EVENT_PREFETCH_LINEFILL         0xC2 /* Linefill because of prefetch */
++#define SEL4BENCH_EVENT_ICACHE_THROTTLE           0xC3 /* Instruction cache throttle occurred */
++#define SEL4BENCH_EVENT_READ_ALLOC_ENTER          0xC4 /* Entering read allocate mode */
++#define SEL4BENCH_EVENT_READ_ALLOC                0xC5 /* Read allocate mode */
++#define SEL4BENCH_EVENT_PRE_DECODE_ERR            0xC6 /* Pre-decode error */
++#define SEL4BENCH_EVENT_STALL_SB_FULL             0xC7 /* Data write stalls the pipeline: store buffer full */
++#define SEL4BENCH_EVENT_SCU_SNOOPED_DATA          0xC8 /* SCU snooped data from another CPU for this CPU */
++#define SEL4BENCH_EVENT_BR_COND                   0xC9 /* Conditional branch executed */
++#define SEL4BENCH_EVENT_BR_INDIRECT_MISPRED       0xCA /* Indirect branch mispredicted */
++#define SEL4BENCH_EVENT_BR_INDIRECT_ADDR_MISPRED  0xCB /* Indirect branch mispredicted, address miscompare */
++#define SEL4BENCH_EVENT_BR_COND_MISPRED           0xCC /* Conditional branch mispredicted */
++#define SEL4BENCH_EVENT_L1I_MEM_ERROR             0xD0 /* L1 instruction cache memory error */
++#define SEL4BENCH_EVENT_L1D_MEM_ERROR             0xD1 /* L1 data cache memory error */
++#define SEL4BENCH_EVENT_TLB_MEM_ERROR             0xD2 /* TLB memory error */
+diff --git a/libsel4bench/src/arch/arm/cpu/cortex-a7/event_counters.c b/libsel4bench/src/arch/arm/cpu/cortex-a7/event_counters.c
+new file mode 100644
+index 0000000..e37e2df
+--- /dev/null
++++ b/libsel4bench/src/arch/arm/cpu/cortex-a7/event_counters.c
+@@ -0,0 +1,37 @@
++/*
++ * Copyright 2017, Data61, CSIRO (ABN 41 687 119 230)
++ * Copyright 2026, Sebastian Dauenhauer
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "../../event_counters.h"
++
++const char* const sel4bench_cpu_event_counter_data[] = {
++    NAME_EVENT(BUS_ACCESS_LD           , "Bus access, read"),
++    NAME_EVENT(BUS_ACCESS_ST           , "Bus access, write"),
++    NAME_EVENT(EXC_IRQ                 , "Exception taken, IRQ"),
++    NAME_EVENT(EXC_FIQ                 , "Exception taken, FIQ"),
++    NAME_EVENT(EXT_MEM_REQ             , "External memory request"),
++    NAME_EVENT(EXT_MEM_REQ_NC          , "Non-cacheable external memory request"),
++    NAME_EVENT(PREFETCH_LINEFILL       , "Linefill because of prefetch"),
++    NAME_EVENT(ICACHE_THROTTLE         , "Instruction cache throttle occurred"),
++    NAME_EVENT(READ_ALLOC_ENTER        , "Entering read allocate mode"),
++    NAME_EVENT(READ_ALLOC              , "Read allocate mode"),
++    NAME_EVENT(PRE_DECODE_ERR          , "Pre-decode error"),
++    NAME_EVENT(STALL_SB_FULL           , "Data write stalls the pipeline: store buffer full"),
++    NAME_EVENT(SCU_SNOOPED_DATA        , "SCU snooped data from another CPU for this CPU"),
++    NAME_EVENT(BR_COND                 , "Conditional branch executed"),
++    NAME_EVENT(BR_INDIRECT_MISPRED     , "Indirect branch mispredicted"),
++    NAME_EVENT(BR_INDIRECT_ADDR_MISPRED, "Indirect branch mispredicted, address miscompare"),
++    NAME_EVENT(BR_COND_MISPRED         , "Conditional branch mispredicted"),
++    NAME_EVENT(L1I_MEM_ERROR           , "L1 instruction cache memory error"),
++    NAME_EVENT(L1D_MEM_ERROR           , "L1 data cache memory error"),
++    NAME_EVENT(TLB_MEM_ERROR           , "TLB memory error")
++};
++
++int
++sel4bench_cpu_get_num_counters(void)
++{
++    return ARRAY_SIZE(sel4bench_cpu_event_counter_data);
++}

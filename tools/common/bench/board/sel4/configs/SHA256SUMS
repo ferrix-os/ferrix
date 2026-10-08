@@ -1,0 +1,5 @@
+990b1eeef6cd39be5d4a4b1f329b06ed415ed5a44ded23d7352767c89bf40a2b  card/bench/sel4/sel4bench.elf
+b996e8c33c976ab7087cf652c33225095dc2a15eb5cda7dcce9b677173fa820c  card/bench/sel4/sel4test.elf
+f1497ddfa60da22cf02417092b59876fbf4debf4532cdaac03ab3b80c4032abd  ./sel4bench-qemu-arm-virt.elf
+5a96aec7b5ff4374afa30200708f222a56ad4a7a7ccd76628a9c5ef083ab0ad7  ./sel4bench-smp.elf
+5079a3b16814b07b633a39a11cf4ac664ac9b0ddf4d2f7e5a526f0c786a8129e  ./sel4test-qemu-arm-virt.elf

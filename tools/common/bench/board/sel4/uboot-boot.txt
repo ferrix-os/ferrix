@@ -1,0 +1,36 @@
+# U-Boot v2026.07 (the DK1 firmware's) lines that boot the seL4 images from
+# bootfs (mmc 0:4). Send one line at a time and wait for the prompt: two lines
+# back to back overflow U-Boot's UART. Nothing here writes the saved
+# environment. Lines starting with # are notes, not commands.
+#
+# Each image is an ELF: the seL4 elfloader with the kernel and the root task
+# inside. It is loaded at 0xc2000000 (kernel_addr_r), `bootelf -p` copies its
+# one PT_LOAD segment to its physical address, and `go` jumps to its entry.
+# `dcache off` (which also turns the MMU off) and `icache off` come first: this
+# U-Boot's bootelf no longer turns the data cache off itself, and the
+# elfloader then starts as seL4 expects, with its caches off; it turns them on
+# with its own page tables. With `autostart` unset (its default), `bootelf`
+# only loads; were it set to yes, `bootelf` would start the image itself and
+# the `go` line would never be reached, which is equally fine.
+#
+# The entry addresses are those of the images whose SHA-256 is in
+# configs/SHA256SUMS; a rebuild prints them (build.sh: "Entry point").
+
+# sel4bench, release, one core: sel4rt, then sel4bench's own IPC suite. Its last
+# line is `board-bench end sel4rt`; about 0.1 s later it resets the board
+# (RCC MPSYSRST). Segment 0xc0140000..0xc0208047, entry 0xc0147000.
+load mmc 0:4 0xc2000000 bench/sel4/sel4bench.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0147000
+
+# sel4test, debug, one core: 125 tests, each reported, then "Test suite passed"
+# or "Test suite failed" and "All is well in the universe" on success. It does
+# not reset the board: the kernel halts. Segment 0xc0490000..0xc07dd047, entry
+# 0xc0498000.
+load mmc 0:4 0xc2000000 bench/sel4/sel4test.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0498000
