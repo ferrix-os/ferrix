@@ -5810,3 +5810,448 @@ AoU-27, AoU-26 before main gave that number to drvupdated). As R1 to R9 say, wit
   assumption of use is AoU-27; the evidence was carried again and the
   generated documents remade; `check`, `check-docs` and the armv7a boots at
   one core and `--smp 2` are rerun on the landing hash (`os07u-land-*`).
+
+
+### 9.15 ARMv7-A lazy VFP: no VFP work for a program that never uses it (design for the consultant, os07-lazyvfp, 2026-10-08)
+
+§9.14's next step. On the branch of §9.14 (`os07/ustate`, being landed),
+every switch between two native programs on ARMv7-A still moves VFP state:
+a blocked direction stores `FPSCR` and `d8`-`d15` and the switch back loads
+them and 192 bytes of zeros; a preempted one moves all 256 bytes each way.
+Native programs never touch VFP (§9.14 F1: `armv7a-none-eabi`, soft float,
+rustc cannot even allocate a VFP register there). This item makes a switch
+between two tasks that have never used VFP move no VFP register and write
+no `FPEXC`, while a task that does use VFP keeps exactly §9.14's contract.
+ARMv7-A only; AArch64 is unchanged.
+
+**What was read first.**
+- *S1. seL4 at c6ce4d2a no longer switches lazily on a trap.* Commit
+  5035def0 (2024-09-08, "FPU: Save and restore FPU state based on TCB
+  flag", "Remove fault-based FPU state saving and loading") removed
+  `handleFPUFault` and the undefined-instruction hook. Today
+  (`include/machine/fpu.h`, `src/machine/fpu.c`,
+  `include/arch/arm/arch/32/mode/machine/fpu.h`):
+  - each TCB carries `seL4_TCBFlag_fpuDisabled`, set and cleared by the
+    user through `seL4_TCB_SetFlags`; new threads have the FPU on, the idle
+    thread has it off (`configureIdleThread`);
+  - each core has an owner, `ksCurFPUOwner`. `lazyFPURestore`, called from
+    `switchToThread` and from the fastpath's `switchToThread_fp`, does: a
+    thread with the flag -> `disableFpu()` (`VMRS FPEXC`, clear `EN`,
+    `VMSR FPEXC`, unconditionally at every such switch); the owner ->
+    `enableFpu()` (`VMRS`, set `EN`, `VMSR`); any other thread ->
+    `switchLocalFpuOwner(thread)`: enable, save the old owner's `d0`-`d31`
+    (`d0`-`d15` on D16), `FPSCR` and `FPEXC` into its TCB, load the new
+    one's, make it the owner. The save is lazy, the load is eager.
+  - *A previous owner's registers while `EN` is clear* stay in the register
+    file, not zeroed, and it stays the owner. A thread with the flag that
+    executes a VFP instruction takes an undefined-instruction exception,
+    which on AArch32 is `handleUserLevelFault(0, 0)`: a fault message to its
+    handler. Nothing enables the FPU for it: there is no "new owner traps"
+    path any more.
+  - Migration (`migrateTCB`), deletion (`Arch_prepareThreadDelete`) and
+    `seL4_TCB_SetFlags` with the flag call `fpuRelease`, which saves the
+    owner's state on its core, by a remote call (`IpiRemoteCall_switchFpuOwner`)
+    when that core is another; the fastpath's signal slowpaths a target
+    whose state lives in some core's FPU. A domain switch calls
+    `switchLocalFpuOwner(NULL)`: save and disable, still not zero.
+  - Before 5035def0, an undefined instruction with the FPU disabled was
+    assumed to be a VFP instruction: `handleFPUFault` made the current thread
+    the owner and the instruction was restarted; a real undefined
+    instruction then trapped again with `EN` set and became a fault.
+    `KernelFPUMaxRestoresSinceSwitch` (64) gave a state back after 64
+    switches without use. That is the "seL4-style" lazy switching §9.14
+    named.
+  - *The matched seL4 benchmark* (`sel4bench` `apps/ipc/src/sel4rt.c`) runs
+    the client with the FPU on and the server with it off, so each seL4
+    round trip pays two `FPEXC` read-modify-writes and no register move.
+- *S2. `FPEXC` and PL0* (ARM ARM v7-A/R, `VMRS`/`VMSR` pseudocode and the
+  Floating-point Extension system registers): with `FPEXC.EN` clear every
+  VFP and Advanced SIMD instruction is UNDEFINED, at every privilege level,
+  except a PL1 `VMRS`/`VMSR` of `FPSID`, `FPEXC`, `MVFR0`, `MVFR1`. At PL0
+  every one of those but `FPSCR` is UNDEFINED whatever `EN` is; `FPSCR` at
+  PL0 needs `EN`. So no PL0 instruction reads a VFP register, `FPSCR`,
+  `FPEXC`, `FPSID` or `MVFR` with `EN` clear: every one traps.
+  `CPACR` (cp10, cp11 full access) is left granted as today. Only the kernel
+  writes `FPEXC` (§9.14 F3).
+- *S3. The undefined-instruction return address.* `LR_und` is the
+  instruction's address + 4 in ARM state and + 2 in Thumb state, for a
+  16-bit and a 32-bit Thumb instruction alike (ARM ARM, exception return
+  table; QEMU's `arm_cpu_do_interrupt_aarch32`: `offset = env->thumb ? 2 : 4`;
+  Linux's `__und_usr_thumb`: "first half of thumb2 instr at LR - 2").
+  `ferrix_stub_undefined` subtracts 4 in both, so for a Thumb program the
+  frame's `pc` is two bytes early today. A `SIGILL` report is off by two;
+  a retry would execute the halfword before. `SPSR_und` carries the IT
+  state of the trapping instruction, so returning with `rfeia` re-executes
+  it inside its IT block.
+- *S4. Linux* (`arch/arm/vfp/vfpmodule.c`) switches lazily: `EN` is
+  cleared at every context switch, the first VFP instruction traps, the
+  state is loaded and the instruction re-executed. Hard-float Linux programs
+  on Ferrix (busybox, Thumb; sessiond) therefore already expect nothing of
+  `EN` but that VFP works.
+
+**The design.**
+- *D1, a per-task bit.* `UserState.vfp`: the task has used VFP. Clear for a
+  new program and after `execve`; set by its first VFP instruction (D5) and
+  never cleared otherwise. A fork child or a thread copies its parent's
+  (`capture`). No heuristic giving it back: a task that used VFP once keeps
+  §9.14's eager switch.
+- *D2, a per-core record of `EN`.* `VFP_ON[logical]`, what this core's
+  `FPEXC.EN` was last written to. Only the kernel writes `FPEXC` (S2, F3),
+  so the record is exact: this is not condition 8's case, which is a
+  register a program writes without the kernel. A check compares the
+  record with the register (C1).
+- *Invariants.*
+  - *I1:* while a task with user state runs on a core -- in USR mode or in
+    the kernel on its behalf -- that core's record equals the task's bit,
+    and `EN` equals both.
+  - *I2:* while a core's `EN` is clear, every VFP register it has and
+    `FPSCR` are zero.
+  - *I3:* while `EN` is set and a task with user state runs, every VFP
+    register and `FPSCR` hold that task's own state (§9.14's restore, or its
+    reset under the AAPCS contract).
+- *D3, the save.* `save_user_state`: a task with the bit is saved as §9.14
+  (whole, or `FPSCR` and `d8`-`d15` when blocked in one of the three);
+  one without it moves no VFP register. `TPIDRURW` and the banked `sp`,
+  `lr` as today.
+- *D4, the restore.* `restore_user_state` for `next`: with the bit -- if
+  this core is off, `vmsr fpexc` with `EN`, an `isb`, record on; then
+  §9.14's restore or reset. Without it -- if this core is on, *scrub*
+  (`FPSCR` zero and every D register from the read-only zero block), then
+  `vmsr fpexc` 0, record off; if it is off, nothing. So two tasks without
+  the bit trade a core with no VFP instruction and no `FPEXC` access, and
+  I2 holds whoever ran before, a dead task included.
+- *D5, the first use.* In `ferrix_trap_entry`, before the generic dispatch:
+  an undefined instruction from USR mode on a core with a VFP whose record
+  is off, from a task with user state, is taken as a first use, with
+  interrupts masked from the exception entry: the task's bit is set, `EN`
+  written with an `isb`, the record set on, the task's own record loaded
+  whole into the registers (§9.14's `ferrix_user_fpu_restore`), and the
+  frame's `pc` put back on the instruction (+2 for Thumb, S3); the exception
+  returns and the instruction runs. An instruction that was not a VFP one
+  traps again, now with `EN` set, and is a `SIGILL` as today -- the old
+  seL4 and Linux way of telling the two apart without decoding. The Thumb
+  correction also applies to that `SIGILL`'s reported address (S3's
+  off-by-two, fixed). An undefined instruction from SVC mode stays fatal.
+- *D6, the record is the truth while `EN` is clear.* The first use loads
+  the record, not zeros, so a state written into the record while the task
+  had no bit is the one it gets:
+  - `capture()` (fork, thread, signal frame) reads the registers when this
+    core is on, else the running task's record (interrupts masked) -- and
+    copies the bit;
+  - `sigreturn`'s VFP load writes the registers when this core is on, else
+    the running task's record (masked); the bit is not set, the first use
+    loads it;
+  - `fp()` and `set_fp()` keep §9.14's meaning.
+  None of these executes a VFP instruction with `EN` clear, which in the
+  kernel would be an undefined instruction from SVC mode, a panic.
+- *D7, `execve`.* In §9.14's masked window: the record's `FPSCR`, doubles,
+  `unsaved` and bit cleared; if this core is on, scrub, `EN` 0, record off.
+- *D8, bring-up.* `enable_user_fpu`: `CPACR` as today, `EN` on, `MVFR0`
+  and `MVFR1` read, scrub (whatever firmware -- U-Boot, OP-TEE on the DK1
+  -- left in the register file), `EN` off, record off. I2 holds from boot.
+- *D9, migration and exit.* A task with the bit is saved at every switch
+  out, so its state is always in its record when it is not running: a task
+  woken or balanced onto the other core needs nothing, and no core ever
+  holds a state another core must fetch. No owner pointer, no remote call,
+  no fastpath slowpath (seL4's `fpuRelease` and the IPI have no analogue).
+  A dead task is not saved; the next task on that core scrubs (no bit) or
+  overwrites (bit). This is where the design differs from seL4: seL4 saves
+  lazily and loads eagerly; this saves eagerly (for tasks with the bit) and
+  decides lazily whether a task needs VFP at all. A VFP user therefore pays
+  §9.14's save on every switch out even when the next task does not use
+  VFP; that is today's cost and not this item's target.
+- *D10, §9.14's AAPCS contract* is kept, unchanged, for tasks with the bit
+  (H.SCHED.12, `L.armv7a.5`-`.9`). For a task without it the contract holds
+  vacuously and more: it holds no VFP value to lose, and every register it
+  could read after its first use is its own record's. `vectors_dead` is
+  still raised and lowered at the entry for every task (two
+  `with_own_user_state` calls a call); skipping them for tasks without the
+  bit is a separate saving, not taken here.
+
+**FDP_RIP.2 as widened: no register state of one program reaches another.**
+- *Architecturally:* with `EN` clear every PL0 access to any VFP register,
+  `FPSCR`, `FPEXC`, `FPSID` and `MVFR` is UNDEFINED (S2), so a task without
+  the bit has no read path; its first VFP instruction loads its own record
+  over every register before `EN` is set for it (D5, I3). A task with the bit
+  runs only after its own restore (I3).
+- *Speculatively (LazyFP, CVE-2018-3665):* irrelevant by construction. I2
+  means a register file behind a clear `EN` holds zeros, never another
+  program's values, so even a core that forwarded a VFP register to
+  dependent instructions past a disabled `EN` would forward zeros. That is
+  the one choice §9.14 left open ("zero it when an owner switches out ... and
+  nothing stale ever stays in the registers"), and it costs only a switch from
+  a task with the bit to a task without it.
+- *On the Cortex-A7 the question would not arise anyway* **(argued, not
+  shown):** the A7 is an in-order, partially dual-issuing core (Cortex-A7
+  MPCore TRM, "About the processor"); Arm's Speculative Processor
+  Vulnerability list (Arm doc 110280) names no Cortex-A7 under Spectre,
+  Meltdown (3, 3a) or Spectre-BHB, Linux's `proc-v7-bugs.c` and Ferrix's own
+  `armv7a/speculation.rs` apply no predictor maintenance to it, and LazyFP
+  was disclosed and acknowledged for Intel cores only; Arm has published no
+  statement that any core is affected. seL4 leaves the old owner's values
+  behind a clear `EN` (S1), which is evidence that its maintainers accept
+  that risk on Arm, not proof. I2 makes Ferrix's claim independent of the
+  core, so a later out-of-order ARMv7-A target (Cortex-A15, which is under
+  3a) needs no new argument.
+- *Remaining channels:* `FPEXC` itself is not readable at PL0; a program can
+  tell whether its first VFP instruction trapped only by timing, which says
+  whether it has used VFP before -- its own fact. The scrub's time depends
+  on whether the previous task on the core used VFP; that is a timing
+  channel of the same class as the existing save/restore asymmetry and the
+  ASID allocator, recorded in VULNERABILITY-ANALYSIS, not closed.
+
+**Cost of `FPEXC` writes on a Cortex-A7.** The TRM gives no cycle count for
+`VMSR FPEXC`; ARMv7 does not make it self-synchronising for the kernel's
+own following VFP instructions in every reading, so D4 and D5 put an `isb`
+after enabling (Linux's `vfphw.S` omits it; the `isb` is about 10 cycles on
+an 8-stage pipeline **(guessed)**). Disabling needs none: the exception return
+is context-synchronising. The writes happen only at a switch between a task
+with the bit and one without, and at a first use. Two tasks without the bit
+pay none, against seL4's two `VMRS`/`VMSR` pairs a round trip in its
+matched set-up (S1).
+
+**The saving** **(guessed; os-07 measures it, ABAB against main with
+§9.14)**: per blocked direction §9.14 does `vmrs fpscr`, `str`, a `vstmia`
+of 8 doubles, then `ldr`, `vmsr fpscr` and three `vldmia` of 8 + 8 + 16
+doubles; at one 64-bit transfer a cycle that is about 40 cycles of
+transfers plus the `FPSCR` write's stall, about 50 to 80 cycles a direction,
+100 to 160 a round trip, about 125 to 200 ns at 800 MHz. Added: one load of
+the task's bit and one of the per-core record a switch (a `TPIDRPRW` read
+and a few instructions). os07-prof's `prof.skip-vfp-UNSAFE` ablation is the
+upper bound on the board. TCG counts show only that the VFP instructions
+are gone from the trip (about 10 instructions a round trip), not the time.
+
+**Conditions, each with a check and a negative control that fires** (stage
+9, ARMv7-A, `arch/armv7a/switch/check.rs`, a new `lazy` boot line; GNU `as`
+fixtures as §9.14's, pinned to the check's core; the cases need a VFP and
+say so otherwise):
+- *C1, two tasks without the bit move nothing.* Check: two native programs
+  that never touch VFP trade 1,000 `channel_write_read` round trips on one
+  core; counters of VFP saves, restores, scrubs and `FPEXC` writes (kept on
+  the VFP paths only) do not move during the trades, and after them the
+  kernel reads `FPEXC.EN` clear and the record off. Control C1-c: the
+  restore takes every task as having the bit -- "moved VFP state for
+  programs that never used VFP".
+- *C2, the first use.* Check: an ARM and a Thumb program whose first VFP
+  instruction is a `vmov` from core registers followed by a `vadd` and a
+  `vmov` back compute the right sum, read zero in every other D register and
+  `FPSCR` before writing them, and exit 0, run after a program that filled
+  every register with its pattern. The Thumb one's instruction before the
+  VFP one increments a counter, so a retry two bytes early shows. And a
+  program's PL0 `vmrs` of `FPEXC`, `FPSID`, `MVFR0`, `MVFR1`, each after its
+  first use, ends with `SIGILL` (S2, under QEMU; argued for the board).
+  Controls: C2-a the first-use hook removed -- "a program's first VFP
+  instruction ended it with SIGILL"; C2-b the Thumb correction removed --
+  "a Thumb program's first VFP instruction did not run as written".
+- *C3, I2.* Check: a program with the bit fills every D register and
+  `FPSCR` and blocks; a program without the bit is switched in on that core
+  and blocks; the check, a kernel thread on that core, reads `FPEXC` (`EN`
+  clear), then with interrupts masked sets `EN`, stores every register,
+  compares with zero and clears `EN` again. Also after an `execve` from a
+  program with the bit into one that never uses VFP. Controls: C3-a the
+  handover scrub removed -- "a program that never used VFP ran with another
+  program's VFP registers behind FPEXC.EN"; C3-b `execve`'s scrub removed --
+  the same text, "after an execve".
+- *C4, the record while `EN` is clear (D6).* Checks: a program without the
+  bit takes a signal whose handler, also without VFP, writes a pattern into
+  the frame's VFP record and returns; the program's first VFP instruction
+  after that reads the pattern. A program with the bit forks; the child,
+  switched out and in, reads the parent's pattern. Controls: C4-a
+  `sigreturn` writes no record while `EN` is clear -- "a signal frame's VFP
+  state did not reach a program that had not used VFP"; C4-b `capture`
+  leaves the VFP state out for a task with the bit -- "a fork child did not
+  inherit its parent's VFP registers".
+- *C5, I1 and migration.* Check (at `--smp 2`, run where two cores exist): a
+  program with the bit blocked in `nanosleep` on one core is woken on the
+  other and reads its whole pattern; the record equals `FPEXC.EN` on both
+  cores after each case. Control C5-c: the restore's `EN` write skipped
+  when the record is on although `EN` is not (the record set without the
+  write) -- "a program with VFP state ran with FPEXC.EN clear" (it would
+  take a first use again and load a stale record; the check counts that).
+- §9.14's checks and controls (`vectors`, `tls`) keep running unchanged;
+  their programs now take a first use and run with the bit.
+
+Besides: the armv7a boots at one core and `--smp 2`, `test-threads`,
+`test-shell` (busybox is Thumb and hard float: every first use goes through
+D5) and `test-ipc-equiv` on armv7a; the x86-64 and AArch64 boots unchanged.
+
+**Rows.** Reserve `L.armv7a.21-25` on `main` first (os07-asid holds 13-20).
+- `L.armv7a.21` a task that has not used VFP runs with `FPEXC.EN` clear,
+  and a switch between two such tasks moves no VFP register and writes no
+  `FPEXC`; the per-core record equals `FPEXC.EN` (C1).
+- `.22` its first VFP instruction traps, sets the bit, enables, loads its
+  own record and re-executes the instruction, ARM and Thumb; any other
+  undefined instruction is `SIGILL` at its own address (C2).
+- `.23` while `EN` is clear every VFP register and `FPSCR` are zero:
+  bring-up, a switch to a task without the bit, `execve` (C3).
+- `.24` while `EN` is clear the task's record is its VFP state: `capture`,
+  `sigreturn`, fork and thread read and write it, never a VFP register (C4).
+- `.25` a task with the bit runs with `EN` set and its own state on whichever
+  core it is resumed (C5).
+- `H.SCHED.8` restated: ARMv7-A's VFP state is in the registers or, while
+  `EN` is clear, in the record. `H.SCHED.12` unchanged. `L.armv7a.6`-`.9`'s
+  criteria say "a task with the bit".
+
+**Assembly.** `ferrix_fpu_disable` (3 lines), `ferrix_fpu_exc` (`vmrs`
+`FPEXC` for C1, C3 and C5, 2 lines), an `isb` in `ferrix_fpu_enable` (1);
+the scrub is `ferrix_user_fpu_restore` of a read-only all-zero `UserState`.
+The cap rises by 6, `switch.rs`'s entry by 6, reasons extended.
+
+**Documents.** Security Target FDP_RIP.2: I2 and S2 for ARMv7-A.
+VULNERABILITY-ANALYSIS: the first-use path taken for a non-VFP undefined
+instruction (it retraps), the scrub's timing channel, a kernel VFP access
+with `EN` clear (a panic, not a leak). U5 of §9.14 (`FPEXC` written only at
+bring-up) is replaced by D2's record and C1, C5. Coverage: the D16 and
+no-VFP branches argued as in §9.14.
+
+**Questions for the consultant.**
+1. Eager save for tasks with the bit, no cross-core ownership, against
+   seL4's lazy save with owners and remote calls: acceptable as the design,
+   given that the target is the round trip between tasks without the bit?
+2. The scrub (I2) on a switch from a task with the bit to one without,
+   rather than leaving the values behind `EN` as seL4 does: is I2 the
+   FDP_RIP.2 argument, with the Cortex-A7 LazyFP argument as background?
+3. The first use decided by "undefined with the record off", not by
+   decoding the instruction: acceptable, with the retrap for a real one?
+4. D2's per-core record instead of reading `FPEXC` at every switch, with
+   C1 and C5 comparing the two?
+5. Five rows, `L.armv7a.21-25`, and `H.SCHED.8` restated?
+6. The Thumb `SIGILL` address fix (S3) in this item, or a finding of its
+   own?
+
+**Estimate.** 22 points: design and review 3, code 5 (switch, trap hook,
+signal, exec, bring-up), fixtures and checks 7, controls 4, rows and
+documents 2, gates 1.
+
+**After the review (os07-lazyvfp's consultant, ledger line 606: OK IF L1 to
+L12).** All six questions answered yes, with these changes to the design:
+- *L1.* `L.armv7a.21-26` (six rows) reserved on `main` first (branch
+  `os07/lazyvfp-reserve`), and F-68 reserved in the ledger; the code is
+  written on `main` once §9.14 has landed there.
+- *L2.* The first use's test is "undefined from USR, a VFP, a task with user
+  state and its bit clear"; the record disagreeing with the bit is a kernel
+  fault report, never a first use or a `SIGILL`; the whole of it masked, no
+  lock, nothing that blocks, back through the stub's `rfeia`; the load is
+  the switch's own restore, and `unsaved` is set only for a task with the
+  bit.
+- *L3.* `capture` and `sigreturn` decide by the running task's bit, read
+  masked, and for a task without it read or write the record in the same
+  masked window. No path runs a VFP instruction with `EN` clear.
+- *L4.* `execve` clears the record (`FPSCR`, doubles, `unsaved`, bit) inside
+  §9.14's masked window, since the first use now loads the record; check and
+  control L4-c ("an execve'd image's first VFP instruction read the old
+  program's VFP state").
+- *L5, F-68 (Minor).* The undefined path sets the frame's `pc` to
+  `LR_und - (T ? 2 : 4)` once, before both the first use and the `SIGILL`.
+  F-68: a Thumb program's `SIGILL` names, and a handler returning unchanged
+  resumes at, the halfword before the instruction. Closed by a `SIGILL` case
+  (ARM `udf`, 16-bit and 32-bit Thumb) reading `si_addr` and the ucontext
+  `pc`, control F68-c. C2's Thumb case uses a 16-bit instruction before the
+  VFP one, and a further case puts the first VFP instruction inside an IT
+  block, control C2-c.
+- *L6, rows.* `.21` C1; `.22` the first use, ARM, Thumb, IT block; `.23`
+  any other undefined instruction is `SIGILL` at its own address (F-68,
+  under H.TRAP.4); `.24` I2 at bring-up, handover and `execve`; `.25` the
+  record while `EN` is clear (`capture`, `sigreturn`, fork, `execve`'s
+  clearing); `.26` a task with the bit on whichever core resumes it.
+  `H.SCHED.8` restated to what a program can observe.
+- *L7.* C1's counts attributed to the two pinned programs, so no other task
+  moves or hides them. *L8.* C4 also shows `capture` from the record (a
+  second signal's frame, a fork child), control C4-c. *L9.* Bring-up's scrub
+  gets a boot case (QEMU starts with zeros) and a control; the DK1 run is a
+  BACKLOG row. *L10.* C5 records the blocking and resuming cores and says it
+  did not run unless they differ.
+- *L11, L12.* Evidence and documents as §9.14's R8 and R9, with FDP_RIP.2
+  resting on I2 and S2 (the LazyFP paragraph background only),
+  VULNERABILITY-ANALYSIS item 4 replaced, FINDINGS F-68, coverage-owed.
+- *Advisory.* seL4's matched set-up runs its client with the FPU on (two
+  `FPEXC` read-modify-writes a round trip); the paper either adds a seL4 row
+  with both threads `fpuDisabled` or states the difference beside the
+  figure.
+
+*Estimate after the review: 30 points* (code 6, fixtures and checks 11 --
+ARM, Thumb, IT block, three `SIGILL` forms, signal-record, fork, `execve`,
+bring-up, migration -- 13 controls 6, documents 3, gates 2, review 2), up
+from 22. Stopped here for os-07 to schedule, as the brief asks when the
+work is well over 20.
+
+*seL4's matched set-up and this item (the consultant's advisory).* sel4rt
+runs its client with the FPU on, so each seL4 round trip pays two `FPEXC`
+read-modify-writes that a Ferrix round trip between two native programs no
+longer does. os-07's branch `os07/b2-sel4` (8abeb6ee0) makes the client's FPU
+a build choice, so that the board shows both seL4 rows -- client FPU on, as
+sel4bench ships it, and both threads `fpuDisabled` -- beside Ferrix's.
+
+**As built (2026-10-08, branch `os07/lazyvfp`).** As L1 to L12 say, with
+these to note for the code review:
+- *Where it lives.* `arch/armv7a/switch.rs`: the bit (`UserState::vfp`) and a
+  per-task count of VFP moves for C1 (`vfp_moves`, counted only on the VFP
+  paths); `VFP_ON`, the per-processor record, read by `vfp_on`; `turn_on`,
+  `scrub_off`, `load_own` (the switch's and the first use's one load),
+  `take_first_use`, `capture_vfp`, `load_user_fp` (`sigreturn`) and
+  `bring_up_vfp`. `trap.rs`: `point_at_undefined` (F-68) and the first use in
+  `ferrix_trap_entry`, which returns through the stub's `rfeia` and reports a
+  record that disagrees with the bit as a kernel fault (FX-9004's catalog
+  entry).
+- *Bring-up writes no record.* On a secondary the per-CPU register that
+  names it is not installed yet (the first boot of the branch panicked on
+  exactly that); every record starts off from its initialiser, which is
+  what bring-up leaves `EN` as. The bring-up check (L9) sets the record from
+  the register after running the sequence.
+- *Assembly.* `ferrix_fpu_disable`, `ferrix_fpu_exc` and the `isb` in
+  `ferrix_fpu_enable`: `switch.rs` 84 to 94 lines, the cap 1,638 to 1,648.
+- *The check* is a `lazy` section of `arch/armv7a/switch/check.rs`, run
+  before the `vectors` and `tls` cases so that each control fires with its
+  own text, on three fixtures assembled by GNU `as` (sources in their doc
+  comments; logs, objects and scripts in
+  `~/.local/share/ferrix/logs/os07-lazyvfp/` on nazuna). Boot line (armv7a
+  TCG, four cores and `--smp 2`): `lazy  1000 round trips between two
+  programs without VFP moved no VFP register and wrote no FPEXC; first uses
+  in ARM, Thumb and an IT block, SIGILL at its own address, zero behind a
+  clear FPEXC.EN at bring-up, handover and execve, the record through
+  signals, fork and execve; a program with VFP state resumed on another
+  processor kept it`. At `--smp 1` the last clause says the migration case
+  did not run.
+- *Controls* (each `gate.sh control` on an armv7a TCG boot, `--smp 2` for
+  C5, FIRED with the check's own text on the code tip): `os07lv-ctl-c1b`
+  (a switch to a task without the bit turns VFP on and scrubs every time:
+  "moved VFP state for programs that never used VFP"), `-c2a2` (no first use
+  taken in Thumb state: "a program's first VFP instruction ended it with
+  SIGILL"), `-c2b` (the retry two bytes early: "a Thumb program's first VFP
+  instruction did not run as written"), `-c2c` (the IT state cleared on the
+  retry: "... inside an IT block lost its IT state"), `-f68` (`main`'s stub:
+  "a Thumb program's SIGILL named the wrong instruction"), `-c3a` (the
+  handover's zeroing removed: "a program that never used VFP ran with another
+  program's VFP registers behind FPEXC.EN"), `-c3b` (`execve`'s: the same
+  "after an execve"), `-l9` (bring-up's: "bring-up left values in the VFP
+  registers behind FPEXC.EN"), `-l4c` (`execve` leaving the record's doubles:
+  "an execve'd image's first VFP instruction read the old program's VFP
+  state"), `-c4a` (`sigreturn` writing no record: "a signal frame's VFP state
+  did not reach a program that had not used VFP"), `-c4c` (`capture`
+  answering the initial state: "a signal frame or fork child did not carry
+  the VFP state of a program that had not used VFP"), `-c5c2` (every blocked
+  save partial: "a program with VFP state resumed on another processor did
+  not get its own VFP state"), and `-c4b3` on 005682925, the code review's
+  M1 (ledger 618: a task with the bit and no VFP move yet -- only a clone
+  child of a VFP user -- loaded with zeros at its first switch in: "a fork
+  child did not inherit its parent's VFP registers").
+- *First tries kept, which did not fire with the lazy check's text*, each
+  stopped by another check first: `os07lv-ctl-c1` (the restore taking every
+  task as a VFP user) by the first use's own I1 report, "a processor's
+  FPEXC.EN record disagreed with the running task's use of VFP"; `-c2a` (no
+  first use at all) and `-c4b` (`capture` leaving a VFP user's registers
+  out) by stage 3's signal check, "a handler installed without a restorer
+  did not return through sigreturn", whose program uses VFP across its
+  handler; `-c5c` (one record for every processor) by "illegal instruction",
+  the kernel's own VFP load with `EN` clear, which fails loudly and never
+  silently; `-c4b2` (a fork child given a fresh state) by stage 13's
+  `CLONE_INTO_CGROUP` case, too coarse a sabotage; `-c4b3` replaced them.
+- *Gates* on the code tip 1e6d3b601, each PASSED: armv7a at four cores and
+  `--smp 2`, x86-64 KVM and TCG, AArch64, `test-threads`, `test-shell` and
+  `test-ipc-equiv` on armv7a, and the release build (`os07lv-*`); `check`
+  in the branch's own worktree on nazuna. Rebased onto `main` for the
+  landing, `check`, `check-docs` and the armv7a boots ran again on the
+  landing hash.
+- *The saving* is the board's to measure, ABAB against `main` with §9.14
+  (os-07); os07-prof's ablation `prof.skip-vfp-UNSAFE`, on os07-prof's own
+  branch and not on this one, bounds it.
