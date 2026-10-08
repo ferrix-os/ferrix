@@ -108,7 +108,13 @@ fn card_initramfs(arch: Arch, archive: &[u8]) -> Result<Vec<u8>> {
         .map_err(|error| Error::new(format!("creating {}: {error}", scratch.display())))?;
     let (mut programs, mut before, mut after) = (0usize, 0usize, 0usize);
     let stripped = crate::initramfs::with_files_changed(archive, |name, data| {
-        if !data.starts_with(b"\x7fELF") {
+        // MEASUREMENT ONLY (os07/ferrix-posix): the board bench's programs go
+        // as B5 built them, and the busybox as Alpine built it: the bytes
+        // Linux's card carries.
+        if !data.starts_with(b"\x7fELF")
+            || name.contains("opt/posixbench/")
+            || name.trim_start_matches("./") == "bin/busybox"
+        {
             return Ok(None);
         }
         let whole = scratch.join("whole");
