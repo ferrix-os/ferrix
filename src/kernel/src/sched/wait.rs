@@ -39,7 +39,7 @@ const WAKE_BATCH: usize = 4;
 /// Whether [`LastLook`] holds preemption off. Always, in every build that
 /// lands: only the negative controls of L.sched.71 and L.sched.72 turn it
 /// off, to show their checks fire (F-69). False, it compiles to nothing.
-const LAST_LOOK_HOLDS: bool = true;
+const LAST_LOOK_HOLDS: bool = false;
 
 /// No switch from a wait's `set_state(BLOCKED)` to the end of its last look
 /// (F-69, `docs/roadmap/stage-05-tasks-scheduler.md`).
