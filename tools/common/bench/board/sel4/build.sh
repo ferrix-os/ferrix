@@ -6,9 +6,12 @@
 # configs:
 #   test-dk1     sel4test, debug, printing, stm32mp1, one core
 #   bench-dk1    sel4bench (IPC app with sel4rt first), release, stm32mp1, one core
+#   bench-dk1-nofpu  as bench-dk1 with sel4rt's client FPU off too (-DSel4rtClientFpu=OFF):
+#                seL4's best case beside the matched row, which keeps the client's FPU on
 #   bench-dk1-smp  as bench-dk1 with both cores (KernelMaxNumNodes 2): the second table
 #   test-qemu    sel4test, debug, qemu-arm-virt, Cortex-A15 in AArch32 (simulation tests)
 #   bench-qemu   sel4bench as bench-dk1, qemu-arm-virt, Cortex-A15
+#   bench-qemu-nofpu  bench-qemu with the client FPU off, as bench-dk1-nofpu
 #
 # Writes <root>/build/<config>/ (images/, config-summary.txt, config-diff.txt)
 # after ./fetch.sh has made <root>/src. config-diff.txt lists every
@@ -61,9 +64,11 @@ bench=(-DRELEASE=ON -DFASTPATH=ON -DSMP=OFF -DKernelMaxNumNodes=1 -DMCS=OFF
 case "$name" in
   test-dk1)      project=sel4test;  plat=("${dk1[@]}"); kplat=("${kdk1[@]}");     args=("${test[@]}") ;;
   bench-dk1)     project=sel4bench; plat=("${dk1[@]}"); kplat=("${kdk1[@]}");     args=("${bench[@]}") ;;
+  bench-dk1-nofpu) project=sel4bench; plat=("${dk1[@]}"); kplat=("${kdk1[@]}");   args=("${bench[@]}" -DSel4rtClientFpu=OFF) ;;
   bench-dk1-smp) project=sel4bench; plat=("${dk1[@]}"); kplat=("${kdk1[@]}");     args=("${bench[@]}" -DSMP=ON) ;;
   test-qemu)     project=sel4test;  plat=("${qemu[@]}"); kplat=("${kqemu[@]}");    args=("${test[@]}") ;;
   bench-qemu)    project=sel4bench; plat=("${qemu[@]}"); kplat=("${kqemu[@]}");    args=("${bench[@]}") ;;
+  bench-qemu-nofpu) project=sel4bench; plat=("${qemu[@]}"); kplat=("${kqemu[@]}"); args=("${bench[@]}" -DSel4rtClientFpu=OFF) ;;
   *) echo "unknown config $name" >&2; exit 2 ;;
 esac
 

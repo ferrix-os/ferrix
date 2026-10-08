@@ -5,10 +5,10 @@ on stm32mp1 is two cores, as on the STM32MP2.
 apps/ipc BSD-2-Clause, apps/sel4bench/src/main.c GPL-2.0-only.
 
 diff --git a/apps/ipc/CMakeLists.txt b/apps/ipc/CMakeLists.txt
-index 1884712..f3a3beb 100644
+index 1884712..759793f 100644
 --- a/apps/ipc/CMakeLists.txt
 +++ b/apps/ipc/CMakeLists.txt
-@@ -95,3 +95,9 @@ if(AppIpcBench)
+@@ -95,3 +95,17 @@ if(AppIpcBench)
  endif()
  
  general_regs_only(ipc)
@@ -18,6 +18,14 @@ index 1884712..f3a3beb 100644
 +set(Sel4rtSources "unknown" CACHE STRING "What sel4rt reports it was built from (build.sh sets it)")
 +target_compile_options(ipc PRIVATE -marm)
 +target_compile_definitions(ipc PRIVATE SEL4RT_SOURCES="${Sel4rtSources}")
++# ON: the client has the FPU and the server not, as on x86-64 (the matched
++# row). OFF: neither has it, seL4's best case for code that never touches VFP.
++option(Sel4rtClientFpu "sel4rt's client thread has the FPU (the matched row)" ON)
++if(Sel4rtClientFpu)
++    target_compile_definitions(ipc PRIVATE SEL4RT_CLIENT_FPU=1)
++else()
++    target_compile_definitions(ipc PRIVATE SEL4RT_CLIENT_FPU=0)
++endif()
 diff --git a/apps/ipc/src/main.c b/apps/ipc/src/main.c
 index e29e4b0..a022973 100644
 --- a/apps/ipc/src/main.c
@@ -61,10 +69,10 @@ index e29e4b0..a022973 100644
      ccnt_t start, end;
 diff --git a/apps/ipc/src/sel4rt.c b/apps/ipc/src/sel4rt.c
 new file mode 100644
-index 0000000..09e1c1c
+index 0000000..c2caa12
 --- /dev/null
 +++ b/apps/ipc/src/sel4rt.c
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,323 @@
 +/*
 + * Copyright 2026, Sebastian Dauenhauer
 + *
@@ -123,6 +131,14 @@ index 0000000..09e1c1c
 +
 +#ifndef SEL4RT_SOURCES
 +#define SEL4RT_SOURCES "unknown"
++#endif
++/* 1: the client has the FPU, as on x86-64 (the matched row). 0: neither
++ * thread has it (seL4_TCBFlag_fpuDisabled on both), seL4's best case for a
++ * user that never touches VFP, as Ferrix's bench programs never do: the
++ * kernel's lazyFPURestore then leaves FPEXC alone at every switch. CMake's
++ * Sel4rtClientFpu sets it. */
++#ifndef SEL4RT_CLIENT_FPU
++#define SEL4RT_CLIENT_FPU 1
 +#endif
 +
 +#define RT_PROG "sel4rt"
@@ -318,14 +334,14 @@ index 0000000..09e1c1c
 +{
 +    printf(RT_PROG " build sources=%s platform=%s cpu=%s kernel=%s fastpath=%d nodes=%d"
 +           " mcs=%d hyp=%d printing=%d pmu_user=%d vcnt_user=%d tick_ms=%d timeslice=%d"
-+           " stack=%d isa=%s\n",
++           " stack=%d isa=%s client_fpu=%s\n",
 +           SEL4RT_SOURCES, rt_platform(), rt_cpu(),
 +           config_set(CONFIG_DEBUG_BUILD) ? "debug" : "release",
 +           config_set(CONFIG_FASTPATH), CONFIG_MAX_NUM_NODES,
 +           config_set(CONFIG_KERNEL_MCS), config_set(CONFIG_ARM_HYPERVISOR_SUPPORT),
 +           config_set(CONFIG_PRINTING), config_set(CONFIG_EXPORT_PMU_USER),
 +           config_set(CONFIG_EXPORT_VCNT_USER), CONFIG_TIMER_TICK_MS, CONFIG_TIME_SLICE,
-+           CONFIG_SEL4UTILS_STACK_SIZE, "arm");
++           CONFIG_SEL4UTILS_STACK_SIZE, "arm", SEL4RT_CLIENT_FPU ? "on" : "off");
 +    printf(RT_PROG " sctlr unavailable: user mode cannot read SCTLR or ACTLR; the elfloader"
 +           " prints ACTLR and SCTLR as it was entered, a debug kernel prints both at boot\n");
 +    uint32_t pmuserenr = bb_pmuserenr();
@@ -357,8 +373,8 @@ index 0000000..09e1c1c
 +    seL4_CPtr ctcb = client->thread.tcb.cptr;
 +    seL4_CPtr stcb = server->thread.tcb.cptr;
 +    /* As on x86-64: the client with the FPU, the server without, both at
-+     * one priority. */
-+    configure_fpu(ctcb, true);
++     * one priority. With SEL4RT_CLIENT_FPU 0, the client without it too. */
++    configure_fpu(ctcb, SEL4RT_CLIENT_FPU != 0);
 +    configure_fpu(stcb, false);
 +    int error = seL4_TCB_SetPriority(ctcb, auth, seL4_MaxPrio - 1);
 +    ZF_LOGF_IF(error, "sel4rt: client priority");

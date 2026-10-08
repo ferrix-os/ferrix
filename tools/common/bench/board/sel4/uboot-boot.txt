@@ -25,6 +25,16 @@ icache off
 bootelf -p 0xc2000000
 go 0xc0147000
 
+# sel4bench-nofpu: bench-dk1 with sel4rt's client FPU off too (client_fpu=off
+# in its build line), seL4's best case beside the matched row above. The same
+# segment 0xc0140000..0xc0208047 and entry 0xc0147000 as sel4bench.elf
+# (readelf on the image), and the same reset after `board-bench end sel4rt`.
+load mmc 0:4 0xc2000000 bench/sel4/sel4bench-nofpu.elf
+dcache off
+icache off
+bootelf -p 0xc2000000
+go 0xc0147000
+
 # sel4test, debug, one core: 125 tests, each reported, then "Test suite passed"
 # or "Test suite failed" and "All is well in the universe" on success. It does
 # not reset the board: the kernel halts. Segment 0xc0490000..0xc07dd047, entry

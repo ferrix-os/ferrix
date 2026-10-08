@@ -51,7 +51,7 @@ mkdir -p ~/.local/share/ferrix/board-bench/sel4/scripts   # copy common/ and sel
 cd ~/.local/share/ferrix/board-bench/sel4
 python3 -m venv venv && venv/bin/pip install -r scripts/sel4/requirements.txt
 bash scripts/sel4/fetch.sh
-bash scripts/sel4/build.sh bench-dk1     # or test-dk1, bench-dk1-smp, bench-qemu, test-qemu
+bash scripts/sel4/build.sh bench-dk1     # or bench-dk1-nofpu, test-dk1, bench-dk1-smp, bench-qemu(-nofpu), test-qemu
 SECURE=on bash scripts/sel4/run-qemu.sh bench-qemu smoke
 ```
 
@@ -115,6 +115,7 @@ no mkimage header to keep in step with the build.
 | Image (on bootfs) | Size | Load (file) | Segment (physical) | Entry |
 |---|---|---|---|---|
 | `bench/sel4/sel4bench.elf` | 752,984 B | 0xC2000000 | 0xC0140000-0xC0208047 | 0xC0147000 |
+| `bench/sel4/sel4bench-nofpu.elf` | 752,984 B | 0xC2000000 | 0xC0140000-0xC0208047 | 0xC0147000 |
 | `bench/sel4/sel4test.elf` | 3,511,588 B | 0xC2000000 | 0xC0490000-0xC07DD047 | 0xC0498000 |
 
 The elfloader unpacks the kernel to 0xC0000000, and the root task just above
@@ -147,10 +148,26 @@ against the project (sel4bench or sel4test) given only the platform.
     cannot read; a trapped access would end the run. The port carries that
     ltimer: `EXTRA="-DKernelArmExportPCNTUser=ON -DKernelArmExportPTMRUser=ON"`
     builds it.
+- **bench-dk1-nofpu** (the card's `sel4bench-nofpu.elf`): bench-dk1 with
+  `-DSel4rtClientFpu=OFF`, so neither sel4rt thread has the FPU. It is a
+  second, reported row beside the matched one; see *The client-FPU-off row*
+  below. Its one difference from bench-dk1 is `Sel4rtClientFpu ON -> OFF`
+  (`configs/bench-dk1-nofpu.txt`).
 - **bench-dk1-smp:** bench-dk1 with both cores (`KernelMaxNumNodes 2`), for the
   second table. It builds and is not on the card yet.
 - **bench-qemu, test-qemu:** the same on `qemu-arm-virt` with a Cortex-A15 in
   AArch32, for the smoke test. sel4test runs its simulation set there.
+  `bench-qemu-nofpu` is bench-qemu with the client FPU off.
+
+**The card's `sel4bench.elf` predates the client-FPU switch.** It was built
+from the patches as of bf916aff2 (`sources=...+patches-a1eeb694df47`), and that
+build is reproducible: rebuilt from those patches on 2026-10-08, it came out
+byte-identical (SHA-256 990b1eee...). The patches with the switch build a
+bench-dk1 that differs (`out/sel4bench-dk1-patches-3c7d1fe6.elf`, 7746ad92...,
+the same size and entry). The sources string in its build line names the new
+patches hash, and the line gains `client_fpu=on`, which moves the root task's
+code and data. What it runs is the same: `configure_fpu(ctcb, true)` with the
+switch at its default. The card keeps 990b1eee... for the matched row.
 
 ## sel4rt, the matched round trip
 
@@ -158,7 +175,9 @@ against the project (sel4bench or sel4test) given only the platform.
 `sel4bench-ferrix-rt.patch`. It runs first in sel4bench's IPC app.
 - **The two processes.** A client and a server, each a process of its own (two
   address spaces), both at `seL4_MaxPrio - 1` on one core. As on x86-64, the
-  client has the FPU and the server does not.
+  client has the FPU and the server does not (`client_fpu=on`). The
+  `bench-*-nofpu` builds take it from the client too; see *The client-FPU-off
+  row*.
 - **The round trip.** `seL4_CallWithMRs` with one word in a register, answered
   by `seL4_ReplyRecvWithMRs`. Every reply is checked for the echoed word,
   outside the timed part.
@@ -185,6 +204,53 @@ against the project (sel4bench or sel4test) given only the platform.
     `WDT_STM32MP=n`. Turning it on would be a clock write.
 - **Arm state.** The IPC app is built `-marm`, and `sel4rt.c` refuses to build
   in Thumb. All of seL4's own C is compiled with `-march=armv7-a -marm`.
+
+### The client-FPU-off row
+
+**The matched row stays client-FPU-on.** The x86-64 runs give the client the
+FPU and not the server, and `sel4bench.elf` does the same. That is the row the
+comparison with Ferrix uses.
+
+**Why a second row.** seL4 at c6ce4d2a decides FPU ownership per TCB flag.
+`lazyFPURestore` runs at every switch, the ARMv7 fast path included:
+- for a thread with `seL4_TCBFlag_fpuDisabled`, `disableFpu` clears FPEXC.EN;
+- for the thread that owns the FPU, `enableFpu` sets it.
+
+Each is a VMRS and a VMSR of FPEXC. With the client on and the server off, the
+round trip turns the FPU on and off once each. Ferrix's bench programs never
+touch VFP. A seL4 user whose code is the same would give both threads the
+flag, so seL4's best case is a row of its own.
+
+**How it is built.** The CMake option `Sel4rtClientFpu` (default ON) becomes
+`SEL4RT_CLIENT_FPU`. With it OFF, `configure_fpu(ctcb, false)` runs as well as
+`configure_fpu(stcb, false)`. The build line says which it is, as
+`client_fpu=on` or `client_fpu=off`. `build.sh bench-dk1-nofpu` and
+`bench-qemu-nofpu` build it. Neither thread uses VFP: the IPC app is
+`general_regs_only` and soft-float.
+
+**What it does not remove (argued from the source).** `disableFpu` still runs
+at each switch. It reads FPEXC and writes it back with EN clear, even when EN
+is already clear. So the off row makes as many FPEXC accesses as the matched
+row. What it saves:
+- the owner check, `nativeThreadUsingFPU`;
+- turning EN on and off: each write leaves EN as it was.
+
+Whether a VMSR that leaves FPEXC unchanged costs less on the Cortex-A7 than
+one that toggles EN, only the board can tell.
+
+**QEMU (2026-10-08, nazuna, QEMU 9.2.4, `SECURE=on ICOUNT=1`).** With
+`-icount shift=0`, the cycle counter follows the instructions. Measured p50,
+every sample the same:
+
+| Series | client_fpu=on | client_fpu=off |
+|---|---|---|
+| `call` | 365 | 362 |
+| `call.after.w256` | 1392 | 1389 |
+| `base.w256` | 1032 | 1032 |
+
+That is 3 instructions fewer a round trip, the owner check's. Under TCG
+(no icount), `call` p50 was 6049 ns on and 6179 ns off. TCG timings say
+nothing about either the board or the FPEXC cost.
 
 ## QEMU smoke (2026-10-08, nazuna, QEMU 9.2.4)
 
