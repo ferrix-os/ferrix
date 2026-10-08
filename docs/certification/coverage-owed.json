@@ -10,14 +10,6 @@
   ],
   "owed": [
   {
-   "landing": "os07-lazyvfp, ARMv7-A lazy VFP: FPEXC.EN clear for a task that has not used VFP, its first use, F-68's Thumb pc (docs/OPAQUE-KERNEL.md §9.15; branch os07/lazyvfp; os07-lazyvfp's consultant, design verdict 2026-10-08 ledger line 606, L1-L12)",
-   "architectures": [
-    "armv7a"
-   ],
-   "dropped": "new code; no coverage run has measured it yet.",
-   "what": "arch/armv7a/switch.rs capture_vfp, load_user_fp, vfp_on, turn_on, scrub_off, bring_up_vfp, load_own, take_first_use and the lazy branches of save_user_state, restore_user_state and reset_user_state, trap.rs point_at_undefined and ferrix_trap_entry's first use: measure them on the ARMv7-A coverage run (stage 9's lazy line reaches them). Argued, not measured: the D16 scrub and load (bring_up_vfp's 16-double branch and every count != 32 load) and every `count == 0` branch, unreachable in the reference configurations (QEMU's cortex-a7 and the DK1's Cortex-A7 are VFPv4-D32) -- other-configuration rows, no BACKLOG row; vfp_on's register fallback before a processor's per-CPU register is installed, reached by no user task; take_first_use's Disagree arm and ferrix_trap_entry's fault report for it, and capture_vfp's and load_user_fp's fall-back to the record for a task with the bit on a processor whose record is off, each unreachable while I1 holds (the record and the mark are written together, masked) -- defensive rows, argued."
-  },
-  {
    "landing": "os07-ustate, ARMv7-A user state: 3a's VFP reset ported, TPIDRURO kept in the task, TPIDRURW switched (docs/OPAQUE-KERNEL.md §9.14; branch os07/ustate; os07-ustate's consultant, design verdict 2026-10-08 ledger line 582, R1-R9)",
    "architectures": [
     "armv7a"

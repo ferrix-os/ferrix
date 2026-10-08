@@ -139,17 +139,6 @@ package FerrixRoadmap {
                  * 1-9 and ran stage 7's script, its exit line whole once the
                  * console drained before power-off. */
         }
-        #implemented requirement lazyVfp {
-            doc /* ARMv7-A's user state for the DK1 IPC matrix
-                 * (docs/OPAQUE-KERNEL.md §9.14, §9.15): TPIDRURO kept in the
-                 * task and TPIDRURW switched (F-66), the blocking native calls'
-                 * VFP reset, and since §9.15 FPEXC.EN clear for a program that
-                 * has never used VFP, so that two native programs trade a core
-                 * with no VFP work at all; its first VFP instruction is taken
-                 * and re-run, and the register file is zero whenever EN is
-                 * clear (L.armv7a.21-26, F-68). Stage 9's lazy, vectors and
-                 * tls lines; the board's ABAB figure is os-07's. */
-        }
         requirement ed1Ev1Boards { @deferred { reason = "1 GiB boards put RAM's identity range on the direct map; plan_identity_map refuses, so they need a trampoline page."; } }
         requirement hardwareBootTest { @deferred { reason = "Automated hardware boot testing beyond watch-serial."; } }
     }

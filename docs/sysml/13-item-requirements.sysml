@@ -531,19 +531,13 @@ package FerrixItemRequirements {
                 the running task's own whenever it runs in user mode, inherited by
                 a fork child and reset by an execve, except that the vector
                 registers of a task resumed from a blocking native call may be the
-                initial state instead (H.SCHED.12). Every VFP register and FPSCR a
-                program can read in user mode shall be its own; on ARMv7-A, while
-                FPEXC.EN is clear for a task that has not used VFP, its VFP state
-                is the one its record holds, which its first VFP instruction
-                loads.";
+                initial state instead (H.SCHED.12).";
             attribute :>> criterion = "Two programs pinned to one processor, each
                 with its own FS and GS bases and XMM, MXCSR and x87 control values
                 on x86-64, or its own TPIDRURO and TPIDRURW on ARMv7-A, read back
                 their own across N yields: 0 mismatches; a fork child reads its
                 parent's, and an execve'd image the reset values (the ARMv7-A `tls`
-                line); on ARMv7-A a program's first VFP instruction reads its own
-                record, never another program's registers, after a handover, a
-                signal frame, a fork and an execve (the `lazy` line).";
+                line).";
             attribute :>> parent = ("O.ISOLATE", "G.1");
         }
         requirement <'H.SCHED.9'> vdsoClocksAnswerAsTheCall : ItemHighLevel {
