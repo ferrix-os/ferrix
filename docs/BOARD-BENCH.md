@@ -46,6 +46,7 @@ this plan.
 | Memory | The same device tree reserved regions (OP-TEE's) and the same RAM size for every kernel. |
 | Caches and predictors | Each kernel's `SCTLR` and `ACTLR` are printed once per boot, to show the same caches and coherency. The Cortex-A7 is not affected by Spectre v2 or BHB, so no kernel needs a predictor flush; each kernel's setting is recorded anyway. |
 | Bench code | One C source per benchmark with a thin layer per OS, built with the same compiler and flags. Linux and Ferrix run the identical static binary for the POSIX benchmarks. |
+| Float ABI | Not equal, and recorded: seL4's user code is soft-float (`arm-none-eabi`), and so are Ferrix's native programs (`armv7a-none-eabi`); Linux's `lbench` and the level-4 binaries are hard-float. No bench does floating point. What differs is what each kernel saves at a switch: Ferrix saves VFP state eagerly for every task (OPAQUE-KERNEL §9.14), seL4 lazily, only for a task that has used the FPU. That cost is Ferrix's own and is counted, not normalised away. |
 | Counters | The bench reads `PMCCNTR` (cycles) and the instructions-retired event itself, around every sample. Each kernel sets `PMUSERENR.EN` for it: seL4 through `KernelArmExportPMUUser`, Linux through a small out-of-tree module, Ferrix through a measurement-only switch. The system counter's 24 MHz ticks are about 42 ns, too coarse to time a round trip with alone. |
 
 ## What is measured
