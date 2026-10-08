@@ -102,6 +102,12 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "unsafe audit",
         &[&["tools/common/check/check-unsafe-audit.py"]],
     ),
+    // ARMv7-A's ASID register sequences and F-67's remap order: orders no
+    // boot under QEMU can show (docs/OPAQUE-KERNEL.md §9.13).
+    (
+        "ARMv7-A ASID orders",
+        &[&["tools/common/check/check-armv7a-asid.py"]],
+    ),
     (
         "panic audit",
         &[&["tools/common/check/check-panic-audit.py"]],
