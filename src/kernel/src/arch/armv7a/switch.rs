@@ -381,16 +381,23 @@ pub(super) unsafe fn fpu_features1() -> u32 {
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor.
 pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
-    state.thread_pointer = super::cpu::read_tpidruro();
+    use crate::prof::{Ablation, ablate};
+    // MEASUREMENT ONLY (os07-prof): the ablations, inside a window only.
+    if !ablate(Ablation::SkipTls) && !ablate(Ablation::SkipTlsRead) {
+        state.thread_pointer = super::cpu::read_tpidruro();
+    }
+    crate::prof::stamp(crate::prof::Point::STls);
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`
     // structure, which is the two words the assembly writes.
     unsafe { ferrix_user_banked_save(core::ptr::from_mut(&mut state.user_sp)) };
+    crate::prof::stamp(crate::prof::Point::SBanked);
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
+    if doubles != 0 && !ablate(Ablation::SkipVfp) {
         // SAFETY: (CONTEXT) the FPU exists and is enabled, and `state` is a live,
         // exclusively borrowed `UserState` whose layout is asserted above.
         unsafe { ferrix_user_fpu_save(core::ptr::from_mut(state), u32::from(doubles == 32)) };
     }
+    crate::prof::stamp(crate::prof::Point::Saved);
 }
 
 /// Load `state` onto this processor for the task about to run.
@@ -402,16 +409,23 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, _blocked: bool) {
 ///
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to.
 pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
+    use crate::prof::{Ablation, ablate};
     let _ = entry_stack;
-    super::cpu::write_tpidruro(state.thread_pointer);
+    // MEASUREMENT ONLY (os07-prof): the ablations, inside a window only.
+    if !ablate(Ablation::SkipTls) {
+        super::cpu::write_tpidruro(state.thread_pointer);
+    }
+    crate::prof::stamp(crate::prof::Point::RTls);
     // SAFETY: (CONTEXT) as in `save_user_state`, read rather than written.
     unsafe { ferrix_user_banked_restore(core::ptr::from_ref(&state.user_sp)) };
+    crate::prof::stamp(crate::prof::Point::RBanked);
     let doubles = super::cpu::user_fpu_doubles();
-    if doubles != 0 {
+    if doubles != 0 && !ablate(Ablation::SkipVfp) {
         // SAFETY: (CONTEXT) as above; loading user registers cannot affect the kernel,
         // which uses none of them.
         unsafe { ferrix_user_fpu_restore(core::ptr::from_ref(state), u32::from(doubles == 32)) };
     }
+    crate::prof::stamp(crate::prof::Point::Restored);
 }
 
 /// Set USR mode's banked stack pointer, as `execve` does for the new program.

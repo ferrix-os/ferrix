@@ -136,6 +136,7 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
             if let Err(why) = arch::system_call(frame) {
                 fatal(frame, why, &crate::panic::catalog::SYSTEM_CALL_TRAP);
             }
+            crate::prof::stamp(crate::prof::Point::Stored);
         }
         Trap::IllegalInstruction => fatal(
             frame,
@@ -485,6 +486,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
     if regs.is_some() {
         crate::sched::call_entered();
     }
+    crate::prof::stamp(crate::prof::Point::ECallEntered);
     let outcome = match SYSCALL_ENTRY.get() {
         Some(entry) => entry(args, regs),
         None => Outcome::Return(Errno::ENOSYS.as_return_value()),
@@ -496,6 +498,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
         crate::sched::throttle_current(must_attend);
         crate::sched::call_left();
     }
+    crate::prof::stamp(crate::prof::Point::Left);
     outcome
 }
 

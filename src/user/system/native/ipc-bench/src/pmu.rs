@@ -53,6 +53,42 @@ const TOUCH_BYTES: usize = 256 * 4096;
 /// board resets (`ferrix.onexit=reset`).
 pub(crate) const END_LINE: &str = "board-bench end ipc-bench";
 
+/// MEASUREMENT ONLY (os07-prof): the timing build's own call (the kernel's
+/// `prof::CALL`), answered only by that build's ARMv7-A kernel.
+const PROF_CALL: usize = 0x1FF0;
+/// Open the profile's window on a slot.
+const PROF_START: usize = 1;
+/// Close it.
+const PROF_STOP: usize = 2;
+/// Print the kernel's span table.
+const PROF_PRINT: usize = 3;
+/// The slot of the `call` series.
+pub(crate) const PROF_CALL_SLOT: usize = 0;
+/// The slot of the `domain-call` series.
+pub(crate) const PROF_DOMAIN_SLOT: usize = 1;
+
+/// The profile call; what a kernel without it answers is ignored.
+fn prof(op: usize, argument: usize) {
+    // SAFETY: the call takes no pointer.
+    let _ = unsafe { linux::call(PROF_CALL, [op, argument, 0, 0, 0, 0]) };
+}
+
+/// MEASUREMENT ONLY (os07-prof): open the kernel profile's window on
+/// `slot`, around one series.
+pub(crate) fn prof_start(slot: usize) {
+    prof(PROF_START, slot);
+}
+
+/// MEASUREMENT ONLY (os07-prof): close the window.
+pub(crate) fn prof_stop() {
+    prof(PROF_STOP, 0);
+}
+
+/// MEASUREMENT ONLY (os07-prof): have the kernel print its span table.
+pub(crate) fn prof_print() {
+    prof(PROF_PRINT, 0);
+}
+
 /// The kernel option that asks for this mode.
 const OPTION: &[u8] = b"ipc-bench.pmu=";
 /// `/proc/cmdline`.

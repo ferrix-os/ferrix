@@ -53,6 +53,8 @@ mod platform {
     }
 }
 mod power;
+/// MEASUREMENT ONLY (os07-prof): the ARMv7-A timing build.
+mod prof;
 mod random;
 mod sched;
 mod service_check;

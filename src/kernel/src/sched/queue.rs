@@ -279,6 +279,7 @@ impl CpuQueue {
     /// Linux was young.
     pub(crate) fn account_in(&mut self, now: u64, user: bool) {
         self.account_load(now);
+        crate::prof::stamp_soft(crate::prof::Point::ALoad);
         let delta = now.saturating_sub(self.exec_start);
         self.exec_start = now;
         if delta == 0 {
@@ -287,7 +288,10 @@ impl CpuQueue {
         if let Some(task) = self.fair.current() {
             self.stats.busy_ns += delta;
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
-            crate::object::quota::charge_cpu(task.group(), now, delta, user);
+            // MEASUREMENT ONLY (os07-prof): `prof.skip-cpu-charge-UNSAFE`.
+            if !crate::prof::ablate(crate::prof::Ablation::SkipCpuCharge) {
+                crate::object::quota::charge_cpu(task.group(), now, delta, user);
+            }
         } else {
             self.stats.idle_ns += delta;
         }
@@ -304,6 +308,7 @@ impl CpuQueue {
                 self.stats.overrun_total = self.stats.overrun_total.saturating_add(overrun);
             }
         }
+        crate::prof::stamp_soft(crate::prof::Point::ACurr);
         self.follow_group_share();
         if self.stats.measuring {
             self.measure();

@@ -83,6 +83,8 @@ fn main(bootstrap: Bootstrap) -> i32 {
             };
             // MEASUREMENT ONLY: the board's driver waits for this line.
             if pmu {
+                // os07-prof: the kernel's span table, before the end line.
+                pmu::prof_print();
                 say(format_args!("{}", pmu::END_LINE));
             }
             status
@@ -322,6 +324,10 @@ fn pmu_client(job: &Job<Kernel>, image: &Vmo<Kernel>) -> Result<(), i32> {
     pmu::settle();
     let measured = pmu_launcher_series(job, image, &mut text);
     text.print();
+    // MEASUREMENT ONLY (os07-prof): the `call` window's table now, before
+    // the settle, so the console is quiet for the domain run and the table
+    // is out even when that run never answers.
+    pmu::prof_print();
     let hz = measured?;
     pmu::settle();
     pmu_domain_run(job, image, hz)
@@ -356,7 +362,11 @@ fn pmu_launcher_series(
     text.series("trip", &mut series, hz);
 
     mine.write(FAST).map_err(|_| 23)?;
-    pmu::run(&mut series, || call_trip(&mine, &message))?;
+    // MEASUREMENT ONLY (os07-prof): the kernel profile's window.
+    pmu::prof_start(pmu::PROF_CALL_SLOT);
+    let timed = pmu::run(&mut series, || call_trip(&mine, &message));
+    pmu::prof_stop();
+    timed?;
     text.series("call", &mut series, hz);
     Ok(hz)
 }
@@ -433,7 +443,11 @@ fn pmu_domain_series(server: &Channel<Kernel>, hz: u64, text: &mut pmu::Text) ->
     server.write(FAST).map_err(|_| 40)?;
     let mut series = pmu::Series::new().ok_or(61)?;
     let buffer = pmu::touch_buffer().ok_or(62)?;
-    pmu::run(&mut series, || call_trip(server, &message))?;
+    // MEASUREMENT ONLY (os07-prof): the kernel profile's window.
+    pmu::prof_start(pmu::PROF_DOMAIN_SLOT);
+    let timed = pmu::run(&mut series, || call_trip(server, &message));
+    pmu::prof_stop();
+    timed?;
     text.series("domain-call", &mut series, hz);
     for (width, base, after) in pmu::SWEEP {
         let touch = || {

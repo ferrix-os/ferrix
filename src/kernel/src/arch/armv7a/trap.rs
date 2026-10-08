@@ -434,6 +434,16 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
         return Err("a system call from SVC mode");
     }
     let [r0, r1, r2, r3, r4, r5, _, r7, ..] = frame.r;
+    // MEASUREMENT ONLY (os07-prof): the timing build's own call, answered
+    // before anything else sees it.
+    if r7 == crate::prof::CALL {
+        let answer = crate::prof::control(r0, r1);
+        if let Some(result) = frame.r.first_mut() {
+            *result = answer;
+        }
+        return Ok(());
+    }
+    crate::prof::stamp(crate::prof::Point::EClassify);
     let args = SyscallArgs {
         abi: crate::trap::Abi::Native,
         number: r7 as usize,
@@ -451,7 +461,9 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
 
     // The registered filter looks at the call first, before `set_tls` and the
     // signal returns are answered below (`docs/SECCOMP.md` §3.3).
-    let outcome = match crate::trap::filter_system_call(&args) {
+    let filtered = crate::trap::filter_system_call(&args);
+    crate::prof::stamp(crate::prof::Point::EFilter);
+    let outcome = match filtered {
         Some(outcome) => outcome,
         None => {
             // `set_tls` writes a coprocessor register, which is a fact about
@@ -485,6 +497,7 @@ pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
 
             let regs = UserRegs(*frame);
             super::enable_interrupts();
+            crate::prof::stamp(crate::prof::Point::EIrqOn);
             let outcome = dispatch(&args, Some(&regs));
             super::disable_interrupts();
             outcome
@@ -535,7 +548,22 @@ unsafe extern "C" {
 /// Not called from Rust — the `bl` in the assembly above is its only caller.
 #[unsafe(no_mangle)]
 extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
+    // MEASUREMENT ONLY (os07-prof): a direction of 0x1013 opens and closes
+    // here; any other exception drops the one it falls in.
+    let profiled = frame.kind == KIND_SVC
+        && frame.r.get(7).copied() == Some(ferrix_native_abi::nr::CHANNEL_WRITE_READ as u32);
+    if profiled {
+        crate::prof::stamp(crate::prof::Point::Entry);
+    } else if frame.kind != KIND_SVC {
+        crate::prof::interrupted();
+    }
     crate::trap::dispatch(frame);
+    if profiled {
+        if crate::prof::ablate(crate::prof::Ablation::ExtraFlush) {
+            cpu::flush_user_tlb();
+        }
+        crate::prof::stamp(crate::prof::Point::Exit);
+    }
 }
 
 /// Fault status: the long-descriptor format's status field, bits 5:0. The

@@ -9,6 +9,8 @@
 //! coprocessor 15 rather than a system register.
 
 mod bench_pmu;
+/// MEASUREMENT ONLY (os07-prof): the registers `crate::prof` reads.
+pub(crate) mod prof_pmu;
 mod check;
 pub(crate) mod console;
 mod cpu;
@@ -1191,10 +1193,15 @@ pub(crate) fn prepare_user_root(root: u64) {
 pub(crate) unsafe fn install_user_root(root: u64) {
     // SAFETY: (TRANSLATE) the caller guarantees the tables are live.
     unsafe { cpu::write_ttbr0(root) };
+    crate::prof::stamp(crate::prof::Point::Ttbr0);
     cpu::flush_user_tlb();
+    crate::prof::stamp(crate::prof::Point::Tlbi);
     // The branch predictor invalidated, if this is another program's space
     // than the one this core last ran and the core is one that needs it.
-    crate::arch::speculation::entered_space(root);
+    if !crate::prof::ablate(crate::prof::Ablation::SkipSpec) {
+        crate::arch::speculation::entered_space(root);
+    }
+    crate::prof::stamp(crate::prof::Point::Barrier);
 }
 
 /// Stop translating the lower half at all.
@@ -1372,6 +1379,8 @@ pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'st
     // MEASUREMENT ONLY (os4b/b3-ferrix): `ipc-bench.pmu`, read before
     // `timer::init` gives the boot processor its counter access.
     bench_pmu::read_option(view, &tree);
+    // MEASUREMENT ONLY (os07-prof): `prof=off` and the ablations.
+    crate::prof::read_options(view, tree.bootargs());
     timer::init(&tree)?;
     gicv2::enable(timer::irq());
     // And the inter-processor interrupt, whose enable bit is this core's own:
