@@ -399,6 +399,86 @@ inside the look, used to be able to wait for room in the console ring
 there. That was a nested wait. Inside the look, `may_block` is false, so
 it now writes synchronously instead.
 
+**The hold made cheaper (F-69 follow-up, os07-hold, L.sched.71-72).** What
+the hold cost, measured on x86-64 under KVM on nazuna by the long bench with
+`perf` on the vCPU (fast path off, core 11 at `performance`; logs under
+`logs/os07-hold/`). Instructions per round trip:
+
+* main before F-69 (f42c1ede0): 10,300;
+* F-69 (d884add58), two boots: 10,442 and 10,443;
+* F-69 with `LAST_LOOK_HOLDS` false and its two cases skipped: 10,299.
+
+So the whole difference is the hold: about 142 instructions a trip, two
+blocking waits each paying a raise of about 14 and a lowering of about 55.
+The lowering is `preempt_enable`'s call: the count comes back to zero and
+the deferred decision looks for a request. It loads the scheduler's start,
+the processor's record and the request flags, and reads the interrupt flag.
+Every blocking wait of a round trip makes that look and finds nothing. On
+ARMv7-A (the release build, read from its object code; argued, not run) a
+blocking wait pays about 84 instructions for the hold, four of them
+`dmb ish` and two interrupt mask pairs.
+
+**Cycles and nanoseconds cannot separate the hold from code layout here.**
+The same base with 64 bytes of nops that never run, placed in `wait_sliced`,
+read +131 cycles a trip; with 256 bytes it read -112. Its instructions moved
+by 11. So layout alone moves a build by about ±120 cycles (±30 ns) a trip.
+F-69's +236 to +279 cycles are its 142 instructions plus a layout shift, and
+the profile puts the cycles on one locked decrement after `receive_words`
+returns. Instructions per trip decide this change, as the
+optimize-ipc-round-trip skill says they do for small ones; an ABAB in ns is
+recorded beside them, not as the verdict.
+
+The design, two changes and nothing else:
+
+1. **A wait that blocks lets the hold go inside the switch's own mask, and
+   makes no decision of its own** (`LastLook::block`, `block_ending_hold`).
+   The look did not find the condition, so the task is listed or filed. The
+   switch it makes next is the decision, made by `choose_next` with every
+   task's state as it stands then. A request an interrupt left pending stays
+   set for the next way out, as a request did across `block` before F-69.
+   At most one more decision follows, at `call_left`, and finds nothing.
+   The count is lowered with interrupts masked, before
+   `require_preemption_on`. An enable that finds nothing to lower stops the
+   machine with FX-0503, as `preempt_enable`'s does. From the end of the look
+   to the switch nothing can come in between now. Under F-69 an interrupt's
+   exit could switch the task there, as its block, which was correct but is
+   no longer possible.
+2. **The two `WaitQueue` waits raise the count without noting a site**
+   (`LastLook::hold_listed`, `preempt_disable_site_free`): one add to the
+   processor's word. Each wait has just listed its task under its queue's
+   lock, and `SpinLock::lock` is `#[track_caller]`, so the site recorded is
+   the wait's own line in `wait.rs`. That is what FX-0503 names if `ready`
+   blocks before taking a lock of its own, as `hold`'s site would have.
+   `park_for_reply` keeps `hold`, with its site, because no lock comes just
+   before it.
+
+What stays as F-69 made it:
+
+* the window: raised before `BLOCKED`, held through `ready`;
+* the branch that finds its condition: its drop lowers the count and makes
+  the decision (L.sched.7's promise, which stage 5's case checks);
+* every caller of `schedule_from` and `choose_next`, and the direct switch;
+* the `ready` rule.
+
+The count is still never raised across a switch.
+
+**Weighed and not taken.** Folding the raise into `set_state`'s own mask,
+the second option F-69's author named, saves nothing on x86-64: the raise is
+one `xadd` without `lock`, and `set_state` masks anyway. On ARMv7-A it would
+save one mask pair a wait, but only through a masked per-CPU add in
+`arch::percpu`, new architecture surface for about six instructions. The
+same holds for the nested mask `block_ending_hold`'s lowering makes on Arm.
+Both are follow-ups, to be measured on the board. A plain `add` and `sub`
+in place of the `xadd` (which Zen 5 runs as microcode) read no better.
+
+Measured on a prototype of this design (measurement tree, never landed):
+10,347 instructions a trip. That is 47 above main before F-69 and 96 below
+F-69: two thirds of the hold's instructions. Its cycles, 7,641, are inside
+the layout band. On ARMv7-A, from the object code (argued): a blocking wait
+pays about 37 instructions for the hold where F-69 pays 84, with no
+`dmb ish` and one interrupt mask pair fewer. A round trip pays two such
+waits. The DK1 has no fast path, so it pays them on every trip.
+
 **Still missing against Linux**, none of it on stage 6's path: group scheduling
 and bandwidth control, which are stage 13; the real-time classes, which are
 stage 14; and NUMA and capacity awareness, which need a topology this kernel
