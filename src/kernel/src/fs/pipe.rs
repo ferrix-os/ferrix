@@ -213,15 +213,49 @@ impl End {
 
     /// Sleep until a read would not wait. `EINTR` if the caller is killed
     /// first, which is what ends a `cat` blocked on a pipe nobody writes to.
+    ///
+    /// # Trusting the queue
+    ///
+    /// The wait files no recheck deadline (`WaitQueue::wait_trusting`): each
+    /// thing that can end it wakes it, so a block is a listing and a switch,
+    /// not also a sleeper filed in the run queue and taken out again
+    /// (po10-pipe P3, the consultant's W1). `ready` reads the buffer under
+    /// its lock, and `killed` the caller's signal state under the signal
+    /// lock. Every waker, and what orders its change before the wait's last
+    /// look (W4):
+    ///
+    /// 1. **Bytes written** (`write_stream`): the buffer changed under its
+    ///    lock, then `readable` woken. The lock orders the change before a
+    ///    look that comes after it; a look before it finds the task listed.
+    /// 2. **Room made** (`took`, for [`End::wait_to_write`]; and a splice out
+    ///    of the pipe): the same, on `writable`.
+    /// 3. **An end opened or closed**, the last writer or reader included
+    ///    (`End::open`, `Drop for End`): the count changed under the buffer's
+    ///    lock, then `wake_both`.
+    /// 4. **Bytes put back** (`unread_stream`): under the lock, then
+    ///    `readable`.
+    /// 5. **A signal** to the thread or the process: recorded under the
+    ///    signal lock, then the thread woken through `sched::work`'s
+    ///    `wake_posted`, whose `SeqCst` fence pairs with the one
+    ///    `wait_trusting` makes after the task is marked blocked.
+    /// 6. **A kill**, `exit_group`, `cgroup.kill` or the OOM killer:
+    ///    `end_record` stores the end, fences, and posts `END` to the tasks.
+    /// 7. **Another thread's `execve`**, 8. **a stop** and 9. **a freeze**:
+    ///    stored, then `wake_other_tasks`, which fences and posts. Each ends
+    ///    the wait through `killed`; a thaw or `SIGCONT` need not wake it,
+    ///    because the waiter has already returned `ERESTARTSYS` and parks on
+    ///    its way out.
+    /// 10. A waiter there was no memory to list sleeps to the recheck by
+    ///     `wait_sliced`'s own rule (F-23).
+    ///
+    /// A waker added later belongs in this list, with its order, or the wait
+    /// it misses never ends: there is no recheck to find it.
     fn wait_to_read(&self) -> ferrix_vfs::Result<()> {
         let caller = process::current();
-        let _ = self.pipe.readable.wait_until_deadline(
-            || {
-                let ready = self.pipe.buffer.lock().can_read();
-                ready || killed(caller.as_ref())
-            },
-            FOREVER,
-        );
+        let _ = self.pipe.readable.wait_trusting(|| {
+            let ready = self.pipe.buffer.lock().can_read();
+            ready || killed(caller.as_ref())
+        });
         if killed(caller.as_ref()) {
             // A restart code, not `EINTR`: a pipe read restarts under
             // `SA_RESTART`. A read that already moved bytes returns the count
@@ -231,16 +265,16 @@ impl End {
         Ok(())
     }
 
-    /// Sleep until a write of `len` bytes would not wait, or `EINTR`.
+    /// Sleep until a write of `len` bytes would not wait, or `EINTR`. Trusts
+    /// its queue as [`End::wait_to_read`] does, by the same list of wakers
+    /// read for `writable`: room made, an end opened or closed, and the
+    /// caller's signals, kills, stops and freezes.
     fn wait_to_write(&self, len: usize) -> ferrix_vfs::Result<()> {
         let caller = process::current();
-        let _ = self.pipe.writable.wait_until_deadline(
-            || {
-                let ready = self.pipe.buffer.lock().can_write(len);
-                ready || killed(caller.as_ref())
-            },
-            FOREVER,
-        );
+        let _ = self.pipe.writable.wait_trusting(|| {
+            let ready = self.pipe.buffer.lock().can_write(len);
+            ready || killed(caller.as_ref())
+        });
         if killed(caller.as_ref()) {
             // A restart code, not `EINTR`, for the same reason a read gives one.
             return Err(Errno::ERESTARTSYS);
@@ -836,4 +870,19 @@ fn join(from: &Pipe, to: &Pipe, bounce: &mut [u8]) -> Joined {
         // The room was had before the source was read, so this is not met.
         WriteOutcome::NoMemory => Joined::NoMemory,
     }
+}
+
+/// For the boot check of the pipe's waits (`fs::pipe_check`): the tasks
+/// listed to read and to write on the pipe `file` is an end of, and the waits
+/// on it a wake ended. `None` for a file that is no pipe.
+pub(crate) fn waiting_on(file: &OpenFile) -> Option<(usize, usize, u32)> {
+    let end = end_of(file)?;
+    Some((
+        end.pipe.readable.listed_now(),
+        end.pipe.writable.listed_now(),
+        end.pipe
+            .readable
+            .waits_ended_by_a_wake()
+            .wrapping_add(end.pipe.writable.waits_ended_by_a_wake()),
+    ))
 }
