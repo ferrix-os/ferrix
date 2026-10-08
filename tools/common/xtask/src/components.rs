@@ -304,6 +304,7 @@ fn emptied(status: &str) -> bool {
 /// Move every checkout that is behind its pin, or missing, to the pin.
 fn sync(components: &[Component]) -> Result<()> {
     for component in components {
+        forget_interrupted(component)?;
         own_objects(component)?;
         own_line_endings(component)?;
         match state(component)? {
@@ -548,6 +549,35 @@ fn mirror(component: &Component) -> Result<PathBuf> {
         let _ = git(&mirror, &["fetch", "--quiet", "--prune", "origin"])?;
     }
     Ok(mirror)
+}
+
+/// Take away the `.git` of a clone that was stopped before its checkout,
+/// so that it is cloned again.
+///
+/// A first xtask command stopped by Ctrl-C while it clones leaves a
+/// repository with no commit checked out and nothing in its index; every
+/// command after it then failed in that checkout ("pathspec '.' did not
+/// match any files", "your current branch appears to be broken") until
+/// somebody deleted it by hand. With no commit and an empty index there is
+/// no work in it to lose: its objects are the mirror's, fetched again.
+fn forget_interrupted(component: &Component) -> Result<()> {
+    if component.commit.is_none() {
+        return Ok(());
+    }
+    let dir = checkout(component);
+    let repository = dir.join(".git");
+    if !repository.is_dir()
+        || git(&dir, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok()
+        || !git(&dir, &["ls-files"]).is_ok_and(|files| files.is_empty())
+    {
+        return Ok(());
+    }
+    println!(
+        "components: {}'s checkout was stopped before it was made; cloning it again",
+        component.name
+    );
+    fs::remove_dir_all(&repository)
+        .map_err(|error| Error::new(format!("{}: {error}", repository.display())))
 }
 
 /// Whether a repository has a commit.
