@@ -2120,8 +2120,15 @@ pub(crate) static STAGE8_PATH_CALLS: Explanation = Explanation {
               to be ENXIO. A failure means a program would be told something false about a file: \
               a size read out of padding, a listing that skips or repeats a name, a working \
               directory that is not where chdir put it, or a device node reaching the wrong \
-              device.",
+              device. Then `syscall::check::run_seam_count` pins a caller to each processor \
+              to make 64 Linux calls through the whole dispatch, and the system call count, \
+              which each processor keeps in its own record, must rise by exactly that many \
+              times the processors.",
     causes: &[
+        "The system call count missed a processor (`fs::seam::syscalls_except` does not sum \
+         every record), lost an add to a migration between finding the slot and adding, or \
+         counted a call twice; or another Linux caller ran in the check's window, where at \
+         that point of stage 8 nothing should (`run_seam_count` says why).",
         "`arch::STAT_LAYOUT` names the wrong `struct stat` for this architecture, or a layout in \
          `src/lib/proto/linux-abi` moved a field.",
         "An arm of `syscall::path::dispatch` reads its arguments in the wrong order or at the \
@@ -2387,7 +2394,12 @@ pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
               through the procfs, zero must read zeros from the devtmpfs, /proc/mounts must \
               list both, and both must unmount; mount -t sysfs must mount and unmount, and \
               mount -t devpts, a type there is not, must be ENODEV. The whole run is done \
-              twice and must leave no frame behind.",
+              twice and must leave no frame behind. After it, `fs::pipe_check::run` blocks a \
+              kernel task in a pipe read, and in a write to a full pipe, and each waker the \
+              pipe has -- bytes written, room made by a read, the last writer and the last \
+              reader closing, bytes put back, a splice -- must end the wait by a wake within \
+              two seconds with the answer it says: a pipe's waits trust their queues, and have \
+              no recheck to end a wait a waker forgot.",
     causes: &[
         "A pipe end's drop no longer counts it out of the buffer, so a reader never sees end \
          of file and the pipe outlives its descriptors as leaked frames.",
@@ -2398,6 +2410,10 @@ pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
         "tmpfs's `grow_to` shrinks a file, or `sendfile` stopped putting its offset back.",
         "`splice` or `copy_file_range` in `src/kernel/src/syscall/pipe.rs` moved the wrong bytes \
          or offset, or `fs::pipe::splice_pipes` lost bytes between two pipes.",
+        "A pipe waker no longer wakes the queue its wait is on (`write_stream`, `took`, \
+         `wake_both`, `unread_stream`, `splice_pipes`), or a new waker of a pipe wait is \
+         missing from the list beside `End::wait_to_read`; the `pipewake <waker>` line names \
+         it.",
     ],
     see: "src/kernel/src/fs/check.rs run_calls; src/kernel/src/fs/pipe.rs; src/kernel/src/syscall/pipe.rs; \
           src/kernel/src/syscall/fsctl.rs; src/lib/fs/vfs/src/pipe.rs; src/lib/fs/vfs/src/statfs.rs; \

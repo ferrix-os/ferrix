@@ -234,7 +234,7 @@ pub(super) fn check_eventfd() {
              room made, the last writer and reader closing, bytes put back, a splice"
         ),
         Err(problem) => fatal!(
-            catalog::STAGE8_EVENTFD,
+            catalog::STAGE8_PIPES_AND_FILESYSTEM_CALLS,
             "stage 8 pipe wake self-check failed: {problem}"
         ),
     }

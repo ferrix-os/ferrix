@@ -1,0 +1,56 @@
+[package]
+name = "pipewait-test"
+description = "A thread blocked in a pipe read, ended by a signal, SIGKILL, a stop and continue, and a freeze and thaw"
+version = "0.1.0"
+edition = "2024"
+# Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+# A workspace of its own, not a member of Ferrix's, for the reason zinc and the
+# compositor are: it is a Linux user program built with std, and the Ferrix
+# workspace's dependency policy is written for a kernel.
+[workspace]
+
+[[bin]]
+name = "pipewait-test"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+# ---------------------------------------------------------------------------
+# Lints
+#
+# The Ferrix discipline, as zinc and the compositor keep it: every failure is
+# a line on the console and a status, never a panic. `unsafe` is allowed: the
+# calls under test are libc's, and every block says what it relies on.
+# ---------------------------------------------------------------------------
+[lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
+[profile.release]
+overflow-checks = true
+panic = "abort"
+strip = true

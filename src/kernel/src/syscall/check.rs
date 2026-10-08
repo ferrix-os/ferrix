@@ -11349,6 +11349,15 @@ fn seam_caller(number: usize) {
 /// migration between finding the slot and adding, or one counted twice
 /// fails by name. Answers the processors and the calls counted.
 ///
+/// # Why nothing else calls in the window
+///
+/// It runs in stage 8, from the boot task, before init or any service is
+/// started: the only programs that have run are the stage checks' own,
+/// each waited for to the end before its check returned, and the kernel's
+/// own threads make no Linux call. So a count above the calls made is not a
+/// flake; it is a caller nobody expected here, or a call counted twice, and
+/// is investigated as one (the consultant's C4).
+///
 /// # Errors
 ///
 /// A caller that could not start or did not finish, or a sum that is not
