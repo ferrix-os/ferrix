@@ -19,6 +19,10 @@
 #   clean    remove the unpacked source and every build directory, keeping
 #            dl/ and out/ (run it only after collect); gen_init_cpio is kept
 #            in tools/ for repack
+#   posix    initramfs-posix.cpio.gz: level 4's lmbench and speedtest1 (B5,
+#            $BB_POSIX, default ~/.local/share/ferrix/board-bench/posix) under
+#            /opt/posixbench, the Alpine busybox ($BB_BUSYBOX) as /bin/sh, and
+#            posix-init.sh as /init; into the card directory
 #   repack   after clean: lbench and the initramfs again, the kernel and
 #            device tree as built; the card's initramfs and out/ updated,
 #            and a line for it appended to versions.txt
@@ -268,11 +272,44 @@ repack() {
     tail -5 "$OUT/out/versions.txt"
 }
 
+posix() {
+    local src=${BB_POSIX:-$HOME/.local/share/ferrix/board-bench/posix}
+    local bb=${BB_BUSYBOX:-$HOME/.local/share/ferrix/busybox/armv7a/bin/busybox.static}
+    local list=$OUT/out/initramfs-posix.list f
+    (cd "$src" && sha256sum -c --quiet SHA256SUMS) || die "posix: $src does not match its SHA256SUMS"
+    {
+        echo "dir /dev 0755 0 0"
+        echo "nod /dev/console 0600 0 0 c 5 1"
+        echo "nod /dev/null 0666 0 0 c 1 3"
+        echo "nod /dev/zero 0666 0 0 c 1 5"
+        echo "dir /bin 0755 0 0"
+        echo "file /bin/busybox $bb 0755 0 0"
+        echo "slink /bin/sh busybox 0777 0 0"
+        echo "file /init $here/posix-init.sh 0755 0 0"
+        echo "dir /opt 0755 0 0"
+        echo "dir /opt/posixbench 0755 0 0"
+        echo "dir /opt/posixbench/bin 0755 0 0"
+        echo "file /opt/posixbench/run-lmbench.sh $src/run-lmbench.sh 0755 0 0"
+        echo "file /opt/posixbench/run-speedtest1.sh $src/run-speedtest1.sh 0755 0 0"
+        for f in "$src"/bin/*; do
+            echo "file /opt/posixbench/bin/$(basename "$f") $f 0755 0 0"
+        done
+    } >"$list"
+    "$(gen_init_cpio)" -t 0 "$list" | gzip -9n >"$OUT/out/card/$CARD/initramfs-posix.cpio.gz"
+    (cd "$OUT/out/card/$CARD" && sha256sum zImage "$(basename "$DTB")" initramfs.cpio.gz initramfs-posix.cpio.gz >SHA256SUMS)
+    ls -l "$OUT/out/card/$CARD/initramfs-posix.cpio.gz"
+    {
+        echo
+        echo "# posix initramfs $(date -u +%Y-%m-%dT%H:%MZ): B5's $(cd "$src" && sha256sum SHA256SUMS | cut -c1-16) set, busybox $(sha256sum "$bb" | cut -c1-16)"
+        (cd "$OUT/out/card" && sha256sum "$CARD/initramfs-posix.cpio.gz")
+    } >>"$OUT/out/versions.txt"
+}
+
 steps=("$@")
 [ ${#steps[@]} -gt 0 ] || steps=(fetch config kernel module lbench cpio collect)
 for step in "${steps[@]}"; do
     case $step in
-    fetch | config | kernel | module | lbench | cpio | collect | clean | repack)
+    fetch | config | kernel | module | lbench | cpio | collect | clean | repack | posix)
         echo "== $step"
         (cd "$OUT" 2>/dev/null || true; "$step")
         ;;
