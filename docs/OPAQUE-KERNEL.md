@@ -5154,9 +5154,9 @@ are not yet, a design of their own.
 
 #### Q8, calls through the GOT (po10-quick; ledger line 533, Q8-C1 to C7)
 
-The release kernel, a static PIE for KASLR, made 4,908 indirect calls through
-a `rip`-relative slot on `main` 390d5f278, 4,472 of them through a GOT slot:
-`memcpy` 1,621, `__udivti3` 1,201, `memmove` 922, `memset` 385, `memcmp`
+The release kernel, a static PIE for KASLR, made 4,911 indirect calls through
+a `rip`-relative slot on `main` 523fc3d50, 4,475 of them through a GOT slot:
+`memcpy` 1,620, `__udivti3` 1,208, `memmove` 922, `memset` 382, `memcmp`
 319, `__divti3` 17, and the context switch's 4. The cause is rustc's
 `x86_64-unknown-none` target, which has no PLT by default and does not ask
 for relaxable relocations, so LLVM emits `R_X86_64_GOTPCREL` for a call to a
@@ -5175,12 +5175,16 @@ symbol declared `extern "C"`, so its four call sites are `call rel32`, with
 no slot and no relocation. Recorded by objdump
 (`~/.local/share/ferrix/logs/po10-quick/q8-objdump.txt`): the same fifteen
 instructions in the same order, with no prologue, epilogue or `endbr`; four
-direct call sites; 4,904 `rip`-relative indirect calls against 4,908, and
-`.rela.dyn` all `R_X86_64_RELATIVE`, 6,415 against 6,416, the switch's slot
-gone. `check-unsafe-audit.py` now counts `#[unsafe(naked)]` and
+direct call sites; 4,907 `rip`-relative indirect calls against 4,911, and
+`.rela.dyn` all `R_X86_64_RELATIVE`, 6,417 against 6,418, the switch's slot
+gone (the same counts on 390d5f278 were 4,908 to 4,904 and 6,416 to 6,415,
+`q8-objdump-390d5f278.txt`). The audit counts 833 traced sites in the
+item against `main`'s 831. `check-unsafe-audit.py` now counts `#[unsafe(naked)]` and
 `unsafe extern "ABI" fn` definitions, so the switch's obligation is traced.
 The library calls stay; the certification consultant's view of the ways to
 remove them (B1 an unstable flag, B2 a post-link rewriter, B3 the target
 changed upstream, preferred) and of mapping the GOT read-only meanwhile is at
 the ledger's line 533 and in `docs/BACKLOG.md`. po9-sched measured an
 indirect call at about 3.5 ns more than a direct one.
+
+**Q8 measured.** Measured with os-76's long bench (`os76/p0-measure` 712cec722 on each tree, measurement only; `~/.local/share/ferrix/logs/po10-quick/perf/v2-*-join.txt`): host perf on the vCPU thread, 60 s of 50,000-trip blocks a boot, turn about with `main` 523fc3d50, 3 boots a side, the fast clock mode's blocks (core 11's SMT sibling 1 to 10% busy in them). `main`: 5,045, 5,045 and 5,041 instructions and 4,608, 4,656 and 4,608 cycles a round trip, 820, 825 and 820 ns. Q8: 5,043, 5,060 and 5,030 instructions (no change, as expected: a direct call replaces an indirect one) and 4,664, 4,549 and 4,567 cycles (about -30, -0.7%, inside the run-to-run spread), 823, 806 and 820 ns. One indirect call a direction is below what this bench resolves; the change is kept for what it removes -- an indirect branch and a writable code pointer on every switch -- not for a figure.
