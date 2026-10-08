@@ -362,7 +362,8 @@ OPTIONS:
                                          --cfg ferrix_mitigations_off into target/mitigations-off:
                                          no index clamps, no speculation controls, no barriers
                                          (docs/certification/SPECULATION.md)
-    --smp <N>                            Virtual CPUs          [default: 4; 1 under whpx]
+    --smp <N>                            Virtual CPUs          [default: 4; 1 under whpx with a
+                                         QEMU not built by fetch-qemu-windows.sh]
     --memory <MiB>                       Guest memory          [default: 512]
     --timeout <SECONDS>                  test-boot patience    [default: 120]
     --seeds <N>                          test-powerfail cuts   [default: 8]

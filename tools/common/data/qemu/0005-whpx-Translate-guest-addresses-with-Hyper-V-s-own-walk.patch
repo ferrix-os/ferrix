@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SetZero <info@magical.rocks>
+Date: Thu, 8 Oct 2026 18:40:00 +0200
+Subject: [PATCH] whpx: Translate guest addresses with Hyper-V's own walk
+
+Since QEMU 11 the WHPX backend emulates a memory-access exit with QEMU's
+own x86 emulator, which translates the instruction's guest-virtual
+address by walking the guest's page tables itself (x86_mmu.c
+walk_gpt). With more than one vCPU that walk intermittently answers
+"not mapped" for a mapping that is there: two processes of one ring-3
+virtio driver, each reading its own BAR through the same virtual
+address on two vCPUs, get a page fault with error code 12 (U|RSVD, P
+clear, from the result enum tested as flags) in about four boots of
+five at four vCPUs.
+
+A memory-access exit is taken only after the processor's own walk of
+the same tables succeeded, so Hyper-V is the authority on that
+translation. Give the emulator an mmu_gva_to_gpa that asks it with
+WHvTranslateGva, whose result codes are the emulator's own. A GPA
+Hyper-V has no RAM at (an MMIO BAR) is still a translated address; what
+is there is the device's business.
+
+Also raise a read's page fault with its address as the exception's
+payload, as a write's already is: env->cr[2] is not written back on the
+fast register path, so the guest saw CR2 0.
+---
+ target/i386/emulate/x86_mmu.c |  3 +-
+ target/i386/whpx/whpx-all.c   | 56 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 58 insertions(+), 1 deletion(-)
+
+diff --git a/target/i386/emulate/x86_mmu.c b/target/i386/emulate/x86_mmu.c
+index 8d43714..1582175 100644
+--- a/target/i386/emulate/x86_mmu.c
++++ b/target/i386/emulate/x86_mmu.c
+@@ -330,7 +330,8 @@ static MMUTranslateResult x86_read_mem_ex(CPUState *cpu, void *data, target_ulon
+         translate_res = mmu_gva_to_gpa(cpu, gva, &gpa, translate_flags);
+         if (translate_res) {
+             int error_code = translate_res_to_error_code(translate_res, false, is_user(cpu));
+-            env->cr[2] = gva;
++            env->exception_has_payload = 1;
++            env->exception_payload = gva;
+             x86_emul_raise_exception(env, EXCP0E_PAGE, error_code);
+             return translate_res;
+         }
+diff --git a/target/i386/whpx/whpx-all.c b/target/i386/whpx/whpx-all.c
+index 634d542..80d0712 100644
+--- a/target/i386/whpx/whpx-all.c
++++ b/target/i386/whpx/whpx-all.c
+@@ -1309,7 +1309,63 @@ static bool whpx_simulate_wrmsr(CPUState *cs)
+     return 0;
+ }
+ 
++/*
++ * Translate with Hyper-V's own walk of the guest's page tables rather than
++ * the emulator's. A memory-access exit is only taken after the processor's
++ * walk succeeded, and with more than one vCPU the emulator's walk
++ * intermittently answers "not mapped" for a mapping that is there, which
++ * reaches the guest as a spurious #PF (error code 12) in a ring-3 driver.
++ */
++static MMUTranslateResult whpx_mmu_gva_to_gpa(CPUState *cpu, target_ulong gva,
++                                              uint64_t *gpa,
++                                              MMUTranslateFlags flags)
++{
++    struct whpx_state *whpx = &whpx_global;
++    WHV_TRANSLATE_GVA_FLAGS whv_flags = WHvTranslateGvaFlagValidateRead;
++    WHV_TRANSLATE_GVA_RESULT res;
++    WHV_GUEST_PHYSICAL_ADDRESS whv_gpa;
++    HRESULT hr;
++
++    if (flags & MMU_TRANSLATE_VALIDATE_WRITE) {
++        whv_flags |= WHvTranslateGvaFlagValidateWrite;
++    }
++    if (flags & MMU_TRANSLATE_VALIDATE_EXECUTE) {
++        whv_flags |= WHvTranslateGvaFlagValidateExecute;
++    }
++    if (flags & MMU_TRANSLATE_PRIV_CHECKS_EXEMPT) {
++        whv_flags |= WHvTranslateGvaFlagPrivilegeExempt;
++    }
++
++    whpx_flush_cpu_state(cpu);
++    hr = whp_dispatch.WHvTranslateGva(whpx->partition, cpu->cpu_index, gva,
++                                      whv_flags, &res, &whv_gpa);
++    if (FAILED(hr)) {
++        error_report("WHPX: Failed to translate GVA 0x%" PRIx64 ", hr=%08lx",
++                     (uint64_t)gva, hr);
++        return MMU_TRANSLATE_PAGE_NOT_MAPPED;
++    }
++
++    switch (res.ResultCode) {
++    case WHvTranslateGvaResultSuccess:
++    /* The page is mapped; what is at the address is the device's business. */
++    case WHvTranslateGvaResultGpaUnmapped:
++    case WHvTranslateGvaResultGpaNoReadAccess:
++    case WHvTranslateGvaResultGpaNoWriteAccess:
++    case WHvTranslateGvaResultGpaIllegalOverlayAccess:
++    case WHvTranslateGvaResultIntercept:
++        *gpa = (whv_gpa & ~(uint64_t)0xfff) | (gva & 0xfff);
++        return MMU_TRANSLATE_SUCCESS;
++    case WHvTranslateGvaResultPageNotPresent:
++        return MMU_TRANSLATE_PAGE_NOT_MAPPED;
++    case WHvTranslateGvaResultPrivilegeViolation:
++        return MMU_TRANSLATE_PRIV_VIOLATION;
++    default:
++        return MMU_TRANSLATE_INVALID_PT_FLAGS;
++    }
++}
++
+ static const struct x86_emul_ops whpx_x86_emul_ops = {
++    .mmu_gva_to_gpa = whpx_mmu_gva_to_gpa,
+     .read_segment_descriptor = read_segment_descriptor,
+     .handle_io = handle_io,
+     .is_protected_mode = is_protected_mode,
+-- 
+2.51.0

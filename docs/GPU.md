@@ -1123,9 +1123,10 @@ on, recorded here so that it can be overruled by name.
 
 * **Vulkan on the Windows host.** Venus, Vulkan over virtio-gpu, needs a
   Linux host with KVM. Under `whpx` it is virgl, which is OpenGL.
-* **More processors under `whpx`.** The one-processor limit is QEMU 11.1's
-  own fault (`docs/BACKLOG.md`) and has nothing to do with the GPU. It
-  matters less once the GPU draws the pixels.
+* **More processors under `whpx`.** The one-processor limit was QEMU 11.1's
+  own fault (`docs/BACKLOG.md`) and had nothing to do with the GPU; since
+  2026-10-08 the QEMU `fetch-qemu-windows.sh` builds carries the fix and its
+  guests get four.
 * **Anything on real hardware.** That is Path B.
 
 ---

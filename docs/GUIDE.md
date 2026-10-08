@@ -139,10 +139,11 @@ believing a change to page tables or invalidation, for the reason
 [Reliability](RELIABILITY.md) gives: an interpreted `MMU` has no `TLB`, so
 a stale translation is a bug the default gate structurally cannot see. `run`
 uses `auto` unless it is given `--accel` or `--gdb`; the tests keep `tcg`.
-Under `whpx` the guest gets one processor unless `--smp` says otherwise:
 QEMU 11.1's WHPX emulation of device registers faults ring-3 drivers with
-more than one, and `/sbin/blk` dies at boot. `--smp N` still works there,
-with a warning. WHPX is given the invariant TSC as KVM is, so the kernel's
+more than one processor, and `/sbin/blk` dies at boot; the QEMU that
+`tools/common/fetch/fetch-qemu-windows.sh` builds carries the fix, and its
+guests get the processors any other does. Under any other WHPX QEMU the
+guest gets one unless `--smp` says otherwise, with a warning. WHPX is given the invariant TSC as KVM is, so the kernel's
 clock is the TSC rather than the HPET, whose every read is an exit
 ([`docs/CHROME.md`](CHROME.md) §8).
 

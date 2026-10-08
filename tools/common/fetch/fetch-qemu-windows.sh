@@ -26,6 +26,10 @@
 set -euo pipefail
 
 version=v11.1.0
+# What `--version` says after the version, and how xtask tells this build
+# from another: `whpx-gva` is 0005, without which a WHPX guest is given one
+# processor (tools/common/xtask/src/qemu.rs, `processors`).
+pkgversion="ferrix: whpx-gva"
 spice_protocol=v0.14.5
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 
@@ -79,9 +83,15 @@ fi
 # docs/NVIDIA.md section 12.3): without it the first boot of every test
 # panics. 0002 was written against 10.2.1 (series-10.2.1); its qtest hunk
 # does not apply to 11.1.0 and the tests are not built here, so that file
-# is left out.
+# is left out. 0004 keeps the host pointer over the window's menu and tab
+# bars with gl=on, which GTK gets wrong on Windows as on Linux. 0005 is
+# WHPX's: the emulator of a memory-mapped I/O exit translates the guest's
+# address with Hyper-V's walk instead of its own, which faulted ring-3
+# drivers with more than one vCPU.
 for patch in "$here"/tools/common/data/qemu/0001-*.patch \
-    "$here"/tools/common/data/qemu/0002-*.patch; do
+    "$here"/tools/common/data/qemu/0002-*.patch \
+    "$here"/tools/common/data/qemu/0004-*.patch \
+    "$here"/tools/common/data/qemu/0005-*.patch; do
     if git -C "$src" apply --reverse --check \
         --exclude=tests/qtest/intel-iommu-test.c "$patch" 2>/dev/null; then
         echo "qemu: $(basename "$patch") already applied"
@@ -96,7 +106,8 @@ rm -rf "$src/build"
     cd "$src"
     ./configure --target-list=x86_64-softmmu --enable-gtk --enable-sdl \
         --enable-opengl --enable-virglrenderer --enable-whpx --disable-docs \
-        --disable-werror --enable-install-blobs --prefix="$out" >/dev/null
+        --disable-werror --enable-install-blobs --prefix="$out" \
+        --with-pkgversion="$pkgversion" >/dev/null
 )
 # FERRIX_QEMU_JOBS caps the build, for a machine someone is using
 # (ninja's default is every processor).

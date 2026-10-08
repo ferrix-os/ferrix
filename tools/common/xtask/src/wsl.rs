@@ -228,6 +228,56 @@ pub(crate) fn require_toolchain(need: &str) -> Result<()> {
     }
 }
 
+/// Open a volume inside WSL and read its first block before QEMU is started
+/// on it, waiting out a file server that does not answer yet; nothing for a
+/// path outside WSL.
+///
+/// Windows reaches `\\wsl.localhost` through WSL's own file server, which
+/// is slow to answer while its machine is starting or busy, and an open that
+/// waits too long fails with `ERROR_SEM_TIMEOUT`. QEMU opens each drive once
+/// and gives up: on the Windows PC on 2026-10-08 two `run-compositor` boots
+/// of nine died as "Could not open '//wsl.localhost/.../rustc.img': The
+/// semaphore timeout period has expired." Once one open has been answered,
+/// the next comes at once.
+///
+/// # Errors
+///
+/// When the volume still cannot be read after the last try.
+pub(crate) fn wake(volume: &Path) -> Result<()> {
+    use std::io::Read as _;
+
+    /// `ERROR_SEM_TIMEOUT`.
+    const SEMAPHORE_TIMEOUT: i32 = 121;
+    const TRIES: u32 = 5;
+
+    let text = volume.to_string_lossy().replace('/', r"\");
+    if !text
+        .trim_start_matches(r"\\?\")
+        .to_ascii_lowercase()
+        .starts_with(r"\\wsl.localhost\")
+    {
+        return Ok(());
+    }
+    let mut block = [0u8; 4096];
+    for attempt in 1..=TRIES {
+        let read = std::fs::File::open(volume).and_then(|mut file| file.read(&mut block));
+        match read {
+            Ok(_) => return Ok(()),
+            Err(error) if error.raw_os_error() == Some(SEMAPHORE_TIMEOUT) && attempt < TRIES => {
+                println!(
+                    "  wsl: {} did not answer in time ({attempt} of {TRIES}); asking again",
+                    volume.display()
+                );
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            Err(error) => {
+                return Err(Error::new(format!("{}: {error}", volume.display())));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

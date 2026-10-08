@@ -89,11 +89,39 @@ pub(crate) fn run(arch: Arch, image: &Path, args: &Args) -> Result<()> {
         let _ = command.args(["-s", "-S"]);
         println!("  waiting for a debugger on localhost:1234");
     }
+    above_normal_when_watched(&mut command, args);
     println!("  {arch}: booting (quit with Ctrl-A x)\n");
     let booted = console.attach(command);
     report_network(&network);
     booted
 }
+
+/// On Windows, start the QEMU of a screen somebody watches above normal
+/// priority.
+///
+/// Under `gl=on` the guest's next GPU submission waits until QEMU's main
+/// thread has shown the last frame, so a frame is late by however long that
+/// thread waits for a processor. On a busy Windows PC that was the whole of
+/// the stutter: a 1920x1080 desktop with a terminal scrolling flat out drew
+/// its slowest frame each second in 29 ms at the 90th percentile, 52 at
+/// worst, and never fewer than 56 frames a second above normal priority,
+/// against 38-49 ms, up to a second, and 38 a second at the priority it
+/// inherited (2026-10-08, four processors under WHPX, other builds running).
+/// The guest's processors idle in the hypervisor, so a quiet guest takes
+/// nothing from the host's own programs. Linux schedules a window's
+/// process by its own measure, and is left to it.
+#[cfg(windows)]
+fn above_normal_when_watched(command: &mut Command, args: &Args) {
+    use std::os::windows::process::CommandExt as _;
+    /// `ABOVE_NORMAL_PRIORITY_CLASS`.
+    const ABOVE_NORMAL: u32 = 0x0000_8000;
+    if args.display {
+        let _ = command.creation_flags(ABOVE_NORMAL);
+    }
+}
+
+#[cfg(not(windows))]
+fn above_normal_when_watched(_command: &mut Command, _args: &Args) {}
 
 /// Boot the image headless and require the kernel to report success.
 pub(crate) fn test_boot(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
@@ -112,8 +140,14 @@ pub(crate) fn test_boot_lines(
     let watched = watch(arch, image, kernel, args, SUCCESS_MARKER)?;
     match watched.verdict {
         Verdict::Reached => {
+            // Judged only when QEMU ended by itself. One stopped from here
+            // after the grace exits as it was stopped: by SIGTERM, which it
+            // takes as a host shutdown and answers 0, on a POSIX host, and by
+            // TerminateProcess, which sets the code to 1, on Windows, where
+            // every `--net` boot that powered off a moment after the grace
+            // failed this way (docs/BACKLOG.md).
             let code = watched.ended.status.code().unwrap_or(0);
-            if code != 0 && code != DEBUG_EXIT_SUCCESS {
+            if watched.ended.powered_off && code != 0 && code != DEBUG_EXIT_SUCCESS {
                 return Err(Error::new(format!(
                     "the {arch} kernel reported success but QEMU exited {code}"
                 )));
@@ -2142,7 +2176,7 @@ fn qemu_command(
 
     let firmware = paths::find_firmware(arch)?;
     let accelerator = accelerator(arch, &binary, args.accel.as_deref())?;
-    let processors = processors(&accelerator, args);
+    let processors = processors(&accelerator, &binary, args);
     // Every boot names its accelerator, so a log read later says whether
     // the guest was emulated without anybody having to guess.
     println!("  qemu: {arch} under {accelerator}, {processors} processors");
@@ -2787,6 +2821,7 @@ fn attach_data_image(command: &mut Command, arch: Arch, args: &Args) -> Result<(
     } else {
         volume
     };
+    crate::wsl::wake(volume)?;
     let (snapshot, said) = if args.data_image_read_only && !persistent {
         (",readonly=on", "read-only")
     } else if args.data_image_kept || persistent {
@@ -3103,18 +3138,24 @@ fn default_accelerator(arch: Arch, binary: &Path) -> &'static str {
 /// is there, and the fault it raises reaches the guest as error code 12 at
 /// address 0: `/sbin/blk` dies reading its virtio registers, and stage 10's
 /// driver check panics. Ferrix's own page tables and `CR3` were checked at the
-/// fault and are right; `docs/BACKLOG.md` has the analysis. At one processor
-/// it has not happened, and WHPX is still the fast path for the display, so
-/// that is the default under WHPX. A count given with `--smp` is kept, with a
-/// warning, for whoever is looking into it.
-pub(crate) fn processors(accelerator: &str, args: &Args) -> u32 {
-    if accelerator != "whpx" {
+/// fault and are right; `docs/BACKLOG.md` has the analysis.
+///
+/// A memory-access exit is only taken after the processor's own walk of the
+/// same tables succeeded, so `tools/common/data/qemu/0005-*.patch` has the
+/// emulator ask Hyper-V for the translation (`WHvTranslateGva`) instead, and
+/// `tools/common/fetch/fetch-qemu-windows.sh` builds a QEMU with it that says
+/// `whpx-gva` in its `--version`. That QEMU gets the processors any other
+/// accelerator does. Any other gets one, where it has not happened; a count
+/// given with `--smp` is kept, with a warning.
+pub(crate) fn processors(accelerator: &str, binary: &Path, args: &Args) -> u32 {
+    if accelerator != "whpx" || translates_with_hyper_v(binary) {
         return args.smp;
     }
     if !args.smp_given {
         println!(
             "  qemu: one processor under whpx: QEMU 11.1's WHPX MMIO emulation faults ring-3 \
-             drivers with more than one (docs/BACKLOG.md); --smp N overrides"
+             drivers with more than one (docs/BACKLOG.md); tools/common/fetch/fetch-qemu-windows.sh \
+             builds one that does not, and --smp N overrides"
         );
         return 1;
     }
@@ -3126,6 +3167,32 @@ pub(crate) fn processors(accelerator: &str, args: &Args) -> u32 {
         );
     }
     args.smp
+}
+
+/// Whether `binary` is a QEMU whose WHPX emulator translates a guest's
+/// addresses with Hyper-V's walk: `fetch-qemu-windows.sh`'s, which says so
+/// in its `--version` (`QEMU emulator version 11.1.0 (ferrix: whpx-gva)`).
+pub(crate) fn translates_with_hyper_v(binary: &Path) -> bool {
+    Command::new(binary)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .is_ok_and(|output| version_translates(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// [`translates_with_hyper_v`]'s reading of a `--version`'s first line.
+fn version_translates(version: &str) -> bool {
+    version
+        .lines()
+        .next()
+        .and_then(|line| line.rsplit_once('('))
+        .is_some_and(|(_, build)| {
+            build
+                .trim_end_matches(')')
+                .split_whitespace()
+                .any(|word| word == "whpx-gva")
+        })
 }
 
 /// Whether this QEMU can actually *initialise* `name` on this machine.
@@ -3274,7 +3341,7 @@ mod tests {
         Arch, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER, blocks_compatibility_format,
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fault_problem,
         iommu_problem, msi_problem, namespace_problem, parse_qemu_version, queue_problem,
-        remap_problem, send_lines, xstate_problem,
+        remap_problem, send_lines, version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -3689,5 +3756,24 @@ mod tests {
         // Every reader of the success marker matches a substring: a skipped
         // boot's marker must not contain it, or it would pass for one.
         assert!(!UNCHECKED_MARKER.contains(SUCCESS_MARKER));
+    }
+
+    /// Only the build that says `whpx-gva` gets more than one processor
+    /// under WHPX: the released one, and ours from before 0005, keep one.
+    #[test]
+    fn only_a_qemu_that_says_whpx_gva_translates_with_hyper_v() {
+        let ours = "QEMU emulator version 11.1.0 (ferrix: whpx-gva)\nCopyright (c) 2003-2026";
+        assert!(version_translates(ours));
+        assert!(!version_translates(
+            "QEMU emulator version 11.1.0 (v11.1.0-dirty)\n"
+        ));
+        assert!(!version_translates(
+            "QEMU emulator version 11.1.0 (v11.1.0-11950-g1234)\n"
+        ));
+        assert!(!version_translates("QEMU emulator version 11.1.0\n"));
+        assert!(!version_translates(
+            "QEMU emulator version 11.1.0 (whpx-gvax)\n"
+        ));
+        assert!(!version_translates(""));
     }
 }

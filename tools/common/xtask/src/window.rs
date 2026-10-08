@@ -546,8 +546,11 @@ fn find_qemu(
 /// the GPU with the slowest at 7-17 ms (`docs/GPU.md` §3.9).
 ///
 /// *Proven* is a served screen: `egl-headless` behind VNC, which is how a
-/// desktop is watched from another machine. A window's GL on this host is
-/// another backend that has not been, and keeps the 2D card unless asked.
+/// desktop is watched from another machine; and on Windows, a window of the
+/// QEMU `tools/common/fetch/fetch-qemu-windows.sh` builds (it says `whpx-gva`
+/// in its `--version`), whose GTK window every `--everything` boot there has
+/// drawn in since its reset fix (`docs/GPU.md` §3.12). Another window's GL
+/// is a backend that has not been, and keeps the 2D card unless asked.
 /// *What it takes* is a QEMU with the card and a render node for
 /// `egl-headless` to draw on -- which also answers for hosts with no
 /// `/dev/dri` at all, since none of them can.
@@ -580,6 +583,13 @@ pub(crate) fn watched_gl(arch: crate::paths::Arch, args: &Args) -> Result<Args> 
         ..args.clone()
     };
     if !matches!(choose(&binary, &asked)?, Window::Vnc(_)) {
+        if cfg!(windows) && crate::qemu::translates_with_hyper_v(&binary) {
+            println!("  gpu: the 3D card, in this window (--no-gl draws in software)");
+            return Ok(Args {
+                gl: true,
+                ..args.clone()
+            });
+        }
         return software("a window on this host is not a proven GL display");
     }
     let node = match args.rendernode.clone() {

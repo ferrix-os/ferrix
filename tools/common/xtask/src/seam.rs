@@ -184,7 +184,7 @@ fn machine(arch: Arch, args: &Args, binary: &Path, accelerator: &str) -> Result<
             "-m",
             &args.memory.to_string(),
             "-smp",
-            &qemu::processors(accelerator, args).to_string(),
+            &qemu::processors(accelerator, binary, args).to_string(),
             "-nographic",
             "-no-reboot",
             "-monitor",
