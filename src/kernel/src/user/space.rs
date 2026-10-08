@@ -528,6 +528,16 @@ fn this_logical_cpu() -> usize {
     }
 }
 
+/// Add `page`, whose entry a remap has just taken out of the tables, to the
+/// remap's shootdown, and invalidate it at once wherever that interrupts
+/// nobody, before the remap writes the entry that replaces it: the order the
+/// Arm architecture asks of a change of output address (F-67, L.user.125;
+/// `arch::break_before_make`). The shootdown after the make still runs.
+fn break_page(pages: &mut TlbPages, page: u64) {
+    pages.add(page);
+    arch::break_before_make(page);
+}
+
 /// How many times a fault fills a page that reclaim took again before it gives
 /// the program a `SIGBUS`: reclaim would have to take it every time.
 const REFILLS: usize = 64;
@@ -1091,10 +1101,9 @@ impl AddressSpace {
             // reach.
             let mut pages = TlbPages::new();
             let _ = self.forget_in(&inner, id, &[(index, 1)], &mut pages);
-            pages.add(page);
             // Break before make (F-67): the old entry out of every TLB that
             // can be told without an interrupt, before the new one goes in.
-            arch::break_before_make(page);
+            break_page(&mut pages, page);
             let mapped = mm::map_in(
                 self.root * PAGE_SIZE,
                 page,
@@ -1364,9 +1373,8 @@ impl AddressSpace {
         let mut pages = TlbPages::new();
         if replace {
             let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
-            pages.add(at.page);
             // Break before make (F-67), as in `fault`.
-            arch::break_before_make(at.page);
+            break_page(&mut pages, at.page);
         }
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
@@ -1413,9 +1421,8 @@ impl AddressSpace {
         };
         let mut pages = TlbPages::new();
         let _ = self.forget_in(&inner, at.id, &[(at.index, 1)], &mut pages);
-        pages.add(at.page);
         // Break before make (F-67), as in `fault`.
-        arch::break_before_make(at.page);
+        break_page(&mut pages, at.page);
         let mapped = mm::map_in(
             self.root * PAGE_SIZE,
             at.page,

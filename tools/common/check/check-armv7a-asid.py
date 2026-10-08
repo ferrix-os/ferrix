@@ -13,7 +13,8 @@ and no emulator shows a TLB conflict:
    Each block must be exactly the instructions below.
 2. F-67 (L.user.125): in src/kernel/src/user/space.rs every remap -- a
    `forget_in` followed within a few lines by a `mm::map_in` -- calls
-   `arch::break_before_make` between the two, and there are exactly three.
+   `break_page` between the two, there are exactly three, and `break_page`
+   adds the page to the shootdown and calls `arch::break_before_make` on it.
 3. `forget()` on a space's ASID tag is called from check code only (the
    second reading's A13).
 
@@ -118,11 +119,21 @@ def check_remaps(problems: list[str]) -> int:
         if made is None:
             continue
         remaps += 1
-        if not any("arch::break_before_make(" in text for text in window[:made]):
+        if not any("break_page(&mut pages," in text for text in window[:made]):
             problems.append(
                 f"space.rs:{index + 1}: a remap writes its new entry without "
-                "arch::break_before_make after the forget_in (F-67, L.user.125)"
+                "break_page after the forget_in (F-67, L.user.125)"
             )
+    helper = re.search(
+        r"^fn break_page\(pages: &mut TlbPages, page: u64\) \{\n(.*?)\n\}",
+        "\n".join(lines),
+        re.M | re.S,
+    )
+    body = [line.strip() for line in helper.group(1).splitlines()] if helper else []
+    if body != ["pages.add(page);", "arch::break_before_make(page);"]:
+        problems.append(
+            "space.rs: `break_page` is not `pages.add(page)` then `arch::break_before_make(page)`"
+        )
     if remaps != 3:
         problems.append(f"space.rs: {remaps} remaps found, where the three paths are expected")
     return remaps

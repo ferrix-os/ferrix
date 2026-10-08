@@ -179,6 +179,12 @@
       "reason": "Stage 4's cross-processor markers: a word one processor writes and another reads, which must not be held in a register."
     },
     {
+      "file": "src/kernel/src/arch/armv7a/asid/check.rs",
+      "kind": "memory",
+      "max_sites": 2,
+      "reason": "ARMv7-A's ASID boot check (docs/OPAQUE-KERNEL.md §9.13): a page's marker written through the direct map and read back through a user address under a reused ASID, the stale probe. Volatile so the compiler cannot decide the check proved itself."
+    },
+    {
       "file": "src/kernel/src/user/rmap_check.rs",
       "kind": "memory",
       "max_sites": 4,

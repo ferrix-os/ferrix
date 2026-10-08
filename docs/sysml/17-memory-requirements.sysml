@@ -1805,14 +1805,15 @@ package FerrixMemoryRequirements {
             attribute :>> statement = "A remap that replaces a valid user entry with one
                 to another frame -- the copy-on-write in fault, install_page with a
                 replace, copy_shadow_page -- shall write the old entry invalid, then
-                call break_before_make for the page, and only then write the new
-                entry, all under the space's lock (F-67).";
+                call break_before_make for the page (break_page), and only then
+                write the new entry, all under the space's lock (F-67).";
             attribute :>> criterion = "Each of the three remaps in space.rs calls
-                break_before_make between its forget_in and its map_in, and there are
-                three (`cargo xtask check`, check-armv7a-asid.py); the copy-on-write
+                break_page, which calls break_before_make, between its forget_in and
+                its map_in, and there are three (`cargo xtask check`, check-armv7a-asid.py); the copy-on-write
                 checks pass on x86-64, AArch64 and ARMv7-A.";
             attribute :>> parent = "H.MEM.1";
-            attribute :>> unit = ("user::space::AddressSpace::install_page",
+            attribute :>> unit = ("user::space::break_page",
+                "user::space::AddressSpace::install_page",
                 "user::space::AddressSpace::copy_shadow_page",
                 "arch::armv7a::break_before_make");
         }
