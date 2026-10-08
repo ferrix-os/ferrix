@@ -64,6 +64,7 @@ Causes are listed most likely first.
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
+| [FX-0603](#fx-0603) | no address space identifier could be given |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
 | [FX-0702](#fx-0702) | System V semaphores failed their self-check |
 | [FX-0703](#fx-0703) | System V shared memory failed its self-check |
@@ -212,13 +213,14 @@ See: src/kernel/src/smp.rs flush_tlb_everywhere; docs/ROADMAP.md stage 4.
 ## FX-0004 — an address space was switched on a processor that cannot name itself
 
 Every address space keeps the set of processors whose TLB may still hold its
-translations, and a TLB shootdown for the space reaches exactly those. A
-processor joins the set before it loads the space's root and leaves it after the
-root write that flushed it, by its logical number, read from its per-CPU record.
-With no record there is no number, and any guess would leave a processor that
-caches the space out of the set, so a later shootdown would free memory it can
-still reach. Nothing installs a user space before every processor has its
-record, so the kernel stops instead.
+translations (on ARMv7-A, whose shootdowns are a broadcast, the processors that
+have it installed), and a TLB shootdown for the space reaches those. A processor
+joins the set before it loads the space's root and leaves it after the root
+write that flushed it, by its logical number, read from its per-CPU record. With
+no record there is no number, and any guess would leave a processor that caches
+the space out of the set, so a later shootdown would free memory it can still
+reach. Nothing installs a user space before every processor has its record, so
+the kernel stops instead.
 
 1. Something installed or uninstalled a user address space before
    `smp::discover` set the boot processor's record, or on a secondary before
@@ -1242,15 +1244,38 @@ Across the measured run every frame must come back.
    joined an address space's set after loading its root, left before the root
    write that flushed it, or answered a shootdown for a processor it was no
    longer running on.
-3. The page-scoped invalidation is wrong for the architecture: `invlpg` not
+3. On ARMv7-A, a shootdown that stopped being a broadcast to every processor:
+   there a processor that left a space's set keeps its entries under the space's
+   ASID, and only the broadcast reaches it (docs/OPAQUE-KERNEL.md §9.13,
+   L.armv7a.16).
+4. The page-scoped invalidation is wrong for the architecture: `invlpg` not
    reaching the entry, or `TLBI VAAE1IS` / `TLBIMVAAIS` given the wrong page
    number.
-4. A decommit, replace or move touched a held page, or backed off after already
+5. A decommit, replace or move touched a held page, or backed off after already
    invalidating it.
 
 See: src/kernel/src/user/rmap_check.rs run; src/kernel/src/user/vmo.rs retire;
 src/kernel/src/user/space.rs forget_pages; src/kernel/src/smp.rs
 flush_tlb_pages; docs/ROADMAP.md stage 6.
+
+<a id="fx-0603"></a>
+
+## FX-0603 — no address space identifier could be given
+
+On ARMv7-A every address space is tagged in the TLB with an 8-bit ASID, one
+allocator for the whole machine (docs/OPAQUE-KERNEL.md §9.13). Numbers are given
+in generations; when none is free the allocator starts a new generation, keeping
+the number each processor is running reserved. It stops the machine rather than
+give a number twice: when the generation would pass 2^56, or when every number
+is still reserved after a rollover, which needs 255 processors or more.
+
+1. A machine with 255 or more processors running a space each, which no GICv2
+   machine          can be.
+2. A generation counter that was overwritten: 2^56 rollovers cannot happen in
+   the life          of a machine.
+
+See: src/kernel/src/arch/armv7a/asid.rs; src/lib/kernel/paging/src/asid.rs;
+docs/OPAQUE-KERNEL.md §9.13.
 
 <a id="fx-0701"></a>
 
