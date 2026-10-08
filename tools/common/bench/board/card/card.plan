@@ -10,11 +10,13 @@
 # fixed paths, so a Ferrix image is made the active one by copying it there
 # from its bench/ferrix/<tag>/ directory with fatwrite before bootefi. This
 # writes the card on each Ferrix boot; nothing else is written.
+# bootargs is emptied first: Ferrix's kernel reads it too.
 # FERRIX/CMDLINE.TXT, the card owner's file, is read before DEFAULTS.TXT and
 # wins on every key both set, so the card carries it empty (stage it from
 # board-bench/card-extra); an empty file is ignored.
 
 [ferrix-main]
+setenv bootargs
 load mmc 0:4 ${kernel_addr_r} bench/ferrix/main/KERNEL.ELF
 fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
 load mmc 0:4 ${kernel_addr_r} bench/ferrix/main/INITRD.IMG
@@ -27,6 +29,7 @@ bootefi ${kernel_addr_r} ${fdtcontroladdr}
 # Level 4 (B5) on Ferrix: lmbench and speedtest1, the same binaries and
 # busybox as [linux-posix] (os07/ferrix-posix, measurement only).
 [ferrix-posix]
+setenv bootargs
 load mmc 0:4 ${kernel_addr_r} bench/ferrix/posix/KERNEL.ELF
 fatwrite mmc 0:4 ${kernel_addr_r} FERRIX/KERNEL.ELF ${filesize}
 load mmc 0:4 ${kernel_addr_r} bench/ferrix/posix/INITRD.IMG

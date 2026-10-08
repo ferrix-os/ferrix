@@ -1,0 +1,8 @@
+# gather.sh sources for the first board session (README, "The first
+# session"): <path on bootfs>  <directory on nazuna>, each with SHA256SUMS.
+bench/linux         ~/.local/share/ferrix/board-bench/linux/out/card/bench/linux
+bench/sel4          ~/.local/share/ferrix/board-bench/sel4/out/card/bench/sel4
+bench/ferrix/main   ~/.local/share/ferrix/board-bench/ferrix/main/bench/ferrix/main
+bench/ferrix/posix  ~/.local/share/ferrix/board-bench/ferrix/posix/bench/ferrix/posix
+EFI/BOOT            ~/.local/share/ferrix/board-bench/ferrix/main/EFI/BOOT
+FERRIX              ~/.local/share/ferrix/board-bench/card-extra/FERRIX
