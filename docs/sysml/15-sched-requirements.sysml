@@ -304,18 +304,25 @@ package FerrixSchedRequirements {
                 release finds the count, or for a lock the locks held, already at
                 zero, having put the word back first; a release that brings the
                 count to zero shall make the decision an interrupt deferred, if
-                interrupts are on.";
-            attribute :>> criterion = "The release's cover test refuses a word
-                whose count, or for a lock whose locks held, is zero, and passes one
-                that covers the release (the stage-5 checks). That held-zero test is
-                the detector L.sched.20's stress relies on; the negative controls of
-                a task that sleeps holding a lock and of a release with nothing
-                raised each stop the boot on FX-0503's message.";
+                interrupts are on. A wait's last look that blocks lowers its hand
+                raise with interrupts masked, inside its own switch, and leaves the
+                decision to that switch.";
+            attribute :>> criterion = "The release's cover test refuses a word whose
+                count, or for a lock whose locks held, is zero, and passes one that
+                covers the release (the stage-5 checks). That held-zero test is the
+                detector L.sched.20's stress relies on; the negative controls of a
+                task that sleeps holding a lock and of a release with nothing raised
+                each stop the boot on FX-0503's message. The blocking last look's
+                own lowering has two controls of its own: one that lowers nothing
+                stops the boot on FX-0503's switch with the count raised, and one
+                that lowers twice on its release whose count was already zero.";
             attribute :>> parent = ("H.SCHED.1", "H.SCHED.2");
             attribute :>> unit = ("sched::preempt::preempt_enable",
                 "sched::preempt::Preempt::enable", "sched::preempt::enable_from",
                 "sched::preempt::unmatched", "sched::preempt::covers",
-                "sched::preempt::decide_deferred", "sched::schedule_from");
+                "sched::preempt::decide_deferred", "sched::schedule_from",
+                "sched::preempt::enable_for_switch", "sched::switch_from",
+                "sched::block_ending_hold");
         }
         requirement <'L.sched.22'> mayBlockReadsItsOwnCount : ItemLowLevel {
             attribute :>> statement = "may_block shall answer true only when the
@@ -567,20 +574,29 @@ package FerrixSchedRequirements {
             attribute :>> statement = "No switch shall take place between a wait's
                 setting its task blocked and the end of its last look (WaitQueue's
                 single-queue and many-queue waits); an interrupt's exit, or a
-                preempt_enable inside the look, shall leave the decision it asks
-                for pending until the look is over, and that decision shall then be
-                made.";
-            attribute :>> criterion = "Stage 5's last-look case: a waiter that drains
-                its own entry while runnable, meets its condition and invites a switch
-                inside its last look, once by a lock's release and once by a timer
-                interrupt's exit, finishes its wait, stays queued and unswitched
-                through the look, and has the decision made after it; with the hold
-                off, or on main's code without it, the case fails with its sentence
-                for a waiter left blocked on no run queue (F-69's controls).";
+                preempt_enable inside the look, shall leave the decision it asks for
+                pending until the look is over, and that decision shall then be
+                made. On a wait that blocks, its block's switch is that decision,
+                the count lowered with interrupts masked for it.";
+            attribute :>> criterion = "Stage 5's last-look case: a waiter that
+                drains its own entry while runnable, meets its condition and invites
+                a switch inside its last look, once by a lock's release and once by
+                a timer interrupt's exit, finishes its wait, stays queued and
+                unswitched through the look, and has the decision made after it;
+                with the hold off, or on main's code without it, the case fails with
+                its sentence for a waiter left blocked on no run queue (F-69's
+                controls). Its blocking sub-case: a waiter whose last look invites a
+                decision by a lock's release and fails stays queued, unswitched and
+                blocked through the look, is found blocked off its run queue by its
+                waker, and returns true with the count at zero and interrupts on;
+                with the hold off and the drained cases left out, it fails with its
+                own sentence.";
             attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
             attribute :>> unit = ("sched::wait::LastLook::hold",
-                "sched::wait::LastLook::drop", "sched::wait::WaitQueue::wait_sliced",
-                "sched::wait::WaitQueue::wait_on_any");
+                "sched::wait::LastLook::drop",
+                "sched::wait::WaitQueue::wait_sliced",
+                "sched::wait::WaitQueue::wait_on_any",
+                "sched::wait::LastLook::block", "sched::block_ending_hold");
         }
         requirement <'L.sched.72'> aParkedBlocksLastLookIsNotPreempted : ItemLowLevel {
             attribute :>> statement = "No switch shall take place between the receive
@@ -595,7 +611,8 @@ package FerrixSchedRequirements {
                 queue (F-69's controls).";
             attribute :>> parent = "H.OBJ.11";
             attribute :>> unit = ("syscall::native::park_for_reply",
-                "object::channel::Endpoint::park", "sched::direct::block_parked");
+                "object::channel::Endpoint::park", "sched::direct::block_parked",
+                "sched::wait::LastLook::block", "sched::block_ending_hold");
         }
     }
 }
