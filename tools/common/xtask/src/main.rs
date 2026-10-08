@@ -284,6 +284,8 @@ COMMANDS:
                   image runs a 32-bit x86 build of it)
     test-sem      Boot sem-test as init and require System V semaphores across forks: a SEM_UNDO mutex, undo at a kill,
                   EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)
+    test-pipewait Boot pipewait-test as init and require a read blocked on a pipe to be ended by a caught signal
+                  (EINTR, and a restart under SA_RESTART), SIGKILL, a stop and continue, and a freeze and thaw
     test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
                   attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
                   ipc(117) and 395-398)
@@ -696,7 +698,7 @@ fn run() -> Result<()> {
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
-        "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" | "install-app" => pkg::run(command, &args),
