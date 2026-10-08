@@ -480,19 +480,22 @@ package FerrixStructure {
             doc /* Translate this processor's user half through a given root.
                  * x86-64 is one CR3 write, whose own side effect is to drop
                  * every non-global entry while the kernel's global ones — set
-                 * because the loader enables CR4.PGE — survive. The two Arm
-                 * architectures write TTBR0, clear EPD0 (the lower half is
-                 * disabled rather than dismantled, so an install re-enables a
-                 * regime), and then invalidate by ASID, in that order: the
-                 * other order leaves the regime live with the register still
-                 * naming the previous space's tables. */
+                 * because the loader enables CR4.PGE — survive. AArch64 writes
+                 * TTBR0, clears EPD0 (the lower half is disabled rather than
+                 * dismantled, so an install re-enables a regime), and then
+                 * invalidates ASID 0, in that order: the other order leaves
+                 * the regime live with the register still naming the previous
+                 * space's tables. ARMv7-A writes the root and the space's ASID
+                 * in one TTBR0 write, synchronizes, clears EPD0 if it was set,
+                 * and invalidates nothing (OPAQUE-KERNEL §9.13). */
         }
         action uninstallUserRoot {
             @stage { number = 6; }
             doc /* Stop translating user addresses, which is the state a kernel
                  * thread runs in. x86-64 goes back to the kernel's own root;
-                 * the Arm pair set EPD0 and invalidate, because EPD0 governs
-                 * walks and not the TLB. Not lazy TLB: keeping the outgoing
+                 * AArch64 sets EPD0 and invalidates, because EPD0 governs walks
+                 * and not the TLB; ARMv7-A sets EPD0 and writes TTBR0 with ASID
+                 * 0, which no space is given, and invalidates nothing. Not lazy TLB: keeping the outgoing
                  * root installed is faster and has to keep an address space
                  * alive under a thread that holds no reference to it. */
         }

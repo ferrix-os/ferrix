@@ -1055,7 +1055,9 @@ pub(crate) fn unmap_in(
 /// cached: one never installed, one every processor that ran it has left
 /// with a flush of its whole TLB (a started processor's bring-up tree), or an
 /// address space being dropped, which every processor left through the root
-/// write that dropped its entries. Its tables go back at once.
+/// write that dropped its entries -- or, on ARMv7-A, whose cached walks are
+/// under an ASID no processor runs again before its own next full flush
+/// (`docs/OPAQUE-KERNEL.md` §9.13, item 7). Its tables go back at once.
 ///
 /// Anything else is [`unmap_in`]'s, for the reason it gives.
 pub(crate) fn unmap_unwalked(

@@ -766,7 +766,13 @@ instructions per clamp.
   still time each other's accesses (Prime+Probe), and two that share a page —
   a file's page cache, a shared VMO — can Flush+Reload it. Nothing here
   partitions a cache; cache colouring or core partitioning is the defence, and
-  it is an integrator's (AoU-11).
+  it is an integrator's (AoU-11). The TLB and its walk caches are such a
+  shared structure too: on ARMv7-A, which tags each space's entries with an
+  ASID (`docs/OPAQUE-KERNEL.md` §9.13), a program's entries survive another
+  program's run on the same core, so which of its pages were evicted
+  meanwhile is visible to its timing at page granularity (the TLBleed
+  class), between programs and between speculation domains alike. The
+  defence is the same partitioning, AoU-11's.
 * **Sibling hyperthreads on an MDS-affected part.** `VERW` clears buffers on
   the way out of the kernel, not while a sibling runs. Such a part is to run
   with SMT off (AoU-11).

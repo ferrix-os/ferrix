@@ -127,7 +127,8 @@ pub(crate) static SPACE_SET_WITHOUT_RECORD: Explanation = Explanation {
     code: "FX-0004",
     title: "an address space was switched on a processor that cannot name itself",
     meaning: "Every address space keeps the set of processors whose TLB may still hold its \
-              translations, and a TLB shootdown for the space reaches exactly those. A \
+              translations (on ARMv7-A, whose shootdowns are a broadcast, the processors \
+              that have it installed), and a TLB shootdown for the space reaches those. A \
               processor joins the set before it loads the space's root and leaves it after the \
               root write that flushed it, by its logical number, read from its per-CPU record. \
               With no record there is no number, and any guess would leave a processor that \
@@ -1383,6 +1384,9 @@ pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
         "The scoped shootdown missed a processor holding a stale entry: a processor joined an \
          address space's set after loading its root, left before the root write that flushed \
          it, or answered a shootdown for a processor it was no longer running on.",
+        "On ARMv7-A, a shootdown that stopped being a broadcast to every processor: there a \
+         processor that left a space's set keeps its entries under the space's ASID, and only \
+         the broadcast reaches it (docs/OPAQUE-KERNEL.md §9.13, L.armv7a.16).",
         "The page-scoped invalidation is wrong for the architecture: `invlpg` not reaching the \
          entry, or `TLBI VAAE1IS` / `TLBIMVAAIS` given the wrong page number.",
         "A decommit, replace or move touched a held page, or backed off after already \

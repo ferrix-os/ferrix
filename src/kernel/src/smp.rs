@@ -1366,8 +1366,12 @@ fn scoped_request(wanted: u64, cpu: usize) -> Option<TlbPages> {
 ///
 /// On `AArch64` and ARMv7-A invalidation is broadcast in hardware, and this
 /// is a page-scoped broadcast (`TLBI VAAE1IS`, `TLBIMVAAIS`) to every core,
-/// whatever the set. Scoping it by processor as well needs `ASID`s, which the
-/// kernel does not allocate: every user translation is tagged with `ASID`
+/// whatever the set, and by address for every ASID. On ARMv7-A, which gives
+/// each space an ASID (`docs/OPAQUE-KERNEL.md` §9.13), a processor that left
+/// a space's set may still hold its entries under its number, and the
+/// broadcast is what reaches it (L.armv7a.16). An invalidation scoped by the
+/// space's ASID would now be sound there too; it is a later step, measured on
+/// the board first. On `AArch64` every user translation is tagged with ASID
 /// zero, so there is no way to tell a core to drop one space's entries
 /// without telling it to drop every space's.
 ///

@@ -2341,8 +2341,10 @@ fn switch_chosen(
 ///
 /// Because two threads of one process share a root, and an address space
 /// switch is the expensive operation this whole stage declined to optimise:
-/// stage 6 allocates no `ASID`s or `PCID`s, so installing a root invalidates
-/// every user translation this processor had. Switching between two threads of
+/// on x86-64 and `AArch64` no `PCID`s or `ASID`s are allocated, so
+/// installing a root invalidates every user translation this processor had
+/// (ARMv7-A's ASIDs keep them, `docs/OPAQUE-KERNEL.md` §9.13, but its
+/// install still writes `TTBR0`). Switching between two threads of
 /// one process must therefore cost nothing, and `Arc::ptr_eq` is what says they
 /// are the same space rather than two equal ones.
 ///
