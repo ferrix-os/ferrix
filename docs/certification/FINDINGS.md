@@ -2762,3 +2762,39 @@ self-check that a display driver's `vmo_read` of the card is refused and a
 gate.sh control that removes the refusal; DISPLAY.md §2.1 then restated as
 "no driver writes the pixels; only a copying driver the kernel qualifies maps
 them" (ledger 310, C10).
+
+### F-70 — a tmpfs read could sleep holding its inode's spin lock, and every stat and listing of the file convoyed on it
+**Found 2026-10-10, open** (found by the steam-stall work on Steam's staging
+stall; numbered by the certification consultant, ledger 2026-10-10 lines
+642-643; pre-existing since `memory.high` reached tmpfs reads, b97f4db71,
+and the plain ticket lock 875b66f3b left on a tmpfs inode).
+
+*Is:* **Major**, the load ring (`ferrix-vfs` tmpfs, `fs/pages.rs`), every
+architecture. A tmpfs inode's `state` stayed a plain ticket lock when the
+rest of `ferrix-vfs` became preemption-holding on 2026-10-03, because a
+truncation cut mappings under it. Every data operation held it across its
+pages: `read_at` across `VmoPages::read`, which calls `oom::throttle`,
+which sleeps when the reader's job is over `memory.high` and reclaim finds
+nothing to take ("must be called with none held"); `write_at` across frame
+commits; `set_len` across the decommit and TLB shootdown. A sleeping or
+preempted holder, and a waiter preempted as its ticket came up, kept every
+other processor spinning in the lock.
+
+The evidence: `cargo xtask test-steam-game` on KVM, Steam's 32-bit client
+with about eighty staging threads: its download stood still at 4.8 of
+84 MB for as long as it ran, 100% of the guest's time in user mode by
+`top`, and 31 of 40 `info registers -a` samples over four vCPUs at one
+address, CPL 0, interrupts on: `SpinLock<tmpfs::State>::acquire` inlined
+in `tmpfs::Node::metadata`, one more in `read_dir`
+(~/ferrix-logs/steam-stall/). A `find` over the directory from another
+process never returned (docs/STEAM.md §7).
+
+*Fix (branch steam-stall, consultant OK IF A1-A7):* a regular file's data
+operations take a sleeping I/O lock first (`FileIo::io`, over the
+scheduler's parker), and `state` became the crate's preemption-holding
+spin lock covering only words and maps (MEMORY-AND-TIMING.md §2.2l). With
+it, the same run installed Teeworlds: 84 MB downloaded and 234 MB staged
+in 26 s, and the walk over the files returned at once. Stage 13's
+`/check-rt` reads a tmpfs file throttled at `memory.high`; it closes on a
+`gate.sh control --expect` with the read back under `state` stopping the
+machine at FX-0503.

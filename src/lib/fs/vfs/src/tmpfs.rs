@@ -23,7 +23,17 @@
 //!
 //! # Locking
 //!
-//! One spin lock per inode, holding everything about it. An operation that
+//! A regular file has two locks, taken in this order and never the other:
+//! its I/O lock ([`FileIo`]'s `io`, a sleeping lock), held by every read,
+//! write, truncation and seal of its contents, and its inode lock (`state`,
+//! the crate's spin lock, whose holder stays on its processor). The VMO's own
+//! locks come after both, and nothing a store or a pager does takes a tmpfs
+//! inode lock again. Work that may wait -- a page's fill, a write's frames, a
+//! job's `memory.high` throttle, a truncation's shootdown -- runs under `io`
+//! alone; `state` covers only words and maps. `io` is never taken under a
+//! spin lock, `state`'s included.
+//!
+//! One spin lock per inode, holding everything else about it. An operation that
 //! needs more than one — `link`, `unlink`, `rmdir`, `rename` — takes them in
 //! ascending inode number, after looking the names up under the directory
 //! lock alone and then re-checking them once everything is held. That order
@@ -235,6 +245,14 @@ pub trait Storage: Send + Sync + fmt::Debug {
 
     /// The largest a file may grow, which is `EFBIG` past.
     fn max_file_size(&self) -> u64;
+
+    /// What a regular file's I/O lock ([`FileIo`]) waits on. Spinning by
+    /// default, which is right on the host; the kernel lends the scheduler's,
+    /// so a task waiting behind a write that fills or a truncation that cuts
+    /// mappings sleeps rather than holds its processor.
+    fn parker(&self) -> &dyn ferrix_sync::Parker {
+        &ferrix_sync::SpinParker
+    }
 
     /// Pages in total and pages free, for `statfs`. Unknown by default, which
     /// `df` shows as a filesystem of no size rather than an invented one.
@@ -556,11 +574,14 @@ impl Tmpfs {
     /// What the storage refuses when it allocates the file's pages.
     pub fn new_unlinked_file(&self, permissions: u32, sealable: bool) -> Result<Arc<dyn Inode>> {
         let now = self.shared.clock.now();
-        let body = Body::File {
-            pages: self.shared.storage.allocate()?,
-            len: 0,
-        };
-        let node = Node::new(&self.shared, body, permissions, now)?;
+        let pages = self.shared.storage.allocate()?;
+        let node = Node::new(
+            &self.shared,
+            Body::File { len: 0 },
+            Some(pages),
+            permissions,
+            now,
+        )?;
         {
             let mut state = node.state.lock();
             state.nlink = 0;
@@ -600,6 +621,7 @@ impl Tmpfs {
         let root = Node::with_charge(
             &shared,
             Body::Dir(Dir::new(Weak::new())),
+            None,
             permissions,
             now,
             charge,
@@ -630,6 +652,7 @@ impl Tmpfs {
         let root = Node::with_charge(
             &shared,
             Body::Dir(Dir::new(Weak::new())),
+            None,
             permissions,
             now,
             Charge::none(),
@@ -677,14 +700,18 @@ pub struct Node {
     /// Itself, for a directory created in it to name as its parent.
     me: Weak<Node>,
     shared: Arc<Shared>,
-    /// A plain ticket lock, unlike the crate's others, whose holder may be
-    /// switched out: a shrinking `set_len` cuts the file's mappings under it,
-    /// which shoots down other processors' TLBs, and that is not asked with a
-    /// preemption-disabling lock held. It is held because it is what
-    /// serialises the cut against `write_at`, which `discard_from` relies on.
-    /// Keeping the holder here needs that serialisation from a lock a
-    /// shrink may sleep under instead.
-    state: ferrix_sync::SpinLock<State>,
+    /// Everything about the inode but a regular file's contents: the crate's
+    /// spin lock, whose holder stays on its processor, so it is held only for
+    /// the words and maps in [`State`] and never across a page's fill, a
+    /// write's frames, a truncation's shootdown or a memory throttle -- those
+    /// run under [`FileIo::io`]. Until 2026-10-10 it was a plain ticket lock
+    /// held across all of them, and Steam's ~80 staging threads stat-ing one
+    /// directory queued behind holders and waiters switched out mid-turn: all
+    /// four processors spun in `metadata` for as long as Steam ran (docs/STEAM.md §7).
+    state: SpinLock<State>,
+    /// A regular file's contents and the lock its data operations take;
+    /// `None` for everything else.
+    file: Option<FileIo>,
     /// The kernel heap the inode holds -- itself, and a symbolic link's
     /// target -- charged to the job that made it for as long as it exists,
     /// linked or open (F-37). Its pages are charged as they are written, to
@@ -743,6 +770,25 @@ impl fmt::Debug for Node {
     }
 }
 
+/// A regular file's contents, and the lock that orders what reads, writes
+/// and truncates them.
+///
+/// `io` is a sleeping lock taken before [`Node::state`] and never under it:
+/// the work it covers may wait -- a page filled from a source, a frame
+/// committed, a job throttled at `memory.high`, a truncation's TLB shootdown
+/// -- and it is what serialises a shrink's cut against a write or a read,
+/// which [`Pages::discard_from`] relies on.
+struct FileIo {
+    io: ferrix_sync::SleepLock<()>,
+    pages: Box<dyn Pages>,
+}
+
+impl fmt::Debug for FileIo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FileIo").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 struct State {
     /// `F_SEAL_*` bits. [`SEAL_SEAL`] for every file but a memfd made to
@@ -787,10 +833,16 @@ impl State {
 
 #[derive(Debug)]
 enum Body {
-    File { pages: Box<dyn Pages>, len: u64 },
+    /// Its contents are [`FileIo::pages`], outside the inode lock.
+    File {
+        len: u64,
+    },
     Dir(Dir),
     Symlink(Box<[u8]>),
-    Special { kind: FileType, rdev: u64 },
+    Special {
+        kind: FileType,
+        rdev: u64,
+    },
 }
 
 /// A directory's names.
@@ -893,7 +945,7 @@ impl Dir {
 
 /// Several inode locks, taken in ascending inode number.
 struct Locked<'a> {
-    guards: Vec<(u64, ferrix_sync::SpinLockGuard<'a, State>)>,
+    guards: Vec<(u64, crate::SpinLockGuard<'a, State>)>,
 }
 
 impl<'a> Locked<'a> {
@@ -924,18 +976,32 @@ impl Node {
     /// # Errors
     ///
     /// `ENOMEM` past the job's memory limit.
-    fn new(shared: &Arc<Shared>, body: Body, permissions: u32, now: Timespec) -> Result<Arc<Node>> {
+    fn new(
+        shared: &Arc<Shared>,
+        body: Body,
+        pages: Option<Box<dyn Pages>>,
+        permissions: u32,
+        now: Timespec,
+    ) -> Result<Arc<Node>> {
         let extra = match &body {
             Body::Symlink(target) => footprint(target.len(), 1),
             _ => 0,
         };
         let charge = crate::charge(arc_footprint::<Node>().saturating_add(extra))?;
-        Ok(Node::with_charge(shared, body, permissions, now, charge))
+        Ok(Node::with_charge(
+            shared,
+            body,
+            pages,
+            permissions,
+            now,
+            charge,
+        ))
     }
 
     fn with_charge(
         shared: &Arc<Shared>,
         body: Body,
+        pages: Option<Box<dyn Pages>>,
         permissions: u32,
         now: Timespec,
         charge: Charge,
@@ -945,7 +1011,11 @@ impl Node {
             ino: shared.next_ino.fetch_add(1, Ordering::Relaxed),
             me: Weak::clone(me),
             shared: Arc::clone(shared),
-            state: ferrix_sync::SpinLock::new(State {
+            file: pages.map(|pages| FileIo {
+                io: ferrix_sync::SleepLock::new((), shared.storage.parker()),
+                pages,
+            }),
+            state: SpinLock::new(State {
                 seals: SEAL_SEAL,
                 permissions: permissions & 0o7777,
                 uid: 0,
@@ -962,6 +1032,17 @@ impl Node {
 
     fn now(&self) -> Timespec {
         self.shared.clock.now()
+    }
+
+    /// A regular file's contents and I/O lock; for anything else the error
+    /// a data operation answers, `EISDIR` for a directory and `EINVAL` for
+    /// the rest.
+    fn file_io(&self) -> Result<&FileIo> {
+        match &self.file {
+            Some(file) => Ok(file),
+            None if self.state.lock().is_dir() => Err(Errno::EISDIR),
+            None => Err(Errno::EINVAL),
+        }
     }
 
     /// The child node called `name`.
@@ -997,34 +1078,39 @@ impl Node {
         }
     }
 
-    fn body_for(&self, node: NewNode<'_>) -> Result<Body> {
-        Ok(match node {
-            NewNode::Regular => Body::File {
-                pages: self.shared.storage.allocate()?,
-                len: 0,
-            },
-            NewNode::Directory => Body::Dir(Dir::new(Weak::clone(&self.me))),
-            NewNode::Symlink(target) => {
-                if target.len() >= PATH_MAX {
-                    return Err(Errno::ENAMETOOLONG);
+    /// What a new inode of `node`'s kind starts as, and a regular file's
+    /// store.
+    fn body_for(&self, node: NewNode<'_>) -> Result<(Body, Option<Box<dyn Pages>>)> {
+        if matches!(node, NewNode::Regular) {
+            return Ok((Body::File { len: 0 }, Some(self.shared.storage.allocate()?)));
+        }
+        Ok((
+            match node {
+                NewNode::Regular => Body::File { len: 0 },
+                NewNode::Directory => Body::Dir(Dir::new(Weak::clone(&self.me))),
+                NewNode::Symlink(target) => {
+                    if target.len() >= PATH_MAX {
+                        return Err(Errno::ENAMETOOLONG);
+                    }
+                    Body::Symlink(Box::from(target))
                 }
-                Body::Symlink(Box::from(target))
-            }
-            NewNode::Device { kind, rdev } => {
-                if !matches!(kind, FileType::CharDevice | FileType::BlockDevice) {
-                    return Err(Errno::EINVAL);
+                NewNode::Device { kind, rdev } => {
+                    if !matches!(kind, FileType::CharDevice | FileType::BlockDevice) {
+                        return Err(Errno::EINVAL);
+                    }
+                    Body::Special { kind, rdev }
                 }
-                Body::Special { kind, rdev }
-            }
-            NewNode::Fifo => Body::Special {
-                kind: FileType::Fifo,
-                rdev: 0,
+                NewNode::Fifo => Body::Special {
+                    kind: FileType::Fifo,
+                    rdev: 0,
+                },
+                NewNode::Socket => Body::Special {
+                    kind: FileType::Socket,
+                    rdev: 0,
+                },
             },
-            NewNode::Socket => Body::Special {
-                kind: FileType::Socket,
-                rdev: 0,
-            },
-        })
+            None,
+        ))
     }
 
     fn unlink_once(&self, name: &[u8]) -> Result<bool> {
@@ -1206,8 +1292,12 @@ impl Inode for Node {
     fn metadata(&self) -> Metadata {
         let state = self.state.lock();
         let (kind, size, blocks, rdev) = match &state.body {
-            Body::File { pages, len } => {
-                (FileType::Regular, *len, pages.committed_bytes() / 512, 0)
+            Body::File { len } => {
+                let committed = self
+                    .file
+                    .as_ref()
+                    .map_or(0, |file| file.pages.committed_bytes());
+                (FileType::Regular, *len, committed / 512, 0)
             }
             Body::Dir(dir) => (
                 FileType::Directory,
@@ -1264,54 +1354,69 @@ impl Inode for Node {
     }
 
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        let state = self.state.lock();
-        match &state.body {
-            Body::File { pages, len } => {
-                if offset >= *len {
-                    return Ok(0);
-                }
-                let available = usize::try_from(*len - offset).unwrap_or(usize::MAX);
-                let take = buf.len().min(available);
-                pages.read(offset, buf.get_mut(..take).ok_or(Errno::EIO)?)?;
-                Ok(take)
-            }
-            Body::Dir(_) => Err(Errno::EISDIR),
-            _ => Err(Errno::EINVAL),
+        let file = self.file_io()?;
+        let _io = file.io.lock();
+        // The length under the inode lock, the bytes after it: no shrink can
+        // cut them meanwhile, because a shrink takes `io` first.
+        let len = match &self.state.lock().body {
+            Body::File { len } => *len,
+            Body::Dir(_) => return Err(Errno::EISDIR),
+            _ => return Err(Errno::EINVAL),
+        };
+        if offset >= len {
+            return Ok(0);
         }
+        let available = usize::try_from(len - offset).unwrap_or(usize::MAX);
+        let take = buf.len().min(available);
+        // May fill a page, and may throttle the reader's job at `memory.high`,
+        // which sleeps: with `io` alone held.
+        file.pages
+            .read(offset, buf.get_mut(..take).ok_or(Errno::EIO)?)?;
+        Ok(take)
     }
 
     fn write_at(&self, offset: u64, data: &[u8], append: bool) -> Result<(usize, u64)> {
         let now = self.now();
         let max = self.shared.storage.max_file_size();
-        let mut state = self.state.lock();
-        let state_seals = state.seals;
-        let end = match &mut state.body {
-            Body::File { pages, len } => {
-                let start = if append { *len } else { offset };
-                if data.is_empty() {
-                    return Ok((0, start));
-                }
-                let end = start.checked_add(data.len() as u64).ok_or(Errno::EFBIG)?;
-                if end > max {
-                    return Err(Errno::EFBIG);
-                }
-                // `shmem_write_begin`'s order: a write seal refuses any write,
-                // a grow seal one that would extend the file.
-                if state_seals & (SEAL_WRITE | SEAL_FUTURE_WRITE) != 0
-                    || (state_seals & SEAL_GROW != 0 && end > *len)
-                {
-                    return Err(Errno::EPERM);
-                }
-                pages.write(start, data)?;
-                if end > *len {
-                    *len = end;
-                    pages.resize(end);
-                }
-                end
+        let file = self.file_io()?;
+        let _io = file.io.lock();
+        let (start, end) = {
+            let state = self.state.lock();
+            let Body::File { len } = &state.body else {
+                return Err(if state.is_dir() {
+                    Errno::EISDIR
+                } else {
+                    Errno::EINVAL
+                });
+            };
+            let start = if append { *len } else { offset };
+            if data.is_empty() {
+                return Ok((0, start));
             }
-            Body::Dir(_) => return Err(Errno::EISDIR),
-            _ => return Err(Errno::EINVAL),
+            let end = start.checked_add(data.len() as u64).ok_or(Errno::EFBIG)?;
+            if end > max {
+                return Err(Errno::EFBIG);
+            }
+            // `shmem_write_begin`'s order: a write seal refuses any write,
+            // a grow seal one that would extend the file.
+            if state.seals & (SEAL_WRITE | SEAL_FUTURE_WRITE) != 0
+                || (state.seals & SEAL_GROW != 0 && end > *len)
+            {
+                return Err(Errno::EPERM);
+            }
+            (start, end)
         };
+        // Frames committed and filled with `io` alone held; the length and
+        // the seals cannot move meanwhile, since every change to either takes
+        // `io` first.
+        file.pages.write(start, data)?;
+        let mut state = self.state.lock();
+        if let Body::File { len } = &mut state.body
+            && end > *len
+        {
+            *len = end;
+            file.pages.resize(end);
+        }
         state.touch(now);
         Ok((data.len(), end))
     }
@@ -1321,28 +1426,37 @@ impl Inode for Node {
         if new_len > self.shared.storage.max_file_size() {
             return Err(Errno::EFBIG);
         }
-        let mut state = self.state.lock();
-        let seals = state.seals;
-        match &mut state.body {
-            Body::File { len, .. }
-                if (new_len < *len && seals & SEAL_SHRINK != 0)
-                    || (new_len > *len && seals & SEAL_GROW != 0) =>
+        let file = self.file_io()?;
+        let _io = file.io.lock();
+        let shrunk = {
+            let mut state = self.state.lock();
+            let seals = state.seals;
+            let Body::File { len } = &mut state.body else {
+                return Err(if state.is_dir() {
+                    Errno::EISDIR
+                } else {
+                    Errno::EINVAL
+                });
+            };
+            if (new_len < *len && seals & SEAL_SHRINK != 0)
+                || (new_len > *len && seals & SEAL_GROW != 0)
             {
                 return Err(Errno::EPERM);
             }
-            Body::File { pages, len } => {
-                // The store hears the new length first, so a mapping's fault
-                // past the cut is refused before the cut pages go.
-                pages.resize(new_len);
-                if new_len < *len {
-                    pages.discard_from(new_len);
-                }
-                *len = new_len;
-            }
-            Body::Dir(_) => return Err(Errno::EISDIR),
-            _ => return Err(Errno::EINVAL),
+            // The store hears the new length first, so a mapping's fault
+            // past the cut is refused before the cut pages go.
+            file.pages.resize(new_len);
+            let shrunk = new_len < *len;
+            *len = new_len;
+            state.touch(now);
+            shrunk
+        };
+        if shrunk {
+            // Pages past the cut decommitted and every mapping of them shot
+            // down, which waits for other processors: with `io` alone held,
+            // which keeps any read or write of this file out until it is done.
+            file.pages.discard_from(new_len);
         }
-        state.touch(now);
         Ok(())
     }
 
@@ -1351,18 +1465,20 @@ impl Inode for Node {
         if new_len > self.shared.storage.max_file_size() {
             return Err(Errno::EFBIG);
         }
+        let file = self.file_io()?;
+        let _io = file.io.lock();
         let mut state = self.state.lock();
         let seals = state.seals;
         match &mut state.body {
             // Decided under the lock every write takes, so a writer that
             // extends the file in the meantime is never cut back.
-            Body::File { len, .. } if *len >= new_len => return Ok(()),
+            Body::File { len } if *len >= new_len => return Ok(()),
             Body::File { .. } if seals & SEAL_GROW != 0 => return Err(Errno::EPERM),
             // Nothing to clear: a shrink zeroes what it cuts off, so the bytes
             // this uncovers already read as zeros.
-            Body::File { pages, len } => {
+            Body::File { len } => {
                 *len = new_len;
-                pages.resize(new_len);
+                file.pages.resize(new_len);
             }
             Body::Dir(_) => return Err(Errno::EISDIR),
             _ => return Err(Errno::EINVAL),
@@ -1372,8 +1488,8 @@ impl Inode for Node {
     }
 
     fn mapping(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        match &self.state.lock().body {
-            Body::File { pages, .. } => pages.object(),
+        match &self.file {
+            Some(file) => file.pages.object(),
             _ => None,
         }
     }
@@ -1398,6 +1514,12 @@ impl Inode for Node {
         // acquisition, which this acquisition follows, so the look below sees
         // the count. A write seal and a shared mapping that may write the file
         // therefore never both stand.
+        //
+        // `io` first, as a write takes it: a seal is never added while a
+        // write it would refuse is between its look at the seals and its
+        // bytes, as Linux's inode lock orders the two.
+        let file = self.file.as_ref().ok_or(Errno::EINVAL)?;
+        let _io = file.io.lock();
         let mut state = self.state.lock();
         if !matches!(state.body, Body::File { .. }) {
             return Err(Errno::EINVAL);
@@ -1428,7 +1550,8 @@ impl Inode for Node {
     fn create(&self, name: &[u8], node: NewNode<'_>, permissions: u32) -> Result<Arc<dyn Inode>> {
         let now = self.now();
         let kind = node.kind();
-        let child = Node::new(&self.shared, self.body_for(node)?, permissions, now)?;
+        let (body, pages) = self.body_for(node)?;
+        let child = Node::new(&self.shared, body, pages, permissions, now)?;
         let charge = Entry::charge(name)?;
         let mut state = self.state.lock();
         {

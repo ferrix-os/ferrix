@@ -974,6 +974,33 @@ queued and the client goes on. These are waits on a driver, not work of the
 item, and no bound is claimed for them. The driver's HELLO is waited for at
 most 10 s by the control's own task, never by a client or the boot.
 
+### 2.2l A tmpfs inode's locks (`ferrix_vfs::tmpfs::Node`, load ring, F-70)
+
+Two locks per inode since 2026-10-10, taken in one order: a regular file's
+`FileIo::io`, a `SleepLock` over the scheduler's parker (`SchedParker`, which
+the kernel's `VmoStorage::parker` hands every tmpfs it makes), then the inode's
+`state`, the crate's preemption-holding spin lock, then the VMO's own locks
+under it. `io` is never taken under `state` or under any spin lock -- the
+`SleepLock`'s `may_park` stops a debug kernel that tries -- and nothing a VMO
+or a pager does re-enters a tmpfs inode's `state`. `state` covers words and
+maps only: the length, seals, times, owner and a directory's names; what
+`stat` reads of the store under it, the committed page count, is a VMO's
+spin-locked count, never a sleep. A read's fill, a write's frames, a job's
+`memory.high` throttle and a truncation's decommit and TLB shootdown all run
+under `io` alone, so a holder of `state` never blocks (FX-0503 stops the
+machine if one does) and is never switched out, and a waiter for it waits
+for a few map operations. The callers of a tmpfs file's `read_at`,
+`write_at` and `set_len` -- the system calls, the exec loader, `sendfile`
+and `splice`, memfd and System V shared memory -- hold no spin lock when
+they call, as they already had to for a file on btrfs.
+
+Before, `state` was a plain ticket lock held across all of that work. A
+reader throttled at `memory.high` slept holding it (F-70), and with Steam's
+eighty staging threads listing and `stat`-ing one directory the holders and
+waiters switched out mid-turn kept all four processors spinning in
+`metadata` for as long as Steam ran (docs/STEAM.md §7; the same convoy
+875b66f3b took out of the rest of `ferrix-vfs` on 2026-10-03).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
