@@ -698,8 +698,12 @@ pub(crate) const DECODER_IN_VOLUME: &str = "/data/usr/bin/ffmpeg-vulkan";
 
 /// The wallpaper's GPU decoder `tools/common/fetch/fetch-ffmpeg-vulkan.sh`
 /// built, beside the fetched release; `None` where it has not been built,
-/// and then the wallpaper is decoded by rav1d as without `--nvidia`.
+/// and then the wallpaper is decoded by rav1d as without `--nvidia`, as it
+/// also is with `FERRIX_WALLPAPER_DECODER=rav1d` (to measure the two).
 pub(crate) fn wallpaper_decoder() -> Result<Option<PathBuf>> {
+    if std::env::var_os("FERRIX_WALLPAPER_DECODER").is_some_and(|value| value == "rav1d") {
+        return Ok(None);
+    }
     let built = nvrm::fetched()?
         .parent()
         .map(|root| root.join("ffmpeg-vulkan").join("ffmpeg"));
