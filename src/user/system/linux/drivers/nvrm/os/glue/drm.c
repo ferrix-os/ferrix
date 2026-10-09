@@ -664,7 +664,21 @@ static int drm_fd_to_handle(struct drm_file *file, NvU64 request, NvU64 arg)
     return copy_out(arg, &p, sizeof(p));
 }
 
+static int drm_ioctl_one(void *opened, NvU64 request, NvU32 cmd, NvU64 arg);
+
+/* Bring-up aid (N3b): say every ioctl and its answer. */
+int nvrm_trace_drm = 1;
+
 int nvrm_drm_ioctl(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
+{
+    int rc = drm_ioctl_one(opened, request, cmd, arg);
+
+    if (nvrm_trace_drm)
+        drm_say("ioctl 0x%x = %d\n", cmd, rc);
+    return rc;
+}
+
+static int drm_ioctl_one(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
 {
     struct drm_file *file = opened;
 
