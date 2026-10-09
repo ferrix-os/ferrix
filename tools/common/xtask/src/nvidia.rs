@@ -685,6 +685,10 @@ pub(crate) fn data_links() -> Vec<ports::File> {
         ("usr/share/glvnd", "/data/usr/share/glvnd"),
         ("usr/share/egl", "/data/usr/share/egl"),
         ("usr/share/nvidia", "/data/usr/share/nvidia"),
+        // virglrenderer's test server, which hyprix's `--renderer vtest`
+        // looks for on PATH: the compositor's frames drawn on the 3060
+        // through NVIDIA's EGL (docs/NVIDIA.md §4.6, N3c).
+        ("bin/virgl_test_server", "/data/usr/bin/virgl_test_server"),
     ]);
     files.push(ports::File {
         path: WEBGL_PAGE.trim_start_matches("file:///").to_owned(),

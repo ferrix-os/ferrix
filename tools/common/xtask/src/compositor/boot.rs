@@ -519,10 +519,18 @@ pub(super) fn build_parts(
     // `--instance` is what puts the control socket where `hyprctl` looks for
     // it.
     let config_path = format!("/{CONFIG_PATH}");
+    let mut arguments = vec!["--config", config_path.as_str(), "--instance", INSTANCE];
+    // `--nvidia`: the frames are drawn on the 3060, by virglrenderer's test
+    // server on NVIDIA's EGL, and read back for nvrm's copying card
+    // (docs/NVIDIA.md §4.6, N3c). The card's render node speaks NVIDIA's
+    // ioctls, not virgl's, so `auto` would draw in software.
+    if args.nvidia {
+        arguments.extend(["--renderer", "vtest"]);
+    }
     let mut carried = crate::init::desktop_files(
         arch,
         &read(&programs.hyprix)?,
-        &["--config", &config_path, "--instance", INSTANCE],
+        &arguments,
         carried_too.zinc.is_some(),
         carried_too.pulsed.as_deref(),
         args.session_user.as_deref(),
