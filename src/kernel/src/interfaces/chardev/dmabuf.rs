@@ -24,6 +24,16 @@
 //! * No sync: `DMA_BUF_IOCTL_SYNC` answers 0, every other ioctl `ENOTTY`,
 //!   and poll is always ready (B9).
 //!
+//! # Name-only dmabufs
+//!
+//! A buffer in video memory is shared as a dmabuf with no VMO at all
+//! ([`DMABUF_NAME_ONLY`], ledger 632): only the cookie and the size its
+//! driver says it has. Nothing maps it (`mmap` is `ENODEV`), and only its
+//! maker's resolve gives the cookie back, so its one use is to come back to
+//! the same driver from another program. The size is the driver's claim and
+//! feeds `fstat` and `lseek` only (N3). Everything else above holds for it
+//! as written: the table, the cap, one object per cookie and the release.
+//!
 //! [`Op::DmabufRelease`]: ferrix_chardevctl::message::Op::DmabufRelease
 
 use alloc::sync::{Arc, Weak};
@@ -36,7 +46,8 @@ use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
-    DMABUF_CLOEXEC, DMABUF_FLAGS, DMABUF_MADE, DMABUF_TELL_MADE, DMABUF_WRITABLE,
+    DMABUF_CLOEXEC, DMABUF_FLAGS, DMABUF_MADE, DMABUF_NAME_MAX, DMABUF_NAME_ONLY, DMABUF_TELL_MADE,
+    DMABUF_WRITABLE,
 };
 use ferrix_vfs::{Inode, Metadata, Readiness, Result as VfsResult};
 
@@ -62,10 +73,36 @@ const SYNC_VALID: u64 = 0x7;
 /// `DMA_BUF_SYNC_RW`: a sync names reading, writing or both.
 const SYNC_RW: u64 = 0x3;
 
+/// What a dmabuf is over: one of exactly two kinds (ledger 632's N2).
+pub(crate) enum Backing {
+    /// The whole of a plain anonymous VMO: what a mapping of it maps.
+    Vmo(Arc<Vmo>),
+    /// No memory the kernel knows: a buffer in its driver's video memory,
+    /// of the size the driver says, which is only ever reported (N3).
+    Name {
+        /// Bytes, a multiple of 4096 and at most `DMABUF_NAME_MAX`.
+        size: u64,
+    },
+}
+
+impl Backing {
+    /// Whether a live dmabuf over `self` may be handed out for an install
+    /// asking for `wanted`: the same VMO, or a name of the same size.
+    fn same(&self, wanted: &Backing) -> bool {
+        match (self, wanted) {
+            (Backing::Vmo(held), Backing::Vmo(asked)) => Arc::ptr_eq(held, asked),
+            (Backing::Name { size: held }, Backing::Name { size: asked }) => held == asked,
+            (Backing::Vmo(_), Backing::Name { .. }) | (Backing::Name { .. }, Backing::Vmo(_)) => {
+                false
+            }
+        }
+    }
+}
+
 /// One dmabuf. Every descriptor of it holds it, and every mapping holds a
 /// descriptor's open file, so it goes with the last of both.
 pub(crate) struct Dmabuf {
-    vmo: Arc<Vmo>,
+    backing: Backing,
     cookie: u64,
     /// Its maker, by identity: what resolve compares, and whom the release
     /// is for while it lives. Weak, so no claim is kept (B2).
@@ -78,11 +115,13 @@ pub(crate) struct Dmabuf {
 
 impl core::fmt::Debug for Dmabuf {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter
-            .debug_struct("Dmabuf")
-            .field("cookie", &self.cookie)
-            .field("pages", &self.vmo.len_pages())
-            .finish_non_exhaustive()
+        let mut out = formatter.debug_struct("Dmabuf");
+        let _ = out.field("cookie", &self.cookie);
+        let _ = match &self.backing {
+            Backing::Vmo(vmo) => out.field("pages", &vmo.len_pages()),
+            Backing::Name { size } => out.field("name_only_bytes", size),
+        };
+        out.finish_non_exhaustive()
     }
 }
 
@@ -120,8 +159,13 @@ impl Inode for Dmabuf {
     /// An anonymous file the size of its buffer, which is what Linux's
     /// `lseek(fd, 0, SEEK_END)` on a dmabuf answers.
     fn metadata(&self) -> Metadata {
+        let size = match &self.backing {
+            Backing::Vmo(vmo) => vmo.len_bytes(),
+            // The driver's claim, reported and never used (N3).
+            Backing::Name { size } => *size,
+        };
         Metadata {
-            size: self.vmo.len_bytes(),
+            size,
             ..crate::fs::anon::metadata()
         }
     }
@@ -157,10 +201,16 @@ impl Inode for Dmabuf {
 
     /// Its VMO, from `offset`: `mmap` maps it through the open file, so a
     /// mapping holds the dmabuf, and refuses a range past the VMO's end,
-    /// which is the buffer's end (the consultant's (1)).
+    /// which is the buffer's end (the consultant's (1)). A name-only one
+    /// has nothing to map: `mmap` turns this `None` into `ENODEV` (N5).
     fn mapping_at(&self, offset: u64) -> Option<(Arc<dyn Any + Send + Sync>, u64)> {
-        let vmo: Arc<dyn Any + Send + Sync> = Arc::clone(&self.vmo) as _;
-        Some((vmo, offset))
+        match &self.backing {
+            Backing::Vmo(vmo) => {
+                let vmo: Arc<dyn Any + Send + Sync> = Arc::clone(vmo) as _;
+                Some((vmo, offset))
+            }
+            Backing::Name { .. } => None,
+        }
     }
 }
 
@@ -189,19 +239,31 @@ pub(crate) fn ioctl(process: &Process, request: u32, arg: u64) -> Result<usize, 
     Ok(0)
 }
 
-/// `chardev_dmabuf_install(control, request, vmo, cookie, flags)`: a dmabuf
-/// over the whole of `vmo` as a new descriptor in the waiting program.
+/// `chardev_dmabuf_install(control, request, vmo, cookie, flags, size)`: a
+/// dmabuf over the whole of `vmo`, or with [`DMABUF_NAME_ONLY`] a name-only
+/// one of `size` bytes, as a new descriptor in the waiting program.
 pub(crate) fn install(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
-    let [handle, id, vmo_handle, cookie, flags, _] = *registers;
+    let [handle, id, vmo_handle, cookie, flags, size] = *registers;
     if flags & !DMABUF_FLAGS != 0 {
         return Err(status::INVALID_ARGS);
     }
     let writable = flags & DMABUF_WRITABLE != 0;
     let control = super::control_of(caller, handle)?;
-    let vmo = handed_vmo(caller, vmo_handle, writable)?;
+    // Every register judged before anything is looked up or held (N1).
+    let backing = if flags & DMABUF_NAME_ONLY != 0 {
+        if vmo_handle != 0 || !name_size_valid(size) {
+            return Err(status::INVALID_ARGS);
+        }
+        Backing::Name { size }
+    } else {
+        if size != 0 {
+            return Err(status::INVALID_ARGS);
+        }
+        Backing::Vmo(handed_vmo(caller, vmo_handle, writable)?)
+    };
     let request = super::outstanding(&control, id)?;
     super::begin_copy(&request)?;
-    let installed = install_for(&control, &request.client, vmo, cookie, flags);
+    let installed = install_for(&control, &request.client, backing, cookie, flags);
     super::copy_done(&request);
     let (descriptor, made) = installed?;
     let descriptor = usize::try_from(descriptor).map_err(|_| status::INVALID_ARGS)?;
@@ -212,13 +274,18 @@ pub(crate) fn install(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, 
     })
 }
 
+/// Whether a name-only dmabuf may say it is `size` bytes: not 0, whole
+/// pages, at most [`DMABUF_NAME_MAX`] (N1).
+fn name_size_valid(size: u64) -> bool {
+    size != 0 && size % 4096 == 0 && size <= DMABUF_NAME_MAX
+}
+
 /// The VMO `handle` names in `caller`'s table, if it may become a dmabuf:
 /// `READ` and `TRANSFER`, `WRITE` too for a writable one, and plain
 /// anonymous memory (the consultant's (2), B1).
 fn handed_vmo(caller: &dyn Host, handle: u64, writable: bool) -> Result<Arc<Vmo>, Errno> {
-    let needed = Rights(
-        Rights::READ.0 | Rights::TRANSFER.0 | if writable { Rights::WRITE.0 } else { 0 },
-    );
+    let needed =
+        Rights(Rights::READ.0 | Rights::TRANSFER.0 | if writable { Rights::WRITE.0 } else { 0 });
     let vmo = caller.core().with_handles(|table| {
         let (object, rights) = table
             .get(Handle::from_register(handle))
@@ -243,15 +310,15 @@ fn handed_vmo(caller: &dyn Host, handle: u64, writable: bool) -> Result<Arc<Vmo>
 fn install_for(
     control: &Arc<Control>,
     client: &Arc<Process>,
-    vmo: Arc<Vmo>,
+    backing: Backing,
     cookie: u64,
     flags: u64,
 ) -> Result<(i32, bool), Errno> {
-    let dmabuf = find_or_make(control, vmo, cookie)?;
+    let dmabuf = find_or_make(control, backing, cookie)?;
     let writable = flags & DMABUF_WRITABLE != 0;
     let inode: Arc<dyn Inode> = Arc::clone(&dmabuf) as _;
-    let open = crate::fs::anon::open_mode(inode, NAME, false, writable)
-        .map_err(|_| status::NO_MEMORY)?;
+    let open =
+        crate::fs::anon::open_mode(inode, NAME, false, writable).map_err(|_| status::NO_MEMORY)?;
     let descriptor = client
         .files()
         .lock()
@@ -263,8 +330,13 @@ fn install_for(
     Ok((descriptor, made))
 }
 
-/// The live dmabuf for `cookie`, which must be over `vmo`, or a new one.
-fn find_or_make(control: &Arc<Control>, vmo: Arc<Vmo>, cookie: u64) -> Result<Arc<Dmabuf>, Errno> {
+/// The live dmabuf for `cookie`, which must be over the same backing (the
+/// same VMO, or a name of the same size), or a new one.
+fn find_or_make(
+    control: &Arc<Control>,
+    backing: Backing,
+    cookie: u64,
+) -> Result<Arc<Dmabuf>, Errno> {
     let mut dmabufs = control.dmabufs.lock();
     let live = dmabufs
         .iter()
@@ -274,7 +346,7 @@ fn find_or_make(control: &Arc<Control>, vmo: Arc<Vmo>, cookie: u64) -> Result<Ar
         // Unlocked before `dmabuf` can drop: were it the last reference,
         // its drop takes this lock.
         drop(dmabufs);
-        return if Arc::ptr_eq(&dmabuf.vmo, &vmo) {
+        return if dmabuf.backing.same(&backing) {
             Ok(dmabuf)
         } else {
             Err(status::ALREADY_BOUND)
@@ -289,7 +361,7 @@ fn find_or_make(control: &Arc<Control>, vmo: Arc<Vmo>, cookie: u64) -> Result<Ar
     // Cyclic only for its failure, which builds nothing: a dmabuf dropped
     // here would take this lock in its drop and give the slot back twice.
     let made = crate::fallible::try_arc_cyclic(|_| Dmabuf {
-        vmo,
+        backing,
         cookie,
         control: Arc::downgrade(control),
         announced: AtomicBool::new(false),
