@@ -188,6 +188,13 @@ pub(super) fn desktop(
         carried.ports.push(crate::chrome::desktop_policy());
         if args.nvidia {
             carried.ports.extend(crate::nvidia::data_links());
+            if args.everything {
+                carried.ports.push(crate::ports::File {
+                    path: NVIDIA_WATCH_PATH.to_owned(),
+                    mode: 0o644,
+                    content: crate::ports::Content::Bytes(NVIDIA_WATCH.as_bytes().to_vec()),
+                });
+            }
         }
         carried.ports.push(crate::chrome::opener(
             arch,
@@ -464,8 +471,41 @@ pub(super) fn with_steam(config: String, args: &Args, arch: Arch) -> String {
         return config;
     }
     println!("  {arch}: Steam, from its bootstrap, as uid 1000 on yserver's :0 (docs/STEAM.md)");
-    format!("{config}\n{}", steam_window::desktop_config())
+    // On the 3060 nobody watches over VNC: the serial log says which
+    // windows hyprix lists, and on which monitor.
+    let watch = if args.nvidia {
+        format!("exec-once = /bin/busybox sh /{NVIDIA_WATCH_PATH}\n")
+    } else {
+        String::new()
+    };
+    format!("{config}\n{}{watch}", steam_window::desktop_config())
 }
+
+/// Where [`NVIDIA_WATCH`] is in the image.
+const NVIDIA_WATCH_PATH: &str = "steam/nvidia-watch.sh";
+
+/// `run-compositor --nvidia --everything`'s watcher: every change in the
+/// windows hyprix lists, with their monitors, and Steam's log, to the
+/// console the run's serial log follows.
+const NVIDIA_WATCH: &str = r#"seen=
+lines=0
+while :; do
+    clients=$(/bin/hyprctl clients 2>/dev/null | grep -iE 'title|monitor|class' | tr '\n' ' ')
+    if [ "$clients" != "$seen" ]; then
+        echo "nvdesk: windows: $clients"
+        /bin/hyprctl monitors 2>/dev/null | head -n 3 | sed 's/^/nvdesk: monitor: /'
+        seen=$clients
+    fi
+    if [ -f /tmp/steam.log ]; then
+        now=$(wc -l < /tmp/steam.log)
+        if [ "$now" -gt "$lines" ]; then
+            tail -n $((now - lines)) /tmp/steam.log | head -n 40 | sed 's/^/nvdesk: steam: /'
+            lines=$now
+        fi
+    fi
+    sleep 3
+done
+"#;
 
 #[cfg(test)]
 mod tests {
