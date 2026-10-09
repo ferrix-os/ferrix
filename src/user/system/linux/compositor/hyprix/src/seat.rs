@@ -110,6 +110,15 @@ pub enum Action {
         /// another window, and has nothing to send without it.
         trigger: Option<(u16, u32)>,
     },
+    /// The device moved by `(dx, dy)`, whether or not the pointer did: a
+    /// locked or confined pointer, or one at the screen's edge, stays put
+    /// while `zwp_relative_pointer_v1` still tells its client the distance.
+    Relative {
+        /// Across.
+        dx: f64,
+        /// Down.
+        dy: f64,
+    },
     /// The pointer is at `(x, y)` on the screen.
     Pointer {
         /// Across.
@@ -216,6 +225,9 @@ pub struct Seat {
     /// before -- which is also what a machine with a mouse plugged in and
     /// never touched should look like.
     used: bool,
+    /// Where the last absolute device put the pointer before any hold, so
+    /// the next one's distance is the device's own.
+    absolute: Option<(f64, f64)>,
     /// Where the pointer is held, if a client has asked for it:
     /// `zwp_pointer_constraints_v1`.
     hold: Hold,
@@ -269,6 +281,7 @@ impl Seat {
             // The pointer starts in the middle, as Hyprland's does.
             pointer: (f64::from(width) / 2.0, f64::from(height) / 2.0),
             used: false,
+            absolute: None,
             screen: (f64::from(width), f64::from(height)),
             origin: (0.0, 0.0),
             submap: None,
@@ -470,11 +483,27 @@ impl Seat {
                 pressed,
                 repeat,
             } => self.key(code, pressed, repeat),
-            Input::Motion { dx, dy } => self.move_to(self.pointer.0 + dx, self.pointer.1 + dy),
-            Input::Absolute { x, y } => self.move_to(
-                self.origin.0 + x * self.screen.0,
-                self.origin.1 + y * self.screen.1,
-            ),
+            Input::Motion { dx, dy } => {
+                let mut actions = vec![Action::Relative { dx, dy }];
+                actions.extend(self.move_to(self.pointer.0 + dx, self.pointer.1 + dy));
+                actions
+            }
+            Input::Absolute { x, y } => {
+                let at = (
+                    self.origin.0 + x * self.screen.0,
+                    self.origin.1 + y * self.screen.1,
+                );
+                let mut actions: Vec<Action> = self
+                    .absolute
+                    .replace(at)
+                    .map(|was| (at.0 - was.0, at.1 - was.1))
+                    .filter(|(dx, dy)| *dx != 0.0 || *dy != 0.0)
+                    .map(|(dx, dy)| Action::Relative { dx, dy })
+                    .into_iter()
+                    .collect();
+                actions.extend(self.move_to(at.0, at.1));
+                actions
+            }
             Input::Button { button, pressed } => {
                 self.used = true;
                 // Which buttons are down, for the one thing that has to
