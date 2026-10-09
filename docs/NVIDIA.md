@@ -651,7 +651,8 @@ else:
   `NV_ERR_NOT_SUPPORTED`) until a gate needs them, and the kernel call goes
   to the consultant for review before any code is written.
 
-**N3b: dmabufs of video memory, name-only (design, 2026-10-10).** The
+**N3b: dmabufs of video memory, name-only (design, 2026-10-10; the
+certification consultant's verdict OK IF N1-N10, ledger 632).** The
 chardev dmabuf of ledger 316 is the whole of one anonymous VMO, because
 its first consumer, hyprix drawing in software, maps it. A GPU-only
 pipeline needs something else: Chrome's GPU compositing with NVIDIA's
@@ -671,7 +672,11 @@ inside `nvrm`. Such a dmabuf only has to *name* the buffer.
 * **The call.** `chardev_dmabuf_install` gains one flag,
   `DMABUF_NAME_ONLY` (`1 << 3`). With it the VMO register must be 0 (no
   handle is read, so none is transferred), and the sixth register is the
-  size in bytes: not 0, a multiple of 4096, at most 2^40. `WRITABLE` and
+  size in bytes: not 0, a multiple of 4096, at most 2^40. Without the flag
+  the sixth register must be 0. Every register is judged before the
+  request is looked up or anything is held (N1). The kernel does not check
+  the size against anything: it is `nvrm`'s claim, reported by `fstat` and
+  `lseek` and used for nothing else (N3). `WRITABLE` and
   `CLOEXEC` keep their meaning (the file's mode, close-on-exec). A live
   cookie asked for in the other kind, or with another size, is
   `ALREADY_BOUND`, as a live cookie over another VMO is today. No new
@@ -695,10 +700,12 @@ inside `nvrm`. Such a dmabuf only has to *name* the buffer.
   makes a VMO dmabuf for a pitch-linear buffer in system memory, as now,
   and a name-only one for any object in video memory (block-linear, or
   pitch-linear that NVIDIA's userspace placed in video memory), sized as
-  the GEM object. `PRIME_FD_TO_HANDLE` resolves either, as now. hyprix's
-  software screens keep advertising LINEAR only and refuse a buffer they
-  cannot map (the import fails, the client hears `failed`); block-linear
-  modifiers are advertised only by consumers that import on the GPU.
+  the GEM object. `PRIME_FD_TO_HANDLE` resolves either, as now. `nvrm`
+  never makes a VMO dmabuf for video memory (N9). hyprix's software
+  screens keep advertising LINEAR only and refuse a buffer they cannot map
+  cleanly (`Importer::Map`'s mmap fails, the import fails, the client hears
+  `failed`, nothing panics); block-linear modifiers are advertised only by
+  consumers that import on the GPU.
 * **Self-checks** (stage `dmabufs`, the fake driver): a name-only install
   with a VMO handle, size 0, an unaligned size, a size over the bound,
   each refused `INVALID_ARGS`; a live VMO cookie asked name-only, a live
