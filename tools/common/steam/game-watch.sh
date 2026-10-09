@@ -45,7 +45,7 @@ echo "steam-game: the client has signed in"
 sleep 120
 # What the client says of the install and the start: its console log and
 # its content log, from here on.
-for name in console_log content_log; do
+for name in console_log content_log compat_log gameprocess_log; do
     ( until [ -f $S/logs/$name.txt ]; do sleep 2; done
       tail -n 0 -F $S/logs/$name.txt 2>/dev/null \
           | awk -v said="steam-game: $name: " '{ print said $0; fflush() }' ) &
@@ -99,6 +99,9 @@ while :; do
     pid=$(pidof $program)
     if [ -n "$pid" ] && [ -z "$running" ]; then
         echo "steam-game: $program runs, pid $pid"
+        for p in $pid; do
+            echo "steam-game: pid $p exe $(readlink /proc/$p/exe), cmdline $(tr '\0' ' ' < /proc/$p/cmdline)"
+        done
     elif [ -z "$pid" ] && [ -n "$running" ]; then
         echo "steam-game: $program has ended"
     fi

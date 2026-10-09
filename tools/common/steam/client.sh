@@ -74,11 +74,58 @@ link_steamrt() {
             || echo "steam-window: ldconfig -n in $files failed"
     done
 }
+# Native Linux games run directly (docs/STEAM.md §7): Steam starts a native
+# game no tool is mapped to in the Steam Linux Runtime 1.0 (scout)
+# container, app 1070560, whose pressure-vessel needs bubblewrap in a user
+# namespace as this user (docs/NAMESPACES.md N5 to N7). The compatibility
+# tool ferrix_direct, carried at /steam/compat, runs the game itself
+# instead; each app in DIRECT_APPS gets a user mapping to it in config.vdf,
+# which outranks Valve's (priority 250, as the client's own Properties page
+# writes). Before each start: the client writes config.vdf back as it holds
+# it, and it holds the mapping from the start on.
+DIRECT_APPS=${FERRIX_DIRECT_APPS-380840}
+install_direct() {
+    mkdir -p $S/compatibilitytools.d/ferrix_direct
+    cp /steam/compat/ferrix_direct/* $S/compatibilitytools.d/ferrix_direct/
+    chmod 755 $S/compatibilitytools.d/ferrix_direct/run
+    cfg=$S/config/config.vdf
+    mkdir -p $S/config
+    [ -f $cfg ] || printf '"InstallConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t}\n\t\t}\n\t}\n}\n' > $cfg
+    for app in $DIRECT_APPS; do
+        # Already mapped to ferrix_direct: the app's block names it.
+        awk -v app="\"$app\"" '$1 == app { getline; getline; if ($2 == "\"ferrix_direct\"") found = 1 } END { exit !found }' $cfg && continue
+        awk -v app="$app" '
+            function entry(t) {
+                print t "\t\"" app "\""; print t "\t{"
+                print t "\t\t\"name\"\t\t\"ferrix_direct\""; print t "\t\t\"config\"\t\t\"\""
+                print t "\t\t\"priority\"\t\t\"250\""; print t "\t}"
+            }
+            { line = $0; key = $0; gsub(/^[ \t]+|[ \t]+$/, "", key) }
+            key == "{" { name[++depth] = tolower(pending); path = path "/" name[depth]
+                print line
+                if (path == "/installconfigstore/software/valve/steam/compattoolmapping" && !done) {
+                    t = line; sub(/\{.*/, "", t); entry(t); done = 1
+                }
+                next }
+            key == "}" {
+                if (path == "/installconfigstore/software/valve/steam" && !done) {
+                    t = line; sub(/\}.*/, "", t)
+                    print t "\t\"CompatToolMapping\""; print t "\t{"; entry(t "\t"); print t "\t}"
+                    done = 1
+                }
+                path = substr(path, 1, length(path) - length(name[depth]) - 1); depth--; print line; next }
+            { if (key ~ /^"[^"]*"$/) { pending = key; gsub(/"/, "", pending) } print line }
+            END { if (!done) print "steam-window: no Steam block in config.vdf for " app > "/dev/stderr" }
+        ' $cfg > $cfg.new && mv $cfg.new $cfg
+        echo "steam-window: app $app mapped to ferrix_direct"
+    done
+}
 n=0
 while [ $n -lt 4 ]; do
     n=$((n + 1))
     unpack_runtime
     link_steamrt
+    install_direct
     # Scout's pinned libraries, as steam.sh has its setup.sh make them, and
     # with the PATH steam.sh has then: without the runtime's directories.
     # With them, setup.sh finds the runtime's own zenity and pipes its

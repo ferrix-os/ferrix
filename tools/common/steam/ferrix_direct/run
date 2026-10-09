@@ -1,0 +1,37 @@
+#!/bin/sh
+# Steam's compatibility tool `ferrix_direct` (docs/STEAM.md §7): runs a
+# native Linux game directly, in the place of the Steam Linux Runtime 1.0
+# (scout) container Steam gives a native game no tool is mapped to.
+# pressure-vessel builds that container with bubblewrap in a user
+# namespace as the client's user, which Ferrix does not do yet
+# (docs/NAMESPACES.md N5 to N7). client.sh installs this tool in
+# compatibilitytools.d and maps the game to it in config.vdf.
+#
+# Steam runs `run <verb> <command...>` (toolmanifest.vdf, version 2); the
+# Steam Linux Runtime's entry point is called `... --verb=<verb> -- <command...>`,
+# and this script takes that form too, so it can stand in for it.
+log=/tmp/steam-launch.log
+verb=
+case "${1-}" in
+    run | waitforexitandrun | getcompatpath | getnativepath) verb=$1; shift ;;
+esac
+for arg in "$@"; do
+    [ "$arg" = "--" ] && { while [ "$1" != "--" ]; do shift; done; shift; break; }
+done
+case "$verb" in
+    getcompatpath | getnativepath) echo "$1"; exit 0 ;;
+esac
+# The game's libraries: Debian's 64-bit and 32-bit ones first (Mesa, SDL,
+# the X libraries), then scout's, which the client's environment names.
+RT=${STEAM_RUNTIME:-/data/steam/ubuntu12_32/steam-runtime}
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib/i386-linux-gnu:$RT/pinned_libs_64:$RT/pinned_libs_32:$RT/lib/x86_64-linux-gnu:$RT/usr/lib/x86_64-linux-gnu:$RT/lib/i386-linux-gnu:$RT/usr/lib/i386-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export LIBGL_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri:/usr/lib/i386-linux-gnu/dri
+# The 32-bit client draws in software (client.sh); the game picks its own.
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER LD_PRELOAD WAYLAND_DISPLAY
+export SDL_VIDEO_DRIVER=${SDL_VIDEO_DRIVER:-x11}
+# A file of settings for the game's environment (the GPU's, for one), if
+# one is there.
+env=${FERRIX_GAME_ENV:-/data/home/.config/ferrix/game.env}
+[ -f "$env" ] && . "$env"
+echo "steam-launch: pid $$ verb ${verb:-none} runs $*" | tee -a $log >&2
+exec "$@"
