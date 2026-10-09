@@ -21,7 +21,7 @@
 # CARD_WT: the worktree `up` builds from (default: this script's checkout).
 # CARD_PORT: the host port forwarded to the guest's sshd (default 2360).
 set -u
-D=$HOME/.local/share/ferrix/nvidia
+D=${CARD_DIR:-$HOME/.local/share/ferrix/nvidia}
 STATE=$D/cardvm.env
 STOP=$D/cardvm-stop
 ARGS=$D/cardvm.args
@@ -32,7 +32,11 @@ PORT=${CARD_PORT:-2360}
 WT=${CARD_WT:-$(cd "$(dirname "$0")/../../.." && pwd)}
 AGENT=${CARD_AGENT:-${USER}}
 # The customer's G303 belongs to Ferrix; never the Keychron (host keyboard).
+# n3c's private NVIDIA tree (virgl debs) when it is there: hyprix composites on the GPU.
+[ -z "${FERRIX_NVIDIA:-}" ] && [ -d "$HOME/.local/share/ferrix/nvidia-n3c" ] && export FERRIX_NVIDIA=$HOME/.local/share/ferrix/nvidia-n3c
 export FERRIX_NVIDIA_INPUT=${FERRIX_NVIDIA_INPUT:-/dev/input/by-id/usb-Logitech_Gaming_Mouse_G303_0F8934563031-event-mouse:/dev/input/by-id/usb-Logitech_Gaming_Mouse_G303_0F8934563031-if01-event-kbd}
+
+keeper() { pgrep -f tv-keeper-cardvm.sh > /dev/null; }
 
 die() { echo "card: $*" >&2; exit 1; }
 
@@ -64,13 +68,24 @@ push() { # local guest-path
     || die "copying $src to $dst failed"
 }
 
-dispatch() { # command line
-  gssh "$GUEST_ENV; /bin/hyprctl dispatch exec '$*'"
+dispatch() { # command line: written to a script in the guest, which the
+  # compositor runs as the session's user with the session's environment
+  local script=/tmp/card-exec-$$.sh
+  printf 'exec > %s 2>&1\n%s\n' "${script%.sh}.log" "$*" | gssh "cat > $script && chmod 644 $script && $GUEST_ENV && /bin/hyprctl dispatch exec '/bin/busybox sh $script'" && echo "card: output in ${script%.sh}.log in the guest"
 }
 
 up() {
   if [ -f "$STATE" ] && . "$STATE" && kill -0 "$PID" 2>/dev/null; then
     echo "card: already up: guest $ADDRESS, ssh port $PORT, log $LOG"; return 0
+  fi
+  if keeper; then
+    echo "card: the TV keeper boots the card VM; waiting for it"
+    local waited=0
+    until [ -f "$STATE" ]; do sleep 2; waited=$((waited + 2)); done
+    . "$STATE"
+    until gssh true 2>/dev/null; do sleep 2; waited=$((waited + 2)); done
+    echo "card: up after ${waited} s: guest $ADDRESS, ssh port $PORT, serial $LOG"
+    return 0
   fi
   printf '%s\n' "$@" > "$ARGS"
   rm -f "$STOP" "$STATE"
@@ -100,6 +115,7 @@ down() {
   echo "card: asked xtask $PID to stop; it destroys ferrix-3060"
   while kill -0 "$PID" 2>/dev/null; do sleep 1; done
   rm -f "$STOP"
+  keeper && echo "card: the TV keeper boots it again within seconds unless a want-* file is there"
   grep -E 'ferrix-3060: (destroyed|virsh)' "$OUT" | tail -1
   announce "card VM down"
 }
@@ -112,20 +128,34 @@ swap() {
   case $what in
     yserver)
       push "$2" /data/yserver/yserver
-      gssh "pkill -x yserver; i=0; while pgrep -x yserver >/dev/null && [ \$i -lt 50 ]; do sleep 0.1; i=\$((i+1)); done; \
+      gssh "pkill -f '[/]data/yserver/yserver'; i=0; while pgrep -f '[/]data/yserver/yserver' >/dev/null && [ \$i -lt 50 ]; do sleep 0.1; i=\$((i+1)); done; \
             rm -f /tmp/.X11-unix/X0 /tmp/.X0-lock"
       dispatch "/bin/busybox sh /etc/yserver.sh"
       gssh 'i=0; while [ ! -S /tmp/.X11-unix/X0 ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; [ -S /tmp/.X11-unix/X0 ] && echo "card: :0 is back" || { echo "card: no :0 after 30 s"; tail -5 /tmp/yserver.log; }'
       ;;
     hyprix)
       push "$2" /bin/hyprix
-      gssh "svc restart hyprix.service && svc status hyprix.service | head -5"
+      # The session's processes live in user.slice, not in the unit's cgroup:
+      # a plain restart leaves the old compositor holding the seat.
+      gssh 'svc stop hyprix.service >/dev/null 2>&1
+            for k in /sys/fs/cgroup/user.slice/user-*.slice/session-*.scope/cgroup.kill; do [ -e "$k" ] && echo 1 > "$k"; done
+            pkill -x hyprix; i=0
+            while pgrep -x hyprix >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+            pkill -9 -x hyprix; sleep 0.2
+            svc start hyprix.service; sleep 2; svc status hyprix.service | head -5
+            i=0; while ! pgrep -f "^/bin/hyprix --config" >/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done
+            pgrep -f "^/bin/hyprix --config" >/dev/null && echo "card: hyprix is back" || echo "card: no hyprix"'
+
       ;;
     chrome-flags)
       local line
       line=$(gssh "grep -m1 '^exec-once = .*chrom' /etc/hyprland.conf | sed 's/^exec-once = //'")
       [ -n "$line" ] || die "no Chrome line in the guest's /etc/hyprland.conf"
-      gssh "pkill -x chrome; pkill -x chrome-headless-shell; sleep 1"
+      gssh 'pkill -x chrome; i=0
+            while pgrep -x chrome >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+            pkill -9 -x chrome; sleep 0.3
+            rm -f /dev/shm/chrome/Singleton* 2>/dev/null; true'
+
       dispatch "$line $2"
       ;;
     *)
