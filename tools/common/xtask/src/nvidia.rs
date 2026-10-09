@@ -418,7 +418,7 @@ fn home() -> String {
 /// The NVIDIA volume: the fetched release's whole tree, hard-linked into
 /// [`vm_dir`] (the same filesystem), with `nvrm`'s core beside it at
 /// [`CORE_IN_VOLUME`], made into a btrfs image.
-fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
+fn whole_volume(dir: &Path, core: &Path, beside: Option<&Path>) -> Result<()> {
     let tree = dir.join("nvidia.tree");
     if tree.exists() {
         std::fs::remove_dir_all(&tree)
@@ -440,8 +440,14 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
     }
     // Chrome's tree beside it, when fetch-chrome.sh has made it: the two are
     // Debian-shaped and pin the same glibc, so they merge, and Chrome's GPU
-    // process finds NVIDIA's ICD where its Vulkan loader looks (N4).
-    if let Ok(chrome) = chrome::volume() {
+    // process finds NVIDIA's ICD where its Vulkan loader looks (N4). Or,
+    // for `--everything`, the whole merged tree `beside` (Chrome's among
+    // them): yserver, Steam, the compiler.
+    let chrome = match beside {
+        Some(tree) => Ok(tree.join("everything.img")),
+        None => chrome::volume(),
+    };
+    if let Ok(chrome) = chrome {
         let chrome_tree = chrome.with_file_name("tree");
         if chrome_tree.is_dir() {
             let merged = Command::new("cp")
@@ -463,6 +469,14 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
                 "  volume: Chrome's tree merged from {}",
                 chrome_tree.display()
             );
+        }
+    }
+    // The merged tree's other Vulkan drivers would offer Chrome's ANGLE
+    // lavapipe and a virtio-gpu this domain has not: NVIDIA's alone is
+    // listed. X clients' GL is Mesa's (llvmpipe), which needs no ICD.
+    if beside.is_some() {
+        for other in ["lvp_icd.json", "virtio_icd.json"] {
+            let _ = std::fs::remove_file(tree.join("usr/share/vulkan/icd.d").join(other));
         }
     }
     let to = tree.join(CORE_IN_VOLUME);
@@ -613,7 +627,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     place(&test_disk::ensure()?, &dir, "pattern.img")?;
     place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;
     place(&btrfs_disk::ensure_blank(arch)?, &dir, "btrfs-write.img")?;
-    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    whole_volume(&dir, &programs.path("nvrm-core"), None)?;
     println!(
         "  {}: image, fixture disks and the NVIDIA volume",
         dir.display()
@@ -763,9 +777,20 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
         &dir,
         "btrfs-write.img",
     )?;
-    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    // `--everything`: its volume's tree (yserver, Steam, the compiler,
+    // Chrome) merged with NVIDIA's, and Steam's memory.
+    let everything = if args.everything {
+        args.data_image.as_deref().and_then(Path::parent)
+    } else {
+        None
+    };
+    whole_volume(&dir, &programs.path("nvrm-core"), everything)?;
     let machine = Machine {
-        memory: MEMORY,
+        memory: if everything.is_some() {
+            crate::compositor::steam_window::MEMORY
+        } else {
+            MEMORY
+        },
         vcpus: 8,
         devices: format!(
             "    <interface type='network'>\n\
