@@ -130,19 +130,26 @@ impl SyncFile {
         })
     }
 
-    /// Signal it with `code`, once: whether this call did. Wakes its waiters.
+    /// Signal it with `code`, once: whether this call did. A fence past its
+    /// deadline is `ETIMEDOUT` already, whoever signals it, so a late
+    /// driver's signal is refused rather than changing what was read.
+    /// Wakes its waiters.
     fn signal(&self, code: i32) -> bool {
         let now = crate::timer::now_nanos();
-        let did = {
+        let timed_out = -(Errno::ETIMEDOUT.0 as i32);
+        let (did, woke) = {
             let mut signalled = self.signalled.lock();
             if signalled.is_some() {
-                false
+                (false, false)
+            } else if now >= self.deadline {
+                *signalled = Some((timed_out, self.deadline));
+                (code == timed_out, true)
             } else {
                 *signalled = Some((code, now));
-                true
+                (true, true)
             }
         };
-        if did {
+        if woke {
             self.readable.wake_all();
         }
         did
