@@ -330,3 +330,48 @@ fn every_shader_is_numbered_and_ends() {
     }
     assert!(shaders::VERTEX.contains("DCL OUT[1], GENERIC[0]"));
 }
+
+/// A memfd as the test server makes one, `len` bytes, sealable or not.
+fn memfd(len: i64, sealable: bool) -> std::os::fd::OwnedFd {
+    use std::os::fd::FromRawFd;
+    let flags = if sealable { libc::MFD_ALLOW_SEALING } else { 0 };
+    // SAFETY: a fresh descriptor from a constant name.
+    let raw = unsafe { libc::memfd_create(c"vtest-test".as_ptr(), flags | libc::MFD_CLOEXEC) };
+    assert!(raw >= 0, "memfd_create");
+    // SAFETY: just made, owned by nothing else.
+    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    // SAFETY: a descriptor this test holds.
+    assert_eq!(unsafe { libc::ftruncate(raw, len) }, 0, "ftruncate");
+    fd
+}
+
+#[test]
+fn shared_memory_is_mapped_only_sealed_and_big_enough() {
+    use std::os::fd::{AsFd, AsRawFd};
+    // A file that cannot be sealed is never mapped: it could shrink under
+    // the mapping.
+    let unsealable = memfd(16 * 16 * 4, false);
+    assert!(!crate::vtest::adopt_for_test(unsealable.as_fd(), 16, 16).expect("asked"));
+    // A file smaller than its texture is never mapped either.
+    let small = memfd(16 * 16 * 4 - 1, true);
+    assert!(!crate::vtest::adopt_for_test(small.as_fd(), 16, 16).expect("asked"));
+    // One that can be sealed is, and is sealed by it: it no longer shrinks
+    // or grows.
+    let good = memfd(16 * 16 * 4, true);
+    assert!(crate::vtest::adopt_for_test(good.as_fd(), 16, 16).expect("asked"));
+    // SAFETY: a descriptor this test holds.
+    assert_ne!(unsafe { libc::ftruncate(good.as_raw_fd(), 4) }, 0, "shrunk");
+    // SAFETY: as above.
+    let grew = unsafe { libc::ftruncate(good.as_raw_fd(), 1 << 20) };
+    assert_ne!(grew, 0, "grew");
+    // A file its maker sealed against further seals, without the two this
+    // needs, is refused.
+    let wrong = memfd(16 * 16 * 4, true);
+    // SAFETY: as above; only the file's seals change.
+    let sealed = unsafe { libc::fcntl(wrong.as_raw_fd(), libc::F_ADD_SEALS, libc::F_SEAL_SEAL) };
+    assert_eq!(sealed, 0);
+    assert!(!crate::vtest::adopt_for_test(wrong.as_fd(), 16, 16).expect("asked"));
+    // An empty texture has nothing to map.
+    let any = memfd(4096, true);
+    assert!(!crate::vtest::adopt_for_test(any.as_fd(), 0, 16).expect("asked"));
+}

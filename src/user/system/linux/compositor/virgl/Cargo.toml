@@ -11,5 +11,10 @@ publish.workspace = true
 name = "compositor_virgl"
 path = "src/lib.rs"
 
+[dependencies]
+# Declarations only: recvmsg, fcntl and mmap for the test server's shared
+# memory (protocol version 2), which std does not have.
+libc = "0.2.189"
+
 [lints]
 workspace = true

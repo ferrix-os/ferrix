@@ -78,6 +78,35 @@ pub trait Device: core::fmt::Debug {
     /// The device's.
     fn read(&mut self, resource: u32, region: Region) -> io::Result<Vec<u8>>;
 
+    /// [`Device::read`] into `into`, rows `stride` bytes apart: a screen's
+    /// buffer, say, so that a device that can put the pixels there itself
+    /// saves the copy through a vector.
+    ///
+    /// # Errors
+    ///
+    /// The device's; an `into` too short for the region.
+    fn read_into(
+        &mut self,
+        resource: u32,
+        region: Region,
+        into: &mut [u8],
+        stride: usize,
+    ) -> io::Result<()> {
+        let pixels = self.read(resource, region)?;
+        let row = region.width as usize * 4;
+        if row == 0 {
+            return Ok(());
+        }
+        for (index, from) in pixels.chunks_exact(row).enumerate() {
+            let start = index * stride;
+            let target = into
+                .get_mut(start..start + row)
+                .ok_or_else(|| io::Error::other("pixels too short for their region"))?;
+            target.copy_from_slice(from);
+        }
+        Ok(())
+    }
+
     /// A descriptor for `resource` that a card can be shown, if this device
     /// is the kind that has one.
     ///
@@ -152,6 +181,16 @@ impl<D: Device + ?Sized> Device for Box<D> {
 
     fn read(&mut self, resource: u32, region: Region) -> io::Result<Vec<u8>> {
         (**self).read(resource, region)
+    }
+
+    fn read_into(
+        &mut self,
+        resource: u32,
+        region: Region,
+        into: &mut [u8],
+        stride: usize,
+    ) -> io::Result<()> {
+        (**self).read_into(resource, region, into, stride)
     }
 
     fn release(&mut self, resource: u32) -> io::Result<()> {

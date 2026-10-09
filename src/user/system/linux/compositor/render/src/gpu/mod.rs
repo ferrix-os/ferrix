@@ -368,6 +368,42 @@ impl<D: Device> Canvas<D> {
         )
     }
 
+    /// Read `rect` of the frame straight into a screen's `buffer`, rows
+    /// `stride` bytes apart, at `rect`'s own place in it: [`Canvas::read`]
+    /// without the vector between, which a device with shared memory
+    /// fills in one copy.
+    ///
+    /// # Errors
+    ///
+    /// The device's, or [`Canvas::finish`]'s; a buffer too short.
+    pub fn read_into(&mut self, rect: Rect, buffer: &mut [u8], stride: u32) -> io::Result<()> {
+        self.flush();
+        if let Some(error) = self.failed.take() {
+            return Err(error);
+        }
+        let Some(rect) = intersect(rect, Painter::bounds(self)) else {
+            return Ok(());
+        };
+        let start = (unsigned(rect.y) as usize)
+            .checked_mul(stride as usize)
+            .and_then(|start| start.checked_add(unsigned(rect.x) as usize * 4))
+            .ok_or_else(|| io::Error::other("a rectangle outside the buffer"))?;
+        let into = buffer
+            .get_mut(start..)
+            .ok_or_else(|| io::Error::other("a rectangle outside the buffer"))?;
+        self.device.read_into(
+            self.target.resource,
+            Region {
+                x: unsigned(rect.x),
+                y: unsigned(rect.y),
+                width: unsigned(rect.width),
+                height: unsigned(rect.height),
+            },
+            into,
+            stride as usize,
+        )
+    }
+
     /// The state every draw shares, made once.
     fn begin(&mut self) {
         let stream = &mut self.stream;
