@@ -43,6 +43,31 @@ struct chardev_file {
 static struct chardev_file *files;
 static nvos_mutex_t files_lock;
 
+/* The request rate and the bytes copied for the clients, said every five
+ * seconds while requests come: what decides whether the path wants shared
+ * memory (N3c measurement). */
+static NvU64 count_ioctl, count_mmap, count_other, bytes_in, bytes_out;
+static struct nvos_timer *count_timer;
+
+#define COUNT_SPAN 5
+
+static void count_say(void *unused)
+{
+    NvU64 ioctl, mmap, other, in, out;
+
+    (void)unused;
+    ioctl = __atomic_exchange_n(&count_ioctl, 0, __ATOMIC_RELAXED);
+    mmap = __atomic_exchange_n(&count_mmap, 0, __ATOMIC_RELAXED);
+    other = __atomic_exchange_n(&count_other, 0, __ATOMIC_RELAXED);
+    in = __atomic_exchange_n(&bytes_in, 0, __ATOMIC_RELAXED);
+    out = __atomic_exchange_n(&bytes_out, 0, __ATOMIC_RELAXED);
+    if (ioctl + mmap + other != 0)
+        nv_printf(NV_DBG_ERRORS, "nvrm: chardev: %llu req/s (ioctl %llu, mmap %llu), copy-in %llu KB/s, copy-out %llu KB/s\n",
+                  (ioctl + mmap + other) / COUNT_SPAN, ioctl / COUNT_SPAN, mmap / COUNT_SPAN,
+                  in / COUNT_SPAN / 1024, out / COUNT_SPAN / 1024);
+    nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
+}
+
 static void remember(NvU64 file, nv_linux_file_private_t *nvlfp, void *drm,
                      struct chardev_file *entry)
 {
@@ -107,11 +132,13 @@ static struct chardev_file *forget(NvU64 file)
 /* The client's copies, through the bridge, for the request in context. */
 static int bridge_in(void *context, void *to, NvU64 from, NvU32 length)
 {
+    __atomic_fetch_add(&bytes_in, length, __ATOMIC_RELAXED);
     return nvos_chardev_copy_in(*(NvU64 *)context, to, from, length) == 0 ? 0 : -EFAULT;
 }
 
 static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length)
 {
+    __atomic_fetch_add(&bytes_out, length, __ATOMIC_RELAXED);
     return nvos_chardev_copy_out(*(NvU64 *)context, to, from, length) == 0 ? 0 : -EFAULT;
 }
 
@@ -233,6 +260,13 @@ static void handle(const struct nvos_request *request)
     struct worker *work;
     void *drm;
 
+    if (request->op == NVOS_REQUEST_IOCTL)
+        __atomic_fetch_add(&count_ioctl, 1, __ATOMIC_RELAXED);
+    else if (request->op == NVOS_REQUEST_MMAP)
+        __atomic_fetch_add(&count_mmap, 1, __ATOMIC_RELAXED);
+    else
+        __atomic_fetch_add(&count_other, 1, __ATOMIC_RELAXED);
+
     switch (request->op)
     {
         case NVOS_REQUEST_OPEN:
@@ -331,6 +365,9 @@ int nvrm_chardev_serve(void)
 {
     struct nvos_request request;
 
+    count_timer = nvos_timer_create(count_say, NULL);
+    if (count_timer != NULL)
+        nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
     for (;;)
     {
         if (nvos_chardev_next(&request) != NV_OK)
