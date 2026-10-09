@@ -355,8 +355,17 @@ pub const DMABUF_CLOEXEC: u64 = 1 << 1;
 /// RELEASE may still be on its way: the release of the old one would then
 /// read as the release of the new.
 pub const DMABUF_TELL_MADE: u64 = 1 << 2;
+/// `chardev_dmabuf_install`'s flags: a name-only dmabuf, for a buffer in
+/// video memory (`docs/NVIDIA.md` §4.4, N3b). No VMO: the VMO register must
+/// be 0 and the sixth register is the buffer's size in bytes (not 0, a
+/// multiple of 4096, at most [`DMABUF_NAME_MAX`]). It cannot be mapped;
+/// only its maker's resolve gives the cookie back.
+pub const DMABUF_NAME_ONLY: u64 = 1 << 3;
+/// The largest size a name-only dmabuf may say it has.
+pub const DMABUF_NAME_MAX: u64 = 1 << 40;
 /// Every flag `chardev_dmabuf_install` knows; any other is `INVALID_ARGS`.
-pub const DMABUF_FLAGS: u64 = DMABUF_WRITABLE | DMABUF_CLOEXEC | DMABUF_TELL_MADE;
+pub const DMABUF_FLAGS: u64 =
+    DMABUF_WRITABLE | DMABUF_CLOEXEC | DMABUF_TELL_MADE | DMABUF_NAME_ONLY;
 /// In `chardev_dmabuf_install`'s answer, with [`DMABUF_TELL_MADE`]: this call
 /// made the dmabuf. Above every descriptor number, which is at most
 /// `i32::MAX`.

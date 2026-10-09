@@ -1312,12 +1312,14 @@ pub(super) fn check_chardev() {
     println!(
         "  chardev  {} HELLOs, copies and requests refused as specified, {} requests answered, \
          {} abandoned with the queue to a driver that reads nothing at most {} requests, \
-         {} dmabuf calls refused as specified and one release after the last mapping{}",
+         {} dmabuf calls refused as specified and one release after the last mapping, \
+         {} name-only dmabuf calls and mappings refused as specified{}",
         report.refusals,
         report.answered,
         report.abandoned,
         report.most_queued,
         report.dmabuf_refusals,
+        report.name_refusals,
         if report.one_device {
             "; one PCI function, so no second driver"
         } else {

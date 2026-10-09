@@ -651,6 +651,71 @@ else:
   `NV_ERR_NOT_SUPPORTED`) until a gate needs them, and the kernel call goes
   to the consultant for review before any code is written.
 
+**N3b: dmabufs of video memory, name-only (design, 2026-10-10; the
+certification consultant's verdict OK IF N1-N10, ledger 632).** The
+chardev dmabuf of ledger 316 is the whole of one anonymous VMO, because
+its first consumer, hyprix drawing in software, maps it. A GPU-only
+pipeline needs something else: Chrome's GPU compositing with NVIDIA's
+block-linear modifiers, hyprix compositing on the card (N3c, importing
+clients' buffers as EGLImages), yserver's DRI3 pixmaps. Their buffers are
+in video memory and block-linear, which no processor mapping can read, and
+the one importer is NVIDIA's userspace again: `PRIME_FD_TO_HANDLE`, then
+`GEM_EXPORT_NVKMS_MEMORY` and RM's import into its own client, all served
+inside `nvrm`. Such a dmabuf only has to *name* the buffer.
+
+* **The object.** A dmabuf is either over a VMO, as built, or name-only:
+  no VMO, only the weak control, the cookie and a byte size. Nothing else
+  changes: one object per (control, cookie) (3), `DMABUF_RELEASE` once
+  after the last descriptor (B4), the control held weakly (B2), resolve
+  only for this same live control (B3), the live-object cap (B5), no sync
+  (B9).
+* **The call.** `chardev_dmabuf_install` gains one flag,
+  `DMABUF_NAME_ONLY` (`1 << 3`). With it the VMO register must be 0 (no
+  handle is read, so none is transferred), and the sixth register is the
+  size in bytes: not 0, a multiple of 4096, at most 2^40. Without the flag
+  the sixth register must be 0. Every register is judged before the
+  request is looked up or anything is held (N1). The kernel does not check
+  the size against anything: it is `nvrm`'s claim, reported by `fstat` and
+  `lseek` and used for nothing else (N3). `WRITABLE` and
+  `CLOEXEC` keep their meaning (the file's mode, close-on-exec). A live
+  cookie asked for in the other kind, or with another size, is
+  `ALREADY_BOUND`, as a live cookie over another VMO is today. No new
+  native call, no new item number.
+* **What a program can do with one.** `mmap` is `ENODEV` (`mapping_at`
+  answers nothing, which `memory.rs` already turns into `ENODEV`); `read`
+  and `write` `EINVAL`; `fstat` and `lseek(SEEK_END)` give the size, as
+  Linux's dmabuf does; `DMA_BUF_IOCTL_SYNC` 0, other ioctls `ENOTTY`;
+  `poll` ready; passing it over a socket, `dup` and `fork` as for any file.
+  A later mapping through BAR1 would be a design of its own (ledger 300's
+  aperture rules), not a change to this one.
+* **What it exposes.** Nothing the kernel holds: no frames, no window, no
+  aperture. The bytes stay `nvrm`'s video memory; the cookie means
+  something only to the control that made it, and resolve gives it to that
+  control alone. A client holding the descriptor keeps `nvrm`'s GEM object
+  (and its video memory) alive until it closes it, as a client holding a
+  VMO dmabuf keeps the frames (B6); bounded by the cap and the client's
+  descriptor limit. When `nvrm` dies the descriptor names nothing: the new
+  `nvrm` resolves it as `BAD_HANDLE` (B7) and no mapping existed.
+* **nvrm's policy (outside the item).** `drm.c`'s `PRIME_HANDLE_TO_FD`
+  makes a VMO dmabuf for a pitch-linear buffer in system memory, as now,
+  and a name-only one for any object in video memory (block-linear, or
+  pitch-linear that NVIDIA's userspace placed in video memory), sized as
+  the GEM object. `PRIME_FD_TO_HANDLE` resolves either, as now. `nvrm`
+  never makes a VMO dmabuf for video memory (N9). hyprix's software
+  screens keep advertising LINEAR only and refuse a buffer they cannot map
+  cleanly (`Importer::Map`'s mmap fails, the import fails, the client hears
+  `failed`, nothing panics); block-linear modifiers are advertised only by
+  consumers that import on the GPU.
+* **Self-checks** (stage `dmabufs`, the fake driver): a name-only install
+  with a VMO handle, size 0, an unaligned size, a size over the bound,
+  each refused `INVALID_ARGS`; a live VMO cookie asked name-only, a live
+  name-only cookie asked over a VMO or with another size, `ALREADY_BOUND`;
+  two installs one object; `mmap` `ENODEV`; `fstat` size; resolve gives
+  the cookie; `DMABUF_RELEASE` once, after the last of two descriptors; one
+  name-only descriptor kept past the driver's death closes with nobody
+  told. Control (B11 (e)): with `mapping_at`'s refusal removed the check's
+  `ENODEV` line fails.
+
 `/proc/driver/nvidia/{params,version,gpus/<bdf>/information}` are text
 files that the core asks `nvrm` for, under a `procfs` hook. A `/sys/module/
 nvidia/initstate` reading `live` is added to sysfs, which already serves
