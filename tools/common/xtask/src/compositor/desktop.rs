@@ -436,7 +436,15 @@ pub(super) fn with_yserver(config: String, args: &Args, arch: Arch) -> String {
         return config;
     }
     println!("  {arch}: yserver, the X server, on :0 beside the compositor");
-    format!("{config}\n{}", crate::yserver::desktop_config())
+    // On the 3060 (`--nvidia`) the volume has NVIDIA's libGLX too, which
+    // needs NV-GLX in the server; yserver has none, so X clients' GL is
+    // Mesa's (llvmpipe), as on the virtio desktop.
+    let vendor = if args.nvidia {
+        "env = __GLX_VENDOR_LIBRARY_NAME,mesa\n"
+    } else {
+        ""
+    };
+    format!("{config}\n{vendor}{}", crate::yserver::desktop_config())
 }
 
 /// Whether `run-compositor --everything` merges the volume
