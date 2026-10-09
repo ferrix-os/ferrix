@@ -44,7 +44,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -71,6 +71,17 @@ const PROTOCOL_VERSION: u32 = 11;
 const RESOURCE_CREATE2: u32 = 12;
 const TRANSFER_GET2: u32 = 13;
 const TRANSFER_PUT2: u32 = 14;
+const GET_PARAM: u32 = 15;
+
+/// Ferrix's own command, in the server tools/common/fetch/fetch-virgl-server.sh
+/// builds (its patch's `vtest_protocol.h`): a texture whose storage is a
+/// dmabuf passed with it. A stock server ends the connection on a command
+/// it does not know, so it is sent only after [`PARAM_FERRIX_IMPORT_FD`]
+/// said it may be.
+const FERRIX_RESOURCE_IMPORT_FD: u32 = 64;
+/// The `VCMD_GET_PARAM` a patched server answers valid; a stock one answers
+/// any parameter it does not know "not valid".
+const PARAM_FERRIX_IMPORT_FD: u32 = 0x4658_0001;
 
 /// The version asked for. Version 3 has the server number resources, which
 /// buys nothing here, so this stops at the one that brought shared memory.
@@ -158,7 +169,14 @@ impl Shared {
             )
         };
         if at == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
+            // A file this process may not map writable -- one opened for
+            // reading only, or sealed against writes -- is memory the
+            // texture does without, like an unsealed one.
+            let error = io::Error::last_os_error();
+            return match error.raw_os_error() {
+                Some(libc::EACCES | libc::EPERM) => Ok(None),
+                _ => Err(error),
+            };
         }
         Ok(Some(Self {
             at: at.cast(),
@@ -170,8 +188,12 @@ impl Shared {
 
     fn bytes(&self) -> &[u8] {
         // SAFETY: a live shared mapping of `len` bytes that this object
-        // owns, of a file sealed against shrinking; the server writes it
-        // only inside a transfer this program waits for.
+        // owns, of a file sealed against shrinking, so every page is there.
+        // That the server writes it only inside a transfer this program
+        // waits for is an ASSUMPTION about a cooperating server, not
+        // something this process can enforce. A server that writes at
+        // other times changes only pixel values: no length, index or branch
+        // here is ever taken from the mapped bytes, which are only copied.
         unsafe { core::slice::from_raw_parts(self.at, self.len) }
     }
 
@@ -239,6 +261,161 @@ fn copy_rows(
     Ok(())
 }
 
+/// Receive one message of one byte from `socket` and answer every
+/// descriptor that came with it, each owned, so that one this program did
+/// not ask for is closed when it is dropped. A message whose descriptors did
+/// not all fit (`MSG_CTRUNC`) is an error, after those that did fit are
+/// closed.
+fn receive_fds(socket: std::os::fd::RawFd) -> io::Result<Vec<OwnedFd>> {
+    let mut byte = 0_u8;
+    let mut iov = libc::iovec {
+        iov_base: (&raw mut byte).cast(),
+        iov_len: 1,
+    };
+    // Room for a few descriptors' control messages, aligned as one.
+    let mut control = [0_u64; 8];
+    // SAFETY: a zeroed `msghdr` is a valid value: null pointers and zero
+    // lengths, and musl's padding fields zero as they must be.
+    let mut message: libc::msghdr = unsafe { core::mem::zeroed() };
+    message.msg_iov = &raw mut iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr().cast();
+    #[allow(
+        clippy::useless_conversion,
+        reason = "a usize on glibc and a socklen_t on musl"
+    )]
+    {
+        message.msg_controllen = size_of_val(&control).try_into().unwrap_or(0);
+    }
+    // SAFETY: recvmsg writes at most the one byte and the control buffer
+    // described above, both alive for the call.
+    let got = unsafe { libc::recvmsg(socket, &raw mut message, libc::MSG_CMSG_CLOEXEC) };
+    if got < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut fds = Vec::new();
+    // SAFETY: the message recvmsg filled in, with its control buffer.
+    let mut header = unsafe { libc::CMSG_FIRSTHDR(&raw const message) };
+    // SAFETY: a pure computation of a length from a constant.
+    let empty = unsafe { libc::CMSG_LEN(0) } as usize;
+    while !header.is_null() {
+        // SAFETY: a header CMSG_FIRSTHDR or CMSG_NXTHDR found inside the
+        // control buffer.
+        let cmsg = unsafe { header.read_unaligned() };
+        if cmsg.cmsg_level == libc::SOL_SOCKET && cmsg.cmsg_type == libc::SCM_RIGHTS {
+            let count = (cmsg.cmsg_len as usize).saturating_sub(empty) / size_of::<libc::c_int>();
+            // SAFETY: the data of that control message, inside the buffer.
+            let data = unsafe { libc::CMSG_DATA(header) }.cast::<libc::c_int>();
+            for index in 0..count {
+                // SAFETY: the `index`th of the `count` descriptors the
+                // message's length says it holds, inside the control buffer;
+                // they may be unaligned in it.
+                let at = data.wrapping_add(index);
+                // SAFETY: as above, one descriptor.
+                let raw = unsafe { at.read_unaligned() };
+                if raw >= 0 {
+                    // SAFETY: SCM_RIGHTS installed the descriptor in this
+                    // process just now, and nothing else owns it.
+                    fds.push(unsafe { OwnedFd::from_raw_fd(raw) });
+                }
+            }
+        }
+        // SAFETY: the next header of the same message, or null.
+        header = unsafe { libc::CMSG_NXTHDR(&raw const message, header) };
+    }
+    if got == 0 {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
+    if message.msg_flags & libc::MSG_CTRUNC != 0 {
+        return Err(io::Error::other(
+            "the server sent more descriptors than fit",
+        ));
+    }
+    Ok(fds)
+}
+
+/// One byte from `socket` and exactly one descriptor beside it, as the
+/// server answers `VCMD_RESOURCE_CREATE2`. Anything else is refused, and
+/// every descriptor that came is closed first (`tests/fds.rs`).
+///
+/// # Errors
+///
+/// The socket's; no descriptor, or more than one.
+pub fn receive_one_fd(socket: std::os::fd::RawFd) -> io::Result<OwnedFd> {
+    let mut fds = receive_fds(socket)?;
+    match (fds.pop(), fds.is_empty()) {
+        (Some(fd), true) => Ok(fd),
+        (None, _) => Err(io::Error::other(
+            "the server's answer carried no descriptor",
+        )),
+        (Some(_), false) => Err(io::Error::other(
+            "the server sent more descriptors than one",
+        )),
+    }
+}
+
+/// Send one byte on `socket` with `fd` beside it (`SCM_RIGHTS`), as the
+/// server's `vtest_receive_fd` takes one.
+fn send_fd(socket: std::os::fd::RawFd, fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    let mut byte = 0_u8;
+    let mut iov = libc::iovec {
+        iov_base: (&raw mut byte).cast(),
+        iov_len: 1,
+    };
+    let mut control = [0_u64; 4];
+    // SAFETY: a zeroed `msghdr` is a valid value, as in `receive_fds`.
+    let mut message: libc::msghdr = unsafe { core::mem::zeroed() };
+    message.msg_iov = &raw mut iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr().cast();
+    // SAFETY: a pure computation of a length from a constant.
+    let space = unsafe { libc::CMSG_SPACE(size_of::<libc::c_int>() as u32) };
+    #[allow(
+        clippy::useless_conversion,
+        reason = "a usize on glibc and a socklen_t on musl"
+    )]
+    {
+        message.msg_controllen = (space as usize).try_into().unwrap_or(0);
+    }
+    // SAFETY: the first header of the control buffer set up above, which
+    // has room for it.
+    let header = unsafe { libc::CMSG_FIRSTHDR(&raw const message) };
+    if header.is_null() {
+        return Err(io::Error::other("no room for a descriptor's message"));
+    }
+    // SAFETY: a pure computation of a length from a constant.
+    let len = unsafe { libc::CMSG_LEN(size_of::<libc::c_int>() as u32) };
+    // A zeroed header first: musl's has a padding field of its own.
+    let mut cmsg = zeroed_cmsghdr();
+    #[allow(
+        clippy::useless_conversion,
+        reason = "its type differs between C libraries"
+    )]
+    {
+        cmsg.cmsg_len = (len as usize).try_into().unwrap_or(0);
+    }
+    cmsg.cmsg_level = libc::SOL_SOCKET;
+    cmsg.cmsg_type = libc::SCM_RIGHTS;
+    // SAFETY: the header's place inside the control buffer.
+    unsafe { header.write_unaligned(cmsg) };
+    // SAFETY: the data of that header, inside the buffer.
+    let data = unsafe { libc::CMSG_DATA(header) }.cast::<libc::c_int>();
+    // SAFETY: room for one descriptor there, which CMSG_SPACE counted.
+    unsafe { data.write_unaligned(fd.as_raw_fd()) };
+    // SAFETY: sendmsg reads the byte and the control buffer, both alive.
+    let sent = unsafe { libc::sendmsg(socket, &raw const message, libc::MSG_NOSIGNAL) };
+    if sent < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// A zeroed `cmsghdr`, for its padding fields on musl.
+fn zeroed_cmsghdr() -> libc::cmsghdr {
+    // SAFETY: all of its fields are integers, for which zero is valid.
+    unsafe { core::mem::zeroed() }
+}
+
 /// The protocol a new connection asks for: [`SHARED_MEMORY`] unless the
 /// environment says `0`.
 fn wanted_protocol() -> u32 {
@@ -246,6 +423,34 @@ fn wanted_protocol() -> u32 {
         Ok(value) if value.trim() == "0" => 0,
         _ => SHARED_MEMORY,
     }
+}
+
+/// A buffer made outside the server -- by the GPU's own driver, where a
+/// display engine can scan it out -- for a frame to be drawn into.
+#[derive(Debug)]
+pub struct Scanout {
+    /// The dmabuf.
+    pub fd: OwnedFd,
+    /// Bytes from one row to the next.
+    pub stride: u32,
+    /// Where the first pixel is in the dmabuf.
+    pub offset: u32,
+    /// Its DRM format modifier (`0` for linear).
+    pub modifier: u64,
+    /// Whatever must live as long as the buffer: the driver's handle, say.
+    pub keep: Box<dyn core::fmt::Debug>,
+}
+
+/// Where [`Scanout`] buffers come from: the compositor's, which knows the
+/// card.
+pub trait ScanoutSource: core::fmt::Debug {
+    /// A buffer for a `width` x `height` frame, four bytes a pixel.
+    ///
+    /// # Errors
+    ///
+    /// The driver's; the frame is then drawn into a texture of the server's
+    /// own, and fetched.
+    fn allocate(&mut self, width: u32, height: u32) -> io::Result<Scanout>;
 }
 
 /// A running server and the connection to it. The server is this object's
@@ -263,6 +468,14 @@ pub struct Vtest {
     /// Textures whose memory an upload wrote that the server may not have
     /// read yet: the next write to one waits for it first.
     unread: HashSet<u32>,
+    /// Where a frame's buffers come from, if anywhere.
+    scanouts: Option<Box<dyn ScanoutSource>>,
+    /// Whether the server takes [`FERRIX_RESOURCE_IMPORT_FD`], once asked.
+    importable: Option<bool>,
+    /// The textures whose storage is a [`Scanout`], with it.
+    imported: HashMap<u32, Scanout>,
+    /// Why the last frame buffer was not imported, for the compositor to say.
+    import_failure: Option<String>,
 }
 
 impl Drop for Vtest {
@@ -298,10 +511,25 @@ impl Vtest {
     ///
     /// As [`Vtest::start`]'s.
     pub fn start_with(name: &str, version: u32) -> io::Result<Option<Self>> {
+        Self::start_program(std::path::Path::new(SERVER), name, version)
+    }
+
+    /// [`Vtest::start_with`], with the server at `program` rather than the
+    /// one on `PATH`: how a test runs Ferrix's patched build beside the
+    /// host's stock one.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vtest::start`]'s.
+    pub fn start_program(
+        program: &std::path::Path,
+        name: &str,
+        version: u32,
+    ) -> io::Result<Option<Self>> {
         let socket =
             std::env::temp_dir().join(format!("ferrix-vtest-{}-{name}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket);
-        let spawned = Command::new(SERVER)
+        let spawned = Command::new(program)
             .arg("--no-fork")
             .arg("--use-egl-surfaceless")
             .arg("--socket-path")
@@ -337,6 +565,10 @@ impl Vtest {
             version: 0,
             shared: HashMap::new(),
             unread: HashSet::new(),
+            scanouts: None,
+            importable: None,
+            imported: HashMap::new(),
+            import_failure: None,
         };
         // The one command whose length is in bytes: the client's name.
         vtest.header(u32::try_from(name.len()).unwrap_or(0), CREATE_RENDERER)?;
@@ -410,79 +642,169 @@ impl Vtest {
         Ok(())
     }
 
-    /// The descriptor that comes with `VCMD_RESOURCE_CREATE2`'s answer: one
-    /// byte, and the file beside it.
+    /// The descriptor that comes with `VCMD_RESOURCE_CREATE2`'s answer.
     fn receive_fd(&mut self) -> io::Result<OwnedFd> {
-        let mut byte = 0_u8;
-        let mut iov = libc::iovec {
-            iov_base: (&raw mut byte).cast(),
-            iov_len: 1,
-        };
-        // Room for one descriptor's control message, aligned as one.
-        let mut control = [0_u64; 4];
-        // SAFETY: a zeroed `msghdr` is a valid value: null pointers and
-        // zero lengths, and musl's padding fields zero as they must be.
-        let mut message: libc::msghdr = unsafe { core::mem::zeroed() };
-        message.msg_iov = &raw mut iov;
-        message.msg_iovlen = 1;
-        message.msg_control = control.as_mut_ptr().cast();
-        #[allow(
-            clippy::useless_conversion,
-            reason = "a usize on glibc and a socklen_t on musl"
-        )]
-        {
-            message.msg_controllen = size_of_val(&control).try_into().unwrap_or(0);
+        receive_one_fd(self.stream.as_raw_fd())
+    }
+
+    /// Draw frames -- textures a screen may be shown -- into buffers from
+    /// `source` where the server can take them ([`Vtest::can_import`]):
+    /// what [`Device::export`] then answers, for a card to show without a
+    /// copy. Where either cannot, a frame is a texture of the server's own,
+    /// as before.
+    pub fn set_scanout_source(&mut self, source: Box<dyn ScanoutSource>) {
+        self.scanouts = Some(source);
+    }
+
+    /// Why the last frame was not drawn into a [`Scanout`], once.
+    pub fn take_import_failure(&mut self) -> Option<String> {
+        self.import_failure.take()
+    }
+
+    /// How many textures are imported buffers.
+    #[must_use]
+    pub fn imported_textures(&self) -> usize {
+        self.imported.len()
+    }
+
+    /// Whether the server takes dmabufs (Ferrix's patched server): asked
+    /// once with `VCMD_GET_PARAM`, which a stock server answers "not valid"
+    /// and keeps the connection.
+    ///
+    /// # Errors
+    ///
+    /// The socket's.
+    pub fn can_import(&mut self) -> io::Result<bool> {
+        if let Some(known) = self.importable {
+            return Ok(known);
         }
-        // SAFETY: recvmsg writes at most the one byte and the control
-        // buffer described above, both alive for the call.
-        let got = unsafe {
-            libc::recvmsg(
-                self.stream.as_raw_fd(),
-                &raw mut message,
-                libc::MSG_CMSG_CLOEXEC,
+        self.header(1, GET_PARAM)?;
+        self.words(&[PARAM_FERRIX_IMPORT_FD])?;
+        let [len, command, valid, value] = self.reply_words::<4>()?;
+        if len != 2 || command != GET_PARAM {
+            return Err(io::Error::other("the server's parameter answer is not one"));
+        }
+        let known = valid != 0 && value >= 1;
+        self.importable = Some(known);
+        Ok(known)
+    }
+
+    /// Make a `width` x `height` texture whose storage is the dmabuf `fd`,
+    /// rows `stride` apart from `offset`. With protocol 2 and a four-byte
+    /// format it is given shared memory for transfers too, as a texture of
+    /// [`Vtest::create_shared`]'s is, so a frame drawn into it can still be
+    /// fetched.
+    ///
+    /// # Errors
+    ///
+    /// The socket's; a server without the command (`EOPNOTSUPP`, nothing
+    /// sent); the server's refusal, as its errno (the connection stays
+    /// usable).
+    #[expect(clippy::too_many_arguments, reason = "the command's own fields")]
+    pub fn import(
+        &mut self,
+        fd: std::os::fd::BorrowedFd<'_>,
+        format: u32,
+        bind: u32,
+        (width, height): (u32, u32),
+        stride: u32,
+        offset: u32,
+        modifier: u64,
+    ) -> io::Result<u32> {
+        if !self.can_import()? {
+            return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
+        }
+        let shared = self.version >= SHARED_MEMORY && four_bytes(format);
+        let size = if shared {
+            width
+                .checked_mul(height)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?
+        } else {
+            0
+        };
+        let resource = self.next;
+        self.next += 1;
+        self.header(10, FERRIX_RESOURCE_IMPORT_FD)?;
+        #[expect(clippy::cast_possible_truncation, reason = "the modifier's two halves")]
+        self.words(&[
+            resource,
+            format,
+            bind,
+            width,
+            height,
+            stride,
+            offset,
+            modifier as u32,
+            (modifier >> 32) as u32,
+            size,
+        ])?;
+        send_fd(self.stream.as_raw_fd(), fd)?;
+        let [len, command] = self.reply_words::<2>()?;
+        if command != FERRIX_RESOURCE_IMPORT_FD || !(1..=2).contains(&len) {
+            return Err(io::Error::other("the server's import answer is not one"));
+        }
+        let mut status = [0_u32; 2];
+        for word in status.iter_mut().take(len as usize) {
+            *word = self.reply_words::<1>()?[0];
+        }
+        if status[0] != 0 {
+            let errno = i32::try_from(status[0]).unwrap_or(libc::EIO);
+            return Err(io::Error::from_raw_os_error(errno));
+        }
+        if size != 0 {
+            let memory = self.receive_fd()?;
+            match Shared::adopt(&memory, width, height) {
+                Ok(Some(shared)) => {
+                    let _ = self.shared.insert(resource, shared);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = Device::release(self, resource);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(resource)
+    }
+
+    /// A frame texture drawn into a buffer from the scanout source, or the
+    /// reason it is not.
+    fn import_scanout(&mut self, texture: Texture) -> Result<u32, String> {
+        if !self.can_import().map_err(|error| error.to_string())? {
+            return Err("the test server takes no dmabufs (a stock virgl_test_server)".to_owned());
+        }
+        let source = self
+            .scanouts
+            .as_mut()
+            .ok_or_else(|| "no scanout source".to_owned())?;
+        let scanout = source
+            .allocate(texture.width, texture.height)
+            .map_err(|error| format!("the driver gave no buffer: {error}"))?;
+        let resource = self
+            .import(
+                scanout.fd.as_fd(),
+                texture.format,
+                texture.bind,
+                (texture.width, texture.height),
+                scanout.stride,
+                scanout.offset,
+                scanout.modifier,
             )
-        };
-        if got < 0 {
-            return Err(io::Error::last_os_error());
+            .map_err(|error| format!("the server would not import the buffer: {error}"))?;
+        let _ = self.imported.insert(resource, scanout);
+        Ok(resource)
+    }
+
+    /// Read a reply of `N` words.
+    fn reply_words<const N: usize>(&mut self) -> io::Result<[u32; N]> {
+        let mut words = [0_u32; N];
+        let mut bytes = [0_u8; 4];
+        for word in &mut words {
+            self.stream.read_exact(&mut bytes)?;
+            *word = u32::from_le_bytes(bytes);
         }
-        if got == 0 {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        if message.msg_flags & libc::MSG_CTRUNC != 0 {
-            return Err(io::Error::other(
-                "the server sent more descriptors than one",
-            ));
-        }
-        // SAFETY: the message recvmsg filled in, with its control buffer.
-        let header = unsafe { libc::CMSG_FIRSTHDR(&raw const message) };
-        if header.is_null() {
-            return Err(io::Error::other(
-                "the server's answer carried no descriptor",
-            ));
-        }
-        // SAFETY: a header CMSG_FIRSTHDR found inside the control buffer.
-        let cmsg = unsafe { header.read_unaligned() };
-        // SAFETY: a pure computation of a length from a constant.
-        let one = unsafe { libc::CMSG_LEN(size_of::<libc::c_int>() as u32) };
-        if cmsg.cmsg_level != libc::SOL_SOCKET
-            || cmsg.cmsg_type != libc::SCM_RIGHTS
-            || cmsg.cmsg_len as usize != one as usize
-        {
-            return Err(io::Error::other(
-                "the server's answer carried no descriptor",
-            ));
-        }
-        // SAFETY: the data of a control message whose length says it holds
-        // exactly one descriptor, inside the control buffer.
-        let data = unsafe { libc::CMSG_DATA(header) };
-        // SAFETY: as above; the descriptor may be unaligned in the buffer.
-        let raw = unsafe { data.cast::<libc::c_int>().read_unaligned() };
-        if raw < 0 {
-            return Err(io::Error::other("the server sent no descriptor"));
-        }
-        // SAFETY: SCM_RIGHTS installed the descriptor in this process just
-        // now, and nothing else owns it.
-        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+        Ok(words)
     }
 
     fn header(&mut self, len: u32, command: u32) -> io::Result<()> {
@@ -552,8 +874,16 @@ impl Vtest {
         ])?;
         // Version 2 answers with the descriptor alone.
         let fd = self.receive_fd()?;
-        if let Some(shared) = Shared::adopt(&fd, width, height)? {
-            let _ = self.shared.insert(resource, shared);
+        match Shared::adopt(&fd, width, height) {
+            Ok(Some(shared)) => {
+                let _ = self.shared.insert(resource, shared);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                // The server made the resource; it goes again with the error.
+                let _ = Device::release(self, resource);
+                return Err(error);
+            }
         }
         Ok(resource)
     }
@@ -769,6 +1099,12 @@ const fn four_bytes(format: u32) -> bool {
 
 impl Device for Vtest {
     fn texture(&mut self, texture: Texture) -> io::Result<u32> {
+        if texture.scanout && self.scanouts.is_some() {
+            match self.import_scanout(texture) {
+                Ok(resource) => return Ok(resource),
+                Err(why) => self.import_failure = Some(why),
+            }
+        }
         if self.version >= SHARED_MEMORY && texture.moved && four_bytes(texture.format) {
             return self.create_shared(texture.format, texture.bind, texture.width, texture.height);
         }
@@ -834,7 +1170,20 @@ impl Device for Vtest {
         }
         let _ = self.shared.remove(&resource);
         self.header(1, RESOURCE_UNREF)?;
-        self.words(&[resource])
+        self.words(&[resource])?;
+        // The buffer goes once the server has let go of it.
+        if self.imported.contains_key(&resource) {
+            self.sync()?;
+            let _ = self.imported.remove(&resource);
+        }
+        Ok(())
+    }
+
+    fn export(&mut self, resource: u32) -> io::Result<Option<OwnedFd>> {
+        self.imported
+            .get(&resource)
+            .map(|scanout| scanout.fd.try_clone())
+            .transpose()
     }
 }
 
