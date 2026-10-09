@@ -662,9 +662,14 @@ fn fences(
     if fence_status(&program.process, once)?.is_some() {
         return Err("a fence read as signalled before it was");
     }
+    let woken = fence_wakes(&program.process, once)?;
     if signal(FENCE, 0).is_err() || fence_status(&program.process, once)? != Some(0) {
         return Err("a fence was not signalled once with 0");
     }
+    if fence_wakes(&program.process, once)? == woken {
+        return Err("a fence's signal did not wake its queue");
+    }
+    file_info(program, once, report)?;
     if signal(FENCE, -5) != Err(status::BAD_STATE) || fence_status(&program.process, once)? != Some(0)
     {
         return Err("a fence was signalled twice");
@@ -700,6 +705,73 @@ fn fences(
         return Err("a control counted other than one unsignalled fence");
     }
     Ok(kept)
+}
+
+/// How often the fence `fd` of `process` names has woken its queue.
+fn fence_wakes(process: &Process, fd: i32) -> Result<Option<u64>, &'static str> {
+    use ferrix_vfs::Inode;
+    let file = crate::syscall::fd::file(process, fd).map_err(|_| "a fence's descriptor went")?;
+    let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    Ok(fence.poll_changes())
+}
+
+/// `SYNC_IOC_FILE_INFO` through the program's memory, as Linux answers it
+/// for one signalled fence, and its refusals (S6).
+fn file_info(program: &Side, fd: i32, report: &mut Report) -> Result<(), &'static str> {
+    const FILE_INFO: u32 = 0xC038_3E04;
+    const MERGE: u32 = 0xC030_3E03;
+    let file = crate::syscall::fd::file(&program.process, fd).map_err(|_| "a fence's descriptor went")?;
+    let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    let ask = |info: &[u8; 56]| -> Result<Result<usize, Errno>, &'static str> {
+        program.put(BUFFER, info)?;
+        Ok(super::sync::ioctl(&program.process, &fence, FILE_INFO, BUFFER))
+    };
+    let word = |bytes: &[u8], at: usize| -> u32 {
+        let mut word = [0u8; 4];
+        word.copy_from_slice(bytes.get(at..at + 4).unwrap_or(&[0; 4]));
+        u32::from_ne_bytes(word)
+    };
+    // num_fences 0: the count, no array.
+    if ask(&[0u8; 56])? != Ok(0) {
+        return Err("SYNC_IOC_FILE_INFO with no array was refused");
+    }
+    let got = program.get(BUFFER, 56)?;
+    if word(&got, 32) != 1 || word(&got, 40) != 1 || !got.starts_with(b"nvidia-drm") {
+        return Err("SYNC_IOC_FILE_INFO did not say one signalled fence");
+    }
+    // num_fences 1: one entry, at an array in the program's memory.
+    let mut info = [0u8; 56];
+    info[40..44].copy_from_slice(&1u32.to_ne_bytes());
+    info[48..56].copy_from_slice(&(BUFFER + 0x100).to_ne_bytes());
+    if ask(&info)? != Ok(0) || word(&program.get(BUFFER + 0x100, 80)?, 64) != 1 {
+        return Err("SYNC_IOC_FILE_INFO did not write its fence's entry");
+    }
+    let mut flagged = [0u8; 56];
+    flagged[36] = 1;
+    let mut stray = info;
+    stray[48..56].copy_from_slice(&u64::MAX.to_ne_bytes());
+    for (refused, wanted, what) in [
+        (ask(&flagged)?, Errno::EINVAL, "SYNC_IOC_FILE_INFO with flags set was answered"),
+        (ask(&stray)?, Errno::EFAULT, "SYNC_IOC_FILE_INFO wrote through a bad pointer"),
+        (
+            super::sync::ioctl(&program.process, &fence, MERGE, BUFFER),
+            Errno::ENOTTY,
+            "SYNC_IOC_MERGE was answered",
+        ),
+    ] {
+        if refused != Err(wanted) {
+            return Err(what);
+        }
+        report.sync_refusals += 1;
+    }
+    let mut byte = [0u8; 1];
+    if ferrix_vfs::Inode::read_at(&*fence, 0, &mut byte) != Err(Errno::EINVAL)
+        || ferrix_vfs::Inode::mapping_at(&*fence, 0).is_some()
+    {
+        return Err("a fence was read or mapped");
+    }
+    report.sync_refusals += 1;
+    Ok(())
 }
 
 /// After its driver went, the fence it never signalled reads `ENODEV`.
