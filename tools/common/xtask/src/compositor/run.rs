@@ -71,7 +71,13 @@ bind = SUPER, W, exec, /bin/hyprctl activewindow
 /// feature of a watched desktop like the others `--everything` turns on, and
 /// fuzzel then lists vkgears. Elsewhere the card stays virgl's, as it was.
 fn everything_venus(arch: Arch, args: &mut Args) {
-    if args.everything && args.gl && !args.venus && crate::window::offers_venus(arch) {
+    // Not on the 3060 (`--nvidia`), whose domain has no virtio-gpu.
+    if args.everything
+        && args.gl
+        && !args.venus
+        && !args.nvidia
+        && crate::window::offers_venus(arch)
+    {
         println!("  gpu: Venus on the 3D card, so Vulkan runs on the host's GPU");
         args.venus = true;
     }
