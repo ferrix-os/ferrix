@@ -603,3 +603,162 @@ fn shared_memory_moves_the_pixels_the_socket_does() {
     assert_eq!(uploaded, &expected, "the second upload");
     assert_eq!(socket, shared, "version 0 and version 2 agree");
 }
+
+/// Ferrix's patched server, built by tools/common/fetch/fetch-virgl-server.sh:
+/// `FERRIX_VIRGL_SERVER_BIN`, or where that script puts it.
+fn patched_server() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("FERRIX_VIRGL_SERVER_BIN")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                std::path::PathBuf::from(home)
+                    .join(".local/share/ferrix/virgl-server/out/usr/bin/virgl_test_server")
+            })
+        })?;
+    path.is_file().then_some(path)
+}
+
+/// One texture drawn and read back, to show the connection still works.
+#[expect(clippy::expect_used, reason = "a test's helper")]
+fn still_draws(server: &mut Vtest) {
+    use compositor_virgl::{Device, Texture};
+    let target = server
+        .texture(Texture {
+            width: 8,
+            height: 8,
+            format: pipe::FORMAT_B8G8R8A8_UNORM,
+            bind: pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+            moved: true,
+            scanout: false,
+        })
+        .expect("a texture after the import");
+    let mut stream = Stream::new();
+    stream.create_surface(SURFACE, target, pipe::FORMAT_B8G8R8A8_UNORM);
+    stream.set_framebuffer(SURFACE);
+    stream.clear([0.0, 0.0, 1.0, 1.0]);
+    Device::submit(server, stream.words()).expect("submitted");
+    let pixels = server
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 8,
+            },
+        )
+        .expect("read back");
+    assert_eq!(
+        pixel(&pixels, 8, 3, 3),
+        0xff00_00ff,
+        "the clear, after the import"
+    );
+}
+
+/// A memfd standing in for a dmabuf: `lseek` gives its size, as a dmabuf's,
+/// and no EGL takes it as one.
+#[expect(clippy::expect_used, reason = "a test's helper")]
+fn not_a_dmabuf(len: i64) -> std::os::fd::OwnedFd {
+    use std::os::fd::FromRawFd;
+    // SAFETY: a fresh descriptor from a constant name.
+    let raw = unsafe { libc::memfd_create(c"not-a-dmabuf".as_ptr(), libc::MFD_CLOEXEC) };
+    assert!(raw >= 0);
+    // SAFETY: just made, owned by nothing else.
+    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    // SAFETY: a descriptor this test holds.
+    assert_eq!(unsafe { libc::ftruncate(raw, len) }, 0);
+    let _ = fd.try_clone().expect("cloneable");
+    fd
+}
+
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_stock_server_is_never_sent_the_import() {
+    use std::os::fd::AsFd;
+    let Some(mut server) = server("stock-import") else {
+        return;
+    };
+    if server.can_import().expect("asked") {
+        eprintln!("stock-import: the server on PATH is a patched one; skipped");
+        return;
+    }
+    let buffer = not_a_dmabuf(64 * 64 * 4);
+    let error = server
+        .import(
+            buffer.as_fd(),
+            pipe::FORMAT_B8G8R8X8_UNORM,
+            pipe::BIND_RENDER_TARGET,
+            (64, 64),
+            256,
+            0,
+            0,
+        )
+        .expect_err("a stock server takes no import");
+    assert_eq!(error.raw_os_error(), Some(libc::EOPNOTSUPP));
+    still_draws(&mut server);
+}
+
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn the_patched_server_refuses_a_buffer_its_geometry_does_not_fit() {
+    use std::os::fd::AsFd;
+    let Some(program) = patched_server() else {
+        eprintln!("patched-import: no patched virgl_test_server built; skipped");
+        return;
+    };
+    let Ok(Some(mut server)) = Vtest::start_program(&program, "patched-import", 2) else {
+        eprintln!("patched-import: the patched server would not start; skipped");
+        return;
+    };
+    assert!(
+        server.can_import().expect("asked"),
+        "the patched server says it imports"
+    );
+    let refuse = |server: &mut Vtest, len: i64, size: (u32, u32), stride: u32, offset: u32| {
+        let buffer = not_a_dmabuf(len);
+        server
+            .import(
+                buffer.as_fd(),
+                pipe::FORMAT_B8G8R8X8_UNORM,
+                pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+                size,
+                stride,
+                offset,
+                0,
+            )
+            .expect_err("refused")
+            .raw_os_error()
+    };
+    // A stride shorter than a row, a buffer shorter than its rows, an offset
+    // pushing the last row past the end, and no size: each EINVAL, before
+    // EGL is asked anything.
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4, (64, 64), 255, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4 - 1, (64, 64), 256, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4, (64, 64), 256, 4),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 4096, (0, 64), 256, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 1 << 30, (20000, 4), 80000, 0),
+        Some(libc::EINVAL)
+    );
+    // A geometry that fits, of a file that is no dmabuf: EGL refuses it, and
+    // the server says so rather than ending the connection.
+    let fits = refuse(&mut server, 64 * 64 * 4, (64, 64), 256, 0);
+    assert!(
+        fits.is_some_and(|errno| errno != 0),
+        "refused by EGL: {fits:?}"
+    );
+    assert_eq!(server.imported_textures(), 0);
+    still_draws(&mut server);
+}
