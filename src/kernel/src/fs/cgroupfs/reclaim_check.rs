@@ -23,6 +23,11 @@
 //! * the files: `memory.high` reads `max` and what was written, `memory.low`
 //!   and `memory.min` read `0`, a bad value is `EINVAL`, and there is no
 //!   `memory.swap.max`;
+//! * `/check-rt`, `memory.high` 16 pages, writes 32 pages to a tmpfs file
+//!   and reads them back through the file: the read is throttled, reclaim
+//!   finds nothing it may take, and the reader sleeps -- holding the file's
+//!   I/O lock and no spin lock, so the machine is not stopped (F-70) -- and
+//!   reads what it wrote;
 //! * `pgfault` counts the faults of a job's program.
 
 use alloc::boxed::Box;
@@ -261,6 +266,7 @@ fn all(harness: &mut Harness) -> Checked<u64> {
     sibling.end(harness)?;
     let at_max = max(harness)?;
     let protected = protection(harness)?;
+    tmpfs_read_throttled(harness)?;
     faults(harness)?;
     Ok(stolen + at_max + protected)
 }
@@ -379,6 +385,51 @@ fn high(
         return Err("memory.stat does not split a cgroup's cache into file and shmem");
     }
     Ok(stolen)
+}
+
+/// Pages `/check-rt` writes to its tmpfs file: twice its `memory.high`.
+const TMPFS_PAGES: u64 = 32;
+
+/// `/check-rt` reads a tmpfs file while over its `memory.high`: the read
+/// throttles and sleeps, which is allowed only because the file's data
+/// operations hold its sleeping I/O lock and not its inode spin lock (F-70;
+/// with the spin lock held, FX-0503 stops the machine here).
+fn tmpfs_read_throttled(harness: &mut Harness) -> Checked<()> {
+    use ferrix_vfs::{FileSystem, NewNode};
+    let group = Group::make(harness, b"/check-rt")?;
+    group.set(harness, "memory.high", MARK)?;
+    let page = PAGE_SIZE as usize;
+    let outcome = group.as_task(|| -> Checked<bool> {
+        let fs = crate::fs::new_tmpfs().map_err(|_| "reclaim check: no tmpfs")?;
+        let file = fs
+            .root()
+            .create(b"f", NewNode::Regular, 0o600)
+            .map_err(|_| "reclaim check: no tmpfs file")?;
+        for index in 0..TMPFS_PAGES {
+            let fill = [index as u8; PAGE_SIZE as usize];
+            let _ = file
+                .write_at(index * PAGE_SIZE, &fill, false)
+                .map_err(|_| "a tmpfs file over memory.high would not take a write")?;
+        }
+        let mut buf = fallible::try_filled(0_u8, page).map_err(|_| "reclaim check: no memory")?;
+        let mut whole = true;
+        for index in 0..TMPFS_PAGES {
+            let read = file
+                .read_at(index * PAGE_SIZE, &mut buf)
+                .map_err(|_| "a tmpfs read over memory.high failed")?;
+            whole &= read == page && buf.iter().all(|&b| b == index as u8);
+        }
+        Ok(whole)
+    });
+    let throttled = group.number(harness, "memory.events", "high")?;
+    group.end(harness)?;
+    if !outcome? {
+        return Err("a tmpfs file read over memory.high did not read back what was written");
+    }
+    if throttled == 0 {
+        return Err("a tmpfs read over memory.high was not throttled");
+    }
+    Ok(())
 }
 
 /// `/check-rm` at its `memory.max`: the cache is room.
