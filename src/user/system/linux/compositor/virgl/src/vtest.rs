@@ -451,6 +451,12 @@ pub trait ScanoutSource: core::fmt::Debug {
     /// The driver's; the frame is then drawn into a texture of the server's
     /// own, and fetched.
     fn allocate(&mut self, width: u32, height: u32) -> io::Result<Scanout>;
+
+    /// What became of a frame buffer: drawn into one of [`Self::allocate`]'s,
+    /// or why not. For the compositor's log; the default says nothing.
+    fn note(&mut self, line: String) {
+        let _ = line;
+    }
 }
 
 /// A running server and the connection to it. The server is this object's
@@ -1101,8 +1107,24 @@ impl Device for Vtest {
     fn texture(&mut self, texture: Texture) -> io::Result<u32> {
         if texture.scanout && self.scanouts.is_some() {
             match self.import_scanout(texture) {
-                Ok(resource) => return Ok(resource),
-                Err(why) => self.import_failure = Some(why),
+                Ok(resource) => {
+                    if let Some(source) = self.scanouts.as_mut() {
+                        source.note(format!(
+                            "a {}x{} frame is drawn into the driver's own buffer",
+                            texture.width, texture.height
+                        ));
+                    }
+                    return Ok(resource);
+                }
+                Err(why) => {
+                    if let Some(source) = self.scanouts.as_mut() {
+                        source.note(format!(
+                            "a {}x{} frame is drawn into the server's texture: {why}",
+                            texture.width, texture.height
+                        ));
+                    }
+                    self.import_failure = Some(why);
+                }
             }
         }
         if self.version >= SHARED_MEMORY && texture.moved && four_bytes(texture.format) {
