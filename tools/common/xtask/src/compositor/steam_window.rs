@@ -57,6 +57,16 @@ const CLIENT: &[u8] = include_bytes!("../../../steam/client.sh");
 /// The steamrt64 entry point's stand-in.
 const ENTRY_POINT: &[u8] = include_bytes!("../../../steam/_v2-entry-point");
 
+/// The compatibility tool `client.sh` maps native games to, so Steam runs
+/// them directly rather than in the Steam Linux Runtime's container.
+const DIRECT_TOOL: &[u8] = include_bytes!("../../../steam/ferrix_direct/compatibilitytool.vdf");
+
+/// [`DIRECT_TOOL`]'s manifest: the command line Steam puts before a game's.
+const DIRECT_MANIFEST: &[u8] = include_bytes!("../../../steam/ferrix_direct/toolmanifest.vdf");
+
+/// [`DIRECT_TOOL`]'s script, which runs the game.
+const DIRECT_RUN: &[u8] = include_bytes!("../../../steam/ferrix_direct/run");
+
 /// The Steam Runtime logger's stand-in.
 const LOGGER: &[u8] = include_bytes!("../../../steam/logger-0.bash");
 
@@ -99,6 +109,17 @@ const SCRIPTS: &[(&str, &[u8], u32)] = &[
         0o644,
     ),
     ("usr/bin/lsof", LSOF, 0o755),
+    (
+        "steam/compat/ferrix_direct/compatibilitytool.vdf",
+        DIRECT_TOOL,
+        0o644,
+    ),
+    (
+        "steam/compat/ferrix_direct/toolmanifest.vdf",
+        DIRECT_MANIFEST,
+        0o644,
+    ),
+    ("steam/compat/ferrix_direct/run", DIRECT_RUN, 0o755),
 ];
 
 /// The title of Steam's sign-in window, which `run.sh`'s watcher looks for
