@@ -15,7 +15,7 @@ manifest=$S/steamapps/appmanifest_$app.acf
 # hand it to the running client and exit (client.sh with an argument).
 hand() {
     echo "steam-game: handing the client $1"
-    ( su -p -s /bin/sh ferrix -c "/bin/busybox sh /steam/client.sh $1" 2>&1 \
+    ( su -s /bin/sh ferrix -c "/bin/busybox sh /steam/client.sh $1" 2>&1 \
         | sed 's/^/steam-game: hand: /'
       echo "steam-game: handed $1" ) &
 }

@@ -27,4 +27,4 @@ fi
 if [ "$(stat -c %u /data/steam)" != 1000 ] || [ "$(stat -c %u /data/home)" != 1000 ]; then
     chown -R 1000:1000 /data/home /data/steam
 fi
-su -p -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1 | tee /tmp/steam.log
+su -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1 | tee /tmp/steam.log
