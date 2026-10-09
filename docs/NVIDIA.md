@@ -842,6 +842,30 @@ before it commits the buffer, so hyprix receives finished frames.
    `GET_DEV_INFO` answers `supports_sync_fd = 1` and
    `supports_semsurf = 1` only on a kernel that serves the three calls.
 
+*As built on `n3b-gbm`, and the verdict.* The consultant's verdict is
+**OK IF S1–S12** (ledger 647, 2026-10-10). As built on this branch:
+
+* **The kernel object.** It is `interfaces/chardev/sync.rs`, served
+  through native calls `0x1062`–`0x1064`.
+* **Cookies (S3).** nvrm's fence cookies come from one monotonic u64
+  counter in `drm.c` and are never reused. A signal that arrives after the
+  kernel's deadline is refused, and does not change what a reader already
+  saw.
+* **How fences signal (S8).** Through the KAPI semaphore-surface callback.
+  If it is already reached at registration, the fence signals at once. If
+  registration fails, the fence signals `-EIO`. The 1 ms poll fallback is
+  not built.
+* **Not built yet (S8).**
+  * `SEMSURF_FENCE_WAIT`, which will take only fds that `RESOLVE` answers
+    and will leave the semaphore unset if the fence it waited for signals
+    with an error;
+  * each client's share of the per-control cap;
+  * the probe that gates `GET_DEV_INFO`'s two bits. Today the branch
+    answers 1 unconditionally, as an experiment that must not land.
+* **A known leak.** A fence context closed before its last fence keeps its
+  semaphore surface until nvrm exits, because freeing it from inside its
+  own callback is not safe.
+
 *The exposure.* A compromised nvrm can at worst:
 
 * signal a fence early, which a client then reads as a finished frame
