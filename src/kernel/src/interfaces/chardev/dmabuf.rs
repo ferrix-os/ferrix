@@ -277,7 +277,7 @@ pub(crate) fn install(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, 
 /// Whether a name-only dmabuf may say it is `size` bytes: not 0, whole
 /// pages, at most [`DMABUF_NAME_MAX`] (N1).
 fn name_size_valid(size: u64) -> bool {
-    size != 0 && size % 4096 == 0 && size <= DMABUF_NAME_MAX
+    size != 0 && size.is_multiple_of(4096) && size <= DMABUF_NAME_MAX
 }
 
 /// The VMO `handle` names in `caller`'s table, if it may become a dmabuf:

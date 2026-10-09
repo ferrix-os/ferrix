@@ -630,7 +630,7 @@ fn outlived(program: &Side, kept: Kept) -> Result<(), &'static str> {
 
 /// The cookie the check names its name-only dmabuf by, and the one it keeps
 /// past the driver's death.
-const NAME_COOKIE: u64 = 0x0E_D3AB;
+const NAME_COOKIE: u64 = 0x000E_D3AB;
 /// The size the driver says its name-only dmabuf has: more than the check's
 /// VMO, so nothing of that size could be mapped by mistake.
 const NAME_BYTES: u64 = 16 * 4096;
@@ -647,7 +647,7 @@ fn names(
     report: &mut Report,
 ) -> Result<i32, &'static str> {
     use ferrix_native_abi::types::{
-        DMABUF_MADE, DMABUF_NAME_MAX, DMABUF_NAME_ONLY, DMABUF_TELL_MADE, DMABUF_WRITABLE,
+        DMABUF_MADE, DMABUF_NAME_ONLY, DMABUF_TELL_MADE, DMABUF_WRITABLE,
     };
     drain_channel(side, control);
     let vmo = side.handle(nr::VMO_CREATE, &[DMABUF_BYTES], "vmo_create failed")?;
@@ -666,6 +666,81 @@ fn names(
             &[reg(control), wire.id, vmo_register, cookie, flags, size],
         )
     };
+    let name = DMABUF_NAME_ONLY;
+    register_refusals(&install, vmo, report)?;
+    if super::dmabuf::alive(core) != 1 {
+        return Err("a refused name-only install left a dmabuf behind");
+    }
+    let first = install(
+        0,
+        NAME_COOKIE,
+        name | DMABUF_TELL_MADE | DMABUF_WRITABLE,
+        NAME_BYTES,
+    )
+    .map_err(|_| "a name-only dmabuf was refused")?;
+    let second = install(0, NAME_COOKIE, name | DMABUF_TELL_MADE, NAME_BYTES)
+        .map_err(|_| "a second name-only install for a live cookie was refused")?;
+    if first & DMABUF_MADE == 0 || second & DMABUF_MADE != 0 {
+        return Err("a name-only install did not say rightly whether it made the object");
+    }
+    let first = (first & !DMABUF_MADE) as i32;
+    let second = (second & !DMABUF_MADE) as i32;
+    one_object(&program.process, first, second)?;
+    kind_refusals(&install, vmo, report)?;
+    let _ = side
+        .call(
+            nr::CHARDEV_DMABUF_RESOLVE,
+            &[reg(control), wire.id, second as u64, BUFFER],
+        )
+        .map_err(|_| "a name-only dmabuf its control made did not resolve")?;
+    if side.get(BUFFER, 8)? != NAME_COOKIE.to_ne_bytes() {
+        return Err("a name-only dmabuf resolved to another cookie");
+    }
+    let kept = install(0, NAME_COOKIE + 1, name, NAME_BYTES)
+        .map_err(|_| "a name-only dmabuf for a second cookie was refused")? as i32;
+    reply(side, control, wire.id, VALUE)?;
+    if finish()? != Ok(VALUE as usize) {
+        return Err("the program's ioctl did not return after its name-only dmabufs");
+    }
+    report.answered += 1;
+    let _ = side.call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+
+    unmappable(&program.process, first, report)?;
+
+    if let Some(foreign) = foreign {
+        foreign_refused(program, foreign, second, report)?;
+    }
+
+    // One release, after the last of two descriptors.
+    close_fd(&program.process, first)?;
+    if released(side, control)?.is_some() {
+        return Err("a name-only dmabuf was released while a descriptor of it lived");
+    }
+    close_fd(&program.process, second)?;
+    if released(side, control)? != Some(NAME_COOKIE) {
+        return Err(
+            "a name-only dmabuf's driver did not hear its release after its last descriptor",
+        );
+    }
+    if released(side, control)?.is_some() {
+        return Err("a name-only dmabuf's release was heard twice");
+    }
+    if super::dmabuf::alive(core) != 2 {
+        return Err("a control counted other than two live dmabufs");
+    }
+    Ok(kept)
+}
+
+/// A name-only install's arguments: VMO register, cookie, flags, size.
+type Install<'a> = &'a dyn Fn(u64, u64, u64, u64) -> Result<usize, Errno>;
+
+/// The register refusals (N1): each `INVALID_ARGS`.
+fn register_refusals(
+    install: Install<'_>,
+    vmo: Handle,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::{DMABUF_NAME_MAX, DMABUF_NAME_ONLY};
     let name = DMABUF_NAME_ONLY;
     for (vmo_register, flags, size, what) in [
         (0, name, 0, "a name-only dmabuf of no bytes was installed"),
@@ -699,33 +774,18 @@ fn names(
         }
         report.name_refusals += 1;
     }
-    if super::dmabuf::alive(core) != 1 {
-        return Err("a refused name-only install left a dmabuf behind");
-    }
-    let first = install(
-        0,
-        NAME_COOKIE,
-        name | DMABUF_TELL_MADE | DMABUF_WRITABLE,
-        NAME_BYTES,
-    )
-    .map_err(|_| "a name-only dmabuf was refused")?;
-    let second = install(0, NAME_COOKIE, name | DMABUF_TELL_MADE, NAME_BYTES)
-        .map_err(|_| "a second name-only install for a live cookie was refused")?;
-    if first & DMABUF_MADE == 0 || second & DMABUF_MADE != 0 {
-        return Err("a name-only install did not say rightly whether it made the object");
-    }
-    let first = (first & !DMABUF_MADE) as i32;
-    let second = (second & !DMABUF_MADE) as i32;
-    let objects: Vec<_> = [first, second]
-        .iter()
-        .filter_map(|fd| crate::syscall::fd::file(&program.process, *fd).ok())
-        .filter_map(|file| super::dmabuf::of(file.io()))
-        .collect();
-    match objects.as_slice() {
-        [one, two] if Arc::ptr_eq(one, two) => {}
-        _ => return Err("two name-only installs for one cookie did not give one dmabuf"),
-    }
-    drop(objects);
+    Ok(())
+}
+
+/// A live cookie asked in the other kind or with another size:
+/// `ALREADY_BOUND` (N2).
+fn kind_refusals(
+    install: Install<'_>,
+    vmo: Handle,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::DMABUF_NAME_ONLY;
+    let name = DMABUF_NAME_ONLY;
     for (vmo_register, cookie, flags, size, what) in [
         (
             0,
@@ -754,69 +814,54 @@ fn names(
         }
         report.name_refusals += 1;
     }
-    let _ = side
-        .call(
-            nr::CHARDEV_DMABUF_RESOLVE,
-            &[reg(control), wire.id, second as u64, BUFFER],
-        )
-        .map_err(|_| "a name-only dmabuf its control made did not resolve")?;
-    if side.get(BUFFER, 8)? != NAME_COOKIE.to_ne_bytes() {
-        return Err("a name-only dmabuf resolved to another cookie");
-    }
-    let kept = install(0, NAME_COOKIE + 1, name, NAME_BYTES)
-        .map_err(|_| "a name-only dmabuf for a second cookie was refused")? as i32;
-    reply(side, control, wire.id, VALUE)?;
-    if finish()? != Ok(VALUE as usize) {
-        return Err("the program's ioctl did not return after its name-only dmabufs");
-    }
-    report.answered += 1;
-    let _ = side.call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    Ok(())
+}
 
-    unmappable(&program.process, first, report)?;
+/// Two installs for one name gave one object.
+fn one_object(process: &Process, first: i32, second: i32) -> Result<(), &'static str> {
+    let objects: Vec<_> = [first, second]
+        .iter()
+        .filter_map(|fd| crate::syscall::fd::file(process, *fd).ok())
+        .filter_map(|file| super::dmabuf::of(file.io()))
+        .collect();
+    match objects.as_slice() {
+        [one, two] if Arc::ptr_eq(one, two) => {}
+        _ => return Err("two name-only installs for one cookie did not give one dmabuf"),
+    }
+    drop(objects);
+    Ok(())
+}
 
-    // Another driver's resolve: BAD_HANDLE (B3).
-    if let Some((other_side, other_control, other_core)) = foreign {
-        drain_channel(other_side, other_control);
-        let request = admit(other_core, &program.process, IOCTL)
-            .map_err(|_| "an ioctl was not taken in by the second driver")?;
-        start(Job::Await(
-            Arc::clone(other_core),
-            request,
-            Arc::clone(&program.process),
-        ))?;
-        let Some(Message::Request(wire)) = receive(other_side, other_control)? else {
-            return Err("an ioctl did not reach the second driver as a REQUEST");
-        };
-        let resolved = other_side.call(
-            nr::CHARDEV_DMABUF_RESOLVE,
-            &[reg(other_control), wire.id, second as u64, BUFFER],
-        );
-        reply(other_side, other_control, wire.id, VALUE)?;
-        let _ = finish()?;
-        if resolved != Err(status::BAD_HANDLE) {
-            return Err("another driver resolved a name-only dmabuf it did not make");
-        }
-        report.name_refusals += 1;
+/// Another driver's resolve of a name-only dmabuf it did not make is
+/// `BAD_HANDLE` (B3), for a request of its own.
+fn foreign_refused(
+    program: &Side,
+    (other_side, other_control, other_core): (&Side, Handle, &Arc<Control>),
+    second: i32,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    drain_channel(other_side, other_control);
+    let request = admit(other_core, &program.process, IOCTL)
+        .map_err(|_| "an ioctl was not taken in by the second driver")?;
+    start(Job::Await(
+        Arc::clone(other_core),
+        request,
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(other_side, other_control)? else {
+        return Err("an ioctl did not reach the second driver as a REQUEST");
+    };
+    let resolved = other_side.call(
+        nr::CHARDEV_DMABUF_RESOLVE,
+        &[reg(other_control), wire.id, second as u64, BUFFER],
+    );
+    reply(other_side, other_control, wire.id, VALUE)?;
+    let _ = finish()?;
+    if resolved != Err(status::BAD_HANDLE) {
+        return Err("another driver resolved a name-only dmabuf it did not make");
     }
-
-    // One release, after the last of two descriptors.
-    close_fd(&program.process, first)?;
-    if released(side, control)?.is_some() {
-        return Err("a name-only dmabuf was released while a descriptor of it lived");
-    }
-    close_fd(&program.process, second)?;
-    if released(side, control)? != Some(NAME_COOKIE) {
-        return Err(
-            "a name-only dmabuf's driver did not hear its release after its last descriptor",
-        );
-    }
-    if released(side, control)?.is_some() {
-        return Err("a name-only dmabuf's release was heard twice");
-    }
-    if super::dmabuf::alive(core) != 2 {
-        return Err("a control counted other than two live dmabufs");
-    }
-    Ok(kept)
+    report.name_refusals += 1;
+    Ok(())
 }
 
 /// A name-only dmabuf says its size and maps nothing, shared or private
