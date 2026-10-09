@@ -480,6 +480,9 @@ pub struct Vtest {
     importable: Option<bool>,
     /// The textures whose storage is a [`Scanout`], with it.
     imported: HashMap<u32, Scanout>,
+    /// Reads of imported textures so far, which picks the ones checked
+    /// against the buffer's own memory ([`Vtest::check_in_place`]).
+    imported_reads: u64,
     /// Why the last frame buffer was not imported, for the compositor to say.
     import_failure: Option<String>,
 }
@@ -574,6 +577,7 @@ impl Vtest {
             scanouts: None,
             importable: None,
             imported: HashMap::new(),
+            imported_reads: 0,
             import_failure: None,
         };
         // The one command whose length is in bytes: the client's name.
@@ -802,6 +806,97 @@ impl Vtest {
         Ok(resource)
     }
 
+    /// Count a read of an imported texture, and early and once a while
+    /// later say whether the driver draws into the buffer it was given or
+    /// into a copy of its own.
+    fn after_imported_read(&mut self, resource: u32, region: Region, read: &[u8], stride: usize) {
+        self.imported_reads += 1;
+        if !matches!(self.imported_reads, 60 | 3600) {
+            return;
+        }
+        let line = match self.check_in_place(resource, region, read, stride) {
+            Ok((same, all)) => format!(
+                "the driver's buffer holds {same} of {all} sampled pixels of the frame read back ({})",
+                if same == all {
+                    "drawn in place"
+                } else {
+                    "drawn into a copy"
+                }
+            ),
+            Err(error) => format!("the driver's buffer could not be looked at: {error}"),
+        };
+        if let Some(source) = self.scanouts.as_mut() {
+            source.note(line);
+        }
+    }
+
+    /// Compare `region` of an imported texture, as just read into `read`
+    /// (rows `stride` apart), with the same pixels in the imported buffer's
+    /// own memory, mapped read-only for the look: every 97th pixel of
+    /// every 7th row, the low three bytes (an X channel may be anything).
+    /// Answers how many matched of how many were looked at.
+    fn check_in_place(
+        &self,
+        resource: u32,
+        region: Region,
+        read: &[u8],
+        stride: usize,
+    ) -> io::Result<(usize, usize)> {
+        let scanout = self
+            .imported
+            .get(&resource)
+            .ok_or_else(|| io::Error::other("not an imported texture"))?;
+        let raw = scanout.fd.as_raw_fd();
+        // SAFETY: lseek on a descriptor this object holds; it moves only the
+        // descriptor's offset, which nothing reads.
+        let end = unsafe { libc::lseek(raw, 0, libc::SEEK_END) };
+        let len = usize::try_from(end).map_err(|_| io::Error::last_os_error())?;
+        if len == 0 {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+        // SAFETY: a fresh shared read-only mapping the kernel places, of
+        // the buffer's own size, unmapped below.
+        let at = unsafe {
+            libc::mmap(
+                core::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                raw,
+                0,
+            )
+        };
+        if at == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let mut copy = vec![0_u8; len];
+        // SAFETY: `len` readable bytes at `at`, the mapping just made, into
+        // a vector of that length; the two do not overlap.
+        unsafe { core::ptr::copy_nonoverlapping(at.cast::<u8>(), copy.as_mut_ptr(), len) };
+        // SAFETY: exactly the range mmap answered, unmapped once.
+        let _ = unsafe { libc::munmap(at, len) };
+        let mut matches = Vec::new();
+        for row in (0..region.height as usize).step_by(7) {
+            for column in (0..region.width as usize).step_by(97) {
+                let theirs = (region.y as usize + row)
+                    .checked_mul(scanout.stride as usize)
+                    .and_then(|start| {
+                        start
+                            .checked_add(scanout.offset as usize + (region.x as usize + column) * 4)
+                    })
+                    .and_then(|start| copy.get(start..start + 3));
+                let at = row * stride + column * 4;
+                let ours = read.get(at..at + 3);
+                if let (Some(theirs), Some(ours)) = (theirs, ours) {
+                    matches.push(theirs == ours);
+                }
+            }
+        }
+        let same = matches.iter().filter(|&&same| same).count();
+        let all = matches.len();
+        Ok((same, all))
+    }
+
     /// Read a reply of `N` words.
     fn reply_words<const N: usize>(&mut self) -> io::Result<[u32; N]> {
         let mut words = [0_u32; N];
@@ -1015,7 +1110,11 @@ impl Vtest {
         stride: usize,
     ) -> io::Result<()> {
         if self.shared.contains_key(&resource) {
-            return self.get_shared(resource, region, into, stride);
+            self.get_shared(resource, region, into, stride)?;
+            if self.imported.contains_key(&resource) {
+                self.after_imported_read(resource, region, into, stride);
+            }
+            return Ok(());
         }
         let row = region.width as usize * 4;
         let len = region.width * region.height * 4;

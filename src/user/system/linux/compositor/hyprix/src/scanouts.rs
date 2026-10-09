@@ -12,9 +12,9 @@
 //! Every step falls back: no nvidia-drm node, a driver that will not export
 //! the buffer (video memory before name-only dmabufs land), or a stock
 //! server, and the frame is the server's texture as before. What happened
-//! is noted for the log.
+//! is said in the log, and so is whether the driver draws into the buffer
+//! in place (`hyprix: vtest: ...`).
 
-use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
@@ -36,7 +36,14 @@ const SCANOUT_ENV: &str = "FERRIX_VTEST_SCANOUT";
 #[derive(Debug)]
 pub(crate) struct NvidiaScanouts {
     node: Rc<Render>,
-    notes: Rc<RefCell<Vec<String>>>,
+}
+
+/// One line on standard output, hyprix's log.
+fn say(line: &str) {
+    use std::io::Write;
+    let mut out = io::stdout();
+    let _ = writeln!(out, "hyprix: vtest: {line}");
+    let _ = out.flush();
 }
 
 /// The driver's handle for one buffer, let go of with it.
@@ -54,20 +61,15 @@ impl Drop for Held {
 
 impl NvidiaScanouts {
     /// nvidia-drm's render node, if there is one and the environment asks
-    /// for it (`FERRIX_VTEST_SCANOUT=1`); and where its notes will be.
-    pub(crate) fn open() -> Option<(Self, Rc<RefCell<Vec<String>>>)> {
+    /// for it (`FERRIX_VTEST_SCANOUT=1`).
+    pub(crate) fn open() -> Option<Self> {
         if !std::env::var(SCANOUT_ENV).is_ok_and(|value| value.trim() == "1") {
             return None;
         }
         let node = Render::open_driven_by("nvidia-drm").ok()?;
-        let notes = Rc::new(RefCell::new(Vec::new()));
-        Some((
-            Self {
-                node: Rc::new(node),
-                notes: Rc::clone(&notes),
-            },
-            notes,
-        ))
+        Some(Self {
+            node: Rc::new(node),
+        })
     }
 }
 
@@ -98,7 +100,7 @@ impl ScanoutSource for NvidiaScanouts {
     }
 
     fn note(&mut self, line: String) {
-        self.notes.borrow_mut().push(line);
+        say(&line);
     }
 }
 
