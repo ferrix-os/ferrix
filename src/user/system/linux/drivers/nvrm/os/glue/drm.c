@@ -453,6 +453,9 @@ static int drm_dev_info(NvU64 arg)
         /* As nvidia-drm: Turing and later are generation 2. */
         p.page_kind_generation = (kind == 0x06) ? 2 : 0;
         p.sector_layout = 1;
+        /* EXPERIMENT (N3b sync): what Chrome reaches once these say yes. */
+        p.supports_sync_fd = 1;
+        p.supports_semsurf = 1;
     }
     return copy_out(arg, &p, sizeof(p));
 }

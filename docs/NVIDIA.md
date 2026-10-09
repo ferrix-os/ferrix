@@ -738,6 +738,119 @@ There are three steps, and each one stands on its own:
    Vulkan and imports clients' dmabufs without a copy. Only the finished
    frame is copied, into virtio-gpu's scanout, or not at all with N6.
 
+**N3b sync: semaphore-surface fences and `sync_file`.** This is the design
+that ledger 316 B9 asked to see before any `sync_file` or syncobj is built.
+
+*What it is for.* With `GET_DEV_INFO` answering `supports_sync_fd = 0` or
+`supports_semsurf = 0`, which are 316's B9 defaults, NVIDIA's Vulkan driver
+offers no `SYNC_FD` external semaphores or fences.
+`nvrm/test/vk-sync-fd.c` on the host's 3090 shows it: semaphore
+compatibility goes from `0x10`/features `0x3` to `0`/`0`, and fences go the
+same way. Chrome then has no shared-image backing for `Scanout`, and its
+GPU process exits with 8704 ("Could not find SharedImageBackingFactory ...
+VizBufferQueue"). The same Chrome on headless sway on the 3090 composites
+through dmabufs, and it fails in exactly the guest's way when
+`nvrm/test/devinfo-preload.c` zeroes either field alone. With both fields
+at 1 and nothing more, the card run (branch `n3b-gbm`) shows the next wall.
+`vkCreateDevice` calls `SEMSURF_FENCE_CTX_CREATE` (`0xc0206454`) and fails
+device creation when that call is refused. ANGLE then reports
+`VK_ERROR_INITIALIZATION_FAILED`, and the GPU process exits during
+initialisation.
+
+*What the GPU process uses on NVIDIA's node* (host strace of Chrome 154's
+GPU process, the nvidia-drm descriptor only):
+
+* `SEMSURF_FENCE_CTX_CREATE`;
+* `SEMSURF_FENCE_CREATE` (`0xc0186455`), which returns a `sync_file`
+  descriptor;
+* `poll(POLLIN)` on that descriptor;
+* `SYNC_IOC_FILE_INFO` (`0xc0383e04`) on it;
+* the descriptor passed to the browser process.
+
+The host's GPU process makes no syncobj calls on nvidia-drm, and no
+`DMA_BUF_IOCTL_EXPORT_SYNC_FILE`/`IMPORT_SYNC_FILE` calls. All its syncobj
+traffic is the browser process serving `wp_linux_drm_syncobj_v1`, which
+hyprix does not offer. Without that protocol, Chrome waits for the fence
+before it commits the buffer, so hyprix receives finished frames.
+
+*The design, in four parts:*
+
+1. **nvrm, fence contexts (no kernel change).** `SEMSURF_FENCE_CTX_CREATE`
+   imports the client's semaphore surface through KAPI
+   `importSemaphoreSurface` with the client's own parameters, as
+   nvidia-drm does. It returns a GEM handle naming a fence context (surface
+   and index). `GEM_CLOSE` frees the context once no fence uses it, and
+   `GEM_IDENTIFY_OBJECT` keeps answering NVKMS for these handles.
+2. **The kernel, one new object: `sync_file`.** It is an anonymous file
+   made by a chardev control, in the same shape as 316's dmabuf:
+   * **Calls.** Three appended native calls:
+     * `CHARDEV_SYNC_INSTALL(request, cookie, deadline_ms, flags)` returns
+       an fd in the requester's table;
+     * `CHARDEV_SYNC_SIGNAL(control, cookie, status)` is asynchronous,
+       made by the control and not tied to a request, and works once;
+     * `CHARDEV_SYNC_RESOLVE(request, fd)` returns the cookie and state
+       only for a `sync_file` this same live control made. Anything else
+       gets `BAD_HANDLE`.
+   * **State.** A `sync_file` is unsignalled, signalled, or signalled with
+     an error (negative errno).
+   * **Poll.** `POLLIN` once signalled, as Linux.
+   * **Ioctls.** `SYNC_IOC_FILE_INFO` gives name `nvidia-drm`, the
+     status, `num_fences` 1, and one `sync_fence_info` when asked.
+     `SYNC_IOC_MERGE` and everything else answer `ENOTTY`. read and write
+     answer `EINVAL`, and mmap answers `ENODEV`.
+   * **The kernel's own guarantee.** Every `sync_file` signals in bounded
+     time whatever the driver does:
+     * the deadline is the driver's `timeout_value_ms`, capped by the
+       kernel at 10 s, with 5 s when it is 0, as nvidia-drm;
+     * when the deadline passes, the kernel signals it with `ETIMEDOUT`;
+     * when the control dies or restarts, every unsignalled one signals
+       with `ENODEV`.
+
+     A waiter in hyprix or Chrome can therefore never hang on a dead or
+     stuck nvrm.
+   * **Bounds.** Live `sync_file`s are capped per control, as 316 B5, for
+     example at 4096; install over the cap answers `ENOSPC`. The object
+     holds its control weakly (316 B2) and has no release event. nvrm
+     forgets a cookie when it signals it, and a late signal for a cookie
+     that is already signalled or gone is refused without harm.
+3. **nvrm, fences.**
+   * **`SEMSURF_FENCE_CREATE`** installs a `sync_file` for a new cookie,
+     then registers KAPI `registerSemaphoreSurfaceCallback` on (surface,
+     index, `wait_value`).
+     * If the semaphore has already reached the value, it signals at once.
+     * The callback runs on nvrm's KMS worker and calls
+       `CHARDEV_SYNC_SIGNAL(cookie, 0)`.
+     * If KAPI callbacks prove not to fire under nvrm's interrupt path,
+       the fallback is a 1 ms poll of the semaphore through the CPU
+       mapping that `importSemaphoreSurface` returns, run only while
+       waiters exist. NVIDIA.md will record which one is built.
+   * **`SEMSURF_FENCE_WAIT`** resolves the fd, which must be one of nvrm's
+     own; any other answers `EINVAL`. When that fence signals, nvrm sets
+     the context's semaphore to `post_wait_value` through KAPI
+     `setSemaphoreSurfaceValue`.
+   * **`SEMSURF_FENCE_ATTACH`** (implicit sync to a buffer's reservation)
+     stays not offered, because there is no implicit sync (316 B12's
+     row).
+4. **What stays 0.**
+   * `GET_CAP` `DRM_CAP_SYNCOBJ` and `DRM_CAP_SYNCOBJ_TIMELINE` stay 0,
+     and every syncobj ioctl stays refused, because nothing on hyprix's
+     path uses one.
+   * The dmabuf's `EXPORT_SYNC_FILE`/`IMPORT_SYNC_FILE` stay `ENOTTY`.
+   * `wp_linux_drm_syncobj_v1` in hyprix, with syncobj in drm.c, is a
+     later design of its own, and only if N3c needs it.
+
+   `GET_DEV_INFO` answers `supports_sync_fd = 1` and
+   `supports_semsurf = 1` only on a kernel that serves the three calls.
+
+*The exposure.* A compromised nvrm can at worst:
+
+* signal a fence early, which a client then reads as a finished frame
+  (torn output, and the effect stays inside that client);
+* never signal one, which the kernel's deadline bounds.
+
+It gains no memory and no new reach. A client can hold many `sync_file`s,
+which the cap and its fd limit bound.
+
 **yserver.** Its X clients get Vulkan through NVIDIA's X11 fallback
 presentation (§2.2), which works with no change to yserver if `MIT-SHM` and
 `PutImage` are enough. GL clients need GLX. NVIDIA's `libGLX_nvidia` needs
