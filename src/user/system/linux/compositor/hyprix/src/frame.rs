@@ -551,6 +551,13 @@ fn shown(target: &mut Output<'_>) -> Result<(), String> {
             if !backend.adopted() || gamma.is_some() {
                 let bounds = Rect::new(0, 0, logical.0, logical.1);
                 for &rect in present.clipped(bounds).rects() {
+                    // Upright, the pixels go straight into the buffer.
+                    if transform == Transform::Normal {
+                        gpu.canvas
+                            .read_into(rect, backend.buffer(), stride)
+                            .map_err(|error| format!("{GPU_FAILED}{error}"))?;
+                        continue;
+                    }
                     let pixels = gpu
                         .canvas
                         .read(rect)

@@ -468,3 +468,138 @@ fn every_shader_is_one_virglrenderer_takes() {
         );
     }
 }
+
+/// What one protocol makes of a draw and of uploads: the whole target, a
+/// rectangle of it read into a wider buffer, and a source texture written
+/// twice in one place and read back.
+#[expect(
+    clippy::expect_used,
+    clippy::print_stderr,
+    reason = "a test's helper: a refusal is the test failing, and a skip says so"
+)]
+fn round_trip(version: u32) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    use compositor_virgl::{Device, Texture};
+    let mut server = match Vtest::start_with(&format!("shm{version}"), version) {
+        Ok(Some(server)) => server,
+        _ => {
+            eprintln!("shm{version}: no virgl_test_server on this host; skipped");
+            return None;
+        }
+    };
+    assert_eq!(server.version(), version, "the protocol agreed");
+    let side = 64;
+    let texture = |bind| Texture {
+        width: side,
+        height: side,
+        format: pipe::FORMAT_B8G8R8A8_UNORM,
+        bind,
+        moved: true,
+        scanout: false,
+    };
+    let target = server
+        .texture(texture(pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW))
+        .expect("a target");
+    let source = server
+        .texture(texture(pipe::BIND_SAMPLER_VIEW))
+        .expect("a source");
+    let vertices = server.buffer(4096).expect("a vertex buffer");
+    let shared = if version >= 2 { 2 } else { 0 };
+    assert_eq!(server.shared_textures(), shared, "textures with memory");
+
+    let mut stream = Stream::new();
+    begin(&mut stream, target, side, Blend::REPLACE);
+    stream.clear([1.0, 0.0, 0.0, 1.0]);
+    assert!(stream.create_shader(
+        FRAGMENT,
+        pipe::SHADER_FRAGMENT,
+        shaders::SOLID,
+        shaders::TOKENS
+    ));
+    stream.bind_shader(FRAGMENT, pipe::SHADER_FRAGMENT);
+    stream.set_constants(
+        pipe::SHADER_FRAGMENT,
+        &[
+            0.0, 1.0, 0.0, 1.0, 32.0, 0.0, 32.0, 32.0, 0.0, 2.0, 0.0, 0.0,
+        ],
+    );
+    quad(&mut stream, vertices, [32.0, 0.0, 64.0, 32.0]);
+    Device::submit(&mut server, stream.words()).expect("submitted");
+    let whole = Region {
+        x: 0,
+        y: 0,
+        width: side,
+        height: side,
+    };
+    let frame = server.read(target, whole).expect("read back");
+    // A rectangle across the green's edge, into a buffer wider than it,
+    // at the buffer's start.
+    let stride = 40 * 4;
+    let mut wide = vec![0x55_u8; stride * 8];
+    server
+        .read_into(
+            target,
+            Region {
+                x: 28,
+                y: 28,
+                width: 8,
+                height: 8,
+            },
+            &mut wide,
+            stride,
+        )
+        .expect("read into");
+
+    // The same place written twice before anything reads it: the second
+    // write may not land in memory the server is still reading the first
+    // from, and it is the second that is read back.
+    let place = Region {
+        x: 3,
+        y: 5,
+        width: 10,
+        height: 6,
+    };
+    let upload_stride = 12 * 4;
+    for value in [0x11_u8, 0x22] {
+        let pixels: Vec<u8> = (0..upload_stride * 6)
+            .map(|index| value.wrapping_add((index % 251) as u8))
+            .collect();
+        server
+            .upload(source, place, upload_stride as u32, &pixels)
+            .expect("uploaded");
+    }
+    let uploaded = server.read(source, place).expect("read the upload");
+    server.release(source).expect("released");
+    server.release(target).expect("released");
+    Some((frame, wide, uploaded))
+}
+
+#[test]
+fn shared_memory_moves_the_pixels_the_socket_does() {
+    let Some(socket) = round_trip(0) else {
+        return;
+    };
+    let Some(shared) = round_trip(2) else {
+        return;
+    };
+    let (frame, wide, uploaded) = &shared;
+    assert_eq!(pixel(frame, 64, 8, 8), 0xffff_0000, "the clear");
+    assert_eq!(pixel(frame, 64, 56, 8), 0xff00_ff00, "the rectangle");
+    // The rectangle read into the wider buffer: its own rows only.
+    // (28, 28) is its first pixel; the green ends at x 32 and y 32.
+    assert_eq!(pixel(wide, 40, 4, 3), 0xff00_ff00, "inside the green");
+    assert_eq!(pixel(wide, 40, 3, 3), 0xffff_0000, "left of it");
+    assert_eq!(pixel(wide, 40, 4, 4), 0xffff_0000, "below it");
+    assert_eq!(
+        pixel(wide, 40, 8, 0),
+        0x5555_5555,
+        "past the row, untouched"
+    );
+    // The second upload's bytes, rows packed.
+    let expected: Vec<u8> = (0..6)
+        .flat_map(|row| {
+            (0..40).map(move |byte| 0x22_u8.wrapping_add(((row * 48 + byte) % 251) as u8))
+        })
+        .collect();
+    assert_eq!(uploaded, &expected, "the second upload");
+    assert_eq!(socket, shared, "version 0 and version 2 agree");
+}
