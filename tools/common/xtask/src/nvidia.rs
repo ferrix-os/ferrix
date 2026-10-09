@@ -460,13 +460,54 @@ fn merge_beside(tree: &Path, beside: Option<&Path>) -> Result<()> {
             );
         }
     }
-    // The merged tree's other Vulkan drivers would offer Chrome's ANGLE
-    // lavapipe and a virtio-gpu this domain has not: NVIDIA's alone is
-    // listed. X clients' GL is Mesa's (llvmpipe), which needs no ICD.
+    // virtio-gpu's Vulkan driver, for a card this domain has not. lavapipe
+    // stays: yserver renders on it.
     if beside.is_some() {
-        for other in ["lvp_icd.json", "virtio_icd.json"] {
-            let _ = std::fs::remove_file(tree.join("usr/share/vulkan/icd.d").join(other));
+        let _ = std::fs::remove_file(tree.join("usr/share/vulkan/icd.d/virtio_icd.json"));
+        extras(tree)?;
+    }
+    Ok(())
+}
+
+/// `--everything`'s extras on the 3060: `FERRIX_NVIDIA_YSERVER`, a yserver
+/// binary in the volume's one's place (a dev build, as ydev.sh swaps one),
+/// and `FERRIX_NVIDIA_TEEWORLDS`, a directory (Teeworlds' bundle: `lib/`,
+/// `tw/`, `tw.sh`) at `/data/tw`, which the desktop copies to `/tmp/tw` and
+/// starts a match from.
+fn extras(tree: &Path) -> Result<()> {
+    let copy = |from: &std::ffi::OsStr, to: &Path, recursive: bool| -> Result<()> {
+        let mut cp = Command::new("cp");
+        let _ = cp.arg("--remove-destination");
+        if recursive {
+            let _ = cp.arg("-rL");
         }
+        let done = cp
+            .arg(from)
+            .arg(to)
+            .status()
+            .map_err(|error| Error::new(format!("running cp: {error}")))?;
+        if done.success() {
+            println!(
+                "  volume: {} at {}",
+                Path::new(from).display(),
+                to.display()
+            );
+            Ok(())
+        } else {
+            Err(Error::new(format!(
+                "copying {} to {}: {done}",
+                Path::new(from).display(),
+                to.display()
+            )))
+        }
+    };
+    if let Some(yserver) = std::env::var_os("FERRIX_NVIDIA_YSERVER") {
+        copy(&yserver, &tree.join("yserver/yserver"), false)?;
+    }
+    if let Some(teeworlds) = std::env::var_os("FERRIX_NVIDIA_TEEWORLDS") {
+        let to = tree.join("tw");
+        let _ = std::fs::remove_dir_all(&to);
+        copy(&teeworlds, &to, true)?;
     }
     Ok(())
 }
@@ -480,10 +521,13 @@ fn volume_stamp(core: &Path, everything: &Path) -> String {
             |meta| format!("{} {:?}", meta.len(), meta.modified().ok()),
         )
     };
+    let named = |name: &str| std::env::var(name).unwrap_or_default();
     format!(
-        "{}\n{}\n",
+        "{}\n{}\n{}\n{}\n",
         seen(core),
-        seen(&everything.join("everything.img"))
+        seen(&everything.join("everything.img")),
+        named("FERRIX_NVIDIA_YSERVER"),
+        named("FERRIX_NVIDIA_TEEWORLDS")
     )
 }
 
