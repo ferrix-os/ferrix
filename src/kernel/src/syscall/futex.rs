@@ -78,11 +78,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use crate::println;
 use crate::sync::SpinLock;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::types::{
     FUTEX_CLOCK_REALTIME, FUTEX_CMP_REQUEUE, FUTEX_PRIVATE_FLAG, FUTEX_REQUEUE, FUTEX_WAIT,
-    FUTEX_WAIT_BITSET, FUTEX_WAKE, FUTEX_WAKE_BITSET,
+    FUTEX_WAIT_BITSET, FUTEX_WAKE, FUTEX_WAKE_BITSET, FUTEX_WAKE_OP,
 };
 
 use crate::object::process::{Host, Process};
@@ -91,6 +92,9 @@ use crate::syscall::time::TimeWidth;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
 use crate::user::vmo::Vmo;
+
+/// The futex commands already reported as answered `ENOSYS`, a bit each.
+static REFUSED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// A bitset that matches every waiter: what the plain `WAIT` and `WAKE` use.
 const FUTEX_BITSET_MATCH_ANY: u32 = 0xFFFF_FFFF;
@@ -237,7 +241,8 @@ static SLEEP: WaitQueue = WaitQueue::new();
 /// ended while it waits; `EINVAL` for a misaligned word, a zero bitset, a
 /// negative count or a malformed timeout; `EFAULT` for a word or timeout that
 /// cannot be read; `ENOSYS` for an operation not implemented here, the
-/// priority-inheritance ones and `FUTEX_WAKE_OP` among them, and for
+/// priority-inheritance ones among them (each reported on the console the
+/// first time a program asks for it), and for
 /// `FUTEX_CLOCK_REALTIME` on an operation that has no timeout.
 pub(crate) fn sys_futex(
     process: &dyn Host,
@@ -328,8 +333,91 @@ pub(crate) fn sys_futex(
             timeout as i32,
             Some(value3),
         ),
-        _ => Err(Errno::ENOSYS),
+        // The fourth argument is `val2` here too: how many to wake on the
+        // second word if its old value passes the comparison.
+        FUTEX_WAKE_OP => wake_op(
+            process,
+            (address, address2),
+            shared,
+            (value as i32, timeout as i32),
+            value3,
+        ),
+        _ => {
+            // Once a command: a program that waits on an operation answered
+            // `ENOSYS` may spin in user space instead, with nothing else to
+            // show for it (Steam's staging stall, 2026-10-10).
+            let bit = 1_u32 << (command & 31);
+            if REFUSED.fetch_or(bit, Ordering::Relaxed) & bit == 0 {
+                println!("  futex    operation {command} (op {op:#x}) answered ENOSYS");
+            }
+            Err(Errno::ENOSYS)
+        }
     }
+}
+
+/// `FUTEX_WAKE_OP`: change the word at `to` by the operation `encoded`
+/// names, atomically, rouse up to `wakes.0` waiters on `from`, and if the
+/// second word's old value passes the comparison `encoded` names, up to
+/// `wakes.1` waiters on `to` as well. Answers how many were roused.
+///
+/// Older glibc's condition variables (before 2.25) signal with it, and
+/// programs built against them still do: answered `ENOSYS`, as it was until
+/// 2026-10-10, such a condition variable's waiter was never woken by a
+/// signal. The encoding is Linux's (`futex_atomic_op_inuser`): the
+/// operation in bits 28-31 (8 there: the argument is a shift count), the
+/// comparison in bits 24-27, the argument in bits 12-23 and the comparand
+/// in bits 0-11, both sign-extended. The word is changed before the waiters
+/// are looked for; a waiter that listed itself in between saw the new value
+/// and is at worst woken for nothing.
+fn wake_op(
+    process: &dyn Host,
+    (from, to): (u64, u64),
+    shared: bool,
+    wakes: (i32, i32),
+    encoded: u32,
+) -> Result<usize, Errno> {
+    const SET: u32 = 0;
+    const ADD: u32 = 1;
+    const OR: u32 = 2;
+    const ANDN: u32 = 3;
+    const XOR: u32 = 4;
+    const SHIFT: u32 = 8;
+    let operation = (encoded >> 28) & 7;
+    let comparison = (encoded >> 24) & 15;
+    // Sign-extended from twelve bits.
+    let mut argument = (((encoded >> 12) & 0xfff) as i32) << 20 >> 20;
+    let comparand = ((encoded & 0xfff) as i32) << 20 >> 20;
+    if (encoded >> 28) & SHIFT != 0 {
+        // Linux warns and masks a count past 31 rather than refusing it.
+        argument = 1_i32 << (argument as u32 & 31);
+    }
+    if operation > XOR || comparison > 5 {
+        return Err(Errno::ENOSYS);
+    }
+    let source = key(process.core(), from, shared)?;
+    let target = key(process.core(), to, shared)?;
+    let argument = argument as u32;
+    let old = uaccess::update_u32(process.core().space(), to, |old| match operation {
+        SET => argument,
+        ADD => old.wrapping_add(argument),
+        OR => old | argument,
+        ANDN => old & !argument,
+        _ => old ^ argument,
+    })?;
+    let old = old as i32;
+    let passes = match comparison {
+        0 => old == comparand,
+        1 => old != comparand,
+        2 => old < comparand,
+        3 => old <= comparand,
+        4 => old > comparand,
+        _ => old >= comparand,
+    };
+    let mut woken = rouse(&[source], wakes.0, FUTEX_BITSET_MATCH_ANY, Sleeper::rouse);
+    if passes {
+        woken += rouse(&[target], wakes.1, FUTEX_BITSET_MATCH_ANY, Sleeper::rouse);
+    }
+    Ok(woken)
 }
 
 /// The key for a futex word, which must be aligned as a 32-bit word is:

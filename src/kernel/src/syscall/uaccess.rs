@@ -442,6 +442,49 @@ pub(crate) fn put_word(space: &AddressSpace, at: u64, value: u64) -> Result<(), 
     copy_to_user(space, at, word).map_err(|_| Errno::EFAULT)
 }
 
+/// Change the aligned 32-bit word at `at` to `change(old)` as one atomic step,
+/// and answer `old`: what `FUTEX_WAKE_OP` does to its second word, which
+/// another thread may be changing with its own atomics meanwhile.
+///
+/// The page is faulted in for writing, so a copy-on-write page is copied
+/// first, and the word is changed through the direct map with the space's
+/// lock held, as [`copy_to_user`] writes.
+///
+/// # Errors
+///
+/// `EINVAL` for a word that is not aligned, `EFAULT` if it is not writable
+/// user memory.
+pub(crate) fn update_u32(
+    space: &AddressSpace,
+    at: u64,
+    change: impl Fn(u32) -> u32,
+) -> Result<u32, Errno> {
+    if !at.is_multiple_of(4) {
+        return Err(Errno::EINVAL);
+    }
+    check_range(at, 4).map_err(|_| Errno::EFAULT)?;
+    resolve(space, at, Access::WRITE, |target| {
+        // SAFETY: (USER-COPY) `resolve` faulted the page in for writing and
+        // runs this with the space's lock held, so `target` is the direct-map
+        // address of a frame this space may write that stays live meanwhile;
+        // `at` is 4-aligned, so the word is aligned and inside that page.
+        let word = unsafe { &*(target as *const core::sync::atomic::AtomicU32) };
+        let mut old = word.load(core::sync::atomic::Ordering::Relaxed);
+        loop {
+            match word.compare_exchange_weak(
+                old,
+                change(old),
+                core::sync::atomic::Ordering::SeqCst,
+                core::sync::atomic::Ordering::Relaxed,
+            ) {
+                Ok(_) => return old,
+                Err(now) => old = now,
+            }
+        }
+    })
+    .map_err(|_| Errno::EFAULT)
+}
+
 /// Read one C `int`, four bytes on every architecture.
 ///
 /// # Errors
