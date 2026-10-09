@@ -939,6 +939,7 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
         vcpus: 8,
         devices: format!(
             "    <interface type='network'>\n\
+             \x20     <mac address='{CARDVM_MAC}'/>\n\
              \x20     <source network='default'/>\n\
              \x20     <model type='virtio-non-transitional'/>\n\
              \x20     <driver iommu='on'/>\n\
@@ -960,8 +961,30 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     } else {
         DESKTOP_TIMEOUT
     };
+    // `--ssh` without `--timeout`: the long-lived card VM (`tools/common/nvidia/card.sh`).
+    let kept = args.ssh.is_some() && !args.timeout_given;
+    let stop = cardvm_file(CARDVM_STOP);
+    let state = cardvm_file(CARDVM_STATE);
+    let _ = std::fs::remove_file(&stop);
+    let _ = std::fs::remove_file(&state);
     let _ = virsh(&["start", DOMAIN])?;
     let running = Running;
+    if let Some(port) = args.ssh {
+        forward_ssh(port, log.clone());
+    }
+    if kept {
+        println!(
+            "  {DOMAIN}: the card VM is starting on the 3060's monitor; serial in {}; \
+             kept until {} appears (`tools/common/nvidia/card.sh down`)",
+            log.display(),
+            stop.display()
+        );
+        let followed = follow(&log, &stop);
+        let _ = std::fs::remove_file(&state);
+        drop(running);
+        let _ = std::fs::remove_file(&stop);
+        return followed;
+    }
     println!(
         "  {DOMAIN}: the desktop is starting on the 3060's monitor; serial in {} for {timeout} s",
         log.display()
@@ -970,4 +993,118 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
     drop(running);
     Ok(())
+}
+
+/// The card VM's network address: fixed, so that its lease is found by it.
+const CARDVM_MAC: &str = "52:54:00:fe:30:60";
+
+/// The file whose appearance ends a kept card VM (`card.sh down`).
+const CARDVM_STOP: &str = "cardvm-stop";
+
+/// Where a kept card VM says how to reach it: shell assignments `PORT=`,
+/// `ADDRESS=`, `LOG=`, `PID=` (`card.sh` sources it).
+const CARDVM_STATE: &str = "cardvm.env";
+
+/// `name` in `~/.local/share/ferrix/nvidia`, beside the card lock.
+fn cardvm_file(name: &str) -> PathBuf {
+    PathBuf::from(home()).join(".local/share/ferrix/nvidia").join(name)
+}
+
+/// The guest's IPv4 address from libvirt's DHCP lease for [`CARDVM_MAC`].
+fn guest_address() -> Option<String> {
+    let leases = virsh(&["domifaddr", DOMAIN, "--source", "lease"]).ok()?;
+    leases
+        .lines()
+        .filter(|line| line.contains(CARDVM_MAC) && line.contains("ipv4"))
+        .find_map(|line| line.split_whitespace().last())
+        .and_then(|address| address.split('/').next())
+        .map(str::to_owned)
+}
+
+/// `--ssh <port>` on the 3060: the guest is on libvirt's NAT network, so
+/// `127.0.0.1:<port>` is forwarded to its port 22 here, by this process,
+/// once its lease is there -- the same address and port a QEMU boot's
+/// `--ssh` gives. The state file is written when the forward listens.
+fn forward_ssh(port: u16, log: PathBuf) {
+    let _ = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(900);
+        let address = loop {
+            if let Some(address) = guest_address() {
+                break address;
+            }
+            if Instant::now() > deadline {
+                println!("  cardvm: no DHCP lease for {CARDVM_MAC} after 900 s; no ssh");
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        };
+        let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                println!("  cardvm: cannot listen on 127.0.0.1:{port}: {error}");
+                return;
+            }
+        };
+        let target = format!("{address}:{}", crate::ssh::GUEST_PORT);
+        let state = format!(
+            "PORT={port}\nADDRESS={address}\nLOG={}\nPID={}\n",
+            log.display(),
+            std::process::id()
+        );
+        let _ = std::fs::write(cardvm_file(CARDVM_STATE), state);
+        println!(
+            "  cardvm: the guest is {address}; 127.0.0.1:{port} forwards to its sshd \
+             (tools/common/nvidia/card.sh ssh <command>)"
+        );
+        for client in listener.incoming().flatten() {
+            let target = target.clone();
+            let _ = std::thread::spawn(move || {
+                let Ok(server) = TcpStream::connect(&target) else {
+                    return;
+                };
+                let (Ok(mut client_read), Ok(mut server_read)) =
+                    (client.try_clone(), server.try_clone())
+                else {
+                    return;
+                };
+                let (mut client, mut server) = (client, server);
+                let up = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut client_read, &mut server);
+                    let _ = server.shutdown(std::net::Shutdown::Write);
+                });
+                let _ = std::io::copy(&mut server_read, &mut client);
+                let _ = client.shutdown(std::net::Shutdown::Write);
+                let _ = up.join();
+            });
+        }
+    });
+}
+
+/// A kept card VM's serial console, into `log` and onto the output, until
+/// `stop` appears or the port closes (the guest powered off or rebooted;
+/// the domain destroys itself on either).
+fn follow(log: &Path, stop: &Path) -> Result<()> {
+    let stream = loop {
+        match TcpStream::connect(SERIAL) {
+            Ok(stream) => break stream,
+            Err(_) if !stop.exists() => std::thread::sleep(Duration::from_millis(100)),
+            Err(error) => return Err(Error::new(format!("no serial port at {SERIAL}: {error}"))),
+        }
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| Error::new(format!("serial port: {error}")))?;
+    let mut out = std::fs::File::create(log)
+        .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
+    let mut reader = BufReader::new(stream);
+    loop {
+        if stop.exists() {
+            println!("  cardvm: {} is there; stopping", stop.display());
+            return Ok(());
+        }
+        if read_line(&mut reader, &mut out).is_err() {
+            println!("  cardvm: the serial port closed: the guest stopped");
+            return Ok(());
+        }
+    }
 }
