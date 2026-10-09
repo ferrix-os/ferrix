@@ -161,9 +161,14 @@ struct drm_gem {
     struct NvKmsKapiMemory *memory;
     /* The system-memory allocation it is, or NULL in video memory. */
     nv_alloc_t *at;
-    /* Handles naming it, in every file, and whether a dmabuf is open. */
+    /*
+     * Handles naming it, in every file, and its dmabufs alive: one up for
+     * each the kernel says an install made, one down for each release, so
+     * a release of a dmabuf that went just before another was made is not
+     * read as the release of the new one.
+     */
     NvU32 handles;
-    NvBool exported;
+    NvU32 dmabufs;
 };
 
 static struct drm_gem *gems;
@@ -197,7 +202,7 @@ static void gem_settle_locked(struct drm_gem *gem)
     struct drm_gem **link;
     NvU32 gpu_id, kind;
 
-    if (gem->handles != 0 || gem->exported)
+    if (gem->handles != 0 || gem->dmabufs != 0)
         return;
     for (link = &gems; *link != NULL; link = &(*link)->next)
     {
@@ -361,9 +366,9 @@ void nvrm_drm_released(NvU64 cookie)
 
     nvos_mutex_lock(&gems_lock);
     gem = gem_by_cookie_locked(cookie);
-    if (gem != NULL)
+    if (gem != NULL && gem->dmabufs != 0)
     {
-        gem->exported = NV_FALSE;
+        gem->dmabufs--;
         gem_settle_locked(gem);
     }
     nvos_mutex_unlock(&gems_lock);
@@ -601,6 +606,7 @@ static int drm_handle_to_fd(struct drm_file *file, NvU64 request, NvU64 arg)
     struct drm_gem *gem;
     NvU32 vmo = 0, flags = 0;
     NvS64 fd;
+    NvBool made;
 
     if (copy_in(&p, arg, sizeof(p)) != 0)
         return -EFAULT;
@@ -617,12 +623,17 @@ static int drm_handle_to_fd(struct drm_file *file, NvU64 request, NvU64 arg)
         flags |= NVOS_DMABUF_WRITABLE;
     if (p.flags & DRM_CLOEXEC)
         flags |= NVOS_DMABUF_CLOEXEC;
-    fd = nvos_chardev_dmabuf_install(request, vmo, gem->cookie, flags);
+    fd = nvos_chardev_dmabuf_install(request, vmo, gem->cookie, flags | NVOS_DMABUF_TELL_MADE);
     if (fd < 0)
         return (int)fd;
-    nvos_mutex_lock(&gems_lock);
-    gem->exported = NV_TRUE;
-    nvos_mutex_unlock(&gems_lock);
+    made = (fd & NVOS_DMABUF_MADE) != 0;
+    fd &= ~NVOS_DMABUF_MADE;
+    if (made)
+    {
+        nvos_mutex_lock(&gems_lock);
+        gem->dmabufs++;
+        nvos_mutex_unlock(&gems_lock);
+    }
     p.fd = (NvS32)fd;
     return copy_out(arg, &p, sizeof(p));
 }

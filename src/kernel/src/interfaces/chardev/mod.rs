@@ -55,7 +55,7 @@ use core::convert::Infallible;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use ferrix_chardevctl::message::{self, Message, Op, Request as Wire};
-use ferrix_chardevctl::node::MAJOR;
+use ferrix_chardevctl::node::{MAJOR, RENDER_MINOR};
 use ferrix_chardevctl::session::{self, Publication, Refusal};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::handle::Handle;
@@ -81,6 +81,7 @@ use crate::timer;
 use crate::user::vmo::Vmo;
 
 pub(crate) mod check;
+pub(crate) mod dmabuf;
 pub(crate) mod file;
 
 /// The most requests one control has outstanding; the next is `EBUSY`.
@@ -122,6 +123,9 @@ pub(crate) fn publishes_for(device: &Arc<DeviceNode>) -> bool {
 static CONTROLS: SpinLock<Vec<Arc<Control>>> = SpinLock::new(Vec::new());
 /// The published nodes: each minor of major 195 and the control serving it.
 static PUBLISHED: SpinLock<Vec<(u16, Arc<Control>)>> = SpinLock::new(Vec::new());
+/// The published render nodes: each `renderD<N>`'s number, which the render
+/// core lent, and the control serving it (N3b; the consultant's B8).
+static RENDERS: SpinLock<Vec<(u32, Arc<Control>)>> = SpinLock::new(Vec::new());
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 /// One driver's control: its channel, its requests and its nodes.
@@ -143,6 +147,8 @@ pub(crate) struct Control {
     /// claim has gone back: it goes back when the driver is gone and the
     /// last such mapping with it.
     apertures: SpinLock<Apertures>,
+    /// Its live dmabufs, by cookie (N3b, [`dmabuf`]).
+    dmabufs: SpinLock<dmabuf::Table>,
 }
 
 /// [`Control::apertures`].
@@ -193,6 +199,8 @@ struct State {
 enum Outgoing {
     Request(Arc<Request>),
     Release { file: u64, minor: u16 },
+    /// A dmabuf's last reference went ([`dmabuf`]).
+    DmabufRelease { cookie: u64 },
 }
 
 /// One program's request, outstanding until answered or abandoned.
@@ -243,6 +251,8 @@ pub(crate) fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevCopyIn, copy_in)?;
     native::serve(NativeCall::ChardevCopyOut, copy_out)?;
     native::serve(NativeCall::ChardevFile, file_of)?;
+    native::serve(NativeCall::ChardevDmabufInstall, dmabuf::install)?;
+    native::serve(NativeCall::ChardevDmabufResolve, dmabuf::resolve)?;
     native::register_server(&SERVER)
 }
 
@@ -331,6 +341,7 @@ fn make_control(
         work: WaitQueue::new(),
         gone: AtomicBool::new(false),
         apertures: SpinLock::new(Apertures::default()),
+        dmabufs: SpinLock::new(Vec::new()),
     })
     .ok()
 }
@@ -472,12 +483,18 @@ fn take_up(control: &Arc<Control>) -> Option<Publication> {
     }
 }
 
-/// Publish `publication`'s minors for `control`: all or none.
+/// Publish `publication`'s minors for `control`: all or none. The render
+/// node, if listed, is numbered by the render core, never by the driver
+/// (the consultant's B8, ledger 316), and is not a minor of major 195.
 fn publish(control: &Arc<Control>, publication: &Publication) -> Result<(), Refusal> {
-    let mut published = PUBLISHED.lock();
-    if publication
+    let render = publication.minors().contains(&RENDER_MINOR);
+    let majors = publication
         .minors()
         .iter()
+        .filter(|minor| **minor != RENDER_MINOR);
+    let mut published = PUBLISHED.lock();
+    if majors
+        .clone()
         .any(|minor| published.iter().any(|(held, _)| held == minor))
     {
         return Err(Refusal::Taken);
@@ -485,7 +502,16 @@ fn publish(control: &Arc<Control>, publication: &Publication) -> Result<(), Refu
     published
         .try_reserve(publication.count)
         .map_err(|_| Refusal::NoMemory)?;
-    for minor in publication.minors() {
+    if render {
+        let mut renders = RENDERS.lock();
+        renders.try_reserve(1).map_err(|_| Refusal::NoMemory)?;
+        let index = crate::interfaces::render::lend_number(control.device.index())
+            .ok_or(Refusal::NoMemory)?;
+        // NOALLOC: reserved above.
+        renders.push((index, Arc::clone(control)));
+    }
+    for minor in majors {
+        // NOALLOC: reserved above.
         published.push((*minor, Arc::clone(control)));
     }
     Ok(())
@@ -496,6 +522,17 @@ fn unpublish(control: &Arc<Control>, publication: &Publication) {
     PUBLISHED
         .lock()
         .retain(|(_, held)| !Arc::ptr_eq(held, control));
+    let mut lent = Vec::new();
+    RENDERS.lock().retain(|(index, held)| {
+        let mine = Arc::ptr_eq(held, control);
+        if mine && lent.try_reserve(1).is_ok() {
+            lent.push(*index);
+        }
+        !mine
+    });
+    for index in lent {
+        crate::interfaces::render::return_number(index);
+    }
 }
 
 /// Write what is queued, and wait for more, until the driver goes.
@@ -549,8 +586,20 @@ fn serve(control: &Arc<Control>) {
                     arg: 0,
                     pages: 0,
                 },
+                Outgoing::DmabufRelease { cookie } => Wire {
+                    id: 0,
+                    file: 0,
+                    op: Op::DmabufRelease,
+                    minor: 0,
+                    pid: 0,
+                    euid: 0,
+                    egid: 0,
+                    cmd: 0,
+                    arg: *cookie,
+                    pages: 0,
+                },
             };
-            if let Outgoing::Release { .. } = next {
+            if let Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } = next {
                 let mut state = control.state.lock();
                 state.holding = state.holding.saturating_sub(1);
             }
@@ -625,6 +674,15 @@ pub(crate) fn published_minors() -> Vec<u16> {
     minors
 }
 
+/// The control serving `renderD<index>`, if a chardev driver serves it.
+pub(crate) fn render_control(index: u32) -> Option<Arc<Control>> {
+    RENDERS
+        .lock()
+        .iter()
+        .find(|(held, _)| *held == index)
+        .map(|(_, control)| Arc::clone(control))
+}
+
 /// Take one slot of `control`'s outgoing queue for a file's release.
 pub(crate) fn hold_release(control: &Control) -> Result<(), Errno> {
     let mut state = control.state.lock();
@@ -651,6 +709,28 @@ pub(crate) fn queue_release(control: &Control, file: u64, minor: u16) {
         }
         // NOALLOC: the slot `hold_release` reserved.
         state.outgoing.push_back(Outgoing::Release { file, minor });
+    }
+    control.work.wake_all();
+}
+
+/// Give back a slot [`hold_release`] took that no release will use.
+pub(crate) fn unhold_release(control: &Control) {
+    let mut state = control.state.lock();
+    state.holding = state.holding.saturating_sub(1);
+}
+
+/// Queue the release of the dmabuf `cookie` names, in the slot
+/// [`hold_release`] took when it was made; nothing once the driver is gone
+/// (the consultant's B4: the closer never waits on the driver).
+pub(crate) fn queue_dmabuf_release(control: &Control, cookie: u64) {
+    {
+        let mut state = control.state.lock();
+        if control.is_gone() {
+            state.holding = state.holding.saturating_sub(1);
+            return;
+        }
+        // NOALLOC: the slot `hold_release` reserved.
+        state.outgoing.push_back(Outgoing::DmabufRelease { cookie });
     }
     control.work.wake_all();
 }
@@ -876,6 +956,8 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
             Op::Mmap => map_reply(caller, &control, &request, value as u64, a4, a5)
                 .map(Answer::Map)
                 .ok_or(Errno::EIO),
+            // Never a request anyone waits in.
+            Op::DmabufRelease => Err(Errno::EIO),
         }
     };
     let accepted = outcome.is_ok() || status < 0;
@@ -993,16 +1075,23 @@ fn copy(caller: &dyn Host, registers: &[u64; 6], way: Way) -> Result<usize, Errn
     }
     let control = control_of(caller, handle)?;
     let request = outstanding(&control, id)?;
-    {
-        let mut inner = request.inner.lock();
-        if !inner.alive || inner.answer.is_some() {
-            return Err(status::BAD_STATE);
-        }
-        inner.copying = inner.copying.saturating_add(1);
-    }
+    begin_copy(&request)?;
     let moved = copy_chunks(caller, &request, way, client_at, buffer, length);
     copy_done(&request);
     moved.map(|()| 0)
+}
+
+/// Count one more copy for `request`, which must be alive and unanswered:
+/// the program's call does not return while it runs (N4). A dmabuf's
+/// install and resolve count as copies too, so a descriptor never lands in
+/// a program that has already given up.
+fn begin_copy(request: &Request) -> Result<(), Errno> {
+    let mut inner = request.inner.lock();
+    if !inner.alive || inner.answer.is_some() {
+        return Err(status::BAD_STATE);
+    }
+    inner.copying = inner.copying.saturating_add(1);
+    Ok(())
 }
 
 /// One copy for `request` is over: wake the program if it was waiting for

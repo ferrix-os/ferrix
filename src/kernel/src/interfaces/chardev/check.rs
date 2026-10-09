@@ -27,6 +27,15 @@
 //! * the 257th outstanding request is `EBUSY`, and requests abandoned
 //!   while the driver reads nothing never let the queue to it grow past
 //!   its room (F-63);
+//! * a dmabuf (N3b; the consultant's B10, ledger 316): unknown flags, a
+//!   handle that is not a VMO, a VMO handle without `TRANSFER`, and a
+//!   writable dmabuf of a handle without `WRITE` are each refused; a second
+//!   install for the cookie gives the same object and says it made nothing,
+//!   the cookie over another VMO is refused; resolve gives the cookie back
+//!   and refuses a descriptor that is not a dmabuf; install and resolve for
+//!   an answered request are refused; the driver hears one release, only
+//!   after the last of two descriptors and a mapping went; and a dmabuf
+//!   outlives its driver with its bytes, its going after unheard (B7);
 //! * when the driver goes, a waiting program wakes with `ENODEV` and the
 //!   node is unpublished (N9).
 //!
@@ -106,6 +115,8 @@ pub(crate) struct Report {
     pub(crate) abandoned: u32,
     /// The requests the queue held once answered ones filled it (F-63).
     pub(crate) most_queued: usize,
+    /// dmabuf installs and resolves refused as specified (B10).
+    pub(crate) dmabuf_refusals: u32,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -178,7 +189,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     abandoned(&driver, control, &core, &program, &mut report)?;
     answered_drains(&driver, control, &core, &program, &mut report)?;
     bounded(&driver, control, &core, &program, &mut report)?;
+    let kept = dmabufs(&driver, control, &core, &program, &mut report)?;
     death(&driver, control, &core, &program, &mut report)?;
+    outlived(&program, kept)?;
     if let Some((side, other)) = other {
         close(&side, other)?;
         side.close_everything();
@@ -390,6 +403,247 @@ fn bounded(
         sched::sleep_for(1_000_000);
     }
     Ok(())
+}
+
+/// The cookie the check names its dmabuf by.
+const COOKIE: u64 = 0xD3AB_0F;
+/// Its buffer: two pages.
+const DMABUF_BYTES: u64 = 2 * 4096;
+/// What the driver writes in it, and the program reads through a mapping.
+const STAMP: [u8; 8] = *b"dmabuf<>";
+
+/// A descriptor the check keeps open past the driver's death, with its
+/// mapping's address.
+struct Kept {
+    fd: i32,
+    at: u64,
+}
+
+/// The dmabuf calls (B10): the refusals, one object a cookie, resolve, and
+/// one release after the last descriptor and mapping. Answers with a
+/// descriptor and a mapping kept for [`outlived`].
+fn dmabufs(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<Kept, &'static str> {
+    use ferrix_native_abi::rights::Rights;
+    use ferrix_native_abi::types::{DMABUF_MADE, DMABUF_TELL_MADE, DMABUF_WRITABLE};
+    drain_channel(side, control);
+    let vmo = side.handle(nr::VMO_CREATE, &[DMABUF_BYTES], "vmo_create failed")?;
+    let other = side.handle(nr::VMO_CREATE, &[DMABUF_BYTES], "vmo_create failed")?;
+    let held = |rights: u32| -> Result<Handle, &'static str> {
+        side.handle(
+            nr::HANDLE_DUPLICATE,
+            &[reg(vmo), u64::from(rights)],
+            "handle_duplicate of a VMO failed",
+        )
+    };
+    let no_transfer = held(Rights::READ.0 | Rights::WRITE.0 | Rights::MAP.0)?;
+    let read_only = held(Rights::READ.0 | Rights::TRANSFER.0 | Rights::MAP.0)?;
+    side.put(BUFFER, &STAMP)?;
+    let _ = side
+        .call(nr::VMO_WRITE, &[reg(vmo), BUFFER, 8, 0])
+        .map_err(|_| "vmo_write failed")?;
+
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let install = |handle: Handle, cookie: u64, flags: u64| {
+        side.call(
+            nr::CHARDEV_DMABUF_INSTALL,
+            &[reg(control), wire.id, reg(handle), cookie, flags],
+        )
+    };
+    for (handle, flags, wanted, what) in [
+        (vmo, 1 << 9, status::INVALID_ARGS, "a dmabuf with an unknown flag was installed"),
+        (control, 0, status::WRONG_TYPE, "a dmabuf of a handle that is no VMO was installed"),
+        (no_transfer, 0, status::ACCESS_DENIED, "a dmabuf of a VMO without TRANSFER was installed"),
+        (
+            read_only,
+            DMABUF_WRITABLE,
+            status::ACCESS_DENIED,
+            "a writable dmabuf of a VMO without WRITE was installed",
+        ),
+    ] {
+        if install(handle, COOKIE, flags) != Err(wanted) {
+            return Err(what);
+        }
+        report.dmabuf_refusals += 1;
+    }
+    let first = install(vmo, COOKIE, DMABUF_TELL_MADE | DMABUF_WRITABLE)
+        .map_err(|_| "a dmabuf of a whole anonymous VMO was refused")?;
+    let second = install(vmo, COOKIE, DMABUF_TELL_MADE)
+        .map_err(|_| "a second dmabuf install for a live cookie was refused")?;
+    if first & DMABUF_MADE == 0 || second & DMABUF_MADE != 0 {
+        return Err("a dmabuf install did not say rightly whether it made the object");
+    }
+    let first = (first & !DMABUF_MADE) as i32;
+    let second = (second & !DMABUF_MADE) as i32;
+    let objects: Vec<_> = [first, second]
+        .iter()
+        .filter_map(|fd| crate::syscall::fd::file(&program.process, *fd).ok())
+        .filter_map(|file| super::dmabuf::of(file.io()))
+        .collect();
+    match objects.as_slice() {
+        [one, two] if Arc::ptr_eq(one, two) => {}
+        _ => return Err("two installs for one cookie did not give one dmabuf"),
+    }
+    drop(objects);
+    if install(other, COOKIE, 0) != Err(status::ALREADY_BOUND) {
+        return Err("a live cookie was installed over another VMO");
+    }
+    report.dmabuf_refusals += 1;
+    let resolve = |fd: i32| {
+        side.call(
+            nr::CHARDEV_DMABUF_RESOLVE,
+            &[reg(control), wire.id, fd as u64, BUFFER],
+        )
+    };
+    let _ = resolve(second).map_err(|_| "a dmabuf this control made did not resolve")?;
+    if side.get(BUFFER, 8)? != COOKIE.to_ne_bytes() {
+        return Err("a dmabuf resolved to another cookie");
+    }
+    if resolve(i32::MAX - 1) != Err(status::BAD_HANDLE) {
+        return Err("a descriptor that is no dmabuf resolved");
+    }
+    report.dmabuf_refusals += 1;
+    reply(side, control, wire.id, VALUE)?;
+    if finish()? != Ok(VALUE as usize) {
+        return Err("the program's ioctl did not return after its dmabufs");
+    }
+    report.answered += 1;
+    if install(vmo, COOKIE + 1, 0) != Err(status::BAD_STATE)
+        || resolve(second) != Err(status::BAD_STATE)
+    {
+        return Err("a dmabuf call for an answered request was not refused");
+    }
+    report.dmabuf_refusals += 1;
+
+    // One release, after the last of two descriptors and a mapping.
+    let map = |fd: i32| map_dmabuf(&program.process, fd);
+    let at = map(first)?;
+    if read_mapped(&program.process, at)? != STAMP {
+        return Err("a dmabuf's mapping did not show its VMO's bytes");
+    }
+    close_fd(&program.process, first)?;
+    close_fd(&program.process, second)?;
+    if released(side, control)?.is_some() {
+        return Err("a dmabuf was released while a mapping of it lived");
+    }
+    let _ = crate::syscall::memory::sys_munmap(&program.process, at, DMABUF_BYTES)
+        .map_err(|_| "unmapping a dmabuf failed")?;
+    if released(side, control)? != Some(COOKIE) {
+        return Err("a dmabuf's driver did not hear its release after its last mapping went");
+    }
+    if released(side, control)?.is_some() {
+        return Err("a dmabuf's release was heard twice");
+    }
+
+    // One kept past the driver's death (B7), made for a request of its own.
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        request,
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let fd = side
+        .call(
+            nr::CHARDEV_DMABUF_INSTALL,
+            &[reg(control), wire.id, reg(vmo), COOKIE + 2, 0],
+        )
+        .map_err(|_| "a dmabuf for a second cookie was refused")? as i32;
+    reply(side, control, wire.id, VALUE)?;
+    let _ = finish()?;
+    let at = map(fd)?;
+    for handle in [vmo, other, no_transfer, read_only] {
+        let _ = side.call(nr::HANDLE_CLOSE, &[reg(handle)]);
+    }
+    if super::dmabuf::alive(core) != 1 {
+        return Err("a control counted other than one live dmabuf");
+    }
+    Ok(Kept { fd, at })
+}
+
+/// After its driver went, a dmabuf's mapping still shows its bytes, a new
+/// mapping still works, and closing it all is heard by nobody (B7).
+fn outlived(program: &Side, kept: Kept) -> Result<(), &'static str> {
+    if read_mapped(&program.process, kept.at)? != STAMP {
+        return Err("a dmabuf's mapping lost its bytes when its driver went");
+    }
+    let again = map_dmabuf(&program.process, kept.fd)?;
+    if read_mapped(&program.process, again)? != STAMP {
+        return Err("a dmabuf could not be mapped again after its driver went");
+    }
+    for at in [kept.at, again] {
+        let _ = crate::syscall::memory::sys_munmap(&program.process, at, DMABUF_BYTES)
+            .map_err(|_| "unmapping a dmabuf failed")?;
+    }
+    close_fd(&program.process, kept.fd)
+}
+
+/// Map the whole dmabuf `fd` of `process`, shared and read-only.
+fn map_dmabuf(process: &Process, fd: i32) -> Result<u64, &'static str> {
+    use crate::syscall::memory::{MmapRequest, OffsetUnit};
+    use ferrix_linux_abi::types::{MAP_SHARED, PROT_READ};
+    crate::syscall::memory::sys_mmap(
+        process,
+        &MmapRequest {
+            addr: 0,
+            len: DMABUF_BYTES,
+            prot: PROT_READ,
+            flags: MAP_SHARED,
+            fd: i64::from(fd),
+            offset: 0,
+            unit: OffsetUnit::Bytes,
+        },
+    )
+    .map(|at| at as u64)
+    .map_err(|_| "a dmabuf could not be mapped")
+}
+
+/// The first eight bytes at `at` in `process`.
+fn read_mapped(process: &Process, at: u64) -> Result<[u8; 8], &'static str> {
+    let mut bytes = [0u8; 8];
+    crate::syscall::uaccess::copy_from_user(process.space(), at, &mut bytes)
+        .map_err(|_| "a dmabuf's mapping could not be read")?;
+    Ok(bytes)
+}
+
+/// Close descriptor `fd` of `process`.
+fn close_fd(process: &Process, fd: i32) -> Result<(), &'static str> {
+    crate::syscall::fd::sys_close(process, fd)
+        .map(|_| ())
+        .map_err(|_| "closing a dmabuf's descriptor failed")
+}
+
+/// The cookie of the next `DmabufRelease` on `control`, if one comes within
+/// a short while; any other message is an error.
+fn released(side: &Side, control: Handle) -> Result<Option<u64>, &'static str> {
+    let deadline = timer::now_nanos().saturating_add(STILL_NANOS * 4);
+    loop {
+        if let Some(bytes) = read(side, control) {
+            return match Message::decode(&bytes) {
+                Ok(Message::Request(wire)) if wire.op == Op::DmabufRelease => Ok(Some(wire.arg)),
+                _ => Err("the chardev core wrote something other than a dmabuf's release"),
+            };
+        }
+        if timer::now_nanos() > deadline {
+            return Ok(None);
+        }
+        sched::sleep_for(1_000_000);
+    }
 }
 
 /// Take requests in until `EBUSY`; a 257th taken is an error.

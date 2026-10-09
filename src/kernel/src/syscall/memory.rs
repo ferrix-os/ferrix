@@ -367,6 +367,11 @@ fn map_file(
     if !file.readable() || (vma.shared && vma.write && !file.writable()) {
         return Err(Errno::EACCES);
     }
+    // A chardev driver's dmabuf is never executable (N3b; the consultant's
+    // B1, ledger 316).
+    if vma.execute && crate::interfaces::chardev::dmabuf::of(file.io()).is_some() {
+        return Err(Errno::EPERM);
+    }
     // Linux's `do_mmap`: a file on a `noexec` mount is never mapped
     // executable.
     if vma.execute && file.location().mount.no_exec() {

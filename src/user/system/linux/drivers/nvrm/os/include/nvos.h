@@ -130,6 +130,9 @@ NvS64 nvos_chardev_file(NvU64 id, int fd);
 /* N3b: a dmabuf of a whole VMO into request `id`'s program, and back. */
 #define NVOS_DMABUF_WRITABLE 1
 #define NVOS_DMABUF_CLOEXEC  2
+/* Ask whether the install made the dmabuf: NVOS_DMABUF_MADE in the answer. */
+#define NVOS_DMABUF_TELL_MADE 4
+#define NVOS_DMABUF_MADE     (1LL << 31)
 NvS64 nvos_chardev_dmabuf_install(NvU64 id, NvU32 vmo, NvU64 cookie, NvU32 flags);
 int nvos_chardev_dmabuf_resolve(NvU64 id, int fd, NvU64 *cookie);
 void nvos_isr_enter_leave(NvBool entering);

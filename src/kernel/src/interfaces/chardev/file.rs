@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use core::any::Any;
 
 use ferrix_chardevctl::message::Op;
-use ferrix_chardevctl::node::{MAJOR, MODE};
+use ferrix_chardevctl::node::{MAJOR, MODE, RENDER_MINOR};
 use ferrix_vfs::initramfs::makedev;
 use ferrix_vfs::{Errno, FileType, Inode, Metadata, Readiness, Result as VfsResult, Timespec};
 
@@ -44,11 +44,24 @@ pub(crate) fn metadata(minor: u16) -> Metadata {
     }
 }
 
+/// What `stat` says of `renderD<index>` when a chardev driver serves it:
+/// the render core's major and the number it lent, mode 0666 as the
+/// driver's other nodes (N3b).
+pub(crate) fn render_metadata(index: u32) -> Metadata {
+    Metadata {
+        ino: (1u64 << 41).saturating_add(u64::from(index)),
+        rdev: makedev(crate::interfaces::display::DRM_MAJOR, index),
+        ..metadata(RENDER_MINOR)
+    }
+}
+
 /// One open file.
 pub(crate) struct ChardevFile {
     control: Arc<Control>,
     file: u64,
     minor: u16,
+    /// For an open of `renderD<N>`: N.
+    render: Option<u32>,
 }
 
 impl ChardevFile {
@@ -60,6 +73,21 @@ impl ChardevFile {
     /// or what the driver or the wait answered.
     pub(crate) fn open(minor: u16) -> VfsResult<Arc<Self>> {
         let control = super::published(minor).ok_or(Errno::ENXIO)?;
+        Self::open_on(control, minor, None)
+    }
+
+    /// Open `renderD<index>`, which its driver knows as
+    /// [`RENDER_MINOR`].
+    ///
+    /// # Errors
+    ///
+    /// As [`ChardevFile::open`].
+    pub(crate) fn open_render(index: u32) -> VfsResult<Arc<Self>> {
+        let control = super::render_control(index).ok_or(Errno::ENXIO)?;
+        Self::open_on(control, RENDER_MINOR, Some(index))
+    }
+
+    fn open_on(control: Arc<Control>, minor: u16, render: Option<u32>) -> VfsResult<Arc<Self>> {
         let client = process::current().ok_or(Errno::ENXIO)?;
         super::hold_release(&control)?;
         let file = super::next_file(&control);
@@ -86,6 +114,7 @@ impl ChardevFile {
             control: Arc::clone(&control),
             file,
             minor,
+            render,
         }) {
             Ok(opened) => Ok(opened),
             Err(_) => {
@@ -126,7 +155,7 @@ impl core::fmt::Debug for ChardevFile {
 
 impl Inode for ChardevFile {
     fn metadata(&self) -> Metadata {
-        metadata(self.minor)
+        self.render.map_or_else(|| metadata(self.minor), render_metadata)
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {

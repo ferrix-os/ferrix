@@ -871,19 +871,27 @@ impl Inode for Node {
             ),
             // The same major as a card, with the node's own number for its
             // minor, as Linux numbers `renderD128` 226:128.
-            (Place::Render(index), _) => crate::interfaces::render::renderer(index).map_or(
-                Metadata {
-                    kind: FileType::CharDevice,
-                    rdev: makedev(crate::interfaces::display::DRM_MAJOR, index),
-                    ..directory
-                },
-                |renderer| Metadata {
-                    atime: self.made,
-                    mtime: self.made,
-                    ctime: self.made,
-                    ..renderer.metadata()
-                },
-            ),
+            (Place::Render(index), _) => {
+                let served = crate::interfaces::render::renderer(index)
+                    .map(|renderer| renderer.metadata())
+                    .or_else(|| {
+                        crate::interfaces::chardev::render_control(index)
+                            .map(|_| crate::interfaces::chardev::file::render_metadata(index))
+                    });
+                served.map_or(
+                    Metadata {
+                        kind: FileType::CharDevice,
+                        rdev: makedev(crate::interfaces::display::DRM_MAJOR, index),
+                        ..directory
+                    },
+                    |served| Metadata {
+                        atime: self.made,
+                        mtime: self.made,
+                        ctime: self.made,
+                        ..served
+                    },
+                )
+            }
             _ => directory,
         }
     }
@@ -966,9 +974,13 @@ impl Inode for Node {
         // Every open of a render node is its own, and there may be any
         // number: a render node is not the display's master, which is what
         // Linux has them for and what `docs/GPU.md` §3.3 keeps.
+        // A chardev driver's render node is its driver's to answer, as its
+        // other nodes are (`docs/NVIDIA.md` §4.4, N3b).
         if let Place::Render(index) = self.place {
-            let renderer = crate::interfaces::render::renderer(index).ok_or(Errno::ENXIO)?;
-            let file: Arc<dyn Inode> = crate::interfaces::render::node::RenderFile::open(renderer)?;
+            let file: Arc<dyn Inode> = match crate::interfaces::render::renderer(index) {
+                Some(renderer) => crate::interfaces::render::node::RenderFile::open(renderer)?,
+                None => crate::interfaces::chardev::file::ChardevFile::open_render(index)?,
+            };
             return Ok(Some(file));
         }
         // Every open of an input device gets its own object, with its own
@@ -1084,7 +1096,8 @@ impl Inode for Node {
             // `renderD<N>` first: a card's name cannot be mistaken for one,
             // and a render node is not a card with another name.
             if let Some(index) = crate::interfaces::render::node::render_number(name) {
-                let _renderer = crate::interfaces::render::renderer(index).ok_or(Errno::ENOENT)?;
+                let _served =
+                    crate::interfaces::render::node_device(index).ok_or(Errno::ENOENT)?;
                 return Ok(Arc::new(Node {
                     place: Place::Render(index),
                     made: self.made,
@@ -1132,7 +1145,7 @@ impl Inode for Node {
         }
         if name == DRI
             && !(crate::interfaces::display::card_indices().is_empty()
-                && crate::interfaces::render::renderer_indices().is_empty())
+                && crate::interfaces::render::node_indices().is_empty())
         {
             return Ok(Arc::new(Node {
                 place: Place::Dri,
@@ -1378,7 +1391,7 @@ fn read_dri(cursor: u64, emit: &mut dyn FnMut(DirEntry<'_>) -> bool) -> Result<(
     }
     // Then the render nodes, which are numbered from 128 upwards where a
     // card's number is small, so one cursor counts through both in order.
-    for index in crate::interfaces::render::renderer_indices() {
+    for index in crate::interfaces::render::node_indices() {
         if u64::from(index) < first {
             continue;
         }

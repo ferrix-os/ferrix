@@ -692,6 +692,10 @@ pub(crate) fn sys_ioctl(
     if let Some(chardev) = crate::interfaces::chardev::file::of(file.io()) {
         return crate::interfaces::chardev::file::ioctl(&chardev, request, arg);
     }
+    // A dmabuf such a driver made: no sync to wait for (N3b, B9).
+    if crate::interfaces::chardev::dmabuf::of(file.io()).is_some() {
+        return crate::interfaces::chardev::dmabuf::ioctl(process, request, arg);
+    }
     // An open disk (`docs/INSTALLER.md` §5.1): its geometry and a flush.
     if let Some(disk) = fs::disk_file::of(file.io()) {
         return fs::disk_file::ioctl(process, &disk, request, arg);

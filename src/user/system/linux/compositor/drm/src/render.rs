@@ -73,6 +73,33 @@ impl Render {
         Ok(Self { fd })
     }
 
+    /// The first render node whose driver is called `driver`, by
+    /// `DRM_IOCTL_VERSION`: how a program finds a node whose number depends
+    /// on which driver started first (`docs/NVIDIA.md` §4.4, N3b), as
+    /// Chrome's path finder and libgbm pick theirs by name.
+    ///
+    /// # Errors
+    ///
+    /// `ENOENT` when no node is driven by it.
+    pub fn open_driven_by(driver: &str) -> io::Result<Self> {
+        // Linux's render minors, 128 to 191.
+        for number in 128..192 {
+            let Ok(path) = std::ffi::CString::new(format!("/dev/dri/renderD{number}")) else {
+                continue;
+            };
+            let Ok(fd) = compositor_seat::open(&path, libc::O_RDWR) else {
+                continue;
+            };
+            let node = Self {
+                fd: fd.into_raw_fd(),
+            };
+            if node.driver().is_ok_and(|name| name == driver) {
+                return Ok(node);
+            }
+        }
+        Err(io::Error::from_raw_os_error(libc::ENOENT))
+    }
+
     /// The width this program's structures are laid out at.
     fn width() -> Width {
         if size_of::<usize>() == 4 {
@@ -497,6 +524,47 @@ impl Render {
 pub struct Mapping {
     at: *mut u8,
     len: usize,
+}
+
+impl Mapping {
+    /// The whole of the dmabuf `fd`, mapped shared and read-only: what a
+    /// compositor drawing in software reads a client's GPU buffer through,
+    /// as Linux's `dma_buf_mmap` gives it (`docs/NVIDIA.md` §4.6, N3b). Its
+    /// size is the descriptor's end, which `lseek` to `SEEK_END` answers on
+    /// a dmabuf.
+    ///
+    /// # Errors
+    ///
+    /// What `lseek` or `mmap` said, and `EINVAL` for an empty buffer.
+    pub fn of_dmabuf(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+        // SAFETY: a descriptor the caller holds open; `lseek` moves only its
+        // offset, which nothing reads.
+        let end = unsafe { libc::lseek(fd.as_raw_fd(), 0, libc::SEEK_END) };
+        let len = usize::try_from(end).map_err(|_| io::Error::last_os_error())?;
+        if len == 0 {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+        // SAFETY: a fresh shared read-only mapping the kernel places; the
+        // descriptor names the buffer it maps, and the mapping holds it.
+        let at = unsafe {
+            libc::mmap(
+                core::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                fd.as_raw_fd(),
+                0,
+            )
+        };
+        if at == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            at: at.cast(),
+            len,
+        })
+    }
 }
 
 impl core::fmt::Debug for Mapping {

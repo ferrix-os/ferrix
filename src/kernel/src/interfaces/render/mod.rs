@@ -610,11 +610,11 @@ static LENT: SpinLock<Vec<(u32, usize)>> = SpinLock::new(Vec::new());
 /// `renderD<N>` never collide whichever driver started first (the
 /// consultant's B8, ledger 316). `None` when there was no memory to hold it.
 pub(crate) fn lend_number(device: usize) -> Option<u32> {
+    let mut lent = LENT.lock();
+    lent.try_reserve(1).ok()?;
     let index = NUMBERS.take()?;
-    if crate::fallible::try_push(&mut LENT.lock(), (index, device)).is_err() {
-        NUMBERS.give_back(index);
-        return None;
-    }
+    // NOALLOC: reserved above.
+    lent.push((index, device));
     Some(index)
 }
 

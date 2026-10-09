@@ -895,10 +895,14 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     // any colour next frame at the same size, under damage that is the
     // whole window: it is moved whole like anything else without a name.
     .map(|made| match (buffer.solid, imported) {
-        (_, Some(imported)) => made.named(name).on_device(
-            imported.fd(),
-            (slot.serial() << 32) | (buffer.pool.0 & 0xffff_ffff),
-        ),
+        // A buffer mapped beside NVIDIA's GPU is read where it is mapped,
+        // as `wl_shm`'s are: no renderer here can import it.
+        (_, Some(imported)) => match imported.device_fd() {
+            Some(fd) => made
+                .named(name)
+                .on_device(fd, (slot.serial() << 32) | (buffer.pool.0 & 0xffff_ffff)),
+            None => made.named(name),
+        },
         (Some(_), None) => made,
         (None, None) => made.named(name),
     })
