@@ -389,6 +389,10 @@ OPTIONS:
                                          claude too once fetch-claude-code.sh has run; and
                                          this machine's ~/.config/hypr/hyprland.conf with its
                                          dotfiles unless --config or --no-dotfiles says otherwise
+    --steam-preinstall                   run-compositor --everything, test-steam-game: merge the Steam
+                                         library fetch-steam-preinstall.sh installed on the host
+                                         (Teeworlds, the Steam Linux Runtime) into /data/steam, so
+                                         Steam finds them installed and does not download them
     --session                            flash --compositor: the desktop runs as the user ferrix,
                                          started by sessiond, as --everything's does; --config's
                                          dotfiles seed the home disk once and edits there are kept,
@@ -601,6 +605,7 @@ fn run() -> Result<()> {
     // set once, here, rather than threaded through each of them.
     cargo::set_kernel_build(args.mitigations, args.iterate, args.release)?;
     fat::set_strip_kernel(args.strip_kernel);
+    everything::set_steam_preinstall(args.steam_preinstall);
 
     if args.help {
         println!("{USAGE}");

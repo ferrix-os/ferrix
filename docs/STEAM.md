@@ -347,6 +347,21 @@ as the install's download; it does not pass yet. In order:
    Steam had staged 79 MB. Whether Steam's staging stalls on tmpfs too was
    not known at the wind-down (BACKLOG).
 
+   **The bypass, `--steam-preinstall`.** `tools/common/fetch/fetch-steam-preinstall.sh`
+   installs the apps with steamcmd on the host (the gate's account, the
+   host's i386 loader): Teeworlds and the Steam Linux Runtime 1.0 by
+   default, each as Steam lays out a library -- `steamapps/appmanifest_<app>.acf`
+   at `StateFlags` 4 and the files in `steamapps/common/<installdir>` --
+   under `~/.local/share/ferrix/steam-preinstall/tree/steam`
+   (`FERRIX_STEAM_PREINSTALL`). `run-compositor --everything
+   --steam-preinstall` and `test-steam-game --steam-preinstall` merge that
+   tree into the everything volume last, so Steam in the guest finds both
+   installed at `/data/steam/steamapps` and neither downloads nor stages
+   them; `game-watch.sh` then skips `steam://install` and hands the client
+   `steam://rungameid/380840` at once. The volume is made again whenever the
+   flag is given or left out, so a run that wants to keep the default
+   volume names its own with `FERRIX_EVERYTHING_VOLUME`.
+
 Two things on the way were not Steam's. Steam's sign-in window showed game
 art in red while it loaded, which the store gate took for a refused
 sign-in (§1). And on the Windows desktop `/data/steam` and `/data/home`
