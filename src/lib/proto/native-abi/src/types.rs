@@ -361,3 +361,12 @@ pub const DMABUF_FLAGS: u64 = DMABUF_WRITABLE | DMABUF_CLOEXEC | DMABUF_TELL_MAD
 /// made the dmabuf. Above every descriptor number, which is at most
 /// `i32::MAX`.
 pub const DMABUF_MADE: usize = 1 << 31;
+/// `chardev_sync_install`'s flag: the descriptor is close-on-exec.
+pub const SYNC_CLOEXEC: u64 = 1 << 0;
+/// Every flag `chardev_sync_install` knows.
+pub const SYNC_FLAGS: u64 = SYNC_CLOEXEC;
+/// A fence's deadline when the driver asks for none: nvidia-drm's own
+/// default timeout.
+pub const SYNC_DEADLINE_DEFAULT_MS: u64 = 5_000;
+/// The longest deadline a fence is given, whatever the driver asks.
+pub const SYNC_DEADLINE_MAX_MS: u64 = 10_000;

@@ -306,6 +306,84 @@ pub unsafe extern "C" fn nvos_chardev_dmabuf_resolve(id: u64, fd: i32, cookie: *
     }
 }
 
+/// A fence, unsignalled, named by `cookie`, as a new descriptor in the
+/// program request `id` is for: nvidia-drm's SEMSURF_FENCE_CREATE (N3b sync,
+/// `docs/NVIDIA.md` §4.6). It reads as signalled with ETIMEDOUT after
+/// `deadline_ms` (0 is 5 s, at most 10 s) and with ENODEV once nvrm is
+/// gone. `flags` is `NVOS_SYNC_CLOEXEC`. The descriptor, or a negative errno.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_sync_install(id: u64, cookie: u64, deadline_ms: u32, flags: u32) -> i64 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_SYNC_INSTALL,
+        [
+            control,
+            id as usize,
+            cookie as usize,
+            deadline_ms as usize,
+            flags as usize,
+            0,
+        ],
+    ) {
+        Ok(fd) => i64::try_from(fd).unwrap_or(-9),
+        Err(errno) => i64::from(errno),
+    }
+}
+
+/// Signal the fence `cookie` with `status`, 0 or a negative errno, once.
+/// 0, or a negative errno: a fence already signalled, or past its deadline,
+/// is refused.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_sync_signal(cookie: u64, status: i32) -> i32 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_SYNC_SIGNAL,
+        [
+            control,
+            cookie as usize,
+            i64::from(status) as usize,
+            0,
+            0,
+            0,
+        ],
+    ) {
+        Ok(_) => 0,
+        Err(errno) => errno,
+    }
+}
+
+/// The cookie of the fence the waiting program's descriptor `fd` names, for
+/// request `id`, into `cookie`, if this control made it: 1 if it is
+/// signalled, 0 if not, or a negative errno.
+///
+/// # Safety
+///
+/// `cookie` is writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_chardev_sync_resolve(id: u64, fd: i32, cookie: *mut u64) -> i32 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    let mut found = 0_u64;
+    let result = native(
+        nr::CHARDEV_SYNC_RESOLVE,
+        [
+            control,
+            id as usize,
+            fd as isize as usize,
+            core::ptr::from_mut(&mut found) as usize,
+            0,
+            0,
+        ],
+    );
+    match result {
+        Ok(signalled) => {
+            // SAFETY: the caller vouches for `cookie`.
+            unsafe { cookie.write(found) };
+            i32::from(signalled != 0)
+        }
+        Err(errno) => errno,
+    }
+}
+
 /// Answer mmap request `id`: `value` a VMO handle with `offset` its byte
 /// offset, or a physical address, by `kind` (`ferrix_chardevctl::message`'s
 /// `MAP_*`). 0, or a negative errno.

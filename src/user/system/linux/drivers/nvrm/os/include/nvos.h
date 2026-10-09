@@ -135,6 +135,11 @@ NvS64 nvos_chardev_file(NvU64 id, int fd);
 #define NVOS_DMABUF_MADE     (1LL << 31)
 NvS64 nvos_chardev_dmabuf_install(NvU64 id, NvU32 vmo, NvU64 cookie, NvU32 flags);
 int nvos_chardev_dmabuf_resolve(NvU64 id, int fd, NvU64 *cookie);
+/* N3b sync: a fence (sync_file) into request `id`'s program, signalled once. */
+#define NVOS_SYNC_CLOEXEC    0x1u
+NvS64 nvos_chardev_sync_install(NvU64 id, NvU64 cookie, NvU32 deadline_ms, NvU32 flags);
+int nvos_chardev_sync_signal(NvU64 cookie, int status);
+int nvos_chardev_sync_resolve(NvU64 id, int fd, NvU64 *cookie);
 void nvos_isr_enter_leave(NvBool entering);
 
 /* display.rs: nvrm's end of the kernel's display core (N6). */

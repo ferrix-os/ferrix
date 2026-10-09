@@ -44,7 +44,11 @@ impl Importer {
         if on_gpu {
             return Render::open().ok().map(|node| Self::Node(Rc::new(node)));
         }
-        Render::open_driven_by("nvidia-drm").ok().map(|_| Self::Map)
+        let map = Render::open_driven_by("nvidia-drm").ok().map(|_| Self::Map);
+        // Buffers mapped from the CPU must be linear: offered alone, so
+        // NVIDIA's GBM backend allocates pitch-linear system memory.
+        compositor_server::offer_linear_only(map.is_some());
+        map
     }
 }
 

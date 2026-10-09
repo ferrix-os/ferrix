@@ -65,6 +65,7 @@ struct NvKmsKapiDevice *nvrm_kms_device(NvU32 *gpu_id, NvU32 *page_kind);
 #define DRM_IOCTL_NVIDIA_DMABUF_SUPPORTED           0x0000644Fu
 #define DRM_IOCTL_NVIDIA_GET_DRM_FILE_UNIQUE_ID     0xC0086458u
 #define DRM_IOCTL_NVIDIA_SEMSURF_FENCE_CTX_CREATE   0xC0206454u
+#define DRM_IOCTL_NVIDIA_SEMSURF_FENCE_CREATE       0xC0186455u
 
 #define DRM_CAP_PRIME                   0x5
 #define DRM_PRIME_CAP_IMPORT            0x1
@@ -153,6 +154,14 @@ struct drm_nvidia_semsurf_fence_ctx_create_params {
     NvU32 pad;
 };
 
+struct drm_nvidia_semsurf_fence_create_params {
+    NvU32 fence_context_handle;
+    NvU32 timeout_value_ms;
+    NvU64 wait_value;
+    NvS32 fd;
+    NvU32 pad;
+};
+
 struct drm_nvidia_gem_identify_object_params {
     NvU32 handle;
     NvU32 object_type;      /* 0 NVKMS, 1 DMABUF, 2 USERMEMORY */
@@ -175,6 +184,8 @@ struct drm_gem {
     struct NvKmsKapiSemaphoreSurface *semsurf;
     NvU64 sem_index;
     void *sem_map;
+    /* Fences on it still waiting for their callback: it outlives them. */
+    NvU32 fences;
     /* The system-memory allocation it is, or NULL in video memory. */
     nv_alloc_t *at;
     /*
@@ -218,7 +229,7 @@ static void gem_settle_locked(struct drm_gem *gem)
     struct drm_gem **link;
     NvU32 gpu_id, kind;
 
-    if (gem->handles != 0 || gem->dmabufs != 0)
+    if (gem->handles != 0 || gem->dmabufs != 0 || gem->fences != 0)
         return;
     for (link = &gems; *link != NULL; link = &(*link)->next)
     {
@@ -620,6 +631,99 @@ static int drm_semsurf_ctx_create(struct drm_file *file, NvU64 arg)
     return copy_out(arg, &p, sizeof(p));
 }
 
+/*
+ * Fences (N3b sync, NVIDIA.md 4.6; consultant ledger 647). Each is a kernel
+ * sync_file named by a cookie that is never reused, signalled from KAPI's
+ * semaphore-surface callback once the semaphore reaches the wait value. The
+ * kernel signals it ETIMEDOUT at its deadline and ENODEV if nvrm dies, so a
+ * fence nvrm never signals still ends; a late signal is refused, harmlessly.
+ */
+struct drm_fence {
+    NvU64 cookie;
+    struct drm_gem *ctx;
+};
+
+static NvU64 next_fence_cookie = 1;
+extern int nvrm_trace_drm;
+
+/* KAPI's callback: the semaphore reached the value. */
+static void drm_fence_reached(void *data)
+{
+    struct drm_fence *fence = data;
+    int rc = nvos_chardev_sync_signal(fence->cookie, 0);
+
+    if (nvrm_trace_drm)
+        drm_say("fence %llu reached, signal %d\n", (unsigned long long)fence->cookie, rc);
+    nvos_mutex_lock(&gems_lock);
+    /*
+     * Not settled here: freeing the semaphore surface from inside its own
+     * callback is not safe. A context closed before its last fence keeps
+     * its surface until nvrm exits.
+     */
+    fence->ctx->fences--;
+    nvos_mutex_unlock(&gems_lock);
+    free(fence);
+}
+
+static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 arg)
+{
+    struct drm_nvidia_semsurf_fence_create_params p;
+    const struct NvKmsKapiFunctionsTable *kapi = nvrm_kms_kapi();
+    NvU32 gpu_id, kind;
+    struct NvKmsKapiDevice *device = nvrm_kms_device(&gpu_id, &kind);
+    struct NvKmsKapiSemaphoreSurfaceCallback *handle = NULL;
+    struct drm_fence *fence;
+    struct drm_gem *ctx;
+    NvKmsKapiRegisterWaiterResult result;
+    NvS64 fd;
+
+    if (device == NULL)
+        return -EOPNOTSUPP;
+    if (copy_in(&p, arg, sizeof(p)) != 0)
+        return -EFAULT;
+    if (p.pad != 0)
+        return -EINVAL;
+    ctx = handle_gem(file, p.fence_context_handle);
+    if (ctx == NULL || ctx->semsurf == NULL)
+        return -EINVAL;
+    fence = calloc(1, sizeof(*fence));
+    if (fence == NULL)
+        return -ENOMEM;
+    nvos_mutex_lock(&gems_lock);
+    fence->cookie = next_fence_cookie++;
+    fence->ctx = ctx;
+    ctx->fences++;
+    nvos_mutex_unlock(&gems_lock);
+    fd = nvos_chardev_sync_install(request, fence->cookie, p.timeout_value_ms, NVOS_SYNC_CLOEXEC);
+    if (fd < 0)
+    {
+        nvos_mutex_lock(&gems_lock);
+        ctx->fences--;
+        gem_settle_locked(ctx);
+        nvos_mutex_unlock(&gems_lock);
+        free(fence);
+        return (int)fd;
+    }
+    p.fd = (NvS32)fd;
+    result = kapi->registerSemaphoreSurfaceCallback(device, ctx->semsurf, drm_fence_reached, fence,
+                                                    ctx->sem_index, p.wait_value, 0, &handle);
+    if (nvrm_trace_drm)
+        drm_say("fence %llu: semaphore %llu wait %llu, fd %d, waiter %d\n",
+                (unsigned long long)fence->cookie, (unsigned long long)ctx->sem_index,
+                (unsigned long long)p.wait_value, p.fd, (int)result);
+    if (result != NVKMS_KAPI_REG_WAITER_SUCCESS)
+    {
+        /* Reached already: signalled now. Not registered: an error. */
+        (void)nvos_chardev_sync_signal(fence->cookie,
+                                       result == NVKMS_KAPI_REG_WAITER_ALREADY_SIGNALLED ? 0 : -EIO);
+        nvos_mutex_lock(&gems_lock);
+        ctx->fences--;
+        nvos_mutex_unlock(&gems_lock);
+        free(fence);
+    }
+    return copy_out(arg, &p, sizeof(p));
+}
+
 static int drm_export_nvkms(struct drm_file *file, NvU64 arg)
 {
     struct drm_nvidia_gem_export_nvkms_memory_params p;
@@ -787,6 +891,8 @@ static int drm_ioctl_one(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
         return 0;
     case DRM_IOCTL_NVIDIA_SEMSURF_FENCE_CTX_CREATE:
         return drm_semsurf_ctx_create(file, arg);
+    case DRM_IOCTL_NVIDIA_SEMSURF_FENCE_CREATE:
+        return drm_semsurf_fence_create(file, request, arg);
     case DRM_IOCTL_NVIDIA_GET_DRM_FILE_UNIQUE_ID:
         return copy_out(arg, &file->unique, sizeof(file->unique));
     default:
