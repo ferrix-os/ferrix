@@ -188,6 +188,13 @@ pub(super) fn desktop(
         carried.ports.push(crate::chrome::desktop_policy());
         if args.nvidia {
             carried.ports.extend(crate::nvidia::data_links());
+            if args.everything && std::env::var_os("FERRIX_DRI3_PROBE").is_some() {
+                carried.ports.push(crate::ports::File {
+                    path: DRI3_PROBE_PATH.to_owned(),
+                    mode: 0o644,
+                    content: crate::ports::Content::Bytes(DRI3_PROBE.as_bytes().to_vec()),
+                });
+            }
             if args.everything {
                 carried.ports.push(crate::ports::File {
                     path: NVIDIA_WATCH_PATH.to_owned(),
@@ -362,7 +369,7 @@ fn carry_everything(arch: Arch, args: &Args, carried: &mut Carried) {
     }
     let steam = with_steam_volume(args, arch);
     if arch == Arch::X86_64 && (crate::yserver::volume().is_ok() || steam) {
-        let files = crate::yserver::desktop_files(&carried.ports);
+        let files = crate::yserver::desktop_files_on(&carried.ports, args.nvidia);
         carried.ports.extend(files);
     }
     if steam {
@@ -443,15 +450,25 @@ pub(super) fn with_yserver(config: String, args: &Args, arch: Arch) -> String {
         return config;
     }
     println!("  {arch}: yserver, the X server, on :0 beside the compositor");
-    // On the 3060 (`--nvidia`) the volume has NVIDIA's libGLX too, which
-    // needs NV-GLX in the server; yserver has none, so X clients' GL is
-    // Mesa's (llvmpipe), as on the virtio desktop.
-    let vendor = if args.nvidia {
+    // On the 3060 (`--nvidia`) yserver renders on NVIDIA's Vulkan and names
+    // nvidia first among its GLX vendors, so libglvnd loads NVIDIA's libGLX,
+    // which, finding no NV-GLX, renders on the GPU and hands yserver its
+    // frames over DRI3 and Present. FERRIX_X_GL=mesa keeps X clients' GL on
+    // Mesa's llvmpipe instead, as on the virtio desktop.
+    let vendor = if args.nvidia && std::env::var("FERRIX_X_GL").is_ok_and(|gl| gl == "mesa") {
         "env = __GLX_VENDOR_LIBRARY_NAME,mesa\n"
     } else {
         ""
     };
-    format!("{config}\n{vendor}{}", crate::yserver::desktop_config())
+    let probe = if args.nvidia && std::env::var_os("FERRIX_DRI3_PROBE").is_some() {
+        format!("exec-once = /bin/busybox sh /{DRI3_PROBE_PATH}\n")
+    } else {
+        String::new()
+    };
+    format!(
+        "{config}\n{vendor}{}{probe}",
+        crate::yserver::desktop_config()
+    )
 }
 
 /// Whether `run-compositor --everything` merges the volume
@@ -480,6 +497,31 @@ pub(super) fn with_steam(config: String, args: &Args, arch: Arch) -> String {
     };
     format!("{config}\n{}{watch}", steam_window::desktop_config())
 }
+
+/// Where [`DRI3_PROBE`] is in the image.
+const DRI3_PROBE_PATH: &str = "steam/dri3-probe.sh";
+
+/// `FERRIX_DRI3_PROBE`'s check on the 3060: once yserver's socket is there,
+/// NVIDIA's vkcube draws through its X11 surface (DRI3 and Present) for a
+/// while, then what yserver logged of DRI3 and its renderer, all to the
+/// serial log as `dri3:` lines.
+const DRI3_PROBE: &str = r#"waited=0
+while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do sleep 1; waited=$((waited + 1)); done
+echo "dri3: :0 there after ${waited}s"
+sleep 5
+grep -iE 'dri3|render node|VkContext|vulkan|glx' /tmp/yserver.log | head -n 30 | sed 's/^/dri3: yserver: /'
+export DISPLAY=:0 VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/nvidia_icd.json
+/data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu     /data/usr/bin/vkcube --wsi xcb --c 1200 > /tmp/vkcube.log 2>&1 &
+cube=$!
+sleep 20
+echo "dri3: vkcube after 20 s: $(kill -0 $cube 2>/dev/null && echo running || echo exited)"
+sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | head -n 30
+/bin/hyprctl clients 2>/dev/null | grep -iE 'title|class' | sed 's/^/dri3: window: /'
+wait $cube
+echo "dri3: vkcube exited $?"
+sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | tail -n 20
+grep -iE 'dri3|present|pixmapfrom|syncobj|fence|import' /tmp/yserver.log | tail -n 40 | sed 's/^/dri3: yserver: /'
+"#;
 
 /// Where [`NVIDIA_WATCH`] is in the image.
 const NVIDIA_WATCH_PATH: &str = "steam/nvidia-watch.sh";
