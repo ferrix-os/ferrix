@@ -1101,14 +1101,33 @@ fn follow(log: &Path, stop: &Path) -> Result<()> {
     let mut out = std::fs::File::create(log)
         .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
     let mut reader = BufReader::new(stream);
+    let mut checked = Instant::now();
     loop {
         if stop.exists() {
             println!("  cardvm: {} is there; stopping", stop.display());
             return Ok(());
+        }
+        // The card protocol: a want-* file is an agent queued for a boot of
+        // its own (a kernel or nvrm change), and the card VM yields to it.
+        if checked.elapsed() >= Duration::from_secs(2) {
+            checked = Instant::now();
+            if let Some(want) = wanted(stop) {
+                println!("  cardvm: {want} wants the card; stopping");
+                return Ok(());
+            }
         }
         if read_line(&mut reader, &mut out).is_err() {
             println!("  cardvm: the serial port closed: the guest stopped");
             return Ok(());
         }
     }
+}
+
+/// A `want-*` file beside `stop` other than the card VM's own, if any.
+fn wanted(stop: &Path) -> Option<String> {
+    std::fs::read_dir(stop.parent()?)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .find(|name| name.starts_with("want-") && name != "want-cardvm")
 }
