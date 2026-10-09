@@ -159,9 +159,15 @@ fn wallpaper(file: Option<&str>) -> ! {
 fn video(rest: &[String]) -> ! {
     let mut options: Vec<String> = Vec::new();
     let mut words: Vec<&str> = Vec::new();
+    let mut decoder: Option<String> = None;
     let mut at = 0;
     while let Some(word) = rest.get(at) {
         match word.as_str() {
+            // Not mpvpaper's: the program that decodes on the GPU.
+            "--decoder" => {
+                decoder = rest.get(at + 1).cloned();
+                at += 2;
+            }
             "-o" | "--mpv-options" => {
                 if let Some(given) = rest.get(at + 1) {
                     options.extend(given.split_whitespace().map(str::to_owned));
@@ -197,7 +203,24 @@ fn video(rest: &[String]) -> ! {
     }
     let shown = std::fs::read(file)
         .map_err(|error| format!("reading {file}: {error}"))
-        .and_then(|bytes| compositor_pattern::Movie::parse(&bytes))
+        .and_then(|bytes| {
+            // The GPU's decoder where one was named and starts, and rav1d
+            // on this processor where not, having said why.
+            if let Some(decoder) = decoder.as_deref() {
+                match compositor_pattern::Movie::piped(&bytes, file, decoder) {
+                    Ok(movie) => {
+                        say(&format!(
+                            "pattern: the video is decoded by {decoder} on the GPU"
+                        ));
+                        return Ok(movie);
+                    }
+                    Err(error) => say(&format!(
+                        "pattern: {decoder} cannot decode the video ({error}), so rav1d does"
+                    )),
+                }
+            }
+            compositor_pattern::Movie::parse(&bytes)
+        })
         .and_then(compositor_pattern::run_video);
     match shown {
         Ok(line) => {

@@ -444,10 +444,16 @@ fn spans(marked: impl Iterator<Item = bool>, len: usize) -> Vec<(i32, i32)> {
 /// when it is due, so the guest holds one decoded frame and the decoder's
 /// reference pictures rather than every frame of the clip.
 pub struct Movie {
-    /// Every AV1 temporal unit, still compressed.
+    /// Every AV1 temporal unit, still compressed. Empty when the frames come
+    /// from a [`Piped`] decoder, which reads the file itself.
     packets: Vec<Vec<u8>>,
     /// The decoder, which has seen packets through `at`.
     decoder: Decoder,
+    /// A decoder in another process that hands over whole `XRGB8888`
+    /// frames, where there is one: the GPU's (`--decoder`).
+    piped: Option<Piped>,
+    /// What the last ten seconds cost, said once each.
+    tally: Tally,
     /// How long one frame is shown.
     period: Duration,
     /// Which packet made `shown`.
@@ -506,6 +512,8 @@ impl Movie {
         Ok(Self {
             packets: ivf.packets,
             decoder,
+            piped: None,
+            tally: Tally::new("rav1d", None),
             period,
             at: 0,
             shown: picture(first),
@@ -523,6 +531,43 @@ impl Movie {
     #[must_use]
     pub fn frames(&self) -> usize {
         self.packets.len()
+    }
+
+    /// A video decoded by `decoder`, a program in another process, from the
+    /// IVF file at `file`: on the 3060 a minimal `ffmpeg` whose AV1 decoder
+    /// is NVIDIA's Vulkan Video (`--hwaccel vulkan`), so the decoding is
+    /// the GPU's and this process only copies finished rows.
+    ///
+    /// The program is run as `ffmpeg` is: it loops the file for ever and
+    /// writes raw `bgr0` frames, which is `XRGB8888` in memory, to its
+    /// standard output. The first frame is read here, so a decoder that
+    /// cannot start is said now and the caller falls back to rav1d.
+    ///
+    /// # Errors
+    ///
+    /// A sentence saying what is wrong with the file or the decoder.
+    pub fn piped(bytes: &[u8], file: &str, decoder: &str) -> Result<Self, String> {
+        let ivf = demux_ivf(bytes)?;
+        let period = Duration::from_millis(1_000 / u64::from(ivf.rate.max(1)));
+        let mut piped = Piped::spawn(decoder, file, ivf.width, ivf.height)?;
+        let mut first = vec![0; piped.frame_bytes];
+        piped.read(&mut first)?;
+        let rows = usize::try_from(ivf.height).map_err(|_| "a video too tall to hold")?;
+        let child = piped.child.id();
+        Ok(Self {
+            packets: Vec::new(),
+            decoder: Decoder::new()?,
+            piped: Some(piped),
+            tally: Tally::new("the GPU (Vulkan Video)", Some(child)),
+            period,
+            at: 0,
+            shown: Picture {
+                width: ivf.width,
+                height: ivf.height,
+                pixels: first,
+            },
+            changed: vec![true; rows],
+        })
     }
 
     /// The frame being shown, which is a [`Picture`] and scales like one.
@@ -547,6 +592,31 @@ impl Movie {
     ///
     /// Nothing here can fail: [`Movie::parse`] decoded every packet once.
     pub fn advance(&mut self) {
+        self.tally.frame();
+        if let Some(piped) = self.piped.as_mut() {
+            // The next frame into the spare buffer, then compared and swapped
+            // in, so a frame costs one copy out of the pipe and no allocation.
+            let mut next = std::mem::take(&mut piped.spare);
+            next.resize(piped.frame_bytes, 0);
+            if let Err(error) = piped.read(&mut next) {
+                say(&format!("pattern: the video's decoder stopped: {error}"));
+                self.piped = None;
+                return;
+            }
+            let stride = usize::try_from(u64::from(self.shown.width) * 4)
+                .unwrap_or(1)
+                .max(1);
+            for (changed, (new, old)) in self
+                .changed
+                .iter_mut()
+                .zip(next.chunks(stride).zip(self.shown.pixels.chunks(stride)))
+            {
+                *changed = new != old;
+            }
+            piped.spare = std::mem::replace(&mut self.shown.pixels, next);
+            self.at = self.at.wrapping_add(1);
+            return;
+        }
         let next = match self.at.checked_add(1) {
             Some(next) if next < self.packets.len() => next,
             _ => 0,
@@ -584,6 +654,169 @@ impl Movie {
         self.shown = next;
         self.at = index;
     }
+}
+
+/// A decoder in another process, writing raw frames to a pipe.
+struct Piped {
+    child: std::process::Child,
+    out: std::process::ChildStdout,
+    /// The bytes of one `XRGB8888` frame.
+    frame_bytes: usize,
+    /// The buffer the next frame is read into.
+    spare: Vec<u8>,
+}
+
+impl Piped {
+    fn spawn(decoder: &str, file: &str, width: u32, height: u32) -> Result<Self, String> {
+        let frame_bytes = usize::try_from(u64::from(width) * u64::from(height) * 4)
+            .map_err(|_| "a video too large to hold")?;
+        // `-hwaccel vulkan` alone: frames are decoded on the GPU and handed
+        // back as NV12, which FFmpeg's own scaler turns into `bgr0`. The
+        // decoder built for this has no software AV1 decoder, so a GPU that
+        // cannot decode is an error rather than a quiet CPU fallback.
+        let mut child = std::process::Command::new(decoder)
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-init_hw_device",
+                "vulkan=gpu",
+                "-hwaccel",
+                "vulkan",
+                "-hwaccel_device",
+                "gpu",
+                "-stream_loop",
+                "-1",
+                "-i",
+                file,
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "bgr0",
+                "-",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("starting {decoder}: {error}"))?;
+        let out = child
+            .stdout
+            .take()
+            .ok_or_else(|| format!("{decoder} has no standard output"))?;
+        Ok(Self {
+            child,
+            out,
+            frame_bytes,
+            spare: Vec::new(),
+        })
+    }
+
+    fn read(&mut self, into: &mut [u8]) -> Result<(), String> {
+        use std::io::Read as _;
+        self.out
+            .read_exact(into)
+            .map_err(|error| format!("reading a frame: {error}"))
+    }
+}
+
+impl Drop for Piped {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Frames shown and processor time spent, said every ten seconds: the
+/// wallpaper's own cost, and the decoder process's where it has one.
+struct Tally {
+    by: &'static str,
+    child: Option<u32>,
+    since: Instant,
+    frames: u32,
+    cpu: Duration,
+    child_cpu: Duration,
+}
+
+impl Tally {
+    fn new(by: &'static str, child: Option<u32>) -> Self {
+        let mut tally = Self {
+            by,
+            child,
+            since: Instant::now(),
+            frames: 0,
+            cpu: Duration::ZERO,
+            child_cpu: Duration::ZERO,
+        };
+        tally.cpu = own_cpu();
+        tally.child_cpu = child.map_or(Duration::ZERO, process_cpu);
+        tally
+    }
+
+    fn frame(&mut self) {
+        self.frames = self.frames.saturating_add(1);
+        let elapsed = self.since.elapsed();
+        if elapsed < Duration::from_secs(10) {
+            return;
+        }
+        let cpu = own_cpu();
+        let child_cpu = self.child.map_or(Duration::ZERO, process_cpu);
+        let seconds = elapsed.as_secs_f64();
+        let percent = |spent: Duration| spent.as_secs_f64() * 100.0 / seconds;
+        let mut line = format!(
+            "pattern: video {:.1} fps decoded by {}, pattern {:.0}% of a processor",
+            f64::from(self.frames) / seconds,
+            self.by,
+            percent(cpu.saturating_sub(self.cpu)),
+        );
+        if self.child.is_some() {
+            line.push_str(&format!(
+                ", decoder {:.0}%",
+                percent(child_cpu.saturating_sub(self.child_cpu))
+            ));
+        }
+        say(&line);
+        self.since = Instant::now();
+        self.frames = 0;
+        self.cpu = cpu;
+        self.child_cpu = child_cpu;
+    }
+}
+
+/// This process's processor time, user and system.
+fn own_cpu() -> Duration {
+    // SAFETY: `getrusage` fills the struct it is given and nothing else.
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: as above; `usage` is a valid, writable `rusage`.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, &raw mut usage) } != 0 {
+        return Duration::ZERO;
+    }
+    let time = |value: libc::timeval| {
+        Duration::from_secs(u64::try_from(value.tv_sec).unwrap_or(0))
+            + Duration::from_micros(u64::try_from(value.tv_usec).unwrap_or(0))
+    };
+    time(usage.ru_utime) + time(usage.ru_stime)
+}
+
+/// Another process's processor time from `/proc/<pid>/stat`, in clock
+/// ticks of a hundredth of a second; zero where that cannot be read.
+fn process_cpu(pid: u32) -> Duration {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return Duration::ZERO;
+    };
+    // The command is in parentheses and may hold spaces: count after it.
+    let Some(after) = stat.rfind(')').and_then(|at| stat.get(at + 1..)) else {
+        return Duration::ZERO;
+    };
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    // `utime` and `stime` are fields 14 and 15, the 12th and 13th after the
+    // command.
+    let ticks: u64 = fields.get(11..13).map_or(0, |both| {
+        both.iter()
+            .filter_map(|field| field.parse::<u64>().ok())
+            .sum()
+    });
+    Duration::from_millis(ticks.saturating_mul(10))
 }
 
 /// Feed one temporal unit and take the picture it makes. The decoder uses a
@@ -710,7 +943,7 @@ pub fn run_wallpaper(picture: Picture) -> Result<String, String> {
 ///
 /// A sentence saying what could not be done.
 pub fn run_video(movie: Movie) -> Result<String, String> {
-    be_wallpaper(Shown::Moving(movie))
+    be_wallpaper(Shown::Moving(Box::new(movie)))
 }
 
 /// Be the wallpaper the compositor the environment names has.
@@ -738,7 +971,7 @@ enum Shown {
     /// One picture, behind everything, which never changes.
     Still(Picture),
     /// A video's frames, behind everything, in turn and then again.
-    Moving(Movie),
+    Moving(Box<Movie>),
 }
 
 impl Shown {
