@@ -64,8 +64,8 @@
 //! A filesystem's own locks are its own business, except that it must not
 //! hold a spin lock across I/O either.
 //!
-//! **A spin lock's holder stays on its processor.** Every spin lock here but
-//! a tmpfs inode's (`tmpfs.rs` says why) is the crate's `SpinLock`, a
+//! **A spin lock's holder stays on its processor.** Every spin lock here,
+//! a tmpfs inode's included since 2026-10-10, is the crate's `SpinLock`, a
 //! `ferrix_sync::PreemptSpinLock` over [`ferrix_sync::HookedPreempt`]: the
 //! kernel installs its preemption count behind it at boot, so neither a
 //! holder nor a task waiting for its ticket is switched out. A plain ticket
@@ -101,6 +101,10 @@ mod tests;
 /// This crate's spin lock: its holder is kept on its processor (see the
 /// crate documentation).
 pub(crate) type SpinLock<T> = ferrix_sync::PreemptSpinLock<T, ferrix_sync::HookedPreempt>;
+
+/// The guard of this crate's [`SpinLock`].
+pub(crate) type SpinLockGuard<'a, T> =
+    ferrix_sync::PreemptSpinLockGuard<'a, T, ferrix_sync::HookedPreempt>;
 
 pub use access::Access;
 pub use dentry::Dentry;
