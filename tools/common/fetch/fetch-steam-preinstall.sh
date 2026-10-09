@@ -6,8 +6,10 @@
 # at StateFlags 4, fully installed, and neither downloads nor stages it
 # (docs/STEAM.md §7, item 7: the guest's staging stood still).
 #
-# By default Teeworlds (380840) and the Steam Linux Runtime 1.0 (scout,
-# 1070560), which Steam adds to the install of a `native` game. The apps
+# By default Teeworlds (380840), the Steam Linux Runtime 1.0 (scout,
+# 1070560), which Steam adds to the install of a `native` game, and the
+# Steam Linux Runtime 2.0 (soldier, 1391110), which Steam downloads before
+# it launches the game (scout runs on soldier). The apps
 # must be owned by the account: Teeworlds is free, and
 # `steamcmd +login <account> <password> +app_license_request 380840 +quit`
 # claims it.
@@ -34,7 +36,7 @@ out=${FERRIX_STEAM_PREINSTALL:-$HOME/.local/share/ferrix/steam-preinstall}
 host=${FERRIX_STEAMCMD_HOST:-$HOME/.local/share/ferrix/steamcmd-host}
 account=${FERRIX_STEAM_ACCOUNT_FILE:-$HOME/.config/ferrix/steam-test-account}
 apps=("$@")
-[ ${#apps[@]} -gt 0 ] || apps=(380840 1070560)
+[ ${#apps[@]} -gt 0 ] || apps=(380840 1070560 1391110)
 
 [ -e /lib/ld-linux.so.2 ] \
     || { echo "fetch-steam-preinstall: no i386 loader at /lib/ld-linux.so.2: steamcmd cannot run on this host" >&2; exit 1; }
