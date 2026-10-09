@@ -492,7 +492,9 @@ const NVIDIA_WATCH_PATH: &str = "steam/nvidia-watch.sh";
 /// console the run's serial log follows.
 const NVIDIA_WATCH: &str = r#"if [ "$1" = teeworlds ]; then
     # FERRIX_NVIDIA_TEEWORLDS's bundle, when the volume has it: a match on
-    # dm1, the client fullscreen on yserver's :0, on Mesa's GL.
+    # dm1, the client in a 1280x720 window on yserver's :0, on Mesa's GL: at
+    # 1080p fullscreen llvmpipe's frames through the X socket stalled the
+    # client past the server's 10 s timeout (2026-10-10).
     [ -f /data/tw/tw.sh ] || exit 0
     while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 1; done
     sleep 5
@@ -502,7 +504,7 @@ const NVIDIA_WATCH: &str = r#"if [ "$1" = teeworlds ]; then
         ./teeworlds_srv "sv_map dm1" 2>&1 | sed 's/^/nvdesk: tw-srv: /' | head -n 40) &
     sleep 3
     echo "nvdesk: teeworlds: starting the client"
-    /bin/busybox sh /tmp/tw/tw.sh "cl_showfps 1" "gfx_fullscreen 1" "connect 127.0.0.1:8303" 2>&1 \
+    /bin/busybox sh /tmp/tw/tw.sh "cl_showfps 1" "gfx_fullscreen 0" "gfx_screen_width 1280" "gfx_screen_height 720" "gfx_texture_quality 0" "gfx_high_detail 0" "connect 127.0.0.1:8303" 2>&1 \
         | sed 's/^/nvdesk: tw: /' | head -n 200
     echo "nvdesk: teeworlds: client ended"
     exit 0
