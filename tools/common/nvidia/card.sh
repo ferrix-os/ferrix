@@ -91,14 +91,16 @@ up() {
   rm -f "$STOP" "$STATE"
   touch "$D/want-cardvm"
   echo "card: waiting for card.lock (want-cardvm is there); building in $WT"
-  ( cd "$WT" && setsid flock "$D/card.lock" bash -c '
+  cd "$WT" || die "no worktree $WT"
+  setsid flock "$D/card.lock" bash -c '
       rm -f "$1/want-cardvm"; shift
       exec cargo xtask run-compositor --nvidia --arch x86_64 --ssh "$@"' _ "$D" "$PORT" "$@" \
-      > "$OUT" 2>&1 < /dev/null & )
-  local waited=0
+      > "$OUT" 2>&1 < /dev/null &
+  local pid=$! waited=0
+  echo "card: queued as pid $pid (flock, then the xtask)"
   until [ -f "$STATE" ]; do
     sleep 2; waited=$((waited + 2))
-    if ! pgrep -f "run-compositor --nvidia --arch x86_64 --ssh $PORT" > /dev/null; then
+    if ! kill -0 "$pid" 2>/dev/null; then
       tail -20 "$OUT"; die "the xtask ended before the guest had an address; see $OUT"
     fi
   done
