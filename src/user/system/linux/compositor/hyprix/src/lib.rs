@@ -55,6 +55,8 @@ pub mod prompt;
 #[path = "prompt_absent.rs"]
 pub mod prompt;
 pub mod rules;
+#[cfg(target_os = "linux")]
+pub(crate) mod scanouts;
 pub mod scope;
 pub mod seat;
 pub mod select;
