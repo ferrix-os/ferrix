@@ -678,8 +678,11 @@ impl Piped {
             .args([
                 "-nostdin",
                 "-hide_banner",
+                // `verbose` says how the Vulkan device was chosen and why
+                // one was refused, which `error` alone does not; once the
+                // stream runs it says nothing more a frame.
                 "-loglevel",
-                "error",
+                "verbose",
                 "-init_hw_device",
                 "vulkan=gpu",
                 "-hwaccel",
@@ -783,8 +786,14 @@ impl Tally {
     }
 }
 
-/// This process's processor time, user and system.
+/// This process's processor time, user and system: `getrusage`, or
+/// `/proc/self/stat` where that says more (Ferrix's `getrusage` says zero).
 fn own_cpu() -> Duration {
+    rusage_cpu().max(process_cpu(std::process::id()))
+}
+
+/// This process's processor time as `getrusage` says it.
+fn rusage_cpu() -> Duration {
     // SAFETY: `getrusage` fills the struct it is given and nothing else.
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     // SAFETY: as above; `usage` is a valid, writable `rusage`.
