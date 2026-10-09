@@ -84,6 +84,13 @@ while :; do
     # busiest processes.
     if [ $(( ($(date +%s) - asked) % 30 )) -lt 5 ]; then
         top -b -n 1 | sed -n '2p;5,9p' | sed 's/^/steam-game: top: /'
+        # The 32-bit client's threads: name, state and CPU ticks each, to
+        # tell a spinning thread from a sleeping one while staging stalls.
+        for pid in $(pidof steam); do
+            for t in /proc/$pid/task/*; do
+                [ -r $t/stat ] && echo "steam-game: thread $pid/${t##*/} $(cut -d' ' -f2,3,14,15 $t/stat 2>/dev/null)"
+            done
+        done | head -n 80
     fi
     sleep 5
 done
