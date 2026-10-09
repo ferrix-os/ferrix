@@ -30,14 +30,21 @@ field() {
 # and a find over steamapps/downloading on the volume never returned. On
 # tmpfs that tells the volume's write path from the rest; the find hung
 # on tmpfs as well, so that walk is no evidence about the volume.
-mkdir -p /tmp/steamapps
-if [ -d $S/steamapps ] && [ ! -L $S/steamapps ]; then
-    cp -a $S/steamapps/. /tmp/steamapps/ && rm -rf $S/steamapps
+# A preinstalled library (`--steam-preinstall`) stays where Steam's
+# libraryfolders.vdf says it is: behind a link to /tmp, Steam said
+# "Staging/Install library folder not found" and went for the runtime.
+if [ "$(field StateFlags)" = 4 ]; then
+    echo "steam-game: the library stays on the volume: the app is preinstalled"
+else
+    mkdir -p /tmp/steamapps
+    if [ -d $S/steamapps ] && [ ! -L $S/steamapps ]; then
+        cp -a $S/steamapps/. /tmp/steamapps/ && rm -rf $S/steamapps
+    fi
+    ln -sfn /tmp/steamapps $S/steamapps
+    chown -R 1000:1000 /tmp/steamapps
+    chown -h 1000:1000 $S/steamapps
+    echo "steam-game: the library is on tmpfs: $(ls -ld $S/steamapps)"
 fi
-ln -sfn /tmp/steamapps $S/steamapps
-chown -R 1000:1000 /tmp/steamapps
-chown -h 1000:1000 $S/steamapps
-echo "steam-game: the library is on tmpfs: $(ls -ld $S/steamapps)"
 until [ -f $log ] && grep -q "RecvMsgClientLogOnResponse() : \[[^]]*\] 'OK'" $log; do sleep 5; done
 echo "steam-game: the client has signed in"
 # The gate judges the store before the game; an install dialog over the
@@ -45,7 +52,13 @@ echo "steam-game: the client has signed in"
 sleep 120
 # What the client says of the install and the start: its console log and
 # its content log, from here on.
-for name in console_log content_log compat_log gameprocess_log; do
+# The compatibility log from its start, less Valve's thousands of
+# per-app mappings: which tool the game gets, and its command prefix.
+( until [ -f $S/logs/compat_log.txt ]; do sleep 2; done
+  tail -n +1 -F $S/logs/compat_log.txt 2>/dev/null \
+      | /data/usr/bin/grep --line-buffered -v -e "Mapping AppID" -e "non-user mapping" -e "Registering tool" \
+      | awk '{ print "steam-game: compat_log: " $0; fflush() }' ) &
+for name in console_log content_log gameprocess_log; do
     ( until [ -f $S/logs/$name.txt ]; do sleep 2; done
       tail -n 0 -F $S/logs/$name.txt 2>/dev/null \
           | awk -v said="steam-game: $name: " '{ print said $0; fflush() }' ) &
