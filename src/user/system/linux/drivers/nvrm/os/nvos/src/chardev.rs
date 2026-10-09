@@ -274,6 +274,35 @@ pub extern "C" fn nvos_chardev_dmabuf_install(id: u64, vmo: u32, cookie: u64, fl
     }
 }
 
+/// A name-only dmabuf of `size` bytes, named by `cookie`, as a new
+/// descriptor in the program request `id` is for: PRIME_HANDLE_TO_FD of a
+/// buffer in video memory (N3b, `docs/NVIDIA.md` §4.4). It has no VMO and
+/// cannot be mapped; only this driver's resolve gives its cookie back.
+/// Answers as [`nvos_chardev_dmabuf_install`].
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_dmabuf_install_name(
+    id: u64,
+    size: u64,
+    cookie: u64,
+    flags: u32,
+) -> i64 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_DMABUF_INSTALL,
+        [
+            control,
+            id as usize,
+            0,
+            cookie as usize,
+            (u64::from(flags) | ferrix_native_abi::types::DMABUF_NAME_ONLY) as usize,
+            size as usize,
+        ],
+    ) {
+        Ok(fd) => i64::try_from(fd).unwrap_or(-9),
+        Err(errno) => i64::from(errno),
+    }
+}
+
 /// The cookie of the dmabuf the waiting program's descriptor `fd` names,
 /// for request `id`, into `cookie`: nvidia-drm's PRIME_FD_TO_HANDLE. 0 only
 /// for one this control made; otherwise a negative errno.

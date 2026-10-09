@@ -379,6 +379,8 @@ fi
 echo "nvidia-gate: vulkaninfo exited $?"
 /bin/vk-offscreen
 echo "nvidia-gate: vk-offscreen exited $?"
+/bin/vk-dmabuf
+echo "nvidia-gate: vk-dmabuf exited $?"
 if [ -x /data/chrome/chrome-headless-shell ]; then
   /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
   echo "nvidia-gate: chrome exited $?"
@@ -391,9 +393,16 @@ exit 16
 /// its Vulkan headers and loader, and run on Ferrix with Debian's loader and
 /// NVIDIA's ICD from the volume; it asks for nothing newer than glibc 2.34.
 fn vk_offscreen(dir: &Path) -> Result<Vec<u8>> {
+    vk_test(dir, "vk-offscreen")
+}
+
+/// `nvrm/test/<name>.c`, built as [`vk_offscreen`] is: `vk-offscreen`, and
+/// `vk-dmabuf`, a block-linear image in video memory shared between two
+/// processes as a name-only dmabuf and its pixels compared (N3b).
+fn vk_test(dir: &Path, name: &str) -> Result<Vec<u8>> {
     let source = crate::paths::workspace_root()
-        .join("src/user/system/linux/drivers/nvrm/test/vk-offscreen.c");
-    let out = dir.join("vk-offscreen");
+        .join(format!("src/user/system/linux/drivers/nvrm/test/{name}.c"));
+    let out = dir.join(name);
     let built = Command::new("cc")
         .args(["-O2", "-Wall", "-Wextra", "-Werror", "-o"])
         .arg(&out)
@@ -546,6 +555,11 @@ fn initramfs_files(dir: &Path) -> Result<Vec<ports::File>> {
         path: "bin/vk-offscreen".to_owned(),
         mode: 0o755,
         content: ports::Content::Bytes(vk_offscreen(dir)?),
+    });
+    files.push(ports::File {
+        path: "bin/vk-dmabuf".to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(vk_test(dir, "vk-dmabuf")?),
     });
     files.push(ports::File {
         path: "bin/busybox".to_owned(),
