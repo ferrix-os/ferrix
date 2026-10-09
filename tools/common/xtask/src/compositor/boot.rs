@@ -535,6 +535,27 @@ pub(super) fn build_parts(
         carried_too.pulsed.as_deref(),
         args.session_user.as_deref(),
     )?;
+    // `FERRIX_VTEST_PROTOCOL` from the host, for hyprix's test-server client
+    // under `--nvidia`: `0` keeps the frames on the socket, which is how
+    // protocol 2's shared memory is measured against it (N3c).
+    if let Some(protocol) = std::env::var("FERRIX_VTEST_PROTOCOL")
+        .ok()
+        .filter(|value| args.nvidia && value.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        for file in &mut carried {
+            if file.path == "etc/ferrix/units/hyprix.service"
+                && let crate::ports::Content::Bytes(bytes) = &mut file.content
+            {
+                let unit = String::from_utf8_lossy(bytes).replacen(
+                    "[Service]\n",
+                    &format!("[Service]\nEnvironment=FERRIX_VTEST_PROTOCOL={protocol}\n"),
+                    1,
+                );
+                *bytes = unit.into_bytes();
+                println!("  n3c: hyprix runs with FERRIX_VTEST_PROTOCOL={protocol}");
+            }
+        }
+    }
     for (path, program) in programs.carried() {
         // The desktop's `reboot` takes the name from init's link to `svc`,
         // since it can pass a board's firmware the word that says where to
