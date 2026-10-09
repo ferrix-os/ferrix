@@ -450,8 +450,10 @@ fn dmabufs(
     let no_transfer = held(Rights::READ.0 | Rights::WRITE.0 | Rights::MAP.0)?;
     let read_only = held(Rights::READ.0 | Rights::TRANSFER.0 | Rights::MAP.0)?;
     side.put(BUFFER, &STAMP)?;
+    // `vmo_write` reads its offset from memory.
+    side.put(DEADLINE, &0_u64.to_ne_bytes())?;
     let _ = side
-        .call(nr::VMO_WRITE, &[reg(vmo), BUFFER, 8, 0])
+        .call(nr::VMO_WRITE, &[reg(vmo), BUFFER, 8, DEADLINE])
         .map_err(|_| "vmo_write failed")?;
 
     let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
