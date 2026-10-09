@@ -75,6 +75,7 @@ pub(crate) fn run(built: &Built) -> Result<Report, &'static str> {
         None => false,
     };
     check_tmp_is_its_own_mount()?;
+    check_tmpfs_io_sleeps()?;
 
     // Twice, measured on the second, for the reason `syscall::check` gives:
     // the heap keeps the last page of a size class it has used, and a single
@@ -105,6 +106,18 @@ pub(crate) fn run(built: &Built) -> Result<Report, &'static str> {
         filled,
         leaked,
     })
+}
+
+/// A tmpfs file's I/O lock waits on the scheduler (F-70): the kernel's store
+/// lends the parker every kernel `SleepLock` uses, never the spinning
+/// default, whose waiter would hold its processor while a write fills or a
+/// truncation shoots down.
+fn check_tmpfs_io_sleeps() -> Result<(), &'static str> {
+    let parker = alloc::format!("{:?}", VmoStorage.parker());
+    if parker != alloc::format!("{:?}", crate::sync::SchedParker) {
+        return Err("tmpfs's store lends a parker that is not the scheduler's");
+    }
+    Ok(())
 }
 
 /// Read a whole file through the namespace.
