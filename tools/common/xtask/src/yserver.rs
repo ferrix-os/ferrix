@@ -75,10 +75,61 @@ pub(crate) fn desktop_config() -> String {
     )
 }
 
+/// [`DESKTOP_SCRIPT`] on the RTX 3060 (`run-compositor --nvidia`), whose
+/// volume has no lavapipe: yserver renders on NVIDIA's Vulkan, and with a
+/// GPU and its render node it offers DRI3 and Present, through which
+/// NVIDIA's libGLX and its Vulkan X11 surfaces hand it finished frames as
+/// dmabufs (docs/NVIDIA.md §4.6). [`DEV_SERVER_PATH`], when the image
+/// carries it, runs in place of the volume's server.
+const NVIDIA_DESKTOP_SCRIPT: &str = r#"export YSERVER_BACKEND=wayland
+export RUST_LOG="${RUST_LOG:-info}" VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/nvidia_icd.json
+unset LD_LIBRARY_PATH
+server=/data/yserver/yserver
+[ -x /yserver-dev/yserver ] && server=/yserver-dev/yserver
+exec /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
+    $server :0 -nolisten tcp > /tmp/yserver.log 2>&1
+"#;
+
+/// Where `FERRIX_YSERVER_DEV`'s server is in the image.
+const DEV_SERVER_PATH: &str = "yserver-dev/yserver";
+
+/// The server `FERRIX_YSERVER_DEV` names on the host, a yserver built from a
+/// fork branch (stripped: the image is in memory), carried to
+/// [`DEV_SERVER_PATH`] for [`NVIDIA_DESKTOP_SCRIPT`] to start in place of
+/// the volume's.
+fn dev_server() -> Option<crate::ports::File> {
+    let path = std::env::var_os("FERRIX_YSERVER_DEV")?;
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            println!(
+                "  yserver: {} in place of the volume's (FERRIX_YSERVER_DEV)",
+                std::path::Path::new(&path).display()
+            );
+            Some(crate::ports::File {
+                path: DEV_SERVER_PATH.to_owned(),
+                mode: 0o755,
+                content: crate::ports::Content::Bytes(bytes),
+            })
+        }
+        Err(error) => {
+            println!("  yserver: FERRIX_YSERVER_DEV unreadable ({error}); the volume's server");
+            None
+        }
+    }
+}
+
 /// What `run-compositor --everything` adds to the archive for yserver:
 /// [`DESKTOP_SCRIPT`], and [`LINKS`] less any path `carried` already has --
 /// Chrome's and the compiler's name the same Debian's paths.
 pub(crate) fn desktop_files(carried: &[crate::ports::File]) -> Vec<crate::ports::File> {
+    desktop_files_on(carried, false)
+}
+
+/// [`desktop_files`], with [`NVIDIA_DESKTOP_SCRIPT`] on the RTX 3060.
+pub(crate) fn desktop_files_on(
+    carried: &[crate::ports::File],
+    nvidia: bool,
+) -> Vec<crate::ports::File> {
     let taken = |path: &str| {
         carried.iter().any(|file| {
             file.path == path
@@ -94,10 +145,16 @@ pub(crate) fn desktop_files(carried: &[crate::ports::File]) -> Vec<crate::ports:
         .filter(|(path, _)| !taken(path))
         .collect();
     let mut files = rustc::files(&links);
+    let script = if nvidia {
+        files.extend(dev_server());
+        NVIDIA_DESKTOP_SCRIPT
+    } else {
+        DESKTOP_SCRIPT
+    };
     files.push(crate::ports::File {
         path: DESKTOP_PATH.to_owned(),
         mode: 0o644,
-        content: crate::ports::Content::Bytes(DESKTOP_SCRIPT.as_bytes().to_vec()),
+        content: crate::ports::Content::Bytes(script.as_bytes().to_vec()),
     });
     files
 }
