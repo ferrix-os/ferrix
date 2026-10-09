@@ -63,7 +63,14 @@ done
   done ) &
 # The account must have the game in its library already (docs/STEAM.md
 # §1): for a game it does not have, steam://install does nothing at all.
-hand steam://install/$app
+# A library preinstalled on the host (`--steam-preinstall`,
+# fetch-steam-preinstall.sh) has the manifest at 4 already: nothing to
+# install, and Steam is not asked to.
+if [ "$(field StateFlags)" = 4 ]; then
+    echo "steam-game: preinstalled: $(field name), build $(field buildid), in $S/steamapps/common/$(field installdir)"
+else
+    hand steam://install/$app
+fi
 asked=$(date +%s)
 told=
 said=

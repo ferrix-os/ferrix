@@ -67,6 +67,37 @@ const YSERVER_SPARE_MIB: u64 = 256;
 /// browser's cache.
 const STEAM_SPARE_MIB: u64 = 4096;
 
+/// `--steam-preinstall`: merge the Steam library
+/// `tools/common/fetch/fetch-steam-preinstall.sh` installed on the host
+/// (Teeworlds and the Steam Linux Runtime by default) into `/data/steam`,
+/// so Steam in the guest finds those apps installed and neither downloads
+/// nor stages them (docs/STEAM.md §7, item 7).
+static STEAM_PREINSTALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set once from the command line, as `crate::fat::set_strip_kernel`.
+pub(crate) fn set_steam_preinstall(on: bool) {
+    STEAM_PREINSTALL.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The preinstalled library's stamp and its tree, beside each other in
+/// `FERRIX_STEAM_PREINSTALL` (default `~/.local/share/ferrix/steam-preinstall`).
+fn steam_preinstall() -> Result<(PathBuf, PathBuf)> {
+    let directory = match std::env::var_os("FERRIX_STEAM_PREINSTALL") {
+        Some(directory) => PathBuf::from(directory),
+        None => crate::paths::volume_directory("steam-preinstall")?,
+    };
+    let stamp = directory.join("steam-preinstall.stamp");
+    let tree = directory.join("tree");
+    if !stamp.is_file() || !tree.join("steam/steamapps").is_dir() {
+        return Err(Error::new(format!(
+            "--steam-preinstall: no library in {}: tools/common/fetch/fetch-steam-preinstall.sh \
+             installs it with steamcmd on this host",
+            directory.display()
+        )));
+    }
+    Ok((stamp, tree))
+}
+
 /// The volume, made or made again from the two trees when it is missing or
 /// older than either of the images they were packed into.
 ///
@@ -274,7 +305,12 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
         + CLAUDE_CODE_SPARE_MIB
         + YSERVER_SPARE_MIB
         + STEAM_SPARE_MIB;
-    Ok((vec![rustc, chrome, steamcmd, claude_code, steam], spare))
+    let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam];
+    // Last, under Steam's tree: only `steam/steamapps`, which no other tree has.
+    if STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
+        sources.push(steam_preinstall()?);
+    }
+    Ok((sources, spare))
 }
 
 /// The image `volume` finds, after running `tools/common/fetch/<script>`

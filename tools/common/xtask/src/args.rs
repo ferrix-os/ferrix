@@ -145,6 +145,10 @@ pub(crate) struct Args {
     /// of the two (`crate::everything`). The network and the hypervisor a
     /// watched boot has already.
     pub(crate) everything: bool,
+    /// `--steam-preinstall`: the everything volume carries the Steam
+    /// library `fetch-steam-preinstall.sh` installed on the host
+    /// (`crate::everything`).
+    pub(crate) steam_preinstall: bool,
     /// `--login`: `run`'s getty asks who is there with `/bin/login`
     /// instead of starting root's shell (`docs/AUTH.md` §6.2), and the image
     /// carries `authd` for it. A person's account with no password chooses
@@ -758,6 +762,7 @@ impl Args {
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
                 "--chrome" | "--login" | "--nvidia" | "--update" => args.switch(&item),
                 "--everything" => args.everything(),
+                "--steam-preinstall" => args.steam_preinstall = true,
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;
                     args.forwards.push(crate::gateway::Forward::parse(&raw)?);
