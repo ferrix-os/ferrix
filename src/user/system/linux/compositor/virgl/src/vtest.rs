@@ -822,7 +822,7 @@ impl Vtest {
         for word in words {
             bytes.extend_from_slice(&word.to_le_bytes());
         }
-        self.stream.write_all(&bytes)
+        send(&mut self.stream, &bytes)
     }
 
     /// Make a resource and answer its number, which is what a stream names
@@ -935,7 +935,7 @@ impl Vtest {
             1,
             len,
         ])?;
-        self.stream.write_all(data)
+        send(&mut self.stream, data)
     }
 
     /// [`Vtest::put`] through shared memory: the rows written into the
@@ -1037,10 +1037,10 @@ impl Vtest {
             let target = into
                 .get_mut(..len as usize)
                 .ok_or_else(|| io::Error::other("pixels too short for their region"))?;
-            return self.stream.read_exact(target);
+            return receive(&mut self.stream, target);
         }
         let mut data = vec![0_u8; len as usize];
-        self.stream.read_exact(&mut data)?;
+        receive(&mut self.stream, &mut data)?;
         copy_rows(&data, row, into, stride, row, region.height as usize)
     }
 
@@ -1101,6 +1101,35 @@ const fn four_bytes(format: u32) -> bool {
         format,
         pipe::FORMAT_B8G8R8A8_UNORM | pipe::FORMAT_B8G8R8X8_UNORM | pipe::FORMAT_R8G8B8A8_UNORM
     )
+}
+
+/// The most one write or read on the socket moves: a 1080p frame through
+/// the socket (protocol 0) is 8 MB, and Ferrix answered such a transfer with
+/// `ENOMEM` on the RTX 3060 (N3c), so the bytes go in pieces and an error
+/// says how many were asked for.
+const PIECE: usize = 256 << 10;
+
+/// Write all of `bytes`, [`PIECE`] at a time.
+fn send(stream: &mut UnixStream, bytes: &[u8]) -> io::Result<()> {
+    bytes
+        .chunks(PIECE)
+        .try_for_each(|piece| stream.write_all(piece))
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("vtest: writing {} bytes: {error}", bytes.len()),
+            )
+        })
+}
+
+/// Fill `data`, [`PIECE`] at a time.
+fn receive(stream: &mut UnixStream, data: &mut [u8]) -> io::Result<()> {
+    let len = data.len();
+    data.chunks_mut(PIECE)
+        .try_for_each(|piece| stream.read_exact(piece))
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("vtest: reading {len} bytes: {error}"))
+        })
 }
 
 impl Device for Vtest {
