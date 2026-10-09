@@ -520,7 +520,7 @@ sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | head -n 30
 wait $cube
 echo "dri3: vkcube exited $?"
 sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | tail -n 20
-grep -iE 'dri3|present|pixmapfrom|syncobj|fence|import' /tmp/yserver.log | tail -n 40 | sed 's/^/dri3: yserver: /'
+grep -iE 'dri3|present|pixmap|syncobj|fence|import|error|warn' /tmp/yserver.log | tail -n 60 | sed 's/^/dri3: yserver: /'
 "#;
 
 /// Where [`NVIDIA_WATCH`] is in the image.
