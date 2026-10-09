@@ -371,6 +371,9 @@ dependencies = [
 [[package]]
 name = "compositor-virgl"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "compositor-vkbd"

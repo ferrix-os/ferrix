@@ -519,14 +519,43 @@ pub(super) fn build_parts(
     // `--instance` is what puts the control socket where `hyprctl` looks for
     // it.
     let config_path = format!("/{CONFIG_PATH}");
+    let mut arguments = vec!["--config", config_path.as_str(), "--instance", INSTANCE];
+    // `--nvidia`: the frames are drawn on the 3060, by virglrenderer's test
+    // server on NVIDIA's EGL, and read back for nvrm's copying card
+    // (docs/NVIDIA.md §4.6, N3c). The card's render node speaks NVIDIA's
+    // ioctls, not virgl's, so `auto` would draw in software.
+    if args.nvidia {
+        arguments.extend(["--renderer", "vtest"]);
+    }
     let mut carried = crate::init::desktop_files(
         arch,
         &read(&programs.hyprix)?,
-        &["--config", &config_path, "--instance", INSTANCE],
+        &arguments,
         carried_too.zinc.is_some(),
         carried_too.pulsed.as_deref(),
         args.session_user.as_deref(),
     )?;
+    // `FERRIX_VTEST_PROTOCOL` from the host, for hyprix's test-server client
+    // under `--nvidia`: `0` keeps the frames on the socket, which is how
+    // protocol 2's shared memory is measured against it (N3c).
+    if let Some(protocol) = std::env::var("FERRIX_VTEST_PROTOCOL")
+        .ok()
+        .filter(|value| args.nvidia && value.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        for file in &mut carried {
+            if file.path == "etc/ferrix/units/hyprix.service"
+                && let crate::ports::Content::Bytes(bytes) = &mut file.content
+            {
+                let unit = String::from_utf8_lossy(bytes).replacen(
+                    "[Service]\n",
+                    &format!("[Service]\nEnvironment=FERRIX_VTEST_PROTOCOL={protocol}\n"),
+                    1,
+                );
+                *bytes = unit.into_bytes();
+                println!("  n3c: hyprix runs with FERRIX_VTEST_PROTOCOL={protocol}");
+            }
+        }
+    }
     for (path, program) in programs.carried() {
         // The desktop's `reboot` takes the name from init's link to `svc`,
         // since it can pass a board's firmware the word that says where to

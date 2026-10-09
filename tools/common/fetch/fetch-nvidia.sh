@@ -110,6 +110,17 @@ EXTRA_DEBS=(
     "pool/main/libd/libdrm/libdrm2_2.4.124-2_amd64.deb fe2276901c7cd7b8079de63072d37fe1cbeb4eb001a3bc1f1d662ad89aa0890e"
     "pool/main/libd/libdrm/libdrm-common_2.4.124-2_all.deb 9a8a6c65c165e9964f106fb4ac710959b5d33e0790227e3ab6b27c4742d1254a"
     "pool/main/w/wayland/libwayland-server0_1.23.1-3_amd64.deb 2967212bd582e0dffca443fdc44f4c660e7368d41f7ee3a7f6314e0c3abfe9ea"
+    # virglrenderer's test server and what it loads, for hyprix drawing its
+    # frames on the 3060 through NVIDIA's EGL (docs/NVIDIA.md §4.6, N3c):
+    # hyprix's `--renderer vtest` starts it. libgbm1 and libexpat1 are the
+    # builds Chrome's tree pins.
+    "pool/main/v/virglrenderer/virgl-server_1.1.0-2_amd64.deb 91e3161288f9712c5897a99ce9da1b37b9ac088d3645779cf5ec4759e66825f1"
+    "pool/main/v/virglrenderer/libvirglrenderer1_1.1.0-2_amd64.deb e27da1f8b54538b2c7b4dfe112811d09bc79c8d2faf39b3e8300f1b26f5dbd48"
+    "pool/main/libe/libepoxy/libepoxy0_1.5.10-2_amd64.deb 4c4c8024f2175086de65bca9fdc3fbb967f2863ebf249d489c66d0c8103dd3a3"
+    "pool/main/libv/libva/libva2_2.22.0-3_amd64.deb b76bdd330de47a826698aaed10f53435b703e9a7d4415dd68269c97709f46a9b"
+    "pool/main/libv/libva/libva-drm2_2.22.0-3_amd64.deb 5dce5007ddc0ce87a61db4d71476ce1a5a135737b5185ce2e8b7067342fcafc6"
+    "pool/main/m/mesa/libgbm1_25.0.7-2+deb13u1_amd64.deb 31fb6d76b9ceaf13848fa617df53f85f62626b4fe7464a93811c720af6d5f2dd"
+    "pool/main/e/expat/libexpat1_2.8.3-1~deb13u1_amd64.deb 38abe0e710a07688e9c149d74536e67cfee0364bdb64dd6d644c32a1cfad389f"
 )
 
 # §2.2's figures for the two objects, from the feasibility pass.
