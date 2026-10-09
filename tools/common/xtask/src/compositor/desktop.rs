@@ -474,7 +474,10 @@ pub(super) fn with_steam(config: String, args: &Args, arch: Arch) -> String {
     // On the 3060 nobody watches over VNC: the serial log says which
     // windows hyprix lists, and on which monitor.
     let watch = if args.nvidia {
-        format!("exec-once = /bin/busybox sh /{NVIDIA_WATCH_PATH}\n")
+        format!(
+            "exec-once = /bin/busybox sh /{NVIDIA_WATCH_PATH}\n\
+             exec-once = /bin/busybox sh /{NVIDIA_WATCH_PATH} teeworlds\n"
+        )
     } else {
         String::new()
     };
@@ -487,7 +490,24 @@ const NVIDIA_WATCH_PATH: &str = "steam/nvidia-watch.sh";
 /// `run-compositor --nvidia --everything`'s watcher: every change in the
 /// windows hyprix lists, with their monitors, and Steam's log, to the
 /// console the run's serial log follows.
-const NVIDIA_WATCH: &str = r#"seen=
+const NVIDIA_WATCH: &str = r#"if [ "$1" = teeworlds ]; then
+    # FERRIX_NVIDIA_TEEWORLDS's bundle, when the volume has it: a match on
+    # dm1, the client fullscreen on yserver's :0, on Mesa's GL.
+    [ -f /data/tw/tw.sh ] || exit 0
+    while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 1; done
+    sleep 5
+    rm -rf /tmp/tw && cp -r /data/tw /tmp/tw
+    export __GLX_VENDOR_LIBRARY_NAME=mesa
+    (cd /tmp/tw/tw && LD_LIBRARY_PATH=/tmp/tw/lib:/usr/lib/x86_64-linux-gnu HOME=/home/ferrix \
+        ./teeworlds_srv "sv_map dm1" 2>&1 | sed 's/^/nvdesk: tw-srv: /' | head -n 40) &
+    sleep 3
+    echo "nvdesk: teeworlds: starting the client"
+    /bin/busybox sh /tmp/tw/tw.sh "cl_showfps 1" "gfx_fullscreen 1" "connect 127.0.0.1:8303" 2>&1 \
+        | sed 's/^/nvdesk: tw: /' | head -n 200
+    echo "nvdesk: teeworlds: client ended"
+    exit 0
+fi
+seen=
 lines=0
 while :; do
     clients=$(/bin/hyprctl clients 2>/dev/null | grep -iE 'title|monitor|class' | tr '\n' ' ')
