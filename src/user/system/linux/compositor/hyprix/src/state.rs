@@ -3072,14 +3072,13 @@ fn gpu_for(
 ) -> Result<Option<crate::frame::Gpu>, String> {
     use crate::options::Renderer;
 
-    let mut notes: Option<Notes> = None;
     let device: Result<Box<dyn compositor_virgl::Device>, String> = match renderer {
         Renderer::Software => return Ok(None),
         Renderer::Vtest => compositor_virgl::vtest::Vtest::start(&format!("hyprix-{screen}"))
             .map_err(|error| error.to_string())
             .and_then(|server| server.ok_or_else(|| "no virgl_test_server".to_owned()))
             .map(|mut server| {
-                notes = scanouts_for(&mut server);
+                scanouts_for(&mut server);
                 Box::new(server) as Box<dyn compositor_virgl::Device>
             }),
         Renderer::Auto | Renderer::Gpu => render_node(),
@@ -3088,13 +3087,6 @@ fn gpu_for(
         compositor_render::gpu::Canvas::new(device, width, height)
             .map_err(|error| error.to_string())
     });
-    // What became of the frame's buffer: the driver's own, or why not.
-    for line in notes
-        .iter()
-        .flat_map(|notes| notes.borrow_mut().split_off(0))
-    {
-        report(&format!("hyprix: {screen}: {line}"));
-    }
     match made {
         Ok(canvas) => {
             report(&format!("hyprix: {screen}: frames are drawn on the GPU"));
@@ -3148,23 +3140,18 @@ fn adopt(
     }
 }
 
-/// The lines a scanout source keeps for the log.
-type Notes = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
-
 /// Give the test server nvidia-drm's buffers to draw frames into, where
 /// there is an nvidia-drm render node (`crate::scanouts`).
 #[cfg(target_os = "linux")]
-fn scanouts_for(server: &mut compositor_virgl::vtest::Vtest) -> Option<Notes> {
-    let (source, notes) = crate::scanouts::NvidiaScanouts::open()?;
-    server.set_scanout_source(Box::new(source));
-    Some(notes)
+fn scanouts_for(server: &mut compositor_virgl::vtest::Vtest) {
+    if let Some(source) = crate::scanouts::NvidiaScanouts::open() {
+        server.set_scanout_source(Box::new(source));
+    }
 }
 
 /// The same, where there is no `/dev/dri`.
 #[cfg(not(target_os = "linux"))]
-fn scanouts_for(_server: &mut compositor_virgl::vtest::Vtest) -> Option<Notes> {
-    None
-}
+fn scanouts_for(_server: &mut compositor_virgl::vtest::Vtest) {}
 
 /// The card's render node, when its driver speaks virgl.
 #[cfg(target_os = "linux")]
