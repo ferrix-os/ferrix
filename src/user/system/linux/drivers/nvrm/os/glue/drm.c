@@ -943,8 +943,9 @@ static int drm_fd_to_handle(struct drm_file *file, NvU64 request, NvU64 arg)
 
 static int drm_ioctl_one(void *opened, NvU64 request, NvU32 cmd, NvU64 arg);
 
-/* Bring-up aid (N3b): say every ioctl and its answer. */
-int nvrm_trace_drm = 1;
+/* Bring-up aid (N3b): say every ioctl and its answer, and every fence.
+ * Off: a line a frame per client on the serial console. */
+int nvrm_trace_drm = 0;
 
 int nvrm_drm_ioctl(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
 {

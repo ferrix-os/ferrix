@@ -84,10 +84,11 @@ static void count_say(void *unused)
  * long: nothing is taken from the kernel meanwhile. A request said once is
  * said again when it is answered after all.
  *
- * One switch, nvrm_diag, which os/glue/drm.c reads too. On in this branch;
- * to be 0 before it lands.
+ * One switch, nvrm_diag, which os/glue/drm.c reads too, and which turns
+ * nvos's table of lock holders and sleepers on (nvos_lock_watch). Off: set
+ * it to 1 and rebuild to look into a stall.
  * ---------------------------------------------------------------------- */
-int nvrm_diag = 1;
+int nvrm_diag = 0;
 
 #define DIAG_SLOTS      128
 #define DIAG_OLD_NS     (5ULL * 1000000000ULL)
