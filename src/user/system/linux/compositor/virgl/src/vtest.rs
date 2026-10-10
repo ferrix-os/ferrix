@@ -50,7 +50,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::{Device, Region, Texture, pipe};
+use crate::{Device, Layout, Region, Texture, pipe};
 
 /// The server's name, looked for on `PATH`.
 const SERVER: &str = "virgl_test_server";
@@ -80,8 +80,26 @@ const GET_PARAM: u32 = 15;
 /// said it may be.
 const FERRIX_RESOURCE_IMPORT_FD: u32 = 64;
 /// The `VCMD_GET_PARAM` a patched server answers valid; a stock one answers
-/// any parameter it does not know "not valid".
+/// any parameter it does not know "not valid". Its value is the import's
+/// version: 1 the import alone, 2 with [`FERRIX_DMABUF_MODIFIERS`].
 const PARAM_FERRIX_IMPORT_FD: u32 = 0x4658_0001;
+/// Ferrix's own command (the second patch): the modifiers the server's EGL
+/// imports a format with, sent only to a server whose
+/// [`PARAM_FERRIX_IMPORT_FD`] is 2 or more.
+const FERRIX_DMABUF_MODIFIERS: u32 = 65;
+/// The most modifiers one answer carries
+/// (`VCMD_FERRIX_DMABUF_MODIFIERS_MAX`); an answer saying more is not one.
+const DMABUF_MODIFIERS_MAX: u32 = 64;
+
+/// A modifier the server's EGL says it imports a format with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Modifier {
+    /// The DRM format modifier.
+    pub value: u64,
+    /// Whether EGL imports it for external textures only, which the
+    /// server's import -- a 2D texture -- cannot use.
+    pub external_only: bool,
+}
 
 /// The version asked for. Version 3 has the server number resources, which
 /// buys nothing here, so this stops at the one that brought shared memory.
@@ -476,8 +494,9 @@ pub struct Vtest {
     unread: HashSet<u32>,
     /// Where a frame's buffers come from, if anywhere.
     scanouts: Option<Box<dyn ScanoutSource>>,
-    /// Whether the server takes [`FERRIX_RESOURCE_IMPORT_FD`], once asked.
-    importable: Option<bool>,
+    /// The version of the server's [`FERRIX_RESOURCE_IMPORT_FD`], once asked:
+    /// 0 for a server without it.
+    import_version: Option<u32>,
     /// The textures whose storage is a [`Scanout`], with it.
     imported: HashMap<u32, Scanout>,
     /// Reads of imported textures so far, which picks the ones checked
@@ -575,7 +594,7 @@ impl Vtest {
             shared: HashMap::new(),
             unread: HashSet::new(),
             scanouts: None,
-            importable: None,
+            import_version: None,
             imported: HashMap::new(),
             imported_reads: 0,
             import_failure: None,
@@ -685,7 +704,12 @@ impl Vtest {
     ///
     /// The socket's.
     pub fn can_import(&mut self) -> io::Result<bool> {
-        if let Some(known) = self.importable {
+        Ok(self.import_version()? >= 1)
+    }
+
+    /// The version of the server's dmabuf import: 0 for a stock server.
+    fn import_version(&mut self) -> io::Result<u32> {
+        if let Some(known) = self.import_version {
             return Ok(known);
         }
         self.header(1, GET_PARAM)?;
@@ -694,9 +718,43 @@ impl Vtest {
         if len != 2 || command != GET_PARAM {
             return Err(io::Error::other("the server's parameter answer is not one"));
         }
-        let known = valid != 0 && value >= 1;
-        self.importable = Some(known);
+        let known = if valid == 0 { 0 } else { value };
+        self.import_version = Some(known);
         Ok(known)
+    }
+
+    /// The modifiers the server's EGL imports the DRM format `fourcc` with
+    /// (`EGL_EXT_image_dma_buf_import_modifiers`), as it reports them:
+    /// what a compositor may offer its clients for buffers this server is
+    /// to sample. Empty for a server that cannot say -- a stock one, the
+    /// first patch alone, an EGL without the extension -- and nothing is
+    /// sent to one that does not know the command.
+    ///
+    /// # Errors
+    ///
+    /// The socket's; an answer that is not one.
+    pub fn dmabuf_modifiers(&mut self, fourcc: u32) -> io::Result<Vec<Modifier>> {
+        if self.import_version()? < 2 {
+            return Ok(Vec::new());
+        }
+        self.header(1, FERRIX_DMABUF_MODIFIERS)?;
+        self.words(&[fourcc])?;
+        let [len, command, count] = self.reply_words::<3>()?;
+        if command != FERRIX_DMABUF_MODIFIERS
+            || count > DMABUF_MODIFIERS_MAX
+            || len != 1 + 3 * count
+        {
+            return Err(io::Error::other("the server's modifier answer is not one"));
+        }
+        let mut modifiers = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let [low, high, external_only] = self.reply_words::<3>()?;
+            modifiers.push(Modifier {
+                value: (u64::from(high) << 32) | u64::from(low),
+                external_only: external_only != 0,
+            });
+        }
+        Ok(modifiers)
     }
 
     /// Make a `width` x `height` texture whose storage is the dmabuf `fd`,
@@ -716,15 +774,43 @@ impl Vtest {
         fd: std::os::fd::BorrowedFd<'_>,
         format: u32,
         bind: u32,
-        (width, height): (u32, u32),
+        size: (u32, u32),
         stride: u32,
         offset: u32,
         modifier: u64,
     ) -> io::Result<u32> {
+        let layout = Layout {
+            width: size.0,
+            height: size.1,
+            stride,
+            offset,
+            modifier,
+        };
+        self.import_as(fd, format, bind, &layout, true)
+    }
+
+    /// [`Vtest::import`], with shared memory for transfers only when
+    /// `moved`: a client's buffer is sampled where it lies and no pixel is
+    /// ever moved to or from it.
+    fn import_as(
+        &mut self,
+        fd: std::os::fd::BorrowedFd<'_>,
+        format: u32,
+        bind: u32,
+        layout: &Layout,
+        moved: bool,
+    ) -> io::Result<u32> {
+        let Layout {
+            width,
+            height,
+            stride,
+            offset,
+            modifier,
+        } = *layout;
         if !self.can_import()? {
             return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
         }
-        let shared = self.version >= SHARED_MEMORY && four_bytes(format);
+        let shared = moved && self.version >= SHARED_MEMORY && four_bytes(format);
         let size = if shared {
             width
                 .checked_mul(height)
@@ -1334,6 +1420,28 @@ impl Device for Vtest {
             .get(&resource)
             .map(|scanout| scanout.fd.try_clone())
             .transpose()
+    }
+
+    /// A client's buffer as a texture of the server's EGL, where the server
+    /// is Ferrix's patched one; `None` from a stock server, whose answer is
+    /// the upload. Its alpha is the view's to read or not, so one format
+    /// does for both of a client's.
+    fn import(
+        &mut self,
+        fd: std::os::fd::BorrowedFd<'_>,
+        layout: &Layout,
+    ) -> io::Result<Option<u32>> {
+        if !self.can_import()? {
+            return Ok(None);
+        }
+        self.import_as(
+            fd,
+            pipe::FORMAT_B8G8R8A8_UNORM,
+            pipe::BIND_SAMPLER_VIEW,
+            layout,
+            false,
+        )
+        .map(Some)
     }
 }
 

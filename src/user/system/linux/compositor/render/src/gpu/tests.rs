@@ -484,3 +484,176 @@ fn a_waiting_draw_keeps_the_pixels_it_was_written_with() {
     assert_eq!(at(8, 8), Some(vec![0x00, 0x00, 0xff]), "the first draw");
     assert_eq!(at(40, 8), Some(vec![0xff, 0x00, 0x00]), "the second");
 }
+
+/// A part of an imported buffer is drawn by laying the whole buffer where
+/// its part comes out over the part's rectangle.
+#[test]
+fn a_part_of_an_imported_buffer_spreads_the_whole_around_it() {
+    use std::os::fd::AsFd;
+    let file = std::fs::File::open("/dev/null").expect("a descriptor");
+    let whole = Surface::without_pixels(100, 80, 400, Format::Argb8888)
+        .expect("a surface")
+        .on_device(file.as_fd(), 1);
+    let image = |width, height| super::Image {
+        resource: 1,
+        surface: 0,
+        view: 0,
+        opaque_view: 0,
+        width,
+        height,
+    };
+    let across = Rect::new(10, 20, 100, 80);
+    // All of its buffer: where it was put.
+    assert_eq!(super::spread(across, &whole, image(100, 80)), across);
+    // The 60x40 part from (30, 20), pixel for pixel at (10, 20): the whole
+    // begins 30 to the left and 20 above.
+    let part = whole.cropped(30, 20, 60, 40).expect("a part");
+    assert_eq!(
+        super::spread(Rect::new(10, 20, 60, 40), &part, image(100, 80)),
+        Rect::new(-20, 0, 100, 80)
+    );
+    // Drawn at twice the size, so is everything around it.
+    assert_eq!(
+        super::spread(Rect::new(10, 20, 120, 80), &part, image(100, 80)),
+        Rect::new(-50, -20, 200, 160)
+    );
+    // An image that is not the buffer -- an upload of the part -- is the
+    // part's own rectangle.
+    assert_eq!(
+        super::spread(Rect::new(10, 20, 60, 40), &part, image(60, 40)),
+        Rect::new(10, 20, 60, 40)
+    );
+}
+
+/// A buffer no processor can read, on a device that imports nothing (a
+/// stock test server): nothing is drawn for it and nothing has failed, so
+/// the screen goes on being drawn on the GPU.
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_buffer_without_pixels_that_is_not_imported_draws_nothing() {
+    use std::os::fd::AsFd;
+    let Some(mut server) = server("unread") else {
+        return;
+    };
+    if server.can_import().expect("asked") {
+        eprintln!("unread: the server on PATH is a patched one; skipped");
+        return;
+    }
+    let (wide, tall) = (64, 32);
+    let mut gpu = Canvas::new(server, wide, tall).expect("a GPU canvas");
+    let whole = Damage::full(wide, tall);
+    Painter::clear(&mut gpu, crate::Color(0xff20_4060), &whole);
+    let file = std::fs::File::open("/dev/null").expect("a descriptor");
+    let surface = Surface::without_pixels(16, 16, 64, Format::Argb8888)
+        .expect("a surface")
+        .named(3)
+        .on_device(file.as_fd(), 5);
+    assert!(!gpu.imports(&surface));
+    Painter::composite(&mut gpu, &surface, Rect::new(0, 0, 16, 16), &whole);
+    let part = surface.cropped(4, 4, 8, 8).expect("a part");
+    Painter::composite(&mut gpu, &part, Rect::new(32, 0, 8, 8), &whole);
+    gpu.finish().expect("nothing failed");
+    let drawn = gpu
+        .read(Rect::new(0, 0, wide.into(), 1))
+        .expect("read back");
+    for pixel in drawn.chunks_exact(4) {
+        assert_eq!(pixel.get(..3), Some(&[0x60, 0x40, 0x20][..]), "the clear");
+    }
+
+    // The software painter draws nothing for it either.
+    let mut software = crate::Canvas::new(wide, tall).expect("a canvas");
+    software.clear(crate::Color(0xff20_4060), &whole);
+    let before = software.data().to_vec();
+    software.composite(&surface, Rect::new(0, 0, 16, 16), &whole);
+    software.composite(&part, Rect::new(32, 0, 8, 8), &whole);
+    assert!(software.data() == before.as_slice());
+}
+
+/// A device that makes whatever it is asked for and refuses every import,
+/// counting how often it was asked.
+#[derive(Debug, Default)]
+struct Refusing {
+    made: u32,
+    asked: u32,
+}
+
+impl compositor_virgl::Device for Refusing {
+    fn texture(&mut self, _texture: compositor_virgl::Texture) -> std::io::Result<u32> {
+        self.made += 1;
+        Ok(self.made)
+    }
+
+    fn buffer(&mut self, _bytes: u32) -> std::io::Result<u32> {
+        self.made += 1;
+        Ok(self.made)
+    }
+
+    fn upload(
+        &mut self,
+        _resource: u32,
+        _region: compositor_virgl::Region,
+        _stride: u32,
+        _data: &[u8],
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn submit(&mut self, _words: &[u32]) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn read(
+        &mut self,
+        _resource: u32,
+        region: compositor_virgl::Region,
+    ) -> std::io::Result<Vec<u8>> {
+        Ok(vec![0; (region.width * region.height * 4) as usize])
+    }
+
+    fn release(&mut self, _resource: u32) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn import(
+        &mut self,
+        _fd: std::os::fd::BorrowedFd<'_>,
+        layout: &compositor_virgl::Layout,
+    ) -> std::io::Result<Option<u32>> {
+        self.asked += 1;
+        // What the painter says of the buffer is the whole buffer's, with
+        // the layout its client gave.
+        assert_eq!((layout.width, layout.height, layout.stride), (16, 16, 64));
+        assert_eq!((layout.offset, layout.modifier), (8, 0x0300_0000_0060_6014));
+        Err(std::io::Error::from_raw_os_error(5))
+    }
+}
+
+/// A buffer the device refused is not offered to it again frame after
+/// frame, whole or in part: once asked, the answer stands, nothing is drawn
+/// for it, and no frame fails.
+#[test]
+fn a_refused_import_is_asked_once() {
+    use std::os::fd::AsFd;
+    let mut gpu = Canvas::new(Refusing::default(), 64, 32).expect("a GPU canvas");
+    let whole = Damage::full(64, 32);
+    let file = std::fs::File::open("/dev/null").expect("a descriptor");
+    let surface = Surface::without_pixels(16, 16, 64, Format::Argb8888)
+        .expect("a surface")
+        .named(3)
+        .on_device(file.as_fd(), 5)
+        .laid_out(8, 0x0300_0000_0060_6014);
+    assert!(!gpu.imports(&surface));
+    for _ in 0..3 {
+        Painter::composite(&mut gpu, &surface, Rect::new(0, 0, 16, 16), &whole);
+        let part = surface.cropped(4, 4, 8, 8).expect("a part");
+        Painter::composite(&mut gpu, &part, Rect::new(32, 0, 8, 8), &whole);
+        gpu.finish().expect("nothing failed");
+    }
+    assert_eq!(gpu.device().asked, 1);
+    // Another buffer is another question.
+    let other = surface
+        .on_device(file.as_fd(), 6)
+        .laid_out(8, 0x0300_0000_0060_6014);
+    assert!(!gpu.imports(&other));
+    assert_eq!(gpu.device().asked, 2);
+}
