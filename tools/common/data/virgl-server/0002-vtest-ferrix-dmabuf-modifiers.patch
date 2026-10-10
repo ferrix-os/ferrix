@@ -1,0 +1,231 @@
+--- a/src/virglrenderer.c
++++ b/src/virglrenderer.c
+@@ -169,6 +169,12 @@
+    return vrend_winsys_ferrix_can_import_dmabuf();
+ }
+ 
++int virgl_renderer_ferrix_dmabuf_modifiers(uint32_t fourcc, int max, uint64_t *modifiers,
++                                           uint32_t *external_only)
++{
++   return vrend_winsys_ferrix_dmabuf_modifiers(fourcc, max, modifiers, external_only);
++}
++
+ void virgl_renderer_resource_set_priv(uint32_t res_handle, void *priv)
+ {
+    struct virgl_resource *res = virgl_resource_lookup(res_handle);
+--- a/src/virglrenderer.h
++++ b/src/virglrenderer.h
+@@ -287,6 +287,14 @@
+                                                      uint64_t modifier);
+ /* Ferrix: whether virgl_renderer_ferrix_import_dmabuf can work here. */
+ VIRGL_EXPORT bool virgl_renderer_ferrix_can_import_dmabuf(void);
++/*
++ * Ferrix: the modifiers virgl_renderer_ferrix_import_dmabuf can be given for
++ * `fourcc`, as the renderer's EGL display reports them, at most `max` and 64,
++ * each with whether it is for external textures only. How many.
++ */
++VIRGL_EXPORT int virgl_renderer_ferrix_dmabuf_modifiers(uint32_t fourcc, int max,
++                                                        uint64_t *modifiers,
++                                                        uint32_t *external_only);
+ VIRGL_EXPORT void virgl_renderer_resource_unref(uint32_t res_handle);
+ 
+ VIRGL_EXPORT void virgl_renderer_resource_set_priv(uint32_t res_handle, void *priv);
+--- a/src/vrend/vrend_winsys.c
++++ b/src/vrend/vrend_winsys.c
+@@ -276,6 +276,19 @@
+ #endif
+ }
+ 
++int vrend_winsys_ferrix_dmabuf_modifiers(uint32_t fourcc, int max, uint64_t *modifiers,
++                                         uint32_t *external_only)
++{
++#ifdef ENABLE_GBM
++   if (!egl)
++      return 0;
++   return virgl_egl_ferrix_dmabuf_modifiers(egl, fourcc, max, modifiers, external_only);
++#else
++   (void)fourcc; (void)max; (void)modifiers; (void)external_only;
++   return 0;
++#endif
++}
++
+ int vrend_winsys_get_fd_for_texture2(uint32_t tex_id, int *fd, int *stride, int *offset)
+ {
+ #ifdef ENABLE_GBM
+--- a/src/vrend/vrend_winsys_egl.c
++++ b/src/vrend/vrend_winsys_egl.c
+@@ -777,6 +777,29 @@
+    return has_bit(egl->extension_bits, EGL_EXT_IMAGE_DMA_BUF_IMPORT);
+ }
+ 
++int virgl_egl_ferrix_dmabuf_modifiers(struct virgl_egl *egl, uint32_t fourcc, int max,
++                                      uint64_t *modifiers, uint32_t *external_only)
++{
++   EGLuint64KHR found[64];
++   EGLBoolean external[64];
++   EGLint count = 0;
++
++   if (!has_bit(egl->extension_bits, EGL_EXT_IMAGE_DMA_BUF_IMPORT_MODIFIERS))
++      return 0;
++   if (max > 64)
++      max = 64;
++   if (max <= 0 ||
++       !eglQueryDmaBufModifiersEXT(egl->egl_display, (EGLint)fourcc, max, found, external, &count))
++      return 0;
++   if (count > max)
++      count = max;
++   for (EGLint i = 0; i < count; i++) {
++      modifiers[i] = found[i];
++      external_only[i] = external[i] ? 1 : 0;
++   }
++   return count;
++}
++
+ bool virgl_has_egl_khr_gl_colorspace(struct virgl_egl *egl)
+ {
+    return has_bit(egl->extension_bits, EGL_KHR_GL_COLORSPACE);
+--- a/src/vrend/vrend_winsys_egl.h
++++ b/src/vrend/vrend_winsys_egl.h
+@@ -63,6 +63,14 @@
+ 
+ /* Ferrix: whether the display imports dmabufs (EGL_EXT_image_dma_buf_import). */
+ bool virgl_egl_ferrix_has_dmabuf_import(struct virgl_egl *egl);
++/*
++ * Ferrix: the modifiers the display imports `fourcc` with
++ * (EGL_EXT_image_dma_buf_import_modifiers), at most `max` and 64 of them,
++ * each with whether it is for external textures only. How many; 0 without
++ * the extension.
++ */
++int virgl_egl_ferrix_dmabuf_modifiers(struct virgl_egl *egl, uint32_t fourcc, int max,
++                                      uint64_t *modifiers, uint32_t *external_only);
+ 
+ #ifdef ENABLE_GBM
+ int virgl_egl_get_attrs_for_texture(struct virgl_egl *egl, uint32_t tex_id, uint32_t format,
+--- a/src/vrend/vrend_winsys.h
++++ b/src/vrend/vrend_winsys.h
+@@ -70,6 +70,8 @@
+                                             uint32_t offset);
+ void vrend_winsys_ferrix_image_destroy(void *image);
+ bool vrend_winsys_ferrix_can_import_dmabuf(void);
++int vrend_winsys_ferrix_dmabuf_modifiers(uint32_t fourcc, int max, uint64_t *modifiers,
++                                         uint32_t *external_only);
+ 
+ uint32_t vrend_winsys_query_video_memory(void);
+ bool vrend_winsys_different_gpu(void);
+--- a/vtest/vtest.h
++++ b/vtest/vtest.h
+@@ -113,6 +113,7 @@
+ int vtest_drm_sync_transfer(uint32_t length_dw);
+ int vtest_resource_export_fd(uint32_t length_dw);
+ int vtest_ferrix_resource_import_fd(uint32_t length_dw);
++int vtest_ferrix_dmabuf_modifiers(uint32_t length_dw);
+ 
+ void vtest_set_max_length(uint32_t length);
+ 
+--- a/vtest/vtest_protocol.h
++++ b/vtest/vtest_protocol.h
+@@ -103,6 +103,13 @@
+  * connection.
+  */
+ #define VCMD_FERRIX_RESOURCE_IMPORT_FD 64
++/*
++ * Ferrix's own: the modifiers VCMD_FERRIX_RESOURCE_IMPORT_FD takes for a
++ * format, as the server's EGL reports them
++ * (EGL_EXT_image_dma_buf_import_modifiers). Only for a server whose
++ * VCMD_PARAM_FERRIX_IMPORT_FD value is 2 or more.
++ */
++#define VCMD_FERRIX_DMABUF_MODIFIERS 65
+ 
+ #define VCMD_RES_CREATE_SIZE 10
+ #define VCMD_RES_CREATE_RES_HANDLE 0 /* must be 0 since protocol version 3 */
+@@ -173,7 +180,10 @@
+ enum vcmd_param  {
+    VCMD_PARAM_MAX_TIMELINE_COUNT = 1,
+    VCMD_PARAM_HAS_TIMELINE_SYNCOBJ = 2,
+-   /* Ferrix: VCMD_FERRIX_RESOURCE_IMPORT_FD, its version in the value. */
++   /*
++    * Ferrix: VCMD_FERRIX_RESOURCE_IMPORT_FD, its version in the value: 1 the
++    * import alone, 2 with VCMD_FERRIX_DMABUF_MODIFIERS.
++    */
+    VCMD_PARAM_FERRIX_IMPORT_FD = 0x46580001,
+ };
+ #define VCMD_GET_PARAM_SIZE 1
+@@ -387,4 +397,15 @@
+ #define VCMD_FERRIX_IMPORT_FD_DATA_SIZE 9
+ /* rsp fd */
+ 
++/*
++ * VCMD_FERRIX_DMABUF_MODIFIERS: one word, the DRM format code. The answer
++ * is a header and 1 + 3n words: n, at most
++ * VCMD_FERRIX_DMABUF_MODIFIERS_MAX, then for each modifier its low word, its
++ * high word, and 1 when EGL imports it for external textures only (which
++ * the import, a 2D texture, cannot use) or 0.
++ */
++#define VCMD_FERRIX_DMABUF_MODIFIERS_SIZE 1
++#define VCMD_FERRIX_DMABUF_MODIFIERS_FOURCC 0
++#define VCMD_FERRIX_DMABUF_MODIFIERS_MAX 64
++
+ #endif /* VTEST_PROTOCOL */
+--- a/vtest/vtest_renderer.c
++++ b/vtest/vtest_renderer.c
+@@ -968,7 +968,7 @@
+       break;
+    case VCMD_PARAM_FERRIX_IMPORT_FD:
+       resp[0] = virgl_renderer_ferrix_can_import_dmabuf();
+-      resp[1] = resp[0] ? 1 : 0;
++      resp[1] = resp[0] ? 2 : 0;
+       break;
+    case VCMD_PARAM_HAS_TIMELINE_SYNCOBJ: {
+ #ifdef ENABLE_DRM
+@@ -3182,6 +3182,41 @@
+    return 0;
+ }
+ 
++int vtest_ferrix_dmabuf_modifiers(UNUSED uint32_t length_dw)
++{
++   struct vtest_context *ctx = vtest_get_current_context();
++   uint32_t buf[VCMD_FERRIX_DMABUF_MODIFIERS_SIZE];
++   uint32_t resp_buf[VTEST_HDR_SIZE + 1 + 3 * VCMD_FERRIX_DMABUF_MODIFIERS_MAX];
++   uint64_t modifiers[VCMD_FERRIX_DMABUF_MODIFIERS_MAX];
++   uint32_t external_only[VCMD_FERRIX_DMABUF_MODIFIERS_MAX];
++   uint32_t *resp = &resp_buf[VTEST_CMD_DATA_START];
++   int ret, count;
++
++   ret = ctx->input->read(ctx->input, buf, sizeof(buf));
++   if (ret != sizeof(buf))
++      return -1;
++
++   count = virgl_renderer_ferrix_dmabuf_modifiers(buf[VCMD_FERRIX_DMABUF_MODIFIERS_FOURCC],
++                                                  VCMD_FERRIX_DMABUF_MODIFIERS_MAX, modifiers,
++                                                  external_only);
++   if (count < 0)
++      count = 0;
++   if (count > VCMD_FERRIX_DMABUF_MODIFIERS_MAX)
++      count = VCMD_FERRIX_DMABUF_MODIFIERS_MAX;
++
++   resp_buf[VTEST_CMD_LEN] = 1 + 3 * (uint32_t)count;
++   resp_buf[VTEST_CMD_ID] = VCMD_FERRIX_DMABUF_MODIFIERS;
++   resp[0] = (uint32_t)count;
++   for (int i = 0; i < count; i++) {
++      resp[1 + 3 * i] = (uint32_t)modifiers[i];
++      resp[2 + 3 * i] = (uint32_t)(modifiers[i] >> 32);
++      resp[3 + 3 * i] = external_only[i];
++   }
++   ret = vtest_block_write(ctx->out_fd, resp_buf,
++                           (VTEST_HDR_SIZE + 1 + 3 * (size_t)count) * sizeof(uint32_t));
++   return ret < 0 ? ret : 0;
++}
++
+ void vtest_set_max_length(uint32_t length)
+ {
+    renderer.max_length = length;
+--- a/vtest/vtest_server.c
++++ b/vtest/vtest_server.c
+@@ -733,6 +733,7 @@
+ 
+    /* Ferrix's own (vtest_protocol.h) */
+    HANDLER(FERRIX_RESOURCE_IMPORT_FD,   ferrix_resource_import_fd, true   ),
++   HANDLER(FERRIX_DMABUF_MODIFIERS,     ferrix_dmabuf_modifiers,   false  ),
+ };
+ 
+ static int vtest_client_dispatch_commands(struct vtest_client *client)
