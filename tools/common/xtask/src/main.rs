@@ -302,7 +302,8 @@ COMMANDS:
     test-steam-game  The same, then require Teeworlds installed from Steam, started by it and drawing in its window;
                   needs the account file
     test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a
-                  prefix with wineboot and its cmd to print the Windows version (docs/WINE.md)
+                  prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on
+                  hyprix through yserver (docs/WINE.md)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
