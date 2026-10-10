@@ -155,9 +155,10 @@ impl Served {
 ///
 /// A short list searched by call rather than an array indexed by number: the
 /// search is over a decoded [`NativeCall`], never over a number a program
-/// chose, so no bound here can be mispredicted into memory past it; and each
-/// of these calls makes a channel for a driver, not the path a driver's work
-/// takes. A `Once` per call, as [`crate::hooks`] keeps them: written at
+/// chose, so no bound here can be mispredicted into memory past it. Most
+/// of these calls make a channel for a driver; the chardev core's are a
+/// driver's work for every request (`chardev_next` once a request), for which
+/// the search is at most the 21 rows. A `Once` per call, as [`crate::hooks`] keeps them: written at
 /// bring-up, read without a lock.
 static SERVED: [Served; 21] = [
     Served::new(NativeCall::BlockRingCreate),

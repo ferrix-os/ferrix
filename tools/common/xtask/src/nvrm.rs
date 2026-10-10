@@ -421,13 +421,7 @@ fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Res
             // serves its control device.
             if up {
                 let deadline = Instant::now() + TRIP_PATIENCE;
-                let _ = at.read_more(deadline, |lines| {
-                    lines.iter().any(|line| {
-                        line.contains(TRIP_DONE)
-                            || line.contains("nvrm-trip: stopped")
-                            || line.contains("nvrm: stopped")
-                    })
-                })?;
+                let _ = at.read_more(deadline, trip_over)?;
             }
         } else {
             at.read_what_was_said(QUIET)?;
@@ -542,6 +536,15 @@ fn judge_handed(lines: &[String]) -> Option<String> {
         Some((_, failed)) => Some(format!("devmgr reported {failed} failed")),
         None => Some("the kernel never printed devmgr's report".to_owned()),
     }
+}
+
+/// Whether the bench has said its last: done, or stopped, or `nvrm` stopped.
+fn trip_over(lines: &[String]) -> bool {
+    lines.iter().any(|line| {
+        line.contains(TRIP_DONE)
+            || line.contains("nvrm-trip: stopped")
+            || line.contains("nvrm: stopped")
+    })
 }
 
 /// The median, in nanoseconds, of the bench's line for `request` served as

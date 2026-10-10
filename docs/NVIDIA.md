@@ -1109,7 +1109,12 @@ F-63, read against the direct path):
   within 50 ms as before.
 * A request taken off the queue whose bytes cannot be written to the
   driver (`out` faults) is answered `EIO`: its program does not wait for a
-  driver that never heard of it.
+  driver that never heard of it. A release taken and not written goes back
+  to the head of the queue in the slot it had, so N8 holds against a
+  driver's bad `out` too.
+* When `chardev_next` fails after its answer was given -- `EINTR`,
+  `LIMIT_REACHED`, `NO_MEMORY`, `FAULT` on `out` -- the answer stands, and
+  how it fared is not said: the caller must not answer the request again.
 * The seats are bounded: 64 a control (`MAX_SEATS`), reserved when the
   control is made, the next `LIMIT_REACHED`; a seat is allocated once and
   kept. The wait is killable and ends `EINTR` on a signal.
@@ -1121,8 +1126,12 @@ bytes are read once, when the call is made, where `nvrm` used to read them
 some microseconds later: a program that changes its argument from another
 thread during its own call saw either before and sees the earlier now. The
 tail is written after the driver's last action for the request instead of
-before its reply; nothing else of the program's runs in between, since the
-calling thread is asleep.
+before its reply, by the calling thread as it wakes; the program's other
+threads run meanwhile, as they did between a driver's copy-out and its
+reply. And the driver is not told when the tail cannot be written: the
+program's call fails with `EFAULT`, where Linux's module sees its own
+`copy_to_user` fail, so what RM made in that call lives until the program
+frees it or its file is released.
 
 **Checks.** The stage-10 self-check's fake driver, on a direct control
 (`interfaces/chardev/check.rs`, `direct`): the two refusals and an

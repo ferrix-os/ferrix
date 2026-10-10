@@ -1268,19 +1268,32 @@ fn next(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
         if written {
             return Ok(0);
         }
-        // Taken off the queue and not delivered: its program does not wait
-        // for a driver that never heard of it.
-        if let Outgoing::Request(request) = &item {
-            {
-                let mut state = control.state.lock();
-                if let Ok(at) = state
-                    .requests
-                    .binary_search_by_key(&request.wire.id, |held| held.wire.id)
+        // Taken off the queue and not delivered. A request's program does
+        // not wait for a driver that never heard of it; a release goes back
+        // to the head of the queue, in the slot it had, so that a driver's
+        // bad `out` loses none (N8).
+        match item {
+            Outgoing::Request(request) => {
                 {
-                    let _ = state.requests.remove(at);
+                    let mut state = control.state.lock();
+                    if let Ok(at) = state
+                        .requests
+                        .binary_search_by_key(&request.wire.id, |held| held.wire.id)
+                    {
+                        let _ = state.requests.remove(at);
+                    }
+                }
+                answer(&request, Err(Errno::EIO));
+            }
+            release @ (Outgoing::Release { .. } | Outgoing::DmabufRelease { .. }) => {
+                let mut state = control.state.lock();
+                if !control.is_gone() {
+                    state.holding = state.holding.saturating_add(1);
+                    // NOALLOC: the slot it was taken from, which
+                    // `hold_release` reserved and nothing else has used.
+                    state.outgoing.push_front(release);
                 }
             }
-            answer(request, Err(Errno::EIO));
         }
         return Err(status::FAULT);
     }

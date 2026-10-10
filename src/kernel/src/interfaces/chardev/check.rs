@@ -379,31 +379,46 @@ fn direct(
     reply(side, control, second.wire.id, VALUE)?;
     reply(side, control, third.wire.id, VALUE)?;
 
+    seated_and_gone(side, control, &core, program, report)
+}
+
+/// The rest of [`direct`]: a thread waiting in a seat is handed a request
+/// without the queue; a release is taken as a request; and a thread waiting
+/// when the driver's end closes is told the control is gone.
+fn seated_and_gone(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
     // A thread with nothing to take waits in a seat, and is handed the
     // next ioctl without the queue.
     start(Job::Next(Arc::clone(&side.process), control))?;
     still_waiting("chardev_next with nothing to take returned")?;
-    if seated(&core) != 1 {
+    if seated(core) != 1 {
         return Err("a thread waiting in chardev_next has no seat");
     }
-    let fourth = admit(&core, &program.process, IOCTL).map_err(|_| "a fourth ioctl was refused")?;
-    if queued(&core) != 0 {
+    let fourth = admit(core, &program.process, IOCTL).map_err(|_| "a fourth ioctl was refused")?;
+    if queued(core) != 0 {
         return Err("an ioctl was queued although a driver thread waited for it");
     }
     if finish()? != Ok(0) {
         return Err("a waiting thread was not handed the ioctl");
     }
     let (wire, _, head) = taken(side)?;
-    if wire.id != fourth.wire.id || head.get(..8) != Some(&PONG[..]) || seated(&core) != 0 {
+    if wire.id != fourth.wire.id || head.get(..8) != Some(&PONG[..]) || seated(core) != 0 {
         return Err("the ioctl handed to a waiting thread was another, or its seat stayed");
     }
     report.direct_taken += 1;
     reply(side, control, fourth.wire.id, VALUE)?;
 
     // A file's release is taken as a request.
-    super::hold_release(&core).map_err(|_| "no room for a release")?;
-    super::queue_release(&core, 99, 0);
-    let _ = next(0, 0, 0, 0).map_err(|_| "a release was not taken")?;
+    super::hold_release(core).map_err(|_| "no room for a release")?;
+    super::queue_release(core, 99, 0);
+    let _ = side
+        .call(nr::CHARDEV_NEXT, &[reg(control), INBOX, 0, 0, 0, 0])
+        .map_err(|_| "a release was not taken")?;
     let (wire, _, head) = taken(side)?;
     if wire.op != Op::Release || wire.file != 99 || !head.is_empty() {
         return Err("a file's release was not taken as it was queued");
