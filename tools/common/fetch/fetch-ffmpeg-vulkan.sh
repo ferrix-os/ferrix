@@ -56,6 +56,17 @@ rm -rf "$src"
 tar -xJf "$tarball" -C "$out"
 (
     cd "$src"
+    # Two optional device extensions FFmpeg turns on when the driver names
+    # them, and that nvrm cannot serve yet (seen on the RTX 3060, 2026-10-10):
+    # with VK_NV_optical_flow vkCreateDevice fails (INITIALIZATION_FAILED),
+    # and VK_EXT_external_memory_host needs os_lock_user_pages (N1e), without
+    # which every downloaded frame fails with OUT_OF_DEVICE_MEMORY. Decoding
+    # needs neither.
+    for extension in VK_NV_OPTICAL_FLOW_EXTENSION_NAME VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME; do
+        grep -q "{ $extension," libavutil/hwcontext_vulkan.c \
+            || { echo "fetch-ffmpeg-vulkan: $extension is not in FFmpeg's optional list any more" >&2; exit 1; }
+        sed -i "/{ $extension,/d" libavutil/hwcontext_vulkan.c
+    done
     ./configure --disable-everything --disable-autodetect --disable-x86asm --disable-doc \
         --disable-network --disable-debug --enable-static --disable-shared \
         --disable-ffprobe --disable-ffplay \
