@@ -51,6 +51,7 @@ use crate::{Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, nativ
 use crate::{uutils, zinc};
 
 mod update;
+mod usb;
 
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -117,6 +118,9 @@ enum Kind {
     Net,
     /// Every disk's `blk`, `/` among them.
     Blk,
+    /// The xHCI controller's `usbhid`, with a hub, a keyboard, a mouse and
+    /// a stick behind it (`test-usb`).
+    Usb,
 }
 
 impl Kind {
@@ -127,10 +131,11 @@ impl Kind {
             Some("input") => vec![Kind::Input],
             Some("net") => vec![Kind::Net],
             Some("blk") => vec![Kind::Blk],
+            Some("usb") => vec![Kind::Usb],
             Some("all") => vec![Kind::Gpu, Kind::Input, Kind::Net, Kind::Blk],
             Some(other) => {
                 return Err(Error::new(format!(
-                    "test-restart --boot takes gpu, input, net, blk or all, not `{other}`"
+                    "test-restart --boot takes gpu, input, net, blk, usb or all, not `{other}`"
                 )));
             }
         })
@@ -143,6 +148,7 @@ impl Kind {
             Kind::Input => "input",
             Kind::Net => "net",
             Kind::Blk => "blk",
+            Kind::Usb => "usbhid",
         }
     }
 
@@ -153,6 +159,7 @@ impl Kind {
             Kind::Input => "input drivers",
             Kind::Net => "network driver",
             Kind::Blk => "disk drivers",
+            Kind::Usb => "USB host driver",
         }
     }
 
@@ -163,6 +170,7 @@ impl Kind {
             Kind::Gpu => &["display  card0 is"],
             Kind::Input => &["input    event0 ", "input    event1 "],
             Kind::Net | Kind::Blk => &[],
+            Kind::Usb => &usb::FOUND,
         }
     }
 }
@@ -174,7 +182,7 @@ impl Kind {
 ///
 /// When the image cannot be built, when the boot fails or panics, or when a
 /// driver is not found, not restarted, or the shell stops answering.
-pub(crate) fn test_restart(args: &Args) -> Result<()> {
+fn test_restart(args: &Args) -> Result<()> {
     let arch = Arch::X86_64;
     if args.arches()?.iter().any(|&asked| asked != arch) {
         return Err(Error::new(
@@ -209,9 +217,14 @@ pub(crate) fn test_restart(args: &Args) -> Result<()> {
     let mut carried = crate::apps::ported(arch, args)?;
     carried.push(carry(BLANK, &blank)?);
     // What shows a key arriving on a restarted keyboard.
-    if kinds.contains(&Kind::Input) {
+    if kinds.contains(&Kind::Input) || kinds.contains(&Kind::Usb) {
         let evecho = crate::input::build_evecho(arch, false)?;
         carried.push(carry(EVECHO, &evecho)?);
+    }
+    // And what misnames it, for the USB boot's negative control.
+    if kinds.contains(&Kind::Usb) {
+        let evecho = crate::input::build_evecho(arch, true)?;
+        carried.push(carry(usb::EVECHO_CONTROL, &evecho)?);
     }
     // The helper, the client and the images it updates the card's driver to.
     let fingerprint = if args.update {
@@ -232,7 +245,73 @@ pub(crate) fn test_restart(args: &Args) -> Result<()> {
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
     for kind in kinds {
         restart_one(arch, &image, &kernel, args, kind, fingerprint)?;
+        if kind == Kind::Usb {
+            usb_control(arch, &image, &kernel, args)?;
+        }
     }
+    Ok(())
+}
+
+/// `test-restart`, or `test-usb`, which is `test-restart --boot usb` under
+/// the name its row has.
+///
+/// # Errors
+///
+/// As [`test_restart`].
+pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
+    if command == "test-usb" {
+        test_usb(args)
+    } else {
+        test_restart(args)
+    }
+}
+
+fn test_usb(args: &Args) -> Result<()> {
+    // x86-64 only, and not only for `kill`: under QEMU's AArch64 firmware
+    // the controller's memory decoding is left off, and the kernel gives no
+    // driver a BAR nothing says firmware placed (`docs/XHCI.md` §8).
+    let mut args = args.clone();
+    args.boot = Some("usb".to_owned());
+    test_restart(&args)
+}
+
+/// The seed of the stick `test-usb` attaches, and of the other one its
+/// control attaches in its place.
+const STICK_SEED: u64 = 1;
+const CONTROL_SEED: u64 = 2;
+
+/// The USB boot's negative control (`usb`'s module documentation).
+fn usb_control(
+    arch: Arch,
+    image: &std::path::Path,
+    kernel: &std::path::Path,
+    args: &Args,
+) -> Result<()> {
+    let stick = usb::Stick::write(arch, CONTROL_SEED, STICK_SEED)?;
+    let mut booted = args.clone();
+    let port = crate::display::free_port()?;
+    booted.qmp_port = Some(port);
+    booted.usb = usb::attached(&stick.path);
+    println!("  {arch}: the negative control: another stick, and an evecho that misnames keys");
+    let mut verdict = Err("the control's boot never reached its shell".to_owned());
+    let _ = qemu::watch_then(
+        arch,
+        image,
+        kernel,
+        &booted,
+        qemu::SUCCESS_MARKER,
+        |watching| {
+            watching.stop_when_done();
+            verdict =
+                ready(watching, Kind::Usb).and_then(|()| usb::control(watching, &stick, port));
+            Ok(())
+        },
+    )?;
+    verdict.map_err(|why| Error::new(format!("{arch}: the negative control: {why}")))?;
+    println!(
+        "  {arch}: the negative control read the other stick and reported the key as \
+         KEY_RESERVED, and failed both checks"
+    );
     Ok(())
 }
 
@@ -248,15 +327,9 @@ fn carry(path: &str, program: &std::path::Path) -> Result<ports::File> {
     })
 }
 
-/// One kind's boot: its devices on the bus, two rounds, and the verdict.
-fn restart_one(
-    arch: Arch,
-    image: &std::path::Path,
-    kernel: &std::path::Path,
-    args: &Args,
-    kind: Kind,
-    update: Option<u64>,
-) -> Result<()> {
+/// What a kind's boot has on its bus, and for the USB kind the stick the
+/// gate attached.
+fn boot_of(arch: Arch, args: &Args, kind: Kind) -> Result<(Args, Option<usb::Stick>)> {
     let mut booted = args.clone();
     match kind {
         // A virtio-gpu on the bus, and nothing drawn to a window.
@@ -269,7 +342,26 @@ fn restart_one(
         Kind::Net => booted.net = true,
         // `/` on a btrfs root made fresh for the run (`qemu::attach_root_disk`).
         Kind::Blk => booted.btrfs_root = true,
+        Kind::Usb => booted.qmp_port = Some(crate::display::free_port()?),
     }
+    let stick = match kind {
+        Kind::Usb => Some(usb::Stick::write(arch, STICK_SEED, STICK_SEED)?),
+        _ => None,
+    };
+    booted.usb = stick.as_ref().and_then(|stick| usb::attached(&stick.path));
+    Ok((booted, stick))
+}
+
+/// One kind's boot: its devices on the bus, two rounds, and the verdict.
+fn restart_one(
+    arch: Arch,
+    image: &std::path::Path,
+    kernel: &std::path::Path,
+    args: &Args,
+    kind: Kind,
+    update: Option<u64>,
+) -> Result<()> {
+    let (booted, stick) = boot_of(arch, args, kind)?;
     let checker = match kind {
         Kind::Blk => Some(btrfs_check::Checker::required()?),
         _ => None,
@@ -290,6 +382,12 @@ fn restart_one(
             // The shell at its prompt is left there: nothing powers off.
             watching.stop_when_done();
             if let Err(failure) = ready(watching, kind) {
+                failures.push(failure);
+                return Ok(());
+            }
+            if let (Some(stick), Some(port)) = (&stick, booted.qmp_port)
+                && let Err(failure) = usb::before_the_kills(watching, stick, port)
+            {
                 failures.push(failure);
                 return Ok(());
             }
@@ -406,7 +504,7 @@ fn prepare(
             }
             Ok(links)
         }
-        Kind::Input | Kind::Blk => Ok(Vec::new()),
+        Kind::Input | Kind::Blk | Kind::Usb => Ok(Vec::new()),
     }
 }
 
@@ -548,12 +646,13 @@ fn serves_again(
             }
         }
         Kind::Blk => write_and_read_back(watching, round),
-        Kind::Input => a_key_arrives(watching, round, qmp_port),
+        Kind::Input => a_key_arrives(watching, round, qmp_port, KEYBOARD),
+        Kind::Usb => a_key_arrives(watching, round, qmp_port, usb::KEYBOARD),
         Kind::Gpu => Ok(()),
     }
 }
 
-/// Start [`EVECHO`], press and release `a` on the keyboard through QMP, and
+/// Start [`EVECHO`], press and release `a` on the keyboard `named` through QMP, and
 /// require the press on the node evecho found the keyboard on. Not always
 /// `event0`: numbers are the lowest free, and when both drivers die at once
 /// the one that comes back first takes the lower.
@@ -561,6 +660,7 @@ fn a_key_arrives(
     watching: &mut qemu::Watching<'_>,
     round: u32,
     qmp_port: Option<u16>,
+    named: &str,
 ) -> std::result::Result<(), String> {
     let io = |error: Error| format!("round {round}: {error}");
     let port = qmp_port.ok_or_else(|| format!("round {round}: the boot has no QMP port"))?;
@@ -578,9 +678,8 @@ fn a_key_arrives(
             "round {round}: {EVECHO} never opened the restarted devices"
         ));
     }
-    let keyboard =
-        crate::input::node_of(watching.after().get(before..).unwrap_or_default(), KEYBOARD)
-            .ok_or_else(|| format!("round {round}: {EVECHO} opened no `{KEYBOARD}`"))?;
+    let keyboard = crate::input::node_of(watching.after().get(before..).unwrap_or_default(), named)
+        .ok_or_else(|| format!("round {round}: {EVECHO} opened no `{named}`"))?;
     let arrived_line = format!("evecho: {keyboard} EV_KEY KEY_A 1");
     let mut qmp =
         crate::display::Qmp::connect(port, Instant::now() + Duration::from_secs(10)).map_err(io)?;

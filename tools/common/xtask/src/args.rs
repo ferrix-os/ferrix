@@ -352,6 +352,10 @@ pub(crate) struct Args {
     /// QMP's `input-send-event` drives. `test-input` turns it on, and
     /// `--display` brings them as well.
     pub(crate) input: bool,
+    /// A `qemu-xhci` controller with a hub, a keyboard behind the hub, a
+    /// mouse and a memory stick holding this image (`docs/XHCI.md` §7). No
+    /// flag sets it: `test-usb` does.
+    pub(crate) usb: Option<std::path::PathBuf>,
     /// `--screens N`: how many virtio-gpu devices are on the bus, one
     /// screen each. Zero and one both mean one. A second device rather than
     /// a second output of the first, because QEMU enables a second output

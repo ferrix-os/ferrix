@@ -100,18 +100,28 @@ const DISPLAY_CLASS: u8 = 0x03;
 const TEST_GPU_VENDOR: u16 = 0x1B36;
 const TEST_GPU_IDS: [u16; 1] = [0x0005];
 
+/// The vendor of a table row that matches a function of any vendor: no
+/// vendor has this identifier, which is what an empty slot reads as.
+const ANY_VENDOR: u16 = 0xFFFF;
+
 /// How a PCI function that is not virtio is matched.
 #[derive(Clone, Copy)]
 enum PciMatch {
     /// Any function of the vendor whose base class is this.
     Class(u8),
+    /// Any function of the vendor whose whole class code is this: base
+    /// class, subclass and programming interface.
+    Interface(u8, u8, u8),
     /// The vendor's functions with these device ids.
     Devices(&'static [u16]),
 }
 
 /// The PCI functions that are not virtio transports: which driver, by name
 /// in the initramfs, drives which, and as which kind.
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 2] = [
+///
+/// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
+/// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 3] = [
     (
         NVIDIA_VENDOR,
         PciMatch::Class(DISPLAY_CLASS),
@@ -123,6 +133,12 @@ const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 2] = [
         PciMatch::Devices(&TEST_GPU_IDS),
         b"nvrm-test",
         Kind::Gpu,
+    ),
+    (
+        ANY_VENDOR,
+        PciMatch::Interface(0x0C, 0x03, 0x30),
+        b"usbhid",
+        Kind::Host,
     ),
 ];
 
@@ -267,8 +283,8 @@ const MAX_RESTARTS: u32 = 8;
 /// `docs/INIT.md` §5.4): `Restart=always` for a kind that is
 /// [`restarted`] and `Restart=no` for the rest, no delay, and a start limit of
 /// [`MAX_RESTARTS`] which, with no clock to renew it, is a count.
-fn policy_for(kind: Kind) -> Policy {
-    let restart = if restarted(kind) {
+fn policy_for(kind: Kind, location: u32) -> Policy {
+    let restart = if restarted(kind, location) {
         Restart::Always
     } else {
         Restart::No
@@ -315,12 +331,18 @@ fn died_status(exit: Exit) -> i32 {
 /// with its requests queued -- and gives a dead driver's quarantined pins
 /// back only once the next one has reset the device and sent HELLO
 /// (`src/kernel/src/object/pin.rs`). The serial port has no core to wait for,
-/// and the USB host, GPU engine and gadget kinds are not restarted yet.
-const fn restarted(kind: Kind) -> bool {
+/// and a board's USB host, the GPU engine and the gadget are not restarted yet.
+///
+/// A bus host on PCI -- an xHCI controller -- is started again too
+/// (`docs/XHCI.md` §5): its driver resets the controller as it starts, the
+/// input core waits for every one of the dead driver's claims and takes its
+/// keyboards and mice back as the new driver finds them. A board's host is
+/// not, until that has been tried on the board.
+const fn restarted(kind: Kind, location: u32) -> bool {
     matches!(
         kind,
         Kind::Display | Kind::Sound | Kind::Net | Kind::Input | Kind::Block
-    )
+    ) || (matches!(kind, Kind::Host) && location != DEVICE_NOT_PCI)
 }
 
 /// A driver devmgr started, and what it keeps of it.
@@ -407,6 +429,18 @@ fn main(bootstrap: Bootstrap) -> i32 {
     }
 }
 
+/// Whether the machine is a board: one with tree nodes. `usbhid` drives a
+/// board's EHCI node and a PC's xHCI function, and a driver has one bus in
+/// sysfs, the first it is announced on; on a board it stays a platform
+/// driver.
+fn is_board(devices: &[Option<(Device<Kernel>, Device<Kernel>)>]) -> bool {
+    devices.iter().flatten().any(|(device, _)| {
+        device
+            .info()
+            .is_ok_and(|info| info.virtio == DEVICE_TREE_BLOCKS)
+    })
+}
+
 /// Everything, in `docs/DEVMGR.md`'s order: read DEVICES, start a driver per
 /// match one at a time, REPORT, then serve deaths for ever.
 fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
@@ -415,7 +449,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         return Err(Step::Devices);
     };
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
-    announce_drivers(channel, &given.names, given.drivers);
+    announce_drivers(channel, &given.names, given.drivers, &given.devices);
     let mut inbox = Inbox::default();
     let mut started: [Option<Started>; MAX_DEVICES] = [const { None }; MAX_DEVICES];
     let mut count = 0_u32;
@@ -495,7 +529,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     plan,
                     quiesced: false,
                     unbinding: None,
-                    policy: policy_for(kind),
+                    policy: policy_for(kind, info.location),
                     device: keep,
                     job,
                     process,
@@ -648,7 +682,9 @@ fn announce_drivers(
     channel: &Channel<Kernel>,
     names: &[[u8; NAME_BYTES]; MAX_DRIVERS],
     count: usize,
+    devices: &[Option<(Device<Kernel>, Device<Kernel>)>],
 ) {
+    let board = is_board(devices);
     let pci = DRIVERS
         .iter()
         .map(|(_, _, name, _)| (*name, BUS_PCI))
@@ -656,7 +692,25 @@ fn announce_drivers(
     let platform = TREE_DRIVERS
         .iter()
         .map(|(_, name, _)| (*name, BUS_PLATFORM));
-    for (wanted, bus) in pci.chain(platform) {
+    // The kernel keeps the first bus a driver is announced on.
+    let mut ordered = [None; DRIVERS.len() + PCI_DRIVERS.len() + TREE_DRIVERS.len()];
+    let (first, second) = ordered.split_at_mut(if board {
+        TREE_DRIVERS.len()
+    } else {
+        DRIVERS.len() + PCI_DRIVERS.len()
+    });
+    let (pci_slots, platform_slots) = if board {
+        (second, first)
+    } else {
+        (first, second)
+    };
+    for (slot, row) in pci_slots.iter_mut().zip(pci) {
+        *slot = Some(row);
+    }
+    for (slot, row) in platform_slots.iter_mut().zip(platform) {
+        *slot = Some(row);
+    }
+    for (wanted, bus) in ordered.into_iter().flatten() {
         if let Some(driver) = image_index(names, count, wanted) {
             let _ = channel.write(
                 &Message::Driver {
@@ -1169,7 +1223,7 @@ fn update_driver(
     let mut tried = 0_u32;
     for entry in started.iter().flatten().filter(|entry| named(entry)) {
         tried += 1;
-        let refused = if !restarted(entry.kind) {
+        let refused = if !restarted(entry.kind, entry.location) {
             Outcome::NotRestarted
         } else if entry.dead || !entry.published || entry.unbinding.is_some() {
             Outcome::Busy
@@ -1486,7 +1540,7 @@ fn driver_for<'a>(
         _ if info.location != DEVICE_NOT_PCI => PCI_DRIVERS
             .iter()
             .find(|(vendor, matched, _, _)| {
-                *vendor == info.vendor_id && pci_matches(*matched, info)
+                (*vendor == ANY_VENDOR || *vendor == info.vendor_id) && pci_matches(*matched, info)
             })
             .map(|(_, _, wanted, kind)| (wanted, kind))?,
         _ => return None,
@@ -1543,6 +1597,10 @@ fn start(
 fn pci_matches(matched: PciMatch, info: &DeviceInfo) -> bool {
     match matched {
         PciMatch::Class(base) => (info.class >> 16) as u8 == base,
+        PciMatch::Interface(base, sub, interface) => {
+            info.class & 0x00FF_FFFF
+                == (u32::from(base) << 16) | (u32::from(sub) << 8) | u32::from(interface)
+        }
         PciMatch::Devices(ids) => ids.contains(&info.device_id),
     }
 }
