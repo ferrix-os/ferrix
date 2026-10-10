@@ -183,12 +183,14 @@ here.**
 10. Who settles the design's §4.2 and §6.2 lists with the present and
     `nv-trip` sessions.
 
-The game-mode switch raises ten more, in `docs/SETTINGS.md` §8, none
-taken: what the mark should do first, where a game's scope may sit, whether
-the one-way barrier is for every client of `nvrm`, and whether, how and by
-whom a game may be let into the driver's speculation domain, which narrows
-question 4 to a choice of two (§7 there, a proposal, reviewed as a design:
-ledger line 698).
+The game-mode switch raises ten more, in `docs/SETTINGS.md` §8. The
+customer decided three on 2026-10-11: a mark first; then the speculation
+protections and the other latency trades per application, to be built;
+administrator privilege required. Open: where a game's scope may sit,
+whether the one-way barrier is for every client of `nvrm`, how and by which
+administrator a game is let into the driver's speculation domain, whether
+the certified item carries that at all, and question 4 narrowed to a choice
+of two (§7 there, a proposal, reviewed as a design: ledger line 698).
 
 ## What it cannot win, and what can go wrong
 

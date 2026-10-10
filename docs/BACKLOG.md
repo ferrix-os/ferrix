@@ -639,7 +639,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 |---|---|
 | hyprix draws the top layer (waybar) over a fullscreen window, and under `--no-gl` its blur is then the frame's largest phase: "over 35 to 72 ms" of the slowest frames with a terminal fullscreen (softgl-gap, 2026-10-10; `~/ferrix-logs/softgl-desk/base2.log`, `bord2.log`, shot `base2-fs.png`: the bar over the fullscreen window). Hyprland does not draw the top layer over a fullscreen window, only the overlay. Start at `over_windows` in `src/user/system/linux/compositor/hyprix/src/state/draw.rs` and `render_onto`'s `Phase::Over`; with it gone, measure `--no-gl` fullscreen frames a second again on a quiet host: 14.2 at a load of 31 before the border's fix (12dfc447e, which took the border's 37 to 53 ms a frame away) and 11.0 at a load of 45 after it, so the gain in frames is not shown yet. Also seen: a translucent terminal over the video wallpaper costs "blur 150 to 380 ms" a frame under `--no-gl` (`base.log`) | open |
 | The video wallpaper stops decoding under a window that covers it (0765b49a9: `pattern --video` from 0.59 of a processor to 0.02 under a fullscreen terminal, back to 0.6 windowed) only when the covering window's buffer is opaque: XRGB or an `opaque` rule, opacity 1, square corners. Not checked: which format yserver gives a game's window, so the case the softgl-gap study saw (Teeworlds through yserver, `pattern` at 0.5 to 0.64 of a processor) is unverified. Run it, and if the buffer is ARGB decide whether a fullscreen X window's alpha is honoured at all | open |
-| Settings (`docs/SETTINGS.md`, the customer's order of 2026-10-11): the app, its game-mode page, the user's `~/.config/ferrix/game-mode.conf` and the launcher's mark landed with this row, with `test-compositor --boot settings` on x86-64 and its negative control. Game mode is a mark with no effect, and the page says so. Left: the boot on AArch64 and ARMv7-A; the page looked at on the `--everything` desktop as the user `ferrix`; a first real effect, which needs something privileged to act on the mark (§4's table; G0 is stage 24's); the list following the file and the installed applications while the window is open; a second page. The driver-domain opt-in is a proposal only (§7) and waits on the customer (§8). Owner: open | 24 |
+| Settings (`docs/SETTINGS.md`, the customer's order of 2026-10-11): the app, its game-mode page, the user's `~/.config/ferrix/game-mode.conf` and the launcher's mark landed with this row, with `test-compositor --boot settings` on x86-64 and its negative control. Game mode is a mark with no effect, and the page says so; the customer accepted that as the first version and decided what comes next (*Decisions*, 2026-10-11): the speculation protections and the other latency and frame-rate trades, per application, behind administrator privilege, whose design round is on branch `game-mode-design`. Left: the boot on AArch64 and ARMv7-A; the page looked at on the `--everything` desktop as the user `ferrix`; the first real effect as decided, which waits on that design round, the one-way barrier and a bare-metal figure; the list following the file and the installed applications while the window is open; a second page. The driver-domain opt-in is a proposal only (§7) and waits on the customer (§8). Owner: open | 24 |
 | `run-compositor --everything` is everything (the customer's rule, 2026-10-01): nothing on that desktop may be conditional or silently left out. Done: every volume is fetched when missing, and a failed fetch stops the run (f7777c17); Steam's launcher entry (cb21ecd8); every app installed, the opt-in ones too, and a script app with no package (btop) built, through WSL on Windows (211bc0e5, os-24); the ports built on Windows through WSL, with LLVM's clang where WSL's gcc is older than 15 (503d65aa, os-df); a missing port or busybox built and a missing Bad Apple!! fetched rather than left out (os-24, 2026-10-01); launcher entries and icons for btop and ferrofetch, and Bad Apple's icon (48f440dc, os-3c); the ported programs (curl, git, sshdt, foot, vkgears, ALSA's) are apps, so `--everything` builds a missing one as it builds btop, and `ports::everything` is gone with them (os-3c, 2026-10-01). Left: choosing Steam from fuzzel after closing the client, which no live desktop has tried yet. vkgears needs Venus, which WHPX does not give, so a Windows host's desktop cannot list it | 19 |
 | Two btop builds at once wreck each other: every checkout's btop app builds, by its `build.sh`, in the one `$FERRIX_PORTS/btop/build`, which each starts with `rm -rf`, so a second build deletes the first's `obj/` mid-compile (`opening dependency file obj/btop.d: No such file or directory`). Seen twice on nazuna on 2026-10-01, os-24's `--everything` control beside os-3c's apps-launcher `build-apps`; alone, the same script built 6 of 6. Since 211bc0e5 `--everything` builds btop when it has no package, and `test-apps` always does, so two gates at once keep meeting here. **Fixed 2026-10-01 (os-3c, with the ports' move into apps):** ferrousli's port toolkit has `lock_port`, a `flock` on `$builds/<port>.lock` held until the script exits, and every port's and script app's `build.sh` takes it before it empties its work directory, so a second build waits | done |
 | `test-audio --arch x86_64`'s mix boot failed once, on 2026-10-01 at a load of 15 to 19, gating the ports' move into apps on 1c4dbcf4: "the mix has 1000 Hz at 7537, not 8192 within 5%, and 440 Hz at 8188". That boot is pulsed mixing two tones, which the branch does not touch; the same boot on the rebased tip 4be395fa passed at a load of about 9. Kept: `~/ferrix-logs/apps-ports/b-audio.log` on nazuna. A mix level 8% low on one tone looks like a lost or late period under load, not noise | open |
@@ -1036,6 +1036,24 @@ from it, and the forecast's scope, 647 points, is in `docs/roadmap/status.md`.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-11 (customer)** **Game mode: a mark first, then the
+  protections, behind administrator privilege** (`docs/SETTINGS.md` §8).
+  Three answers. That a mark with no effect is acceptable as Settings'
+  first version: "yes". That the apps branch be pushed so it can land:
+  "yes". And what game mode should do first once something privileged can
+  act on it: "disable speculative protections and basically everything that
+  brings down latency and brings up fps that might not be acceptable in
+  normal high assurance apps, but this path should require admin privileges
+  on the system, as otherwise normal apps could disable some protections".
+  So the first privileged effect is the speculation protections and the
+  other latency and frame-rate trades, per application, not G0's weights
+  first; it is to be designed and built; and it is granted only with
+  administrator privilege, never by the user's own `game-mode.conf`. Not
+  decided by this: whether the administrator is `wheel` with a password or
+  root alone, how the kernel learns the grant, and whether and how the
+  certified item carries it (*Waiting on the customer*). The consultant's
+  order stands: the one-way barrier and a bare-metal figure, then a design
+  round, then code (ledger lines 690 and 698). Nothing of it is built.
 * **2026-10-10 (customer)** **The game path is on the roadmap, as stage
   24** ("add GAME-PATH.md to main and to the roadmap"), which decides
   question 1 of `docs/GAME-PATH.md` §10 as that document recommended: a
@@ -1431,14 +1449,16 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
 
 ## Waiting on the customer
 
-* Settings' game mode (`docs/SETTINGS.md` §8, 2026-10-11): whether a mark
-  with no effect is acceptable as the first version; what game mode should
-  do first; whether a game's scope may sit beside the session's; whether the
-  one-way barrier towards `nvrm` is for every client or only for marked
-  applications; whether the opt-in that lets a game into the driver's
-  speculation domain is built at all, by admission or by birth, and who may
-  turn it on; whether the certified item takes an admission mechanism at
-  all; and with it the two-way form of the game path's question 4.
+* Settings' game mode (`docs/SETTINGS.md` §8, 2026-10-11; questions 1, 2
+  and 5 are decided, under *Decisions*): whether a game's scope may sit
+  beside the session's; whether the one-way barrier towards `nvrm` is for
+  every program that follows the driver or only towards named jobs; whether
+  a game enters the driver's speculation domain by admission or by birth;
+  whether the administrator who grants it is a member of `wheel` with their
+  password or root alone; whether the certified item takes such a mechanism
+  at all, and how a certified configuration relates to one that can grant
+  game mode per application at run time; and with it the two-way form of
+  the game path's question 4.
 * The game path, stage 24 (`docs/GAME-PATH.md` §10, 2026-10-10; that it is
   a roadmap stage is decided): which Linux its exit is judged against; whether the game
   domain may open stage 14 early, in the item's core ring; speculation
