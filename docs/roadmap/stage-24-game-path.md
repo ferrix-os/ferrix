@@ -73,7 +73,10 @@ design says only that G0 goes "as far as a heuristic goes").
 Points are first guesses in the roadmap's sizes, made before any of it ran.
 "Consultant" is a review by the certification consultant before the row
 lands; "design" is a design review before code. What each row needs, and
-the section that designs it, is in `docs/GAME-PATH.md` §8.
+the section that designs it, is in `docs/GAME-PATH.md` §8. The
+certification consultant has seen the design and this page as a docs
+landing only: the design review of the session and the game domain (the
+design's §5, G0 to G5) and of P1 is owed before any code.
 
 ### Step 1: the rig  ·  19 to 21 points
 
@@ -94,14 +97,14 @@ In the design's order, by gain for effort.
 | # | Landing | Points | Gain expected | Review |
 |---|---|---|---|---|
 | — | displayctl v9, flips of a driver's own dmabuf | another session's; none here | 9 to 15 ms and three copies off hyprix's own frame | its own |
-| P1 | The flip's time: `FLIPPED` carries it, the DRM event reports it, hyprix's pace follows it | 8 | M1: up to a refresh of phase error; the base for everything timed | consultant (the display core's protocol and checks) |
+| P1 | The flip's time: `FLIPPED` carries it, the DRM event reports it, hyprix's pace follows it | 8 | M1: up to a refresh of phase error; the base for everything timed | design, consultant (the display core's protocol and checks) |
 | P2 | The game lane in hyprix: a fullscreen dmabuf surface flipped as it is, with the fallback | 8 | M1: hyprix's frame out of the path; M7: about 1.2 processors | — |
 | — | yserver hands an X client's pixmap on as a dmabuf | another session's; none here | the read-back's 2 ms and yserver's thread | its own |
 | — | A hardware cursor through NVKMS | stage 21's; none here | the lane survives a visible pointer | its own |
 | I1 | Input: time carried end to end, hyprix's input thread, no coalescing under a pointer lock | 5 | M1's tail; the mouse's lag becomes a number per hop | — |
 | P6 | Tearing: the hint from Wayland and from Present to an NVKMS tearing flip | 5 | M2 exists | consultant for the protocol flag |
 | P7 | Just in time: the hold, in yserver and in hyprix, with its controller and its rule | 8 | M1: about one refresh, for any game | — |
-| G0 | The session with what exists: affinity applied, weights for the game, the path and the rest | 8 | M4, as far as a heuristic goes | consultant (the scheduler applies affinity: core ring) |
+| G0 | The session with what exists: affinity applied, weights for the game, the path and the rest | 8 | M4, as far as a heuristic goes | design, consultant, ids reserved first (the scheduler applies affinity: core ring) |
 | P5 | hyprix draws backwards from the deadline | 5 | M1 for composited clients: up to a refresh | — |
 
 P1, P2, I1, P6, P7, G0 and P5 are 47. The first card run of P2 decides
@@ -116,7 +119,7 @@ risk).
 | G1 | A domain made and dissolved at run time through a handle; the partition's rules | 21 | boot checks: a task outside never runs inside, the domain dissolves with its handle, a machine too small is refused; a control for each | question 3; design, consultant, ids reserved first |
 | G2 | The fixed-priority class in that domain with budgets, and the wake-up test | 13 | M5 held by a boot with the load on the other processors; a looping thread stopped by its budget | design, consultant |
 | G3 | Interrupts placed with the domain | 5 | the card's and the mouse's lines counted per processor | — |
-| G4 | Memory under the session: a reclaim floor for a job, `mlock` | 8 | a game job's pages survive the load's pressure | consultant (`mm/**` is core ring) |
+| G4 | Memory under the session: a reclaim floor for a job, `mlock` | 8 | a game job's pages survive the load's pressure | design, consultant, ids reserved first (`mm/**` is core ring) |
 | G5 | The session service, hyprix's request and the rule | 5 | a `test-compositor` boot: fullscreen makes the domain, losing focus dissolves it; M4 on the card | — |
 
 G4's `mlock` is also something stage 23's E1.3 names as missing for Wine;

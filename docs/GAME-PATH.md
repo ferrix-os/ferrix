@@ -608,8 +608,10 @@ fullscreen and focused.
   path that must wake on time: yserver's loop, hyprix's flip and input
   threads, `nvrm`'s dispatch and interrupt threads, the sound server's
   mixer and the mouse's driver. Nothing else: no stealing into or out of
-  a domain is already the design, and it is what makes a statement about
-  those processors possible.
+  the domain. `docs/ARCHITECTURE.md` §5 says that of `HardRt` only, and
+  `Throughput` steals work; for a `SoftRt` domain cut out of `Throughput`
+  at run time it is something G1 must add and prove. It is what makes a
+  statement about those processors possible.
 * **How they are ordered.** The path's threads run in the fixed-priority
   class above the fair one: they wake, work for microseconds and block.
   Each is under a `cpu.max` budget (the mechanism exists), so that one of
@@ -697,9 +699,10 @@ that it does not by default and cannot say what it guarantees.
   rule (the partition holds; a thread outside the domain never runs
   inside; a budget stops its thread; the domain dissolves with its
   handle).
-* **No worst-case execution time is claimed**, and the text of every
-  requirement here says "measured under the stated load", as
-  `MEMORY-AND-TIMING.md` §2 requires. The session is `SoftRt`, never
+* **No worst-case execution time is claimed**
+  (`MEMORY-AND-TIMING.md` §2.1), and the text of every requirement written
+  for this will say that its figure is measured under the stated load; that
+  phrase is this design's, and no such requirement exists yet. The session is `SoftRt`, never
   described as `HardRt`: there is no admission test for a closed game.
 * **The interrupt rule stands**: a handler's time is charged to whoever it
   cut (`MEMORY-AND-TIMING.md` §2.2). Placing the card's line on the game's
@@ -939,14 +942,14 @@ the row says so and gives no points.
 | # | Landing | Points | Gain expected | Proved by | Needs |
 |---|---|---|---|---|---|
 | — | displayctl v9, flips of a driver's own dmabuf | another session's (`zerocopy.md`) | removes 9 to 15 ms and three copies for hyprix's own frame | its own Z1 to Z10 | `nv-vram-dmabuf` first |
-| P1 | The flip's time: `FLIPPED` carries it, the DRM event reports it, hyprix's pace follows it (§4.1) | 8 | M1: up to a refresh of phase error gone; the base for everything timed | host tests of the protocol; a boot where the reported time is the driver's and not the answer's arrival (control: the kernel's own clock substituted); on the card, completions' `msc` advancing by one | v9; consultant (the display core's protocol and checks) |
+| P1 | The flip's time: `FLIPPED` carries it, the DRM event reports it, hyprix's pace follows it (§4.1) | 8 | M1: up to a refresh of phase error gone; the base for everything timed | host tests of the protocol; a boot where the reported time is the driver's and not the answer's arrival (control: the kernel's own clock substituted); on the card, completions' `msc` advancing by one | v9; design, consultant (the display core's protocol and checks) |
 | P2 | The game lane in hyprix: a fullscreen dmabuf surface flipped as it is, with the fallback (§4.2) | 8 | M1: hyprix's frame out of the path; M7: about 1.2 processors | `test-compositor --gl --boot` on virtio-gpu's render objects, which already take this road: a fullscreen client's frames reach the screen with hyprix drawing none (control: eligibility forced off, "drew N frames"); a second window makes it draw again; then on the card | v9, P1; the first card run decides whether NVKMS scans out a client's image |
 | — | yserver hands an X client's pixmap on as a dmabuf | another session's (`present.md`) | the read-back's 2 ms and yserver's thread | §4.2's list of needs | `nv-present`, yserver's fork |
 | — | A hardware cursor through NVKMS | stage 21's, second in the customer's order | the lane survives a visible pointer | `test-compositor --boot cursor`'s shape on the card | — |
 | I1 | Input: time carried end to end, hyprix's input thread, no coalescing under a pointer lock (§4.7) | 5 | M1's tail; the mouse's lag becomes a number per hop | the probe's per-hop ages; a boot check that a motion is forwarded while a frame is held (control: the thread removed) | nothing; yserver's fork for its half |
 | P6 | Tearing: the hint from Wayland and from Present to an NVKMS tearing flip (§4.4) | 5 | M2 exists | on the card, completions faster than the refresh with `allow_tearing`, none without; host tests of the flag | P2; consultant for the protocol flag |
 | P7 | Just in time: the hold, in yserver and in hyprix, with its controller and its rule (§4.5) | 8 | **M1: about one refresh**, for any game | R2 on both systems, hold on and off; misses a minute no higher with it on; control: the margin set to zero must miss and back off | P1, P2, I1 |
-| G0 | The session with what exists: affinity applied, weights for the game, the path and the rest (§5.3) | 8 | M4, as far as a heuristic goes | R1 under the load, on and off, against Linux's GameMode | consultant (the scheduler applies affinity: core ring) |
+| G0 | The session with what exists: affinity applied, weights for the game, the path and the rest (§5.3) | 8 | M4, as far as a heuristic goes | R1 under the load, on and off, against Linux's GameMode | design, consultant, ids reserved first (the scheduler applies affinity: core ring) |
 | P5 | hyprix draws backwards from the deadline (§4.6) | 5 | M1 for composited clients: up to a refresh | a boot where a commit a few milliseconds before the deadline is in that frame (control: the old latch) | P1; worth little before S2 |
 
 ### 8.3 The game domain, which is stage 14's ground
@@ -956,7 +959,7 @@ the row says so and gives no points.
 | G1 | A domain made and dissolved at run time through a handle; the partition's rules | 21 | boot checks: a task outside never runs inside, the domain dissolves with its handle, a machine too small is refused; a control for each | question 3 of §10; design, consultant, ids reserved |
 | G2 | The fixed-priority class in that domain with budgets, and the wake-up test | 13 | M5 held by a boot, load on the other processors; a looping thread stopped by its budget (control: the budget removed) | G1; design, consultant |
 | G3 | Interrupts placed with the domain | 5 | the card's and the mouse's lines counted per processor | G1; whether a line's destination can be set |
-| G4 | Memory under the session: a reclaim floor for a job, `mlock` | 8 | a game job's pages survive the load's pressure (control: the floor at zero) | consultant (`mm/**` is core ring) |
+| G4 | Memory under the session: a reclaim floor for a job, `mlock` | 8 | a game job's pages survive the load's pressure (control: the floor at zero) | design, consultant, ids reserved first (`mm/**` is core ring) |
 | G5 | The session service, hyprix's request and the rule | 5 | `test-compositor` boot: fullscreen makes the domain, losing focus dissolves it; M4 on the card | G1 |
 
 ### 8.4 Later, each on a measurement
