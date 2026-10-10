@@ -292,6 +292,7 @@ pub unsafe extern "C" fn os_free_mutex(mutex: *mut c_void) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn os_acquire_mutex(mutex: *mut c_void) -> NvStatus {
     if !may_sleep() {
+        crate::sync::watch::refused("os_acquire_mutex", mutex as usize);
         return status::INVALID_REQUEST;
     }
     // SAFETY: the caller vouches for it.
@@ -357,6 +358,7 @@ pub unsafe extern "C" fn os_free_semaphore(semaphore: *mut c_void) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn os_acquire_semaphore(semaphore: *mut c_void) -> NvStatus {
     if !may_sleep() {
+        crate::sync::watch::refused("os_acquire_semaphore", semaphore as usize);
         return status::INVALID_REQUEST;
     }
     // SAFETY: the caller vouches for it.
@@ -430,6 +432,7 @@ unsafe fn rwlock<'a>(lock: *mut c_void) -> &'a RwLock {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn os_acquire_rwlock_read(lock: *mut c_void) -> NvStatus {
     if !may_sleep() {
+        crate::sync::watch::refused("os_acquire_rwlock_read", lock as usize);
         return status::INVALID_REQUEST;
     }
     // SAFETY: the caller vouches for it.
@@ -445,6 +448,7 @@ pub unsafe extern "C" fn os_acquire_rwlock_read(lock: *mut c_void) -> NvStatus {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn os_acquire_rwlock_write(lock: *mut c_void) -> NvStatus {
     if !may_sleep() {
+        crate::sync::watch::refused("os_acquire_rwlock_write", lock as usize);
         return status::INVALID_REQUEST;
     }
     // SAFETY: the caller vouches for it.

@@ -146,6 +146,10 @@ NvS64 nvos_chardev_sync_install(NvU64 id, NvU64 cookie, NvU32 deadline_ms, NvU32
 int nvos_chardev_sync_signal(NvU64 cookie, int status);
 int nvos_chardev_sync_resolve(NvU64 id, int fd, NvU64 *cookie);
 void nvos_isr_enter_leave(NvBool entering);
+/* The stall diagnostic's: keep who holds and who sleeps for each lock, and
+ * say every sleep older than the look before this one. */
+void nvos_lock_watch(NvBool watch);
+void nvos_lock_look(void);
 
 /* display.rs: nvrm's end of the kernel's display core (N6). */
 struct nvos_display_timing {

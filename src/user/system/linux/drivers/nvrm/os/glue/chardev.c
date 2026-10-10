@@ -314,6 +314,9 @@ static void diag_watch(void *unused)
             diag_line("%u request(s) are in nvrm%s; %llu were never watched (table full)",
                      in, more != 0 ? ", more old ones than are said at once" : "",
                      (unsigned long long)unwatched);
+        /* What each sleeping thread sleeps for, and who holds it. */
+        if (count != 0)
+            nvos_lock_look();
 
         began = __atomic_load_n(&diag_dispatch_began, __ATOMIC_ACQUIRE);
         if (began != 0 && now - began >= DIAG_OLD_NS &&
@@ -666,6 +669,7 @@ int nvrm_chardev_serve(void)
         nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
     if (nvrm_diag)
     {
+        nvos_lock_watch(NV_TRUE);
         if (nvos_thread_spawn(diag_watch, NULL))
             diag_line("on: requests unanswered for 5 s are said, every 5 s");
         else

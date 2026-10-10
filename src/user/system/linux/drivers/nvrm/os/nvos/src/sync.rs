@@ -38,9 +38,14 @@ impl Mutex {
 
     /// Take it, if free, without waiting.
     pub fn try_lock(&self) -> bool {
-        self.state
+        let took = self
+            .state
             .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
+            .is_ok();
+        if took {
+            watch::took(self, watch::MUTEX);
+        }
+        took
     }
 
     /// Take it, spinning `spins` times before sleeping.
@@ -60,13 +65,17 @@ impl Mutex {
             return;
         }
         // Mark it contended, and sleep until it was free when marked.
+        let slot = watch::sleeps(self, watch::MUTEX);
         while self.state.swap(2, Ordering::Acquire) != 0 {
             futex::wait(&self.state, 2, None);
         }
+        watch::woke(slot);
+        watch::took(self, watch::MUTEX);
     }
 
     /// Give it back, and wake one sleeper if any.
     pub fn unlock(&self) {
+        watch::gave(self);
         if self.state.swap(0, Ordering::Release) == 2 {
             futex::wake(&self.state, 1);
         }
@@ -107,7 +116,10 @@ impl Semaphore {
                 Ordering::Acquire,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return true,
+                Ok(_) => {
+                    watch::took(self, watch::SEMAPHORE);
+                    return true;
+                }
                 Err(now) => count = now,
             }
         }
@@ -124,16 +136,252 @@ impl Semaphore {
             // The count is read again by the kernel: an `up` between the
             // failed take and this sleep leaves it non-zero, and the wait
             // returns at once.
+            let slot = watch::sleeps(self, watch::SEMAPHORE);
             futex::wait(&self.count, 0, None);
+            watch::woke(slot);
             let _ = self.sleepers.fetch_sub(1, Ordering::SeqCst);
         }
     }
 
     /// Give one back, and wake a sleeper if any.
     pub fn up(&self) {
+        watch::gave(self);
         let _ = self.count.fetch_add(1, Ordering::Release);
         if self.sleepers.load(Ordering::SeqCst) != 0 {
             futex::wake(&self.count, 1);
+        }
+    }
+}
+
+/// Who holds which lock and who waits for which, for the stall diagnostic
+/// (`glue/chardev.c`, `nvrm_diag`): Ferrix's `/proc` says a thread sleeps,
+/// not on what. Off until [`nvos_lock_watch`] turns it on; then every take
+/// and release writes one slot of a table, and every sleep one of another.
+/// Nothing here takes a lock or allocates, and a torn entry is at worst a
+/// wrong line of the diagnostic.
+pub mod watch {
+    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+    use crate::futex;
+    use crate::log::say;
+
+    /// What an entry's lock is, and how it is held or waited for.
+    pub(crate) const MUTEX: u32 = 1;
+    pub(crate) const SEMAPHORE: u32 = 2;
+    pub(crate) const READ: u32 = 3;
+    pub(crate) const WRITE: u32 = 4;
+    pub(crate) const COMPLETION: u32 = 5;
+    pub(crate) const EVENT: u32 = 6;
+
+    static ON: AtomicBool = AtomicBool::new(false);
+
+    const BUCKETS: usize = 512;
+    const WAYS: usize = 4;
+    const WAITS: usize = 128;
+
+    struct Hold {
+        lock: AtomicUsize,
+        tid: AtomicU32,
+        how: AtomicU32,
+    }
+    struct Wait {
+        tid: AtomicU32,
+        how: AtomicU32,
+        lock: AtomicUsize,
+        since: AtomicU64,
+    }
+    static HOLDS: [Hold; BUCKETS * WAYS] = [const {
+        Hold {
+            lock: AtomicUsize::new(0),
+            tid: AtomicU32::new(0),
+            how: AtomicU32::new(0),
+        }
+    }; BUCKETS * WAYS];
+    static WAITING: [Wait; WAITS] = [const {
+        Wait {
+            tid: AtomicU32::new(0),
+            how: AtomicU32::new(0),
+            lock: AtomicUsize::new(0),
+            since: AtomicU64::new(0),
+        }
+    }; WAITS];
+    /// Bumped by every sleep; a look remembers where it was.
+    static CLOCK: AtomicU64 = AtomicU64::new(1);
+    static LAST_LOOK: AtomicU64 = AtomicU64::new(0);
+    static LOST: AtomicU32 = AtomicU32::new(0);
+
+    fn on() -> bool {
+        ON.load(Ordering::Relaxed)
+    }
+
+    fn bucket(lock: usize) -> &'static [Hold] {
+        let at = ((lock >> 3).wrapping_mul(0x9E37_79B9_7F4A_7C15_usize) >> 40) % BUCKETS;
+        HOLDS.get(at * WAYS..at * WAYS + WAYS).unwrap_or_default()
+    }
+
+    /// The calling thread holds `lock` from now.
+    pub(crate) fn took<T>(lock: &T, how: u32) {
+        if !on() {
+            return;
+        }
+        let lock = core::ptr::from_ref(lock) as usize;
+        for hold in bucket(lock) {
+            if hold
+                .lock
+                .compare_exchange(0, lock, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                hold.tid.store(futex::tid(), Ordering::Relaxed);
+                hold.how.store(how, Ordering::Release);
+                return;
+            }
+        }
+        let _ = LOST.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `lock` is held one time fewer: the calling thread's hold if it has
+    /// one (a reader's), else any (a semaphore another thread releases).
+    pub(crate) fn gave<T>(lock: &T) {
+        if !on() {
+            return;
+        }
+        let lock = core::ptr::from_ref(lock) as usize;
+        let tid = futex::tid();
+        let mut any = None;
+        for hold in bucket(lock) {
+            if hold.lock.load(Ordering::Acquire) != lock {
+                continue;
+            }
+            if hold.tid.load(Ordering::Relaxed) == tid {
+                hold.how.store(0, Ordering::Relaxed);
+                hold.lock.store(0, Ordering::Release);
+                return;
+            }
+            any = Some(hold);
+        }
+        if let Some(hold) = any {
+            hold.how.store(0, Ordering::Relaxed);
+            hold.lock.store(0, Ordering::Release);
+        }
+    }
+
+    /// The calling thread is about to sleep for `lock`; what to hand
+    /// [`woke`].
+    pub(crate) fn sleeps<T>(lock: &T, how: u32) -> usize {
+        if !on() {
+            return usize::MAX;
+        }
+        let tid = futex::tid();
+        let start = tid as usize % WAITS;
+        for step in 0..WAITS {
+            let at = (start + step) % WAITS;
+            let Some(wait) = WAITING.get(at) else { break };
+            if wait
+                .tid
+                .compare_exchange(0, tid, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                wait.how.store(how, Ordering::Relaxed);
+                wait.since
+                    .store(CLOCK.fetch_add(1, Ordering::Relaxed), Ordering::Relaxed);
+                wait.lock
+                    .store(core::ptr::from_ref(lock) as usize, Ordering::Release);
+                return at;
+            }
+        }
+        usize::MAX
+    }
+
+    /// The sleep [`sleeps`] announced is over.
+    pub(crate) fn woke(slot: usize) {
+        if let Some(wait) = WAITING.get(slot) {
+            wait.lock.store(0, Ordering::Relaxed);
+            wait.tid.store(0, Ordering::Release);
+        }
+    }
+
+    /// A reader-writer lock was released in a way it was not held: said,
+    /// the first sixteen times, with who did it.
+    pub(crate) fn unbalanced<T>(lock: &T, how: &str, was: u32) {
+        static SAID: AtomicU32 = AtomicU32::new(0);
+        if SAID.fetch_add(1, Ordering::Relaxed) < 16 {
+            say!(
+                "locks: thread {} ended a {how} hold of rwlock {:p} whose state was {was:#x} (in the interrupt handler: {})",
+                futex::tid(),
+                core::ptr::from_ref(lock),
+                crate::thread::in_isr()
+            );
+        }
+    }
+
+    /// An acquire RM asked for in the interrupt handler, where it may not
+    /// sleep, was refused: said the first sixteen times.
+    pub(crate) fn refused(what: &str, lock: usize) {
+        static SAID: AtomicU32 = AtomicU32::new(0);
+        if SAID.fetch_add(1, Ordering::Relaxed) < 16 {
+            say!("locks: {what} of {lock:#x} refused in the interrupt handler");
+        }
+    }
+
+    fn name(how: u32) -> &'static str {
+        match how {
+            MUTEX => "mutex",
+            SEMAPHORE => "semaphore",
+            READ => "rwlock (read)",
+            WRITE => "rwlock (write)",
+            COMPLETION => "wait queue",
+            EVENT => "event",
+            _ => "?",
+        }
+    }
+
+    /// Turn the tables on or off.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn nvos_lock_watch(watch: bool) {
+        ON.store(watch, Ordering::Release);
+    }
+
+    /// Say every sleep that began before the look before this one and has
+    /// not ended, with who holds what it sleeps for. The stall diagnostic
+    /// calls it each time it has an old request to name.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn nvos_lock_look() {
+        let before = LAST_LOOK.swap(CLOCK.load(Ordering::Relaxed), Ordering::Relaxed);
+        for wait in &WAITING {
+            let tid = wait.tid.load(Ordering::Acquire);
+            let lock = wait.lock.load(Ordering::Acquire);
+            let since = wait.since.load(Ordering::Relaxed);
+            if tid == 0 || lock == 0 || since >= before {
+                continue;
+            }
+            let how = wait.how.load(Ordering::Relaxed);
+            let mut holders = [(0_u32, 0_u32); WAYS];
+            let mut count = 0;
+            let held = bucket(lock)
+                .iter()
+                .filter(|hold| hold.lock.load(Ordering::Acquire) == lock);
+            for (slot, hold) in holders.iter_mut().zip(held) {
+                *slot = (
+                    hold.tid.load(Ordering::Relaxed),
+                    hold.how.load(Ordering::Relaxed),
+                );
+                count += 1;
+            }
+            // The lock's first word: a mutex's or a reader-writer lock's
+            // state, a semaphore's count. The lock is live while a thread
+            // sleeps for it.
+            // SAFETY: every lock here starts with an `AtomicU32`, and one a
+            // thread sleeps for has not been freed.
+            let word = unsafe { &*(lock as *const AtomicU32) }.load(Ordering::Relaxed);
+            say!(
+                "locks: thread {tid} sleeps for {} {lock:#x} (first word {word:#x}) since before the last look; held by {:?} (thread, how: 1 mutex 2 semaphore 3 read 4 write)",
+                name(how),
+                holders.get(..count).unwrap_or_default()
+            );
+        }
+        let lost = LOST.load(Ordering::Relaxed);
+        if lost != 0 {
+            say!("locks: {lost} holds found no room in the table and are not known");
         }
     }
 }
@@ -181,7 +429,10 @@ impl RwLock {
                 Ordering::Acquire,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return true,
+                Ok(_) => {
+                    watch::took(self, watch::READ);
+                    return true;
+                }
                 Err(now) => state = now,
             }
         }
@@ -190,9 +441,14 @@ impl RwLock {
 
     /// Write it, if nobody holds it, without waiting.
     pub fn try_write(&self) -> bool {
-        self.state
+        let took = self
+            .state
             .compare_exchange(0, WRITER, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
+            .is_ok();
+        if took {
+            watch::took(self, watch::WRITE);
+        }
+        took
     }
 
     /// Read it, sleeping while a writer holds it or waits.
@@ -202,7 +458,9 @@ impl RwLock {
             if self.try_read() {
                 return;
             }
+            let slot = watch::sleeps(self, watch::READ);
             futex::wait(&self.sequence, seen, None);
+            watch::woke(slot);
         }
     }
 
@@ -215,20 +473,31 @@ impl RwLock {
                 let _ = self.writers_waiting.fetch_sub(1, Ordering::SeqCst);
                 return;
             }
+            let slot = watch::sleeps(self, watch::WRITE);
             futex::wait(&self.sequence, seen, None);
+            watch::woke(slot);
         }
     }
 
     /// Stop reading it.
     pub fn read_unlock(&self) {
-        if self.state.fetch_sub(1, Ordering::Release) == 1 {
+        watch::gave(self);
+        let was = self.state.fetch_sub(1, Ordering::Release);
+        if was == 0 || was & WRITER != 0 {
+            watch::unbalanced(self, "read", was);
+        }
+        if was == 1 {
             self.release();
         }
     }
 
     /// Stop writing it.
     pub fn write_unlock(&self) {
-        self.state.store(0, Ordering::Release);
+        watch::gave(self);
+        let was = self.state.swap(0, Ordering::Release);
+        if was != WRITER {
+            watch::unbalanced(self, "write", was);
+        }
         self.release();
     }
 
@@ -259,7 +528,9 @@ impl Completion {
     /// Sleep until it is done.
     pub fn wait(&self) {
         while self.done.load(Ordering::Acquire) == 0 {
+            let slot = watch::sleeps(self, watch::COMPLETION);
             futex::wait(&self.done, 0, None);
+            watch::woke(slot);
         }
     }
 

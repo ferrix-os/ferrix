@@ -43,6 +43,26 @@ extern "C" fn trampoline(start: *mut c_void) -> *mut c_void {
     // SAFETY: allocated by `spawn` with `malloc`, read above, used no more.
     unsafe { libc::free(start.cast()) };
     remember(futex::tid());
+    // For the stall diagnostic: which thread is which, by what it runs
+    // (the address is a symbol of nvrm's, or of its core's).
+    // Said once per function: the ioctl workers are one a request.
+    static SAID: [core::sync::atomic::AtomicUsize; 16] =
+        [const { core::sync::atomic::AtomicUsize::new(0) }; 16];
+    let what = run as usize;
+    for slot in &SAID {
+        let was = slot.load(Ordering::Relaxed);
+        if was == what {
+            break;
+        }
+        if was == 0
+            && slot
+                .compare_exchange(0, what, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+        {
+            crate::log::say!("thread {} runs {:p}", futex::tid(), run as *const c_void);
+            break;
+        }
+    }
     run(argument);
     core::ptr::null_mut()
 }
