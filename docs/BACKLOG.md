@@ -789,6 +789,43 @@ log path and commit; a new sighting is added to its row the day it is seen.
   volume on it. The certification consultant's C5 (ledger line 480) asks
   this row.
 
+* **NVMe, what the driver leaves (nvme-driver, 2026-10-10; `docs/NVME.md`).**
+  (1) *The first run on a real drive*, by §9's checklist, on the WD PC
+  SN720 once the PC boots Ferrix at all (H0): nothing in the driver has met
+  hardware, and §8 lists what QEMU cannot show. (2) *The shutdown
+  notification is unreachable*: the driver writes `CC.SHN` on STOP, and no
+  kernel code sends STOP (stage 10's *Still to do*), so a real drive is
+  powered off flushed but unnotified and counts an unsafe shutdown each
+  time. (3) *Names*: an NVMe disk is `/dev/vdX`; `/dev/nvme0n1` as
+  `docs/INSTALLER.md` §5.2 has it needs the block ring's name check and
+  major to take it. (4) *The Host Memory Buffer, timeouts and Abort* are
+  shown against the driver's own model only; QEMU's controller asks for no
+  host memory and cannot be made to lose a command. (5) *One I/O queue
+  pair*, until a serve loop runs on more than one processor. (6) *AArch64
+  in the shell gate*, once uutils is built for it; `test-nvme --boot up`
+  boots the driver there today. (7) *An interrupt 100 ms late, once*: at a
+  host load of 50 a restarted driver's watch took completions before any
+  interrupt came (`~/.local/share/ferrix/nvme-driver/logs/late-interrupt-load50.log`,
+  at 55.08). Taken for the virtual processor the vector is routed to
+  standing still on a starved host, which is not proved; the gate says it
+  and does not judge it. Worth one look on an idle host with the vector's
+  processor pinned.
+* **A function below a PCIe root port has its DMA faulted by the SMMUv3
+  (nvme-driver, 2026-10-10).** `cargo xtask test-nvme --boot up --arch
+  aarch64` with `FERRIX_NVME_BELOW_PORT=1` puts QEMU's `nvme` on a
+  `pcie-root-port` of the `virt` machine: the kernel says `pci 0000:01:00.0
+  behind the SmmuV3 unit at 0x9050000 as stream 0x100`, the driver's first
+  admin command is never read (`nvme 0000:01:00.0 did not come up: Fatal`,
+  QEMU's controller setting `CSTS.CFS` when its read of the queue faults),
+  and the boot ends `FX-1007`, `16 DMA faults no check provoked`. On the
+  root bus the same drive works, and on x86-64 the same drive works three
+  bridges down behind VT-d, so it is the SMMUv3's handling of a stream
+  above 0xFF or of a bridge, not the driver. Nothing else on that machine
+  sits below a bridge, which is why no gate saw it. Log:
+  `~/.local/share/ferrix/nvme-driver/logs/aarch64-smmu-bridge-fault.serial.log`
+  (branch `nvme-driver`). The certified item's IOMMU code is the place to
+  look, so the fix goes through the consultant.
+
 ---
 
 ## Fourteen programs stand between the userland and deleting busybox
