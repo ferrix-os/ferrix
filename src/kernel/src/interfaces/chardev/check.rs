@@ -46,7 +46,19 @@
 //!   after the last of two descriptors; and one kept past the driver's
 //!   death still says its size, still maps nothing and closes unheard;
 //! * when the driver goes, a waiting program wakes with `ENODEV` and the
-//!   node is unpublished (N9).
+//!   node is unpublished (N9);
+//! * a direct control (`docs/NVIDIA.md` §4.7): `chardev_next` on a control
+//!   made without the flag, a control asked for with an unknown flag, and a
+//!   tail longer than a request carries are each refused; an ioctl is taken
+//!   with the first bytes of its argument and nothing is written on the
+//!   channel; an answer given with the next take returns the program's call
+//!   with the driver's value and the tail's bytes at its argument, written
+//!   after the driver's call; an answer for a request not outstanding is
+//!   said in what the take wrote, and the take still takes; a thread with
+//!   nothing to take waits, is handed the next ioctl without the queue, and
+//!   leaves no seat behind; a file's release is taken as a request; and a
+//!   thread waiting when the driver's end closes is told the control is
+//!   gone.
 //!
 //! A machine with one PCI function checks everything but the two cases that
 //! need a second driver, and says so.
@@ -54,7 +66,9 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use ferrix_chardevctl::message::{Hello, MAX_NODES, Message, Op, VERSION};
+use ferrix_chardevctl::message::{
+    self, Hello, INLINE_MAX, MAX_NODES, Message, NEXT_HEAD, Op, REQUEST_BYTES, VERSION,
+};
 use ferrix_chardevctl::node::MODE;
 use ferrix_chardevctl::session::Refusal;
 use ferrix_linux_abi::errno::Errno;
@@ -130,6 +144,8 @@ pub(crate) struct Report {
     pub(crate) name_refusals: u32,
     /// sync_file installs, signals and resolves refused as specified (S9).
     pub(crate) sync_refusals: u32,
+    /// Requests a direct control's driver took with `chardev_next`.
+    pub(crate) direct_taken: u32,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -142,6 +158,9 @@ enum Job {
     Await(Arc<Control>, Arc<Request>, Arc<Process>),
     /// Abandon the request, as a signal makes a program's call do.
     Abandon(Arc<Control>, Arc<Request>),
+    /// Take the next request of the control this handle names in the
+    /// process, as a driver thread with nothing to answer does.
+    Next(Arc<Process>, Handle),
 }
 
 /// The helper's job.
@@ -177,6 +196,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let control = accepted(&driver, first, &[0])?;
     let core = control_of(first)?;
     duplicate_refused(&driver, control, &mut report)?;
+    if driver.call(nr::CHARDEV_NEXT, &[reg(control), INBOX, 0, 0, 0, 0]) != Err(status::BAD_STATE)
+    {
+        return Err("chardev_next on a control made without CHARDEV_DIRECT was not refused");
+    }
+    report.refusals += 1;
     if super::file::metadata(0).permissions != MODE || published(0).is_none() {
         return Err("an accepted HELLO did not publish nvidia0, mode 0666");
     }
@@ -221,7 +245,176 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     driver.close_everything();
     program.close_everything();
     settle()?;
+    let driver = Side::new()?;
+    let program = Side::new()?;
+    direct(&driver, first, &program, &mut report)?;
+    driver.close_everything();
+    program.close_everything();
+    settle()?;
     Ok(report)
+}
+
+/// What `chardev_next` wrote at the driver's [`INBOX`]: the REQUEST, how
+/// the answer given with the take fared, and the argument's first bytes.
+fn taken(side: &Side) -> Result<(super::Wire, i32, Vec<u8>), &'static str> {
+    let bytes = side.get(INBOX, message::NEXT_BYTES)?;
+    let Ok(Message::Request(wire)) = Message::decode(bytes.get(..REQUEST_BYTES).unwrap_or(&[]))
+    else {
+        return Err("chardev_next did not write a REQUEST");
+    };
+    let word = |at: usize| -> Result<[u8; 4], &'static str> {
+        bytes
+            .get(at..at + 4)
+            .and_then(|word| <[u8; 4]>::try_from(word).ok())
+            .ok_or("a short take")
+    };
+    let replied = i32::from_le_bytes(word(REQUEST_BYTES)?);
+    let carried = u32::from_le_bytes(word(REQUEST_BYTES + 4)?) as usize;
+    let head = bytes
+        .get(NEXT_HEAD..NEXT_HEAD + carried)
+        .ok_or("chardev_next said more bytes than a request carries")?
+        .to_vec();
+    Ok((wire, replied, head))
+}
+
+/// How many driver threads wait in `control`'s seats.
+fn seated(control: &Control) -> usize {
+    control.state.lock().seats.len()
+}
+
+/// A direct control: requests taken with `chardev_next`, answered in the
+/// take, handed to a waiting thread, and the control's end
+/// (`docs/NVIDIA.md` §4.7).
+fn direct(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::CHARDEV_DIRECT;
+    let device = device_handle(side, node)?;
+    if side.call(nr::CHARDEV_CONTROL_CREATE, &[reg(device), 2]) != Err(status::INVALID_ARGS) {
+        return Err("a chardev control with an unknown flag was not refused");
+    }
+    report.refusals += 1;
+    let control = side.handle(
+        nr::CHARDEV_CONTROL_CREATE,
+        &[reg(device), CHARDEV_DIRECT],
+        "a direct chardev control was refused",
+    )?;
+    hello(side, control, location(node), &[0])?;
+    if !matches!(receive(side, control)?, Some(Message::Ready(1))) {
+        return Err("a direct control's HELLO was not answered READY");
+    }
+    let core = control_of(node)?;
+    let next = |reply: u64, result: u64, tail: u64, len: u64| {
+        side.call(
+            nr::CHARDEV_NEXT,
+            &[reg(control), INBOX, reply, result, tail, len],
+        )
+    };
+
+    // An ioctl, taken with its argument's first bytes; nothing on the
+    // channel.
+    program.put(BUFFER, &PING)?;
+    let first = admit(&core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(&core),
+        Arc::clone(&first),
+        Arc::clone(&program.process),
+    ))?;
+    let _ = next(0, 0, 0, 0).map_err(|_| "a queued ioctl was not taken with chardev_next")?;
+    let (wire, replied, head) = taken(side)?;
+    if wire.op != Op::Ioctl || wire.cmd != COMMAND || wire.arg != BUFFER || wire.id != first.wire.id
+    {
+        return Err("chardev_next took another request than the ioctl made");
+    }
+    if replied != 0 || head.len() != message::inline_len(COMMAND) || head.get(..8) != Some(&PING[..])
+    {
+        return Err("an ioctl was not taken with the first bytes of its argument");
+    }
+    if read(side, control).is_some() {
+        return Err("a direct control's request was written on the channel as well");
+    }
+    report.direct_taken += 1;
+
+    // A tail longer than a request carries is refused and answers nothing.
+    let long = u64::try_from(INLINE_MAX + 1).map_err(|_| "a length")?;
+    if next(wire.id, VALUE, BUFFER, long) != Err(status::INVALID_ARGS) {
+        return Err("a tail longer than a request carries was not refused");
+    }
+    report.refusals += 1;
+    still_waiting("a refused answer returned the program's call")?;
+
+    // Answered in the take of the second: the program's call returns the
+    // value, with the tail's bytes at its argument.
+    let second = admit(&core, &program.process, IOCTL).map_err(|_| "a second ioctl was refused")?;
+    side.put(BUFFER, &PONG)?;
+    let _ = next(wire.id, VALUE, BUFFER, 8).map_err(|_| "an answer with the next take was refused")?;
+    if finish()? != Ok(VALUE as usize) {
+        return Err("an answer given with the next take did not return the program's call");
+    }
+    if program.get(BUFFER, 8)? != PONG {
+        return Err("an answer's tail did not reach the program's argument");
+    }
+    report.answered += 1;
+    let (wire, replied, _) = taken(side)?;
+    if wire.id != second.wire.id || replied != 0 {
+        return Err("the take that answered did not take the second ioctl");
+    }
+    report.direct_taken += 1;
+
+    // An answer for a request not outstanding is said, and the take takes.
+    let third = admit(&core, &program.process, IOCTL).map_err(|_| "a third ioctl was refused")?;
+    let _ = next(first.wire.id, VALUE, 0, 0).map_err(|_| "a take with a stale answer did not take")?;
+    let (wire, replied, _) = taken(side)?;
+    if wire.id != third.wire.id || replied != -i32::from(status::BAD_STATE.0) {
+        return Err("an answer for a request not outstanding was not said in the take");
+    }
+    report.refusals += 1;
+    report.direct_taken += 1;
+    reply(side, control, second.wire.id, VALUE)?;
+    reply(side, control, third.wire.id, VALUE)?;
+
+    // A thread with nothing to take waits in a seat, and is handed the
+    // next ioctl without the queue.
+    start(Job::Next(Arc::clone(&side.process), control))?;
+    still_waiting("chardev_next with nothing to take returned")?;
+    if seated(&core) != 1 {
+        return Err("a thread waiting in chardev_next has no seat");
+    }
+    let fourth = admit(&core, &program.process, IOCTL).map_err(|_| "a fourth ioctl was refused")?;
+    if queued(&core) != 0 {
+        return Err("an ioctl was queued although a driver thread waited for it");
+    }
+    if finish()? != Ok(0) {
+        return Err("a waiting thread was not handed the ioctl");
+    }
+    let (wire, _, head) = taken(side)?;
+    if wire.id != fourth.wire.id || head.get(..8) != Some(&PONG[..]) || seated(&core) != 0 {
+        return Err("the ioctl handed to a waiting thread was another, or its seat stayed");
+    }
+    report.direct_taken += 1;
+    reply(side, control, fourth.wire.id, VALUE)?;
+
+    // A file's release is taken as a request.
+    super::hold_release(&core).map_err(|_| "no room for a release")?;
+    super::queue_release(&core, 99, 0);
+    let _ = next(0, 0, 0, 0).map_err(|_| "a release was not taken")?;
+    let (wire, _, head) = taken(side)?;
+    if wire.op != Op::Release || wire.file != 99 || !head.is_empty() {
+        return Err("a file's release was not taken as it was queued");
+    }
+    report.direct_taken += 1;
+
+    // A thread waiting when the driver's end closes is told so.
+    start(Job::Next(Arc::clone(&side.process), control))?;
+    still_waiting("chardev_next with nothing to take returned")?;
+    close(side, control)?;
+    if finish()? != Err(status::PEER_CLOSED) {
+        return Err("a thread waiting in chardev_next was not told its control is gone");
+    }
+    Ok(())
 }
 
 /// Each HELLO the session refuses, refused, each on a control of its own
@@ -1334,7 +1527,7 @@ fn read(side: &Side, control: Handle) -> Option<Vec<u8>> {
             &[
                 reg(control),
                 INBOX,
-                ferrix_chardevctl::message::MAX_BYTES as u64,
+                message::MAX_BYTES as u64,
                 IN_HANDLES,
                 0,
                 ACTUAL,
@@ -1446,6 +1639,9 @@ fn helper(_: usize) {
         Some(Job::Abandon(control, request)) => {
             abandon(&control, &request);
             Ok(0)
+        }
+        Some(Job::Next(process, control)) => {
+            Side { process }.call(nr::CHARDEV_NEXT, &[reg(control), INBOX, 0, 0, 0, 0])
         }
         None => Err(Errno::EINVAL),
     };

@@ -361,6 +361,10 @@ pub const DMABUF_TELL_MADE: u64 = 1 << 2;
 /// multiple of 4096, at most [`DMABUF_NAME_MAX`]). It cannot be mapped;
 /// only its maker's resolve gives the cookie back.
 pub const DMABUF_NAME_ONLY: u64 = 1 << 3;
+/// `chardev_control_create`'s flags, in its second register: the driver
+/// takes its requests with `chardev_next`, and none is written on the
+/// channel (`docs/NVIDIA.md` §4.7). Any other bit is `INVALID_ARGS`.
+pub const CHARDEV_DIRECT: u64 = 1;
 /// The largest size a name-only dmabuf may say it has.
 pub const DMABUF_NAME_MAX: u64 = 1 << 40;
 /// Every flag `chardev_dmabuf_install` knows; any other is `INVALID_ARGS`.

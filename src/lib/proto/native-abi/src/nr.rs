@@ -181,6 +181,8 @@ pub const CHARDEV_SYNC_INSTALL: usize = 0x1062;
 pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 /// [`NativeCall::ChardevSyncResolve`].
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
+/// [`NativeCall::ChardevNext`].
+pub const CHARDEV_NEXT: usize = 0x1065;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -604,10 +606,27 @@ pub enum NativeCall {
     /// `BAD_HANDLE` for any other descriptor. Only while the request is
     /// outstanding. Answered by the load ring.
     ChardevSyncResolve,
+    /// `(control, out, request, result, tail, tail length)`. On a control
+    /// made with [`crate::types::CHARDEV_DIRECT`]: answer `request`, unless
+    /// it is zero, and wait for the control's next request, written at
+    /// `out` as `ferrix_chardevctl::message::NEXT_BYTES` describes -- the
+    /// REQUEST, how the answer fared, and the first bytes of an ioctl's
+    /// argument, read from the program as it made the call. `result` is
+    /// the answer: an ioctl's value, or a negative errno no lower than
+    /// -4095. `tail length` bytes at `tail`, at most
+    /// `ferrix_chardevctl::message::INLINE_MAX` and for an ioctl only, are
+    /// written at the ioctl's argument by the program's own thread before
+    /// its call returns, which fails with `EFAULT` if they cannot be. A
+    /// thread waiting here is handed the next request directly and woken on
+    /// the processor of the program that made it. `BAD_STATE` on a control
+    /// made without the flag, `PEER_CLOSED` once the control is gone,
+    /// `EINTR` for a wait a signal ended, `LIMIT_REACHED` past the
+    /// control's waiting threads. Answered by the load ring.
+    ChardevNext,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 64] = [
+pub const ALL: [NativeCall; 65] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -672,6 +691,7 @@ pub const ALL: [NativeCall; 64] = [
     NativeCall::ChardevSyncInstall,
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
+    NativeCall::ChardevNext,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -751,6 +771,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_INSTALL => NativeCall::ChardevSyncInstall,
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
+        CHARDEV_NEXT => NativeCall::ChardevNext,
         _ => return None,
     };
     Some(call)
@@ -824,5 +845,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncInstall => CHARDEV_SYNC_INSTALL,
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
+        NativeCall::ChardevNext => CHARDEV_NEXT,
     }
 }

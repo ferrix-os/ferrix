@@ -64,6 +64,8 @@ static struct nvos_timer *count_timer;
 #define COUNT_SPAN 5
 
 static NvU32 pool_most_now(void);
+static void which_say(void);
+static void which_note(NvU32 escape, const NvU32 *words, NvU32 size);
 
 static void count_say(void *unused)
 {
@@ -79,6 +81,7 @@ static void count_say(void *unused)
         nv_printf(NV_DBG_ERRORS, "nvrm: chardev: %llu req/s (ioctl %llu, mmap %llu), copy-in %llu KB/s, copy-out %llu KB/s, %u threads at most\n",
                   (ioctl + mmap + other) / COUNT_SPAN, ioctl / COUNT_SPAN, mmap / COUNT_SPAN,
                   in / COUNT_SPAN / 1024, out / COUNT_SPAN / 1024, pool_most_now());
+    which_say();
     nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
 }
 
@@ -239,6 +242,7 @@ void nvrm_diag_rm(NvU32 escape, const void *argument, NvU32 size)
     NvU64 thread = 0;
     int i, w;
 
+    which_note(escape, words, size);
     if (!nvrm_diag)
         return;
     (void)os_get_current_thread(&thread);
@@ -402,6 +406,39 @@ static void *find_drm(NvU64 file)
     return found;
 }
 
+/*
+ * A RELEASE can be served before the OPEN of its file: the kernel queues it
+ * the moment a program gives up on an OPEN, and two threads of the pool
+ * take the two. Such a file is remembered here until its OPEN is through,
+ * which then closes it at once. A RELEASE for an OPEN that was refused
+ * stays in the ring until 32 more push it out: identities are never
+ * reused, so it matches nothing.
+ */
+#define EARLY_SLOTS 32
+static NvU64 early[EARLY_SLOTS];
+static NvU32 early_next;
+
+/* Under serial_lock. */
+static void early_note(NvU64 file)
+{
+    early[early_next++ % EARLY_SLOTS] = file;
+}
+
+/* Whether `file` was released before now; forgotten if so. Under
+ * serial_lock. */
+static NvBool early_take(NvU64 file)
+{
+    NvU32 i;
+
+    for (i = 0; i < EARLY_SLOTS; i++)
+        if (early[i] == file && file != 0)
+        {
+            early[i] = 0;
+            return NV_TRUE;
+        }
+    return NV_FALSE;
+}
+
 static struct chardev_file *forget(NvU64 file)
 {
     struct chardev_file **at, *entry = NULL;
@@ -491,7 +528,110 @@ struct worker {
     int diag;
     /* The round trip's stamps, and the copies counted. */
     struct nvrm_trip_stamps trip;
+    /* For an RM call, once its argument is read: the escape, and a
+     * control's command or an allocation's class (which_note). */
+    NvU32 escape, detail;
+    /* Whether the dispatcher made it: nvrm-link-test's client has a
+     * context of its own. */
+    NvU32 magic;
+    /* The first bytes of the ioctl's argument, as they came with the
+     * request: head_length of them, none once the argument is written. */
+    NvU32 head_length;
+    /* What the handler wrote at the ioctl's argument, kept to go back with
+     * the answer: tail_length bytes, where keep_tail lets it be kept. */
+    NvU32 tail_length;
+    NvBool keep_tail;
+    NvU8 head[NVOS_INLINE_MAX];
+    NvU8 tail[NVOS_INLINE_MAX];
 };
+
+#define WORKER_MAGIC 0x74726970u
+
+/* ------------------------------------------------------------------------
+ * Which requests come (docs/NVIDIA.md §4.7): every ioctl served is counted
+ * by its command and, for an RM call, by its escape and its control's
+ * command or its allocation's class, in a small table without a lock; the
+ * line said every five seconds names the four most frequent. A table that
+ * is full counts the rest together.
+ * ---------------------------------------------------------------------- */
+#define WHICH_SLOTS 64
+
+static struct { NvU64 key; NvU64 count; } which_table[WHICH_SLOTS];
+static NvU64 which_lost;
+
+static void which_count(const struct worker *work)
+{
+    /* The command, then the escape's detail; never 0 for a real ioctl. */
+    NvU64 key = ((NvU64)work->request.cmd << 32) | work->detail;
+    NvU32 at = (NvU32)((key * 0x9E3779B97F4A7C15ULL) >> 58), step;
+
+    for (step = 0; step < 8; step++)
+    {
+        NvU64 was = __atomic_load_n(&which_table[(at + step) % WHICH_SLOTS].key, __ATOMIC_RELAXED);
+
+        if (was == 0 &&
+            __atomic_compare_exchange_n(&which_table[(at + step) % WHICH_SLOTS].key, &was, key,
+                                        NV_FALSE, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+            was = key;
+        if (was == key)
+        {
+            __atomic_fetch_add(&which_table[(at + step) % WHICH_SLOTS].count, 1, __ATOMIC_RELAXED);
+            return;
+        }
+    }
+    __atomic_fetch_add(&which_lost, 1, __ATOMIC_RELAXED);
+}
+
+/* From nvrm_diag_rm, once an RM call's argument is read: which call the
+ * calling thread's request is -- a control's command, an allocation's
+ * class, or the escape alone. */
+static void which_note(NvU32 escape, const NvU32 *words, NvU32 size)
+{
+    struct worker *work = nvos_client_context();
+
+    if (work == NULL || work->magic != WORKER_MAGIC)
+        return;
+    work->escape = escape;
+    if (escape == 0x2A && words != NULL && size >= 3 * sizeof(NvU32))        /* NV_ESC_RM_CONTROL */
+        work->detail = words[2];
+    else if (escape == 0x2B && words != NULL && size >= 4 * sizeof(NvU32))   /* NV_ESC_RM_ALLOC */
+        work->detail = words[3];
+}
+
+/* Say the four most frequent of the span, and empty the table. */
+static void which_say(void)
+{
+    struct { NvU64 key, count; } top[4] = { { 0, 0 } };
+    char line[256];
+    int used, i, j;
+    NvU64 lost = __atomic_exchange_n(&which_lost, 0, __ATOMIC_RELAXED);
+
+    for (i = 0; i < WHICH_SLOTS; i++)
+    {
+        NvU64 key = __atomic_exchange_n(&which_table[i].key, 0, __ATOMIC_RELAXED);
+        NvU64 count = __atomic_exchange_n(&which_table[i].count, 0, __ATOMIC_RELAXED);
+
+        for (j = 0; j < 4 && key != 0; j++)
+            if (count > top[j].count)
+            {
+                NvU64 k = top[j].key, c = top[j].count;
+
+                top[j].key = key;
+                top[j].count = count;
+                key = k;
+                count = c;
+            }
+    }
+    if (top[0].count == 0)
+        return;
+    used = snprintf(line, sizeof(line), "nvrm: chardev: most frequent:");
+    for (j = 0; j < 4 && top[j].count != 0; j++)
+        used += snprintf(line + used, sizeof(line) - (size_t)used, " ioctl 0x%x/0x%x %llu/s;",
+                         (NvU32)(top[j].key >> 32), (NvU32)top[j].key,
+                         (unsigned long long)(top[j].count / COUNT_SPAN));
+    nv_printf(NV_DBG_ERRORS, "%s %llu uncounted\n", line, (unsigned long long)lost);
+}
+
 
 /* The trip ioctls, answered here: 0 or a negative errno. */
 static int trip_ioctl(struct worker *work)
@@ -527,14 +667,53 @@ static int trip_ioctl(struct worker *work)
     }
 }
 
-/* The client's copies, through the bridge, for the request its worker
- * serves. */
+/*
+ * The client's copies, through the bridge, for the request its worker
+ * serves (docs/NVIDIA.md §4.7).
+ *
+ * Two of them need no call: a read inside the first bytes of the ioctl's
+ * argument is answered from the bytes that came with the request, which
+ * the program's own thread read as it made the call; and one write at the
+ * argument's start is kept, to go back with the answer, where the program's
+ * own thread writes it before its call returns. Kept bytes are written out
+ * at once, by a copy of the old kind, before any later copy that touches
+ * the same bytes, and before an answer that is an error, with which the
+ * kernel sends no bytes back; and once the argument has been written its
+ * first bytes are no longer read from what came with the request.
+ */
+static NvBool tail_touches(const struct worker *work, NvU64 at, NvU32 length)
+{
+    return work->tail_length != 0 && at < work->request.arg + work->tail_length &&
+           work->request.arg < at + length;
+}
+
+/* Write the kept bytes out now; 0, or -EFAULT. */
+static int tail_flush(struct worker *work)
+{
+    NvU32 length = work->tail_length;
+
+    if (length == 0)
+        return 0;
+    work->tail_length = 0;
+    work->trip.copies++;
+    return nvos_chardev_copy_out(work->request.id, work->request.arg, work->tail, length) == 0
+               ? 0 : -EFAULT;
+}
+
 static int bridge_in(void *context, void *to, NvU64 from, NvU32 length)
 {
     struct worker *work = context;
 
-    work->trip.copies++;
     __atomic_fetch_add(&bytes_in, length, __ATOMIC_RELAXED);
+    if (tail_touches(work, from, length) && tail_flush(work) != 0)
+        return -EFAULT;
+    if (from >= work->request.arg && length <= work->head_length &&
+        from - work->request.arg <= work->head_length - length)
+    {
+        memcpy(to, work->head + (from - work->request.arg), length);
+        return 0;
+    }
+    work->trip.copies++;
     return nvos_chardev_copy_in(work->request.id, to, from, length) == 0 ? 0 : -EFAULT;
 }
 
@@ -542,8 +721,19 @@ static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length)
 {
     struct worker *work = context;
 
-    work->trip.copies++;
     __atomic_fetch_add(&bytes_out, length, __ATOMIC_RELAXED);
+    if (tail_touches(work, to, length) && tail_flush(work) != 0)
+        return -EFAULT;
+    /* Written, the argument is no longer what came with the request. */
+    if (to < work->request.arg + work->head_length && work->request.arg < to + length)
+        work->head_length = 0;
+    if (work->keep_tail && to == work->request.arg && length != 0 && length <= NVOS_INLINE_MAX)
+    {
+        memcpy(work->tail, from, length);
+        work->tail_length = length;
+        return 0;
+    }
+    work->trip.copies++;
     return nvos_chardev_copy_out(work->request.id, to, from, length) == 0 ? 0 : -EFAULT;
 }
 
@@ -554,13 +744,9 @@ static NvS64 bridge_fd(void *context, int fd)
     return nvos_chardev_file(work->request.id, fd);
 }
 
-static void pool_release(void);
-
-/* Serve the ioctl in `work` as its client and answer it. A thread of the
- * pool counts itself free before it answers: the program's next request
- * can come before this thread is back from the answer, and whoever takes
- * it would start a thread for want of a free one. */
-static void serve(struct worker *work, NvBool pooled)
+/* Serve the ioctl in `work` as its client: its answer, a value or a
+ * negative errno, for the caller to send. */
+static NvS64 serve(struct worker *work)
 {
     nvos_client_t client;
     int rc;
@@ -579,11 +765,8 @@ static void serve(struct worker *work, NvBool pooled)
 
     if (!nvos_client_enter(&client))
     {
-        if (pooled)
-            pool_release();
-        (void)nvos_chardev_reply(work->request.id, -EBUSY, 0);
         diag_leave(work->diag);
-        return;
+        return -EBUSY;
     }
     if (TRIP_TYPE_OF(work->request.cmd) == NVRM_TRIP_TYPE)
         rc = trip_ioctl(work);
@@ -592,6 +775,9 @@ static void serve(struct worker *work, NvBool pooled)
     else
         rc = nvrm_ioctl(work->nvlfp, work->request.cmd, (void *)(NvUPtr)work->request.arg);
     nvos_client_leave();
+    /* No bytes go back with an error: what was kept is written now. */
+    if (rc < 0)
+        (void)tail_flush(work);
     if (TRIP_TYPE_OF(work->request.cmd) != NVRM_TRIP_TYPE)
     {
         work->trip.id = work->request.id;
@@ -599,17 +785,19 @@ static void serve(struct worker *work, NvBool pooled)
         work->trip.pid = work->request.pid;
         work->trip.done = trip_now();
         trip_keep(&work->trip);
+        which_count(work);
     }
-    if (pooled)
-        pool_release();
-    (void)nvos_chardev_reply(work->request.id, rc < 0 ? rc : 0, rc > 0 ? rc : 0);
     diag_leave(work->diag);
+    return rc;
 }
 
 /* A thread started for one ioctl (NVRM_TRIP_MODE 1). */
 static void serve_ioctl(void *argument)
 {
-    serve(argument, NV_FALSE);
+    struct worker *work = argument;
+    NvS64 rc = serve(work);
+
+    (void)nvos_chardev_reply(work->request.id, rc < 0 ? (int)rc : 0, rc > 0 ? rc : 0);
     free(argument);
 }
 
@@ -695,6 +883,10 @@ static NvBool take(const struct nvos_request *request, NvU64 taken, struct worke
         return NV_FALSE;
     }
     os_mem_set(&work->trip, 0, sizeof(work->trip));
+    work->tail_length = 0;
+    work->escape = 0;
+    work->detail = 0;
+    work->magic = WORKER_MAGIC;
     work->request = *request;
     work->trip.taken = taken;
     work->nvlfp = nvlfp;
@@ -757,6 +949,13 @@ static void handle_one(const struct nvos_request *request, NvU64 taken)
                     (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
                     return;
                 }
+                if (early_take(request->file))
+                {
+                    nvrm_drm_close(drm);
+                    free(entry);
+                    (void)nvos_chardev_reply(request->id, -ENODEV, 0);
+                    return;
+                }
                 remember(request->file, NULL, drm, entry);
                 (void)nvos_chardev_reply(request->id, 0, 0);
                 return;
@@ -771,6 +970,13 @@ static void handle_one(const struct nvos_request *request, NvU64 taken)
             /* RM names files by fd (nv_get_file_private): the kernel's
              * identity for it, which chardev_file resolves descriptors to. */
             nvlfp->fd = (NvS32)request->file;
+            if (early_take(request->file))
+            {
+                nvrm_close(nvlfp);
+                free(entry);
+                (void)nvos_chardev_reply(request->id, -ENODEV, 0);
+                return;
+            }
             remember(request->file, nvlfp, NULL, entry);
             (void)nvos_chardev_reply(request->id, 0, 0);
             return;
@@ -815,6 +1021,8 @@ static void handle_one(const struct nvos_request *request, NvU64 taken)
                     nvrm_close(entry->nvlfp);
                 free(entry);
             }
+            else
+                early_note(request->file);
             return;
 
         case NVOS_REQUEST_DMABUF_RELEASE:
@@ -836,25 +1044,25 @@ int nvrm_chardev_publish(const NvU16 *minors, NvU32 count)
  * request and started a thread for each ioctl: a stack mapped, a clone, an
  * exit and an unmap a request, 116 us of a 544 us round trip on the bench.
  *
- * Now the threads that serve are the threads that take. One of them at a
- * time, the leader, holds lead_lock and waits in the bridge for the next
- * request. When it has one it gives the lead to a thread that is free, and
- * serves the request itself, on its own stack, with nothing allocated;
- * then it queues for the lead again. A leader that finds no thread free
- * starts one, up to POOL_MOST, which is the number of clients nvos lets
- * threads serve at once; at that number the last free thread keeps the
- * lead and answers ioctls EBUSY, as nvos_client_enter's refusal did, so
- * that requests are still taken.
+ * Now the threads that serve are the threads that take. Each waits in the
+ * kernel for a request (nvos_chardev_next); the kernel hands a request to
+ * the one that began to wait last and wakes it where the program that made
+ * the request ran. The thread serves it on its own stack, with nothing
+ * allocated, and answers it in the call that takes its next. A thread that
+ * takes a request and leaves none waiting starts one, up to POOL_MOST,
+ * which is the number of clients nvos lets threads serve at once; at that
+ * number the last free thread answers ioctls EBUSY, as nvos_client_enter's
+ * refusal did, so that requests are still taken.
  *
  * Everything but an ioctl -- OPEN, RELEASE, MMAP, a dmabuf's release -- is
- * still served one at a time and in the order the kernel sent it, as the
- * one dispatch thread served it: the leader takes serial_lock before it
- * gives the lead away. A RELEASE the kernel queued behind an abandoned
- * OPEN therefore still finds the file that OPEN made.
+ * still served one at a time, under serial_lock, as the one dispatch
+ * thread served it. Their order is no longer the kernel's, since two
+ * threads take two requests; the one order that mattered, a RELEASE behind
+ * the OPEN of its file, is kept by the file (early_note).
  * ---------------------------------------------------------------------- */
 #define POOL_MOST 64
 
-static nvos_mutex_t lead_lock, serial_lock, pool_lock;
+static nvos_mutex_t serial_lock, pool_lock;
 /* The pool's threads, and how many of them serve nothing. Under pool_lock. */
 static NvU32 pool_threads, pool_free;
 /* The most threads the pool has had, for the line said at 5 s. */
@@ -862,8 +1070,8 @@ static NvU32 pool_most;
 
 static void pool_run(void *unused);
 
-/* The calling thread, the leader, has a request to serve: whether another
- * thread is, or now will be, free to lead. */
+/* The calling thread has a request to serve: whether another thread is, or
+ * now will be, free to take the next. */
 static NvBool pool_engage(void)
 {
     NvBool other = NV_TRUE, start = NV_FALSE;
@@ -905,67 +1113,68 @@ static void pool_release(void)
     nvos_mutex_unlock(&pool_lock);
 }
 
-/* Whether the control channel failed: every thread of the pool ends. */
-static int pool_failed;
-
 static void pool_run(void *unused)
 {
-    struct worker work;
+    struct worker *work = calloc(1, sizeof(*work));
     struct nvos_request request;
+    /* The answer that goes with the next take: 0 for none. */
+    NvU64 answer = 0;
+    NvS64 result = 0;
     NvU64 taken;
 
     (void)unused;
+    /* Without memory for its own, a thread takes and refuses. */
     for (;;)
     {
-        nvos_mutex_lock(&lead_lock);
-        if (__atomic_load_n(&pool_failed, __ATOMIC_ACQUIRE) ||
-            nvos_chardev_next(&request) != NV_OK)
-        {
-            __atomic_store_n(&pool_failed, 1, __ATOMIC_RELEASE);
-            nvos_mutex_unlock(&lead_lock);
+        NvU32 head_length = 0;
+        NvU8 spare[NVOS_INLINE_MAX];
+
+        if (nvos_chardev_next(&request, work != NULL ? work->head : spare, &head_length,
+                              answer, result, work != NULL ? work->tail : spare,
+                              work != NULL ? work->tail_length : 0) != NV_OK)
             return;
-        }
         taken = trip_now();
+        answer = 0;
 
         if (request.op == NVOS_REQUEST_IOCTL &&
             __atomic_load_n(&trip_mode, __ATOMIC_RELAXED) != 0)
         {
-            /* The control: a thread started for it, the lead kept, as the
-             * one dispatch thread did. */
+            /* The control: a thread started for it, as the one dispatch
+             * thread did. */
             handle(&request, taken);
-            nvos_mutex_unlock(&lead_lock);
             continue;
         }
         if (request.op != NVOS_REQUEST_IOCTL)
         {
-            /* In the order taken, one at a time; where no other thread
-             * is free, with the lead kept. */
+            /* One at a time. A thread that is the last one free serves it
+             * all the same: nothing here waits for a client. */
             NvBool other = pool_engage();
 
             nvos_mutex_lock(&serial_lock);
-            if (other)
-                nvos_mutex_unlock(&lead_lock);
             handle(&request, taken);
             nvos_mutex_unlock(&serial_lock);
             if (other)
                 pool_release();
-            else
-                nvos_mutex_unlock(&lead_lock);
             continue;
         }
 
         count(&request);
-        if (!pool_engage())
+        if (work == NULL || !pool_engage())
         {
-            (void)nvos_chardev_reply(request.id, -EBUSY, 0);
-            nvos_mutex_unlock(&lead_lock);
+            (void)nvos_chardev_reply(request.id, work == NULL ? -ENOMEM : -EBUSY, 0);
             continue;
         }
-        nvos_mutex_unlock(&lead_lock);
-        if (take(&request, taken, &work))
-            serve(&work, NV_TRUE);
-        else
-            pool_release();
+        if (take(&request, taken, work))
+        {
+            work->head_length = head_length;
+            work->keep_tail = NV_TRUE;
+            result = serve(work);
+            answer = request.id;
+        }
+        /* Free before the answer goes: the program's next request can come
+         * before this thread is back in the kernel's wait, and whoever
+         * took it would start a thread for want of a free one. */
+        pool_release();
     }
 }
 

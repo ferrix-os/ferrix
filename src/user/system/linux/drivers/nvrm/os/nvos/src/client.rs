@@ -91,6 +91,14 @@ pub extern "C" fn nvos_client_resolve_fd(fd: i32) -> i64 {
     }
 }
 
+/// What the calling thread's client was entered with as its `context`, or
+/// null with no client entered: for the dispatcher to find the request a
+/// thread serves from inside a call RM made back.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_client_context() -> *mut c_void {
+    current().map_or(ptr::null_mut(), |client| client.context)
+}
+
 /// Say the calling thread now serves `client`, until
 /// [`nvos_client_leave`]. Returns whether there was a slot for it.
 ///

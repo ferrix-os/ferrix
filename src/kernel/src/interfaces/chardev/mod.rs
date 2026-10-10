@@ -40,6 +40,23 @@
 //! * When the driver goes, its nodes go: every open file answers `ENODEV`
 //!   for good, and every waiter wakes with `ENODEV` (N9).
 //!
+//! # Taken, not written (`docs/NVIDIA.md` §4.7)
+//!
+//! A driver that made its control with `CHARDEV_DIRECT` takes its requests
+//! with `chardev_next` instead of reading them off the channel, and may
+//! answer one in the same call. A driver thread with nothing to take waits
+//! in a seat; the program's own thread, admitting a request, hands it to
+//! the thread that sat down last and wakes it onto its own processor, as it
+//! is about to sleep there. Nothing passes through the control's task,
+//! which on such a control only watches the channel for the driver's end.
+//! The request carries the first bytes of an ioctl's argument, which the
+//! program's thread read from its own memory, and the answer may carry
+//! bytes back, which the program's thread writes there before its call
+//! returns: neither is a copy into another program's memory, and neither
+//! needs a call of its own. What holds above holds unchanged: the table
+//! and the queue are the same ones, a seat only takes the place of the
+//! queue's head.
+//!
 //! An mmap is forwarded as a request too (N2; the consultant's ledger 300):
 //! the driver answers with a VMO of its own or a range of its device's own
 //! memory apertures, and the kernel maps that into the program once the
@@ -54,7 +71,7 @@ use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use ferrix_chardevctl::message::{self, Message, Op, Request as Wire};
+use ferrix_chardevctl::message::{self, INLINE_MAX, Message, Op, Request as Wire};
 use ferrix_chardevctl::node::{MAJOR, RENDER_MINOR};
 use ferrix_chardevctl::session::{self, Publication, Refusal};
 use ferrix_linux_abi::errno::Errno;
@@ -87,6 +104,10 @@ pub(crate) mod sync;
 
 /// The most requests one control has outstanding; the next is `EBUSY`.
 pub(crate) const MAX_OUTSTANDING: usize = 256;
+
+/// The most driver threads waiting in `chardev_next` on one control; the
+/// next is `LIMIT_REACHED`.
+pub(crate) const MAX_SEATS: usize = 64;
 
 /// A copy's chunk: between chunks it checks the request is still alive.
 const CHUNK: usize = 4096;
@@ -142,6 +163,9 @@ pub(crate) struct Control {
     state: SpinLock<State>,
     /// The task's: woken when there is something to send.
     work: WaitQueue,
+    /// Whether the driver takes its requests with `chardev_next`
+    /// (`CHARDEV_DIRECT`), and the task writes none on the channel.
+    direct: bool,
     /// Set once the driver is gone.
     gone: AtomicBool,
     /// Aperture mappings that hold the device's claim, and whether the
@@ -196,6 +220,21 @@ struct State {
     queued: usize,
     /// Files open, each holding one slot of `outgoing` for its release.
     holding: usize,
+    /// Driver threads waiting in `chardev_next`, the last to sit down last:
+    /// none while `outgoing` holds anything, since whoever queues looks
+    /// here first and whoever sits down looks there first, both under this
+    /// lock. At most [`MAX_SEATS`].
+    seats: Vec<Arc<Seat>>,
+    /// Seats nobody sits in, kept so that sitting down allocates nothing.
+    spare: Vec<Arc<Seat>>,
+}
+
+/// Where one driver thread waits in `chardev_next`.
+struct Seat {
+    /// What it was handed, by whoever took the seat off the control's list.
+    given: SpinLock<Option<Outgoing>>,
+    /// Woken when something is handed over, and when the driver is gone.
+    queue: WaitQueue,
 }
 
 /// One message the task has yet to write.
@@ -214,10 +253,32 @@ enum Outgoing {
 /// One program's request, outstanding until answered or abandoned.
 pub(crate) struct Request {
     wire: Wire,
+    /// The first bytes of an ioctl's argument, read by the program's own
+    /// thread as it made the call; empty unless the control is direct.
+    head: Inline,
     /// The waiting program, whose memory the copies reach.
     client: Arc<Process>,
     inner: SpinLock<Inner>,
     waiters: WaitQueue,
+}
+
+/// Up to [`INLINE_MAX`] bytes that go with a request or come back with its
+/// answer.
+#[derive(Clone, Copy, Debug)]
+struct Inline {
+    len: usize,
+    bytes: [u8; INLINE_MAX],
+}
+
+impl Inline {
+    const EMPTY: Inline = Inline {
+        len: 0,
+        bytes: [0; INLINE_MAX],
+    };
+
+    fn as_bytes(&self) -> &[u8] {
+        self.bytes.get(..self.len).unwrap_or(&[])
+    }
 }
 
 /// A request's state.
@@ -229,6 +290,9 @@ struct Inner {
     answer: Option<Result<Answer, Errno>>,
     /// Copies in flight.
     copying: u32,
+    /// What the answer brought for the program's thread to write at the
+    /// ioctl's argument before its call returns.
+    tail: Inline,
 }
 
 impl core::fmt::Debug for Control {
@@ -264,6 +328,7 @@ pub(crate) fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevSyncInstall, sync::install)?;
     native::serve(NativeCall::ChardevSyncSignal, sync::signal)?;
     native::serve(NativeCall::ChardevSyncResolve, sync::resolve)?;
+    native::serve(NativeCall::ChardevNext, next)?;
     native::register_server(&SERVER)
 }
 
@@ -287,11 +352,15 @@ fn wait_until_unserved(
 /// `chardev_control_create`: the device's control channel, one per device,
 /// for a device whose interrupts are isolated.
 fn control_create(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
-    let device = registers.first().copied().unwrap_or(0);
-    native::control_channel(caller, device, DRIVER_RIGHTS, create)
+    let [device, flags, ..] = *registers;
+    if flags & !ferrix_native_abi::types::CHARDEV_DIRECT != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let direct = flags & ferrix_native_abi::types::CHARDEV_DIRECT != 0;
+    native::control_channel(caller, device, DRIVER_RIGHTS, |node| create(node, direct))
 }
 
-fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, Errno> {
+fn create(node: &Arc<DeviceNode>, direct: bool) -> Result<Arc<Endpoint>, Errno> {
     if !node.may_take_vectors_and_pins() {
         return Err(status::ACCESS_DENIED);
     }
@@ -299,7 +368,7 @@ fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, Errno> {
     if !CLAIMS.claim(node, &kernel_end) {
         return Err(status::ALREADY_BOUND);
     }
-    let made = make_control(node, &kernel_end, &driver_end);
+    let made = make_control(node, &kernel_end, &driver_end, direct);
     let Some(control) = made else {
         CLAIMS.release(node);
         return Err(status::NO_MEMORY);
@@ -330,9 +399,16 @@ fn make_control(
     node: &Arc<DeviceNode>,
     kernel_end: &Arc<Endpoint>,
     driver_end: &Arc<Endpoint>,
+    direct: bool,
 ) -> Option<Arc<Control>> {
     let mut requests = Vec::new();
     requests.try_reserve_exact(MAX_OUTSTANDING).ok()?;
+    let mut seats = Vec::new();
+    let mut spare = Vec::new();
+    if direct {
+        seats.try_reserve_exact(MAX_SEATS).ok()?;
+        spare.try_reserve_exact(MAX_SEATS).ok()?;
+    }
     let mut outgoing = VecDeque::new();
     outgoing.try_reserve_exact(MAX_OUTSTANDING).ok()?;
     crate::fallible::try_arc(Control {
@@ -348,8 +424,11 @@ fn make_control(
             outgoing,
             queued: 0,
             holding: 0,
+            seats,
+            spare,
         }),
         work: WaitQueue::new(),
+        direct,
         gone: AtomicBool::new(false),
         apertures: SpinLock::new(Apertures::default()),
         dmabufs: SpinLock::new(Vec::new()),
@@ -564,58 +643,22 @@ fn serve(control: &Arc<Control>) {
             Err(ReadError::Empty) => {}
             Err(_) => return,
         }
-        while end.peer_has_room() {
+        // A direct control's driver takes what is queued itself
+        // (`chardev_next`); this task only watches for its end.
+        while !control.direct && end.peer_has_room() {
             let next = {
                 let mut state = control.state.lock();
-                let next = state.outgoing.pop_front();
-                if let Some(Outgoing::Request(_)) = next {
-                    state.queued = state.queued.saturating_sub(1);
-                }
-                next
+                take_queued(&mut state)
             };
             let Some(next) = next else {
                 break;
             };
             // A request answered or abandoned before its turn is not
             // written: nobody waits for it (F-63).
-            if let Outgoing::Request(request) = &next {
-                let inner = request.inner.lock();
-                if !inner.alive || inner.answer.is_some() {
-                    continue;
-                }
+            if settled(&next) {
+                continue;
             }
-            let wire = match &next {
-                Outgoing::Request(request) => request.wire,
-                Outgoing::Release { file, minor } => Wire {
-                    id: 0,
-                    file: *file,
-                    op: Op::Release,
-                    minor: *minor,
-                    pid: 0,
-                    euid: 0,
-                    egid: 0,
-                    cmd: 0,
-                    arg: 0,
-                    pages: 0,
-                },
-                Outgoing::DmabufRelease { cookie } => Wire {
-                    id: 0,
-                    file: 0,
-                    op: Op::DmabufRelease,
-                    minor: 0,
-                    pid: 0,
-                    euid: 0,
-                    egid: 0,
-                    cmd: 0,
-                    arg: *cookie,
-                    pages: 0,
-                },
-            };
-            if let Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } = next {
-                let mut state = control.state.lock();
-                state.holding = state.holding.saturating_sub(1);
-            }
-            if !send(end, &Message::Request(wire)) {
+            if !send(end, &Message::Request(wire_of(&next))) {
                 return;
             }
         }
@@ -624,10 +667,104 @@ fn serve(control: &Arc<Control>) {
             || {
                 end.signals()
                     .intersects(Signals::READABLE | Signals::PEER_CLOSED)
-                    || (end.peer_has_room() && !control.state.lock().outgoing.is_empty())
+                    || (!control.direct
+                        && end.peer_has_room()
+                        && !control.state.lock().outgoing.is_empty())
             },
             deadline,
         );
+    }
+}
+
+/// The head of the queue to the driver, taken off it and off its counts: a
+/// request is no longer queued, and a release has used the slot its file
+/// held. Under the control's lock.
+fn take_queued(state: &mut State) -> Option<Outgoing> {
+    let next = state.outgoing.pop_front()?;
+    match next {
+        Outgoing::Request(_) => state.queued = state.queued.saturating_sub(1),
+        Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } => {
+            state.holding = state.holding.saturating_sub(1);
+        }
+    }
+    Some(next)
+}
+
+/// Whether `item` is a request answered or abandoned already, which is not
+/// given to the driver: nobody waits for it (F-63).
+fn settled(item: &Outgoing) -> bool {
+    match item {
+        Outgoing::Request(request) => {
+            let inner = request.inner.lock();
+            !inner.alive || inner.answer.is_some()
+        }
+        Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } => false,
+    }
+}
+
+/// `item` as the driver is told it.
+fn wire_of(item: &Outgoing) -> Wire {
+    match item {
+        Outgoing::Request(request) => request.wire,
+        Outgoing::Release { file, minor } => Wire {
+            id: 0,
+            file: *file,
+            op: Op::Release,
+            minor: *minor,
+            pid: 0,
+            euid: 0,
+            egid: 0,
+            cmd: 0,
+            arg: 0,
+            pages: 0,
+        },
+        Outgoing::DmabufRelease { cookie } => Wire {
+            id: 0,
+            file: 0,
+            op: Op::DmabufRelease,
+            minor: 0,
+            pid: 0,
+            euid: 0,
+            egid: 0,
+            cmd: 0,
+            arg: *cookie,
+            pages: 0,
+        },
+    }
+}
+
+/// Queue `item` for the driver, or, on a direct control with a driver
+/// thread waiting, hand it to the one that sat down last: its seat, for the
+/// caller to wake once the lock is let go. Under the control's lock, with
+/// the queue's room reserved as each caller says.
+fn offer(control: &Control, state: &mut State, item: Outgoing) -> Option<Arc<Seat>> {
+    if control.direct
+        && let Some(seat) = state.seats.pop()
+    {
+        // Handed over, it has left the queue it never entered: a release's
+        // slot is used, as when the task takes one off the queue.
+        if let Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } = item {
+            state.holding = state.holding.saturating_sub(1);
+        }
+        *seat.given.lock() = Some(item);
+        return Some(seat);
+    }
+    if let Outgoing::Request(_) = item {
+        state.queued += 1;
+    }
+    // NOALLOC: every caller's room is reserved (`admit`, `hold_release`).
+    state.outgoing.push_back(item);
+    None
+}
+
+/// After [`offer`], the lock let go: wake whoever is to take what was
+/// offered. `how` is for a seat's thread: on the caller's processor for a
+/// caller about to wait for the answer, where it is for one that is not.
+fn roused(control: &Control, seat: Option<Arc<Seat>>, how: sched::Wake) {
+    match seat {
+        Some(seat) => seat.queue.wake_all_with(how),
+        None if control.direct => {}
+        None => control.work.wake_all(),
     }
 }
 
@@ -635,17 +772,24 @@ fn serve(control: &Arc<Control>) {
 /// and every program's process is let go of here, in the task.
 fn finish(control: &Arc<Control>) {
     control.gone.store(true, Ordering::Release);
-    let (requests, outgoing) = {
+    let (requests, outgoing, seats) = {
         let mut state = control.state.lock();
         state.queued = 0;
         (
             core::mem::take(&mut state.requests),
             core::mem::take(&mut state.outgoing),
+            core::mem::take(&mut state.seats),
         )
     };
     for request in &requests {
         answer(request, Err(Errno::ENODEV));
     }
+    // A thread still waiting in `chardev_next` -- the driver closed its end
+    // and lives on -- finds the control gone.
+    for seat in &seats {
+        seat.queue.wake_all();
+    }
+    drop(seats);
     drop(outgoing);
     drop(requests);
     // Every fence it made, signalled ENODEV: no waiter hangs on a dead
@@ -655,13 +799,25 @@ fn finish(control: &Arc<Control>) {
 
 /// Answer `request`, once, and wake its program.
 fn answer(request: &Request, outcome: Result<Answer, Errno>) {
+    answer_with(request, outcome, &Inline::EMPTY, sched::Wake::Home);
+}
+
+/// Answer `request`, once, with `tail` for its program's thread to write at
+/// the ioctl's argument, and wake the program as `how` says.
+fn answer_with(
+    request: &Request,
+    outcome: Result<Answer, Errno>,
+    tail: &Inline,
+    how: sched::Wake,
+) {
     {
         let mut inner = request.inner.lock();
         if inner.answer.is_none() {
             inner.answer = Some(outcome);
+            inner.tail = *tail;
         }
     }
-    request.waiters.wake_all();
+    request.waiters.wake_all_with(how);
 }
 
 // ---------------------------------------------------------------------------
@@ -713,7 +869,7 @@ pub(crate) fn hold_release(control: &Control) -> Result<(), Errno> {
 
 /// Queue the release of `file`, whose slot [`hold_release`] took.
 pub(crate) fn queue_release(control: &Control, file: u64, minor: u16) {
-    {
+    let seat = {
         // Gone is read under the guard: `finish` sets it before it takes
         // the lock to empty the queue, so a release pushed here is never
         // pushed into the emptied queue, which has no room left.
@@ -723,9 +879,9 @@ pub(crate) fn queue_release(control: &Control, file: u64, minor: u16) {
             return;
         }
         // NOALLOC: the slot `hold_release` reserved.
-        state.outgoing.push_back(Outgoing::Release { file, minor });
-    }
-    control.work.wake_all();
+        offer(control, &mut state, Outgoing::Release { file, minor })
+    };
+    roused(control, seat, sched::Wake::Home);
 }
 
 /// Give back a slot [`hold_release`] took that no release will use.
@@ -738,16 +894,16 @@ pub(crate) fn unhold_release(control: &Control) {
 /// [`hold_release`] took when it was made; nothing once the driver is gone
 /// (the consultant's B4: the closer never waits on the driver).
 pub(crate) fn queue_dmabuf_release(control: &Control, cookie: u64) {
-    {
+    let seat = {
         let mut state = control.state.lock();
         if control.is_gone() {
             state.holding = state.holding.saturating_sub(1);
             return;
         }
         // NOALLOC: the slot `hold_release` reserved.
-        state.outgoing.push_back(Outgoing::DmabufRelease { cookie });
-    }
-    control.work.wake_all();
+        offer(control, &mut state, Outgoing::DmabufRelease { cookie })
+    };
+    roused(control, seat, sched::Wake::Home);
 }
 
 /// A new file identity on `control`.
@@ -804,7 +960,20 @@ fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<
     } = ask;
     let (euid, egid) = client
         .with_credentials(|credentials| (credentials.user.effective, credentials.group.effective));
-    let request = {
+    // The first bytes of an ioctl's argument go with it to a driver that
+    // takes its requests: read here, by the program's own thread from its
+    // own memory, before any lock. An argument that cannot be read goes
+    // without; the driver's own copy then finds the fault, as before.
+    let mut head = Inline::EMPTY;
+    if control.direct && op == Op::Ioctl {
+        let len = message::inline_len(cmd);
+        if let Some(room) = head.bytes.get_mut(..len)
+            && uaccess::copy_from_user(client.space(), arg, room).is_ok()
+        {
+            head.len = len;
+        }
+    }
+    let (request, seat) = {
         let mut state = control.state.lock();
         if control.is_gone() {
             return Err(Errno::ENODEV);
@@ -827,11 +996,13 @@ fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<
                 arg,
                 pages,
             },
+            head,
             client: Arc::clone(client),
             inner: SpinLock::new(Inner {
                 alive: true,
                 answer: None,
                 copying: 0,
+                tail: Inline::EMPTY,
             }),
             waiters: WaitQueue::new(),
         })
@@ -841,13 +1012,12 @@ fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<
         // MAX_OUTSTANDING requests and a release per open file, of which
         // `queued` counts the requests (F-63).
         state.requests.push(Arc::clone(&request));
-        state
-            .outgoing
-            .push_back(Outgoing::Request(Arc::clone(&request)));
-        state.queued += 1;
-        request
+        let seat = offer(control, &mut state, Outgoing::Request(Arc::clone(&request)));
+        (request, seat)
     };
-    control.work.wake_all();
+    // The program sleeps for the answer next: a driver thread that waited
+    // for this request runs where the program ran.
+    roused(control, seat, sched::Wake::Sync);
     Ok(request)
 }
 
@@ -861,12 +1031,24 @@ fn await_answer(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
     );
-    let answered = request.inner.lock().answer.clone();
-    if let Some(answer) = answered {
+    let answered = {
+        let inner = request.inner.lock();
+        inner.answer.clone().map(|answer| (answer, inner.tail))
+    };
+    if let Some((answer, tail)) = answered {
         // A reply from one driver thread may come while another is still
         // copying for the request: the program's call returns only once no
         // copy can touch its memory (N4; the consultant's L1, ledger 297).
         drain(request);
+        // What the answer brought for the ioctl's argument, written by the
+        // program's own thread: an argument that cannot be written fails
+        // the call, as a driver's failed copy-out does.
+        if answer.is_ok()
+            && tail.len != 0
+            && uaccess::copy_to_user(client.space(), request.wire.arg, tail.as_bytes()).is_err()
+        {
+            return Err(Errno::EFAULT);
+        }
         return answer;
     }
     abandon(control, request);
@@ -944,6 +1126,26 @@ fn outstanding(control: &Control, id: u64) -> Result<Arc<Request>, Errno> {
 fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     let [handle, id, status_word, value, a4, a5] = *registers;
     let control = control_of(caller, handle)?;
+    conclude(
+        caller,
+        &control,
+        [id, status_word, value, a4, a5],
+        &Inline::EMPTY,
+        sched::Wake::Home,
+    )
+}
+
+/// Answer request `id` of `control` as `chardev_reply`'s registers say,
+/// with `tail` for the program to write, and wake the program as `how`
+/// says.
+fn conclude(
+    caller: &dyn Host,
+    control: &Arc<Control>,
+    registers: [u64; 5],
+    tail: &Inline,
+    how: sched::Wake,
+) -> Result<usize, Errno> {
+    let [id, status_word, value, a4, a5] = registers;
     let request = {
         let mut state = control.state.lock();
         let at = state
@@ -968,7 +1170,7 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
                 .filter(|value| i32::try_from(*value).is_ok())
                 .map(Answer::Value)
                 .ok_or(Errno::EIO),
-            Op::Mmap => map_reply(caller, &control, &request, value as u64, a4, a5)
+            Op::Mmap => map_reply(caller, control, &request, value as u64, a4, a5)
                 .map(Answer::Map)
                 .ok_or(Errno::EIO),
             // Never a request anyone waits in.
@@ -976,12 +1178,182 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
         }
     };
     let accepted = outcome.is_ok() || status < 0;
-    answer(&request, outcome);
+    // Bytes for the argument go only with an ioctl's value.
+    let tail = if matches!(outcome, Ok(Answer::Value(_))) && request.wire.op == Op::Ioctl {
+        tail
+    } else {
+        &Inline::EMPTY
+    };
+    answer_with(&request, outcome, tail, how);
     if well_formed && accepted {
         Ok(0)
     } else {
         Err(status::INVALID_ARGS)
     }
+}
+
+/// `chardev_next(control, out, request, result, tail, tail length)`: answer
+/// one request, unless `request` is zero, and take the next
+/// (`docs/NVIDIA.md` §4.7).
+fn next(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
+    let [handle, out, id, result, tail_at, tail_len] = *registers;
+    let control = control_of(caller, handle)?;
+    if !control.direct {
+        return Err(status::BAD_STATE);
+    }
+    let tail_len = usize::try_from(tail_len).map_err(|_| status::INVALID_ARGS)?;
+    if tail_len > INLINE_MAX {
+        return Err(status::INVALID_ARGS);
+    }
+    let driver = caller.core();
+    // Everything of the caller's is read before anything is answered: a
+    // tail that cannot be read leaves the request outstanding.
+    let mut tail = Inline::EMPTY;
+    if id != 0 && tail_len != 0 {
+        let room = tail.bytes.get_mut(..tail_len).ok_or(status::INVALID_ARGS)?;
+        uaccess::copy_from_user(driver.space(), tail_at, room).map_err(|_| status::FAULT)?;
+        tail.len = tail_len;
+    }
+    let mut replied = 0_i32;
+    if id != 0 {
+        // The program is woken onto this processor when this thread is
+        // about to wait here, and where it sleeps when more is queued.
+        let how = if control.state.lock().outgoing.is_empty() {
+            sched::Wake::Sync
+        } else {
+            sched::Wake::Home
+        };
+        let signed = result as i64;
+        let (status_word, value) = if signed < 0 {
+            (result, 0)
+        } else {
+            (0, result)
+        };
+        if let Err(errno) = conclude(caller, &control, [id, status_word, value, 0, 0], &tail, how) {
+            replied = -i32::from(errno.0);
+        }
+    }
+    loop {
+        let item = match sit(&control)? {
+            Sat::Taken(item) => item,
+            Sat::Seat(seat) => {
+                let _ = seat.queue.wait_until_deadline(
+                    || {
+                        seat.given.lock().is_some()
+                            || control.is_gone()
+                            || caller.wait_interrupted()
+                    },
+                    u64::MAX,
+                );
+                match rise(&control, seat) {
+                    Some(item) => item,
+                    None if control.is_gone() => return Err(status::PEER_CLOSED),
+                    None => return Err(Errno::EINTR),
+                }
+            }
+        };
+        if settled(&item) {
+            continue;
+        }
+        let mut bytes = [0_u8; message::NEXT_BYTES];
+        let head = match &item {
+            Outgoing::Request(request) => request.head,
+            Outgoing::Release { .. } | Outgoing::DmabufRelease { .. } => Inline::EMPTY,
+        };
+        let encoded = Message::Request(wire_of(&item)).encode();
+        let length = message::NEXT_HEAD + head.len;
+        let fits = lay(&mut bytes, 0, encoded.as_bytes())
+            && lay(&mut bytes, message::REQUEST_BYTES, &replied.to_le_bytes())
+            && lay(
+                &mut bytes,
+                message::REQUEST_BYTES + 4,
+                &u32::try_from(head.len).unwrap_or(0).to_le_bytes(),
+            )
+            && lay(&mut bytes, message::NEXT_HEAD, head.as_bytes());
+        let written = fits
+            && bytes
+                .get(..length)
+                .is_some_and(|whole| uaccess::copy_to_user(driver.space(), out, whole).is_ok());
+        if written {
+            return Ok(0);
+        }
+        // Taken off the queue and not delivered: its program does not wait
+        // for a driver that never heard of it.
+        if let Outgoing::Request(request) = &item {
+            {
+                let mut state = control.state.lock();
+                if let Ok(at) = state
+                    .requests
+                    .binary_search_by_key(&request.wire.id, |held| held.wire.id)
+                {
+                    let _ = state.requests.remove(at);
+                }
+            }
+            answer(request, Err(Errno::EIO));
+        }
+        return Err(status::FAULT);
+    }
+}
+
+/// Put `source` in `bytes` at `at`; whether it fitted.
+fn lay(bytes: &mut [u8], at: usize, source: &[u8]) -> bool {
+    match bytes.get_mut(at..at.saturating_add(source.len())) {
+        Some(slot) => {
+            slot.copy_from_slice(source);
+            true
+        }
+        None => false,
+    }
+}
+
+/// What a driver thread found asking for the next request.
+enum Sat {
+    /// Something was queued.
+    Taken(Outgoing),
+    /// Nothing was: it is on the control's list in this seat.
+    Seat(Arc<Seat>),
+}
+
+/// Take the head of `control`'s queue, or sit down to wait for one.
+fn sit(control: &Control) -> Result<Sat, Errno> {
+    let mut state = control.state.lock();
+    if control.is_gone() {
+        return Err(status::PEER_CLOSED);
+    }
+    if let Some(item) = take_queued(&mut state) {
+        return Ok(Sat::Taken(item));
+    }
+    if state.seats.len() >= MAX_SEATS {
+        return Err(status::LIMIT_REACHED);
+    }
+    let seat = match state.spare.pop() {
+        Some(seat) => seat,
+        None => crate::fallible::try_arc(Seat {
+            given: SpinLock::new(None),
+            queue: WaitQueue::new(),
+        })
+        .map_err(|_| status::NO_MEMORY)?,
+    };
+    // NOALLOC: reserved for MAX_SEATS when the control was made.
+    state.seats.push(Arc::clone(&seat));
+    Ok(Sat::Seat(seat))
+}
+
+/// Leave `seat` after a wait: what it was handed, if anything. Off the
+/// control's list if it was still on it, and kept for the next to sit.
+fn rise(control: &Control, seat: Arc<Seat>) -> Option<Outgoing> {
+    let mut state = control.state.lock();
+    if let Some(at) = state.seats.iter().position(|held| Arc::ptr_eq(held, &seat)) {
+        let _ = state.seats.remove(at);
+    }
+    // Whoever hands a seat something takes it off the list first, under
+    // this lock: off the list here, it is handed nothing more.
+    let given = seat.given.lock().take();
+    if state.spare.len() < MAX_SEATS && state.spare.capacity() > state.spare.len() {
+        // NOALLOC: within the capacity reserved when the control was made.
+        state.spare.push(seat);
+    }
+    given
 }
 
 /// Check an mmap's answer: `value` a VMO handle with `a4` its byte offset,

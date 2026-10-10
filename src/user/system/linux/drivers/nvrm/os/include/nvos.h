@@ -125,7 +125,15 @@ int nvos_chardev_reply_map(NvU64 id, NvU64 value, NvU64 offset, NvU64 kind);
 /* pages.rs: the VMO an allocation is, for mapping it into a client. */
 NV_STATUS nvos_pages_vmo(const struct nvos_pages *pages, NvU32 *handle);
 NV_STATUS nvos_chardev_start(const NvU16 *minors, NvU32 count);
-NV_STATUS nvos_chardev_next(struct nvos_request *out);
+/* ferrix_chardevctl::message's INLINE_MAX: the most bytes of an ioctl's
+ * argument that come with its request, and that go back with its answer. */
+#define NVOS_INLINE_MAX 128
+/* Answer request `reply` (0: none) with `result`, an ioctl's value or a
+ * negative errno, and `tail_length` bytes for its program to write at the
+ * ioctl's argument; then take the next request, with the first bytes of an
+ * ioctl's argument at `head`. Any number of threads may wait in it. */
+NV_STATUS nvos_chardev_next(struct nvos_request *out, NvU8 *head, NvU32 *head_length,
+                            NvU64 reply, NvS64 result, const void *tail, NvU32 tail_length);
 int nvos_chardev_reply(NvU64 id, int status, NvS64 value);
 int nvos_chardev_copy_in(NvU64 id, void *to, NvU64 from, NvU32 length);
 int nvos_chardev_copy_out(NvU64 id, NvU64 to, const void *from, NvU32 length);
@@ -208,6 +216,8 @@ typedef struct nvos_client {
 NvBool nvos_client_enter(const nvos_client_t *);
 void nvos_client_leave(void);
 NvS64 nvos_client_resolve_fd(int fd);
+/* The context the calling thread's client was entered with, or NULL. */
+void *nvos_client_context(void);
 
 /* os.rs and log.rs. */
 void *nvos_read_whole_file(const char *path, NvU64 *size);

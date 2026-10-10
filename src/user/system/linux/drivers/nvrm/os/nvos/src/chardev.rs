@@ -2,8 +2,11 @@
 //! (`docs/NVIDIA.md` §4.4, N1e).
 //!
 //! [`nvos_chardev_start`] makes the device's control channel, says HELLO
-//! with the minors nvrm serves, and waits for READY. [`nvos_chardev_next`]
-//! takes the next REQUEST. [`nvos_chardev_reply`] answers one, and the two
+//! with the minors nvrm serves, and waits for READY. The control is made
+//! direct (`CHARDEV_DIRECT`, `docs/NVIDIA.md` §4.7): no REQUEST is written
+//! on the channel; [`nvos_chardev_next`] answers the request a thread has
+//! served and takes the next in one call, with the first bytes of an
+//! ioctl's argument. [`nvos_chardev_reply`] answers one by itself, and the two
 //! copies reach the waiting program's memory while its request is
 //! outstanding: they back a client's `copy_in` and `copy_out`
 //! (`client.rs`), so RM's `os_memcpy_from_user` and `os_memcpy_to_user`
@@ -12,7 +15,9 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use ferrix_chardevctl::message::{self, Hello, MAX_NODES, Message, Op, VERSION};
+use ferrix_chardevctl::message::{
+    self, Hello, INLINE_MAX, MAX_NODES, Message, NEXT_BYTES, NEXT_HEAD, Op, REQUEST_BYTES, VERSION,
+};
 use ferrix_native::channel::Channel;
 use ferrix_native::handle::{Object, OwnedHandle};
 use ferrix_native::{Deadline, Handle};
@@ -96,7 +101,11 @@ pub unsafe extern "C" fn nvos_chardev_start(minors: *const u16, count: u32) -> N
     if device == 0 {
         return status::INVALID_STATE;
     }
-    let handle = match native(nr::CHARDEV_CONTROL_CREATE, [device as usize, 0, 0, 0, 0, 0]) {
+    let direct = ferrix_native_abi::types::CHARDEV_DIRECT as usize;
+    let handle = match native(
+        nr::CHARDEV_CONTROL_CREATE,
+        [device as usize, direct, 0, 0, 0, 0],
+    ) {
         Ok(handle) => u32::try_from(handle).unwrap_or(0),
         Err(errno) => {
             say!("chardev_control_create refused: errno {}", -errno);
@@ -151,66 +160,110 @@ pub unsafe extern "C" fn nvos_chardev_start(minors: *const u16, count: u32) -> N
     }
 }
 
-/// Wait for the next REQUEST and write it to `out`. `NV_OK`, or
-/// `NV_ERR_INVALID_STATE` when the channel is gone.
+/// Linux's `EINTR`: a wait a signal ended.
+const EINTR: i32 = 4;
+
+/// Answer request `reply`, unless it is 0, with `result` -- an ioctl's
+/// value, or a negative errno -- and `tail_length` bytes at `tail` for the
+/// program's thread to write at the ioctl's argument; then wait for the
+/// next REQUEST and write it to `out`, with the first bytes of an ioctl's
+/// argument at `head`, which has room for `NVOS_INLINE_MAX`, and their
+/// number at `head_length`. `NV_OK`, or `NV_ERR_INVALID_STATE` when the
+/// control is gone.
+///
+/// Any number of threads may wait here at once: the kernel hands each
+/// request to one of them.
 ///
 /// # Safety
 ///
-/// `out` is writable.
+/// `out` and `head_length` are writable, `head` has room for
+/// `NVOS_INLINE_MAX` bytes, and `tail` holds `tail_length` bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
-    let Some(channel) = control() else {
+pub unsafe extern "C" fn nvos_chardev_next(
+    out: *mut Request,
+    head: *mut u8,
+    head_length: *mut u32,
+    reply: u64,
+    result: i64,
+    tail: *const c_void,
+    tail_length: u32,
+) -> NvStatus {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    if control == 0 {
         return status::INVALID_STATE;
-    };
-    let mut bytes = [0_u8; message::MAX_BYTES];
-    let mut handles = [Handle(0); 1];
+    }
+    let mut bytes = [0_u8; NEXT_BYTES];
+    let mut reply = reply;
     loop {
-        match channel.read(&mut bytes, &mut handles) {
-            Ok(received) => {
-                let Ok(Message::Request(request)) =
-                    Message::decode(bytes.get(..received.bytes).unwrap_or(&[]))
-                else {
-                    say!("chardev: a message that is not a REQUEST");
-                    continue;
-                };
-                let op = match request.op {
-                    Op::Open => 1,
-                    Op::Ioctl => 2,
-                    Op::Release => 3,
-                    Op::Mmap => 4,
-                    Op::DmabufRelease => 5,
-                };
-                // SAFETY: the caller vouches for `out`.
-                unsafe {
-                    out.write(Request {
-                        id: request.id,
-                        file: request.file,
-                        op,
-                        minor: u32::from(request.minor),
-                        pid: request.pid,
-                        euid: request.euid,
-                        egid: request.egid,
-                        cmd: request.cmd,
-                        arg: request.arg,
-                        pages: request.pages,
-                        reserved: 0,
-                    });
-                }
-                return status::OK;
+        let asked = native(
+            nr::CHARDEV_NEXT,
+            [
+                control,
+                bytes.as_mut_ptr() as usize,
+                reply as usize,
+                result as usize,
+                tail as usize,
+                if reply == 0 { 0 } else { tail_length as usize },
+            ],
+        );
+        match asked {
+            Ok(_) => {}
+            // The answer went before the wait began.
+            Err(errno) if errno == -EINTR => {
+                reply = 0;
+                continue;
             }
-            Err(ferrix_native::channel::ReadError::Failed(ferrix_native::Error::ShouldWait)) => {
-                if channel
-                    .wait_one(Signals::READABLE | Signals::PEER_CLOSED, Deadline::Never)
-                    .is_err()
-                {
-                    return status::INVALID_STATE;
+            Err(errno) => {
+                if errno != -i32::from(ferrix_native_abi::status::PEER_CLOSED.0) {
+                    say!("chardev_next failed: errno {}", -errno);
                 }
-            }
-            Err(why) => {
-                say!("chardev: the control channel failed: {why:?}");
                 return status::INVALID_STATE;
             }
         }
+        reply = 0;
+        let Ok(Message::Request(request)) =
+            Message::decode(bytes.get(..REQUEST_BYTES).unwrap_or(&[]))
+        else {
+            say!("chardev: what chardev_next wrote is not a REQUEST");
+            continue;
+        };
+        let carried = bytes
+            .get(REQUEST_BYTES + 4..NEXT_HEAD)
+            .and_then(|word| <[u8; 4]>::try_from(word).ok())
+            .map_or(0, u32::from_le_bytes);
+        let carried = (carried as usize).min(INLINE_MAX);
+        let op = match request.op {
+            Op::Open => 1,
+            Op::Ioctl => 2,
+            Op::Release => 3,
+            Op::Mmap => 4,
+            Op::DmabufRelease => 5,
+        };
+        let carried_bytes = bytes.get(NEXT_HEAD..NEXT_HEAD + carried).unwrap_or(&[]);
+        // SAFETY: the caller vouches for `head`'s room for `INLINE_MAX`
+        // bytes, which `carried_bytes` is no longer than.
+        unsafe {
+            core::ptr::copy_nonoverlapping(carried_bytes.as_ptr(), head, carried_bytes.len());
+        }
+        // SAFETY: the caller vouches for `head_length`.
+        unsafe { head_length.write(u32::try_from(carried_bytes.len()).unwrap_or(0)) };
+        // SAFETY: the caller vouches for `out`.
+        unsafe {
+            out.write(Request {
+                id: request.id,
+                file: request.file,
+                op,
+                minor: u32::from(request.minor),
+                pid: request.pid,
+                euid: request.euid,
+                egid: request.egid,
+                cmd: request.cmd,
+                arg: request.arg,
+                pages: request.pages,
+                reserved: 0,
+            });
+        }
+        return status::OK;
     }
 }
 

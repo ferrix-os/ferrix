@@ -1315,7 +1315,10 @@ pub(super) fn check_chardev() {
          {} dmabuf calls refused as specified and one release after the last mapping, \
          {} name-only dmabuf calls and mappings refused as specified, \
          {} sync_file calls refused as specified, fences signalled once, by deadline \
-         (ETIMEDOUT) and at the driver's death (ENODEV){}",
+         (ETIMEDOUT) and at the driver's death (ENODEV), \
+         {} requests taken with chardev_next by a direct control's driver, one answered in \
+         the take with its bytes at the program's argument and one handed to a waiting \
+         thread{}",
         report.refusals,
         report.answered,
         report.abandoned,
@@ -1323,6 +1326,7 @@ pub(super) fn check_chardev() {
         report.dmabuf_refusals,
         report.name_refusals,
         report.sync_refusals,
+        report.direct_taken,
         if report.one_device {
             "; one PCI function, so no second driver"
         } else {

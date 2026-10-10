@@ -103,7 +103,7 @@ fn a_slow_round_trip_fails_under_a_hypervisor_only() {
 
 #[test]
 fn a_control_within_the_bound_fails_the_bench() {
-    let quick = TRIP_KVM.replace("p50 273678 ns", "p50 90000 ns");
+    let quick = TRIP_KVM.replace("p50 273678 ns", "p50 59000 ns");
     let why = judge_trip(&lines(&quick), true).unwrap_err();
     assert!(why.contains("the control did not fire"), "{why}");
 }

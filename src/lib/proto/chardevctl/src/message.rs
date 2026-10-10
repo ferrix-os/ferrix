@@ -31,6 +31,38 @@ pub const REQUEST_BYTES: usize = 48;
 /// The longest message.
 pub const MAX_BYTES: usize = REQUEST_BYTES;
 
+/// The most bytes of an ioctl's argument a request carries with it, and the
+/// most an answer carries back, on a control whose driver takes requests
+/// with `chardev_next` (`docs/NVIDIA.md` §4.7).
+pub const INLINE_MAX: usize = 128;
+
+/// What `chardev_next` writes before the argument's bytes: the REQUEST's
+/// [`REQUEST_BYTES`], then a little-endian `i32`, zero or the negative errno
+/// the answer given in the same call was refused with, then a little-endian
+/// `u32`, how many of the argument's bytes follow.
+pub const NEXT_HEAD: usize = REQUEST_BYTES + 8;
+
+/// The room a driver gives `chardev_next` to write in.
+pub const NEXT_BYTES: usize = NEXT_HEAD + INLINE_MAX;
+
+/// How many bytes at an ioctl's argument go with its request: the size its
+/// command encodes, if the command says the program writes an argument
+/// (`_IOC_WRITE`), at most [`INLINE_MAX`]. Linux's encoding
+/// (`asm-generic/ioctl.h`): the number in bits 0 to 7, the type in 8 to 15,
+/// the size in 16 to 29, the direction in 30 and 31, `_IOC_WRITE` 1.
+#[must_use]
+pub const fn inline_len(cmd: u32) -> usize {
+    let writes = (cmd >> 30) & 1 != 0;
+    let size = ((cmd >> 16) & 0x3fff) as usize;
+    if !writes {
+        0
+    } else if size > INLINE_MAX {
+        INLINE_MAX
+    } else {
+        size
+    }
+}
+
 /// What a REQUEST asks the driver to do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {

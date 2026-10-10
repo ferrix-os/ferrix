@@ -30,8 +30,15 @@
 //!    refuses the hand-over by name after setting the mark.
 //!
 //! In the two refusals no `nvrm` line may appear and the kernel's devmgr
-//! report counts one failed. The init of every boot is `nvrm-hold`, which
-//! only keeps the machine up.
+//! report counts one failed.
+//!
+//! The init of every boot is `nvrm-trip` (`test/trip.c`). In the first boot
+//! `nvrm`, once its skeleton is up, starts RM with no GPU and serves
+//! `/dev/nvidiactl` through the kernel's chardev core, and `nvrm-trip`
+//! times a request's round trip, by stage, as built and with `nvrm` serving
+//! as it did before its pool; [`judge_trip`] holds the figure to a bound
+//! the second must fail (`docs/NVIDIA.md` §4.7). In the other two boots no
+//! control device comes and it only keeps the machine up.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -67,11 +74,11 @@ const TRIP_BUILT: &str = "pool";
 const TRIP_CONTROL: &str = "thread-a-request";
 
 /// The most a round trip's median may be under KVM, in nanoseconds
-/// (`docs/NVIDIA.md` §4.7). As built it reads 30 to 40 us on a host at load
-/// 36 to 48 with the boot at nice 19, and the control -- a thread started
+/// (`docs/NVIDIA.md` §4.7). As built it reads 22 to 27 us on a host at load
+/// 20 to 45 with the boot at nice 19, and the control -- a thread started
 /// for every request, as until 2026-10-10 -- 270 to 550 us. Under TCG the
 /// figure is the emulator's and is only printed.
-const TRIP_BOUND_NANOS: u64 = 100_000;
+const TRIP_BOUND_NANOS: u64 = 60_000;
 
 /// How long a refused boot is read on after the report, for a line that
 /// must not come.

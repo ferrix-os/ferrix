@@ -993,6 +993,220 @@ dmabuf presentation to Wayland. It needs N3b.
 **Steam.** The client's web helper keeps its software path. Games need
 either GL or Vulkan through yserver, as above.
 
+### 4.7 What a request costs, and how it is carried (2026-10-10)
+
+§4.4 expected requests to stay off the per-frame path. They do not: NVIDIA's
+GLX makes one a frame, and at 2,200 frames a second on the RTX 3060 the
+serial log counted 2,442 requests a second. This section is the
+measurement, the design that followed, and what is left.
+
+**The figure, and its target.** `nvrm-trip` (`test/trip.c`) times a version
+query (`NV_ESC_CHECK_VERSION_STR`: 72 bytes in and out, no lock of RM's) and
+a null control on a root client of its own (`NV_ESC_RM_CONTROL`, command 0:
+RM's API lock and client lookup, 32 bytes in and out), 5,000 of each after
+200 untimed, by the time-stamp counter, medians. After each it asks `nvrm`
+for the request's own stamps (`NVRM_TRIP_STAMPS`, an ioctl `nvrm` answers
+itself), so a round trip splits in four: to `nvrm`, the hand-off inside
+`nvrm`, the handler, and back. On Linux the same requests are a system call
+into the module. Measured on the host's own driver, 580.173.02 on an RTX
+3090, bare metal, load 28 (a system call into a module costs the same in a
+KVM guest): version query 300 ns, null control 450 ns, nvidia-drm's
+unique-id query 110 ns.
+
+| | version query | null control | to nvrm | hand-off | handler | back |
+|---|---|---|---|---|---|---|
+| Linux, the module (host) | 300 ns | 450 ns | | | | |
+| card VM, nv-present 18f919724, guest load 7 | 132,500 ns | 123,700 ns | | | | |
+| bench, as it was (a thread a request) | 544,000 | 513,000 | 174,000 | 116,000 | 16,000 | 21,000 |
+| bench, the pool | 39,200 | 39,500 | 16,200 | 6,500 | 8,900 | 7,400 |
+| bench, `chardev_next` | 23,800 | 27,400 | 8,900 | 300 | 6,400 | 7,900 |
+| bench, and nvos's locks and processor | 22,500 | 24,600 | 9,100 | 300 | 4,900 | 8,100 |
+| the same, a release kernel | 15,500 | 16,800 | 6,000 | 300 | 3,700 | 5,400 |
+| the same, no switch barrier (measurement only) | 4,700 | 5,300 | 1,800 | 60 | 1,200 | 1,600 |
+
+The bench rows are `cargo xtask test-nvrm --accel kvm` on nazuna, 4
+processors, the host at load 15 to 45 with other sessions' builds, stage
+columns for the version query; they are figures of a busy shared host and
+move by a third between runs, the ratios hold. The card VM's row is the
+same three requests from a static program run in the live guest at nice 19.
+
+**What the path was.** A program's ioctl was admitted by the chardev core,
+which woke the control's kernel task; the task wrote a REQUEST on the
+channel; `nvrm`'s one dispatch thread read it and started a thread for it
+(a stack mapped, a clone, later an exit and an unmap); that thread asked
+the kernel for its id several times, made one call to copy the argument in
+and one to copy it out, each through a bounce buffer the kernel allocated,
+and a third to reply; RM's three reader-writer locks each made a futex wake
+on release with nobody asleep, and RM asked which processor it was on with
+three more system calls. Four switches a request, two of them across
+address spaces, and about fifteen system calls in `nvrm`.
+
+**What it is now.**
+
+* **A pool, not a thread a request** (`os/glue/chardev.c`). The threads
+  that serve are the threads that take. A thread serves an ioctl on its own
+  stack with nothing allocated. A thread that takes a request and leaves no
+  other free starts one, up to the 64 clients nvos lets threads serve at
+  once; at that number the last free thread answers ioctls `EBUSY`, as
+  `nvos_client_enter`'s refusal did. OPEN, RELEASE, MMAP and a dmabuf's
+  release are still served one at a time; a RELEASE that overtakes the OPEN
+  of its file is remembered until that OPEN is through, which then closes
+  the file at once.
+* **Requests taken, not written** (`interfaces/chardev`, the native call
+  `chardev_next`, `0x1065`). A control made with `CHARDEV_DIRECT` in
+  `chardev_control_create`'s second register gets no REQUEST on its
+  channel. Its driver's threads call `chardev_next(control, out, request,
+  result, tail, tail length)`: answer `request`, unless it is zero, and wait
+  for the next. A thread with nothing to take waits in a *seat*; the
+  program's own thread, admitting a request, hands it to the thread that
+  sat down last and wakes it onto its own processor (`Wake::Sync`), as the
+  program is about to sleep there for the answer; the answer wakes the
+  program the same way when the driver's thread is about to wait again. No
+  kernel task and no channel message is on the path. With no thread
+  waiting, the request is queued exactly as before, in the same bounded
+  queue, and the next `chardev_next` takes it.
+* **No copy that needs a call.** The request carries the first bytes of an
+  ioctl's argument -- as many as the command's size says, when it says the
+  program writes one (`_IOC_WRITE`), at most 128
+  (`ferrix_chardevctl::message::INLINE_MAX`) -- which the program's own
+  thread reads from its own memory as it makes the call. The answer may
+  carry up to 128 bytes back, the *tail*, which the program's own thread
+  writes at the ioctl's argument before its call returns; if they cannot be
+  written its call fails with `EFAULT`, as a driver's failed copy-out makes
+  it. `nvrm` answers a read inside the carried bytes from them, keeps one
+  write at the argument's start for the tail, writes kept bytes out at once
+  before any later copy that touches them or an answer that is an error,
+  and makes every other copy as before. A version query and a null control
+  now make no copy call at all; a control with parameters makes the two for
+  its parameters.
+* **nvos** (`os/nvos`). The thread id is kept by the thread pointer
+  (`%fs:0`) instead of asked for; a reader-writer lock counts its sleepers
+  and wakes only when there are any; the processor number is kept for under
+  half a millisecond; RM's 12 KiB stack block is no longer zeroed for every
+  call. A call into RM with no contention now makes no system call.
+
+**What holds, as before** (the conditions of ledger 294, 297 and 300, and
+F-63, read against the direct path):
+
+* N4, a copy reaches a program only while it waits in a request to this
+  control: unchanged for `chardev_copy_*`. The carried bytes are read, and
+  the tail written, by the program's own thread inside its own call: the
+  driver never touches the program's memory for them. The tail is read
+  from the driver's memory before the request is answered, so a tail that
+  cannot be read leaves the request outstanding and answers nothing.
+* N8, a RELEASE is never lost and follows every request of its file: it is
+  queued in the slot its open reserved, or handed to a waiting thread in
+  place of that slot, counted either way. The kernel still sends it after
+  the file's last request was answered or abandoned. `nvrm`'s pool no
+  longer *serves* in the kernel's order; the one order it relied on is kept
+  by the file, above.
+* F-63, the queue to a driver that takes nothing stays within its room: a
+  request handed to a seat never enters the queue; one that finds no seat
+  is counted in `queued` and refused past 256 as before.
+* N9, when the driver goes every waiter wakes with `ENODEV`: unchanged, and
+  a thread waiting in a seat is woken and told `PEER_CLOSED`. On a direct
+  control the task still watches the channel, so the driver's end is seen
+  within 50 ms as before.
+* A request taken off the queue whose bytes cannot be written to the
+  driver (`out` faults) is answered `EIO`: its program does not wait for a
+  driver that never heard of it.
+* The seats are bounded: 64 a control (`MAX_SEATS`), reserved when the
+  control is made, the next `LIMIT_REACHED`; a seat is allocated once and
+  kept. The wait is killable and ends `EINTR` on a signal.
+* A control made without the flag behaves exactly as before; `chardev_next`
+  on it is `BAD_STATE`, and any other flag is `INVALID_ARGS`.
+
+**What the carried bytes change for a program.** The argument's first
+bytes are read once, when the call is made, where `nvrm` used to read them
+some microseconds later: a program that changes its argument from another
+thread during its own call saw either before and sees the earlier now. The
+tail is written after the driver's last action for the request instead of
+before its reply; nothing else of the program's runs in between, since the
+calling thread is asleep.
+
+**Checks.** The stage-10 self-check's fake driver, on a direct control
+(`interfaces/chardev/check.rs`, `direct`): the two refusals and an
+over-long tail; an ioctl taken with its argument's bytes and nothing on
+the channel; an answer in the take returning the program's call with the
+tail at its argument; a stale answer said in the take; a waiting thread
+handed a request without the queue and leaving no seat; a release taken;
+a waiting thread told when the control goes. `test-nvrm` runs the bench on
+the test device (QEMU's `pci-testdev`, RM with no GPU behind
+`/dev/nvidiactl`) and judges it under a hypervisor: each request's median
+within 60 us, and the control -- `NVRM_TRIP_MODE` 1, which the test
+device's `nvrm` alone takes: a thread started for every ioctl -- over it.
+nvos's host tests hold the lock: a release with nobody asleep makes no
+wake, and with a sleeper one (the control: the wake made unconditional
+fails it with 20 wakes counted).
+
+**What is left, and what it is made of.** With everything above a round
+trip is 15 to 23 us on the bench, against Linux's 0.3. Of that:
+
+* **The switch barrier: about 11 us of 15.5.** A switch between `nvrm` and
+  a client is a switch between two programs in no common speculation
+  domain, so the kernel issues the predictor barrier (`IBPB`) both ways
+  (`docs/certification/SPECULATION.md` §3). With the barrier left out for
+  measurement, every other defence on, the round trip is 4.7 us; with
+  every defence off, 4.5. The instruction itself is a fraction of that:
+  what costs is RM running with an empty predictor every time, an
+  indirect call and a return at a time, and the client after it.
+* **Two switches of address space** on the general path, about 1.8 us
+  each way here with the admission and the answer, of which the IPC work
+  (`docs/OPAQUE-KERNEL.md` §9) has taken its native round trip to 0.86 us
+  by a direct switch that this path does not use yet.
+* **RM's own work with a cold TLB**, 1.2 us for a version query that takes
+  0.3 us in Linux's kernel: RM's core is 13 MiB mapped in 4 KiB pages, and
+  every switch into `nvrm` empties the TLB (nazuna offers no PCID).
+
+Not built, with what each would buy and risk:
+
+1. **No barrier between a client and the driver it is entitled to talk
+   to.** Buys about 11 us a request. It is a security decision and not
+   taken here. The barrier is what keeps a client from steering `nvrm`'s
+   indirect branches (Spectre v2), and `nvrm` holds every client's state;
+   Linux protects its module from the same client with IBRS, which has no
+   counterpart between two ring-3 programs. Three ways to decide it:
+   (a) put `nvrm` and the session's programs in one speculation domain,
+   which gives up the defence between all of them and needs no new
+   mechanism but a job for `nvrm` that devmgr and the session share;
+   (b) leave the barrier out in one direction only, from `nvrm` back to
+   the client it answers, which keeps `nvrm` protected and halves the cost
+   (the client then runs on predictor state `nvrm`'s own code left, not on
+   anything another program chose freely) -- a new rule in
+   `arch/speculation.rs`, inside the item; (c) build `nvrm` with real
+   retpolines -- NVIDIA's core already calls every indirect branch through
+   `__x86_indirect_thunk_*`, which `os/glue/thunks.S` supplies as plain
+   jumps -- so that `nvrm` no longer depends on the barrier for its
+   indirect branches, and then argue (b) or the barrier's absence into
+   `nvrm` on that; whether a retpoline holds on the processors in question
+   (Retbleed, SRSO) is part of that argument.
+2. **The direct switch for a chardev request** (`sched::direct`, the fast
+   path's hand-over): the seat is already the "parked reader" it needs.
+   Buys perhaps 1 to 1.5 us a round trip (guessed from the IPC work's
+   figures); a second implementation of a blocking path inside the item,
+   with the fast path's eleven conditions to meet again.
+3. **PCID, or 2 MiB pages for RM's core.** Buys a part of the 0.9 us RM
+   loses to the TLB. PCIDs are step 3 of the IPC work and wait for
+   hardware that has them; large pages for a program's text are not built.
+4. **A shared request and reply area a client maps.** The argument and the
+   answer already travel with the request without a call; what a shared
+   area would save beyond that is the two copies of at most 128 bytes
+   (tens of nanoseconds) and nothing of the switches. NVIDIA's userspace
+   makes an `ioctl`, so the area could not replace the call. Rejected.
+5. **Answering some requests in the kernel.** The core forwards undecoded
+   by design (§4.4): a kernel that answered nvidia-drm's unique id or RM's
+   version would decode NVIDIA's ABI inside the load ring. Rejected.
+6. **`channel_write_read` as the transport.** A client's ioctl is a Linux
+   call on a file, and the request must name the file, the program and its
+   credentials, which the kernel adds; the native call's fast path carries
+   24 bytes between two endpoints both sides hold. What it has that this
+   path lacks is the direct switch, which is item 2.
+
+So while `nvrm` is a separate program, the floor is two switches of
+address space: about 1 us with the direct switch and no barrier, about
+4.7 us as built without the barrier, about 15 us with it. "Linux levels",
+0.3 us, are not reachable across a process boundary.
+
 ## 5. What other parts of Ferrix need
 
 * **The kernel**, as prerequisites N0a–N0d, N0f and N0g (§7, §12):
