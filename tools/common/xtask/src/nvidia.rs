@@ -919,6 +919,11 @@ const DESKTOP_TIMEOUT: u64 = 3600;
 ///
 /// The guard's, a volume or disk that cannot be made, or libvirt refusing.
 pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
+    // `FERRIX_N3C_BUILD_ONLY`: the image is built, and the card is not booted.
+    if std::env::var_os("FERRIX_N3C_BUILD_ONLY").is_some() {
+        println!("  n3c: built {}; not booting", image.display());
+        return Ok(());
+    }
     guard()?;
     let dir = vm_dir();
     std::fs::create_dir_all(&dir)
