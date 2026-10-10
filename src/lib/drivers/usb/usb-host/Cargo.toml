@@ -1,6 +1,6 @@
 [package]
 name = "ferrix-usb-host"
-description = "A USB host as logic over registers and DMA memory: EHCI, hubs, and HID boot keyboards and mice"
+description = "A USB host as logic over registers and DMA memory: EHCI and xHCI, hubs, HID keyboards and mice, and bulk-only disks"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
