@@ -232,7 +232,13 @@ impl Device for RenderDevice {
         self.node.export(held.handle).map(Some)
     }
 
-    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
+    fn import(
+        &mut self,
+        fd: BorrowedFd<'_>,
+        _layout: &compositor_virgl::Layout,
+    ) -> io::Result<Option<u32>> {
+        // The node knows its own buffer's layout; the client's word for it
+        // is not needed.
         let handle = self.node.import(fd)?;
         let (resource, _) = match self.node.resource_info(handle) {
             Ok(info) => info,

@@ -34,6 +34,24 @@ pub struct Texture {
     pub scanout: bool,
 }
 
+/// How a dmabuf's one plane is laid out, as whoever made it said: what an
+/// import needs beside the descriptor where the device cannot ask the
+/// buffer itself (the test server's EGL import).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Layout {
+    /// The buffer's width in pixels.
+    pub width: u32,
+    /// The buffer's height in pixels.
+    pub height: u32,
+    /// Bytes from one row's start to the next.
+    pub stride: u32,
+    /// Where the first row starts in the buffer.
+    pub offset: u32,
+    /// The DRM format modifier: `0` for linear rows, a driver's own for
+    /// its tiled or block-linear layouts.
+    pub modifier: u64,
+}
+
 /// Somewhere streams run.
 pub trait Device: core::fmt::Debug {
     /// Make a texture, and answer the number a stream names it by.
@@ -134,9 +152,10 @@ pub trait Device: core::fmt::Debug {
     ///
     /// # Errors
     ///
-    /// The device's: a descriptor that is not a buffer of this device.
-    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
-        let _ = fd;
+    /// The device's: a descriptor that is not a buffer of this device, or
+    /// one whose `layout` it does not take.
+    fn import(&mut self, fd: BorrowedFd<'_>, layout: &Layout) -> io::Result<Option<u32>> {
+        let _ = (fd, layout);
         Ok(None)
     }
 
@@ -201,7 +220,7 @@ impl<D: Device + ?Sized> Device for Box<D> {
         (**self).export(resource)
     }
 
-    fn import(&mut self, fd: BorrowedFd<'_>) -> io::Result<Option<u32>> {
-        (**self).import(fd)
+    fn import(&mut self, fd: BorrowedFd<'_>, layout: &Layout) -> io::Result<Option<u32>> {
+        (**self).import(fd, layout)
     }
 }

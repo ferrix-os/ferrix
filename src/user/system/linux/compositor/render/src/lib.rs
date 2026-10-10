@@ -117,7 +117,7 @@ use core::fmt;
 
 pub use backdrop::Backdrop;
 pub use blur::Blur;
-pub use buffer::{Format, Surface, Target};
+pub use buffer::{Format, OnDevice, Surface, Target};
 pub use canvas::{
     Canvas, MAX_SIZE, Rounding, Shadow, blend_onto_target, copy_to_target, rounded_spans,
 };
