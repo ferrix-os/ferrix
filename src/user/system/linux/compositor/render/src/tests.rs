@@ -3865,3 +3865,221 @@ fn an_unshared_window_is_a_black_box_in_the_expected_screenshot() {
     assert_ne!(frame, two_client_frame());
     golden::check("unshared-two-clients", WIDTH, HEIGHT, &frame);
 }
+
+// -- What is drawn under a window that covers it -----------------------------
+
+/// A painter that draws nothing and writes down what it was asked for: how
+/// many pixels of each rounded gradient fill, and the rounding each surface
+/// was composited with. What a frame costs is what it asks a painter for,
+/// and that can be counted where a time cannot be compared.
+#[derive(Debug, Default)]
+struct Asked {
+    /// The area, inside the damage, of each `fill_rounded_gradient`.
+    gradients: Vec<i64>,
+    /// How many square borders were asked for.
+    square_borders: usize,
+    /// The rounding of each `composite_scaled`.
+    composited: Vec<Rounding>,
+}
+
+impl crate::Painter for Asked {
+    type Backdrop = ();
+
+    fn bounds(&self) -> Rect {
+        Rect::new(0, 0, 1920, 1080)
+    }
+    fn clear(&mut self, _: Color, _: &Damage) {}
+    fn fill(&mut self, _: Rect, _: Color, _: &Damage) {}
+    fn fill_rounded(&mut self, _: Rect, _: Rounding, _: Color, _: &Damage) {}
+    fn fill_rounded_gradient(&mut self, rect: Rect, _: Rounding, _: &Gradient, damage: &Damage) {
+        self.gradients.push(damage.clipped(rect).area());
+    }
+    fn border_gradient(&mut self, _: Rect, width: i64, _: &Gradient, _: &Damage) {
+        if width > 0 {
+            self.square_borders += 1;
+        }
+    }
+    fn shadow(&mut self, _: Rect, _: &crate::Shadow, _: &Damage) {}
+    fn blur(&mut self, _: Rect, _: Rounding, _: &Blur, _: &Damage) {}
+    fn composite(&mut self, _: &Surface<'_>, _: Rect, _: &Damage) {}
+    fn composite_scaled(
+        &mut self,
+        _: &Surface<'_>,
+        _: Rect,
+        rounding: Rounding,
+        _: f32,
+        _: bool,
+        _: &Damage,
+    ) {
+        self.composited.push(rounding);
+    }
+    fn backdrop_fits(&self, (): &()) -> bool {
+        false
+    }
+    fn keep_backdrop(&mut self, (): &mut (), _: &Damage) {}
+    fn blur_backdrop(&mut self, (): &mut (), _: Rect, _: Rounding, _: &Blur, _: &Damage) {}
+}
+
+/// One window on a 1920x1080 monitor, and a buffer of its size whose every
+/// byte is `0xFF`: opaque white whichever format it is read as.
+fn one_window(rect: Rect, border: i64, fullscreen: bool) -> (MonitorLayout, Vec<u8>) {
+    let layout = MonitorLayout {
+        monitor: MonitorId(1),
+        workspace: compositor_layout::WorkspaceId(1),
+        windows: vec![Placed {
+            window: WindowId(1),
+            rect,
+            border,
+            focused: true,
+            floating: false,
+            fullscreen,
+        }],
+    };
+    let bytes = vec![0xFF; (rect.width * rect.height * 4) as usize];
+    (layout, bytes)
+}
+
+/// What `style` asks a painter for to draw `layout`'s one window from
+/// `bytes` read as `format`, the whole screen damaged.
+fn asked_of(style: &Style, layout: &MonitorLayout, bytes: &[u8], format: Format) -> Asked {
+    let rect = layout.windows[0].rect;
+    let (width, height) = (rect.width as u32, rect.height as u32);
+    let surface = Surface::new(bytes, width, height, width * 4, format).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let mut asked = Asked::default();
+    let _ = render_onto(
+        &mut asked,
+        None,
+        layout,
+        (0, 0),
+        &Styles::plain(style),
+        &surfaces,
+        &[],
+        &Damage::full(1920, 1080),
+    );
+    asked
+}
+
+/// `decorated_style()` with nothing translucent about it and a border that
+/// is a gradient, as Hyprland's default active border is.
+fn rounded_gradient_style() -> Style {
+    let style = Style {
+        blur: None,
+        active_border: Gradient::new(&[Color(0xEE33_CCFF), Color(0xEE00_FF99)], 45),
+        ..decorated_style()
+    };
+    assert!(!style.active_border.is_solid());
+    assert_eq!(style.rounding.radius, 12);
+    style
+}
+
+/// The part of the damage a decoration under an opaque window shows in is
+/// the damage less the window drawn in by its corners' radius.
+#[test]
+fn the_rim_is_the_damage_less_what_the_window_is_sure_to_cover() {
+    let full = Damage::full(1920, 1080);
+    let window = Rect::new(100, 50, 1000, 800);
+    let rim = crate::frame::rim(&full, window, Rounding::circle(12));
+    assert_eq!(rim.area(), 1920 * 1080 - (1000 - 24) * (800 - 24));
+    // A square window covers all of itself.
+    let square = crate::frame::rim(&full, window, Rounding::none());
+    assert_eq!(square.area(), 1920 * 1080 - 1000 * 800);
+    // And one smaller than its corners covers nothing for certain.
+    let tiny = crate::frame::rim(&full, Rect::new(0, 0, 10, 10), Rounding::circle(12));
+    assert_eq!(tiny.area(), 1920 * 1080);
+}
+
+/// A rounded window's border is its whole border box filled with the
+/// gradient. Under a window whose own pixels are copied in opaque, the
+/// painter is asked for the rim of that box and not the two million pixels
+/// inside it that the window then covers; under one that can be seen
+/// through, for all of it, since all of it shows.
+#[test]
+fn an_opaque_windows_rounded_border_is_filled_only_where_it_shows() {
+    let style = rounded_gradient_style();
+    let rect = Rect::new(2, 2, 1916, 1076);
+    let (layout, bytes) = one_window(rect, 2, false);
+    let boxed = 1920 * 1080;
+
+    let opaque = asked_of(&style, &layout, &bytes, Format::Xrgb8888);
+    let rim = boxed - (1916 - 24) * (1076 - 24);
+    assert_eq!(opaque.gradients, [rim], "the fill under an opaque window");
+    assert!(rim * 20 < boxed, "the rim is {rim} of {boxed} pixels");
+
+    let translucent = asked_of(&style, &layout, &bytes, Format::Argb8888);
+    assert_eq!(
+        translucent.gradients,
+        [boxed],
+        "the fill under a window with alpha"
+    );
+}
+
+/// Drawing the border only where it shows changes no pixel: the same opaque
+/// bytes drawn as `XRGB8888`, whose border is filled along the rim, and as
+/// `ARGB8888`, whose border is filled whole and blended over, are one frame.
+#[test]
+fn a_border_filled_only_where_it_shows_is_the_same_frame() {
+    let style = rounded_gradient_style();
+    let rect = Rect::new(40, 30, 300, 200);
+    let (layout, bytes) = one_window(rect, 3, false);
+    let frame = |format: Format| {
+        let surface = Surface::new(&bytes, 300, 200, 1200, format).unwrap();
+        let mut canvas = canvas(400, 300);
+        let _ = render(
+            &mut canvas,
+            &layout,
+            (0, 0),
+            &style,
+            &BTreeMap::from([(WindowId(1), surface)]),
+            &Damage::full(400, 300),
+        );
+        pixels(&canvas)
+    };
+    let rim_only = frame(Format::Xrgb8888);
+    assert_eq!(rim_only, frame(Format::Argb8888));
+    // And the border is in it: the middle of the top edge is neither the
+    // background nor the window.
+    let edge = rim_only[(28 * 400 + 190) as usize];
+    assert_ne!(edge, shown(style.background.0 & 0x00FF_FFFF));
+    assert_ne!(edge, 0xFFFF_FFFF);
+}
+
+/// A fullscreen window is the monitor's rectangle with nothing cut out of
+/// it: its corners are its own pixels and not the wallpaper's, and it has no
+/// border to fill. A maximized one, which the layout gives the workspace's
+/// border, keeps its corners and its border.
+#[test]
+fn a_fullscreen_window_is_square_and_a_maximized_one_is_not() {
+    let style = rounded_gradient_style();
+    let (layout, bytes) = one_window(Rect::new(0, 0, 1920, 1080), 0, true);
+    let fullscreen = asked_of(&style, &layout, &bytes, Format::Xrgb8888);
+    assert_eq!(fullscreen.composited, [Rounding::none()]);
+    assert!(
+        fullscreen.gradients.is_empty(),
+        "{:?}",
+        fullscreen.gradients
+    );
+    assert_eq!(fullscreen.square_borders, 0);
+
+    let (layout, bytes) = one_window(Rect::new(22, 22, 1876, 1036), 2, true);
+    let maximized = asked_of(&style, &layout, &bytes, Format::Xrgb8888);
+    assert_eq!(maximized.composited, [style.rounding]);
+    assert_eq!(maximized.gradients.len(), 1);
+
+    // On the canvas: the corner pixel of the screen is the window's white.
+    let (layout, bytes) = one_window(Rect::new(0, 0, 64, 48), 0, true);
+    let surface = Surface::new(&bytes, 64, 48, 256, Format::Xrgb8888).unwrap();
+    let mut canvas = canvas(64, 48);
+    let _ = render(
+        &mut canvas,
+        &layout,
+        (0, 0),
+        &style,
+        &BTreeMap::from([(WindowId(1), surface)]),
+        &Damage::full(64, 48),
+    );
+    assert!(
+        pixels(&canvas).iter().all(|pixel| *pixel == 0xFFFF_FFFF),
+        "something other than the window shows on a screen it fills"
+    );
+}

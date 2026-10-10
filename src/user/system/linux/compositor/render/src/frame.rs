@@ -797,6 +797,19 @@ fn window<P: Painter>(
         radius: own.rounding.unwrap_or(style.rounding.radius).max(0),
         power: own.rounding_power.unwrap_or(style.rounding.power),
     };
+    // A fullscreen window is the monitor's rectangle and no less: Hyprland
+    // neither rounds it (`renderdata.dontRound` in `renderWindow`) nor
+    // draws its border, and a corner cut out of it is the wallpaper showing
+    // in the four corners of a full-screen game. Fullscreen and not
+    // maximized, which keeps both: the layout gives the first no border
+    // and the second the workspace's, which is how the two are told apart
+    // here. (Under `general:border_size = 0` a maximized window is square
+    // too, the one case this reads wrongly.)
+    let rounding = if placed.fullscreen && placed.border <= 0 {
+        Rounding::none()
+    } else {
+        rounding
+    };
     let width = own.border.unwrap_or(placed.border).max(0);
     let opacity = own
         .opacity
@@ -835,6 +848,14 @@ fn window<P: Painter>(
     // opaque. There the shadow is drawn where it shows -- outside the
     // window's rectangle drawn in by its corners' radius, which is inside
     // its shape whatever the corners' curve.
+    //
+    // The border of a rounded window is the same and worse. It is drawn as
+    // the whole border box filled with the gradient, the surface then going
+    // inside it, so under those two kinds of window all of the fill but the
+    // rim is written over as well -- and a gradient is a ramp looked up and
+    // a blend for every pixel, on one thread: 37 to 53 ms of a 1920x1080
+    // window's frame in software, where copying the window's own pixels in
+    // took half a millisecond. It is drawn where the shadow is.
     let overwritten = (blur.is_some_and(|blur| blur.size > 0 && blur.passes > 0)
         && backdrop
             .as_deref()
@@ -847,17 +868,7 @@ fn window<P: Painter>(
         });
     let seen;
     let shadowed = if overwritten {
-        let inset = rounding
-            .radius
-            .min(rect.width / 2)
-            .min(rect.height / 2)
-            .max(0);
-        seen = damage.without(Rect::new(
-            rect.x.saturating_add(inset),
-            rect.y.saturating_add(inset),
-            rect.width.saturating_sub(inset.saturating_mul(2)),
-            rect.height.saturating_sub(inset.saturating_mul(2)),
-        ));
+        seen = rim(damage, rect, rounding);
         &seen
     } else {
         damage
@@ -902,7 +913,7 @@ fn window<P: Painter>(
                 ..rounding
             },
             gradient,
-            damage,
+            shadowed,
         );
     } else {
         canvas.border_gradient(rect, width, gradient, damage);
@@ -939,6 +950,25 @@ fn window<P: Painter>(
         let alpha = (style.dim.clamp(0.0, 1.0) * 255.0).round() as u32;
         canvas.fill_rounded(rect, rounding, Color(alpha << 24), damage);
     }
+}
+
+/// `damage` less the part of a window at `rect` that its own pixels are
+/// sure to cover when they are copied in opaque: the rectangle drawn in by
+/// the corners' radius, which is inside the window's shape whatever the
+/// corners' curve. What is left is where a decoration drawn under the window
+/// can still be seen -- around it, and in its corners.
+pub(crate) fn rim(damage: &Damage, rect: Rect, rounding: Rounding) -> Damage {
+    let inset = rounding
+        .radius
+        .min(rect.width / 2)
+        .min(rect.height / 2)
+        .max(0);
+    damage.without(Rect::new(
+        rect.x.saturating_add(inset),
+        rect.y.saturating_add(inset),
+        rect.width.saturating_sub(inset.saturating_mul(2)),
+        rect.height.saturating_sub(inset.saturating_mul(2)),
+    ))
 }
 
 /// The part of a monitor whose top-left corner is at `origin` that differs
