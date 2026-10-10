@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "4db6ec9d35e48b249ed661819798d72f126e8b0a7cfe9194bc3323037454fe86",
+  "digest": "300625459f6e7bf4932d24a7e61ffac3bc0433ca04e68fe9a234d51e532ea8c3",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,10 +109,10 @@
   ],
   "summary": {
     "packages": 137,
-    "elements": 6725,
+    "elements": 6726,
     "maturity": {
       "implemented": 281,
-      "inProgress": 22,
+      "inProgress": 23,
       "writtenAhead": 1,
       "planned": 26
     },
@@ -15379,7 +15379,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 10,
-          "doc": "An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Eleven exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.",
+          "doc": "An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Twelve exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, nvme, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
             "line": 136
@@ -15702,6 +15702,20 @@
           }
         },
         {
+          "name": "NvmeDriver",
+          "qualifiedName": "FerrixDrivers::NvmeDriver",
+          "kind": "part",
+          "definition": true,
+          "specializes": "DriverProcess",
+          "maturity": "inProgress",
+          "stage": 10,
+          "doc": "src/user/system/native/drivers/block/nvme over src/lib/drivers/block/nvme: an NVM Express controller's first namespace as a disk behind the block ring (docs/NVME.md), the first driver for a disk a PC has. devmgr starts it on any function of class code 01:08:02; the kernel is not changed. It resets and enables the controller, transfers straight into the ring's data region through PRP lists, lends a drive without DRAM its host memory buffer, aborts and resets on a command that does not come back, and notifies the controller before it disables it. Its gates are the library's host tests against a model of a controller, and cargo xtask test-nvme on QEMU's emulated one, with / on a drive below a PCIe switch. It has not run on a real drive (2026-10-10).",
+          "source": {
+            "file": "docs/sysml/08-drivers.sysml",
+            "line": 308
+          }
+        },
+        {
           "name": "DriverBootstrap",
           "qualifiedName": "FerrixDrivers::DriverBootstrap",
           "kind": "action",
@@ -15758,7 +15772,7 @@
           ],
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 308
+            "line": 325
           },
           "children": [
             {
@@ -15770,7 +15784,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 322
+                "line": 339
               }
             },
             {
@@ -15782,7 +15796,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 323
+                "line": 340
               }
             },
             {
@@ -15794,7 +15808,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 324
+                "line": 341
               }
             },
             {
@@ -15806,7 +15820,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 325
+                "line": 342
               }
             },
             {
@@ -15818,7 +15832,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 326
+                "line": 343
               }
             },
             {
@@ -15830,7 +15844,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 327
+                "line": 344
               }
             }
           ]
@@ -81377,7 +81391,7 @@
       "title": "Driver process and its subtypes",
       "kind": "block",
       "direction": "TB",
-      "caption": "7 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common.",
+      "caption": "8 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common.",
       "nodes": [
         {
           "id": "FerrixDrivers::DriverProcess",
@@ -81440,6 +81454,14 @@
           "sublabel": "stage 10",
           "maturity": "inProgress",
           "stage": 10
+        },
+        {
+          "id": "FerrixDrivers::NvmeDriver",
+          "label": "NvmeDriver",
+          "kind": "box",
+          "sublabel": "stage 10",
+          "maturity": "inProgress",
+          "stage": 10
         }
       ],
       "edges": [
@@ -81481,6 +81503,12 @@
         },
         {
           "from": "FerrixDrivers::Stm32SdmmcDriver",
+          "to": "FerrixDrivers::DriverProcess",
+          "kind": "specialization",
+          "label": ""
+        },
+        {
+          "from": "FerrixDrivers::NvmeDriver",
           "to": "FerrixDrivers::DriverProcess",
           "kind": "specialization",
           "label": ""

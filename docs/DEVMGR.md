@@ -119,7 +119,11 @@ a driver's death or of its restart (§4), printed the same way.
    controller, is a GPU driven by `nvrm` (NVIDIA's N1b, §3.2); and QEMU's
    `pci-testdev` (`1B36:0005`) is a GPU driven by `nvrm-test`, an image only
    `cargo xtask test-nvrm` puts in the driver directory, since QEMU emulates
-   no NVIDIA function.
+   no NVIDIA function. And a function of any vendor whose class code is
+   `01:08:02`, an NVM Express controller, is a disk driven by `nvme`
+   (`docs/NVME.md`): matched by what it is, since every vendor's drive has
+   that class and none of them a row of its own. Its START carries no
+   register blocks; the driver asks `device_aperture` for its BAR.
 2. Each device keeps the kernel's default pin budget, 66560 pages, unless
    its kind's rule says otherwise (§3.1). Devices of one kind are named in
    PCI order — `vda`, `vdb`, … for disks, as `docs/BLOCK-RING.md` §6.1
