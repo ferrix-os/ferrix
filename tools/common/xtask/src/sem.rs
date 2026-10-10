@@ -70,6 +70,16 @@ pub(crate) const TASKS: &[Task] = &[
         run,
     },
     Task {
+        name: "test-seccomp",
+        help_at: 585,
+        help: &[
+            "test-seccomp  Boot seccomp-test as init and require seccomp-bpf as Chromium, bubblewrap and Flatpak use it: probes, errnos and chain",
+            "              order, a trapped call emulated from its SIGSYS context, kills, strict mode, execve, TSYNC among threads being made",
+            "              (--arch all runs the four ABIs: x86-64 and 32-bit x86 on the x86-64 kernel, AArch64, ARMv7-A; --i686: 32-bit x86 alone)",
+        ],
+        run,
+    },
+    Task {
         name: "test-procfs",
         help_at: 590,
         help: &[
@@ -233,7 +243,7 @@ fn starts(line: &str, want: &str) -> bool {
     line.contains(want)
 }
 
-/// `test-sem`, and `test-threads`, `test-shm`, `test-container` and
+/// `test-sem`, and `test-threads`, `test-shm`, `test-container`, `test-seccomp` and
 /// `test-procfs`, the other musl programs booted as init, and `test-uvm`, `test-nvrm` and
 /// `test-nvrm-link`, booted the
 /// same way, which share its arm of `main`'s dispatch.
@@ -243,6 +253,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-shm" => crate::shm::test_shm(args),
         "test-container" => crate::container::run(args),
         "test-pipewait" => crate::pipe_bench::test_pipewait(args),
+        "test-seccomp" => crate::seccomp::test_seccomp(args),
         "test-procfs" => crate::procfs::test_procfs(args),
         "test-uvm" => crate::uvm::test_uvm(args),
         "test-nvrm" => crate::nvrm::test_nvrm(args),

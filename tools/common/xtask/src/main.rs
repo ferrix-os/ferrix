@@ -170,6 +170,7 @@ mod restart;
 mod rustc;
 mod seam;
 mod seat;
+mod seccomp;
 mod selfhost;
 mod sem;
 mod serial;
