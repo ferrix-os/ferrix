@@ -726,6 +726,17 @@ mod tests {
         assert_eq!(unsafe { *shared.count.get() }, 80_000);
     }
 
+    /// Take `lock` to write or to read, and give it back.
+    fn take_and_give(lock: &RwLock, write: bool) {
+        if write {
+            lock.write();
+            lock.write_unlock();
+        } else {
+            lock.read();
+            lock.read_unlock();
+        }
+    }
+
     /// A release wakes every sleeper, not one: with one woken, a reader a
     /// waiting writer holds back sleeps again and the lock stays free with
     /// everyone asleep (the desktop's wedge on the RTX 3060, 2026-10-10).
@@ -743,13 +754,7 @@ mod tests {
                 let lock = Arc::clone(&lock);
                 let done = done.clone();
                 threads.push(thread::spawn(move || {
-                    if index % 3 == 0 {
-                        lock.write();
-                        lock.write_unlock();
-                    } else {
-                        lock.read();
-                        lock.read_unlock();
-                    }
+                    take_and_give(&lock, index % 3 == 0);
                     let _ = done.send(());
                 }));
             }
