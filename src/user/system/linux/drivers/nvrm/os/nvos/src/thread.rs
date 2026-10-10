@@ -33,16 +33,26 @@ struct Start {
     run: extern "C" fn(*mut c_void),
     /// Its argument.
     argument: *mut c_void,
+    /// Whether it is one of this layer's own threads, a kernel thread on
+    /// Linux, and not one that serves clients' requests.
+    ours: bool,
 }
 
 /// Every thread this layer starts begins here: it records itself, then runs.
 extern "C" fn trampoline(start: *mut c_void) -> *mut c_void {
     let start = start.cast::<Start>();
     // SAFETY: `spawn` passes a `Start` it allocated and gave up.
-    let Start { run, argument } = unsafe { start.read() };
+    let Start {
+        run,
+        argument,
+        ours,
+    } = unsafe { start.read() };
     // SAFETY: allocated by `spawn` with `malloc`, read above, used no more.
     unsafe { libc::free(start.cast()) };
-    remember(futex::tid());
+    let _ = futex::tid_begin();
+    if ours {
+        remember(futex::tid());
+    }
     // For the stall diagnostic: which thread is which, by what it runs
     // (the address is a symbol of nvrm's, or of its core's).
     // Said once per function: the ioctl workers are one a request.
@@ -82,13 +92,24 @@ fn remember(tid: u32) {
 /// Start a detached thread that runs `run(argument)`. Returns whether it
 /// started.
 pub(crate) fn spawn(run: extern "C" fn(*mut c_void), argument: *mut c_void) -> bool {
+    spawn_as(run, argument, true)
+}
+
+/// [`spawn`], saying whether the thread is one of this layer's own.
+fn spawn_as(run: extern "C" fn(*mut c_void), argument: *mut c_void, ours: bool) -> bool {
     // SAFETY: a fresh block for one `Start`; malloc's alignment suffices.
     let start = unsafe { libc::malloc(size_of::<Start>()) }.cast::<Start>();
     if start.is_null() {
         return false;
     }
     // SAFETY: `start` is a fresh, aligned block for one `Start`.
-    unsafe { start.write(Start { run, argument }) };
+    unsafe {
+        start.write(Start {
+            run,
+            argument,
+            ours,
+        });
+    }
     let mut thread = 0_u64;
     // SAFETY: `thread` is writable and `trampoline` takes over `start`.
     let started = unsafe {
@@ -135,4 +156,16 @@ pub(crate) extern "C" fn nvos_thread_spawn(
     argument: *mut c_void,
 ) -> bool {
     spawn(run, argument)
+}
+
+/// Start a detached thread running `run(argument)` that serves clients'
+/// requests: the chardev dispatcher's pool (`glue/chardev.c`). On Linux a
+/// request runs on the client's own thread, so this one is not a kernel
+/// thread to RM ([`is_ours`]). Whether it started.
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn nvos_thread_spawn_plain(
+    run: extern "C" fn(*mut c_void),
+    argument: *mut c_void,
+) -> bool {
+    spawn_as(run, argument, false)
 }

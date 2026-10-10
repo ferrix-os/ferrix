@@ -4,7 +4,10 @@ use ferrix_native_abi::nr;
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types;
 
-use super::{TOO_SMALL, UNISOLATED, judge_handed, judge_refused, place_after, report};
+use super::{
+    TOO_SMALL, TRIP_BOUND_NANOS, UNISOLATED, judge_handed, judge_refused, judge_trip, place_after,
+    report, trip_median,
+};
 
 // Recorded 2026-10-03 with nvrm loading its core from the volume
 // (x86-64, KVM, the patched ferrix-cfi QEMU): devmgr's lines, nvrm's and
@@ -25,7 +28,10 @@ nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
 nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
-nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
+nvrm: skeleton up on 00:04.0\n\
+NVRM: loading NVIDIA UNIX Open Kernel Module for x86_64  580.173.02  Release Build  (sebastian@nazuna)  Sat Oct  3 03:28:29 AM CEST 2026\n\
+nvrm: serving /dev/nvidiactl with no GPU, for the round trip's bench\n\
 ";
 
 // The same boot under TCG.
@@ -43,7 +49,10 @@ nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
 nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
-nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
+nvrm: skeleton up on 00:04.0\n\
+NVRM: loading NVIDIA UNIX Open Kernel Module for x86_64  580.173.02  Release Build  (sebastian@nazuna)  Sat Oct  3 03:28:29 AM CEST 2026\n\
+nvrm: serving /dev/nvidiactl with no GPU, for the round trip's bench\n\
 ";
 
 // The default 512 MiB machine, KVM.
@@ -59,6 +68,68 @@ const UNISOLATED_KVM: &str = "\
   8.04 | devmgr   gpu 00:04.0 not started: its interrupts are not isolated (device_isolation 0x0)\n\
   8.05 |   devmgr   13 devices, 12 drivers, 3 started, 1 failed\n\
 ";
+
+// The round trip's bench, recorded 2026-10-10 with nvrm's pool (x86-64,
+// KVM, 4 processors, host load 36 to 48, the boot at nice 19).
+const TRIP_KVM: &str = "\
+   18.82 | nvrm-trip: /dev/nvidiactl open; the counter runs at 4400 MHz\n\
+   18.82 | nvrm-trip: a bare system call: 251 ns\n\
+   19.08 | nvrm-trip: pool version-query: n 5000, round trip p50 31837 ns (min 18078, p90 50875, p99 1295347); to nvrm 14178, hand-off 379, handler 10299 (2 copies), back 5719\n\
+   19.39 | nvrm-trip: pool null-control: n 5000, round trip p50 39166 ns (min 21698, p90 60435, p99 947885); to nvrm 14698, hand-off 389, handler 13198 (2 copies), back 5819\n\
+   19.65 | nvrm-trip: thread-a-request version-query: n 2000, round trip p50 404188 ns (min 133049, p90 4092727, p99 17936886); to nvrm 155377, hand-off 132579, handler 16038 (2 copies), back 20068\n\
+   19.86 | nvrm-trip: thread-a-request null-control: n 2000, round trip p50 273678 ns (min 113251, p90 327274, p99 1092863); to nvrm 136829, hand-off 105461, handler 12858 (2 copies), back 18538\n\
+   19.86 | nvrm-trip: done\n\
+";
+
+#[test]
+fn the_recorded_bench_passes_and_its_medians_are_read() {
+    let run = lines(TRIP_KVM);
+    assert_eq!(trip_median(&run, "pool", "version-query"), Some(31_837));
+    assert_eq!(
+        trip_median(&run, "thread-a-request", "null-control"),
+        Some(273_678)
+    );
+    assert!(judge_trip(&run, true).is_ok());
+    assert!(judge_trip(&run, false).is_ok());
+}
+
+#[test]
+fn a_slow_round_trip_fails_under_a_hypervisor_only() {
+    let slow = TRIP_KVM.replace("p50 31837 ns", &format!("p50 {} ns", TRIP_BOUND_NANOS + 1));
+    let why = judge_trip(&lines(&slow), true).unwrap_err();
+    assert!(why.contains("version-query's round trip took"), "{why}");
+    assert!(judge_trip(&lines(&slow), false).is_ok());
+}
+
+#[test]
+fn a_control_within_the_bound_fails_the_bench() {
+    let quick = TRIP_KVM.replace("p50 273678 ns", "p50 90000 ns");
+    let why = judge_trip(&lines(&quick), true).unwrap_err();
+    assert!(why.contains("the control did not fire"), "{why}");
+}
+
+#[test]
+fn a_bench_that_stopped_or_lacks_a_line_fails() {
+    let unfinished = TRIP_KVM.replace("nvrm-trip: done", "");
+    assert!(judge_trip(&lines(&unfinished), true).is_err());
+    let stopped = format!("{TRIP_KVM}nvrm-trip: stopped: no /dev/nvidiactl\n");
+    assert!(judge_trip(&lines(&stopped), true).is_err());
+    let refused = format!("{TRIP_KVM}nvrm-trip: control: nvrm does not take the mode here\n");
+    assert!(judge_trip(&lines(&refused), true).is_err());
+    let no_control: String = TRIP_KVM
+        .lines()
+        .filter(|line| !line.contains("thread-a-request null-control"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let why = judge_trip(&lines(&no_control), true).unwrap_err();
+    assert!(why.contains("no line for the control"), "{why}");
+    let no_built: String = TRIP_KVM
+        .lines()
+        .filter(|line| !line.contains("pool version-query"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert!(judge_trip(&lines(&no_built), true).is_err());
+}
 
 fn lines(transcript: &str) -> Vec<String> {
     transcript.lines().map(str::to_owned).collect()

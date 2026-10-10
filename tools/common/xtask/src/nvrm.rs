@@ -58,6 +58,21 @@ const TRIP_DONE: &str = "nvrm-trip: done";
 /// The prefix of the bench's lines.
 const TRIP: &str = "nvrm-trip: ";
 
+/// The requests the bench times.
+const TRIP_REQUESTS: [&str; 2] = ["version-query", "null-control"];
+
+/// How nvrm serves as built, and in the bench's negative control, as the
+/// bench's lines begin.
+const TRIP_BUILT: &str = "pool";
+const TRIP_CONTROL: &str = "thread-a-request";
+
+/// The most a round trip's median may be under KVM, in nanoseconds
+/// (`docs/NVIDIA.md` §4.7). As built it reads 30 to 40 us on a host at load
+/// 36 to 48 with the boot at nice 19, and the control -- a thread started
+/// for every request, as until 2026-10-10 -- 270 to 550 us. Under TCG the
+/// figure is the emulator's and is only printed.
+const TRIP_BOUND_NANOS: u64 = 100_000;
+
 /// How long a refused boot is read on after the report, for a line that
 /// must not come.
 const QUIET: Duration = Duration::from_secs(3);
@@ -364,6 +379,20 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
             for line in lines.iter().filter(|line| line.contains(TRIP)) {
                 println!("  {}", line.trim());
             }
+            let kvm = match crate::window::qemu_for(arch.qemu_binary(), false) {
+                Some(binary) => qemu::accelerator(arch, &binary, args.accel.as_deref())? != "tcg",
+                None => args.accel.as_deref().is_some_and(|accel| accel != "tcg"),
+            };
+            match judge_trip(&lines, kvm) {
+                Ok(shown) => println!("  {arch}: {shown}"),
+                Err(why) => {
+                    return Err(Error::new(format!(
+                        "{arch}: the round trip's bench did not show what it must: {why}.\n  \
+                         Serial output is in {}",
+                        log.display()
+                    )));
+                }
+            }
         }
     }
     Ok(())
@@ -506,6 +535,69 @@ fn judge_handed(lines: &[String]) -> Option<String> {
         Some((_, failed)) => Some(format!("devmgr reported {failed} failed")),
         None => Some("the kernel never printed devmgr's report".to_owned()),
     }
+}
+
+/// The median, in nanoseconds, of the bench's line for `request` served as
+/// `served`: `nvrm-trip: <served> <request>: n N, round trip p50 X ns (…`.
+fn trip_median(lines: &[String], served: &str, request: &str) -> Option<u64> {
+    let begins = format!("{TRIP}{served} {request}: ");
+    let line = lines.iter().find(|line| line.contains(&begins))?;
+    let rest = line.get(line.find("round trip p50 ")? + "round trip p50 ".len()..)?;
+    rest.split(' ').next()?.parse().ok()
+}
+
+/// What the round trip's bench showed, or why its lines are not what they
+/// must be: the bench ran to its end; as built each request has a line, and
+/// under a hypervisor its median is within [`TRIP_BOUND_NANOS`]; and the
+/// control, nvrm serving each request on a thread started for it, has a
+/// line for each request too and is over the bound, so the bound is one a
+/// slower path fails.
+fn judge_trip(lines: &[String], hypervisor: bool) -> std::result::Result<String, String> {
+    if let Some(stopped) = lines
+        .iter()
+        .find(|line| line.contains("nvrm-trip: stopped") || line.contains("nvrm-trip: control: "))
+    {
+        return Err(format!("the bench stopped: `{}`", stopped.trim()));
+    }
+    if !lines.iter().any(|line| line.contains(TRIP_DONE)) {
+        return Err(format!("the bench never said `{TRIP_DONE}`"));
+    }
+    let mut shown = Vec::new();
+    for request in TRIP_REQUESTS {
+        let Some(built) = trip_median(lines, TRIP_BUILT, request) else {
+            return Err(format!("no line for `{TRIP_BUILT} {request}`"));
+        };
+        let Some(control) = trip_median(lines, TRIP_CONTROL, request) else {
+            return Err(format!(
+                "no line for the control, `{TRIP_CONTROL} {request}`"
+            ));
+        };
+        if hypervisor && built > TRIP_BOUND_NANOS {
+            return Err(format!(
+                "a {request}'s round trip took {built} ns at the median, over the \
+                 {TRIP_BOUND_NANOS} ns it may"
+            ));
+        }
+        if hypervisor && control <= TRIP_BOUND_NANOS {
+            return Err(format!(
+                "the control did not fire: with a thread started for every request a \
+                 {request}'s round trip took {control} ns, within the {TRIP_BOUND_NANOS} ns bound, \
+                 so the bound shows nothing"
+            ));
+        }
+        shown.push(format!("{request} {built} ns (control {control} ns)"));
+    }
+    Ok(if hypervisor {
+        format!(
+            "a request's round trip within {TRIP_BOUND_NANOS} ns at the median, and the control over it: {}",
+            shown.join(", ")
+        )
+    } else {
+        format!(
+            "a request's round trip, emulated, so printed and not judged: {}",
+            shown.join(", ")
+        )
+    })
 }
 
 /// Why the lines of a refused boot are not what they must be: devmgr's

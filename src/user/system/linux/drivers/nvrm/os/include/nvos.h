@@ -93,6 +93,9 @@ NV_STATUS nvos_device_describe(struct nvos_device_desc *out);
 
 /* thread.rs: a detached thread, for the chardev dispatcher's workers. */
 NvBool nvos_thread_spawn(void (*run)(void *), void *argument);
+/* The same, for a thread that serves clients' requests: it is not one of
+ * the "kernel threads" os_get_current_process_flags answers for. */
+NvBool nvos_thread_spawn_plain(void (*run)(void *), void *argument);
 
 /* chardev.rs: the request bridge to the kernel's chardev core (N1e). */
 struct nvos_request {

@@ -104,11 +104,104 @@ pub(crate) fn wake(word: &AtomicU32, count: u32) {
     };
 }
 
-/// The calling thread's id.
-pub(crate) fn tid() -> u32 {
+/// The calling thread's id, from the kernel.
+fn tid_asked() -> u32 {
     // SAFETY: `gettid` takes no arguments and cannot fail.
     let result = unsafe { call6(SYS_GETTID, [0; 6]) };
     u32::try_from(result).unwrap_or(0)
+}
+
+/// The thread pointer: `%fs:0`, which holds its own address on x86-64 in
+/// ferrousli as in every C library (`ferrousli/src/thread.rs`). One value a
+/// live thread.
+#[cfg(not(test))]
+fn thread_pointer() -> usize {
+    let pointer: usize;
+    // SAFETY: reads one word at `%fs:0`, which the C library set before any
+    // code of this layer ran on the thread; nothing is written.
+    unsafe {
+        asm!("mov {}, fs:[0]", out(reg) pointer, options(nostack, readonly, preserves_flags));
+    }
+    pointer
+}
+
+/// The ids kept: a thread pointer and its thread's id, by the pointer.
+#[cfg(not(test))]
+static TIDS: [(core::sync::atomic::AtomicUsize, AtomicU32); 64] = [const {
+    (
+        core::sync::atomic::AtomicUsize::new(0),
+        AtomicU32::new(0),
+    )
+}; 64];
+
+/// What [`slot`] answers if its index were ever out of range.
+#[cfg(not(test))]
+static SPARE: (core::sync::atomic::AtomicUsize, AtomicU32) =
+    (core::sync::atomic::AtomicUsize::new(0), AtomicU32::new(0));
+
+/// The slot `pointer`'s id is kept in. Thread control blocks are far more
+/// than 64 bytes apart, and pages apart when each has a stack of its own.
+#[cfg(not(test))]
+fn slot(pointer: usize) -> &'static (core::sync::atomic::AtomicUsize, AtomicU32) {
+    let index = ((pointer >> 6) ^ (pointer >> 12) ^ (pointer >> 20)) % TIDS.len();
+    // The remainder is below the length, so the spare is never used.
+    TIDS.get(index).unwrap_or(&SPARE)
+}
+
+/// The calling thread's id.
+///
+/// `gettid` is a system call, and this layer asks on every copy of a
+/// client's memory, every `os_get_current_thread` and every lock taken
+/// while the lock table watches: several a request. So the id is kept by
+/// the thread pointer, in a table a thread reads and writes without a lock:
+/// the id is stored before the pointer that vouches for it, and a reader
+/// that finds its own pointer reads an id only its own thread, or a thread
+/// that had the same control block before it, stored. That second case is
+/// why a thread this layer starts stores its id before anything else
+/// ([`tid_begin`]): a control block reused from a thread that ended never
+/// answers with that thread's id. Two threads whose pointers share a slot
+/// overwrite each other and ask the kernel again, which is only slower.
+#[cfg(not(test))]
+pub(crate) fn tid() -> u32 {
+    use core::sync::atomic::Ordering;
+    let pointer = thread_pointer();
+    let (key, id) = slot(pointer);
+    if key.load(Ordering::Acquire) == pointer {
+        let kept = id.load(Ordering::Acquire);
+        // Another thread may have taken the slot between the two loads:
+        // only an id read with the pointer still in place is this thread's.
+        if kept != 0 && key.load(Ordering::Acquire) == pointer {
+            return kept;
+        }
+    }
+    tid_begin()
+}
+
+/// Ask the kernel for the calling thread's id and keep it: what a thread
+/// does first, and what [`tid`] does when it has none kept.
+#[cfg(not(test))]
+pub(crate) fn tid_begin() -> u32 {
+    use core::sync::atomic::Ordering;
+    let pointer = thread_pointer();
+    let asked = tid_asked();
+    let (key, id) = slot(pointer);
+    key.store(0, Ordering::Release);
+    id.store(asked, Ordering::Release);
+    key.store(pointer, Ordering::Release);
+    asked
+}
+
+/// The calling thread's id. The host's tests run on threads this layer did
+/// not start, whose control blocks are reused, so they ask every time.
+#[cfg(test)]
+pub(crate) fn tid() -> u32 {
+    tid_asked()
+}
+
+/// See [`tid`].
+#[cfg(test)]
+pub(crate) fn tid_begin() -> u32 {
+    tid_asked()
 }
 
 /// Ferrix's native calls, by the instruction: what `ferrix-native`'s
