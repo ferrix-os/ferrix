@@ -887,14 +887,21 @@ package FerrixX8664Requirements {
                 interrupted registers and mask, the siginfo -- and enter the handler
                 with RDI the signal, RSI the siginfo and RDX the ucontext;
                 restore_signal_frame shall load the registers and mask that frame
-                holds, a register the handler changed through the ucontext included.";
+                holds, a register the handler changed through the ucontext included.
+                For a signal a fault raised, the frame's sigcontext shall hold the
+                fault's vector in trapno and its error code in err, and a page
+                fault's address in cr2.";
             attribute :>> criterion = "The 64-bit signal program exits 77: its
                 SA_SIGINFO handler for SIGUSR1 saw EDI 10, si_signo 10 at RSI and
                 SIGUSR1 blocked, the 70 it added to the ucontext's saved RBX came
                 back through rt_sigreturn, and the mask after the return is empty
-                (the `signals` line).";
+                (the `signals` line). A SIGSEGV handler for a write to an unmapped
+                page reads trapno 14, err 6 and the address in cr2 and si_addr
+                (the `sigsegv` line); with the three left zero the program exits
+                1 and the check fails by name.";
             attribute :>> parent = "H.TRAP.9";
             attribute :>> unit = ("arch::x86_64::signal::setup_signal_frame",
+                "arch::x86_64::signal::put_cause",
                 "arch::x86_64::signal::frame_is_buildable",
                 "arch::x86_64::signal::place",
                 "arch::x86_64::signal::write_fp_area",

@@ -67,6 +67,16 @@ const EFLAGS: usize = 136;
 const CS: usize = 144;
 /// `sigcontext.ss`, a 16-bit selector where Linux used to have padding.
 const SS: usize = 150;
+/// `sigcontext.err`: a fault's error code.
+const ERR: usize = 152;
+/// `sigcontext.trapno`: a fault's vector.
+const TRAPNO: usize = 160;
+/// `sigcontext.cr2`: the address of a page fault.
+const CR2: usize = 176;
+/// Where `si_addr` is in a `siginfo` for a fault.
+const SI_ADDR: usize = 16;
+/// The page fault's vector.
+const PAGE_FAULT: u64 = 14;
 /// `sigcontext.oldmask`: the saved mask's first word, for old readers.
 const OLDMASK: usize = 168;
 /// `sigcontext.fpstate`: where the `FXSAVE` area is, or zero for none.
@@ -433,6 +443,31 @@ fn place(stack: u64) -> Result<(u64, u64), BadFrame> {
     Ok((fpstate, frame_at))
 }
 
+/// Put what raised the signal in `frame`: the `siginfo`, and for a fault
+/// its vector and error code in the `sigcontext`, which a handler for
+/// `SIGSEGV` reads to tell a page fault from a protection fault and a write
+/// from a read, and a page fault's address. The three stay zero, as the
+/// frame starts, for a signal the program did not cause, as in a 32-bit
+/// frame (`compat::sigcontext_of`). The address is the `siginfo`'s: the
+/// processor's `CR2` may be a later fault's by now.
+fn put_cause(
+    frame: &mut FrameBytes,
+    context: &UserContext,
+    request: &FrameRequest,
+) -> Result<(), BadFrame> {
+    frame.put(INFO, &request.info)?;
+    if context.0.vector >= 32 {
+        return Ok(());
+    }
+    frame.put_u64(MCONTEXT + TRAPNO, context.0.vector)?;
+    frame.put_u64(MCONTEXT + ERR, context.0.error_code)?;
+    if context.0.vector == PAGE_FAULT {
+        let address = request.info.get(SI_ADDR..SI_ADDR + 8).ok_or(BadFrame)?;
+        frame.put(MCONTEXT + CR2, address)?;
+    }
+    Ok(())
+}
+
 /// Write `request`'s frame below its stack and point `context` at the handler:
 /// `RDI` the signal, `RSI` the `siginfo`, `RDX` the `ucontext`, and the stack
 /// pointer at `pretcode`, as if the handler had just been called from it.
@@ -462,7 +497,7 @@ pub(crate) fn setup_signal_frame(
     frame.put_u64(MCONTEXT + OLDMASK, request.mask)?;
     frame.put_u64(MCONTEXT + FPSTATE, fpstate)?;
     frame.put_u64(UC_SIGMASK, request.mask)?;
-    frame.put(INFO, &request.info)?;
+    put_cause(&mut frame, context, request)?;
     frame.write(space, frame_at)?;
 
     let regs = &mut context.0;

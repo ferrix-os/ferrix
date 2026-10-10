@@ -18,8 +18,6 @@ prefix in `/tmp` with `wineboot -i`, and passes when `cmd /c ver` prints
 runs on demand, as `test-yserver` does, and is not in `cargo xtask check`.
 
 The guest has 6 GiB: the prefix is about 800 MB of files, on tmpfs.
-`wineboot` takes about 110 s on the gate host, against a few seconds on
-Linux (§5).
 
 ## 2. The pieces
 
@@ -115,10 +113,14 @@ See the stage's file under `docs/roadmap/` for the list; this section is
 what a session picking Wine up needs first.
 
 * `wineboot` and `cmd /c ver` pass (`test-wine`).
-* Wine reports `err:seh:segv_handler Got unexpected trap 0` once during
-  `wineboot`, and `failed to open C:\windows\syswow64\rundll32.exe`. Neither
-  appears on Linux. The first says a `SIGSEGV`'s `ucontext` carried trap
-  number 0 where Wine expects 14 for a page fault.
+* A 64-bit signal frame's `sigcontext` now carries a fault's `trapno`,
+  `err` and `cr2`, as a 32-bit one already did. Wine's `SIGSEGV` handler
+  tells a page fault by `trapno` 14 and a write by `err`; with the three
+  zero it logged `err:seh:segv_handler Got unexpected trap 0`, and
+  `wineboot` took 88 s of guest time where it now takes 27.
+* `wineboot` still says `failed to open C:\windows\syswow64\rundll32.exe:
+  c0000135`, which it does not say on Linux: a 32-bit Windows program does
+  not start yet.
 * A prefix on the btrfs volume ran out of space with 680 MB free; the gate
   uses tmpfs.
-* `wineboot` is about thirty times slower than on Linux.
+* `wineboot` takes 27 s of guest time; on Linux, on the same host, a few.

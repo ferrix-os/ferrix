@@ -108,6 +108,54 @@ const PAST_END: &[u8] = &[
     0x75, 0x73, 0x00,
 ];
 
+/// A `SIGSEGV` handler's view of the fault that raised it. The program
+/// installs an `SA_SIGINFO` handler and writes to `0x100000000008`, which
+/// nothing maps. The handler exits 0 when the `ucontext`'s `sigcontext` has
+/// `trapno` 14, `err` 6 (a write, from ring 3, of a page not present) and
+/// `cr2` the address, and the `siginfo`'s `si_addr` is the address too;
+/// 1 to 4 name the first that is not, 9 a failed `rt_sigaction`, and 8 a
+/// write that did not fault. Wine's handler reads all three: it tells a
+/// page fault from every other trap by `trapno`, and a write from a read by
+/// `err` (`docs/WINE.md` §5).
+///
+/// ```text
+///   subq $32, %rsp
+///   leaq handler(%rip), %rax ; movq %rax, (%rsp)
+///   movq $0x04000004, 8(%rsp)
+///   leaq restorer(%rip), %rax ; movq %rax, 16(%rsp)
+///   movq $0, 24(%rsp)
+///   movl $13, %eax ; movl $11, %edi ; movq %rsp, %rsi ; xorl %edx, %edx ; movl $8, %r10d
+///   syscall
+///   movl $9, %edi ; testq %rax, %rax ; jnz exit
+///   movabsq $0x100000000008, %rbx
+///   movq %rax, (%rbx)
+///   movl $8, %edi ; jmp exit
+/// handler:
+///   movl $1, %edi ; cmpq $14, 200(%rdx) ; jne exit
+///   movl $2, %edi ; cmpq $6, 192(%rdx) ; jne exit
+///   movl $3, %edi ; movabsq $0x100000000008, %rax ; cmpq %rax, 216(%rdx) ; jne exit
+///   movl $4, %edi ; cmpq %rax, 16(%rsi) ; jne exit
+///   xorl %edi, %edi
+/// exit:
+///   movl $231, %eax ; syscall
+/// restorer:
+///   movl $15, %eax ; syscall
+/// ```
+const SEGV_CONTEXT: &[u8] = &[
+    0x48, 0x83, 0xec, 0x20, 0x48, 0x8d, 0x05, 0x57, 0x00, 0x00, 0x00, 0x48, 0x89, 0x04, 0x24, 0x48,
+    0xc7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x04, 0x48, 0x8d, 0x05, 0x8d, 0x00, 0x00, 0x00, 0x48,
+    0x89, 0x44, 0x24, 0x10, 0x48, 0xc7, 0x44, 0x24, 0x18, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x0d, 0x00,
+    0x00, 0x00, 0xbf, 0x0b, 0x00, 0x00, 0x00, 0x48, 0x89, 0xe6, 0x31, 0xd2, 0x41, 0xba, 0x08, 0x00,
+    0x00, 0x00, 0x0f, 0x05, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x75, 0x57, 0x48, 0xbb,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x48, 0x89, 0x03, 0xbf, 0x08, 0x00, 0x00, 0x00,
+    0xeb, 0x43, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x48, 0x83, 0xba, 0xc8, 0x00, 0x00, 0x00, 0x0e, 0x75,
+    0x34, 0xbf, 0x02, 0x00, 0x00, 0x00, 0x48, 0x83, 0xba, 0xc0, 0x00, 0x00, 0x00, 0x06, 0x75, 0x25,
+    0xbf, 0x03, 0x00, 0x00, 0x00, 0x48, 0xb8, 0x08, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x48,
+    0x39, 0x82, 0xd8, 0x00, 0x00, 0x00, 0x75, 0x0d, 0xbf, 0x04, 0x00, 0x00, 0x00, 0x48, 0x39, 0x46,
+    0x10, 0x75, 0x02, 0x31, 0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0x0f, 0x00, 0x00,
+    0x00, 0x0f, 0x05,
+];
+
 /// `wrgsbase` with a kernel address, in ring 3: `#UD`, vector 6, because
 /// `CR4.FSGSBASE` is clear (`cpu::forbid_user_base_writes`), whether or not
 /// the processor has the instruction. The one way a program sets its `GS`
@@ -568,7 +616,7 @@ const fn killed_by(signal: u32) -> i32 {
 /// # Errors
 ///
 /// The first program that could not be run, or ended other than it had to.
-/// Verifies: `L.x86_64.60`, `L.x86_64.77`, L.trap.1, `L.x86_64.78`, `L.x86_64.103`, H.TRAP.4
+/// Verifies: `L.x86_64.77`, L.trap.1, `L.x86_64.78`, `L.x86_64.103`, H.TRAP.4
 pub(crate) fn run() -> Result<(), &'static str> {
     // What the trap path does after an `execve`: equal only to the same
     // entry, stack and mode. The entry and stack are every architecture's
@@ -648,6 +696,28 @@ pub(crate) fn run() -> Result<(), &'static str> {
          SIGILL, SIGSEGV, SIGSEGV, SIGFPE and SIGBUS"
     );
 
+    check_fault_context_and_bases()?;
+    check_compat()
+}
+
+/// A `SIGSEGV` handler's view of its fault, and the `FS` and `GS` bases: what
+/// `arch_prctl` refuses, sets and reads back, and that no program writes a
+/// base without it.
+///
+/// Verifies: `L.x86_64.60`, `L.x86_64.42`
+fn check_fault_context_and_bases() -> Result<(), &'static str> {
+    match run_program(b"/segv-context", SEGV_CONTEXT)? {
+        0 => {}
+        1 => return Err("a SIGSEGV handler's sigcontext did not say trap 14 for a page fault"),
+        2 => return Err("a SIGSEGV handler's sigcontext did not carry the fault's error code"),
+        3 => return Err("a SIGSEGV handler's sigcontext did not carry the fault's address in cr2"),
+        4 => return Err("a SIGSEGV handler's siginfo did not carry the fault's address"),
+        _ => return Err("the SIGSEGV context program did not reach its handler"),
+    }
+    println!(
+        "  sigsegv  a handler for a write to an unmapped page read trap 14, error code 6 and \
+         the address in its sigcontext, and the address in its siginfo"
+    );
     if cpu::read_cr4() & cpu::CR4_FSGSBASE != 0 {
         return Err("CR4.FSGSBASE is set, so a program can write its GS base without a call");
     }
@@ -670,7 +740,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
          a GS base it set read through %gs and ARCH_GET_GS, and an FS base through ARCH_GET_FS; \
          CR4.FSGSBASE is clear and a program's WRGSBASE ended it with SIGILL"
     );
-    check_compat()
+    Ok(())
 }
 
 /// The ways into and out of compatibility mode (`docs/I386.md` I1): an i386
