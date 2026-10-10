@@ -101,7 +101,8 @@ may one day need the relaxation.
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Seccomp** (`docs/SECCOMP.md`): `TRACE` and `USER_NOTIF` answer `ENOSYS` (no tracer, no supervisor); `SECCOMP_FILTER_FLAG_NEW_LISTENER` and `WAIT_KILLABLE_RECV` are `EINVAL`; `SECCOMP_FILTER_FLAG_LOG` and the `LOG` action write one rate-limited line (pid, `arch`, number, instruction) on the console and not Linux's audit log (Q4: `audit.rs` records the item's decisions, a filter's is the personality's); `SPEC_ALLOW` is accepted and changes nothing; `TRAP` is a kill until S4 and `TSYNC` is `EINVAL` until S5. User notification would need an fd type and a supervisor protocol | open, S4 and S5 | 13 |
+| **Seccomp** (`docs/SECCOMP.md`): `TRACE` and `USER_NOTIF` answer `ENOSYS` (no tracer, no supervisor); `SECCOMP_FILTER_FLAG_NEW_LISTENER` and `WAIT_KILLABLE_RECV` are `EINVAL`; `SECCOMP_FILTER_FLAG_LOG` and the `LOG` action write one rate-limited line (pid, `arch`, number, instruction) on the console and not Linux's audit log (Q4: `audit.rs` records the item's decisions, a filter's is the personality's); `SPEC_ALLOW` is accepted and changes nothing; `TSYNC` is `EINVAL` until S5. A `TRAP` handler's own frame (its write into the context, `SA_NODEFER`) is checked by S6's guest program, not at boot. User notification would need an fd type and a supervisor protocol | open, S4 and S5 | 13 |
+| Seccomp, S4: a `SIGSYS` from a `TRAP` read through `signalfd` carries `ssi_errno` but not `ssi_call_addr`, `ssi_syscall` or `ssi_arch`, which Linux fills (`encode_signalfd`'s `Origin::Sys` arm); a handler's `siginfo` has them. Fill the three fields and check them with the guest test (the consultant's S4 note, 2026-10-01) | open | 13 |
 
 ### s13-006
 
