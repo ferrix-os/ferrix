@@ -803,6 +803,31 @@ There are three steps, and each one stands on its own:
    Vulkan and imports clients' dmabufs without a copy. Only the finished
    frame is copied, into virtio-gpu's scanout, or not at all with N6.
 
+   As built, the frames are drawn through `virgl_test_server` on NVIDIA's
+   EGL (`--renderer vtest`), and the modifiers hyprix offers follow how it
+   can take a buffer in (`compositor_server::modifiers_offered`):
+   * Ferrix's patched server (`fetch-virgl-server.sh`) is asked which
+     modifiers its EGL imports `ARGB8888` and `XRGB8888` with
+     (`VCMD_FERRIX_DMABUF_MODIFIERS`: `eglQueryDmaBufModifiersEXT`), and
+     hyprix offers each one EGL imports as a 2D texture and then linear;
+     never the implicit layout, which NVIDIA's GBM answers with a layout
+     nobody named. On the development host's RTX 3090 with 580.173.02
+     those are the block-linear `0x0300000000606010`–`15` and
+     `0x0300000000e08010`–`15`, with linear reported for external textures
+     only; the 3060's are whatever its EGL answers.
+   * A buffer of one of them is a name-only dmabuf in video memory. It
+     cannot be mapped, so it is taken only if a screen's renderer imports
+     it there and then (`VCMD_FERRIX_RESOURCE_IMPORT_FD`, an EGL image
+     with the modifier) and is sampled where it lies; otherwise `create`
+     is answered `failed` with one line, `hyprix: a dmabuf could not be
+     imported: ...`. A buffer that can be mapped (linear system memory) is
+     mapped and uploaded as beside a software screen, never imported: an
+     EGL may copy memory that is not its driver's own when it imports it.
+   * A stock server, one with the first patch alone, and every screen
+     drawn in software keep linear only (`Importer::Map`).
+   A screen that gives its GPU up for the software renderer draws nothing
+   for a buffer in video memory until it is on the GPU again.
+
 **N3b sync: semaphore-surface fences and `sync_file`.** This is the design
 that ledger 316 B9 asked to see before any `sync_file` or syncobj is built.
 
