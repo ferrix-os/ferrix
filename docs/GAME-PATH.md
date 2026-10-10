@@ -784,8 +784,9 @@ of one processor.
   list of games and the launcher marks what it starts from it. The mark
   changes no defence. How an opt-in that puts one game in `nvrm`'s domain
   could attach to it, who would have to grant it, and why the user's own
-  list must not, is `docs/SETTINGS.md` §7: a proposal, not built, which
-  turns question 4 into a three-way choice.
+  list must not, is `docs/SETTINGS.md` §7: a proposal, not built, reviewed
+  as a design (ledger line 698), which narrows question 4 to a choice of
+  two and finds §5.4's move of the client's job in conflict with it.
 
 **A vDSO or a shared ring to remove calls.** The clock is done. A ring
 for socket traffic to the X server would save a few 300 ns calls a frame
