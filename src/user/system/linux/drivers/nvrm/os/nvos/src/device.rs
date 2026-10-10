@@ -26,14 +26,25 @@ use ferrix_native_abi::types::{APERTURE_PREFETCHABLE, ApertureInfo, DeviceInfo, 
 
 use crate::futex::Kernel;
 use crate::log::say;
+use crate::mappings::{Entry, Table};
 use crate::status::{self, NvBool, NvStatus};
 use crate::sync::Mutex;
 use crate::thread;
 
 /// The most apertures remembered.
 const APERTURES: usize = 16;
-/// The most kernel mappings remembered.
-const MAPPINGS: usize = 64;
+/// The most kernel mappings alive at once. RM maps a page of BAR1 for each
+/// channel and unmaps it when the channel goes, so this bounds the channels
+/// of every client together with what nvrm itself keeps mapped; each costs
+/// the kernel a region and one of the process's 4096 handles, and a quarter
+/// of those is the most this layer takes.
+const MAPPINGS: usize = 1024;
+/// What `os_map_kernel_space` says when that many are alive.
+const FULL: &str = "all 1024 kernel mappings are in use; none is free until RM unmaps one";
+const _: () = assert!(MAPPINGS == 1024, "FULL names the number");
+/// How many unmaps of an address that is no mapping's are said, of however
+/// many there are.
+const STRAYS_SAID: u32 = 8;
 /// A page.
 const PAGE: u64 = 4096;
 /// The end of PCI Express configuration space.
@@ -50,19 +61,6 @@ struct Attached {
     apertures: [Option<ApertureInfo>; APERTURES],
 }
 
-/// One kernel mapping of part of an aperture.
-#[derive(Clone, Copy)]
-struct Mapping {
-    /// The physical address of its first byte, page-aligned.
-    phys: u64,
-    /// Its length, whole pages.
-    len: u64,
-    /// Where it is mapped.
-    address: usize,
-    /// Whether it is write-combining.
-    combining: bool,
-}
-
 /// The device's state.
 struct State {
     /// The device handle, 0 before attach.
@@ -71,10 +69,12 @@ struct State {
     attached: UnsafeCell<Option<Attached>>,
     /// Guards `mappings`.
     lock: Mutex,
-    /// The kernel mappings made so far. An `IoMapping` cannot be unmapped,
-    /// so each stays for nvrm's life and is reused by later requests it
-    /// covers.
-    mappings: UnsafeCell<[Option<Mapping>; MAPPINGS]>,
+    /// The kernel mappings alive: each made by `os_map_kernel_space` and
+    /// ended by `os_unmap_kernel_space`, as `ioremap` and `iounmap` do
+    /// (`mappings.rs`).
+    mappings: UnsafeCell<Table<IoMapping<Kernel>, MAPPINGS>>,
+    /// Unmaps of an address that is no mapping's, so far.
+    strays: AtomicU32,
 }
 
 // SAFETY: `attached` is written once, before `handle` is published with
@@ -87,7 +87,8 @@ static STATE: State = State {
     handle: AtomicU32::new(0),
     attached: UnsafeCell::new(None),
     lock: Mutex::new(),
-    mappings: UnsafeCell::new([None; MAPPINGS]),
+    mappings: UnsafeCell::new(Table::new()),
+    strays: AtomicU32::new(0),
 };
 
 /// A device handle nobody closes: the handle is nvrm's for its life.
@@ -380,7 +381,9 @@ pub extern "C" fn os_enable_pci_req_atomics(_: *mut c_void, _: u32) -> NvStatus 
 /// `os_map_kernel_space`: map `[start, start + size)` of one of the
 /// device's apertures into nvrm, uncached or write-combining, and return
 /// where; null for anything that is not wholly inside an aperture, which
-/// includes all of system memory (`docs/NVIDIA.md` §4.3).
+/// includes all of system memory (`docs/NVIDIA.md` §4.3). Each call makes a
+/// mapping of its own, which lasts until `os_unmap_kernel_space` is given
+/// the address returned here.
 #[unsafe(no_mangle)]
 pub extern "C" fn os_map_kernel_space(start: u64, size: u64, mode: u32) -> *mut c_void {
     match map(start, size, mode == WRITECOMBINED) {
@@ -392,7 +395,7 @@ pub extern "C" fn os_map_kernel_space(start: u64, size: u64, mode: u32) -> *mut 
     }
 }
 
-/// Map, or find a mapping that covers, `[start, start + size)`.
+/// Map `[start, start + size)`.
 fn map(start: u64, size: u64, combining: bool) -> Result<usize, &'static str> {
     let attached = attached().ok_or("no device is attached")?;
     let end = start.checked_add(size).ok_or("the range wraps")?;
@@ -405,29 +408,22 @@ fn map(start: u64, size: u64, combining: bool) -> Result<usize, &'static str> {
     let combining = combining && aperture.flags & APERTURE_PREFETCHABLE != 0;
     let phys = start & !(PAGE - 1);
     let len = (end - phys).div_ceil(PAGE) * PAGE;
+    let offset = usize::try_from(start - phys).map_err(|_| "offset")?;
     STATE.lock.lock();
-    let found = find_or_map(phys, len, combining);
+    let mapped = map_new(phys, len, combining);
     STATE.lock.unlock();
-    let mapping = found?;
-    let offset = usize::try_from(start - mapping.phys).map_err(|_| "offset")?;
-    Ok(mapping.address + offset)
+    Ok(mapped? + offset)
 }
 
-/// Under the lock: an existing mapping covering the range, or a new one.
-fn find_or_map(phys: u64, len: u64, combining: bool) -> Result<Mapping, &'static str> {
+/// Under the lock: a new mapping of `len` bytes at `phys`, remembered.
+fn map_new(phys: u64, len: u64, combining: bool) -> Result<usize, &'static str> {
     // SAFETY: under `STATE.lock`.
     let mappings = unsafe { &mut *STATE.mappings.get() };
-    if let Some(found) = mappings
-        .iter()
-        .flatten()
-        .find(|m| m.combining == combining && phys >= m.phys && phys + len <= m.phys + m.len)
-    {
-        return Ok(*found);
+    if !mappings.has_room() {
+        // Said by number, since it means RM holds this many at once -- a
+        // leak, or more channels than nvrm serves -- and not a slot short.
+        return Err(FULL);
     }
-    let slot = mappings
-        .iter_mut()
-        .find(|slot| slot.is_none())
-        .ok_or("every mapping slot is used")?;
     let device = device().ok_or("no device is attached")?;
     let window: IoMapping<Kernel> = device
         .io_mapping(IoMappingSpec { phys, len })
@@ -438,22 +434,71 @@ fn find_or_map(phys: u64, len: u64, combining: bool) -> Result<Mapping, &'static
         window.map(None)
     };
     let address = mapped.map_err(|_| "io_mapping_map refused")?;
-    // The mapping outlives the handle, which is kept so the claim on the
-    // aperture is held too.
-    core::mem::forget(window);
-    let mapping = Mapping {
+    // The handle is kept with the mapping and closed when it is unmapped.
+    let entry = Entry {
         phys,
         len,
         address,
-        combining,
+        window,
     };
-    *slot = Some(mapping);
-    Ok(mapping)
+    let peak = mappings.peak();
+    if let Err(entry) = mappings.insert(entry) {
+        // Not reached: there was room, and the lock is held.
+        release(entry);
+        return Err("no room for the mapping");
+    }
+    if peak < MAPPINGS / 2 && mappings.live() == MAPPINGS / 2 {
+        say!(
+            "{} of {MAPPINGS} kernel mappings are in use, for the first time",
+            mappings.live()
+        );
+    }
+    Ok(address)
 }
 
-/// `os_unmap_kernel_space`: kept mapped, to be reused (see [`State`]).
+/// Unmap a mapping the table no longer holds, and close its handle.
+fn release(entry: Entry<IoMapping<Kernel>>) {
+    let length = usize::try_from(entry.len).unwrap_or(0);
+    // SAFETY: the mapping's own pages, which `os_unmap_kernel_space`'s
+    // caller says nothing uses any more.
+    let unmapped = unsafe { crate::libc::munmap(entry.address as *mut c_void, length) };
+    if unmapped != 0 {
+        say!(
+            "munmap of the mapping of {:#x}, {:#x} bytes at {:#x}, refused; it stays mapped",
+            entry.phys,
+            entry.len,
+            entry.address
+        );
+    }
+    drop(entry.window);
+}
+
+/// `os_unmap_kernel_space`: end the mapping `os_map_kernel_space` returned
+/// `address` for -- its pages leave nvrm's address space and its slot and
+/// handle are free for the next map. As `iounmap` does, the mapping goes
+/// whole whatever `size` says, and an address that is no mapping's is left
+/// alone, here with a line.
 #[unsafe(no_mangle)]
-pub extern "C" fn os_unmap_kernel_space(_: *mut c_void, _: u64) {}
+pub extern "C" fn os_unmap_kernel_space(address: *mut c_void, size: u64) {
+    if address.is_null() {
+        return;
+    }
+    STATE.lock.lock();
+    // SAFETY: under `STATE.lock`.
+    let mappings = unsafe { &mut *STATE.mappings.get() };
+    let entry = mappings.remove(address as usize);
+    STATE.lock.unlock();
+    match entry {
+        // Outside the lock: the entry is out of the table, so nothing else
+        // can name it, and a map meanwhile may take its slot.
+        Some(entry) => release(entry),
+        None => {
+            if STATE.strays.fetch_add(1, Ordering::Relaxed) < STRAYS_SAID {
+                say!("os_unmap_kernel_space({address:p}, {size:#x}): no mapping starts there");
+            }
+        }
+    }
+}
 
 /// The device, for the page allocator's pins, if attached.
 pub(crate) fn for_pins() -> Option<ManuallyDrop<Device<Kernel>>> {
