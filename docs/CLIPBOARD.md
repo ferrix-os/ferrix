@@ -428,6 +428,26 @@ two last things in the agent:
   destroy; the agent stopped on "an event for object 16" when the
   terminal's copy replaced the host's selection. It reads and ignores them.
 
+**A port that keeps closing is left longer each time (2026-10-10).** The
+agent took the port up again the moment it read as closed, which is right
+for QEMU's one deliberate close and wrong for a port nobody answers on: it
+was closed again at once, every 10 ms, with a line on the console each
+time -- 89 a second, 85,000 in one boot, up to a quarter of a
+processor in the agent and as much in the kernel writing them. Now the
+first close since the port last gave a byte is answered at once, as
+before; each one after it with nothing heard in between waits twice as
+long as the last, from 10 ms to a second; and a streak is said twice, when
+it begins and when it reaches the second, and once more when the port
+speaks again. A viewer that attaches is joined within a second.
+
+The port that showed it is **`run-compositor --everything`'s own, and its
+clipboard does not work**: that desktop runs as the user `ferrix` through
+`sessiond`, so its `exec-once = /bin/vdagent` is uid 1000, and `vport`
+answers only uid 0 (§6) and closes the agent as it connects. The back-off
+makes that quiet and cheap; it does not make it work. Who may hold the
+port on a desktop that is not root's is a decision still to take
+(`docs/BACKLOG.md`).
+
 Nothing is left of the landings above.
 
 Landings 1 to 5 and 8a are on `main`: the guest now has a driver that opens

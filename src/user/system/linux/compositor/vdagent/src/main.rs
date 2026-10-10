@@ -80,6 +80,11 @@ const PORT_PATIENCE: Duration = Duration::from_secs(10);
 /// for a host that did so before anyone was connected to hear.
 const HOST_PATIENCE: Duration = Duration::from_secs(2);
 
+/// The longest a port that keeps closing is left alone before it is taken up
+/// again: what a boot whose port never answers costs is one connection a
+/// second, and a viewer that attaches is joined within a second of it.
+const REOPEN_PATIENCE: Duration = Duration::from_secs(1);
+
 /// How long a read of the guest's selection may take before it is given up
 /// on. A request must be answered, so a refusal goes back rather than
 /// nothing (`docs/CLIPBOARD.md` §4.3, rule 1).
@@ -183,6 +188,74 @@ fn run() -> Result<(), Stopped> {
     agent.pump()
 }
 
+/// The port closing again and again with nothing said on it in between.
+///
+/// One close is the host's own doing and wants answering at once (see
+/// [`Agent::reconnect`]). A second with no byte heard since the first is a
+/// port nobody is behind: the driver answers only uid 0 and closes any other
+/// peer as it connects (`docs/CLIPBOARD.md` §6), so an agent a desktop
+/// started as its user was closed, took the port up, and was closed again,
+/// every [`TICK`] for as long as the desktop ran, each time with a line on
+/// the console -- 89 a second, 85,000 of them in one boot, 0.23 of a processor
+/// here and as much again in the kernel writing them out. So each close of a
+/// streak waits twice as long as the last, up to [`REOPEN_PATIENCE`], and a
+/// streak is said twice: when it begins and when it has reached that wait.
+#[derive(Debug, Default)]
+struct Reopens {
+    /// How many times in a row the port has closed with nothing heard.
+    streak: u32,
+}
+
+/// What a close of the port asks for.
+#[derive(Debug, PartialEq, Eq)]
+struct Closed {
+    /// How long to leave the port before taking it up again.
+    wait: Duration,
+    /// The line to say about it, for the closes that get one.
+    line: Option<String>,
+}
+
+impl Reopens {
+    /// How long the close that made the streak `streak` long waits: nothing
+    /// for the first, a [`TICK`] for the second, and twice the last from
+    /// there to [`REOPEN_PATIENCE`].
+    fn wait(streak: u32) -> Duration {
+        match streak.checked_sub(2) {
+            None => Duration::ZERO,
+            Some(doublings) => 1_u32
+                .checked_shl(doublings)
+                .and_then(|times| TICK.checked_mul(times))
+                .map_or(REOPEN_PATIENCE, |wait| wait.min(REOPEN_PATIENCE)),
+        }
+    }
+
+    /// The port closed.
+    fn closed(&mut self) -> Closed {
+        self.streak = self.streak.saturating_add(1);
+        let wait = Self::wait(self.streak);
+        let line = if self.streak == 1 {
+            Some("vdagent: the host reopened the port; taking it up again".to_owned())
+        } else if wait == REOPEN_PATIENCE && Self::wait(self.streak.saturating_sub(1)) < wait {
+            Some(format!(
+                "vdagent: the port has closed {} times with nothing said on it; \
+                 looking again every {} ms and saying no more until it speaks",
+                self.streak,
+                REOPEN_PATIENCE.as_millis()
+            ))
+        } else {
+            None
+        };
+        Closed { wait, line }
+    }
+
+    /// The port gave bytes, which ends a streak. The line to say if the
+    /// streak was long enough to have gone quiet.
+    fn heard(&mut self) -> Option<String> {
+        let streak = std::mem::take(&mut self.streak);
+        (streak > 1).then(|| format!("vdagent: the port spoke after closing {streak} times"))
+    }
+}
+
 /// The agent: a Wayland client, a vdagent peer, and what each owes the other.
 struct Agent {
     // -- Wayland --
@@ -215,6 +288,11 @@ struct Agent {
     grab_serial: u32,
     /// When this connection to the port was made.
     connected_at: Instant,
+    /// The closes since the port last gave a byte.
+    reopens: Reopens,
+    /// When a port that closed is taken up again, while it is being left
+    /// alone; `None` while there is a connection to read.
+    closed_until: Option<Instant>,
 }
 
 impl Agent {
@@ -239,6 +317,8 @@ impl Agent {
             announced: false,
             connected_at: Instant::now(),
             grab_serial: 0,
+            reopens: Reopens::default(),
+            closed_until: None,
         }
     }
 
@@ -297,7 +377,10 @@ impl Agent {
                 self.connection.consume(consumed, claimed);
             }
             self.take_from_host()?;
-            if !self.announced && self.connected_at.elapsed() >= HOST_PATIENCE {
+            if !self.announced
+                && self.closed_until.is_none()
+                && self.connected_at.elapsed() >= HOST_PATIENCE
+            {
                 self.announce_once(true);
             }
             self.flush()?;
@@ -309,11 +392,22 @@ impl Agent {
 
     /// Take whatever the port has, and answer every whole message in it.
     fn take_from_host(&mut self) -> Result<(), Stopped> {
+        // A port that keeps closing is left alone for a while ([`Reopens`]);
+        // the Wayland side of the loop goes on meanwhile.
+        if let Some(until) = self.closed_until {
+            if Instant::now() < until {
+                return Ok(());
+            }
+            self.reconnect()?;
+        }
         let mut bytes = [0_u8; chunk::MAX_PAYLOAD * 2];
         loop {
             match self.port.read(&mut bytes) {
-                Ok(0) => return self.reconnect(),
+                Ok(0) => return self.port_closed(),
                 Ok(read) => {
+                    if let Some(line) = self.reopens.heard() {
+                        say(&line);
+                    }
                     say(&format!("vdagent: {read} bytes from the port"));
                     self.frames
                         .extend_from_slice(bytes.get(..read).unwrap_or_default());
@@ -326,6 +420,24 @@ impl Agent {
         self.reassemble()
     }
 
+    /// The port read as closed: take it up again, at once if this is the
+    /// first close since it last spoke and after [`Reopens`]'s wait if not.
+    fn port_closed(&mut self) -> Result<(), Stopped> {
+        let closed = self.reopens.closed();
+        if let Some(line) = closed.line {
+            say(&line);
+        }
+        if closed.wait.is_zero() {
+            return self.reconnect();
+        }
+        // Nothing of the old conversation outlives the close, whenever the
+        // new one starts.
+        self.frames.clear();
+        self.host_owns = false;
+        self.closed_until = Instant::now().checked_add(closed.wait);
+        Ok(())
+    }
+
     /// Take the port up again after the host closed it.
     ///
     /// QEMU closes the port on purpose once the first capabilities have
@@ -336,7 +448,7 @@ impl Agent {
     /// end: half a message is dropped, the host owns nothing any more, and
     /// the capabilities are said again.
     fn reconnect(&mut self) -> Result<(), Stopped> {
-        say("vdagent: the host reopened the port; taking it up again");
+        self.closed_until = None;
         self.port = connect_port()?;
         self.frames.clear();
         self.shape = Shape::QEMU_CLIPBOARD;
@@ -891,4 +1003,78 @@ fn say(line: &str) {
     let mut out = std::io::stdout();
     let _written = writeln!(out, "{line}");
     let _flushed = out.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{REOPEN_PATIENCE, Reopens, TICK};
+    use std::time::Duration;
+
+    /// QEMU's own close after the first capabilities is answered as it
+    /// always was: at once, with its line, however often it comes, as long
+    /// as the port says something in between.
+    #[test]
+    fn a_close_after_the_port_spoke_is_taken_up_at_once() {
+        let mut reopens = Reopens::default();
+        for _ in 0..3 {
+            let closed = reopens.closed();
+            assert_eq!(closed.wait, Duration::ZERO);
+            assert_eq!(
+                closed.line.as_deref(),
+                Some("vdagent: the host reopened the port; taking it up again")
+            );
+            assert_eq!(reopens.heard(), None, "one close is not a streak");
+        }
+    }
+
+    /// A port that closes every time it is taken up is asked less and less
+    /// often, down to once a [`REOPEN_PATIENCE`], and said twice in all.
+    #[test]
+    fn a_port_that_keeps_closing_is_left_longer_each_time_and_said_twice() {
+        let mut reopens = Reopens::default();
+        let closes: Vec<_> = (0..2_000).map(|_| reopens.closed()).collect();
+        let waits: Vec<Duration> = closes.iter().map(|closed| closed.wait).collect();
+        assert_eq!(waits.first(), Some(&Duration::ZERO));
+        assert_eq!(waits.get(1), Some(&TICK));
+        assert_eq!(waits.get(2), TICK.checked_mul(2).as_ref());
+        assert!(
+            waits.windows(2).all(|pair| pair.first() <= pair.get(1)),
+            "a wait shorter than the one before it"
+        );
+        assert!(waits.iter().all(|wait| *wait <= REOPEN_PATIENCE));
+        assert_eq!(waits.last(), Some(&REOPEN_PATIENCE));
+        // Two thousand closes at the old rate were twenty seconds; here
+        // they are more than half an hour.
+        let total: Duration = waits.iter().sum();
+        assert!(total > Duration::from_secs(1_900), "{total:?}");
+        let said: Vec<&str> = closes
+            .iter()
+            .filter_map(|closed| closed.line.as_deref())
+            .collect();
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert!(said.last().is_some_and(|line| line.contains("9 times")));
+    }
+
+    /// The first byte ends the streak, says how long it was, and the close
+    /// after it is a first one again.
+    #[test]
+    fn a_byte_from_the_port_ends_the_streak() {
+        let mut reopens = Reopens::default();
+        for _ in 0..40 {
+            let _ = reopens.closed();
+        }
+        assert_eq!(
+            reopens.heard().as_deref(),
+            Some("vdagent: the port spoke after closing 40 times")
+        );
+        assert_eq!(reopens.heard(), None);
+        assert_eq!(reopens.closed().wait, Duration::ZERO);
+    }
+
+    /// No count of closes overflows the wait.
+    #[test]
+    fn a_very_long_streak_still_waits_the_longest_wait() {
+        assert_eq!(Reopens::wait(u32::MAX), REOPEN_PATIENCE);
+        assert_eq!(Reopens::wait(34), REOPEN_PATIENCE);
+    }
 }
