@@ -1679,7 +1679,7 @@ the boot with the check's own message:
 | the hook never learns a thread holds a filter | `a filtered getppid ran` |
 | the chain keeps the oldest filter's answer | `the newest filter's data did not stand on a tie` |
 | a fork child's thread starts with no filter | `a forked child of a filtered process was not filtered` |
-| a clone's thread starts with no filter | `a thread of a filtered process was not filtered` |
+| a clone's thread starts with no filter | `a thread of a filtered process was made unfiltered, before it was listed` (since S5, which copies the chain a second time as the thread is listed: the first copy has a look of its own) |
 | a native child is given no filter | `a native child of a filtered process was not filtered once its start was refused and made again` |
 | a killed last thread ends its process as exit 0 | `a killed thread's process exited otherwise than by SIGSYS` |
 | an ERRNO of 512 is answered 4 | `a filter's ERESTARTSYS restarted the call` |
@@ -1775,4 +1775,56 @@ in the landing's message):
 | the trap's data left out of `si_errno` | `a trapped call's siginfo did not carry the call, its ip and its arch` |
 | a native-range trap raising `SIGSYS` | `a trapped native-range call returned` |
 
-S5 (`TSYNC`) follows.
+**S5 built (2026-10-01, os-7c, `stage13-s5`).** `TSYNC` and `TSYNC_ESRCH`
+(§3.7). `seccomp(SET_MODE_FILTER, TSYNC)` makes and charges the filter, then
+takes the process's thread-list lock; under it an `execve` that has claimed
+the process answers `EAGAIN`, every other live thread is checked under its
+leaf lock (no seccomp passes; a chain that is an ancestor of the caller's
+passes, Linux's `is_ancestor`; strict mode or a chain of its own fails the
+whole call with that thread's id, or `ESRCH` with `TSYNC_ESRCH`, and no thread
+changes), and then the filter is attached to the caller as `attach` does and
+every other thread's chain becomes the caller's new one. The list of threads
+and the room for the chains they give up are made before the lock, and the
+given-up chains are dropped after it, so nothing is allocated or freed under
+it. `TSYNC_ESRCH` without `TSYNC` is `EINVAL`.
+
+The race SR10 names is closed where the design put it: a thread made by
+`clone(CLONE_THREAD)` copies its creator's chain in
+`Process::add_thread_from`, under the thread-list lock, as it is listed. A
+thread being made during a sync is therefore either listed already, and
+reached by the sync, or copies its creator's chain after the sync gave it the
+new one. The `Thread` is also built with its creator's chain
+(`Thread::sibling_numbered`, outside the lock), which the copy under the lock
+then replaces: a path that listed a thread without `add_thread_from` would
+still list a filtered one, never an unfiltered one (the consultant's
+condition 1 on S5, fail closed). The state the second copy replaces is
+dropped after the lock is released. Each copy has a look and a control of
+its own: the heredity case judges a sibling before it is listed, and the
+running-threads case below needs the copy under the lock.
+
+Evidence: the `seccomp` line of FX-1303. On thread objects: a thread made
+before any filter and one made after the first both take the second filter by
+`TSYNC`, the first with the whole chain; a thread with a chain of its own makes
+`TSYNC` answer its id and `TSYNC|TSYNC_ESRCH` answer `ESRCH`, with every
+thread's chain unchanged; `TSYNC_ESRCH` alone is `EINVAL`. With running
+threads: eight threads, and a ninth that makes forty more one after another, a
+`TSYNC` from the first thread in the middle of that, and then every thread of
+the process -- 49, the forty included -- refused the call the filter refuses.
+Negative controls, each through `fleet/gate.sh control --expect`:
+
+| Control (sabotage) | Message |
+|---|---|
+| the creator's chain read before the thread is listed, with a 300 us delay between | `a thread made during TSYNC was not filtered` |
+| every filtered thread counted as an ancestor | `a TSYNC blocked by a thread with a chain of its own did not answer its id` |
+| `TSYNC_ESRCH` ignored | `a blocked TSYNC with TSYNC_ESRCH did not answer ESRCH` |
+| the other threads' chains left as they were | `a thread was left without the chain TSYNC gave` |
+
+What stands on the code: `EAGAIN` for an `execve` in progress (no boot check
+claims an exec), a BACKLOG row. The walk of each other thread's chain for
+`is_ancestor` runs under the thread-list lock, a spin lock, and is bounded
+by the chain's length (6,554) for each thread; the boot times that walk at
+its worst (the `seccomp` cost line's last figure) and
+`MEMORY-AND-TIMING.md` §2.2b has the figure and the arithmetic (the
+consultant's condition 2 on S5). Making it one comparison is a BACKLOG row.
+
+S6 (`test-seccomp`) follows.
