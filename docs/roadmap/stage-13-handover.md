@@ -59,9 +59,9 @@ The two rows below are history.
 |---|---|---|---|---|
 | `stage13-s3` | d19606300 | `s3` | Filters, strict mode, the actions. check and three boots PASSED on 6ec5b4081; controls k1-k5, k11-k15 FIRED. Consultant: cleared on evidence. | The consultant refused a reduced gate: six rows (check, three boots, `test-threads`, `test-init`) must PASS on the rebased hash 8ffcc278a, plus all 19 `s3k` controls FIRED. |
 | `stage13-s3-onmain` | 8ce395f53 | `s3m` | The same patches rebased onto main 21f580cad (range-diff all `=`). | Land this one once its rows pass. |
-| `stage13-s4` | 9ad2c718e | `s4` | `SECCOMP_RET_TRAP`. check PASSED, t1 FIRED on 5e0ba9792. Consultant: OK if five conditions; 1, 2 and 5 written. | Conditions 3 and 4, controls t2-t7, the rows after S3. Delete the `L.trap.8` reservation in the commit that writes it. |
-| `stage13-s5` | 298399f1e | `s5` | `TSYNC`. Consultant: OK if; a new thread starting with its creator's chain is written. | A measured bound for the TSYNC ancestor walk (it runs with preemption off), the rows, four controls. |
-| `stage13-s6` | 64e891f7e | `s6` | `cargo xtask test-seccomp` (S6a), passed on all four ABIs in a direct run. Needs no review. | gate.sh INDEX lines. Linux's `seccomp_bpf` selftest is a BACKLOG row. |
+| `stage13-s4` | 9ad2c718e | `s4` | `SECCOMP_RET_TRAP`. check PASSED, t1 FIRED on 5e0ba9792. Consultant: OK if five conditions; 1, 2 and 5 written. | **2026-10-11:** ported onto `main` as `land-seccomp-s4` with these written; see `docs/SECCOMP.md` §12, "S4 to S6 ported". |
+| `stage13-s5` | 298399f1e | `s5` | `TSYNC`. Consultant: OK if; a new thread starting with its creator's chain is written. | **2026-10-11:** ported onto `main` as `land-seccomp-s4` with these written; see `docs/SECCOMP.md` §12, "S4 to S6 ported". |
+| `stage13-s6` | 64e891f7e | `s6` | `cargo xtask test-seccomp` (S6a), passed on all four ABIs in a direct run. Needs no review. | **2026-10-11:** ported onto `main` as `land-seccomp-s4` with these written; see `docs/SECCOMP.md` §12, "S4 to S6 ported". |
 
 ### /proc access and unprivileged mounting (fdinfo first)
 
