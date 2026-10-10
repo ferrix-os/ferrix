@@ -31,6 +31,12 @@
  *     starts RM (nvrm_module_init) and probes and starts the GPU
  *     (os/kept/nv-pci.c), through rm_init_adapter, which boots its GSP;
  *     the test device has no RM to start and skips this;
+ *  7b. on the test device: attaches it to ferrix-nvos and maps and unmaps
+ *     BAR0's first page through os_map_kernel_space more times than nvrm
+ *     has handles, then holds more mappings at once than the 64 the table
+ *     once had: RM maps a page per channel and unmaps it with the channel,
+ *     and a mapping that outlived its unmap ran the table out on the
+ *     RTX 3060 at 29 Vulkan queues;
  *  8. says it is up, and sleeps until it is killed.
  *
  * Every line goes to standard error, which is the console, in one write.
@@ -65,6 +71,7 @@ enum step {
 	STEP_ATTACH = 13,
 	STEP_RM = 14,
 	STEP_CHARDEV = 15,
+	STEP_MAPPINGS = 16,
 };
 
 /* Where the NVIDIA volume, mounted at /data, carries RM's core (written
@@ -90,6 +97,8 @@ extern uint32_t nvrm_bootstrap;
 /* ferrix-nvos (include/nvos.h) and the kept C (include/nv-ferrix.h), which
  * this file, built against ferrousli's headers alone, declares itself. */
 extern uint32_t nvos_device_attach(uint32_t handle);
+extern void *os_map_kernel_space(uint64_t start, uint64_t size, uint32_t mode);
+extern void os_unmap_kernel_space(void *address, uint64_t size);
 extern int nvrm_module_init(void);
 extern int nvrm_gpu_start(void);
 extern int nvrm_kms_init(void);
@@ -192,6 +201,79 @@ static int bar0(uint32_t device, const struct nv_device_info *info)
 		return 0;
 	}
 	return stop(STEP_BAR0, "the device has no BAR0 aperture", 0);
+}
+
+/* Maps made and unmapped one after another: more than the 4096 handles a
+ * process has and the 1024 mappings ferrix-nvos keeps, so a handle or a
+ * slot that outlived its unmap stops the run. */
+#define MAP_CYCLES 5000
+/* Mappings held at once: more than the 64 slots the table once had. */
+#define MAP_HELD 200
+
+/* On the test device: os_map_kernel_space's mappings end when they are
+ * unmapped, their pages, slots and handles with them. */
+static int mappings(uint32_t device, const struct nv_device_info *info)
+{
+	struct nv_aperture_info aperture;
+	uint32_t index;
+	for (index = 0; index < info->apertures; index++) {
+		memset(&aperture, 0, sizeof aperture);
+		long result = nv_call(NV_DEVICE_APERTURE, device, index,
+				      (long)&aperture, 0, 0, 0);
+		if (nv_failed(result))
+			return stop(STEP_APERTURE, "device_aperture refused",
+				    result);
+		if (aperture.bar == 0)
+			break;
+	}
+	if (index == info->apertures)
+		return stop(STEP_MAPPINGS, "the device has no BAR0 aperture", 0);
+	uint32_t attached = nvos_device_attach(device);
+	if (attached != 0)
+		return stop(STEP_ATTACH, "nvos_device_attach refused", attached);
+
+	/* An unmapped page's address is free for the next map, so the maps
+	 * stay within a few pages of each other; pages that stayed mapped
+	 * would spread them over one page a cycle. */
+	uintptr_t lowest = UINTPTR_MAX, highest = 0;
+	for (int cycle = 0; cycle < MAP_CYCLES; cycle++) {
+		volatile const uint32_t *at =
+			os_map_kernel_space(aperture.phys, 4096, 0);
+		if (!at)
+			return stop(STEP_MAPPINGS,
+				    "a map after as many unmaps was refused",
+				    cycle);
+		(void)*at;
+		if ((uintptr_t)at < lowest)
+			lowest = (uintptr_t)at;
+		if ((uintptr_t)at > highest)
+			highest = (uintptr_t)at;
+		os_unmap_kernel_space((void *)(uintptr_t)at, 4096);
+	}
+	unsigned long spread = (unsigned long)((highest - lowest) / 4096) + 1;
+	if (spread > MAP_CYCLES / 2)
+		return stop(STEP_MAPPINGS,
+			    "unmapped pages stayed in the address space",
+			    (long)spread);
+
+	static void *held[MAP_HELD];
+	for (int at = 0; at < MAP_HELD; at++) {
+		held[at] = os_map_kernel_space(aperture.phys, 4096, 0);
+		if (!held[at])
+			return stop(STEP_MAPPINGS, "a map held with others was "
+				    "refused", at);
+		for (int before = 0; before < at; before++)
+			if (held[before] == held[at])
+				return stop(STEP_MAPPINGS, "two mappings alive "
+					    "at one address", at);
+		(void)*(volatile const uint32_t *)held[at];
+	}
+	for (int at = 0; at < MAP_HELD; at++)
+		os_unmap_kernel_space(held[at], 4096);
+	say("kernel mappings: %d mapped and unmapped in turn over %lu "
+	    "page%s of addresses, then %d held at once and unmapped",
+	    MAP_CYCLES, spread, spread == 1 ? "" : "s", MAP_HELD);
+	return 0;
 }
 
 /* Wait for the core's file, a bounded while, then load it. */
@@ -340,6 +422,10 @@ int main(void)
 		return stop(STEP_CHARDEV, "the device files' control failed",
 			    served);
 	}
+
+	status = mappings(device, &info);
+	if (status != 0)
+		return status;
 
 	say("skeleton up on %s; idle", place);
 	for (;;)
