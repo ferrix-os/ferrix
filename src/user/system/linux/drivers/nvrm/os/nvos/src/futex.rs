@@ -76,8 +76,18 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32, timeout: Option<Timespec>) {
     };
 }
 
-/// Wake up to `count` threads sleeping on `word`.
+/// Wake up to `count` threads sleeping on `word`; `u32::MAX` is all of
+/// them.
+///
+/// The kernel reads the count as an `int`, Linux's and Ferrix's alike, and
+/// wakes ONE sleeper for a count of zero or less. `u32::MAX` is -1 there:
+/// until 2026-10-10 "wake everyone" woke one. A reader-writer lock given
+/// back with a writer and two readers asleep woke one of them, a reader the
+/// waiting writer holds back went to sleep again, and the lock stayed free
+/// with every thread that wanted it asleep -- RM's API lock, at a session's
+/// start and at a client's end. So the count is capped at `i32::MAX`.
 pub(crate) fn wake(word: &AtomicU32, count: u32) {
+    let count = count.min(i32::MAX as u32);
     // SAFETY: the kernel only uses the word's address as a key.
     let _ = unsafe {
         call6(

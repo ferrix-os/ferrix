@@ -455,6 +455,76 @@ mod tests {
         assert_eq!(unsafe { *shared.count.get() }, 80_000);
     }
 
+    /// Take `lock` to write or to read, and give it back.
+    fn take_and_give(lock: &RwLock, write: bool) {
+        if write {
+            lock.write();
+            lock.write_unlock();
+        } else {
+            lock.read();
+            lock.read_unlock();
+        }
+    }
+
+    /// A release wakes every sleeper, not one: with one woken, a reader a
+    /// waiting writer holds back sleeps again and the lock stays free with
+    /// everyone asleep (the desktop's wedge on the RTX 3060, 2026-10-10).
+    #[test]
+    fn a_released_rwlock_wakes_every_sleeper() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        for _ in 0..50 {
+            let lock = Arc::new(RwLock::new());
+            lock.write();
+            let (done, finished) = mpsc::channel();
+            let mut threads = Vec::new();
+            for index in 0..6 {
+                let lock = Arc::clone(&lock);
+                let done = done.clone();
+                threads.push(thread::spawn(move || {
+                    take_and_give(&lock, index % 3 == 0);
+                    let _ = done.send(());
+                }));
+            }
+            // Let them all go to sleep on the lock.
+            thread::sleep(Duration::from_millis(20));
+            lock.write_unlock();
+            for _ in 0..6 {
+                assert!(
+                    finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+                    "a thread sleeps on a free lock"
+                );
+            }
+            for thread in threads {
+                assert!(thread.join().is_ok());
+            }
+        }
+    }
+
+    /// `complete_all` wakes every waiter.
+    #[test]
+    fn a_completion_wakes_every_waiter() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let completion = Arc::new(Completion::new());
+        let (done, finished) = mpsc::channel();
+        for _ in 0..4 {
+            let completion = Arc::clone(&completion);
+            let done = done.clone();
+            let _ = thread::spawn(move || {
+                completion.wait();
+                let _ = done.send(());
+            });
+        }
+        thread::sleep(Duration::from_millis(50));
+        completion.complete_all();
+        for _ in 0..4 {
+            assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+        }
+    }
+
     #[test]
     fn a_mutex_is_released_by_another_thread() {
         let lock = Arc::new(Mutex::new());
