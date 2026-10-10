@@ -767,6 +767,34 @@ package FerrixRoadmap {
              * known (docs/STEAM.md section 7). */
     }
 
+    #planned requirement <'S23'> stage23Endfield : Stage {
+        attribute :>> number = 23;
+        attribute :>> status = StageStatus::Planned;
+        attribute :>> size = "about 205 points as a first guess, step 5 unknown";
+        doc /* The Windows game Arknights: Endfield on Ferrix, through Wine
+             * with DXVK on NVIDIA's Vulkan, put on the roadmap by the
+             * customer on 2026-10-10 as the road after Steam. Nothing of it
+             * is built; a feasibility study was written the same day. Eight
+             * steps in the order they can be proved: the game on plain
+             * Linux in the same VM shape, which costs no Ferrix work and
+             * answers whether its anti-cheat accepts a virtual machine;
+             * plain Wine starts on Ferrix, which needs
+             * arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws
+             * through DXVK on the card, on stage 21's unlanded branches; a
+             * Unity DirectX 11 game without anti-cheat; the game's
+             * installer, launcher and login; past the anti-cheat, unknown
+             * until it is run; playable; and, optional, by way of Steam's
+             * own Proton, which is also stage 22's third exit step. What
+             * Wine needs of the kernel is sized here and not in stage 22.
+             * The anti-cheat's tolerance of Wine and of a virtual machine,
+             * an account ban and the game's terms are outside Ferrix's
+             * engineering and can stop it.
+             * Exit: the game reaches its world past the login and is
+             * playable at 1920x1080 and 60 frames a second on the RTX
+             * 3060; a recorded run on the card with the customer's
+             * account, not a boot in CI. */
+    }
+
     #inProgress requirement <'S20'> stage20SelfHosting : Stage {
         attribute :>> number = 20;
         attribute :>> status = StageStatus::InProgress;
@@ -822,6 +850,7 @@ package FerrixRoadmap {
     dependency from stage21BareMetalGpu to stage19HyprlandFidelity, stageDynamicLinking;
     dependency from stage22Steam to stage19HyprlandFidelity, stageDynamicLinking,
         stage12BtrfsWrite, stage13Isolation, stageNetworking;
+    dependency from stage23Endfield to stage22Steam, stage21BareMetalGpu;
 
     #planned requirement <'D.fuzz'> fuzzTargetsOwed : Principles::DesignRule {
         doc /* src/tests/fuzz/ has two targets, elf_parse and frame_alloc. Every

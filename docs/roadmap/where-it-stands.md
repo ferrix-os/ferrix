@@ -547,7 +547,19 @@ itself draws through yserver, a Rust X11 server, with a rootless Wayland
 backend of Ferrix's own: its sign-in window is on hyprix since 2026-09-29,
 and on the `--everything` desktop, its 64-bit side on ferrousli, it signs
 in and shows its store (2026-09-30, gated by `test-steam-store`), with
-launch-side workarounds listed in `docs/STEAM.md`. Ferrix also boots on the customer's Pixel
+launch-side workarounds listed in `docs/STEAM.md`. Stage 23 is the Windows
+game *Arknights: Endfield* through Wine with DXVK on NVIDIA's Vulkan, on the
+roadmap since 2026-10-10 at the customer's word and not started: a
+feasibility study is written, and its eight steps are sized at about 205
+points as a first guess. Step 0, the game on plain Linux in the same VM
+shape, comes first and can end it, because whether the game's anti-cheat
+accepts a virtual machine is not known; it waits on the customer for an
+account and about 110 GB of disk. On Ferrix, 64-bit Wine very probably
+cannot start yet (`arch_prctl` has no `ARCH_SET_GS`), and a window of an X
+program drawn by the card exists on unlanded branches only: on 2026-10-10
+Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
+second between stalls of about 5 s, whose cause is found and whose fix is
+not landed ([its page](stage-23-arknights-endfield.md)). Ferrix also boots on the customer's Pixel
 7: natively on all eight cores to `FERRIX-BOOT-OK stages 1-12`, and as a guest
 of the phone's own crosvm from a launcher app, which shows a desktop in that
 VM with Chromium on it (2026-09-27), and each release carries that desktop,

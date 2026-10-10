@@ -31,6 +31,7 @@
 - [◐ Stage 20 — Self-hosting](stage-20-self-hosting.md)
 - [◐ Stage 21 — Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md)
 - [◐ Stage 22 — Steam](stage-22-steam.md)
+- [○ Stage 23 — Arknights: Endfield](stage-23-arknights-endfield.md)
 - [◦ Written ahead of their stage](written-ahead.md)
 - [◦ Continuously, from stage 1](continuously.md)
 

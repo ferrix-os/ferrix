@@ -126,6 +126,10 @@ Now [`docs/roadmap/stage-21-bare-metal-gpu-ferrix.md`](roadmap/stage-21-bare-met
 
 Now [`docs/roadmap/stage-22-steam.md`](roadmap/stage-22-steam.md).
 
+## Stage 23 — Arknights: Endfield  ·  *≈ 205 points as a first guess, step 5 unknown*
+
+Now [`docs/roadmap/stage-23-arknights-endfield.md`](roadmap/stage-23-arknights-endfield.md).
+
 ## Written ahead of their stage
 
 Now [`docs/roadmap/written-ahead.md`](roadmap/written-ahead.md).

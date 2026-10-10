@@ -690,6 +690,14 @@ log path and commit; a new sighting is added to its row the day it is seen.
   stage 13 (13), XWayland (40 as a first guess), sound (current work,
   `docs/AUDIO.md`), and Vulkan through Venus on a KVM host (landed for
   vkgears). Over 300 points; the roadmap's stage 22 is the list.
+* Stage 23, Arknights: Endfield (decided 2026-10-10): a Windows game through
+  Wine with DXVK on NVIDIA's Vulkan, in eight steps, about 205 points as a
+  first guess, unowned and not started. Step 0 (the game on Linux in the
+  same VM shape, 8) needs no Ferrix work and waits on the customer; step 1
+  (Wine starts on Ferrix, 42: `arch_prctl(ARCH_SET_GS)` first, which is the
+  certified item's) and step 2 (Direct3D 11 through DXVK on the card, 18, on
+  stage 21's unlanded `nv-next` branches) can run side by side after it. The
+  roadmap's stage 23 is the list.
 * Bad Apple!! and Doom, beside stage 22 (games with sound; the customer's
   order of 2026-09-26, ferrix-b0, `docs/MEDIA.md`). Bad Apple!! with sound
   and `test-badapple`: not estimated before it started, ≈ 8 spent, landed.
@@ -938,6 +946,17 @@ from it, and the forecast's scope, 647 points, is in `docs/roadmap/status.md`.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-10 (customer)** **Arknights: Endfield is on the roadmap, as
+  stage 23**, the road after Steam ("update the roadmap to Endfield (add new
+  points after the road to Steam)"): the Windows game through Wine with DXVK
+  on NVIDIA's Vulkan, to its world past the login and playable at 1080p60 on
+  the RTX 3060. Eight steps, about 205 points as a first guess, from a
+  feasibility study of the same day; step 0, the game on plain Linux in the
+  same VM shape, is first and can end the stage, because whether the
+  anti-cheat accepts a virtual machine is not known. Stage 22's third exit
+  step, a Windows game through Steam's own Proton, stays stage 22's; what
+  Wine needs of the kernel is sized in stage 23. Nothing is built, and the
+  points are not in the burndown's scope.
 * **2026-10-04 (customer)** **A docs-only change runs `check-docs`, not
   `check`.** A change that touches only `docs/`, top-level Markdown, the
   skills and agent definitions under `.claude/`, or the generators that write documents alone (`gen-roadmap-charts.py`,
@@ -1313,6 +1332,15 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
 
 ## Waiting on the customer
 
+* Stage 23, Arknights: Endfield (2026-10-10), before its step 0 can run: a
+  game account the customer can afford to lose, since nobody can rule out a
+  ban for playing under Wine on a kernel no other player has; about 110 GB
+  of disk for the Linux guest (nazuna's root volume had 88 GB free that
+  evening); and the card for the run. Before step 4: whether the game's
+  third-party EULA permits Wine and a third-party Proton build, which nobody
+  has read. In step 5: whether Ferrix may answer `Linux` to this one program
+  where `uname -s` says `Ferrix`. And whether the stage's ≈ 205 points enter
+  the burndown's scope.
 * The Steam-performance session's pushes (2026-10-02): local `main` on
   nazuna is ahead of `origin` by the night's landings (`docs/STEAM.md` §8),
   and yserver's `steam-perf` branch is not on the fork. Both are the

@@ -173,6 +173,13 @@ installs to btrfs, launches and draws through the GPU path with sound; and
 a Windows game runs through Proton. The first two are a guest's exit on
 the Linux host; the third is the GPU's Vulkan, wherever that comes first.
 
+What Wine needs of the kernel, DXVK on NVIDIA's Vulkan and a first Windows
+game run as a plain program are [stage 23](stage-23-arknights-endfield.md)'s
+steps 1 to 3 since 2026-10-10, sized there and not here. The third step
+stays this stage's: a Windows game that Steam starts through its own Proton
+in the runtime's container, which is stage 23's step 3 with N5 to N7 under
+it.
+
 The first step is met, and gated (2026-09-30): on the `--everything`
 desktop, with its 64-bit side on ferrousli rather than glibc, the client
 starts, its browser helper draws the sign-in window, and the client shows

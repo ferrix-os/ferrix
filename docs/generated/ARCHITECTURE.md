@@ -70,6 +70,7 @@ _Generated from docs/sysml/. Every element carries the maturity keyword the mode
   - [S19 — Stage 19 hyprland fidelity](#s19-stage-19-hyprland-fidelity)
   - [S21 — Stage 21 bare metal gpu](#s21-stage-21-bare-metal-gpu)
   - [S22 — Stage 22 steam](#s22-stage-22-steam)
+  - [S23 — Stage 23 endfield](#s23-stage-23-endfield)
   - [S20 — Stage 20 self hosting](#s20-stage-20-self-hosting)
   - [Ordering](#ordering)
 - [Assurance](#assurance)
@@ -119,14 +120,14 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 137 packages, 6702 elements, 215 relations. Model digest `5b2721b065ee943a`.
+26 files, 137 packages, 6706 elements, 216 relations. Model digest `b2367121861c0e75`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
 | `#implemented` | 281 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
 | `#inProgress` | 22 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
-| `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
+| `#planned` | 25 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
 
 An element carries its own keyword or none; a keyword is never inherited from a parent, so a `#planned` field inside an `#implemented` part still reads as planned.
@@ -3037,7 +3038,8 @@ flowchart TB
   n24_FerrixRoadmap_stage19HyprlandFidelity["S19  Stage 19 hyprland fidelity<br>InProgress · 178 points, about 8 left"]
   n25_FerrixRoadmap_stage21BareMetalGpu["S21  Stage 21 bare metal gpu<br>InProgress · unsized, over 100 points"]
   n26_FerrixRoadmap_stage22Steam["S22  Stage 22 steam<br>InProgress · unsized, over 300 points"]
-  n27_FerrixRoadmap_stage20SelfHosting["S20  Stage 20 self hosting<br>InProgress · longer"]
+  n27_FerrixRoadmap_stage23Endfield["S23  Stage 23 endfield<br>Planned · about 205 points as a first guess, step 5 unknown"]
+  n28_FerrixRoadmap_stage20SelfHosting["S20  Stage 20 self hosting<br>InProgress · longer"]
   n0_FerrixRoadmap_stage0Foundation -. "depends on" .-> n1_FerrixRoadmap_stage1Boot
   n1_FerrixRoadmap_stage1Boot -. "depends on" .-> n2_FerrixRoadmap_stage2Memory
   n2_FerrixRoadmap_stage2Memory -. "depends on" .-> n3_FerrixRoadmap_stage3TrapsInterruptsTime
@@ -3069,7 +3071,7 @@ flowchart TB
   n8_FerrixRoadmap_stage7LinuxAbi -. "depends on" .-> n22_FerrixRoadmap_stage17DisplayAndInput
   n22_FerrixRoadmap_stage17DisplayAndInput -. "depends on" .-> n23_FerrixRoadmap_stage18Compositor
   n23_FerrixRoadmap_stage18Compositor -. "depends on" .-> n24_FerrixRoadmap_stage19HyprlandFidelity
-  n21_FerrixRoadmap_stage16Rustc -. "depends on" .-> n27_FerrixRoadmap_stage20SelfHosting
+  n21_FerrixRoadmap_stage16Rustc -. "depends on" .-> n28_FerrixRoadmap_stage20SelfHosting
   n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n25_FerrixRoadmap_stage21BareMetalGpu
   n14_FerrixRoadmap_stageDynamicLinking -. "depends on" .-> n25_FerrixRoadmap_stage21BareMetalGpu
   n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n26_FerrixRoadmap_stage22Steam
@@ -3077,12 +3079,14 @@ flowchart TB
   n17_FerrixRoadmap_stage12BtrfsWrite -. "depends on" .-> n26_FerrixRoadmap_stage22Steam
   n18_FerrixRoadmap_stage13Isolation -. "depends on" .-> n26_FerrixRoadmap_stage22Steam
   n13_FerrixRoadmap_stageNetworking -. "depends on" .-> n26_FerrixRoadmap_stage22Steam
+  n26_FerrixRoadmap_stage22Steam -. "depends on" .-> n27_FerrixRoadmap_stage23Endfield
+  n25_FerrixRoadmap_stage21BareMetalGpu -. "depends on" .-> n27_FerrixRoadmap_stage23Endfield
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
   class n0_FerrixRoadmap_stage0Foundation,n1_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixRoadmap_stage3TrapsInterruptsTime,n4_FerrixRoadmap_stage4Smp,n5_FerrixRoadmap_armv7aPort,n6_FerrixRoadmap_stage5Scheduler,n7_FerrixRoadmap_stage6UserMode,n8_FerrixRoadmap_stage7LinuxAbi,n9_FerrixRoadmap_stage8Vfs,n10_FerrixRoadmap_stage9NativeAbi,n11_FerrixRoadmap_stage10UserspaceDrivers,n12_FerrixRoadmap_stage11BtrfsRead,n13_FerrixRoadmap_stageNetworking,n14_FerrixRoadmap_stageDynamicLinking,n15_FerrixRoadmap_stageSysfs,n17_FerrixRoadmap_stage12BtrfsWrite,n21_FerrixRoadmap_stage16Rustc,n22_FerrixRoadmap_stage17DisplayAndInput,n23_FerrixRoadmap_stage18Compositor implemented
-  class n16_FerrixRoadmap_stageChrome,n18_FerrixRoadmap_stage13Isolation,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n27_FerrixRoadmap_stage20SelfHosting inProgress
-  class n19_FerrixRoadmap_stage14RealTime planned
+  class n16_FerrixRoadmap_stageChrome,n18_FerrixRoadmap_stage13Isolation,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n28_FerrixRoadmap_stage20SelfHosting inProgress
+  class n19_FerrixRoadmap_stage14RealTime,n27_FerrixRoadmap_stage23Endfield planned
 ```
 
 **Figure 17 — The roadmap, stage by stage.** An arrow points from a stage to the stage it unblocks. The two stages with a second arrow into them are the ones that need more than their predecessor. [SVG](diagrams/roadmap-stages.svg) Source: `10-roadmap.sysml`.
@@ -3116,6 +3120,7 @@ flowchart TB
 | `S19` | 19 | Stage 19 hyprland fidelity | InProgress | 178 points, about 8 left | `#inProgress` |
 | `S21` | 21 | Stage 21 bare metal gpu | InProgress | unsized, over 100 points | `#inProgress` |
 | `S22` | 22 | Stage 22 steam | InProgress | unsized, over 300 points | `#inProgress` |
+| `S23` | 23 | Stage 23 endfield | Planned | about 205 points as a first guess, step 5 unknown | `#planned` |
 | `S20` | 20 | Stage 20 self hosting | InProgress | longer | `#inProgress` |
 
 Sizes are order-of-magnitude and not a schedule.
@@ -3396,6 +3401,12 @@ Steam on Ferrix, put on the roadmap by the customer on 2026-09-18 as the step af
 
 Under way since 2026-09-26. Sound's playback is done (docs/AUDIO.md, 24 points): a ring-3 virtio-snd driver, the kernel's audio core and /dev/snd, verified by cargo xtask test-audio on x86-64 and AArch64; alsa-lib (U1, 3) and a sound server (U2, unsized) are left. The 32-bit x86 ABI is designed in docs/I386.md, I1 to I4 at 42 points, and I1 is met: a 32-bit program entered in compatibility mode, making its calls through int $0x80, on a GDT in Linux's order. I2 to I4 followed on 2026-09-27 (threads, signals, fork, and Alpine's and Debian's i386 busybox), with I5a: Valve's steamcmd logs in to Steam. Sound was finished the same day with alsa-lib and pulsed, a PulseAudio-protocol server. On 2026-09-29 the Steam client, unchanged, drew its sign-in window on hyprix through yserver (docs/STEAM.md, cargo xtask test-steam-window), with launch-side workarounds each owned by a fix: namespaces for pressure-vessel, the /proc gaps, and a SIGBUS that needs a 16 GiB guest. On 2026-09-30 the exit's first step was met: on the --everything desktop, its 64-bit side on ferrousli, the client signs in and shows its store, gated by cargo xtask test-steam-store with a test account. Its sandbox waits on stage 13, and its GPU process on user copies through a device window and a render group (docs/STEAM.md section 6). On 2026-10-01 the second step got its gate, cargo xtask test-steam-game, not passing yet: Teeworlds installs on request and downloads, and Steam then stalls staging it, for a reason not yet known (docs/STEAM.md section 7).
 
+### S23 — Stage 23 endfield
+
+**Planned**  ·  size about 205 points as a first guess, step 5 unknown  ·  `#planned`
+
+The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the customer on 2026-10-10 as the road after Steam. Nothing of it is built; a feasibility study was written the same day. Eight steps in the order they can be proved: the game on plain Linux in the same VM shape, which costs no Ferrix work and answers whether its anti-cheat accepts a virtual machine; plain Wine starts on Ferrix, which needs arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws through DXVK on the card, on stage 21's unlanded branches; a Unity DirectX 11 game without anti-cheat; the game's installer, launcher and login; past the anti-cheat, unknown until it is run; playable; and, optional, by way of Steam's own Proton, which is also stage 22's third exit step. What Wine needs of the kernel is sized here and not in stage 22. The anti-cheat's tolerance of Wine and of a virtual machine, an account ban and the game's terms are outside Ferrix's engineering and can stop it. Exit: the game reaches its world past the login and is playable at 1920x1080 and 60 frames a second on the RTX 3060; a recorded run on the card with the customer's account, not a boot in CI.
+
 ### S20 — Stage 20 self hosting
 
 **InProgress**  ·  size longer  ·  `#inProgress`
@@ -3432,6 +3443,7 @@ Every stage ends in something that runs, and nothing is stubbed that a later sta
 - `stage20SelfHosting` depends on `stage16Rustc`
 - `stage21BareMetalGpu` depends on `stage19HyprlandFidelity` and `stageDynamicLinking`
 - `stage22Steam` depends on `stage19HyprlandFidelity`, `stageDynamicLinking`, `stage12BtrfsWrite`, `stage13Isolation` and `stageNetworking`
+- `stage23Endfield` depends on `stage22Steam` and `stage21BareMetalGpu`
 - `stage5Scheduler` depends on `hostsRustc::kernelThreads`
 - `stage6UserMode` depends on `hostsRustc::addressSpaceScale`
 - `stage7LinuxAbi` depends on `hostsRustc::signalDelivery` and `hostsRustc::processSpawn`
@@ -3844,8 +3856,9 @@ flowchart LR
 | `S17` | `stage17DisplayAndInput` | `dependency` | — | `#implemented` |
 | `S18` | `stage18Compositor` | `dependency` | — | `#implemented` |
 | `S19` | `stage19HyprlandFidelity` | `dependency` | — | `#inProgress` |
-| `S21` | `stage21BareMetalGpu` | — | — | `#inProgress` |
-| `S22` | `stage22Steam` | — | — | `#inProgress` |
+| `S21` | `stage21BareMetalGpu` | `dependency` | — | `#inProgress` |
+| `S22` | `stage22Steam` | `dependency` | — | `#inProgress` |
+| `S23` | `stage23Endfield` | — | — | `#planned` |
 | `S20` | `stage20SelfHosting` | — | — | `#inProgress` |
 | `D.fuzz` | `fuzzTargetsOwed` | — | — | `#planned` |
 | `D.miri` | `miriOwed` | — | — | `#planned` |
@@ -4970,7 +4983,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |
-| 17 | The roadmap, stage by stage | 28 nodes, 39 edges | `10-roadmap.sysml` | [roadmap-stages.svg](diagrams/roadmap-stages.svg) |
+| 17 | The roadmap, stage by stage | 29 nodes, 41 edges | `10-roadmap.sysml` | [roadmap-stages.svg](diagrams/roadmap-stages.svg) |
 | 18 | The gates and the rules they uphold | 16 nodes, 10 edges | `11-assurance.sysml` | [gates-and-rules.svg](diagrams/gates-and-rules.svg) |
 | 19 | Stages and the parts that answer them | 46 nodes, 31 edges | `10-roadmap.sysml` | [stages-and-parts.svg](diagrams/stages-and-parts.svg) |
 | 20 | The boot tests and the stages they verify | 16 nodes, 21 edges | `10-roadmap.sysml` | [tests-and-stages.svg](diagrams/tests-and-stages.svg) |

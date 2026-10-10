@@ -2,7 +2,8 @@
 
 Ferrix is an operating system in Rust for x86-64, AArch64 and ARMv7-A. Its
 first goal, compiling Rust on Ferrix, is met; the goal since is a
-Hyprland-shaped desktop, and then Steam. This page is the short version; each
+Hyprland-shaped desktop, then Steam, and after Steam a Windows game,
+*Arknights: Endfield* (stage 23, 2026-10-10). This page is the short version; each
 stage has its own page, and the details are linked at the end.
 
 The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
@@ -79,6 +80,14 @@ them; what is red, parked and waiting is in
 **Not started**
 
 - Stage 14 (real-time).
+- **Stage 23 (Arknights: Endfield):** the road from Steam to a Windows game
+  through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the
+  customer on 2026-10-10. Eight steps, about 205 points as a first guess. The
+  first costs no Ferrix work and can end the stage: the game on plain Linux
+  in the same VM shape, to learn whether its anti-cheat accepts a virtual
+  machine. It waits on the customer for an account and about 110 GB of disk,
+  and its GPU steps stand on stage 21's unlanded branches
+  ([its page](stage-23-arknights-endfield.md)).
 
 **Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
 RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
@@ -90,7 +99,8 @@ booting with `nvidia-smi`, are on `main`.
   the forecast rate of 20 a day: they end on 2026-11-03 (2026-10-18 at 56 a
   day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
   recount and what moved it are in [Status](status.md).
-- Unsized work (self-hosting, bare metal, most of Steam) is not in any date.
+- Unsized work (self-hosting, bare metal, most of Steam) is not in any date,
+  and neither are stage 23's first guesses.
 
 ## Details
 
@@ -145,6 +155,7 @@ single file across.
 | 20 | [Self-hosting](stage-20-self-hosting.md) | ◐ in progress |  |
 | 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ◐ in progress | unsized, over 100 points |
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
+| 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ○ not started | ≈ 205 points as a first guess, step 5 unknown |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |
 
