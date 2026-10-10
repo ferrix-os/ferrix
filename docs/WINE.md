@@ -156,14 +156,14 @@ tree). 100 different system calls; two have no number in
 
 | Workaround | Why | Real fix | Owner |
 |---|---|---|---|
-| The prefix is made with no `DISPLAY`, and `UseXRandR` is `N` in `HKCU\Software\Wine\X11 Driver` before a program gets one | On yserver's RandR 1.5, Wine's X driver registers its XRandR 1.4 display handler and then finds no monitor: `err:system:lock_display_devices Failed to read display config`, over and over. A window's monitor DPI is then 0, wineserver divides by it (`map_dpi_point` in `server/window.c`) and ends with `SIGFPE`, and every Wine program waits on it for ever | whatever `xrandr14_get_gpus`, `_get_adapters` or `_get_monitors` (`dlls/winex11.drv/xrandr.c`) gets from yserver on the Wayland backend that it does not get from Xorg: not found yet. yserver's nested backends report no RandR provider, which Wine has a path for, so the lead is the output and CRTC answers | open (yserver) |
+| The prefix is made with no `DISPLAY`, and `UseXRandR` is `N` in `HKCU\Software\Wine\X11 Driver` before a program gets one | yserver's Wayland backend lists its Vulkan renderer as the one RandR provider (`vulkan-unverified`, Source Output) with no CRTC and no output (`xrandr --listproviders` on Ferrix: `crtcs: 0 outputs: 0`). Wine's X driver takes a provider's own outputs when there is a provider (`xrandr14_get_adapters`, `dlls/winex11.drv/xrandr.c`), finds none, and registers no monitor: `Failed to read display config`, over and over. A window's monitor DPI is then 0, wineserver divides by it (`map_dpi_point`, `server/window.c`) and ends with `SIGFPE`, and every Wine program waits on it for ever. Xwayland lists no provider (`Providers: number : 0` on the host's Xwayland 24.1), and Wine then reads the screen's resources | yserver's Wayland backend lists no provider: one commit, `wayland: the rootless server lists no RandR provider, as Xwayland does`, on the fork clone `~/.local/share/ferrix/yserver-wine/src` (`wine-randr` 612130ba on the fork's `nv-next`, `wine-randr-pin` 6d66bff9 on the commit `fetch-yserver.sh` pins). With it, on 2026-10-10, `wineboot` ran with `DISPLAY` set, notepad's window was viewable after 1 s, and `explorer.exe` did not assert. The workaround goes when the pin moves to a commit that has it | stage 23; the pin's move is the product owner's |
 
 **Leads, none of them in the kernel as far as is known.**
 
 * With XRandR off, `explorer.exe` (Wine's desktop process) ends on an
-  assertion in `dlls/winex11.drv/xvidmode.c:164`, `xf86vm_free_modes`:
-  the XF86VidMode modes yserver lists are not what Wine's fallback
-  expects. Notepad draws without it.
+  assertion in `dlls/winex11.drv/xvidmode.c:164`, `xf86vm_free_modes`.
+  It is the workaround's own: with yserver's provider fix and XRandR on,
+  it did not happen. Notepad draws without it.
 * Notepad draws at the size it asked for, about 720 by 510, and not at the
   982 by 726 of the tile hyprix gave its window, which X reports as the
   window's size. The rest of the tile is black.
