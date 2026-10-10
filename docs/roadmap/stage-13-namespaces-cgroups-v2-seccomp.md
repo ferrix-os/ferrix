@@ -182,7 +182,16 @@ of its own or in strict mode makes the call answer its id (`ESRCH` with
 `TSYNC_ESRCH`), and a thread made while the sync runs copies its creator's
 chain under the lock the sync holds, so it cannot be left out. The `seccomp`
 line checks it with 49 threads, forty of them made during the sync; four
-negative controls. The guest test (S6) follows.
+negative controls.
+
+**Done -- seccomp S6, the guest test (2026-10-01, 2 points).** `cargo xtask
+test-seccomp` boots `src/tests/seccomp` as init on x86-64, i386, AArch64 and
+ARMv7-A: Chromium's probes and its `SIGSYS` emulation, Flatpak's filter for two
+architectures, bubblewrap's `prctl` then `execve`, the kill actions with a
+thread killed among several, strict mode, and `TSYNC` while threads are being
+made; two negative controls as features of the program
+(`docs/SECCOMP.md` §12). Linux's own `seccomp_bpf` selftest is the part of S6
+still to do (BACKLOG).
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
