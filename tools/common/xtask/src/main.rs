@@ -126,6 +126,7 @@ mod parallel;
 mod paths;
 mod pe;
 mod persistent;
+mod pipe_bench;
 mod pkg;
 mod ports;
 mod powerfail;
@@ -257,6 +258,8 @@ COMMANDS:
                   service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean
     bench-ipc     Boot --init's shell and time a channel round trip between two native processes
                   (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds
+    bench-pipe    Boot src/tests/pipe-bench as init --rounds times (5) and time Linux-ABI round trips
+                  between two processes: a pipe, a Unix stream socket and a futex ping-pong of 8 bytes
     hw-fingerprint  Print this host's and --arch's guest's canonical hardware description and its SHA-256, the key
                   hot-path results are filed by (docs/HOTPATHS.md)
     test-ipc-equiv
@@ -688,7 +691,7 @@ fn run() -> Result<()> {
         "test-init" => init::test_init(&args),
         "test-auth" => auth::test_auth(&args),
         "test-restart" | "test-usb" | "test-nvme" => driver_gate(command, &args),
-        "bench-seam" | "bench-ipc" => bench(command, &args),
+        "bench-seam" | "bench-ipc" | "bench-pipe" => bench(command, &args),
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
@@ -1110,12 +1113,13 @@ fn driver_gate(command: &str, args: &Args) -> Result<()> {
 }
 
 /// The boot benchmarks: the seam's disk read against Linux's (`bench-seam`),
-/// and a channel round trip between two native processes (`bench-ipc`).
+/// a channel round trip between two native processes (`bench-ipc`), and
+/// Linux-ABI round trips between two processes (`bench-pipe`).
 fn bench(command: &str, args: &Args) -> Result<()> {
-    if command == "bench-ipc" {
-        ipc::bench_ipc(args)
-    } else {
-        seam::bench_seam(args)
+    match command {
+        "bench-ipc" => ipc::bench_ipc(args),
+        "bench-pipe" => pipe_bench::bench_pipe(args),
+        _ => seam::bench_seam(args),
     }
 }
 
