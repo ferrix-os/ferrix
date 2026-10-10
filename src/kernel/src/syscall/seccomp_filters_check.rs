@@ -1183,7 +1183,7 @@ fn ended_early(
         Some(Ending::Sync) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             seen.threads = synchronised(env)?;
-            Ok(Some(Ok(seen)))
+            Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::Thread | Ending::Process) | None => Ok(None),
     }
