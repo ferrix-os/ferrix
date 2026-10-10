@@ -251,11 +251,24 @@ impl Compositor<'_> {
                 });
                 let ok = match imported {
                     Ok(imported) => {
+                        // Said once for each way a buffer is shown: the
+                        // first sampled where it lies on the GPU, and the
+                        // first mapped and read.
+                        let sampled = imported.needs_a_gpu();
                         let _ = slot.dmabufs.insert(dmabuf.pool, imported);
-                        if !core::mem::replace(&mut self.dmabuf_said, true) {
+                        if let Some(said) = self.dmabuf_said.get_mut(usize::from(sampled))
+                            && !core::mem::replace(said, true)
+                        {
                             (self.report)(&format!(
-                                "hyprix: imported a dmabuf, {}x{}, through zwp_linux_dmabuf_v1",
-                                dmabuf.width, dmabuf.height
+                                "hyprix: imported a dmabuf, {}x{}, modifier 0x{:016x}, {}, through zwp_linux_dmabuf_v1",
+                                dmabuf.width,
+                                dmabuf.height,
+                                dmabuf.plane.modifier,
+                                if sampled {
+                                    "in video memory and sampled where it lies"
+                                } else {
+                                    "mapped"
+                                }
                             ));
                         }
                         true

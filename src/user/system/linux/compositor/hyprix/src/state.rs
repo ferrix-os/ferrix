@@ -331,8 +331,9 @@ struct Compositor<'r> {
     /// offered: through the render node when the frames are drawn on the
     /// GPU, or mapped beside NVIDIA's (N3b).
     dmabuf: Option<crate::dmabuf::Importer>,
-    /// Whether the first import has been said, which a test waits for.
-    dmabuf_said: bool,
+    /// Whether the first import has been said, which a test waits for: of
+    /// a buffer mapped, and of one sampled in video memory.
+    dmabuf_said: [bool; 2],
     /// How many connections there have been: a slot's serial.
     connections: u64,
     /// Which client and surface each window's pixels come from.
@@ -605,7 +606,7 @@ impl<'r> Compositor<'r> {
                     .find_map(|screen| screen.gpu.as_ref())
                     .map_or(crate::dmabuf::Drawn::Software, |gpu| gpu.drawn.clone()),
             ),
-            dmabuf_said: false,
+            dmabuf_said: [false; 2],
             screens,
             window_rules,
             clipboard: crate::clipboard::Clipboard::new(),
