@@ -655,6 +655,23 @@ fn whole_volume(dir: &Path, core: &Path, beside: Option<&Path>) -> Result<()> {
         )));
     }
     merge_beside(&tree, beside)?;
+    // The moving wallpaper's decoder, when fetch-ffmpeg-vulkan.sh has
+    // built it: AV1 on the 3060's Vulkan Video rather than rav1d on the
+    // guest's processors (`pattern --video --decoder`).
+    if let Some(decoder) = wallpaper_decoder()? {
+        let to = tree.join(DECODER_IN_VOLUME.trim_start_matches("/data/"));
+        let _ = std::fs::copy(&decoder, &to).map_err(|error| {
+            Error::new(format!(
+                "copying {} to {}: {error}",
+                decoder.display(),
+                to.display()
+            ))
+        })?;
+        println!(
+            "  volume: the wallpaper's GPU decoder from {}",
+            decoder.display()
+        );
+    }
     let to = tree.join(CORE_IN_VOLUME);
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)
@@ -894,6 +911,24 @@ pub(crate) fn nvrm_native() -> Result<Built> {
         directory: native::DRIVERS,
         bytes,
     })
+}
+
+/// Where the NVIDIA volume carries the moving wallpaper's decoder, as the
+/// guest sees it.
+pub(crate) const DECODER_IN_VOLUME: &str = "/data/usr/bin/ffmpeg-vulkan";
+
+/// The wallpaper's GPU decoder `tools/common/fetch/fetch-ffmpeg-vulkan.sh`
+/// built, beside the fetched release; `None` where it has not been built,
+/// and then the wallpaper is decoded by rav1d as without `--nvidia`, as it
+/// also is with `FERRIX_WALLPAPER_DECODER=rav1d` (to measure the two).
+pub(crate) fn wallpaper_decoder() -> Result<Option<PathBuf>> {
+    if std::env::var_os("FERRIX_WALLPAPER_DECODER").is_some_and(|value| value == "rav1d") {
+        return Ok(None);
+    }
+    let built = nvrm::fetched()?
+        .parent()
+        .map(|root| root.join("ffmpeg-vulkan").join("ffmpeg"));
+    Ok(built.filter(|path| path.is_file()))
 }
 
 /// The links NVIDIA's userspace finds its data through, from the volume at

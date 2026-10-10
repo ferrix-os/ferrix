@@ -281,7 +281,17 @@ pub(super) fn desktop(
                 // splits `exec-once` as a shell would for its quoting
                 // (`hyprix::command`).
                 crate::wallpaper::Chosen::Moving(_) => {
-                    (MOVIE_PATH, format!("--video -o no-audio ALL /{MOVIE_PATH}"))
+                    // On the 3060 the GPU decodes it, where the decoder
+                    // has been built (tools/common/fetch/fetch-ffmpeg-vulkan.sh).
+                    let decoder = if args.nvidia && crate::nvidia::wallpaper_decoder()?.is_some() {
+                        format!("--decoder {} ", crate::nvidia::DECODER_IN_VOLUME)
+                    } else {
+                        String::new()
+                    };
+                    (
+                        MOVIE_PATH,
+                        format!("--video {decoder}-o no-audio ALL /{MOVIE_PATH}"),
+                    )
                 }
             };
             carried.ports.push(crate::ports::File {
