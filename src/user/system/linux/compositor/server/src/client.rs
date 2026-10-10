@@ -45,8 +45,8 @@ mod xdg_shell;
 pub use capture::{Frame, Source};
 pub use control::{Flavour, Manager};
 pub use dmabuf::{
-    DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, MOD_INVALID, MOD_LINEAR, Plane, format_of,
-    offer_linear_only,
+    DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, MOD_INVALID, MOD_LINEAR,
+    MODIFIERS_OFFERED_MOST, Plane, Reported, Taken, format_of, modifiers_offered,
 };
 pub use drag::Dragging;
 pub use event::Event;

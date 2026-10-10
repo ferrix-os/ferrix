@@ -37,7 +37,42 @@ fn sent(client: &mut Client) -> Vec<(ObjectId, u16)> {
 /// A connection offered `zwp_linux_dmabuf_v1` at version 3, bound as
 /// object 3, and what the bind sent.
 fn dmabuf_client() -> (Client, Vec<(ObjectId, u16)>) {
+    let (client, outgoing) = dmabuf_client_offered(None);
+    (client, outgoing)
+}
+
+/// The modifiers a bind's `modifier` events named, a format at a time in
+/// the order they came.
+fn modifiers_told(client: &mut Client) -> Vec<(u32, u64)> {
+    let outgoing = client.take_outgoing();
+    let mut reader = Reader::new(&outgoing.bytes, &outgoing.descriptors);
+    let mut out = Vec::new();
+    while !reader.is_done() {
+        let header = reader.peek().expect("a header");
+        let interface = client
+            .objects()
+            .get(header.sender)
+            .map_or(&core::WL_DISPLAY, |entry| entry.interface);
+        let method = interface.event(header.opcode).expect("an event");
+        let message = reader.read(method.signature).expect("it reads");
+        if header.sender == ObjectId(3) && header.opcode == zwp_linux_dmabuf_v1::event::MODIFIER {
+            let words: Vec<u32> = message.1.iter().filter_map(Arg::as_uint).collect();
+            let [format, high, low] = words.as_slice() else {
+                panic!("a modifier event of three words");
+            };
+            out.push((*format, (u64::from(*high) << 32) | u64::from(*low)));
+        }
+    }
+    out
+}
+
+/// [`dmabuf_client`], with the compositor having said which modifiers it
+/// offers when `offered` is some; what the bind sent is left unread.
+fn dmabuf_client_unread(offered: Option<&[u64]>) -> Client {
     let mut globals = Globals::new();
+    if let Some(offered) = offered {
+        globals.offer_dmabuf_modifiers(offered);
+    }
     assert!(
         globals
             .add(
@@ -68,6 +103,12 @@ fn dmabuf_client() -> (Client, Vec<(ObjectId, u16)>) {
         ],
     ));
     assert_eq!(client.read(&bytes, &[]), bytes.len());
+    client
+}
+
+/// [`dmabuf_client_unread`], and what the bind sent.
+fn dmabuf_client_offered(offered: Option<&[u64]>) -> (Client, Vec<(ObjectId, u16)>) {
+    let mut client = dmabuf_client_unread(offered);
     let told = sent(&mut client);
     (client, told)
 }
@@ -312,4 +353,188 @@ fn a_dmabuf_is_held_to_the_protocols_errors() {
         client.fatal(),
         Some(Fatal::Interface { code, .. }) if *code == error::ALREADY_USED
     ));
+}
+
+/// NVIDIA's block-linear modifiers for `B8G8R8A8`, as its EGL reports them
+/// (580.173.02): six plain, six compressed, and linear for external
+/// textures only.
+fn nvidia_reported() -> Vec<crate::Reported> {
+    let mut reported: Vec<crate::Reported> = (0x10..=0x15_u64)
+        .flat_map(|low| [0x0300_0000_0060_6000 | low, 0x0300_0000_00e0_8000 | low])
+        .map(|modifier| crate::Reported {
+            modifier,
+            external_only: false,
+        })
+        .collect();
+    reported.push(crate::Reported {
+        modifier: crate::MOD_LINEAR,
+        external_only: true,
+    });
+    reported
+}
+
+/// What is offered follows how a buffer is taken in: the render node's own
+/// way has linear and the implicit layout, a mapping linear alone, and a
+/// GPU renderer's EGL what it reported for 2D textures and then linear --
+/// never the implicit layout, never an external-only one, none twice.
+#[test]
+fn what_is_offered_is_what_the_importer_takes() {
+    use crate::{MOD_INVALID, MOD_LINEAR, Reported, Taken, modifiers_offered};
+    assert_eq!(modifiers_offered(Taken::Node), [MOD_LINEAR, MOD_INVALID]);
+    assert_eq!(modifiers_offered(Taken::Mapped), [MOD_LINEAR]);
+
+    let reported = nvidia_reported();
+    let offered = modifiers_offered(Taken::Sampled(&reported));
+    assert_eq!(offered.len(), 13);
+    assert_eq!(offered.last(), Some(&MOD_LINEAR));
+    assert_eq!(offered.first(), Some(&0x0300_0000_0060_6010));
+    assert!(offered.contains(&0x0300_0000_00e0_8015));
+    assert!(!offered.contains(&MOD_INVALID));
+
+    // An EGL that reports nothing, or cannot be asked, leaves linear.
+    assert_eq!(modifiers_offered(Taken::Sampled(&[])), [MOD_LINEAR]);
+    // External-only, the implicit layout, and a second mention are left out;
+    // linear is offered once however it was reported.
+    let odd = [
+        Reported {
+            modifier: 7,
+            external_only: true,
+        },
+        Reported {
+            modifier: MOD_INVALID,
+            external_only: false,
+        },
+        Reported {
+            modifier: MOD_LINEAR,
+            external_only: false,
+        },
+        Reported {
+            modifier: 9,
+            external_only: false,
+        },
+        Reported {
+            modifier: 9,
+            external_only: false,
+        },
+    ];
+    assert_eq!(modifiers_offered(Taken::Sampled(&odd)), [9, MOD_LINEAR]);
+
+    // More than a bind may announce: the first ones, and still linear.
+    let many: Vec<Reported> = (1..=100_u64)
+        .map(|modifier| Reported {
+            modifier,
+            external_only: false,
+        })
+        .collect();
+    let offered = modifiers_offered(Taken::Sampled(&many));
+    assert_eq!(offered.len(), crate::MODIFIERS_OFFERED_MOST);
+    assert_eq!(offered.first(), Some(&1));
+    assert_eq!(offered.last(), Some(&MOD_LINEAR));
+}
+
+/// A bind announces exactly the modifiers the compositor said it offers,
+/// with each format and in its order; linear and the implicit layout when
+/// it said nothing.
+#[test]
+fn a_bind_announces_the_modifiers_offered() {
+    use crate::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, MOD_INVALID, MOD_LINEAR};
+    let each = |modifiers: &[u64]| -> Vec<(u32, u64)> {
+        [DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888]
+            .into_iter()
+            .flat_map(|format| modifiers.iter().map(move |modifier| (format, *modifier)))
+            .collect()
+    };
+    let mut unsaid = dmabuf_client_unread(None);
+    assert_eq!(
+        modifiers_told(&mut unsaid),
+        each(&[MOD_LINEAR, MOD_INVALID])
+    );
+
+    let mapped = crate::modifiers_offered(crate::Taken::Mapped);
+    let mut client = dmabuf_client_unread(Some(&mapped));
+    assert_eq!(modifiers_told(&mut client), each(&[MOD_LINEAR]));
+
+    let reported = nvidia_reported();
+    let sampled = crate::modifiers_offered(crate::Taken::Sampled(&reported));
+    let mut client = dmabuf_client_unread(Some(&sampled));
+    let told = modifiers_told(&mut client);
+    assert_eq!(told, each(&sampled));
+    assert!(told.iter().all(|(_, modifier)| *modifier != MOD_INVALID));
+}
+
+/// A buffer with a modifier that was offered is taken to the import; one
+/// that was not is the protocol's `invalid_format`, as a tiled one is where
+/// only linear is offered.
+#[test]
+fn a_modifier_is_taken_only_where_it_was_offered() {
+    let block_linear = 0x0300_0000_0060_6014_u64;
+    let reported = nvidia_reported();
+    let sampled = crate::modifiers_offered(crate::Taken::Sampled(&reported));
+    let mapped = crate::modifiers_offered(crate::Taken::Mapped);
+    for (offered, taken) in [(&sampled, true), (&mapped, false)] {
+        let (mut client, _) = dmabuf_client_offered(Some(offered));
+        let mut bytes = create_params(4);
+        bytes.extend(add_plane(4, 0, 256, block_linear));
+        bytes.extend(create_immed(4, 5, 64, crate::DRM_FORMAT_ARGB8888));
+        assert_eq!(client.read(&bytes, &[Fd(9)]), bytes.len());
+        let created = client.take_events().into_iter().any(|event| {
+            matches!(event, Event::DmabufCreated { dmabuf } if dmabuf.plane.modifier == block_linear)
+        });
+        assert_eq!(created, taken);
+        if taken {
+            assert_eq!(client.fatal(), None);
+        } else {
+            assert!(matches!(
+                client.fatal(),
+                Some(Fatal::Interface { code, .. })
+                    if *code == zwp_linux_buffer_params_v1::error::INVALID_FORMAT
+            ));
+        }
+    }
+}
+
+/// A buffer of an offered modifier that the importer then would not take is
+/// a `create` answered `failed`, and nothing else: the connection goes on,
+/// and the next buffer is made.
+#[test]
+fn a_failed_import_of_an_offered_modifier_leaves_the_connection_usable() {
+    let block_linear = 0x0300_0000_0060_6014_u64;
+    let reported = nvidia_reported();
+    let sampled = crate::modifiers_offered(crate::Taken::Sampled(&reported));
+    let (mut client, _) = dmabuf_client_offered(Some(&sampled));
+    let create = |params: u32| {
+        let mut bytes = create_params(params);
+        bytes.extend(add_plane(params, 0, 256, block_linear));
+        bytes.extend(request(
+            params,
+            zwp_linux_buffer_params_v1::request::CREATE,
+            &[ArgType::Int, ArgType::Int, ArgType::Uint, ArgType::Uint],
+            &[
+                Arg::Int(64),
+                Arg::Int(32),
+                Arg::Uint(crate::DRM_FORMAT_ARGB8888),
+                Arg::Uint(0),
+            ],
+        ));
+        bytes
+    };
+    let bytes = create(4);
+    assert_eq!(client.read(&bytes, &[Fd(9)]), bytes.len());
+    client.dmabuf_imported(ObjectId(4), false);
+    assert_eq!(
+        sent(&mut client),
+        [(ObjectId(4), zwp_linux_buffer_params_v1::event::FAILED)]
+    );
+    assert_eq!(client.fatal(), None);
+    // Answered once: a second answer for the same parameters says nothing.
+    client.dmabuf_imported(ObjectId(4), false);
+    assert!(sent(&mut client).is_empty());
+    let bytes = create(6);
+    assert_eq!(client.read(&bytes, &[Fd(10)]), bytes.len());
+    client.dmabuf_imported(ObjectId(6), true);
+    assert_eq!(
+        sent(&mut client),
+        [(ObjectId(6), zwp_linux_buffer_params_v1::event::CREATED)]
+    );
+    assert_eq!(client.fatal(), None);
 }
