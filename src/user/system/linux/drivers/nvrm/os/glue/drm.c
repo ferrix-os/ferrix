@@ -224,27 +224,64 @@ static struct drm_gem *gem_by_cookie_locked(NvU64 cookie)
     return NULL;
 }
 
-/* Free `gem` if nothing names it any more; under gems_lock. */
-static void gem_settle_locked(struct drm_gem *gem)
+/*
+ * gems_lock is a leaf: nothing is called under it that can wait. KAPI's
+ * frees take RM's locks, and KAPI's semaphore-surface callback
+ * (drm_fence_reached) takes gems_lock from inside RM, so a free made under
+ * gems_lock and a fence reached at the same moment would each wait for what
+ * the other holds. The dispatch thread takes gems_lock too, for every open,
+ * mmap and release of the node, and would stop behind them.
+ *
+ * So an object is ended in two steps: gem_unlink_locked takes it out of the
+ * list under the lock, once nothing names it, and gem_free gives its memory
+ * back to KAPI after the lock is dropped. Unlinked, no cookie, handle or
+ * fence can find it, so gem_free's caller is its only holder.
+ */
+
+/* Unlink `gem` if nothing names it any more; under gems_lock. Whether the
+ * caller must gem_free it once the lock is dropped. */
+static NvBool gem_unlink_locked(struct drm_gem *gem)
 {
     struct drm_gem **link;
-    NvU32 gpu_id, kind;
 
     if (gem->handles != 0 || gem->dmabufs != 0 || gem->fences != 0)
-        return;
+        return NV_FALSE;
     for (link = &gems; *link != NULL; link = &(*link)->next)
     {
         if (*link == gem)
         {
             *link = gem->next;
-            break;
+            gem->next = NULL;
+            return NV_TRUE;
         }
     }
+    /* Not in the list: another thread unlinked it and frees it. */
+    return NV_FALSE;
+}
+
+/* Give an unlinked object's memory back; never under gems_lock. */
+static void gem_free(struct drm_gem *gem)
+{
+    NvU32 gpu_id, kind;
+
     if (gem->memory != NULL)
         nvrm_kms_kapi()->freeMemory(nvrm_kms_device(&gpu_id, &kind), gem->memory);
     if (gem->semsurf != NULL)
         nvrm_kms_kapi()->freeSemaphoreSurface(nvrm_kms_device(&gpu_id, &kind), gem->semsurf);
     free(gem);
+}
+
+/* End `gem` if nothing names it any more: what a caller that holds no lock
+ * does after taking a name away. */
+static void gem_settle(struct drm_gem *gem)
+{
+    NvBool dead;
+
+    nvos_mutex_lock(&gems_lock);
+    dead = gem_unlink_locked(gem);
+    nvos_mutex_unlock(&gems_lock);
+    if (dead)
+        gem_free(gem);
 }
 
 /*
@@ -344,6 +381,7 @@ static NvU32 handle_of(struct drm_file *file, const struct drm_gem *gem)
 static int handle_close(struct drm_file *file, NvU32 handle)
 {
     struct drm_gem *gem = NULL;
+    NvBool dead;
 
     nvos_mutex_lock(&file->lock);
     if (handle != 0 && handle <= file->room)
@@ -356,8 +394,10 @@ static int handle_close(struct drm_file *file, NvU32 handle)
         return -EINVAL;
     nvos_mutex_lock(&gems_lock);
     gem->handles--;
-    gem_settle_locked(gem);
+    dead = gem_unlink_locked(gem);
     nvos_mutex_unlock(&gems_lock);
+    if (dead)
+        gem_free(gem);
     return 0;
 }
 
@@ -394,15 +434,18 @@ void nvrm_drm_close(void *opened)
 void nvrm_drm_released(NvU64 cookie)
 {
     struct drm_gem *gem;
+    NvBool dead = NV_FALSE;
 
     nvos_mutex_lock(&gems_lock);
     gem = gem_by_cookie_locked(cookie);
     if (gem != NULL && gem->dmabufs != 0)
     {
         gem->dmabufs--;
-        gem_settle_locked(gem);
+        dead = gem_unlink_locked(gem);
     }
     nvos_mutex_unlock(&gems_lock);
+    if (dead)
+        gem_free(gem);
 }
 
 /* ------------------------------------------------------------------------
@@ -538,9 +581,7 @@ static int drm_alloc(struct drm_file *file, NvU64 arg)
     p.handle = handle_new(file, gem);
     if (p.handle == 0)
     {
-        nvos_mutex_lock(&gems_lock);
-        gem_settle_locked(gem);
-        nvos_mutex_unlock(&gems_lock);
+        gem_settle(gem);
         return -ENOSPC;
     }
     return copy_out(arg, &p, sizeof(p));
@@ -572,9 +613,7 @@ static int drm_import_nvkms(struct drm_file *file, NvU64 arg)
     p.handle = handle_new(file, gem);
     if (p.handle == 0)
     {
-        nvos_mutex_lock(&gems_lock);
-        gem_settle_locked(gem);
-        nvos_mutex_unlock(&gems_lock);
+        gem_settle(gem);
         return -ENOSPC;
     }
     return copy_out(arg, &p, sizeof(p));
@@ -622,9 +661,7 @@ static int drm_semsurf_ctx_create(struct drm_file *file, NvU64 arg)
     p.handle = handle_new(file, gem);
     if (p.handle == 0)
     {
-        nvos_mutex_lock(&gems_lock);
-        gem_settle_locked(gem);
-        nvos_mutex_unlock(&gems_lock);
+        gem_settle(gem);
         return -ENOSPC;
     }
     drm_say("fence context %u: semaphore %llu, mapped %d\n", p.handle,
@@ -655,12 +692,14 @@ static void drm_fence_reached(void *data)
 
     if (nvrm_trace_drm)
         drm_say("fence %llu reached, signal %d\n", (unsigned long long)fence->cookie, rc);
-    nvos_mutex_lock(&gems_lock);
     /*
+     * Called from inside RM, which holds its own locks: gems_lock is taken
+     * for the count alone, and no holder of it calls RM (see gems_lock).
      * Not settled here: freeing the semaphore surface from inside its own
      * callback is not safe. A context closed before its last fence keeps
      * its surface until nvrm exits.
      */
+    nvos_mutex_lock(&gems_lock);
     fence->ctx->fences--;
     nvos_mutex_unlock(&gems_lock);
     free(fence);
@@ -676,6 +715,7 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
     struct drm_fence *fence;
     struct drm_gem *ctx;
     NvKmsKapiRegisterWaiterResult result;
+    NvBool dead;
     NvS64 fd;
 
     if (device == NULL)
@@ -700,8 +740,10 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
     {
         nvos_mutex_lock(&gems_lock);
         ctx->fences--;
-        gem_settle_locked(ctx);
+        dead = gem_unlink_locked(ctx);
         nvos_mutex_unlock(&gems_lock);
+        if (dead)
+            gem_free(ctx);
         free(fence);
         return (int)fd;
     }
