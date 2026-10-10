@@ -40,6 +40,10 @@
 //! in microframes 2 to 4, the budget EHCI's section 4.12.2 gives a packet of
 //! up to 64 bytes.
 
+pub use crate::host::{
+    CONTROL_BYTES, Data, Error, PIPE_BYTES, Packet, RootPort, RootReset, Target,
+};
+use crate::host::{Endpoint, Host, Place};
 use crate::usb::{Setup, Speed};
 use crate::{Clock, Dma, MILLISECOND, Parts, Registers, wait_for};
 
@@ -192,11 +196,7 @@ const CONTROL_QTDS: usize = FIRST_PIPE_QH + MAX_PIPES * QH_SLOT;
 const FIRST_PIPE_QTD: usize = CONTROL_QTDS + 3 * QTD_SLOT;
 const SETUP_BUFFER: usize = 2 * PAGE;
 const CONTROL_BUFFER: usize = SETUP_BUFFER + 64;
-/// The largest control data stage.
-pub const CONTROL_BYTES: usize = 1024;
 const FIRST_PIPE_BUFFER: usize = 3 * PAGE;
-/// The largest packet a pipe reads.
-pub const PIPE_BYTES: usize = 64;
 
 const _: () = assert!(
     FIRST_PIPE_QTD + MAX_PIPES * 2 * QTD_SLOT <= 2 * PAGE,
@@ -245,79 +245,6 @@ const POWER_SETTLE: u64 = 20 * MILLISECOND;
 // The controller
 // ---------------------------------------------------------------------------
 
-/// Why the controller would not come up, or a transfer failed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Error {
-    /// The memory is too small, or a page of it has no 32-bit address.
-    Memory,
-    /// The controller would not halt, reset or start.
-    Unresponsive,
-    /// A schedule would not switch on or off.
-    Schedule,
-    /// The device stalled the request.
-    Stall,
-    /// A transaction failed three times: a device gone, or a bad cable.
-    Transaction,
-    /// The device sent more than the buffer held.
-    Babble,
-    /// The controller could not reach memory in time.
-    Buffer,
-    /// The transfer did not finish in time.
-    Timeout,
-    /// No pipe is free.
-    NoPipe,
-    /// The request was larger than the buffer.
-    TooLong,
-}
-
-/// Where a request goes: the device and how the controller reaches it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Target {
-    /// The device's address.
-    pub address: u8,
-    /// Its speed.
-    pub speed: Speed,
-    /// The largest packet its control endpoint takes.
-    pub max_packet: u16,
-    /// For a full- or low-speed device behind a high-speed hub, that hub's
-    /// address and the port on it the device's path goes through.
-    pub translator: Option<(u8, u8)>,
-}
-
-/// A data stage.
-#[derive(Debug)]
-pub enum Data<'a> {
-    /// None.
-    None,
-    /// Device to host, into the buffer.
-    In(&'a mut [u8]),
-    /// Host to device, from the buffer.
-    Out(&'a [u8]),
-}
-
-/// A root port, as `PORTSC` says.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct RootPort {
-    /// A device is there.
-    pub connected: bool,
-    /// The connection changed since this was last cleared.
-    pub changed: bool,
-    /// The port is enabled.
-    pub enabled: bool,
-}
-
-/// What a root port reset found.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RootReset {
-    /// A high-speed device, enabled.
-    HighSpeed,
-    /// A full- or low-speed device, which EHCI hands to its companion
-    /// controller: nothing this driver drives.
-    Handed,
-    /// Nothing is there any more.
-    Gone,
-}
-
 /// One interrupt pipe's bookkeeping.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Pipe {
@@ -332,17 +259,6 @@ struct Pipe {
 /// Halts in a row after which a pipe is left stopped: the device is most
 /// likely gone, and the next hub poll will say so.
 const MAX_HALTS: u32 = 4;
-
-/// A packet an interrupt pipe received.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Packet {
-    /// The pipe.
-    pub pipe: usize,
-    /// The bytes, of which `len` were received.
-    pub bytes: [u8; PIPE_BYTES],
-    /// How many.
-    pub len: usize,
-}
 
 /// The controller, running, and its memory.
 #[derive(Debug)]
@@ -534,7 +450,7 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         if value & PORT_CONNECTED == 0 {
             RootReset::Gone
         } else if value & PORT_ENABLED != 0 {
-            RootReset::HighSpeed
+            RootReset::Ready(Speed::High)
         } else {
             self.write(register, (value & !PORT_CHANGES) | PORT_OWNER);
             RootReset::Handed
@@ -562,11 +478,7 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         setup: &Setup,
         data: Data<'_>,
     ) -> Result<usize, Error> {
-        let length = match &data {
-            Data::None => 0,
-            Data::In(buffer) => buffer.len(),
-            Data::Out(buffer) => buffer.len(),
-        };
+        let length = data.len();
         if length > CONTROL_BYTES || length > usize::from(setup.length) {
             return Err(Error::TooLong);
         }
@@ -968,6 +880,83 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
     }
 }
 
+/// The rest after `SET_ADDRESS`: two milliseconds by the specification,
+/// ten as Linux gives.
+const ADDRESS_RECOVERY: u64 = 10 * MILLISECOND;
+
+impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
+    type Clock = C;
+    type Parts = Parts<R, D, C>;
+
+    fn clock(&mut self) -> &mut C {
+        Controller::clock(self)
+    }
+
+    fn shutdown(self) -> Result<Parts<R, D, C>, Parts<R, D, C>> {
+        Controller::shutdown(self)
+    }
+
+    fn ports(&self) -> u32 {
+        Controller::ports(self)
+    }
+
+    fn root_port(&self, port: u32) -> RootPort {
+        Controller::root_port(self, port)
+    }
+
+    fn clear_root_changes(&mut self, port: u32) {
+        Controller::clear_root_changes(self, port);
+    }
+
+    fn reset_root_port(&mut self, port: u32) -> RootReset {
+        Controller::reset_root_port(self, port)
+    }
+
+    /// Nothing to do: a device in the default state answers at address
+    /// zero, and the control queue head is written for each transfer.
+    fn open(&mut self, place: &Place) -> Result<Target, Error> {
+        Ok(Target {
+            address: 0,
+            speed: place.speed,
+            max_packet: place.speed.default_max_packet(),
+            translator: place.translator,
+            slot: 0,
+            route: place.route,
+            root_port: place.root_port,
+        })
+    }
+
+    /// `SET_ADDRESS`, and the rest the device is owed after it.
+    fn assign(&mut self, target: &mut Target, address: u8, max_packet: u16) -> Result<(), Error> {
+        let _ = self.control(target, &Setup::set_address(address), Data::None)?;
+        self.clock.sleep_nanos(ADDRESS_RECOVERY);
+        target.address = address;
+        target.max_packet = max_packet;
+        Ok(())
+    }
+
+    fn control(&mut self, target: &Target, setup: &Setup, data: Data<'_>) -> Result<usize, Error> {
+        Controller::control(self, target, setup, data)
+    }
+
+    /// Every pipe is polled every frame, whatever interval it asks for.
+    fn open_pipe(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
+        Controller::open_pipe(self, target, endpoint.number, endpoint.max_packet)
+    }
+
+    fn close_pipe(&mut self, pipe: usize) {
+        Controller::close_pipe(self, pipe);
+    }
+
+    fn pipe_stopped(&self, pipe: usize) -> bool {
+        Controller::pipe_stopped(self, pipe)
+    }
+
+    fn service(&mut self, receive: impl FnMut(Packet)) -> Result<(), Error> {
+        Controller::service(self, receive)
+    }
+}
+
 /// A qTD token: active, three tries.
 const fn token(pid: u32, bytes: u32, toggle: bool, interrupt: bool) -> u32 {
     let mut value =
@@ -1005,7 +994,8 @@ const fn speed_bits(speed: Speed) -> u32 {
     match speed {
         Speed::Full => EPS_FULL,
         Speed::Low => EPS_LOW,
-        Speed::High => EPS_HIGH,
+        // No device faster than high speed is ever on this bus.
+        Speed::High | Speed::Super => EPS_HIGH,
     }
 }
 

@@ -104,6 +104,9 @@ pub struct HubDescriptor {
     pub ports: u8,
     /// `bPwrOn2PwrGood`, in milliseconds rather than its units of two.
     pub power_good_ms: u32,
+    /// `wHubCharacteristics`' TT think time, bits 6 and 5: how long its
+    /// transaction translator needs between transactions.
+    pub think_time: u8,
 }
 
 impl HubDescriptor {
@@ -116,6 +119,7 @@ impl HubDescriptor {
         Some(HubDescriptor {
             ports: *bytes.get(2)?,
             power_good_ms: u32::from(*bytes.get(5)?) * 2,
+            think_time: (*bytes.get(3)? >> 5) & 0x3,
         })
     }
 }
