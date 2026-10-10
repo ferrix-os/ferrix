@@ -29,6 +29,10 @@ pub struct Global {
 #[derive(Clone, Debug, Default)]
 pub struct Globals {
     entries: Vec<Global>,
+    /// The modifiers `zwp_linux_dmabuf_v1` announces with each format, when
+    /// the compositor has said which; linear and the implicit layout when
+    /// it has not.
+    dmabuf_modifiers: Option<Vec<u64>>,
 }
 
 impl Globals {
@@ -37,7 +41,25 @@ impl Globals {
     pub const fn new() -> Self {
         Self {
             entries: Vec::new(),
+            dmabuf_modifiers: None,
         }
+    }
+
+    /// Announce `modifiers` with each format of `zwp_linux_dmabuf_v1`, in
+    /// this order: the ones the compositor can take a buffer in with
+    /// ([`crate::modifiers_offered`]). At most
+    /// [`crate::MODIFIERS_OFFERED_MOST`] are kept.
+    pub fn offer_dmabuf_modifiers(&mut self, modifiers: &[u64]) {
+        let kept = modifiers.len().min(crate::MODIFIERS_OFFERED_MOST);
+        self.dmabuf_modifiers = modifiers.get(..kept).map(<[u64]>::to_vec);
+    }
+
+    /// The modifiers `zwp_linux_dmabuf_v1` announces with each format.
+    #[must_use]
+    pub fn dmabuf_modifiers(&self) -> &[u64] {
+        self.dmabuf_modifiers
+            .as_deref()
+            .unwrap_or(&[crate::MOD_LINEAR, crate::MOD_INVALID])
     }
 
     /// Advertise `interface` at `version`, which must not be above what the

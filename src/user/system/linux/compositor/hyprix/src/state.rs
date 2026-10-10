@@ -106,7 +106,7 @@ impl Slot {
     pub(crate) fn for_test() -> Self {
         let (ours, _theirs) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
         Self {
-            client: Client::new(globals(1, false)),
+            client: Client::new(globals(1, None)),
             connection: Connection::new(ours).expect("a connection"),
             pools: BTreeMap::new(),
             dmabufs: BTreeMap::new(),
@@ -599,7 +599,12 @@ impl<'r> Compositor<'r> {
             style,
             overlay: crate::overlay::Overlay::default(),
             overlay_was: false,
-            dmabuf: crate::dmabuf::Importer::find(screens.iter().any(Screen::on_gpu)),
+            dmabuf: crate::dmabuf::Importer::find(
+                &screens
+                    .iter()
+                    .find_map(|screen| screen.gpu.as_ref())
+                    .map_or(crate::dmabuf::Drawn::Software, |gpu| gpu.drawn.clone()),
+            ),
             dmabuf_said: false,
             screens,
             window_rules,
@@ -836,8 +841,10 @@ impl<'r> Compositor<'r> {
                         },
                         pid: connection.peer_pid(),
                         client: {
-                            let mut client =
-                                Client::new(globals(self.screens.len(), self.dmabuf.is_some()));
+                            let mut client = Client::new(globals(
+                                self.screens.len(),
+                                self.dmabuf.as_ref().map(crate::dmabuf::Importer::offered),
+                            ));
                             // What each screen is, and what the seat has: only
                             // the capabilities there are devices for, since a
                             // client may not ask for one the seat did not
@@ -2662,11 +2669,6 @@ const GPU_AGAIN_FIRST: Duration = Duration::from_secs(5);
 const GPU_AGAIN_MOST: Duration = Duration::from_secs(60);
 
 impl Screen {
-    /// Whether this screen's frames are drawn on the GPU now.
-    pub(crate) const fn on_gpu(&self) -> bool {
-        self.gpu.is_some()
-    }
-
     /// Say that the card went away, once a loss, whichever path found it.
     fn say_gone(&mut self, report: &mut dyn FnMut(&str)) {
         if !self.said_gone {
@@ -3072,6 +3074,7 @@ fn gpu_for(
 ) -> Result<Option<crate::frame::Gpu>, String> {
     use crate::options::Renderer;
 
+    let mut drawn = crate::dmabuf::Drawn::Node;
     let device: Result<Box<dyn compositor_virgl::Device>, String> = match renderer {
         Renderer::Software => return Ok(None),
         Renderer::Vtest => compositor_virgl::vtest::Vtest::start(&format!("hyprix-{screen}"))
@@ -3079,6 +3082,7 @@ fn gpu_for(
             .and_then(|server| server.ok_or_else(|| "no virgl_test_server".to_owned()))
             .map(|mut server| {
                 scanouts_for(&mut server);
+                drawn = crate::dmabuf::Drawn::Server(server_imports(&mut server, screen, report));
                 Box::new(server) as Box<dyn compositor_virgl::Device>
             }),
         Renderer::Auto | Renderer::Gpu => render_node(),
@@ -3093,6 +3097,7 @@ fn gpu_for(
             Ok(Some(crate::frame::Gpu {
                 canvas,
                 backdrop: compositor_render::gpu::Backdrop::new(width, height),
+                drawn,
             }))
         }
         Err(why) if renderer == Renderer::Auto => {
@@ -3103,6 +3108,54 @@ fn gpu_for(
         }
         Err(why) => Err(format!("--renderer asked for a GPU: {why}")),
     }
+}
+
+/// The modifiers the test server's EGL imports both of a client's formats
+/// with, for a server that takes dmabufs at all (Ferrix's patched one):
+/// what clients are then offered. `None` for a stock server, or one that
+/// could not be asked, whose clients' buffers are mapped as for a screen
+/// drawn in software.
+fn server_imports(
+    server: &mut compositor_virgl::vtest::Vtest,
+    screen: &str,
+    report: &mut dyn FnMut(&str),
+) -> Option<Vec<compositor_server::Reported>> {
+    use compositor_server::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Reported};
+
+    if !server.can_import().unwrap_or(false) {
+        return None;
+    }
+    let asked = server
+        .dmabuf_modifiers(DRM_FORMAT_ARGB8888)
+        .and_then(|argb| Ok((argb, server.dmabuf_modifiers(DRM_FORMAT_XRGB8888)?)));
+    let (argb, xrgb) = match asked {
+        Ok(both) => both,
+        Err(error) => {
+            report(&format!(
+                "hyprix: {screen}: the test server's modifiers could not be asked ({error}); clients' buffers are mapped"
+            ));
+            return None;
+        }
+    };
+    // One list for both formats: a modifier the two are imported with.
+    let reported: Vec<Reported> = argb
+        .iter()
+        .filter(|modifier| xrgb.contains(modifier))
+        .map(|modifier| Reported {
+            modifier: modifier.value,
+            external_only: modifier.external_only,
+        })
+        .collect();
+    let offered =
+        compositor_server::modifiers_offered(compositor_server::Taken::Sampled(&reported));
+    report(&format!(
+        "hyprix: {screen}: clients' dmabufs are imported by the test server's EGL; modifiers offered:{}",
+        offered
+            .iter()
+            .map(|modifier| format!(" 0x{modifier:016x}"))
+            .collect::<String>()
+    ));
+    Some(reported)
 }
 
 /// Show what the renderer draws into on `backend`, if both can.
@@ -5988,7 +6041,7 @@ fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: Win
 /// The globals the compositor offers. `dmabuf` is whether a client's GPU
 /// buffer can be imported and drawn where it lies, which is only where the
 /// frames are drawn on the GPU (`docs/GPU.md` §3.13).
-fn globals(outputs: usize, dmabuf: bool) -> Globals {
+fn globals(outputs: usize, dmabuf: Option<Vec<u64>>) -> Globals {
     let mut globals = Globals::new();
     for (interface, version, role) in [
         // Each at the version its own interface offers. A compositor that
@@ -6347,12 +6400,13 @@ fn globals(outputs: usize, dmabuf: bool) -> Globals {
     }
     // A client's own GPU buffer, handed over as a dmabuf. Version 3: the
     // feedback of version 4 has no reader before Mesa (`docs/GPU.md` §3a).
-    if dmabuf {
+    if let Some(offered) = dmabuf {
         let _ = globals.add(
             &compositor_protocol::linux_dmabuf::ZWP_LINUX_DMABUF_V1,
             3,
             Role::LinuxDmabuf,
         );
+        globals.offer_dmabuf_modifiers(&offered);
     }
     // One `wl_output` a monitor, in the order the screens came: that is how
     // a client is told there are two screens, and which is which.

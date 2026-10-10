@@ -32,6 +32,14 @@
 //! is refused rather than shown wrong. Version 3 only: version 4's feedback
 //! -- the format table and the main device -- comes with Mesa (§3a), its
 //! first reader.
+//!
+//! # What is offered
+//!
+//! The modifiers announced are the ones the compositor above can take in,
+//! which depends on how it takes a buffer in ([`Taken`],
+//! [`modifiers_offered`]) and is said with the globals
+//! ([`crate::Globals::offer_dmabuf_modifiers`]). A modifier that is neither
+//! offered nor one of the two above is the protocol's `invalid_format`.
 
 use compositor_protocol::core;
 use compositor_protocol::linux_dmabuf::{zwp_linux_buffer_params_v1, zwp_linux_dmabuf_v1};
@@ -54,15 +62,65 @@ pub const MOD_LINEAR: u64 = 0;
 /// layout -- linear, for a virgl resource seen from the guest.
 pub const MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
 
-/// Whether the implicit layout goes unannounced: only linear is offered.
-/// A compositor that maps NVIDIA's buffers from the CPU sets it, because
-/// NVIDIA's GBM backend answers "no modifier" with block-linear video
-/// memory, which it cannot map (N3b, `docs/NVIDIA.md` §4.6).
-static LINEAR_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The most modifiers offered with a format: more than any driver's EGL
+/// reports for one, and a bound on what a bind sends.
+pub const MODIFIERS_OFFERED_MOST: usize = 32;
 
-/// Offer clients the linear modifier only, from the next bind on.
-pub fn offer_linear_only(only: bool) {
-    LINEAR_ONLY.store(only, std::sync::atomic::Ordering::Relaxed);
+/// A modifier a GPU renderer's EGL says it imports a format with
+/// (`EGL_EXT_image_dma_buf_import_modifiers`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Reported {
+    /// The DRM format modifier.
+    pub modifier: u64,
+    /// Whether it is imported for external textures only, which a
+    /// renderer that samples 2D textures cannot use.
+    pub external_only: bool,
+}
+
+/// How the compositor above takes a client's buffer in, which is what
+/// decides the modifiers it may offer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Taken<'a> {
+    /// Into its own open of the render node its frames are drawn through
+    /// (virgl): linear, and the implicit layout, which is linear there.
+    Node,
+    /// Mapped and read by the processor: linear only. The implicit layout
+    /// goes unannounced, because NVIDIA's GBM backend answers "no modifier"
+    /// with block-linear video memory, which cannot be mapped (N3b,
+    /// `docs/NVIDIA.md` §4.6).
+    Mapped,
+    /// Sampled by a GPU renderer whose EGL reported these modifiers for
+    /// every format offered: each one it imports as a 2D texture, and
+    /// linear, which is mapped where it can be. Never the
+    /// implicit layout: what a driver makes of "no modifier" is a layout
+    /// nobody named, and here one EGL may not have reported.
+    Sampled(&'a [Reported]),
+}
+
+/// The modifiers to offer with every format, in the order they are
+/// announced, for a compositor that takes buffers in as `taken` says.
+#[must_use]
+pub fn modifiers_offered(taken: Taken<'_>) -> Vec<u64> {
+    match taken {
+        Taken::Node => vec![MOD_LINEAR, MOD_INVALID],
+        Taken::Mapped => vec![MOD_LINEAR],
+        Taken::Sampled(reported) => {
+            let mut offered: Vec<u64> = Vec::new();
+            for found in reported {
+                let usable = !found.external_only
+                    && found.modifier != MOD_INVALID
+                    && found.modifier != MOD_LINEAR
+                    && !offered.contains(&found.modifier);
+                if usable && offered.len() < MODIFIERS_OFFERED_MOST - 1 {
+                    offered.push(found.modifier);
+                }
+            }
+            // Last: a driver choosing among them takes its own layout
+            // first where it reads this as an order of preference.
+            offered.push(MOD_LINEAR);
+            offered
+        }
+    }
 }
 
 /// The formats offered, each with the modifiers it is offered with.
@@ -155,20 +213,17 @@ impl Client {
                 &[ArgType::Uint],
                 &[Arg::Uint(code)],
             );
-            if version >= 3 {
-                let linear_only = LINEAR_ONLY.load(std::sync::atomic::Ordering::Relaxed);
-                for modifier in [MOD_LINEAR, MOD_INVALID] {
-                    if linear_only && modifier == MOD_INVALID {
-                        continue;
-                    }
-                    let (high, low) = halves(modifier);
-                    let _ = self.out.write(
-                        id,
-                        zwp_linux_dmabuf_v1::event::MODIFIER,
-                        &[ArgType::Uint, ArgType::Uint, ArgType::Uint],
-                        &[Arg::Uint(code), Arg::Uint(high), Arg::Uint(low)],
-                    );
-                }
+            if version < 3 {
+                continue;
+            }
+            for &modifier in self.globals.dmabuf_modifiers() {
+                let (high, low) = halves(modifier);
+                let _ = self.out.write(
+                    id,
+                    zwp_linux_dmabuf_v1::event::MODIFIER,
+                    &[ArgType::Uint, ArgType::Uint, ArgType::Uint],
+                    &[Arg::Uint(code), Arg::Uint(high), Arg::Uint(low)],
+                );
             }
         }
     }
@@ -286,10 +341,19 @@ impl Client {
             ));
             return;
         };
-        if plane.modifier != MOD_LINEAR && plane.modifier != MOD_INVALID {
+        // Linear and the implicit layout are taken whether or not they
+        // were announced, as before there was anything else to announce:
+        // the import says whether such a buffer is one that can be shown.
+        if plane.modifier != MOD_LINEAR
+            && plane.modifier != MOD_INVALID
+            && !self.globals.dmabuf_modifiers().contains(&plane.modifier)
+        {
             self.fail(refuse(
                 zwp_linux_buffer_params_v1::error::INVALID_FORMAT,
-                format!("modifier 0x{:016x} is not linear", plane.modifier),
+                format!(
+                    "modifier 0x{:016x} is not one this compositor offers",
+                    plane.modifier
+                ),
             ));
             return;
         }
