@@ -179,6 +179,20 @@ const GATE_MACHINE: Machine = Machine {
     devices: String::new(),
 };
 
+/// The domain, as libvirt defines it.
+///
+/// **The processor carries `invtsc`.** `host-passthrough` alone hides the
+/// invariant-TSC bit (`CPUID.80000007H:EDX[8]`), because a domain with it
+/// cannot migrate; libvirt passes it only with `migratable='off'` and the
+/// feature required, which QEMU gets as `-cpu host,migratable=off,invtsc=on`.
+/// Without the bit the kernel's clock is the HPET (`arch/x86_64/clock.rs`),
+/// which QEMU emulates in its own process: every reading of the clock is
+/// three exits to QEMU under its one lock, and `gettimeofday` leaves the
+/// vDSO. Measured 2026-10-10 on the same machine under plain KVM, Teeworlds
+/// on llvmpipe at 1920x1080: 62 swaps a second on the HPET against 103 to 129
+/// on the TSC, and an idle `teeworlds_srv` at 18 % of a processor against 2 %
+/// (`~/.local/share/ferrix/steam-race/softgl-gap.md`). Every other boot has
+/// had the bit since `qemu::x86_cpu` gave it `+invtsc`.
 fn domain_xml(dir: &Path, machine: &Machine) -> String {
     let file = |name: &str| dir.join(name).display().to_string();
     let virtio = |name: &str, slot: u32, readonly: bool| {
@@ -207,8 +221,9 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
     <nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd' templateFormat='raw' format='raw'>/var/lib/libvirt/qemu/nvram/{DOMAIN}_VARS.fd</nvram>
   </os>
   <features><acpi/><apic/><ioapic driver='qemu'/></features>
-  <cpu mode='host-passthrough' check='none'>
+  <cpu mode='host-passthrough' check='none' migratable='off'>
     <maxphysaddr mode='passthrough'/>
+    <feature policy='require' name='invtsc'/>
   </cpu>
   <clock offset='utc'/>
   <on_poweroff>destroy</on_poweroff>
@@ -763,4 +778,19 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
     drop(running);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The card's domain is defined with the invariant-TSC bit, for the
+    /// gate's machine and the desktop's alike: without it the kernel's clock
+    /// is the HPET, which QEMU emulates in its own process.
+    #[test]
+    fn the_domain_has_an_invariant_tsc() {
+        let xml = domain_xml(Path::new("/vm"), &GATE_MACHINE);
+        assert!(xml.contains("<cpu mode='host-passthrough' check='none' migratable='off'>"));
+        assert!(xml.contains("<feature policy='require' name='invtsc'/>"));
+    }
 }
