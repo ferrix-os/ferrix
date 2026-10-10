@@ -174,8 +174,15 @@ so that a handler finds the call in its context and can answer it, as
 Chromium's renderers do. A trap cannot be blocked or ignored; a trapped
 native-range call kills its process. `PR_{GET,SET}_SPECULATION_CTRL` report
 both mitigations force-disabled and refuse to enable them. Six negative
-controls (`docs/SECCOMP.md` §12). `TSYNC` (S5) and the guest test (S6)
-follow.
+controls (`docs/SECCOMP.md` §12).
+
+**Done -- seccomp S5, `TSYNC` (2026-10-01, 3 points).** A filter can be
+given to every thread of a process at once, or to none: a thread with a chain
+of its own or in strict mode makes the call answer its id (`ESRCH` with
+`TSYNC_ESRCH`), and a thread made while the sync runs copies its creator's
+chain under the lock the sync holds, so it cannot be left out. The `seccomp`
+line checks it with 49 threads, forty of them made during the sync; four
+negative controls. The guest test (S6) follows.
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
