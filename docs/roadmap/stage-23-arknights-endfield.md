@@ -167,11 +167,10 @@ way).
 
 ### Step 1: plain Wine starts on Ferrix  ·  42 points
 
-64-bit Wine very probably cannot start today: it keeps Windows's thread
-block at `%gs`, and `arch_prctl` answers `ARCH_SET_FS` alone and `EINVAL`
-for every other request (`src/kernel/src/arch/x86_64/syscall.rs`), with
-`FSGSBASE` left off for programs. That Wine needs one of the two is the
-study's knowledge of Wine, not something run.
+When this page was written 64-bit Wine could not start: it keeps Windows's
+thread block at `%gs`, and `arch_prctl` answered `ARCH_SET_FS` alone, with
+`FSGSBASE` left off for programs. It answers `ARCH_SET_GS` since
+2026-10-10, and Wine starts; where the step stands is below the list.
 
 * **E1.1** `arch_prctl`'s `ARCH_SET_GS`, `ARCH_GET_GS` and `ARCH_GET_FS`: a
   thread's `GS` base kept across a switch, a `fork` and a signal, and a
@@ -197,6 +196,25 @@ study's knowledge of Wine, not something run.
   segment that I1 put in the GDT, and a signal taken while in it. Needed if
   the installer or the launcher is a 32-bit program, which is not known.
   `modify_ldt` is needed only by old-style 32-bit Wine and stays out. 8.
+
+**Where step 1 stands (2026-10-10, branch `wine-m1`; `docs/WINE.md`).**
+Debian 13's 64-bit Wine 10.0 makes a prefix, its `cmd /c ver` answers
+`Microsoft Windows 10.0.19043`, and its notepad draws a window on hyprix
+through yserver, under KVM: `cargo xtask test-wine`.
+
+* *Done:* E1.1, with `CR4.FSGSBASE` now cleared at bring-up, which nothing
+  did before. E1.2. Of E1.3, the one thing `wineboot` tripped over in the
+  kernel: a 64-bit signal frame's `sigcontext` left `trapno`, `err` and
+  `cr2` zero, which Wine's `SIGSEGV` handler reads. None of the calls E1.3
+  names (`mlock`, `membarrier`, the reservations' charging) was met by
+  `wineboot`, `cmd` or notepad. E1.4's first half: wineserver alone. E1.5's
+  drawing.
+* *Still to do:* E1.5 runs with one workaround, `UseXRandR=N`: on
+  yserver's RandR Wine's X driver finds no monitor and wineserver ends on a
+  divide by a DPI of zero. Notepad draws at the size it asked for and not
+  at its tile's; keys and the pointer are untried. E1.4's esync. E1.6:
+  `wineboot` says a 32-bit `rundll32.exe` did not start. A prefix on the
+  btrfs volume ran out of space with 680 MB free.
 
 **Proved by** `cargo xtask test-wine`: a prefix is made, `cmd /c ver`
 prints, and `notepad`'s window is found on the screen with a typed line in

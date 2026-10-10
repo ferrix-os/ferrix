@@ -18,9 +18,19 @@ twice. The first boot is a shell: it makes a prefix in `/tmp` with
 The second is hyprix with yserver on `:0`, as `test-xwindow` boots it: the
 same two steps, then `notepad`, which must become a window of hyprix's
 titled "Untitled - Notepad" with its white page on the screen
-(`build/x86_64/wine-notepad.ppm`). It needs no network. It attaches a
-volume, so it runs on demand, as `test-yserver` does, and is not in
-`cargo xtask check`.
+(`build/x86_64/wine-notepad.ppm`). It needs no network.
+
+**Where it runs.** On demand, as `test-yserver` and `test-xwindow` do: it
+is not in `cargo xtask check`, not in CI, and not in the batch's `full`
+profile (`batch.sh profile`), so no landing runs it unasked. A landing that
+changes what Wine uses of the kernel, yserver or hyprix adds it with
+`batch.sh join … --gate FILE`, the file holding `test-wine --arch x86_64
+--accel kvm`. The gate never downloads: with no `wine.img` under
+`~/.local/share/ferrix/wine` (or `FERRIX_WINE_VOLUME`) it stops at once and
+names the fetch script. On nazuna the volume is there since 2026-10-10,
+with the packages it was made from in `pool/` beside it, so making it
+again downloads nothing. It needs yserver's tree
+(`~/.local/share/ferrix/yserver/tree`), which `fetch-yserver.sh` makes.
 
 The guest has 6 GiB: the prefix is about 800 MB of files, on tmpfs.
 

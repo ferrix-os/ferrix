@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "12f8d933ef85e73de0f386e82ddc84af6d55c651ec442472ca8e28fe3d61b3e5",
+  "digest": "62c5d3813b4fd5f1e02e3d2137411e742b08f018c09e62f406f4c93637dd9a8d",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -6346,8 +6346,8 @@
                   "qualifiedName": "FerrixStructure::Workspace::xtask::commands",
                   "kind": "attribute",
                   "type": "String",
-                  "multiplicity": "68",
-                  "value": "(\"build\", \"run\", \"run-compositor\", \"run-badapple\", \"remote-desktop\", \"wallpapers\", \"everything-volume\", \"test-btrfs\", \"test-powerfail\", \"test-boot\", \"test-kaslr\", \"test-shell\", \"test-vfs\", \"test-net\", \"test-clipboard\", \"test-adb\", \"test-display\", \"test-compositor\", \"test-video\", \"test-input\", \"test-audio\", \"test-badapple\", \"test-seat\", \"test-pty\", \"test-foot\", \"test-vkgears\", \"test-jobs\", \"test-init\", \"bench-seam\", \"test-auth\", \"test-restart\", \"test-install\", \"test-sysfs\", \"test-threads\", \"test-sem\", \"test-procfs\", \"test-rustc\", \"test-chrome\", \"test-steamcmd\", \"test-steam-bootstrap\", \"test-steam-window\", \"run-steam\", \"test-yserver\", \"test-xwindow\", \"test-chrome-window\", \"test-chrome-audio\", \"bench-chrome\", \"bench-chrome-video\", \"test-selfhost\", \"builds-execute\", \"coverage\", \"check\", \"host-clippy\", \"host-test\", \"host-doctest\", \"host-doc\", \"check-ferrousli\", \"miri\", \"native-clippy\", \"model-doc\", \"busybox\", \"uutils\", \"ports\", \"flash\", \"watch-serial\", \"deploy\", \"omz\", \"zsh-functions\")",
+                  "multiplicity": "69",
+                  "value": "(\"build\", \"run\", \"run-compositor\", \"run-badapple\", \"remote-desktop\", \"wallpapers\", \"everything-volume\", \"test-btrfs\", \"test-powerfail\", \"test-boot\", \"test-kaslr\", \"test-shell\", \"test-vfs\", \"test-net\", \"test-clipboard\", \"test-adb\", \"test-display\", \"test-compositor\", \"test-video\", \"test-input\", \"test-audio\", \"test-badapple\", \"test-seat\", \"test-pty\", \"test-foot\", \"test-vkgears\", \"test-jobs\", \"test-init\", \"bench-seam\", \"test-auth\", \"test-restart\", \"test-install\", \"test-sysfs\", \"test-threads\", \"test-sem\", \"test-procfs\", \"test-rustc\", \"test-chrome\", \"test-steamcmd\", \"test-steam-bootstrap\", \"test-steam-window\", \"run-steam\", \"test-yserver\", \"test-xwindow\", \"test-wine\", \"test-chrome-window\", \"test-chrome-audio\", \"bench-chrome\", \"bench-chrome-video\", \"test-selfhost\", \"builds-execute\", \"coverage\", \"check\", \"host-clippy\", \"host-test\", \"host-doctest\", \"host-doc\", \"check-ferrousli\", \"miri\", \"native-clippy\", \"model-doc\", \"busybox\", \"uutils\", \"ports\", \"flash\", \"watch-serial\", \"deploy\", \"omz\", \"zsh-functions\")",
                   "source": {
                     "file": "docs/sysml/02-structure.sysml",
                     "line": 1495
