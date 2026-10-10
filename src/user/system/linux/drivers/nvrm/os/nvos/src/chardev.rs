@@ -341,7 +341,12 @@ pub unsafe extern "C" fn nvos_chardev_dmabuf_resolve(id: u64, fd: i32, cookie: *
 /// `deadline_ms` (0 is 5 s, at most 10 s) and with ENODEV once nvrm is
 /// gone. `flags` is `NVOS_SYNC_CLOEXEC`. The descriptor, or a negative errno.
 #[unsafe(no_mangle)]
-pub extern "C" fn nvos_chardev_sync_install(id: u64, cookie: u64, deadline_ms: u32, flags: u32) -> i64 {
+pub extern "C" fn nvos_chardev_sync_install(
+    id: u64,
+    cookie: u64,
+    deadline_ms: u32,
+    flags: u32,
+) -> i64 {
     let control = CONTROL.load(Ordering::Acquire) as usize;
     match native(
         nr::CHARDEV_SYNC_INSTALL,
