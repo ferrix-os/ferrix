@@ -1636,9 +1636,14 @@ pub(crate) fn frame_pointer() -> u64 {
 }
 
 /// Stop the machine, and QEMU with it, once the console has sent its last line.
+///
+/// QEMU's debug-exit device is the only way off, so QEMU's status is always 33
+/// for a power-off here; real hardware discards the write and is halted.
 pub(crate) fn shutdown() -> ! {
+    crate::console::announce_power_off();
     crate::console::drain();
     cpu::debug_exit();
+    crate::console::announce_power_off_failed();
     halt()
 }
 

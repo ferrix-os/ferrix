@@ -31,6 +31,14 @@ pub(crate) const PANIC_MARKER: &str = "FERRIX-PANIC";
 /// once, and says why, rather than waiting out its timeout.
 pub(crate) const UNCHECKED_MARKER: &str = "FERRIX-BOOT-UNCHECKED";
 
+/// What the kernel prints last before it powers the machine off
+/// (`src/kernel/src/console.rs`, `announce_power_off`), matched as a whole
+/// line. A QEMU that exits by itself without it was not powered off: a triple
+/// fault under `-no-reboot`, or a reset there, ends it as quietly (F-46).
+const POWER_OFF_MARKER: &str = "FERRIX-POWER-OFF";
+/// What the kernel prints when its power-off write returned instead.
+const POWER_OFF_FAILED: &str = "FERRIX-POWER-OFF-FAILED";
+
 /// The option `--reset` puts in the image's `CMDLINE.TXT`.
 pub(crate) const RESET_OPTION: &str = "ferrix.onexit=reset";
 
@@ -1102,18 +1110,78 @@ pub(crate) fn watch_to_power_off(
             )));
         }
     }
-    let code = watched.ended.status.code();
-    // A QEMU asked to stop exits 0 as well, so the status alone would pass a
-    // guest that never powered off.
-    if !watched.ended.powered_off || (code != Some(0) && code != Some(DEBUG_EXIT_SUCCESS)) {
+    if let Some(problem) = power_off_problem(
+        arch,
+        &watched.lines,
+        until,
+        watched.ended.powered_off,
+        watched.ended.status.code(),
+    ) {
         return Err(Error::new(format!(
-            "{arch}: the guest did not power itself off ({}), so what it wrote to /data may \
-             not be committed.\n  Serial output is in {}",
-            watched.ended.status,
+            "{arch}: {problem}, so what it wrote to /data may not be committed.\n  Serial output \
+             is in {}",
             watched.log.display()
         )));
     }
     Ok(watched.lines)
+}
+
+/// Why a run that reached `until` did not end in the kernel's own power-off,
+/// or nothing when it did.
+///
+/// Three things together, since each alone passes something that is not one.
+/// QEMU exited by itself: one asked to stop exits 0 as well. The kernel's
+/// power-off line came after `until` and its failure line did not follow: a
+/// triple fault under `-no-reboot`, or a PSCI reset there, also ends QEMU by
+/// itself with 0 (F-46). And the status is the one the architecture's
+/// power-off gives: 33 from x86-64's debug-exit device, its only way off, and
+/// 0 from PSCI's `SYSTEM_OFF` on Arm.
+fn power_off_problem(
+    arch: Arch,
+    lines: &[String],
+    until: &str,
+    exited_by_itself: bool,
+    code: Option<i32>,
+) -> Option<String> {
+    let after = lines
+        .iter()
+        .position(|line| line.contains(until))
+        .and_then(|at| lines.get(at + 1..))
+        .unwrap_or_default();
+    let announced = after
+        .iter()
+        .position(|line| line.trim() == POWER_OFF_MARKER);
+    if let Some(at) = announced
+        && after
+            .get(at + 1..)
+            .is_some_and(|rest| rest.iter().any(|line| line.trim() == POWER_OFF_FAILED))
+    {
+        return Some(format!(
+            "the kernel's power-off returned ({POWER_OFF_FAILED}), and the machine was left running"
+        ));
+    }
+    let status = code.map_or_else(|| "no status".to_owned(), |code| format!("status {code}"));
+    if !exited_by_itself {
+        return Some(format!(
+            "the guest did not power itself off: QEMU had to be stopped ({status})"
+        ));
+    }
+    if announced.is_none() {
+        return Some(format!(
+            "QEMU exited by itself with {status} after `{until}`, but the kernel never printed \
+             {POWER_OFF_MARKER}: a fault or a reset on the way down, not a power-off"
+        ));
+    }
+    let expected = match arch {
+        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
+        Arch::AArch64 | Arch::Armv7a => 0,
+    };
+    (code != Some(expected)).then(|| {
+        format!(
+            "QEMU exited with {status} after {POWER_OFF_MARKER}, not the {expected} {arch}'s \
+             power-off gives: something else ended the run"
+        )
+    })
 }
 
 /// The hook [`watch_then`] runs at the marker.
@@ -3488,10 +3556,11 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 #[cfg(test)]
 mod tests {
     use super::{
-        Arch, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER, blocks_compatibility_format,
-        cleaning_problem, config_problem, devmgr_problem, entropy_problem, fault_problem,
-        iommu_problem, msi_problem, namespace_problem, parse_qemu_version, queue_problem,
-        remap_problem, send_lines, version_translates, xstate_problem,
+        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER,
+        blocks_compatibility_format, cleaning_problem, config_problem, devmgr_problem,
+        entropy_problem, fault_problem, iommu_problem, msi_problem, namespace_problem,
+        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
+        version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -3612,6 +3681,89 @@ mod tests {
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|line| (*line).to_owned()).collect()
+    }
+
+    /// F-46: only the kernel's own power-off, with the architecture's status,
+    /// passes; a fault or a reset after the marker that ends QEMU by itself
+    /// does not, and neither does a power-off write that returned.
+    #[test]
+    fn only_the_kernels_power_off_is_a_power_off() {
+        let off = lines(&[
+            "boot",
+            SUCCESS_MARKER,
+            "reboot: Power down",
+            POWER_OFF_MARKER,
+        ]);
+        let problem = |arch, lines: &[String], by_itself, code| {
+            power_off_problem(arch, lines, SUCCESS_MARKER, by_itself, code)
+        };
+        assert_eq!(
+            problem(Arch::X86_64, &off, true, Some(33)),
+            None,
+            "x86-64's debug exit"
+        );
+        assert_eq!(
+            problem(Arch::AArch64, &off, true, Some(0)),
+            None,
+            "PSCI SYSTEM_OFF"
+        );
+        assert_eq!(
+            problem(Arch::Armv7a, &off, true, Some(0)),
+            None,
+            "PSCI SYSTEM_OFF"
+        );
+        let crlf = lines(&[SUCCESS_MARKER, "FERRIX-POWER-OFF\r"]);
+        assert_eq!(
+            problem(Arch::Armv7a, &crlf, true, Some(0)),
+            None,
+            "a carriage return"
+        );
+
+        let faulted = lines(&["boot", SUCCESS_MARKER, "reboot: Power down"]);
+        let why = problem(Arch::X86_64, &faulted, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("never printed FERRIX-POWER-OFF"),
+            "a triple fault: {why}"
+        );
+        let why = problem(Arch::AArch64, &faulted, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("never printed FERRIX-POWER-OFF"),
+            "a PSCI reset: {why}"
+        );
+        let before = lines(&[POWER_OFF_MARKER, SUCCESS_MARKER]);
+        assert!(
+            problem(Arch::Armv7a, &before, true, Some(0)).is_some(),
+            "only after the marker"
+        );
+        let quoted = lines(&[SUCCESS_MARKER, "echo FERRIX-POWER-OFF"]);
+        assert!(
+            problem(Arch::Armv7a, &quoted, true, Some(0)).is_some(),
+            "a whole line only"
+        );
+
+        let why = problem(Arch::X86_64, &off, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("not the 33"),
+            "x86-64 exiting 0 after its line: {why}"
+        );
+        assert!(
+            problem(Arch::AArch64, &off, true, Some(33)).is_some(),
+            "Arm exiting 33"
+        );
+        let why = problem(Arch::X86_64, &off, false, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("had to be stopped"),
+            "a QEMU asked to stop: {why}"
+        );
+
+        let returned = lines(&[SUCCESS_MARKER, POWER_OFF_MARKER, POWER_OFF_FAILED]);
+        let why = problem(Arch::AArch64, &returned, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains(POWER_OFF_FAILED),
+            "a power-off that returned: {why}"
+        );
+        let why = problem(Arch::X86_64, &returned, false, None).unwrap_or_default();
+        assert!(why.contains(POWER_OFF_FAILED), "and was halted: {why}");
     }
 
     #[test]
