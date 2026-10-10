@@ -98,8 +98,9 @@ struct Start {
     location: Option<Location>,
     /// Whether devmgr waits for this device's PUBLISHED. Not for a tree
     /// node's: every tree node shares [`TREE_LOCATION`], so one's PUBLISHED
-    /// could end devmgr's wait for another, and a bus host's devices come
-    /// and go long after devmgr stopped waiting for anything.
+    /// could end devmgr's wait for another. And not for a bus host's, tree
+    /// node or PCI function (a node with more than one input function): its
+    /// devices come and go long after devmgr stopped waiting for anything.
     announce: bool,
 }
 
@@ -293,8 +294,9 @@ fn control_create(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errn
 /// # Errors
 ///
 /// [`CreateError::InUse`] when the device already has as many as it has
-/// input functions -- one, but for a USB host, whose driver asks for one per
-/// keyboard or mouse it finds -- and [`CreateError::NoMemory`] when the
+/// input functions -- one, but for a USB host (an STM32 board's node or a PCI
+/// xHCI function), whose driver asks for one per keyboard or mouse it finds
+/// -- and [`CreateError::NoMemory`] when the
 /// channel or the task could not be made.
 pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateError> {
     let (kernel_end, driver_end) = Endpoint::pair().map_err(|_| CreateError::NoMemory)?;
@@ -302,9 +304,15 @@ pub(crate) fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateErro
         return Err(CreateError::InUse);
     }
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    // A bus host's devices are not announced, wherever the host is: devmgr
+    // waits for no PUBLISHED from one, and they come and go for as long as
+    // the machine runs.
     let (location, announce) = match node.location() {
         crate::device::Location::Tree(_) => (Some(TREE_LOCATION), false),
-        _ => (crate::interfaces::block_ring::location_of(node), true),
+        _ => (
+            crate::interfaces::block_ring::location_of(node),
+            node.input_functions() == 1,
+        ),
     };
     STARTING.lock().push(Start {
         id,

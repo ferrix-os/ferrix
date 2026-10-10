@@ -267,8 +267,15 @@ pub const TREE_GS201_DWC3: u16 = 4;
 /// not one the kernel holds. The node's clock, through `device_clock`, says
 /// the controller's kernel clock rate and refuses `CLOCK_SET`.
 pub const TREE_STM32_SDMMC: u16 = 5;
-/// How many input control channels one USB host's node may hold at once.
+/// How many input control channels one USB host's node may hold at once: an
+/// STM32MP15 board's ([`TREE_STM32_USBH`]), or a PCI function whose class is
+/// [`PCI_CLASS_XHCI`].
 pub const USB_INPUT_FUNCTIONS: usize = 8;
+/// [`DeviceInfo::class`] of an xHCI USB host controller: base class 0C
+/// (serial bus), subclass 03 (USB), programming interface 30 (xHCI). Its
+/// driver may make an input control channel for each keyboard or mouse it
+/// finds, up to [`USB_INPUT_FUNCTIONS`].
+pub const PCI_CLASS_XHCI: u32 = 0x000C_0330;
 
 /// What `process_status` writes: whether the process has ended, and how.
 /// Eight bytes, the same on every target.

@@ -73,7 +73,7 @@ use ferrix_bootinfo::{BootView, MemKind, PAGE_SIZE};
 use ferrix_fdt::{GicInterrupt, Trigger as TreeTrigger};
 use ferrix_native_abi::types::{
     APERTURE_BAR_64, APERTURE_NOT_BAR, APERTURE_PREFETCHABLE, APERTURE_WHOLE_PAGES, ApertureInfo,
-    DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceBlock, DeviceInfo,
+    DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceBlock, DeviceInfo, PCI_CLASS_XHCI,
     TREE_GS201_DWC3, TREE_STM32_USBH, USB_INPUT_FUNCTIONS,
 };
 use ferrix_pci::Address;
@@ -1383,9 +1383,23 @@ impl DeviceNode {
     /// How many input control channels the device may hold at once: one
     /// for an input device, and one per keyboard or mouse for a USB host,
     /// whose driver learns what is on its bus only as it enumerates it.
-    pub(crate) const fn input_functions(&self) -> usize {
+    ///
+    /// A USB host is an STM32 board's node by its binding, or a PCI function
+    /// whose class code, as enumeration read it, is exactly xHCI's
+    /// ([`PCI_CLASS_XHCI`]). The class is the function's own claim, and all a
+    /// function that lies about it gains is these claims on its own node,
+    /// each of which still takes the node's `MANAGE` handle.
+    pub(crate) fn input_functions(&self) -> usize {
         match self.location {
             Location::Tree(_) if self.binding == TREE_STM32_USBH => USB_INPUT_FUNCTIONS,
+            Location::Pci(_)
+                if self
+                    .pci
+                    .as_ref()
+                    .is_some_and(|function| function.class == PCI_CLASS_XHCI) =>
+            {
+                USB_INPUT_FUNCTIONS
+            }
             _ => 1,
         }
     }
@@ -2302,6 +2316,7 @@ pub(crate) fn publish<'f>(
         check::check_node(node, reserved, &mut report)?;
     }
     check::check_exclusive(&nodes)?;
+    check::check_input_functions()?;
 
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());
