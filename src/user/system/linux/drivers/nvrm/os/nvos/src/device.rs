@@ -472,7 +472,20 @@ struct Isr {
     argument: *mut c_void,
 }
 
-/// The interrupt thread: wait, handle, acknowledge.
+/// The interrupt thread: wait, acknowledge, handle.
+///
+/// Acknowledged before the handler runs, not after it. The vector is an
+/// edge-triggered MSI, which the kernel coalesces: a message that arrives
+/// while the line is pending queues nothing, and the acknowledgement then
+/// clears pending (`object/interrupt.rs` in the kernel). Acknowledging after
+/// the handler therefore dropped every message the GPU raised between RM's
+/// re-arm of its MSI, which is the top half's last act, and the
+/// acknowledgement -- and the GPU sends no further message until it is
+/// re-armed, which only the top half does. One such message ended the
+/// card's interrupts for the rest of the boot: no semaphore-surface
+/// callback (every waiting fence ran to its 5 s deadline), no stall
+/// interrupt. Acknowledged first, a message that arrives while the handler
+/// runs queues a packet of its own and the handler runs again for it.
 extern "C" fn isr_thread(isr: *mut c_void) {
     // SAFETY: `nvos_interrupt_start` passes a malloc'd `Isr` and gives it
     // up to this thread.
@@ -485,11 +498,11 @@ extern "C" fn isr_thread(isr: *mut c_void) {
     loop {
         match isr.port.wait(Deadline::Never) {
             Ok(packet) if packet.kind == PACKET_INTERRUPT => {
-                (isr.handler)(isr.argument);
                 if let Err(why) = isr.interrupt.ack() {
                     say!("interrupt_ack refused: {why:?}; the interrupt thread stops");
                     return;
                 }
+                (isr.handler)(isr.argument);
             }
             Ok(_) => {}
             Err(why) => {
@@ -501,8 +514,8 @@ extern "C" fn isr_thread(isr: *mut c_void) {
 }
 
 /// Claim the device's interrupt `index` (N0b's MSI on the 3060), bind it
-/// to a port, and start a thread that calls `handler(argument)` for each
-/// delivery and then acknowledges it. `NV_OK`, or why not.
+/// to a port, and start a thread that acknowledges each delivery and then
+/// calls `handler(argument)` for it. `NV_OK`, or why not.
 #[unsafe(no_mangle)]
 pub extern "C" fn nvos_interrupt_start(
     index: u32,
