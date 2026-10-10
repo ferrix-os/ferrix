@@ -2315,6 +2315,7 @@ fn qemu_command(
     attach_rng(&mut command, arch);
     attach_display(&mut command, arch, args, &binary);
     attach_asked_for(&mut command, arch, args, &binary);
+    attach_usb(&mut command, arch, args);
     attach_test_disk(&mut command, arch)?;
     attach_btrfs_disk(&mut command, arch)?;
     attach_install_disks(&mut command, arch, image, args);
@@ -2751,6 +2752,52 @@ fn report_network(network: &Network) {
 /// `bootindex`: the first sector holds no partition table and no filesystem,
 /// so firmware that looks at the disk finds nothing to boot and goes on to the
 /// image.
+/// `test-usb`'s bus: a `qemu-xhci` controller, a hub on its first port with a
+/// keyboard behind it, a mouse on its second, and a memory stick on its
+/// third. Emulated devices only: nothing of the host's is ever
+/// attached.
+fn attach_usb(command: &mut Command, arch: Arch, args: &Args) {
+    let Some(stick) = &args.usb else {
+        return;
+    };
+    println!(
+        "  {arch}: qemu-xhci with a hub, a keyboard behind it, a mouse, and {} as a stick",
+        display(stick)
+    );
+    // Each of the controller's four sockets is a USB 3 root port (1 to 4)
+    // and a USB 2 one (5 to 8), and a device shows on the one its speed
+    // takes: the hub and the mouse at full speed on ports 5 and 6, the stick
+    // at SuperSpeed on port 3.
+    let _ = command.args(["-device", &format!("qemu-xhci,id={USB_BUS}")]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-hub,bus={USB_BUS}.0,port=1,id=usbhub"),
+    ]);
+    let _ = command.args(["-device", &usb_keyboard(USB_KEYBOARD_ID)]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-mouse,bus={USB_BUS}.0,port=2,id=usbmouse"),
+    ]);
+    let _ = command.args([
+        "-drive",
+        &format!("file={},if=none,format=raw,id=usbstick", display(stick)),
+    ]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-storage,bus={USB_BUS}.0,port=3,drive=usbstick,id=usbdisk"),
+    ]);
+}
+
+/// The xHCI controller's id on QEMU's command line.
+const USB_BUS: &str = "xhci";
+/// The id of the keyboard the boot starts with.
+pub(crate) const USB_KEYBOARD_ID: &str = "usbkbd";
+
+/// A `usb-kbd` behind the hub, as `-device` and QMP's `device_add` take it.
+pub(crate) fn usb_keyboard(id: &str) -> String {
+    format!("usb-kbd,bus={USB_BUS}.0,port=1.1,id={id}")
+}
+
 fn attach_test_disk(command: &mut Command, arch: Arch) -> Result<()> {
     let disk = test_disk::ensure()?;
     println!(
