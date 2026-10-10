@@ -22,7 +22,7 @@ use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 use ferrix_sync::IrqControl;
 
 use super::super::cpu;
-use super::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, debug_hook};
+use super::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
 use crate::console::println;
 use crate::sync::SpinLock;
 
@@ -61,6 +61,70 @@ const NMI_PATIENCE_NANOS: u64 = 1_000_000_000;
 /// status, or why it has none. `None` while it runs.
 static WINDOW: SpinLock<Option<Result<i32, &'static str>>> = SpinLock::new(None);
 
+/// Whether the window check's program is [`HIGH_GS_PROGRAM`]: read by the
+/// pinned task, which takes no argument but its processor.
+static WINDOW_HIGH_GS: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The `GS` base the two programs below give themselves: the highest user
+/// page. Its upper half is not zero, so the paranoid stub's sign test reads
+/// a word a base below 4 GiB never gave it, and nothing is mapped there, so
+/// a handler that ran on it as its per-CPU record would fault.
+const HIGH_GS_BASE: u64 = 0x0000_7fff_ffff_f000;
+
+/// What [`HIGH_GS_PROGRAM`] exits with.
+const HIGH_GS_STATUS: i32 = 43;
+
+/// A program that sets its `GS` base to [`HIGH_GS_BASE`] with
+/// `arch_prctl(ARCH_SET_GS)`, makes two more calls and exits with
+/// [`HIGH_GS_STATUS`], or with 9 if the base was refused: the window check's
+/// program with a base a program chose.
+///
+/// ```text
+///   movl $158, %eax ; movl $0x1001, %edi ; movabsq $0x00007ffffffff000, %rsi
+///   syscall ; testq %rax, %rax ; jne 1f
+///   movl $39, %eax ; syscall
+///   movl $39, %eax ; syscall
+///   movl $231, %eax ; movl $43, %edi ; syscall
+///   1: movl $231, %eax ; movl $9, %edi ; syscall
+/// ```
+const HIGH_GS_PROGRAM: &[u8] = &[
+    0xb8, 0x9e, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x10, 0x00, 0x00, 0x48, 0xbe, 0x00, 0xf0, 0xff, 0xff,
+    0xff, 0x7f, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x85, 0xc0, 0x75, 0x1a, 0xb8, 0x27, 0x00, 0x00, 0x00,
+    0x0f, 0x05, 0xb8, 0x27, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0xbf, 0x2b,
+    0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x0f,
+    0x05,
+];
+
+/// Where [`SPIN_PROGRAM`] maps the word it waits on.
+const SPIN_WORD: u64 = 0x5200_0000;
+
+/// What [`SPIN_PROGRAM`] exits with.
+const SPIN_STATUS: i32 = 44;
+
+/// A program that sets its `GS` base to [`HIGH_GS_BASE`], maps a page at
+/// [`SPIN_WORD`] and spins in ring 3 until the word there is not zero, then
+/// exits with [`SPIN_STATUS`]; 9 if a call failed. What an NMI is sent into.
+///
+/// ```text
+///   movl $158, %eax ; movl $0x1001, %edi ; movabsq $0x00007ffffffff000, %rsi
+///   syscall ; testq %rax, %rax ; jne 1f
+///   movl $0x52000000, %edi ; movl $4096, %esi ; movl $3, %edx ; movl $0x32, %r10d
+///   movq $-1, %r8 ; xorl %r9d, %r9d ; movl $9, %eax
+///   syscall ; cmpq $0x52000000, %rax ; jne 1f
+///   2: pause ; cmpl $0, (%rax) ; je 2b
+///   movl $231, %eax ; movl $44, %edi ; syscall
+///   1: movl $231, %eax ; movl $9, %edi ; syscall
+/// ```
+const SPIN_PROGRAM: &[u8] = &[
+    0xb8, 0x9e, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x10, 0x00, 0x00, 0x48, 0xbe, 0x00, 0xf0, 0xff, 0xff,
+    0xff, 0x7f, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x85, 0xc0, 0x75, 0x41, 0xbf, 0x00, 0x00, 0x00, 0x52,
+    0xbe, 0x00, 0x10, 0x00, 0x00, 0xba, 0x03, 0x00, 0x00, 0x00, 0x41, 0xba, 0x32, 0x00, 0x00, 0x00,
+    0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x45, 0x31, 0xc9, 0xb8, 0x09, 0x00, 0x00, 0x00, 0x0f,
+    0x05, 0x48, 0x3d, 0x00, 0x00, 0x00, 0x52, 0x75, 0x13, 0xf3, 0x90, 0x83, 0x38, 0x00, 0x74, 0xf9,
+    0xb8, 0xe7, 0x00, 0x00, 0x00, 0xbf, 0x2c, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0xe7, 0x00, 0x00,
+    0x00, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x0f, 0x05,
+];
+
 /// The boot checks for these entries, each of which halts the machine or
 /// fails if the entry is not there.
 ///
@@ -70,7 +134,9 @@ static WINDOW: SpinLock<Option<Result<i32, &'static str>>> = SpinLock::new(None)
 /// Verifies: `L.x86_64.80`
 pub(crate) fn run() -> Result<(), &'static str> {
     let nmis = check_nmi()?;
-    let (entries, returns, status) = check_system_call_window()?;
+    let (entries, returns, status) = check_system_call_window(false)?;
+    let (high_entries, high_returns, _) = check_system_call_window(true)?;
+    let user_nmis = check_nmi_in_a_program()?;
     let hook_runs = check_breakpoints_do_not_nest()?;
     println!(
         "  nmi      {nmis} NMI sent to this processor with interrupts masked was taken on its \
@@ -81,6 +147,18 @@ pub(crate) fn run() -> Result<(), &'static str> {
          sysretq, each on the program's stack, found the kernel's GS; the program exited \
          with {status}"
     );
+    match user_nmis {
+        Some(taken) => println!(
+            "  debug    beside a program whose GS base is {HIGH_GS_BASE:#x}: {high_entries} \
+             breakpoints on the system call entry and {high_returns} on its sysretq found the \
+             kernel's GS, and {taken} NMIs taken in the program on another processor did"
+        ),
+        None => println!(
+            "  debug    beside a program whose GS base is {HIGH_GS_BASE:#x}: {high_entries} \
+             breakpoints on the system call entry and {high_returns} on its sysretq found the \
+             kernel's GS; one processor, so no NMI was sent into the program"
+        ),
+    }
     println!(
         "  debug    a breakpoint on code the #DB handler runs did not fire inside it: \
          {hook_runs} handler runs, one stack"
@@ -128,7 +206,8 @@ fn check_nmi() -> Result<u64, &'static str> {
 /// registers are per processor, so the program and the task that arms them
 /// are pinned to one. Returns the hits at each, and the program's status.
 /// Verifies: `L.x86_64.25`, `L.x86_64.52`, `L.x86_64.87`
-fn check_system_call_window() -> Result<(u64, u64, i32), &'static str> {
+fn check_system_call_window(high_gs: bool) -> Result<(u64, u64, i32), &'static str> {
+    WINDOW_HIGH_GS.store(high_gs, Ordering::Release);
     let cpu = crate::smp::this_cpu()
         .ok_or("the per-CPU register is not installed")?
         .logical;
@@ -171,7 +250,12 @@ fn check_system_call_window() -> Result<(u64, u64, i32), &'static str> {
     if entries < 2 || returns < 1 {
         return Err("a breakpoint in the system call window did not fire");
     }
-    if status != super::super::USER_TEST_STATUS {
+    let expected = if high_gs {
+        HIGH_GS_STATUS
+    } else {
+        super::super::USER_TEST_STATUS
+    };
+    if status != expected {
         return Err("the program with breakpoints in its system calls exited wrongly");
     }
     Ok((entries, returns, status))
@@ -192,7 +276,11 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
         ferrix_elf::Class::Elf64,
         super::super::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
-        super::super::USER_TEST_PROGRAM,
+        if WINDOW_HIGH_GS.load(Ordering::Acquire) {
+            HIGH_GS_PROGRAM
+        } else {
+            super::super::USER_TEST_PROGRAM
+        },
     );
     let program = Executable {
         image: crate::syscall::load::Source::Bytes(&file),
@@ -241,6 +329,84 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
         return Err("a program ran with a per-CPU record as its GS base");
     }
     status.ok_or("the system call window program could not be started")
+}
+
+/// An NMI taken while a program whose `GS` base is [`HIGH_GS_BASE`] runs in
+/// ring 3 is survived, with the kernel's `GS`: the entry reads a base whose
+/// upper half is not zero, takes it for the program's by its sign, and
+/// swaps. [`SPIN_PROGRAM`] is pinned to another processor and NMIs are sent
+/// there until three have been taken from ring 3; then its word is written,
+/// and it must exit with its status. Answers the NMIs taken in it, or `None`
+/// on a machine with one processor.
+///
+/// Verifies: `L.x86_64.24`
+fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
+    use crate::syscall::exec::{Executable, load_executable};
+
+    let here = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let Some(topology) = crate::smp::topology() else {
+        return Ok(None);
+    };
+    let Some(other) = topology.cpus().iter().rev().find(|cpu| cpu.logical != here) else {
+        return Ok(None);
+    };
+    let file = crate::syscall::image::build_with(
+        ferrix_elf::Class::Elf64,
+        super::super::ARCH.elf_machine(),
+        crate::syscall::image::Shape::Good,
+        SPIN_PROGRAM,
+    );
+    let program = Executable {
+        image: crate::syscall::load::Source::Bytes(&file),
+        exe: b"/nmi-spin",
+        exec_fn: b"/nmi-spin",
+        set_ids: crate::fs::SetIds::NONE,
+        interpreter: None,
+    };
+    let process = load_executable(
+        program,
+        &[b"/nmi-spin"],
+        &[],
+        [0x5a; ferrix_ustack::RANDOM_BYTES],
+    )
+    .map_err(|_| "the NMI check's program could not be loaded")?;
+    let before = USER_NMIS.load(Ordering::Relaxed);
+    let foreign = FOREIGN_GS.load(Ordering::Relaxed);
+    let task = crate::syscall::process::start_on(&process, Some(other.logical))
+        .map_err(|_| "the NMI check's program could not be started")?;
+    let deadline = crate::timer::now_nanos().saturating_add(WINDOW_PATIENCE_NANOS);
+    let mut sent = Ok(());
+    while sent.is_ok()
+        && USER_NMIS.load(Ordering::Relaxed).wrapping_sub(before) < 3
+        && crate::timer::now_nanos() < deadline
+    {
+        crate::sched::sleep_for(1_000_000);
+        sent = super::super::apic::send_nmi_to(other.hardware_id as u32);
+    }
+    let taken = USER_NMIS.load(Ordering::Relaxed).wrapping_sub(before);
+    // Let it go, whatever happened: its word, once its page is mapped.
+    let mut released = false;
+    while !released && crate::timer::now_nanos() < deadline {
+        released = crate::syscall::uaccess::put_u32(process.space(), SPIN_WORD, 1).is_ok();
+        if !released {
+            crate::sched::sleep_for(1_000_000);
+        }
+    }
+    let status = process.wait_for_exit(deadline);
+    drop(task);
+    sent?;
+    if FOREIGN_GS.load(Ordering::Relaxed) != foreign {
+        return Err("an NMI taken in a program with a high GS base ran with that base as GS");
+    }
+    if taken < 3 {
+        return Err("NMIs sent to a processor running a program never arrived in ring 3");
+    }
+    if status != Some(SPIN_STATUS) {
+        return Err("the program NMIs were sent into did not exit with its status");
+    }
+    Ok(Some(taken))
 }
 
 /// Whether `address` is one of the processors' per-CPU records.

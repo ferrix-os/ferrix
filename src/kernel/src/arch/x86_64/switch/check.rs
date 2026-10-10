@@ -55,6 +55,15 @@ pub(crate) struct Report {
     pub(crate) kept: u32,
     /// Times two programs traded the processor with their own `FS` bases.
     pub(crate) traded: u32,
+    /// The same, with their own `GS` bases, set by `ARCH_SET_GS`.
+    pub(crate) traded_gs: u32,
+    /// Processors whose bring-up read `CR4.FSGSBASE` clear: all of them.
+    pub(crate) base_processors: usize,
+    /// Whether the processor has `FSGSBASE`, so that the clear was seen to
+    /// clear a set bit.
+    pub(crate) base_clear_seen: bool,
+    /// Processors on which a program's `WRGSBASE` was `SIGILL`.
+    pub(crate) base_refused_on: usize,
     /// Whether the processor saves with `XSAVE`, without which the vector
     /// cases are not run: the reset is an `XRSTOR` of an empty header.
     pub(crate) xsave: bool,
@@ -625,6 +634,12 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         }
     }
     report.traded = check_programs_trade_their_fs_bases()?;
+    report.traded_gs = check_programs_trade_their_gs_bases()?;
+    (
+        report.base_processors,
+        report.base_clear_seen,
+        report.base_refused_on,
+    ) = check_no_program_writes_a_base()?;
     check_a_cleared_base_comes_back_and_leaks_nowhere()?;
     Ok(report)
 }
@@ -1131,6 +1146,33 @@ fn check_programs_trade_their_fs_bases() -> Result<u32, &'static str> {
     Ok(FS_ROUNDS * 2)
 }
 
+/// The same trade with `GS` bases, each set with `arch_prctl(ARCH_SET_GS)`:
+/// the call writes the base to the task's record beside the shadow MSR, and
+/// the switch writes the incoming task's from its record. A call that
+/// wrote the MSR alone would leave the record zero, and the first switch
+/// back to the program would hand it a `GS` base of zero, where nothing is
+/// mapped.
+///
+/// Verifies: `L.x86_64.9`
+fn check_programs_trade_their_gs_bases() -> Result<u32, &'static str> {
+    let first = gs_program(BASE_LOW, 0x9999_AAAA_BBBB_CCCC)?;
+    let second = gs_program(BASE_HIGH, 0xDDDD_EEEE_FFFF_0001)?;
+    let [first, second] = run_fs_pair(&first, &second)?;
+    for status in [first, second] {
+        match status {
+            Some(0) => {}
+            Some(8 | 9) => return Err("a GS program's mmap or arch_prctl failed"),
+            Some(_) => {
+                return Err(
+                    "two programs trading one processor did not each read their own GS base",
+                );
+            }
+            None => return Err("a GS program never ended"),
+        }
+    }
+    Ok(FS_ROUNDS * 2)
+}
+
 /// A program that loads `USER_DS` and then a null selector into `FS` --
 /// which leaves the base the descriptor's or cleared, by vendor -- gets its
 /// recorded base back after a switch (Linux's rule); and a second program,
@@ -1201,6 +1243,104 @@ fn fs_program(mode: u8, base: u64, magic: u64) -> Result<Arc<Process>, &'static 
     patch(&mut code, 24, &(gdt::USER_DATA | 3).to_le_bytes())?;
     patch(&mut code, 28, &FS_ROUNDS.to_le_bytes())?;
     load(b"/fs-base", &code)
+}
+
+/// `wrgsbase` with a kernel address, in ring 3: `#UD`, vector 6, because
+/// `CR4.FSGSBASE` is clear (`cpu::forbid_user_base_writes`), whether or not
+/// the processor has the instruction. A program that got past it exits 97.
+///
+/// ```text
+///   movabsq $0xffff800000000000, %rax
+///   wrgsbase %rax
+///   movl $231, %eax ; movl $97, %edi ; syscall
+/// ```
+const WRGSBASE: &[u8] = &[
+    0x48, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff, 0xff, 0xf3, 0x48, 0x0f, 0xae, 0xd8, 0xb8,
+    0xe7, 0x00, 0x00, 0x00, 0xbf, 0x61, 0x00, 0x00, 0x00, 0x0f, 0x05,
+];
+
+/// What a process ended by `SIGILL` is waited for with.
+const KILLED_BY_SIGILL: i32 = 128 + ferrix_linux_abi::types::SIGILL as i32;
+
+/// No program writes its `GS` base without the call that can refuse the
+/// address: `CR4.FSGSBASE` read clear at every processor's bring-up; where
+/// the processor has the feature, the bit set here in ring 0 with interrupts
+/// masked is cleared by [`cpu::forbid_user_base_writes`], so the function is
+/// seen to do what it is for and not merely to find firmware's zero; and a
+/// program's `WRGSBASE` with a kernel address is `SIGILL` on this processor
+/// and on the last application processor. Answers the processors counted,
+/// whether the clear was seen, and the processors a program was refused on.
+///
+/// Verifies: `L.x86_64.172`
+fn check_no_program_writes_a_base() -> Result<(usize, bool, usize), &'static str> {
+    use ferrix_sync::IrqControl;
+
+    let count = crate::smp::count();
+    let forbidden = super::super::BASE_WRITES_FORBIDDEN.load(core::sync::atomic::Ordering::Acquire);
+    if forbidden != count {
+        return Err("CR4.FSGSBASE did not read clear at the bring-up of every processor");
+    }
+    let offered = cpu::has_fsgsbase();
+    if offered {
+        let saved = <super::super::Irq as IrqControl>::disable();
+        // SAFETY: (PROBE) the processor has the bit, interrupts are masked,
+        // and the next line clears it before they are opened.
+        unsafe { cpu::permit_user_base_writes_for_check() };
+        let was_set = cpu::read_cr4() & cpu::CR4_FSGSBASE != 0;
+        let cleared = cpu::forbid_user_base_writes();
+        <super::super::Irq as IrqControl>::restore(saved);
+        if !was_set || !cleared {
+            return Err("CR4.FSGSBASE, set for the check, was not cleared again");
+        }
+    }
+    if cpu::read_cr4() & cpu::CR4_FSGSBASE != 0 {
+        return Err("CR4.FSGSBASE is set, so a program can write its GS base without a call");
+    }
+    let here = crate::smp::this_cpu()
+        .ok_or("the per-CPU register is not installed")?
+        .logical;
+    let other = (1..count).rev().find(|&cpu| cpu != here);
+    let mut refused_on = 0;
+    for cpu in core::iter::once(here).chain(other) {
+        let program = load(b"/wrgsbase", WRGSBASE)?;
+        let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+        let task = process::start_on(&program, Some(cpu))
+            .map_err(|_| "the WRGSBASE program could not be started")?;
+        let status = program.wait_for_exit(deadline);
+        drop(task);
+        if status != Some(KILLED_BY_SIGILL) {
+            return Err("a program's WRGSBASE did not end it with SIGILL");
+        }
+        refused_on += 1;
+    }
+    Ok((count, offered, refused_on))
+}
+
+/// Where [`FS_PROGRAM`]'s `read_fs` has its `FS` prefix, and where its
+/// `set_fs` has the low byte of `ARCH_SET_FS`: the two bytes that make it a
+/// `GS` program.
+const FS_PREFIX_AT: usize = 0xe9;
+/// See [`FS_PREFIX_AT`].
+const SET_FS_AT: usize = 0x102;
+
+/// [`FS_PROGRAM`] in mode `t`, reading through `%gs:0` a base it set with
+/// `ARCH_SET_GS` (`0x1001`): the same program with a `GS` prefix (`0x65`)
+/// for its `FS` one and the other request's number.
+fn gs_program(base: u64, magic: u64) -> Result<Arc<Process>, &'static str> {
+    let mut code = FS_PROGRAM.to_vec();
+    if code.get(4) != Some(&b'?')
+        || code.get(FS_PREFIX_AT) != Some(&0x64)
+        || code.get(SET_FS_AT..SET_FS_AT + 2) != Some(&[0x02, 0x10])
+    {
+        return Err("the FS program's FS prefix or request is not where its layout says");
+    }
+    patch(&mut code, 4, b"t")?;
+    patch(&mut code, 8, &base.to_le_bytes())?;
+    patch(&mut code, 16, &magic.to_le_bytes())?;
+    patch(&mut code, 28, &FS_ROUNDS.to_le_bytes())?;
+    patch(&mut code, FS_PREFIX_AT, &[0x65])?;
+    patch(&mut code, SET_FS_AT, &[0x01])?;
+    load(b"/gs-base", &code)
 }
 
 // ---------------------------------------------------------------------------
@@ -1741,8 +1881,8 @@ fn under_tcg() -> bool {
 /// patched at 24 there, makes it its `FS` base by `arch_prctl(ARCH_SET_FS)`,
 /// and after each yield exits 2 or 3 unless `FS` and `GS` read 0, 4 unless
 /// `%fs:0` is its word, and 5 unless `%gs:0x400100` is its own word at
-/// `0x400100` -- which only a `GS` base of 0, its recorded one, gives (Ferrix
-/// has no `ARCH_SET_GS`, the consultant's K2); `T` installs a flat 32-bit
+/// `0x400100` -- which only a `GS` base of 0, its recorded one, gives (it
+/// sets none; the consultant's K2); `T` installs a flat 32-bit
 /// data descriptor based at the data segment through `set_thread_area` and
 /// before each yield loads its selector into `FS` and `GS`, then 0; `C` and
 /// `G` yield, then far-return into compatibility mode and read through `FS`

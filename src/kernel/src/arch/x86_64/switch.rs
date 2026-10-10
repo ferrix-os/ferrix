@@ -329,6 +329,12 @@ impl UserState {
         self.thread_pointer = pointer;
     }
 
+    /// Give the program `base` as its `GS` base in this record, beside the
+    /// shadow MSR the caller writes: what `arch_prctl(ARCH_SET_GS)` does.
+    pub(super) const fn set_gs_base(&mut self, base: u64) {
+        self.gs_base = base;
+    }
+
     /// Put `descriptor` in thread-local slot `index` of this saved state: a
     /// 32-bit program's `CLONE_SETTLS`, which names a `user_desc` for the
     /// child rather than a base (`docs/I386.md` §3.5). The child's `%gs`

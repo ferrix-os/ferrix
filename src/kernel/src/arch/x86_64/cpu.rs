@@ -80,6 +80,10 @@ const CR4_UMIP: u64 = 1 << 11;
 /// unless `EFLAGS.AC` is set.
 const CR4_SMAP: u64 = 1 << 21;
 
+/// `CR4.FSGSBASE` — `RDFSBASE`, `RDGSBASE`, `WRFSBASE` and `WRGSBASE` may run,
+/// in ring 3 too. Kept clear ([`forbid_user_base_writes`]).
+pub(crate) const CR4_FSGSBASE: u64 = 1 << 16;
+
 /// `CR4.OSXSAVE` — `XSAVE`, `XRSTOR` and `XSETBV` may run, and `CPUID` tells
 /// a program so (leaf 1, `ECX` bit 27), which is what it reads before it
 /// asks `XGETBV` whether it may use AVX.
@@ -354,6 +358,49 @@ pub(crate) fn enable_user_access_protection() -> (bool, bool) {
     SMAP_ON.store(smap, Ordering::Relaxed);
 
     (smep, smap)
+}
+
+/// Clear `CR4.FSGSBASE` on this processor, whatever it held, and say whether
+/// it reads clear.
+///
+/// With it set, `WRGSBASE` in ring 3 writes any canonical address to
+/// `GS_BASE`, a kernel one included, with no call for the kernel to refuse.
+/// The paranoid entries tell the kernel's `GS` from a program's by the base's
+/// sign bit (`super::paranoid`), so a program holding an upper-half base
+/// would run an NMI's or a breakpoint's handler on its own "per-CPU
+/// record". `arch_prctl(ARCH_SET_GS)` is the way to set the base, and it
+/// refuses such an address. Nothing in the kernel uses the four
+/// instructions, and `AT_HWCAP2` does not offer them (`user_hwcaps`).
+///
+/// Every processor runs this at its bring-up: the boot processor before
+/// its `CR4` is snapshotted for the others, and each of those after it has
+/// taken the snapshot, so that none trusts another's register.
+pub(crate) fn forbid_user_base_writes() -> bool {
+    // SAFETY: (PROTECT) clearing the bit is legal on every processor, and
+    // changes only whether four instructions the kernel never executes run.
+    unsafe { write_cr4(read_cr4() & !CR4_FSGSBASE) };
+    read_cr4() & CR4_FSGSBASE == 0
+}
+
+/// Whether the processor has `FSGSBASE` to enable: `CPUID.(EAX=7,ECX=0):EBX`
+/// bit 0. Where it has not, setting the `CR4` bit is `#GP`.
+pub(crate) fn has_fsgsbase() -> bool {
+    use core::arch::x86_64::{__cpuid, __cpuid_count};
+
+    __cpuid(0).eax >= 7 && __cpuid_count(7, 0).ebx & 1 != 0
+}
+
+/// Set `CR4.FSGSBASE`, for the check that [`forbid_user_base_writes`] clears
+/// it and for nothing else.
+///
+/// # Safety
+///
+/// (PROBE) Only where [`has_fsgsbase`], with interrupts masked, and with
+/// [`forbid_user_base_writes`] called before they are opened: no program
+/// may run on this processor while the bit is set.
+pub(crate) unsafe fn permit_user_base_writes_for_check() {
+    // SAFETY: (PROBE) the caller's guarantee; the bit is one the processor has.
+    unsafe { write_cr4(read_cr4() | CR4_FSGSBASE) };
 }
 
 /// Keep the descriptor tables' addresses from ring 3, where the processor

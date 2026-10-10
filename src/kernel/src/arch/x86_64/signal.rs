@@ -33,7 +33,7 @@
 mod compat;
 
 use ferrix_bootinfo::is_user_address;
-use ferrix_linux_abi::types::SA_RESTORER;
+use ferrix_linux_abi::types::{SA_RESTORER, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
 
 use super::cpu;
 use super::gdt;
@@ -67,6 +67,20 @@ const EFLAGS: usize = 136;
 const CS: usize = 144;
 /// `sigcontext.ss`, a 16-bit selector where Linux used to have padding.
 const SS: usize = 150;
+/// `sigcontext.err`: a fault's error code.
+const ERR: usize = 152;
+/// `sigcontext.trapno`: a fault's vector.
+const TRAPNO: usize = 160;
+/// `sigcontext.cr2`: the address of a page fault.
+const CR2: usize = 176;
+/// The signals an exception raises.
+const FAULT_SIGNALS: [u32; 5] = [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP];
+/// Where `si_code` is in a `siginfo`.
+const SI_CODE: usize = 8;
+/// Where `si_addr` is in a `siginfo` for a fault.
+const SI_ADDR: usize = 16;
+/// The page fault's vector.
+const PAGE_FAULT: u64 = 14;
 /// `sigcontext.oldmask`: the saved mask's first word, for old readers.
 const OLDMASK: usize = 168;
 /// `sigcontext.fpstate`: where the `FXSAVE` area is, or zero for none.
@@ -433,6 +447,43 @@ fn place(stack: u64) -> Result<(u64, u64), BadFrame> {
     Ok((fpstate, frame_at))
 }
 
+/// Put what raised the signal in `frame`: the `siginfo`, and for a signal a
+/// fault raised its vector and error code in the `sigcontext`, which a
+/// handler for `SIGSEGV` reads to tell a page fault from a protection fault
+/// and a write from a read, and a page fault's address.
+///
+/// A fault raised the signal when the interrupted context was entered by an
+/// exception, the signal is one of the five an exception raises (`SIGSEGV`,
+/// `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP`), and the `siginfo`'s code is
+/// above zero, which a signal a program sent never has. Any other signal
+/// delivered on the way back from a page fault the kernel resolved --
+/// `SIGCHLD` or `SIGIO`, whose codes are above zero too -- is not the
+/// fault's, and its three fields stay zero, as the frame starts. The
+/// address is the `siginfo`'s: the processor's `CR2` may be a later fault's
+/// by now.
+fn put_cause(
+    frame: &mut FrameBytes,
+    context: &UserContext,
+    request: &FrameRequest,
+) -> Result<(), BadFrame> {
+    frame.put(INFO, &request.info)?;
+    let code = request
+        .info
+        .get(SI_CODE..SI_CODE + 4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map_or(0, i32::from_le_bytes);
+    if context.0.vector >= 32 || code <= 0 || !FAULT_SIGNALS.contains(&request.signal) {
+        return Ok(());
+    }
+    frame.put_u64(MCONTEXT + TRAPNO, context.0.vector)?;
+    frame.put_u64(MCONTEXT + ERR, context.0.error_code)?;
+    if context.0.vector == PAGE_FAULT {
+        let address = request.info.get(SI_ADDR..SI_ADDR + 8).ok_or(BadFrame)?;
+        frame.put(MCONTEXT + CR2, address)?;
+    }
+    Ok(())
+}
+
 /// Write `request`'s frame below its stack and point `context` at the handler:
 /// `RDI` the signal, `RSI` the `siginfo`, `RDX` the `ucontext`, and the stack
 /// pointer at `pretcode`, as if the handler had just been called from it.
@@ -462,7 +513,7 @@ pub(crate) fn setup_signal_frame(
     frame.put_u64(MCONTEXT + OLDMASK, request.mask)?;
     frame.put_u64(MCONTEXT + FPSTATE, fpstate)?;
     frame.put_u64(UC_SIGMASK, request.mask)?;
-    frame.put(INFO, &request.info)?;
+    put_cause(&mut frame, context, request)?;
     frame.write(space, frame_at)?;
 
     let regs = &mut context.0;

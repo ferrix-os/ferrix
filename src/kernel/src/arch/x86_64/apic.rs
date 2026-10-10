@@ -537,6 +537,14 @@ pub(crate) fn send_nmi_to_self() -> Result<(), &'static str> {
     send(id(), ICR_NMI | ICR_ASSERT)
 }
 
+/// Raise a non-maskable interrupt on processor `apic_id`.
+///
+/// For the boot check that an NMI taken in a program is survived, whatever
+/// `GS` base the program holds (`paranoid::check`).
+pub(crate) fn send_nmi_to(apic_id: u32) -> Result<(), &'static str> {
+    send(apic_id, ICR_NMI | ICR_ASSERT)
+}
+
 /// Send `command` to the local APIC `apic_id` and wait for it to be accepted.
 fn send(apic_id: u32, command: u32) -> Result<(), &'static str> {
     if apic_id > 0xFF {

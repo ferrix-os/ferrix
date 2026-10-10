@@ -59,13 +59,6 @@
       "branch": "softgl-clock",
       "date": "2026-10-10",
       "purpose": "The x86-64 clock under a hypervisor (docs/CLOCK.md): the TSC taken on KVM's word where CPUID reports no invariant TSC, the rate its paravirtual clock states, the time page read whole and given back, and the HPET said aloud with its reason when it is the counter"
-    },
-    {
-      "ids": ["L.x86_64.172-174"],
-      "owner": "wine-m1",
-      "branch": "wine-m1-kernel",
-      "date": "2026-10-10",
-      "purpose": "Stage 23 step 1, E1.1 (docs/WINE.md; consultant wine-m1-cert, ledger 2026-10-10 line 668, W1): CR4.FSGSBASE clear on every processor and a ring-3 WRGSBASE refused; ARCH_GET_FS and ARCH_GET_GS writing the calling thread's base; a fault-raised signal's 64-bit sigcontext carrying trapno, err and cr2"
     }
   ]
 }

@@ -187,25 +187,33 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::load_user_gs");
         }
         requirement <'L.x86_64.9'> fsGsBaseTravelsWithTask : ItemLowLevel {
-            doc /* The GS half of 3b (OPAQUE-KERNEL.md §9.8), in a row of its own
-                and unverified (the consultant's condition (a), ledger 387): no
-                call sets a 64-bit program's GS base (arch_prctl answers ARCH_SET_GS
-                with EINVAL), so every record is zero and no case can tell a written
-                zero from a kept one; on the gate host a null selector load clears
-                the base besides. The FS half is L.x86_64.61 and L.x86_64.158. */
+            doc /* The GS half of 3b (OPAQUE-KERNEL.md §9.8), in a row of its own.
+                Until arch_prctl answered ARCH_SET_GS no call set a 64-bit
+                program's GS base, every record was zero, and the row stood
+                unverified (the consultant's condition (a), ledger 387). The call
+                sets one now (docs/WINE.md §3), so two programs with different
+                bases tell a written base from a kept one. The FS half is
+                L.x86_64.61 and L.x86_64.158. */
             attribute :>> statement = "A task's program GS base shall be its
-                UserState's record, zeroed by execve beside the MSR and never read
-                back at a switch, and restore_user_state shall write it at every
-                switch to a task with user state whose GS selector is null.";
-            attribute :>> criterion = "A 64-bit program with a null GS selector,
-                pinned to one processor with an i386 program whose GS selector is a
-                thread-local entry, reads its recorded GS base through %gs after
-                each of N sched_yields: 0 foreign reads.";
+                UserState's record, written by arch_prctl(ARCH_SET_GS) beside the
+                shadow MSR with interrupts masked, zeroed by execve beside the MSR
+                and never read back at a switch, and restore_user_state shall
+                write it at every switch to a task with user state whose GS
+                selector is null.";
+            attribute :>> criterion = "Two 64-bit programs pinned to one processor
+                each set a distinct GS base with ARCH_SET_GS and read their own
+                words through %gs 10,000 times across sched_yield (the `fsbase`
+                line's GS half); with the call writing the MSR and not the record,
+                or with the switch's write of the base removed, a read after a
+                switch faults or reads the other program's word and the check
+                fails by name.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::switch::save_user_state",
                 "arch::x86_64::switch::restore_user_state",
                 "arch::x86_64::switch::load_selectors",
-                "arch::x86_64::switch::UserState::set_bases");
+                "arch::x86_64::switch::UserState::set_bases",
+                "arch::x86_64::switch::UserState::set_gs_base",
+                "arch::x86_64::syscall::arch_prctl");
         }
         requirement <'L.x86_64.10'> fpuStateTravelsWithTask : ItemLowLevel {
             attribute :>> statement = "save_user_state shall save the outgoing
@@ -584,17 +592,22 @@ package FerrixX8664Requirements {
 
         requirement <'L.x86_64.24'> kernelNmiSurvived : ItemLowLevel {
             attribute :>> statement = "ferrix_paranoid_entry shall count an NMI
-                taken in the kernel and return from it, with note_gs finding its GS
-                naming a processor's record, and send and issue shall deliver the
-                NMI a processor sends to its own APIC ID.";
+                taken in the kernel or in a program and return from it, with
+                note_gs finding its GS naming a processor's record whatever GS
+                base the program holds, and send and issue shall deliver the NMI
+                a processor sends to its own APIC ID or to another's.";
             attribute :>> criterion = "An NMI sent to this processor with interrupts
                 masked is accepted, at least one NMI is counted and returned from,
                 and 0 handler runs find a GS naming no processor's record (the `nmi`
-                line).";
+                line). At least 3 NMIs sent to another processor are taken in ring
+                3 of a program there whose GS base is 0x7ffffffff000, 0 with a
+                foreign GS, and the program exits with its status (the second
+                `debug` line).";
             attribute :>> parent = "H.TRAP.6";
             attribute :>> unit = ("arch::x86_64::paranoid::ferrix_paranoid_entry",
                 "arch::x86_64::paranoid::note_gs",
-                "arch::x86_64::apic::id");
+                "arch::x86_64::apic::id",
+                "arch::x86_64::apic::send_nmi_to");
         }
         requirement <'L.x86_64.25'> syscallWindowBreakpointsSurvived : ItemLowLevel {
             attribute :>> statement = "debug shall count a kernel #DB against the
@@ -604,7 +617,10 @@ package FerrixX8664Requirements {
             attribute :>> criterion = "Breakpoints on the SYSCALL stub's swapgs and
                 on its sysretq, while a program writes and exits, fire at least 2
                 and at least 1 times, 0 of them with a foreign GS, and the program
-                exits with its status (the first `debug` line).";
+                exits with its status (the first `debug` line); and again beside
+                a program that first sets its GS base to 0x7ffffffff000, whose
+                upper half the entry's sign test then reads (the second `debug`
+                line).";
             attribute :>> parent = "H.TRAP.6";
             attribute :>> unit = ("arch::x86_64::paranoid::ferrix_paranoid_entry",
                 "arch::x86_64::paranoid::debug",
@@ -899,6 +915,25 @@ package FerrixX8664Requirements {
                 "arch::x86_64::signal::UserContext::set_registers",
                 "arch::x86_64::signal::resume_context");
         }
+        requirement <'L.x86_64.174'> faultInTheSignalContext : ItemLowLevel {
+            doc /* Wine's SIGSEGV handler tells a page fault from every other
+                trap by trapno and a write from a read by err (docs/WINE.md
+                §5). A signal a fault did not raise, delivered on the way back
+                from an exception the kernel resolved, keeps the three zero. */
+            attribute :>> statement = "put_cause shall write the siginfo, and, for a
+                signal a fault raised -- the interrupted context entered by an
+                exception, the signal SIGSEGV, SIGBUS, SIGILL, SIGFPE or SIGTRAP,
+                and the siginfo's code above zero -- the exception's
+                vector in the 64-bit sigcontext's trapno, its error code in err,
+                and a page fault's address, the siginfo's, in cr2; for any other
+                signal the three shall stay zero.";
+            attribute :>> criterion = "A SIGSEGV handler for a write to an unmapped
+                page reads trapno 14, err 6 and the address in cr2 and si_addr and
+                exits 0 (the `sigsegv` line); with the three left zero the
+                program exits 1 and the check fails by name.";
+            attribute :>> parent = "H.TRAP.9";
+            attribute :>> unit = "arch::x86_64::signal::put_cause";
+        }
         requirement <'L.x86_64.43'> nativeForgedFrameRefused : ItemLowLevel {
             attribute :>> statement = "restore_signal_frame shall refuse a 64-bit
                 frame whose RIP or RSP lies outside the user half, and resume a
@@ -1118,14 +1153,59 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::read_gdt");
         }
         requirement <'L.x86_64.60'> archPrctlRefusals : ItemLowLevel {
-            attribute :>> statement = "arch_prctl shall refuse ARCH_SET_FS with an
-                address outside the user half with EPERM, and any other request with
-                EINVAL.";
-            attribute :>> criterion = "A program's ARCH_SET_FS with
-                0xffff800000000000 answers -1 and its ARCH_GET_FS -22, and it exits
-                0 (the `prctl` line).";
+            doc /* ARCH_SET_GS's refusal is half of what the paranoid entries' rule
+                rests on (L.x86_64.25, arch/x86_64/paranoid.rs): a program's GS
+                base never has its sign bit set, so GS_BASE itself says whose it
+                is. The other half is L.x86_64.172. */
+            attribute :>> statement = "arch_prctl shall refuse ARCH_SET_FS and
+                ARCH_SET_GS with an address outside the user half with EPERM,
+                before it writes anything, and any request but ARCH_SET_FS,
+                ARCH_SET_GS, ARCH_GET_FS and ARCH_GET_GS with EINVAL.";
+            attribute :>> criterion = "A program's ARCH_SET_FS and ARCH_SET_GS with
+                0xffff800000000000 and its ARCH_SET_GS with 0x800000000000 answer
+                -1 and its request 0x1000 -22, and it exits 0 (the first `prctl`
+                line). With ARCH_SET_GS's refusal dropped the program exits 2 and
+                the check fails by name.";
             attribute :>> parent = "H.TRAP.1";
             attribute :>> unit = "arch::x86_64::syscall::arch_prctl";
+        }
+        requirement <'L.x86_64.172'> noProgramWritesABaseWithoutTheCall : ItemLowLevel {
+            doc /* The other half of the paranoid entries' rule (L.x86_64.60's
+                note; docs/WINE.md §3). Stated as what a check can read: on the
+                gates' processor model, which has no FSGSBASE, and on a machine
+                whose firmware leaves the bit clear, the boot passes without
+                the clear, so only the processor's state and the clear's effect
+                on a set bit say anything. */
+            attribute :>> statement = "CR4.FSGSBASE shall read clear on every
+                processor from its bring-up on, before any program runs there,
+                forbid_user_base_writes shall clear a set CR4.FSGSBASE, and a
+                program's WRGSBASE shall be an invalid opcode.";
+            attribute :>> criterion = "Every processor's bring-up reads the bit
+                clear and is counted, the count equalling the processors; where
+                CPUID offers FSGSBASE, the bit set in ring 0 with interrupts
+                masked reads clear after forbid_user_base_writes, and where it
+                does not the line says the clear was not seen; a program's
+                WRGSBASE with a kernel address ends it with SIGILL on the
+                checking processor and on the last application processor (the
+                `gsbase` line). On a processor with FSGSBASE, with the clear
+                removed, the check fails by name.";
+            attribute :>> parent = "H.TRAP.6";
+            attribute :>> unit = ("arch::x86_64::cpu::forbid_user_base_writes",
+                "arch::x86_64::cpu::has_fsgsbase",
+                "arch::x86_64::cpu::permit_user_base_writes_for_check");
+        }
+        requirement <'L.x86_64.173'> archPrctlReadsTheBases : ItemLowLevel {
+            attribute :>> statement = "arch_prctl(ARCH_GET_FS) and
+                arch_prctl(ARCH_GET_GS) shall write the calling thread's FS base
+                and GS base to the address given, and answer EFAULT for an
+                address that cannot be written.";
+            attribute :>> criterion = "A program's ARCH_GET_FS and ARCH_GET_GS into
+                address 0 answer -14; the GS base it then sets reads back through
+                %gs:0 and through ARCH_GET_GS, the FS base it sets through
+                ARCH_GET_FS, and the GS base is still the first; it exits 0 (the
+                second `prctl` line).";
+            attribute :>> parent = "H.TRAP.1";
+            attribute :>> unit = "arch::x86_64::syscall::user_base";
         }
         requirement <'L.x86_64.61'> threadPointerPerTask : ItemLowLevel {
             attribute :>> statement = "arch_prctl(ARCH_SET_FS) with a user address

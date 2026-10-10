@@ -4364,6 +4364,11 @@ shape with `FS` and `GS`, and its bases set by `arch_prctl`
   after the bench names the `FS`/`GS` skips the direct switch took.
   Control: the skip removed (the load always taken), which must fire "no
   switch between two programs with null FS and GS left them unloaded".
+- *Since 2026-10-10 the next paragraph's premise is gone:* `arch_prctl`
+  answers `ARCH_SET_GS` (`docs/WINE.md` §3), a 64-bit program's recorded
+  `GS` base may be any user address, and stage 9's `fsbase` line trades two
+  such bases 10,000 times each (L.x86_64.9, verified since). The paragraph
+  stays as what was true when 3c was built.
 - *The `GS` base (the consultant's K2).* Ferrix has no `ARCH_SET_GS`
   (`arch_prctl` answers `ARCH_SET_FS` alone, and `paranoid.rs` rests on
   that), and none is added here: a 64-bit program's recorded `GS` base is

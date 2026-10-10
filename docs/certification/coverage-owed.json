@@ -288,6 +288,14 @@
       ],
       "dropped": "new code; no coverage run has measured it yet.",
       "what": "Measure and test or argue on every architecture: sched/wait.rs LastLook::hold, drop and block (both arms of LAST_LOOK_HOLDS are one constant: argued), sched/mod.rs block_ending_hold and switch_from's ending_hold arm, sched/preempt.rs enable_for_switch and its unmatched arm (argued: reached only when the kernel is stopping, shown by control k2), syscall/native.rs park_for_reply's hold, sched/direct.rs block_parked's two branches, and sched/check.rs a_drained_waiter_survives_its_last_look, last_look_case, a_blocking_look_ends_in_its_switch and blocks_after_its_last_look with their failure arms (reached only on a failed check)."
+    },
+    {
+      "landing": "wine-m1, arch_prctl's GS base, CR4.FSGSBASE cleared on every processor, and the 64-bit sigcontext's fault fields (docs/WINE.md §3; branch wine-m1-kernel; wine-m1's consultant, verdict 2026-10-10 ledger line 668, W6)",
+      "architectures": [
+        "x86_64"
+      ],
+      "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
+      "what": "arch/x86_64/syscall.rs arch_prctl's ARCH_SET_GS arm and its ARCH_GET_FS/ARCH_GET_GS arm, and user_base; cpu.rs forbid_user_base_writes and has_fsgsbase; switch.rs UserState::set_gs_base; signal.rs put_cause; apic.rs send_nmi_to; paranoid.rs's count of NMIs from ring 3; and the check functions that reach them (trap/check.rs check_fault_context, check_arch_prctl_refusals, check_arch_prctl_reads; switch/check.rs check_programs_trade_their_gs_bases, check_no_program_writes_a_base; paranoid/check.rs check_nmi_in_a_program and the window check's second run): measure them on the x86-64 coverage run. Argued, not measured, as hardware the measured machine does not have: cpu.rs permit_user_base_writes_for_check and the check's branch that calls it, reached only where CPUID offers FSGSBASE, which the gates' qemu64 model does not (run once by hand and by gate.sh control with FERRIX_X86_CPU=...,+fsgsbase; docs/BACKLOG.md asks the product owner whether the standing model gains it). arch_prctl's null-selector load in ARCH_SET_GS (held_gs != 0) is reached only by a 64-bit program that loaded a GS selector first, which no check does yet (E1.6). Rows that turned in TRACEABILITY.md: L.x86_64.9 leaves the unverified baseline while its x86-64 column reads not built, because its verifier is newer than the last measurement; L.x86_64.60 reads reached under arch_prctl through carried lines of the body as it was; L.x86_64.172 to 174 are new and unmeasured."
     }
   ]
 }

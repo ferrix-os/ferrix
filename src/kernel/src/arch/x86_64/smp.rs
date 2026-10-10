@@ -408,6 +408,11 @@ extern "C" fn secondary_start(record: u64) -> ! {
         // clear as `PCIDE` requires.
         unsafe { cpu::write_cr4(boot_cr4) };
     }
+    // The copy carries the boot processor's clear `FSGSBASE`; this
+    // processor clears its own all the same, and is counted when it reads so.
+    if cpu::forbid_user_base_writes() {
+        let _ = super::BASE_WRITES_FORBIDDEN.fetch_add(1, Ordering::AcqRel);
+    }
     // `XCR0` is each processor's own; `CR4` just gave this one `OSXSAVE`.
     cpu::load_extended_state_on_this_cpu();
     // So is the PAT: entry 1 write-combining, as on the boot processor.

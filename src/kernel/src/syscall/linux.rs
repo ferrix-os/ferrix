@@ -341,6 +341,9 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
         Syscall::SetTidAddress => Ok(set_tid_address(process, a[0])),
         Syscall::SetThreadArea => thread_area::sys_set_thread_area(process, a[0]),
         Syscall::GetThreadArea => thread_area::sys_get_thread_area(process, a[0]),
+        // x86-64 only, and only the two requests that read a base: its entry
+        // answers the rest.
+        Syscall::ArchPrctl => thread_area::sys_arch_prctl(process, a[0], a[1]),
         Syscall::ClockGettime => time::sys_clock_gettime(process, a[0], a[1], native),
         Syscall::ClockGetres => time::sys_clock_getres(process, a[0], a[1], native),
         Syscall::ClockGetresTime64 => time::sys_clock_getres(process, a[0], a[1], wide),

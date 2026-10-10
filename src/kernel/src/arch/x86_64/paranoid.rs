@@ -35,12 +35,14 @@
 //! * **`GS` from `GS_BASE`.** It reads the register: a kernel `GS` base is a
 //!   per-CPU record, a heap address in the upper half with its sign bit set, and
 //!   no program can hold one -- a program starts with a `GS` base of zero
-//!   (`syscall::init`), there is no `ARCH_SET_GS` and no `FSGSBASE`, and
-//!   loading a selector in long mode sets a 32-bit base. Anything else is the
-//!   program's, so it swaps, and remembers in `EBX` to swap back on the way out.
-//!   Linux's `paranoid_entry` makes the same decision the same way. An
-//!   `ARCH_SET_GS`, when one is written, must refuse a kernel address, as
-//!   `ARCH_SET_FS` does, or this rule stops holding.
+//!   (`syscall::init`), `arch_prctl(ARCH_SET_GS)` refuses every address that is
+//!   not a user one (`syscall::arch_prctl`), `CR4.FSGSBASE` stays clear, so
+//!   `WRGSBASE` is `#UD` in ring 3, and loading a selector in long mode sets a
+//!   32-bit base. Anything else is the program's, so it swaps, and remembers in
+//!   `EBX` to swap back on the way out. Linux's `paranoid_entry` made the same
+//!   decision the same way until it enabled `FSGSBASE`. Turning `FSGSBASE` on
+//!   for programs would end this rule: the entry would have to find its
+//!   per-CPU record without `GS` (`docs/WINE.md` §3).
 //! * **`DR7` saved and cleared** for the handler's whole run, and restored on
 //!   the way out.
 //! * **Each stack counts its occupants** in the word above the frame (the IST
@@ -115,6 +117,10 @@ pub(crate) fn nmis() -> u64 {
 static BREAKPOINTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 /// Paranoid handlers that found `GS` naming no processor's record.
 static FOREIGN_GS: AtomicU64 = AtomicU64::new(0);
+/// NMIs taken from ring 3, of [`NMIS`]: the ones whose entry found a
+/// program's `GS` base in the register and swapped.
+static USER_NMIS: AtomicU64 = AtomicU64::new(0);
+
 /// Runs of [`debug_hook`].
 static HOOK_RUNS: AtomicU64 = AtomicU64::new(0);
 
@@ -136,6 +142,9 @@ extern "C" fn ferrix_paranoid_entry(frame: &mut TrapFrame, occupants: u64) {
         NMI => {
             note_gs();
             let _ = NMIS.fetch_add(1, Ordering::Relaxed);
+            if frame.cs & 3 == 3 {
+                let _ = USER_NMIS.fetch_add(1, Ordering::Relaxed);
+            }
         }
         MACHINE_CHECK => crate::trap::fatal(frame, "machine check", &catalog::MACHINE_CHECK),
         vector => crate::trap::fatal(
