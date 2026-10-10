@@ -705,6 +705,45 @@ static void drm_fence_reached(void *data)
     free(fence);
 }
 
+/*
+ * The fence context `handle` names in `file`, counted as holding one more
+ * fence, or NULL. Looked up and counted under the file's lock, which a
+ * GEM_CLOSE of the handle takes first, so the context cannot be ended
+ * between the two.
+ */
+static struct drm_gem *fence_context_hold(struct drm_file *file, NvU32 handle)
+{
+    struct drm_gem *ctx = NULL;
+
+    nvos_mutex_lock(&file->lock);
+    if (handle != 0 && handle <= file->room)
+        ctx = file->table[handle - 1];
+    if (ctx != NULL && ctx->semsurf == NULL)
+        ctx = NULL;
+    if (ctx != NULL)
+    {
+        nvos_mutex_lock(&gems_lock);
+        ctx->fences++;
+        nvos_mutex_unlock(&gems_lock);
+    }
+    nvos_mutex_unlock(&file->lock);
+    return ctx;
+}
+
+/* A fence that never reached KAPI's callback is over: its context has one
+ * fewer, and ends if that was all that kept it. */
+static void fence_context_drop(struct drm_gem *ctx)
+{
+    NvBool dead;
+
+    nvos_mutex_lock(&gems_lock);
+    ctx->fences--;
+    dead = gem_unlink_locked(ctx);
+    nvos_mutex_unlock(&gems_lock);
+    if (dead)
+        gem_free(ctx);
+}
+
 static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 arg)
 {
     struct drm_nvidia_semsurf_fence_create_params p;
@@ -715,7 +754,7 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
     struct drm_fence *fence;
     struct drm_gem *ctx;
     NvKmsKapiRegisterWaiterResult result;
-    NvBool dead;
+    NvU64 cookie, sem_index;
     NvS64 fd;
 
     if (device == NULL)
@@ -724,44 +763,48 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
         return -EFAULT;
     if (p.pad != 0)
         return -EINVAL;
-    ctx = handle_gem(file, p.fence_context_handle);
-    if (ctx == NULL || ctx->semsurf == NULL)
-        return -EINVAL;
     fence = calloc(1, sizeof(*fence));
     if (fence == NULL)
         return -ENOMEM;
+    ctx = fence_context_hold(file, p.fence_context_handle);
+    if (ctx == NULL)
+    {
+        free(fence);
+        return -EINVAL;
+    }
     nvos_mutex_lock(&gems_lock);
-    fence->cookie = next_fence_cookie++;
-    fence->ctx = ctx;
-    ctx->fences++;
+    cookie = next_fence_cookie++;
     nvos_mutex_unlock(&gems_lock);
-    fd = nvos_chardev_sync_install(request, fence->cookie, p.timeout_value_ms, NVOS_SYNC_CLOEXEC);
+    fence->cookie = cookie;
+    fence->ctx = ctx;
+    sem_index = ctx->sem_index;
+    fd = nvos_chardev_sync_install(request, cookie, p.timeout_value_ms, NVOS_SYNC_CLOEXEC);
     if (fd < 0)
     {
-        nvos_mutex_lock(&gems_lock);
-        ctx->fences--;
-        dead = gem_unlink_locked(ctx);
-        nvos_mutex_unlock(&gems_lock);
-        if (dead)
-            gem_free(ctx);
+        fence_context_drop(ctx);
         free(fence);
         return (int)fd;
     }
     p.fd = (NvS32)fd;
+    /*
+     * Once registered, the fence is the callback's: it may be reached, and
+     * freed, and its context closed, before the next line here runs. So
+     * what is said below was copied out first.
+     */
     result = kapi->registerSemaphoreSurfaceCallback(device, ctx->semsurf, drm_fence_reached, fence,
-                                                    ctx->sem_index, p.wait_value, 0, &handle);
+                                                    sem_index, p.wait_value, 0, &handle);
     if (nvrm_trace_drm)
         drm_say("fence %llu: semaphore %llu wait %llu, fd %d, waiter %d\n",
-                (unsigned long long)fence->cookie, (unsigned long long)ctx->sem_index,
+                (unsigned long long)cookie, (unsigned long long)sem_index,
                 (unsigned long long)p.wait_value, p.fd, (int)result);
     if (result != NVKMS_KAPI_REG_WAITER_SUCCESS)
     {
         /* Reached already: signalled now. Not registered: an error. */
-        (void)nvos_chardev_sync_signal(fence->cookie,
+        (void)nvos_chardev_sync_signal(cookie,
                                        result == NVKMS_KAPI_REG_WAITER_ALREADY_SIGNALLED ? 0 : -EIO);
-        nvos_mutex_lock(&gems_lock);
-        ctx->fences--;
-        nvos_mutex_unlock(&gems_lock);
+        /* No callback will come for it: the context is let go here, and
+         * ends here if it was closed meanwhile. */
+        fence_context_drop(ctx);
         free(fence);
     }
     return copy_out(arg, &p, sizeof(p));
