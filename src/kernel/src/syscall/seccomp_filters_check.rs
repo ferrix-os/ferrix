@@ -53,6 +53,9 @@ pub(crate) struct Report {
     pub(crate) walk_long: u64,
     /// What releasing the longest chain costs, in nanoseconds.
     pub(crate) release: u64,
+    /// What `TSYNC`'s test of one other thread costs against the longest
+    /// chain, walked whole, in nanoseconds.
+    pub(crate) ancestor: u64,
     /// Traps delivered as a signal with the call's information, read back, and
     /// a blocked and ignored one that ended its process.
     pub(crate) traps: usize,
@@ -245,10 +248,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     entry_task(&mut report)?;
     speculation(&mut report)?;
     tsync_rules(&mut report)?;
-    let (chain, many, released) = longest_chain()?;
+    let (chain, many, released, ancestor) = longest_chain()?;
     report.chain = chain;
     report.walk_many = many;
     report.release = released;
+    report.ancestor = ancestor;
     report.walk_long = longest_steps()?;
     // Every thread this check filtered, a made, an inherited and an ended
     // one, has gone: the count the entry's first look reads is back where it
@@ -497,6 +501,12 @@ fn heredity(report: &mut Report) -> Result<(), &'static str> {
         )
         .map_err(|_| "no thread for a seccomp sibling")?,
     );
+    // Filtered as it is made, before anything lists it: a path that listed a
+    // thread without `add_thread_from`'s copy would still list a filtered
+    // one (the consultant's S5 condition 1, fail closed).
+    if judge_thread(&sibling, getppid) != Some(EPERM) {
+        return Err("a thread of a filtered process was made unfiltered, before it was listed");
+    }
     env.process.add_thread_from(&sibling, &env.thread);
     if judge_thread(&sibling, getppid) != Some(EPERM) {
         return Err("a thread of a filtered process was not filtered");
@@ -978,10 +988,13 @@ fn outlive_the_leader(_argument: usize) {
     process::exit_thread_current(0);
 }
 
+/// How many times [`longest_chain`] times `TSYNC`'s walk of the chain.
+const ANCESTOR_WALKS: u64 = 20;
+
 /// The longest chain Linux allows is made and released: 6,554 one-instruction
 /// filters, each pointing at the one before, dropped by one reference. A
 /// recursive release would run the kernel stack out (SR11).
-fn longest_chain() -> Result<(usize, u64, u64), &'static str> {
+fn longest_chain() -> Result<(usize, u64, u64, u64), &'static str> {
     let env = Env::new()?;
     // The shortest filter there is: one instruction, `ret ALLOW`.
     let one = [Insn::new(0x06, 0, 0, ALLOW)];
@@ -1013,6 +1026,18 @@ fn longest_chain() -> Result<(usize, u64, u64), &'static str> {
     // What a call pays for the longest chain, once: 6,554 filters of one
     // instruction, each a call of the interpreter.
     let walked = judge_cost(&env.thread, number(Syscall::Getppid)?);
+    // What `TSYNC` pays to test one other thread against this chain at its
+    // worst: a filter that is in no chain is looked for in all of it, 6,554
+    // comparisons, which the sync makes under the thread-list lock.
+    let stranger = seccomp::prepare(&one, false).map_err(|_| "a filter could not be made")?;
+    let start = crate::timer::now_nanos();
+    for _ in 0..ANCESTOR_WALKS {
+        if core::hint::black_box(seccomp::found_in_chain(&env.thread, &stranger)) {
+            return Err("a filter in no chain was found in the longest one");
+        }
+    }
+    let ancestor = crate::timer::now_nanos().saturating_sub(start) / ANCESTOR_WALKS;
+    drop(stranger);
     // Released in one drop, outside the thread's lock: the state is taken out
     // and the chain goes after the lock does. In production the last drop can
     // fall to the reaper with preemption off, which is what this measures.
@@ -1027,7 +1052,7 @@ fn longest_chain() -> Result<(usize, u64, u64), &'static str> {
         return Err("a chain's release was recursive, nested as deep as the chain is long");
     }
     process::kill(&env.process, 137);
-    Ok((made, walked, released))
+    Ok((made, walked, released, ancestor))
 }
 
 /// What a call costs a thread whose chain is seven filters of 4,096
@@ -1485,15 +1510,8 @@ fn synchronised(env: &Env) -> Result<usize, &'static str> {
     for _ in 0..7 {
         tasks.push(spawn_member(&env.process, &leader, member)?);
     }
-    let cloning = crate::syscall::registry::allocate_thread(&env.process).ok_or("no thread id")?;
-    let cloning_thread = Arc::new(
-        Thread::sibling(&env.process, cloning, &leader).map_err(|_| "no memory for a thread")?,
-    );
-    env.process.add_thread_from(&cloning_thread, &leader);
-    tasks.push(
-        sched::spawn_user("seccomp-cloner", cloner, cloning_thread, None, None)
-            .map_err(|_| "no task for the cloning thread")?,
-    );
+    // The cloning thread, made and listed as the others are, its task too.
+    tasks.push(spawn_member(&env.process, &leader, cloner)?);
     // Let it run until it has made a few, then synchronise in the middle of
     // the rest.
     let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);

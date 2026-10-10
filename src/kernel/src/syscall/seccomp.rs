@@ -351,8 +351,14 @@ enum Decision {
 /// increment preceded its making -- cannot read an earlier value. The only
 /// window is a call on another processor that reads the count before an
 /// installer's increment reaches it, which is ordered before the install as
-/// the flag set once was; `TSYNC` is refused, so today only the installing
-/// thread can be filtered by an install, and it is not in that window.
+/// the flag set once was. An install filters the installing thread, which is
+/// not in that window, and with `TSYNC` every other thread of its process,
+/// each through its own `with_seccomp` and so each counted before its flag
+/// is raised: a call one of them has in flight when the sync reaches it, or
+/// one that read the count before the sync's increment, is ordered before
+/// the sync and runs as the thread was, as a call in flight does under
+/// Linux's `TIF_SECCOMP`; no call of theirs that reads the count after it is
+/// let through unjudged.
 /// `SeqCst` is not needed: nothing pairs the count with a second location.
 static FILTERED_THREADS: AtomicUsize = AtomicUsize::new(0);
 
@@ -1061,6 +1067,15 @@ fn synchronise(
         });
     }
     Ok(0)
+}
+
+/// Whether `stranger`, a filter in no chain, is found in `thread`'s: never,
+/// and the whole chain is walked to say so. The walk `TSYNC` makes for one
+/// other thread at its worst, under the thread-list lock, for the boot check
+/// that times it (`docs/certification/MEMORY-AND-TIMING.md` §2.2b).
+pub(crate) fn found_in_chain(thread: &Thread, stranger: &Arc<Filter>) -> bool {
+    let mine = thread.with_seccomp(|state| state.filter.clone());
+    is_ancestor(Some(stranger), mine.as_ref())
 }
 
 /// Whether `candidate` is `walk` or a filter behind it: Linux's

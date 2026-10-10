@@ -330,10 +330,12 @@ pub(super) fn check_seccomp_filters() {
     );
     println!(
         "  seccomp  a call costs {} us for the 6,554-filter chain, {} us for seven filters of \
-         4,096 instructions, the most steps there can be, and releasing the long chain costs {} us",
+         4,096 instructions, the most steps there can be, releasing the long chain costs {} us, \
+         and TSYNC's test of one thread against it, walked whole, costs {} ns",
         checked.walk_many / 1000,
         checked.walk_long / 1000,
         checked.release / 1000,
+        checked.ancestor,
     );
 }
 
