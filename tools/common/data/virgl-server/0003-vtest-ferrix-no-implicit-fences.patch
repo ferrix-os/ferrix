@@ -1,0 +1,26 @@
+--- a/vtest/vtest_renderer.c
++++ b/vtest/vtest_renderer.c
+@@ -203,6 +203,23 @@
+  */
+ static void vtest_create_implicit_fence(struct vtest_renderer *renderer)
+ {
++   /*
++    * Ferrix: a client that never waits for its GPU work through
++    * VCMD_RESOURCE_BUSY_WAIT -- hyprix reads every frame back, and the
++    * transfer waits for the drawing -- says so in the server's environment,
++    * and no fence is made for its commands. A fence is an EGL native fence
++    * where the driver has them: on NVIDIA one sync file a submission, made
++    * by the kernel driver, for nobody. With no fence submitted the wait's
++    * answer is "not busy", as it is before the first command.
++    */
++   static int unwanted = -1;
++
++   if (unwanted < 0) {
++      const char *value = getenv("FERRIX_VTEST_NO_IMPLICIT_FENCES");
++      unwanted = value != NULL && value[0] == '1' && value[1] == '\0';
++   }
++   if (unwanted)
++      return;
+    virgl_renderer_create_fence(++renderer->implicit_fence_submitted, 0);
+ }
+ 

@@ -55,6 +55,13 @@ use crate::{Device, Layout, Region, Texture, pipe};
 /// The server's name, looked for on `PATH`.
 const SERVER: &str = "virgl_test_server";
 
+/// What tells Ferrix's server, when `1`, to make no fence for a submission
+/// (`tools/common/data/virgl-server/0003-vtest-ferrix-no-implicit-fences.patch`).
+/// A fence there is an EGL native fence where the driver has them: on
+/// NVIDIA a sync file a frame, made by nvidia-drm's
+/// `SEMSURF_FENCE_CREATE`, that nothing here ever waits on.
+pub const NO_IMPLICIT_FENCES: &str = "FERRIX_VTEST_NO_IMPLICIT_FENCES";
+
 /// Set to `0` to keep to protocol version 0, which is how the shared
 /// memory's gain is measured.
 const PROTOCOL_ENV: &str = "FERRIX_VTEST_PROTOCOL";
@@ -557,7 +564,17 @@ impl Vtest {
         let socket =
             std::env::temp_dir().join(format!("ferrix-vtest-{}-{name}.sock", std::process::id()));
         let _ = std::fs::remove_file(&socket);
-        let spawned = Command::new(program)
+        let mut command = Command::new(program);
+        // This client never waits for its drawing through the server's
+        // fences: a frame is read back, and the transfer waits for it
+        // (`sync`). Ferrix's server makes none when told so; a stock one
+        // does not read the variable. Left alone if the environment
+        // already says, which is how the two are measured against each
+        // other.
+        if std::env::var_os(NO_IMPLICIT_FENCES).is_none() {
+            let _ = command.env(NO_IMPLICIT_FENCES, "1");
+        }
+        let spawned = command
             .arg("--no-fork")
             .arg("--use-egl-surfaceless")
             .arg("--socket-path")

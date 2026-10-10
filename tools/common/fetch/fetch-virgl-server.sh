@@ -8,10 +8,14 @@
 # tools/common/data/virgl-server/*.patch in their order:
 # 0001-vtest-ferrix-resource-import-fd.patch, the command
 # VCMD_FERRIX_RESOURCE_IMPORT_FD (vtest_protocol.h, number 64) and the
-# parameter VCMD_PARAM_FERRIX_IMPORT_FD a client asks for first; and
+# parameter VCMD_PARAM_FERRIX_IMPORT_FD a client asks for first;
 # 0002-vtest-ferrix-dmabuf-modifiers.patch, VCMD_FERRIX_DMABUF_MODIFIERS
 # (65): the modifiers the server's EGL imports a format with, which is what
-# hyprix offers its clients (the parameter's value is then 2). A stock
+# hyprix offers its clients (the parameter's value is then 2); and
+# 0003-vtest-ferrix-no-implicit-fences.patch, no fence a submission when
+# the server's environment has FERRIX_VTEST_NO_IMPLICIT_FENCES=1, which
+# hyprix sets: it never waits on them, and on NVIDIA each is a sync file
+# from the kernel driver. A stock
 # server answers that parameter "not valid", so hyprix works with either;
 # with the stock one its frames are read back (vtest protocol 2) and its
 # clients' buffers are mapped.

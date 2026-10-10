@@ -540,7 +540,13 @@ pub(super) fn build_parts(
     // frames on the socket, which is how protocol 2's shared memory is
     // measured against it (N3c); scanout `1` draws frames into nvidia-drm's
     // own buffers (zerocopy).
-    for name in ["FERRIX_VTEST_PROTOCOL", "FERRIX_VTEST_SCANOUT"] {
+    // `FERRIX_VTEST_NO_IMPLICIT_FENCES=0` has the test server make a fence
+    // a submission again, to measure against none.
+    for name in [
+        "FERRIX_VTEST_PROTOCOL",
+        "FERRIX_VTEST_SCANOUT",
+        "FERRIX_VTEST_NO_IMPLICIT_FENCES",
+    ] {
         let Some(value) = std::env::var(name).ok().filter(|value| {
             args.nvidia && !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
         }) else {
