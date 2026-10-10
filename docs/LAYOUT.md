@@ -95,7 +95,7 @@ every virtio driver shares.
 
 | Function | Logic (`src/lib/drivers/…`) | Process (`src/user/system/native/drivers/…`) |
 |---|---|---|
-| `block/` | `virtio-blk`, `blkserve` | `virtio-blk` |
+| `block/` | `virtio-blk`, `blkserve`, `stm32-sdmmc`, `nvme` | `virtio-blk`, `stm32-sdmmc`, `nvme` |
 | `net/` | `virtio-net`, `netserve` | `virtio-net` |
 | `display/` | `virtio-gpu`, `stm32-display` | `virtio-gpu`, `stm32-ltdc` |
 | `gpu/` | `gc400` | `gc400` |

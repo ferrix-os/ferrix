@@ -137,9 +137,9 @@ package FerrixDrivers {
         @stage { number = 10; }
         doc /* An ordinary user process in its own Job, holding exactly the
              * capabilities devmgr gave it. A driver fault is a process fault;
-             * a wedged driver is a Job kill. Eleven exist, native programs on
+             * a wedged driver is a Job kill. Twelve exist, native programs on
              * src/user/system/native/rt under /lib/drivers: virtio-blk,
-             * stm32-sdmmc, virtio-net, virtio-gpu, stm32-ltdc, gc400,
+             * stm32-sdmmc, nvme, virtio-net, virtio-gpu, stm32-ltdc, gc400,
              * virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin
              * layer of handles over its src/lib/ crates. */
         ref part job : Job;
@@ -303,6 +303,23 @@ package FerrixDrivers {
              * library's host tests against a model of the controller and a
              * card, and the boot check of the one tree disk; no emulator has
              * the controller, and it has not run on the board (2026-10-08). */
+    }
+
+    #inProgress part def NvmeDriver :> DriverProcess {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drivers/block/nvme over
+             * src/lib/drivers/block/nvme: an NVM Express controller's first
+             * namespace as a disk behind the block ring (docs/NVME.md), the
+             * first driver for a disk a PC has. devmgr starts it on any
+             * function of class code 01:08:02; the kernel is not changed.
+             * It resets and enables the controller, transfers straight into
+             * the ring's data region through PRP lists, lends a drive
+             * without DRAM its host memory buffer, aborts and resets on a
+             * command that does not come back, and notifies the controller
+             * before it disables it. Its gates are the library's host tests
+             * against a model of a controller, and cargo xtask test-nvme on
+             * QEMU's emulated one, with / on a drive below a PCIe switch. It
+             * has not run on a real drive (2026-10-10). */
     }
 
     #implemented action def DriverBootstrap {
