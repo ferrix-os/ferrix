@@ -100,9 +100,16 @@ const DISPLAY_CLASS: u8 = 0x03;
 const TEST_GPU_VENDOR: u16 = 0x1B36;
 const TEST_GPU_IDS: [u16; 1] = [0x0005];
 
-/// The vendor of a table row that matches a function of any vendor: no
-/// vendor has this identifier, which is what an empty slot reads as.
+/// In [`PCI_DRIVERS`]' vendor column: a function of any vendor, matched by
+/// what it is alone. No function has this vendor: it is what a slot with
+/// nothing in it reads as.
 const ANY_VENDOR: u16 = 0xFFFF;
+
+/// The class code of an NVM Express controller: mass storage (`01`),
+/// non-volatile memory (`08`), NVMe I/O (`02`). Every NVMe drive of every
+/// vendor has it, and is driven by `nvme` (`docs/NVME.md`), wherever on the
+/// bus it sits: on a root port, or below a switch as a chipset's slot is.
+const NVME_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x08, 0x02);
 
 /// How a PCI function that is not virtio is matched.
 #[derive(Clone, Copy)]
@@ -121,7 +128,8 @@ enum PciMatch {
 ///
 /// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
 /// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 3] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 4] = [
+    (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
     (
         NVIDIA_VENDOR,
         PciMatch::Class(DISPLAY_CLASS),
@@ -1712,8 +1720,10 @@ impl fmt::Write for Line {
     }
 }
 
-/// A disk's driver -- virtio-blk's, or an STM32MP15's SD card's -- over a
-/// block ring, for the disk to be `name`.
+/// A disk's driver -- virtio-blk's, an NVMe controller's, or an STM32MP15's
+/// SD card's -- over a block ring, for the disk to be `name`. START's
+/// register blocks are virtio's or the tree node's; an NVMe controller has
+/// neither, and its driver finds its BAR through `device_aperture`.
 fn start_block(
     job: &Job<Kernel>,
     device: Device<Kernel>,
@@ -1755,10 +1765,10 @@ fn start_block(
         .map_err(|_| ())?;
     let encoded = Ring::Start(start).encode();
     // The process's name: the table chose the image already.
-    let program = if info.virtio == DEVICE_TREE_BLOCKS {
-        "sdmmc"
-    } else {
-        "blk"
+    let program = match info.virtio {
+        DEVICE_TREE_BLOCKS => "sdmmc",
+        DEVICE_VIRTIO_PCI => "blk",
+        _ => "nvme",
     };
     launch(
         job,
