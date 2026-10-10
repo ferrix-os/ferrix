@@ -1146,7 +1146,7 @@ fn ended_early(
         }
         Some(Ending::Trap) => {
             seen.trapped = trapped_in_the_task(env)?;
-            Ok(Some(Ok(seen)))
+            Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::TrapIgnored) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
@@ -1160,11 +1160,11 @@ fn ended_early(
             if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
                 return Err("a trapping filter was refused through the entry");
             }
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(getsid, [0; 6]);
-            Ok(Some(Err(
-                "a blocked and ignored SIGSYS let a trapped call return",
-            )))
+            Ok(Some(Then::Ending {
+                found: Ok(seen),
+                call: getsid,
+                returned: "a blocked and ignored SIGSYS let a trapped call return",
+            }))
         }
         Some(Ending::TrapNative) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
@@ -1174,9 +1174,11 @@ fn ended_early(
             if call(seccomp_call, [SET_MODE_FILTER, 0, at, 0, 0, 0])? != 0 {
                 return Err("a trapping filter was refused through the entry");
             }
-            *FOUND.lock() = Some(Ok(seen));
-            let _ = call(gap, [0; 6]);
-            Ok(Some(Err("a trapped native-range call returned")))
+            Ok(Some(Then::Ending {
+                found: Ok(seen),
+                call: gap,
+                returned: "a trapped native-range call returned",
+            }))
         }
         Some(Ending::Sync) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
