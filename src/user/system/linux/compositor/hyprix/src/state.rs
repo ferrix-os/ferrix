@@ -2402,6 +2402,16 @@ fn drawn_with(
 /// Every surface on the screen is told, not only the windows: a bar, a
 /// wallpaper, a menu and the lock's own surface each drew, and each waits
 /// the same way.
+///
+/// But for `unseen`, the surfaces under the windows of which this frame
+/// shows nothing (`State::unseen_layers`): their frame callbacks are kept
+/// until a frame shows them again. A callback says "now is a good time to
+/// draw", and for a wallpaper under a full-screen game it never is: told
+/// every frame, a video wallpaper decoded AV1 at half a processor for
+/// nobody, and every frame of it damaged the whole screen. Kept, the
+/// callback is what `wl_surface.frame` says a compositor may do with a
+/// surface that is not visible, and the wallpaper stops as
+/// `docs/DISPLAY.md` says it does.
 #[expect(
     clippy::too_many_arguments,
     reason = "a frame's surfaces come from four places and the event carries the clock, the count, the refresh and its time"
@@ -2412,6 +2422,7 @@ fn frames_done(
     layers: &[crate::frame::Placed],
     popups: &[crate::frame::Placed],
     lock: Option<&Lock>,
+    unseen: &[(usize, ObjectId)],
     now: u32,
     drawn: u32,
     refresh: u32,
@@ -2449,7 +2460,9 @@ fn frames_done(
         let Some(slot) = slots.get_mut(index) else {
             continue;
         };
-        slot.client_mut().fire_frame_callbacks(surface, now);
+        if !unseen.contains(&(index, surface)) {
+            slot.client_mut().fire_frame_callbacks(surface, now);
+        }
         slot.client_mut()
             .presented(surface, at, refresh, u64::from(drawn));
     }

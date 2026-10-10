@@ -123,7 +123,7 @@ pub use compositor_config::Color;
 pub use compositor_layout::Rect;
 pub use damage::{Damage, intersect};
 pub use frame::{
-    LayerFrame, Style, Styles, WindowStyle, damage_between, damage_between_parts,
+    LayerFrame, Style, Styles, WindowStyle, covers, damage_between, damage_between_parts,
     damage_between_styled, outer, reads_backdrop, render, render_onto, render_with_layers, scaled,
 };
 pub use gradient::Gradient;

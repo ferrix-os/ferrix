@@ -791,25 +791,7 @@ fn window<P: Painter>(
 ) {
     let style = styles.base;
     let own = styles.of(placed.window);
-    // A rule's `rounding` and `rounding_power` each stand in for the
-    // style's own, and either may be set without the other.
-    let rounding = Rounding {
-        radius: own.rounding.unwrap_or(style.rounding.radius).max(0),
-        power: own.rounding_power.unwrap_or(style.rounding.power),
-    };
-    // A fullscreen window is the monitor's rectangle and no less: Hyprland
-    // neither rounds it (`renderdata.dontRound` in `renderWindow`) nor
-    // draws its border, and a corner cut out of it is the wallpaper showing
-    // in the four corners of a full-screen game. Fullscreen and not
-    // maximized, which keeps both: the layout gives the first no border
-    // and the second the workspace's, which is how the two are told apart
-    // here. (Under `general:border_size = 0` a maximized window is square
-    // too, the one case this reads wrongly.)
-    let rounding = if placed.fullscreen && placed.border <= 0 {
-        Rounding::none()
-    } else {
-        rounding
-    };
+    let rounding = rounding_of(placed, styles);
     let width = own.border.unwrap_or(placed.border).max(0);
     let opacity = own
         .opacity
@@ -860,12 +842,9 @@ fn window<P: Painter>(
         && backdrop
             .as_deref()
             .is_some_and(|behind| canvas.backdrop_fits(behind)))
-        || surfaces.get(&placed.window).is_some_and(|surface| {
-            (own.opaque || surface.format() == Format::Xrgb8888)
-                && opacity >= 1.0
-                && i64::from(surface.width()) == rect.width
-                && i64::from(surface.height()) == rect.height
-        });
+        || surfaces
+            .get(&placed.window)
+            .is_some_and(|surface| copied_opaque(surface, rect, &own, opacity));
     let seen;
     let shadowed = if overwritten {
         seen = rim(damage, rect, rounding);
@@ -950,6 +929,59 @@ fn window<P: Painter>(
         let alpha = (style.dim.clamp(0.0, 1.0) * 255.0).round() as u32;
         canvas.fill_rounded(rect, rounding, Color(alpha << 24), damage);
     }
+}
+
+/// The corners a window is drawn with.
+fn rounding_of(placed: &Placed, styles: &Styles<'_>) -> Rounding {
+    // A fullscreen window is the monitor's rectangle and no less: Hyprland
+    // neither rounds it (`renderdata.dontRound` in `renderWindow`) nor
+    // draws its border, and a corner cut out of it is the wallpaper showing
+    // in the four corners of a full-screen game. Fullscreen and not
+    // maximized, which keeps both: the layout gives the first no border
+    // and the second the workspace's, which is how the two are told apart
+    // here. (Under `general:border_size = 0` a maximized window is square
+    // too, the one case this reads wrongly.)
+    if placed.fullscreen && placed.border <= 0 {
+        return Rounding::none();
+    }
+    // A rule's `rounding` and `rounding_power` each stand in for the
+    // style's own, and either may be set without the other.
+    let own = styles.of(placed.window);
+    Rounding {
+        radius: own.rounding.unwrap_or(styles.base.rounding.radius).max(0),
+        power: own.rounding_power.unwrap_or(styles.base.rounding.power),
+    }
+}
+
+/// Whether `surface`, drawn into `rect` at `opacity`, is copied in opaque:
+/// a format with no alpha, or a rule that says to read it as one, at full
+/// opacity and at its own size. Every pixel inside the window's shape is
+/// then the window's and nothing under it shows through.
+fn copied_opaque(surface: &Surface<'_>, rect: Rect, own: &WindowStyle, opacity: f32) -> bool {
+    (own.opaque || surface.format() == Format::Xrgb8888)
+        && opacity >= 1.0
+        && i64::from(surface.width()) == rect.width
+        && i64::from(surface.height()) == rect.height
+}
+
+/// Whether the window `placed`, drawn from `surface`, leaves nothing of what
+/// is under its rectangle to be seen: its pixels are copied in opaque and
+/// its corners are square. `placed` is in the pixels the frame is drawn in,
+/// as [`scaled`] gives it.
+///
+/// The renderer's own rule and not a second one beside it, because what it
+/// decides is what a compositor may stop telling a surface about: a
+/// wallpaper under such a window is not on the screen, and one under any
+/// other window -- one with alpha, a rule's opacity, or corners cut -- is,
+/// if only in four corners.
+#[must_use]
+pub fn covers(placed: &Placed, styles: &Styles<'_>, surface: Option<&Surface<'_>>) -> bool {
+    let own = styles.of(placed.window);
+    let opacity = own
+        .opacity
+        .unwrap_or_else(|| styles.base.opacity(placed.focused, placed.fullscreen));
+    rounding_of(placed, styles).is_square()
+        && surface.is_some_and(|surface| copied_opaque(surface, placed.rect, &own, opacity))
 }
 
 /// `damage` less the part of a window at `rect` that its own pixels are

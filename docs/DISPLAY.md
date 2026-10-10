@@ -540,7 +540,14 @@ from `BootInfo`. What changes is what a person sees:
   under a full-screen opaque window is not drawn, is told nothing, and stops
   playing — `mpvpaper-stop`'s job, done by the protocol rather than by a
   person. Five seconds without an answer draws anyway, so a compositor that
-  fires no callbacks is a slow wallpaper rather than a stopped one. It also
+  fires no callbacks is a slow wallpaper rather than a stopped one. The
+  compositor's half of that was missing until 2026-10-10: hyprix told every
+  surface of every frame, seen or not, and a video wallpaper under a
+  full-screen window went on decoding at half a processor. It now keeps the
+  frame callbacks of a layer surface under the windows while a window covers
+  it -- one `compositor_render::covers` says is copied in opaque, square and
+  at its own size, so a window with alpha or with cut corners does not --
+  and fires them in the first frame that shows the surface again. It also
   keeps **two** buffers where a still wallpaper keeps one: a compositor
   releases a buffer when a later commit replaces it, so a client that drew
   once and waited for the release would wait for ever. That one was found by

@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use compositor_layout::{Rect, WindowId};
+use compositor_wire::ObjectId;
 
 use super::{
     Compositor, FRAME_REPORT, blurs_behind, cursor_shown, cursor_surface, described, drawn_with,
@@ -153,12 +154,14 @@ impl Compositor<'_> {
         // client that paces itself by these -- Chrome's BeginFrames on
         // Wayland -- has the drawing's time too for its next frame, which at
         // 120 Hz's 8.3 ms it needs.
+        let unseen = self.unseen_layers(&outputs, &drawn_with, u64::from(now));
         frames_done(
             &mut self.slots,
             &self.sources,
             &self.placed_layers,
             popups,
             self.lock.as_ref(),
+            &unseen,
             now,
             self.tally.drawn.saturating_add(1),
             refresh_ns(&self.screens),
@@ -317,6 +320,77 @@ impl Compositor<'_> {
                 .chain(popups.iter().copied())
                 .collect()
         }
+    }
+
+    /// The layer surfaces under the windows that the frame about to be
+    /// drawn shows nothing of, on any screen: a wallpaper under a window
+    /// that is opaque, square and at least its size.
+    ///
+    /// Worked out from where the tiling has each window, which is where the
+    /// frame draws it unless one of them is on its way somewhere: while any
+    /// window is moving nothing is unseen. That errs one way only. The frame
+    /// that starts a window growing to the screen's size may hold back a
+    /// wallpaper still in view, once, with the frames of the animation
+    /// behind it to tell it; the frame that starts one shrinking tells the
+    /// wallpaper at once, since by then the tiling no longer has a window
+    /// over it. A screen that is locked or turned off draws no window, and
+    /// its surfaces are told as before.
+    fn unseen_layers(
+        &self,
+        outputs: &[compositor_layout::MonitorLayout],
+        drawn_with: &BTreeMap<WindowId, compositor_render::WindowStyle>,
+        now: u64,
+    ) -> Vec<(usize, ObjectId)> {
+        if self.lock.is_some()
+            || self.animations.busy(now)
+            || self.placed_layers.iter().all(|placed| placed.above)
+        {
+            return Vec::new();
+        }
+        let mut unseen = Vec::new();
+        for screen in &self.screens {
+            if self.dpms.get(&screen.name).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(output) = outputs
+                .iter()
+                .find(|output| output.monitor == screen.monitor)
+            else {
+                continue;
+            };
+            let origin = (screen.rect.x, screen.rect.y);
+            let style = self.style.at_scale(screen.scale);
+            let styles = compositor_render::Styles {
+                base: &style,
+                windows: drawn_with,
+            };
+            let covers: Vec<Rect> = compositor_render::scaled(output, origin, screen.scale)
+                .windows
+                .iter()
+                .filter(|placed| {
+                    // The window's pixels as the frame draws them: without
+                    // the shadows its client drew around it.
+                    let surface = self.sources.get(&placed.window).and_then(|source| {
+                        let slot = self.slots.get(source.client)?;
+                        let surface = crate::frame::pixels(slot, source.surface)?;
+                        Some(
+                            crate::frame::window_crop(slot.client(), source.surface)
+                                .and_then(|crop| crop.of(&surface))
+                                .unwrap_or(surface),
+                        )
+                    });
+                    compositor_render::covers(placed, &styles, surface.as_ref())
+                })
+                .map(|placed| placed.rect)
+                .collect();
+            unseen.extend(crate::frame::unseen(
+                &self.placed_layers,
+                &covers,
+                origin,
+                screen.scale,
+            ));
+        }
+        unseen
     }
 
     /// Draw one screen's frame into `drew`.

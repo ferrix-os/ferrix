@@ -676,6 +676,38 @@ fn scale_rect(rect: Rect, origin: (i64, i64), scale: f64) -> Rect {
     )
 }
 
+/// The layer surfaces under the windows of which a screen shows nothing:
+/// those whose rectangle lies inside one of `covers`, the rectangles of the
+/// windows `compositor_render::covers` says leave nothing under them to be
+/// seen, in the pixels the screen at `origin` and `scale` is drawn in.
+///
+/// A wallpaper under a full-screen game, which is what this is for. Only a
+/// surface under the windows: one above them is on top of whatever covers
+/// the rest. And only one that would be drawn at all -- a surface with no
+/// size is on no screen and is not this screen's to answer for.
+pub(crate) fn unseen(
+    layers: &[Placed],
+    covers: &[Rect],
+    origin: (i64, i64),
+    scale: f64,
+) -> Vec<(usize, ObjectId)> {
+    let inside = |inner: Rect, outer: &Rect| {
+        inner.x >= outer.x
+            && inner.y >= outer.y
+            && inner.right() <= outer.right()
+            && inner.bottom() <= outer.bottom()
+    };
+    layers
+        .iter()
+        .filter(|placed| !placed.above)
+        .filter(|placed| {
+            let at = scale_rect(placed.rect, origin, scale);
+            at.width > 0 && at.height > 0 && covers.iter().any(|cover| inside(at, cover))
+        })
+        .map(|placed| (placed.client, placed.surface))
+        .collect()
+}
+
 /// One rectangle of the global space in the screen's own pixels: scaled,
 /// and moved into the canvas's own corner.
 ///
@@ -902,4 +934,77 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
         (Some(_), None) => made,
         (None, None) => made.named(name),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LayerRules, Placed, unseen};
+    use compositor_layout::Rect;
+    use compositor_wire::ObjectId;
+
+    fn layer(surface: u32, rect: Rect, above: bool) -> Placed {
+        Placed {
+            client: 3,
+            surface: ObjectId(surface),
+            rect,
+            above,
+            rules: LayerRules::default(),
+        }
+    }
+
+    /// The desktop this was found on: a bar 40 pixels high above the
+    /// windows, the wallpaper in what the bar leaves, and a game the size of
+    /// the monitor at 2560,0. The wallpaper is not on the screen; the bar
+    /// is, over the game.
+    #[test]
+    fn a_wallpaper_under_a_window_that_covers_it_is_unseen() {
+        let wallpaper = layer(10, Rect::new(2560, 40, 1920, 1040), false);
+        let bar = layer(12, Rect::new(2560, 0, 1920, 40), true);
+        let game = Rect::new(2560, 0, 1920, 1080);
+        assert_eq!(
+            unseen(&[wallpaper, bar], &[game], (2560, 0), 1.0),
+            [(3, ObjectId(10))]
+        );
+    }
+
+    /// With no window that covers, or one that leaves a strip of the
+    /// wallpaper out, the wallpaper is on the screen.
+    #[test]
+    fn a_wallpaper_any_of_which_shows_is_seen() {
+        let wallpaper = layer(10, Rect::new(0, 0, 1920, 1080), false);
+        assert!(unseen(&[wallpaper], &[], (0, 0), 1.0).is_empty());
+        let tiles = [Rect::new(0, 0, 960, 1080), Rect::new(960, 0, 960, 1080)];
+        assert!(
+            unseen(&[wallpaper], &tiles, (0, 0), 1.0).is_empty(),
+            "two windows side by side are not one that covers"
+        );
+        let short = [Rect::new(0, 0, 1920, 1079)];
+        assert!(unseen(&[wallpaper], &short, (0, 0), 1.0).is_empty());
+        // A window on another monitor covers nothing of this one.
+        let elsewhere = [Rect::new(1920, 0, 1920, 1080)];
+        assert!(unseen(&[wallpaper], &elsewhere, (0, 0), 1.0).is_empty());
+    }
+
+    /// The windows' rectangles are the screen's own pixels and the layer's
+    /// is logical: at scale 2 a 960x540 wallpaper is the 1920x1080 window's
+    /// size.
+    #[test]
+    fn a_scaled_screens_wallpaper_is_measured_in_its_pixels() {
+        let wallpaper = layer(10, Rect::new(0, 0, 960, 540), false);
+        let game = [Rect::new(0, 0, 1920, 1080)];
+        assert_eq!(
+            unseen(&[wallpaper], &game, (0, 0), 2.0),
+            [(3, ObjectId(10))]
+        );
+        let small = [Rect::new(0, 0, 960, 540)];
+        assert!(unseen(&[wallpaper], &small, (0, 0), 2.0).is_empty());
+    }
+
+    /// A layer surface with no size yet is nobody's to hold back.
+    #[test]
+    fn a_surface_with_no_size_is_not_unseen() {
+        let unsized_yet = layer(10, Rect::new(0, 0, 0, 0), false);
+        let game = [Rect::new(0, 0, 1920, 1080)];
+        assert!(unseen(&[unsized_yet], &game, (0, 0), 1.0).is_empty());
+    }
 }

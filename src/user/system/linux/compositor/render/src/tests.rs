@@ -4083,3 +4083,82 @@ fn a_fullscreen_window_is_square_and_a_maximized_one_is_not() {
         "something other than the window shows on a screen it fills"
     );
 }
+
+/// What a compositor may stop telling a wallpaper about: a window whose
+/// pixels are copied in opaque and whose corners are square covers its
+/// rectangle, and nothing else does.
+#[test]
+fn only_an_opaque_square_window_covers_what_is_under_it() {
+    let style = rounded_gradient_style();
+    let plain = Styles::plain(&style);
+    let (layout, bytes) = one_window(Rect::new(0, 0, 1920, 1080), 0, true);
+    let placed = layout.windows[0];
+    let read_as = |format| Surface::new(&bytes, 1920, 1080, 7680, format).unwrap();
+    let opaque = read_as(Format::Xrgb8888);
+
+    assert!(crate::covers(&placed, &plain, Some(&opaque)));
+    assert!(
+        !crate::covers(&placed, &plain, None),
+        "a window that has drawn nothing covers nothing"
+    );
+    assert!(
+        !crate::covers(&placed, &plain, Some(&read_as(Format::Argb8888))),
+        "a surface with alpha may show what is under it"
+    );
+    // The same window tiled: its corners are cut, and the wallpaper shows
+    // in them.
+    let tiled = Placed {
+        fullscreen: false,
+        border: 2,
+        ..placed
+    };
+    assert!(!crate::covers(&tiled, &plain, Some(&opaque)));
+    let square = Style {
+        rounding: Rounding::none(),
+        ..style
+    };
+    assert!(crate::covers(
+        &tiled,
+        &Styles::plain(&square),
+        Some(&opaque)
+    ));
+    // A buffer that is not the rectangle's size is stretched, and a
+    // stretched edge is blended.
+    let smaller = Surface::new(&bytes, 960, 540, 3840, Format::Xrgb8888).unwrap();
+    assert!(!crate::covers(&placed, &plain, Some(&smaller)));
+    // A rule's opacity shows what is under the window, and a rule's
+    // `opaque` hides it whatever the format says.
+    let rule = |own: crate::WindowStyle| BTreeMap::from([(WindowId(1), own)]);
+    let faded = rule(crate::WindowStyle {
+        opacity: Some(0.9),
+        ..Default::default()
+    });
+    let faded = Styles {
+        base: &style,
+        windows: &faded,
+    };
+    assert!(!crate::covers(&placed, &faded, Some(&opaque)));
+    let forced = rule(crate::WindowStyle {
+        opaque: true,
+        ..Default::default()
+    });
+    let forced = Styles {
+        base: &style,
+        windows: &forced,
+    };
+    assert!(crate::covers(
+        &placed,
+        &forced,
+        Some(&read_as(Format::Argb8888))
+    ));
+    // `decoration:fullscreen_opacity` is the fullscreen window's.
+    let seen_through = Style {
+        fullscreen_opacity: 0.8,
+        ..style
+    };
+    assert!(!crate::covers(
+        &placed,
+        &Styles::plain(&seen_through),
+        Some(&opaque)
+    ));
+}
