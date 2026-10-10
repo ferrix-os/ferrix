@@ -518,6 +518,23 @@ code on the soft-float ABI; a program that keeps a caller-saved VFP value
 across one of these calls by other means loses it, which harms only itself.
 AArch64 keeps the whole state.
 
+### AoU-28 — a guest whose clock KVM vouches for keeps the host's TSC rate (x86-64)
+A boot whose log reads `clock TSC, vouched for and rated by KVM's
+paravirtual clock` runs on a processor model without the invariant-TSC bit
+and took the TSC for its counter on KVM's word, at the rate KVM's time page
+stated at boot (L.x86_64.166 to L.x86_64.171; `docs/CLOCK.md` §2 and §3).
+The rate is read once: neither the kernel nor the vDSO's data page can
+change it afterwards. The integrator shall not live-migrate such a guest to
+a host without TSC scaling, and shall not start it with a TSC rate other
+than the host's (`tsc-frequency=`, libvirt's `<timer name='tsc'
+frequency=...>`) on a host without TSC scaling; on either, the clock runs
+fast or slow by the ratio of the two rates and nothing reports it. A host
+that loses its own TSC while such a guest runs is a fault of the platform
+beneath the element, which the element does not detect. A guest that must be migrated freely is given no such line: without
+KVM's paravirtual clock it runs on the HPET and says so, at the cost
+`docs/CLOCK.md` §1 measures; a guest that is never migrated is better given
+`invtsc`, whose boot line is `clock TSC, calibrated against the HPET`.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

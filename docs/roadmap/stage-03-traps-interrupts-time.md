@@ -89,7 +89,12 @@ between a program and an operating system.
   TSC (`CPUID.80000007H:EDX[8]`) is the counter whenever the processor has
   one, measured against the HPET, because every HPET read is a device access
   and costs an exit under a hypervisor; QEMU's `qemu64` model has none, so
-  the boot test still counts on the HPET. Every I/O APIC firmware described is
+  the boot test still counts on the HPET. Since 2026-10-10 a guest whose
+  processor model hides that bit (libvirt's `host-passthrough`) takes the
+  TSC on KVM's word instead, where KVM's paravirtual clock says it is
+  stable, at the rate that clock states; and a boot that does end on the
+  HPET says so, with the reason, in a warning beside its `clock` line
+  (`docs/CLOCK.md`). Every I/O APIC firmware described is
   mapped and every input masked — not configured, because nothing is wired to
   a device line until stage 10, but quiesced, because a line firmware left
   enabled would arrive at a vector chosen by whoever wrote the firmware.

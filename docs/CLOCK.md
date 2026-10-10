@@ -4,7 +4,7 @@ Version 1. Written on 2026-10-10, the day a study of a software-GL game
 found the kernel running on the HPET under a hypervisor without saying so
 (`~/.local/share/ferrix/steam-race/softgl-gap.md` on the gate host). The
 code is `src/kernel/src/arch/x86_64/clock.rs`; its requirements are
-`L.x86_64.38` to `L.x86_64.41` and `L.x86_64.166` to `L.x86_64.169`
+`L.x86_64.38` to `L.x86_64.41` and `L.x86_64.166` to `L.x86_64.171`
 (`docs/sysml/18-x86-64-requirements.sysml`). AArch64 and ARMv7-A read the
 generic timer, whose rate the architecture states, and none of this applies
 to them: the Pixel 7's crosvm and the DK1 are not affected.
@@ -67,8 +67,8 @@ same TSC offset. That is the condition under which Linux's vDSO reads
 `KVM_FEATURE_CLOCKSOURCE_STABLE_BIT` says the host will keep the flag
 honest; a guest trusts the flag only with it.
 
-What the flag does not promise is the two things the invariant bit rules
-out by forbidding migration:
+What the flag does not promise is three things, two of which the invariant
+bit rules out by forbidding migration:
 
 * **Migration to a host of another TSC rate.** QEMU carries the guest's
   TSC rate along and KVM scales the TSC on a processor that has TSC
@@ -77,16 +77,29 @@ out by forbidding migration:
   A kernel that took the rate once, at boot, then runs fast or slow.
 * **The host losing its TSC** (its watchdog marking it unstable). KVM
   clears the flag; a kernel that read it once does not hear of it.
+* **A guest started with a TSC rate that is not the host's, on a host
+  without TSC scaling** (libvirt's `<timer name='tsc' frequency=...>`,
+  QEMU's `tsc-frequency=`). This one needs no migration. Asked for a faster
+  TSC than it can scale to, KVM steps the guest's TSC forward to keep up
+  while the time page goes on stating the host's rate with the stable flag
+  set, so a clock built on that rate runs fast from the first second.
 
 Ferrix reads the rate once, with the invariant bit and without it: nothing
-in the kernel or the vDSO data page can change a rate after boot. So the
-second and third rows of §3 state that limit rather than hide it, the boot
-line names KVM as the source of the trust, and the remedy for both cases is
-the full paravirtual clock of §7, which is not built here.
+in the kernel or the vDSO data page can change a rate after boot. So row 2
+of §3 states that limit rather than hides it: the boot line names KVM as
+the source of the trust, `docs/certification/SAFETY-MANUAL.md`'s AoU-28
+tells an integrator what a guest with that line must not be asked to do,
+and the remedy for all three cases is the full paravirtual clock of §7,
+which is not built here.
 
 ## 3. The order, as built by this change
 
-`clock::init` takes the first that holds:
+`clock::init` first opens the HPET where firmware describes one: maps its
+window, starts it and proves that it counts, whichever counter is then
+chosen. A dead HPET fails bring-up on every row, as before (`L.x86_64.39`
+is unchanged), and the window stays mapped on every row: a mapped device
+window is how the kernel knows the registers are its own and no driver's.
+Then it takes the first that holds:
 
 1. **An invariant TSC and an HPET**: the TSC, its rate measured over 10 ms
    of the HPET. Unchanged. Line: `clock TSC, calibrated against the HPET`.
@@ -101,8 +114,8 @@ the full paravirtual clock of §7, which is not built here.
    at that rate, which is the rate KVM itself converts the TSC with:
    `10^9 * 2^32 / (tsc_to_system_mul * 2^tsc_shift)`. Nothing is measured,
    so an HPET is not needed, and the 10 ms of exits that measuring against
-   an emulated HPET costs are not paid. Line: `clock TSC, stable by KVM's
-   word, at its paravirtual clock's rate`. This comes before the HPET and
+   an emulated HPET costs are not paid. Line: `clock TSC, vouched for and
+   rated by KVM's paravirtual clock`. This comes before the HPET and
    before the PIT: a virt-manager domain often has `hpet present='no'`, and
    KVM's stated rate is better than one measured through an emulated PIT.
 3. **An invariant TSC and no HPET**, or **no HPET at all**: the TSC
@@ -110,19 +123,39 @@ the full paravirtual clock of §7, which is not built here.
    case asks nobody whether the TSC is a clock; with no other counter there
    is no alternative to it. Line: `clock TSC`.
 4. **A 64-bit HPET**: the HPET. Unchanged as a counter, and now said aloud
-   (§5). Line: `clock HPET`, then a second line.
-5. **A 32-bit HPET**: the TSC measured against it. Unchanged.
+   (§5). Line: a warning, then `clock HPET`. An invariant TSC whose
+   measurement against the HPET did not come off ends here too, as before,
+   and KVM is not asked on its behalf.
+5. **A 32-bit HPET**: the TSC measured against it. Unchanged, but for one
+   retry: a processor with an invariant TSC and a 32-bit HPET used to
+   measure twice before giving up and now measures once.
+
+Rows 3 and 5 still hand out a TSC nobody vouches for and say nothing of it,
+even where KVM's flag was read and found clear: with no HPET, or only one
+that wraps every few minutes, there is no other counter to prefer.
+`docs/BACKLOG.md` has the row.
+
+Leaf `4000_0001h` is read only under the hypervisor bit and KVM's
+signature, and only where leaf `4000_0000h`'s EAX, the hypervisor's highest
+leaf, is at least `4000_0001h` or is zero, which KVM before Linux 3.x
+answered to mean the same.
 
 The time page is 32 bytes of the kernel's own static data, aligned to 32
 so that it cannot cross a page. It is registered by writing its physical
 address with bit 0 set, read, and given back by writing 0 before `init`
 returns, on every path: the kernel leaves no memory a hypervisor writes
-into on its own schedule. KVM fills the structure before the guest runs
+into on its own schedule. The register is one for each virtual processor,
+so interrupts are masked from the registering write to the give-back:
+nothing preempts the task between them or moves it to a processor whose
+give-back would leave the first one's page registered. KVM fills the structure before the guest runs
 on after the registering write; the read follows KVM's protocol all the
-same (the version is read before and after, and an odd or
-changed version means read again, at most 1,000 times, then give up and
-fall through to the next source). A page whose version is still 0 after
-the write was never filled and vouches for nothing.
+same (the version is read before and after, and a zero,
+odd or changed version means read again, at most 1,000 times, then give up
+and fall through to the next source). A page whose version is still 0
+after the write was never filled and vouches for nothing. A registering
+write that faults is a kernel trap, a panic naming the instruction, never
+a fall-through: it is made only under `KVM_FEATURE_CLOCKSOURCE2`, under
+which KVM accepts it.
 
 All of row 2 is refused, and the order falls through, when any one of its
 conditions fails. It is tried only when the invariant bit is absent, so
@@ -162,21 +195,35 @@ vDSO answers between two system calls on that boot as on any other.
 
 ## 5. The HPET said aloud
 
-When row 4 is the answer the boot prints a second `clock` line with the
-reason and the cost, for example under plain TCG:
+When row 4 is the answer the boot prints a warning beside the `clock`
+line, with the cost and the reason, for example under plain TCG:
 
 ```
+  clock    WARNING: the HPET is the clock, three device reads a reading, and no clock in the vDSO (every clock_gettime is a system call): CPUID reports no invariant TSC, under a hypervisor (TCGTCGTCGTCG) which offers nothing this kernel can ask; give the guest invtsc (QEMU: -cpu ...,migratable=off,+invtsc; libvirt: migratable='off' and <feature policy='require' name='invtsc'/>)
   clock    HPET at 100.000 MHz
-  clock    WARNING: the HPET is the clock, three device reads a reading and no vDSO clock (every clock_gettime is a system call): CPUID reports no invariant TSC and the hypervisor (TCGTCGTCGTCG) does not vouch for it. Under KVM that is about 22 us a reading against 20 ns; give the guest invtsc (QEMU: -cpu ...,migratable=off,+invtsc; libvirt: migratable='off' and <feature policy='require' name='invtsc'/>)
 ```
 
-The reason is one of: no invariant TSC on bare metal (no hypervisor bit);
-a hypervisor, named by the twelve bytes of leaf `4000_0000h`, that does not
-vouch; KVM that offers a paravirtual clock without the stable bit or with a
-time page that never said stable (the host's own TSC is not its clock
-source). `clock::hpet_reason` answers the reason exactly when the HPET is
-the counter, so the line cannot be printed for a TSC or left out for an
-HPET.
+The line says only what this boot knows. The reason is one of: no
+invariant TSC and no hypervisor; an invariant TSC that could not be
+measured; a hypervisor, named by the twelve bytes of leaf `4000_0000h`,
+that is not KVM; and KVM that offers no paravirtual clock, no stable bit, a
+time page that could not be read, one that does not say stable (the host's
+own TSC is not its clock source), or one stating a rate no TSC has. The
+hypervisor's bytes are its own, so they are printed as text only when
+every one is a printable character and in hexadecimal otherwise: nothing a
+hypervisor answers can end the line and forge the next. The remedy is
+printed only under a hypervisor; on bare metal there is none to give. What
+a reading costs under KVM, 22 us against 20 ns, is §1's measurement and
+stays in this document. `clock::hpet_reason` answers the reason exactly
+when the HPET is the counter (`L.x86_64.170`), so the line cannot be
+printed for a TSC or left out for an HPET.
+
+Every x86-64 boot under TCG gains this line, and one more from the checks:
+`clock no KVM paravirtual clock here: its time page's registration and
+give-back were not run`. A boot under KVM gains `clock KVM's time page read
+and given back: multiplier ..., shift ..., stable, ... Hz stated against
+the counter's ...` instead. No other boot line changes; the Arm boots have
+none of this.
 
 ## 6. The HPET's three reads stay three
 
@@ -213,27 +260,76 @@ without TSC scaling; on rows 1, 3 and 5 it could never be.
 
 ## 8. Requirements and checks
 
+`L.x86_64.38` is reworded to the order of §3 and stays baselined, its
+criterion unchanged. `L.x86_64.39` to `41` are unchanged. The checks are
+`src/kernel/src/arch/x86_64/clock/check.rs`, run with stage 3's.
+
 | Id | Shall | Check |
 |---|---|---|
-| `L.x86_64.38` (reworded) | `clock::init` brings up a 64-bit counter and its rate in the order of §3 | baselined, as before |
-| `L.x86_64.166` | `choose` answers the source for a machine described: the TSC by measurement with an invariant TSC, the TSC on KVM's word when the bit is absent and KVM vouches in full, the HPET only when neither holds and a 64-bit HPET exists | every boot: a table of described machines, each with the source it must get (`clock::check::sources_decided`) |
-| `L.x86_64.167` | `pvclock_hz` answers `10^9 * 2^32 / (mul * 2^shift)` rounded down, and nothing for a zero multiplier, a shift outside -31..=31 or a rate outside 1 MHz..=2^40 Hz | every boot: computed vectors, the refusals among them (`clock::check::pvclock_rates`) |
-| `L.x86_64.168` | `kvm_time_page` registers the kernel's time page, reads it whole (version even, non-zero and unchanged across the read), and has given it back when it returns, whatever it read | under KVM: after `init`, a fresh read answers a page and `MSR_KVM_SYSTEM_TIME_NEW` reads 0; elsewhere the check says it did not run (`clock::check::time_page_given_back`) |
-| `L.x86_64.169` | `hpet_reason` answers a reason exactly when the counter is the HPET, and on this boot the counter is not the HPET when the processor has an invariant TSC or KVM vouches | every boot: the live machine's facts against the counter in use (`clock::check::counter_matches_machine`) |
+| `L.x86_64.166` | `choose` answers the counter for a machine described, and `kvm_word` vouches only with every condition of row 2, refusing with the first that fails | every boot: nine machines, the unmeasurable 32-bit HPET, and each of row 2's seven conditions failing alone (`sources_decided`) |
+| `L.x86_64.167` | `pvclock_hz` answers `10^9 * 2^32 / (mul * 2^shift)` rounded down, and nothing for a zero multiplier, a shift outside -31..=31 or a rate outside 1 MHz..=2^40 Hz | every boot: 15 pairs worked out by hand, nazuna's own page among them (`pvclock_rates`) |
+| `L.x86_64.168` | `kvm_time_page` registers the time page with interrupts masked and has given it back when it returns | every boot under KVM, whichever counter was chosen: the register reads 0 after bring-up and 0 again after one more read, whether or not it answered a page (one that could not be read is said in a `clock` line and fails nothing), and an answered page's stated rate is within a third of the counter's (`time_page_given_back`) |
+| `L.x86_64.169` | `read_time_page` reads the version first and last, looks again on zero, odd or changed, at most 1,000 times, and decodes word 6, byte 28 and byte 29 | every boot: scripted pages (`time_page_read_whole`) |
+| `L.x86_64.170` | `hpet_reason` answers a reason exactly when the counter is the HPET | every boot (`reason_only_for_the_hpet`) |
+| `L.x86_64.171` | the HPET is not the counter where KVM vouches in full, nor with an invariant TSC unless its measurement failed | every boot, from the machine's own CPUID and time page read again (`counter_matches_machine`) |
 
-Negative controls, each a `gate.sh control` whose panic line is recorded in
-the commit: row 2 taken out of `choose` (166, any boot; and 169 under KVM
-with `FERRIX_X86_CPU=host`), the shift's sign reversed in `pvclock_hz`
-(167), the give-back write removed (168, under KVM), and `hpet_reason`
-answering nothing (169, under TCG).
+The third of `L.x86_64.168`'s tolerance: a formula wrong by a factor of two
+states twice or half the rate and fails; the counter's own rate on the
+standing KVM boot is measured over 10 ms of an emulated HPET, and to be a
+third out the virtual processor would have to lose 3.3 ms between two
+adjacent instructions of that measurement. The boots of 2026-10-10, at a
+host load of 29 to 35, read 4,400.035 and 4,399.991 MHz against the
+stated 4,400.023.
+
+Negative controls, each a `gate.sh control` whose line is in the commit
+that built this: row 2 taken out of `choose` (166, any boot); the shift's
+direction reversed in `pvclock_hz` (167, any boot); the give-back write
+registering again (168, the standing KVM boot); the changed-version test taken out
+of `read_time_page` (169, any boot); `hpet_reason` answering nothing (170,
+under TCG); and `init` not asking KVM (171, under KVM with
+`FERRIX_X86_CPU=host`).
 
 Gates: the image row, x86_64 under KVM and TCG, plus one boot the row does
 not have: `FERRIX_X86_CPU=host cargo xtask test-boot --arch x86_64 --accel
 kvm`, the card domain's processor line, which must print row 2's line and
-pass the vDSO check on it.
+pass stage 3's timer check and the vDSO's on it. Only that boot reaches
+row 2's arm of `init`; `docs/certification/COVERAGE-RESIDUAL.md` says so,
+and `docs/BACKLOG.md` asks the product owner for a standing boot of it.
 
 ## 9. Where it stands
 
-* 2026-10-10: designed; ids `L.x86_64.166-169` reserved on branch
-  `softgl-clock-reserve`. The certification consultant's design verdict is
-  recorded below when given.
+* 2026-10-10: designed. The certification consultant's design verdict
+  (softgl-clock-cert, ledger line 665): **OK IF** D1 to D18. In short: the
+  third residual and an assumption of use for all three (D1, D2); the
+  backlog rows in the landing (D3); 38 spelled out and 39 decided (D4, D5);
+  the time page's requirement split into registration and read, the
+  HPET's into reason and live machine, six ids (D6 to D8); the tables'
+  rows (D9, D10); the live checks keyed on the processor's facts so the
+  standing KVM boot runs them (D11); interrupts masked across the
+  registration (D12); the one-off boot and every control through `gate.sh`
+  (D13); the coverage residual and evidence files (D14, D15); the loads'
+  order, the registering write's safety argument and the leaves' order
+  (D16); the warning line printing only what the boot knows (D17); the full
+  `check` after the new boot lines (D18).
+* 2026-10-11: the consultant's code verdict (softgl-clock-cert, ledger
+  line 694): **OK IF** E1 to E4. The coverage evidence is exactly what
+  `carry-coverage.py` writes, the new code entered in
+  `docs/certification/coverage-owed.json` with its arguments (E1); a KVM
+  whose time page cannot be read is not failed by the check that gives the
+  page back (E2); the boot without `invtsc` re-run on the landing's kernel
+  (E3); wording (E4).
+* 2026-10-10: built as designed and conditioned. Ids `L.x86_64.166-171`
+  written and their reservation released. The checks run from
+  `arch::check_machine`, at stage 3 right after the timer's rate: run later
+  they came after stage 13's `cpu.max` check, which a kernel on the HPET
+  under KVM fails first. Measured on nazuna with the card domain's
+  processor line (`-cpu host`, 8 processors, the study's tools), before at
+  a host load of 18 to 25 and after at 54 to 64:
+
+  | | boot line | `clock_gettime` | futex round trip, p50 | socket round trip, p50 |
+  |---|---|---|---|---|
+  | before | `clock HPET at 100.000 MHz` | 21,125 to 27,738 ns | 243 us | 198 to 212 us |
+  | after | `clock TSC, vouched for and rated by KVM's paravirtual clock at 4400.023 MHz` | 21 to 70 ns (two of six runs 251 and 284 at load 60) | 2.6 and 9.5 us | 12.6 and 32.2 us |
+
+  The same boot reaches the `clock` line 1.2 to 1.7 s after power-on where
+  it took 3.5 s before, the HPET no longer being read.

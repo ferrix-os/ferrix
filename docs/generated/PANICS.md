@@ -645,7 +645,10 @@ trap and the signal Linux raises; the descriptions a console or interrupt
 controller can be given; and one idle shared line and one idle private line
 masked and let through at the interrupt controller, read back from its
 registers. A program that faults, and a driver that holds its interrupt, rely on
-exactly these answers. On the Arm architectures only.
+exactly these answers. On x86-64 it is the clock's choice instead: which counter
+a machine described is given, the rate a hypervisor's time page states, and that
+this machine was not left on the HPET with a TSC it could trust
+(`docs/CLOCK.md`).
 
 1. A change to the architecture's trap decoding that moved an exception class or
    fault status to another trap or signal; the message says which kind of case.

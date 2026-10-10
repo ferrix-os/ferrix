@@ -164,25 +164,14 @@ pub(crate) const fn sigpage_code() -> Option<&'static [u8]> {
 // machine hands it -- trap syndromes, the console's description, the
 // interrupt controller's masking -- checked at boot against built inputs
 // (`aarch64/check.rs`, `armv7a/check.rs`). x86-64's is for that
-// architecture's pass to write; until then it has nothing here to check.
+// architecture's pass to write; until then it checks what it decides of the
+// clock (`x86_64/clock/check.rs`).
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::check_machine;
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::check_machine;
-
-/// What the architecture decodes on its own, checked: nothing yet on x86-64.
-///
-/// # Errors
-///
-/// None.
 #[cfg(target_arch = "x86_64")]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the Arm architectures' checks return what failed, and callers are shared"
-)]
-pub(crate) const fn check_machine() -> Result<(), &'static str> {
-    Ok(())
-}
+pub(crate) use x86_64::check_machine;
 
 /// What the interrupt controller's concurrent-change check found (F-50):
 /// see `arm_common::gicv2::check`.

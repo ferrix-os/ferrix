@@ -600,7 +600,11 @@ package FerrixStructure {
                  * femtoseconds. Falls back to the TSC calibrated against the
                  * PIT on a machine with no HPET table, and to the TSC
                  * calibrated against the HPET when its counter is 32 bits
-                 * wide and would wrap every five minutes. */
+                 * wide and would wrap every five minutes. An invariant TSC
+                 * measured against the HPET is preferred to it, and so is
+                 * a TSC KVM's paravirtual clock vouches for where the
+                 * processor model hides the invariant bit (docs/CLOCK.md);
+                 * an HPET that is the counter says so at boot. */
         }
         part serial : Serial16550 {
             doc /* COM1 through port I/O. The one in-kernel device. */

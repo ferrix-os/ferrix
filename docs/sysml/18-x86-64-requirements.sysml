@@ -829,17 +829,22 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.38'> counterFrequencyKnown : ItemLowLevel {
             attribute :>> statement = "clock::init shall bring up a 64-bit counter
-                and its frequency: the invariant TSC measured over 10 ms of the HPET
-                where both exist, else a 64-bit HPET at its stated period, else the
-                TSC measured against a 32-bit HPET, else against PIT channel 2.";
+                and its frequency, opening the HPET first where firmware describes
+                one: the invariant TSC measured over 10 ms of the HPET where both
+                exist; else, with no invariant TSC, the TSC at the rate KVM's time
+                page states where kvm_word vouches for it; else, with no HPET, the
+                TSC measured against PIT channel 2; else a 64-bit HPET at its
+                stated period; else the TSC measured against a 32-bit HPET.";
             attribute :>> criterion = "counter_hz agrees with a reference the
                 counter was not calibrated from, within a stated tolerance, on each
                 path a gate boots.";
             attribute :>> parent = "H.SCHED.5";
             attribute :>> unit = ("arch::x86_64::clock::init",
+                "arch::x86_64::clock::adopt",
                 "arch::x86_64::clock::hpet_address",
-                "arch::x86_64::clock::start_hpet",
+                "arch::x86_64::clock::open_hpet",
                 "arch::x86_64::clock::invariant_tsc",
+                "arch::x86_64::clock::kvm_facts",
                 "arch::x86_64::clock::calibrate_tsc_against_hpet",
                 "arch::x86_64::clock::start_tsc",
                 "arch::x86_64::clock::pit_finished",
@@ -859,7 +864,7 @@ package FerrixX8664Requirements {
                 no HPET and the PIT's output held low, init answers an error, 2 of
                 2.";
             attribute :>> parent = "H.SCHED.5";
-            attribute :>> unit = ("arch::x86_64::clock::start_hpet",
+            attribute :>> unit = ("arch::x86_64::clock::open_hpet",
                 "arch::x86_64::clock::calibrate_tsc",
                 "arch::x86_64::clock::start_tsc",
                 "arch::x86_64::clock::pit_finished");
@@ -883,6 +888,88 @@ package FerrixX8664Requirements {
                 system calls made on either side.";
             attribute :>> parent = "H.SCHED.5";
             attribute :>> unit = "arch::x86_64::clock::counter_is_tsc";
+        }
+        requirement <'L.x86_64.166'> counterChosenByWhoVouches : ItemLowLevel {
+            attribute :>> statement = "choose shall answer the counter for a
+                machine described -- the TSC by its measurement with an invariant
+                TSC and an HPET, the TSC at KVM's rate when the processor reports
+                no invariant TSC and kvm_word vouches, the TSC by the PIT with no
+                HPET, a 64-bit HPET only when none of these holds and with the
+                reason, the TSC measured against a 32-bit HPET otherwise -- and
+                kvm_word shall vouch only under the hypervisor bit, KVM's
+                signature, CLOCKSOURCE2, CLOCKSOURCE_STABLE_BIT, a time page read
+                whole with its stable flag set, and a rate pvclock_hz answers,
+                refusing with the first of these that fails.";
+            attribute :>> criterion = "Nine machines described are each given
+                their counter, a 32-bit HPET that could not be measured against is
+                refused with or without the invariant bit, and KVM's word with each
+                of its 7 conditions failing alone is refused for that reason and
+                given the HPET with it.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = ("arch::x86_64::clock::choose",
+                "arch::x86_64::clock::kvm_word");
+        }
+        requirement <'L.x86_64.167'> timePageRate : ItemLowLevel {
+            attribute :>> statement = "pvclock_hz shall answer the rate a time
+                page's multiplier and shift state, 10^9 * 2^32 / (mul * 2^shift)
+                rounded down, and nothing for a multiplier of zero, a shift outside
+                -31 to 31 or a rate outside 1 MHz to 2^40 Hz.";
+            attribute :>> criterion = "15 pairs of multiplier and shift, the gate
+                host's own among them, are each given the rate worked out by hand
+                or refused: a zero multiplier, shifts of -32 and 32, and rates
+                either side of both bounds.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = "arch::x86_64::clock::pvclock_hz";
+        }
+        requirement <'L.x86_64.168'> timePageGivenBack : ItemLowLevel {
+            attribute :>> statement = "kvm_time_page shall register the kernel's
+                time page with KVM on the running processor with interrupts masked,
+                and shall have given it back when it returns, whatever was read.";
+            attribute :>> criterion = "Under KVM with a paravirtual clock, MSR
+                4b564d01h reads 0 after bring-up and 0 again after kvm_time_page,
+                whether or not it answered a page, and the rate an answered page
+                states is within a third of counter_hz where the page says stable
+                and the counter is the TSC; elsewhere the boot says the check did
+                not run.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = ("arch::x86_64::clock::kvm_time_page",
+                "arch::x86_64::clock::kvm_time_page_registered");
+        }
+        requirement <'L.x86_64.169'> timePageReadWhole : ItemLowLevel {
+            attribute :>> statement = "read_time_page shall read a time page's
+                version first and last, look again when it is zero, odd or changed
+                across the read, at most 1,000 times and then answer nothing, and
+                shall answer tsc_to_system_mul from the page's word 6, tsc_shift
+                from byte 28 and the flags from byte 29.";
+            attribute :>> criterion = "A literal 32-byte page is decoded; a
+                version odd then even is read on the third look; a version and
+                multiplier that change across the read are answered from the second
+                read; a page never filled and one that never settles answer nothing
+                after 1,000 tries.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = "arch::x86_64::clock::read_time_page";
+        }
+        requirement <'L.x86_64.170'> hpetSaidWithItsReason : ItemLowLevel {
+            attribute :>> statement = "hpet_reason shall answer a reason exactly
+                when the counter counter_now reads is the HPET, from which
+                warn_of_hpet prints the boot's warning that the HPET is the clock.";
+            attribute :>> criterion = "On every boot hpet_reason answers a reason
+                if and only if the HPET's window is the counter's.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = ("arch::x86_64::clock::hpet_reason",
+                "arch::x86_64::clock::warn_of_hpet",
+                "arch::x86_64::clock::HpetReason::from_code");
+        }
+        requirement <'L.x86_64.171'> hpetOnlyWithoutATscToTrust : ItemLowLevel {
+            attribute :>> statement = "clock::init shall not make the HPET the
+                counter on a machine where KVM vouches for the TSC in full, nor
+                where the processor reports an invariant TSC unless its measurement
+                against the HPET did not come off.";
+            attribute :>> criterion = "On the running machine, with its own CPUID
+                and time page read again: no HPET reason where KVM vouches without
+                an invariant TSC, and none but the failed measurement's with one.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = "arch::x86_64::clock::init";
         }
     }
 

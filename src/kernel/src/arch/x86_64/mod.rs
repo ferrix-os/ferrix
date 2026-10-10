@@ -160,6 +160,19 @@ pub(crate) use trap::{
     TrapFrame, advance_past_breakpoint, breakpoint, classify, fault_signal, report_trap,
 };
 
+/// What this architecture decides on its own from what the machine hands
+/// it, checked right after the timer's rate and before anything is built on
+/// the clock: which counter the clock is and on whose word
+/// (`docs/CLOCK.md` §8). See `clock::check`.
+///
+/// # Errors
+///
+/// The first decision that came out wrong, or the HPET in use on a machine
+/// that had a TSC to trust.
+pub(crate) fn check_machine() -> Result<(), &'static str> {
+    clock::check::run()
+}
+
 /// Show that the exceptions nothing masks are survived where they land: an NMI
 /// in the kernel, and hardware breakpoints in the `SYSCALL` trampoline's ring-0
 /// stretches on the program's stack and `GS`. See `paranoid`. Then the
@@ -1766,6 +1779,11 @@ pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'st
     record_reset_register(&acpi);
 
     let counter = clock::init(&acpi)?;
+    // The HPET is the last resort and a slow one: said here, beside the
+    // `clock` line generic code prints from the report (`docs/CLOCK.md` §5).
+    if let Some(reason) = clock::hpet_reason() {
+        clock::warn_of_hpet(reason);
+    }
     // SAFETY: (DEVICE) called once from `kmain`, on the boot CPU, after `init_traps`
     // filled the IDT and with interrupts masked.
     unsafe { apic::init(&acpi)? };
