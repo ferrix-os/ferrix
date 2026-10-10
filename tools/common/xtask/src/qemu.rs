@@ -2315,11 +2315,11 @@ fn qemu_command(
     attach_rng(&mut command, arch);
     attach_display(&mut command, arch, args, &binary);
     attach_asked_for(&mut command, arch, args, &binary);
-    attach_usb(&mut command, arch, args);
     attach_test_disk(&mut command, arch)?;
     attach_btrfs_disk(&mut command, arch)?;
     attach_install_disks(&mut command, arch, image, args);
     attach_root_disk(&mut command, arch, args)?;
+    attach_nvme_scratch(&mut command, arch, args);
     attach_data_image(&mut command, arch, args)?;
     if let Some(home) = &args.home_image {
         attach_home(&mut command, arch, home, "kept for the next boot");
@@ -2471,10 +2471,11 @@ fn attach_clipboard(command: &mut Command, arch: Arch, args: &Args) {
 }
 
 /// The devices a flag asks for and nothing else brings: the clipboard's
-/// virtio-serial port and the sound card.
+/// virtio-serial port, the sound card and `test-usb`'s bus, in that order.
 fn attach_asked_for(command: &mut Command, arch: Arch, args: &Args, binary: &Path) {
     attach_clipboard(command, arch, args);
     attach_audio(command, arch, args, binary);
+    attach_usb(command, arch, args);
 }
 
 /// A virtio-snd card (`docs/AUDIO.md` §4), when `--audio` names a backend,
@@ -2949,7 +2950,7 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
     let test = (args.btrfs_root
         && matches!(
             args.command.as_deref(),
-            Some("test-chrome-window" | "test-restart")
+            Some("test-chrome-window" | "test-restart" | "test-nvme")
         ))
         || matches!(
             args.command.as_deref(),
@@ -2988,12 +2989,16 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
             display(&disk)
         ),
     ]);
-    let device = if arch == Arch::Armv7a {
-        "virtio-blk-pci,drive=btrfsroot,disable-legacy=on"
+    if args.nvme && arch != Arch::Armv7a {
+        attach_nvme_root(command, arch);
     } else {
-        "virtio-blk-pci,drive=btrfsroot,disable-legacy=on,iommu_platform=on"
-    };
-    let _ = command.args(["-device", device]);
+        let device = if arch == Arch::Armv7a {
+            "virtio-blk-pci,drive=btrfsroot,disable-legacy=on"
+        } else {
+            "virtio-blk-pci,drive=btrfsroot,disable-legacy=on,iommu_platform=on"
+        };
+        let _ = command.args(["-device", device]);
+    }
     // The users' files, beside the root and kept when it starts over: the
     // kernel mounts the disk at `/home` by its label.
     if let Some((home, made)) = home {
@@ -3005,6 +3010,104 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
         attach_home(command, arch, &home, said);
     }
     Ok(())
+}
+
+/// The serial number of the NVMe drive the root is on under `--nvme`.
+pub(crate) const NVME_ROOT_SERIAL: &str = "ferrix-nvme-root";
+/// The serial number of `test-nvme`'s scratch drive.
+pub(crate) const NVME_SCRATCH_SERIAL: &str = "ferrix-nvme-4k";
+
+/// Attach the drive `btrfsroot` as an NVMe drive below a PCIe switch: a
+/// root port, the switch's upstream port, one downstream port, and the
+/// controller on that.
+///
+/// That is where a PC's chipset puts an M.2 slot -- the first real drive
+/// goes into one (`docs/NVME.md`) -- and it is two bridges more than the
+/// root port every other device here sits on, so the function's bus number
+/// is one firmware assigned through three levels, and its IOMMU scope is a
+/// path through them. Chassis and slot numbers continue from
+/// [`attach_rng`]'s two ports.
+fn attach_nvme_root(command: &mut Command, arch: Arch) {
+    println!(
+        "  {arch}: the btrfs root is an NVMe drive ({NVME_ROOT_SERIAL}) below a root port and a \
+         PCIe switch"
+    );
+    let _ = command.args([
+        "-device",
+        "pcie-root-port,id=ferrix.nvme.root,chassis=3,slot=3",
+        "-device",
+        "x3130-upstream,id=ferrix.nvme.up,bus=ferrix.nvme.root",
+        "-device",
+        "xio3130-downstream,id=ferrix.nvme.down,bus=ferrix.nvme.up,chassis=4,slot=4",
+        "-device",
+        &format!("nvme,drive=btrfsroot,serial={NVME_ROOT_SERIAL},bus=ferrix.nvme.down"),
+    ]);
+}
+
+/// Attach `test-nvme`'s scratch image as a second NVMe drive, with
+/// 4096-byte logical blocks, on a root port of its own (the root bus on
+/// AArch64, unless `FERRIX_NVME_BELOW_PORT` is set); through blkdebug
+/// when the gate injects a fault, and with QEMU's trace of the NVMe model
+/// when it asks for the witness.
+fn attach_nvme_scratch(command: &mut Command, arch: Arch, args: &Args) {
+    if let Some(trace) = &args.nvme_trace {
+        for event in [
+            "pci_nvme_flush_ns",
+            "pci_nvme_mmio_shutdown_set",
+            "pci_nvme_mmio_stopped",
+            "pci_nvme_mmio_start_success",
+        ] {
+            let _ = command.args(["-trace", &format!("enable={event}")]);
+        }
+        // The trace comes on QEMU's standard error, beside the DMA fault
+        // trace this tool judges every run by; the sieve puts these lines
+        // in the file.
+        crate::noise::keep("pci_nvme_", trace);
+    }
+    let Some(scratch) = &args.nvme_scratch else {
+        return;
+    };
+    println!(
+        "  {arch}: scratch NVMe drive {} ({NVME_SCRATCH_SERIAL}), 4096-byte blocks{}",
+        display(scratch),
+        if args.nvme_fault.is_some() {
+            ", read through blkdebug"
+        } else {
+            ""
+        }
+    );
+    let file = match &args.nvme_fault {
+        Some(rules) => format!(
+            "file=blkdebug:{}:{},if=none,format=raw,id=nvmescratch,cache=writeback",
+            display(rules),
+            display(scratch)
+        ),
+        None => format!(
+            "file={},if=none,format=raw,id=nvmescratch,cache=writeback",
+            display(scratch)
+        ),
+    };
+    let _ = command.args(["-drive", &file]);
+    // On x86-64, a root port of its own. On AArch64, the root bus: a
+    // function below a bridge there has its DMA faulted by the SMMUv3
+    // (`docs/BACKLOG.md`, found by this gate on 2026-10-10), and nothing
+    // else on that machine sits below one.
+    let bus = if std::env::var_os("FERRIX_NVME_BELOW_PORT").is_some() || arch == Arch::X86_64 {
+        let _ = command.args([
+            "-device",
+            "pcie-root-port,id=ferrix.nvme.port,chassis=5,slot=5",
+        ]);
+        ",bus=ferrix.nvme.port"
+    } else {
+        ""
+    };
+    let _ = command.args([
+        "-device",
+        &format!(
+            "nvme,drive=nvmescratch,serial={NVME_SCRATCH_SERIAL}{bus},\
+             logical_block_size=4096,physical_block_size=4096"
+        ),
+    ]);
 }
 
 /// Attach `home`, a btrfs volume labelled `ferrix-home`, written through:

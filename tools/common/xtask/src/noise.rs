@@ -160,6 +160,44 @@ impl Sieve {
     }
 }
 
+/// Lines a gate asked to have kept for it rather than shown: the prefix
+/// they begin with, and the file they are appended to ([`keep`]).
+static KEPT: std::sync::Mutex<Option<(&'static str, std::path::PathBuf)>> =
+    std::sync::Mutex::new(None);
+
+/// From now on, append every line of a child's standard error that begins
+/// with `prefix` to `file`, and keep it off the terminal: a trace QEMU
+/// writes there that a gate counts afterwards, as `test-nvme` counts the
+/// NVMe model's Flush commands. It shares the stream with the DMA fault
+/// trace, which is why it is not sent to a log file of QEMU's own.
+pub(crate) fn keep(prefix: &'static str, file: &std::path::Path) {
+    if let Ok(mut kept) = KEPT.lock() {
+        *kept = Some((prefix, file.to_path_buf()));
+    }
+}
+
+/// Whether `line` is one [`keep`] asked for, in which case it is in the
+/// file now.
+fn kept(line: &str) -> bool {
+    let Ok(kept) = KEPT.lock() else {
+        return false;
+    };
+    let Some((prefix, file)) = kept.as_ref() else {
+        return false;
+    };
+    if !line.starts_with(prefix) {
+        return false;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+    true
+}
+
 /// What a sieve took out of a stream.
 #[derive(Debug, Default)]
 pub(crate) struct Sieved {
@@ -204,6 +242,9 @@ impl Filter {
                 }
                 let line = String::from_utf8_lossy(&bytes);
                 let line = line.trim_end_matches(['\n', '\r']);
+                if kept(line) {
+                    continue;
+                }
                 match sieve.take(line) {
                     Show::Nothing => {}
                     Show::Line => eprintln!("{line}"),
