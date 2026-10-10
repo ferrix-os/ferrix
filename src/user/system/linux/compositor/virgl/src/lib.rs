@@ -39,7 +39,7 @@ pub mod vtest;
 #[cfg(test)]
 mod tests;
 
-pub use device::{Device, Texture};
+pub use device::{Device, Layout, Texture};
 pub use stream::{
     Blend, Blit, Rasterizer, Region, Sampler, Stream, VertexBuffer, VertexElement, View,
 };

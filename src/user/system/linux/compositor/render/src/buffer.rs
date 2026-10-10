@@ -65,6 +65,28 @@ fn check(len: usize, width: u32, height: u32, stride: u32) -> Result<usize, Erro
     Ok(needed)
 }
 
+/// The buffer on a GPU a [`Surface`]'s pixels are: a client's dmabuf.
+#[derive(Debug, Clone, Copy)]
+pub struct OnDevice<'a> {
+    /// The dmabuf.
+    pub fd: std::os::fd::BorrowedFd<'a>,
+    /// What the buffer is called for as long as it lives.
+    pub key: u64,
+    /// Where the buffer's first row starts in the dmabuf, in bytes.
+    pub offset: u32,
+    /// The buffer's DRM format modifier: `0` for linear rows.
+    pub modifier: u64,
+    /// The whole buffer's width in pixels, which is the surface's unless
+    /// the surface is a part of it.
+    pub width: u32,
+    /// The whole buffer's height in pixels.
+    pub height: u32,
+    /// Where the surface's first pixel is in the buffer.
+    pub x: u32,
+    /// See [`OnDevice::x`].
+    pub y: u32,
+}
+
 /// A client's pixels: a `wl_shm` buffer, or any other 32-bit buffer of the
 /// two formats, with the stride the client gave.
 #[derive(Debug, Clone, Copy)]
@@ -78,7 +100,7 @@ pub struct Surface<'a> {
     /// The buffer on a GPU the pixels also are, as a dmabuf, and what it is
     /// called from frame to frame: a renderer on that GPU samples it where
     /// it lies rather than uploading `data`.
-    device: Option<(std::os::fd::BorrowedFd<'a>, u64)>,
+    device: Option<OnDevice<'a>>,
 }
 
 impl<'a> Surface<'a> {
@@ -106,6 +128,41 @@ impl<'a> Surface<'a> {
             name: 0,
             device: None,
         })
+    }
+
+    /// A `width` × `height` buffer whose pixels this program cannot read:
+    /// video memory, which only the GPU that made it can sample. It is
+    /// drawn only once [`Surface::on_device`] has said which buffer it is,
+    /// and only by a renderer on that GPU; anything else draws nothing for
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Size`] or [`Error::Stride`] when the shape is not one a
+    /// buffer has.
+    pub fn without_pixels(
+        width: u32,
+        height: u32,
+        stride: u32,
+        format: Format,
+    ) -> Result<Self, Error> {
+        let _ = check(usize::MAX, width, height, stride)?;
+        Ok(Self {
+            data: &[],
+            width,
+            height,
+            stride,
+            format,
+            name: 0,
+            device: None,
+        })
+    }
+
+    /// Whether the pixels can be read here: all but
+    /// [`Surface::without_pixels`]'s.
+    #[must_use]
+    pub const fn has_pixels(&self) -> bool {
+        !self.data.is_empty()
     }
 
     /// The same pixels, said to be those of the thing called `name`: a
@@ -138,16 +195,32 @@ impl<'a> Surface<'a> {
         {
             return None;
         }
+        let name = match self.name {
+            0 => 0,
+            name => name ^ (u64::from(x) << 40) ^ (u64::from(y) << 52),
+        };
+        if !self.has_pixels() {
+            // Nothing to read a part of: the part is the same buffer on
+            // its GPU, with where in it the part begins.
+            let on = self.device?;
+            return Some(Self {
+                width,
+                height,
+                name,
+                device: Some(OnDevice {
+                    x: on.x.checked_add(x)?,
+                    y: on.y.checked_add(y)?,
+                    ..on
+                }),
+                ..*self
+            });
+        }
         let start = usize::try_from(y)
             .ok()?
             .checked_mul(usize::try_from(self.stride).ok()?)?
             .checked_add(usize::try_from(x).ok()?.checked_mul(4)?)?;
         let data = self.data.get(start..)?;
         let part = Self::new(data, width, height, self.stride, self.format).ok()?;
-        let name = match self.name {
-            0 => 0,
-            name => name ^ (u64::from(x) << 40) ^ (u64::from(y) << 52),
-        };
         Some(part.named(name))
     }
 
@@ -161,13 +234,38 @@ impl<'a> Surface<'a> {
     /// anywhere; `data` is what it falls back to when it cannot.
     #[must_use]
     pub const fn on_device(mut self, fd: std::os::fd::BorrowedFd<'a>, key: u64) -> Self {
-        self.device = Some((fd, key));
+        self.device = Some(OnDevice {
+            fd,
+            key,
+            offset: 0,
+            modifier: 0,
+            width: self.width,
+            height: self.height,
+            x: 0,
+            y: 0,
+        });
+        self
+    }
+
+    /// Where the buffer [`Surface::on_device`] named begins in its dmabuf
+    /// and how it is laid out, as its client said: what a renderer that
+    /// cannot ask the buffer itself imports it by. Linear from the first
+    /// byte when this is not said.
+    #[must_use]
+    pub const fn laid_out(mut self, offset: u32, modifier: u64) -> Self {
+        if let Some(on) = self.device {
+            self.device = Some(OnDevice {
+                offset,
+                modifier,
+                ..on
+            });
+        }
         self
     }
 
     /// The GPU buffer [`Surface::on_device`] said these pixels are.
     #[must_use]
-    pub const fn device(&self) -> Option<(std::os::fd::BorrowedFd<'a>, u64)> {
+    pub const fn device(&self) -> Option<OnDevice<'a>> {
         self.device
     }
 
@@ -301,6 +399,43 @@ mod tests {
     /// A 4 × 3 buffer whose every pixel's first byte is its index.
     fn numbered() -> Vec<u8> {
         (0..12_u8).flat_map(|at| [at, 0, 0, 0xff]).collect()
+    }
+
+    /// A buffer no processor can read is a surface with no bytes, and a
+    /// part of it is the same buffer on its GPU with where the part begins.
+    #[test]
+    fn a_buffer_without_pixels_is_cropped_by_where_its_part_begins() {
+        use std::os::fd::AsFd;
+        let file = std::fs::File::open("/dev/null").unwrap();
+        assert!(Surface::without_pixels(0, 3, 16, Format::Argb8888).is_err());
+        assert!(Surface::without_pixels(4, 3, 15, Format::Argb8888).is_err());
+        let bare = Surface::without_pixels(4, 3, 16, Format::Argb8888).unwrap();
+        assert!(!bare.has_pixels());
+        assert!(bare.row(0).is_none());
+        // Not said to be on a GPU, there is nothing to take a part of.
+        assert!(bare.cropped(1, 1, 2, 2).is_none());
+        let whole = bare
+            .named(7)
+            .on_device(file.as_fd(), 9)
+            .laid_out(64, 0x0300_0000_0060_6014);
+        let on = whole.device().unwrap();
+        assert_eq!((on.width, on.height, on.x, on.y), (4, 3, 0, 0));
+        assert_eq!((on.offset, on.modifier), (64, 0x0300_0000_0060_6014));
+        let part = whole.cropped(1, 1, 2, 2).unwrap();
+        let part = part.cropped(1, 0, 1, 2).unwrap();
+        assert_eq!((part.width(), part.height(), part.stride()), (1, 2, 16));
+        let on = part.device().unwrap();
+        assert_eq!((on.key, on.width, on.height, on.x, on.y), (9, 4, 3, 2, 1));
+        assert_eq!((on.offset, on.modifier), (64, 0x0300_0000_0060_6014));
+        assert!(whole.cropped(3, 0, 2, 1).is_none());
+        // A surface whose pixels are here keeps its crop in the bytes, and
+        // is the upload's from then on, as before.
+        let bytes = numbered();
+        let read = Surface::new(&bytes, 4, 3, 16, Format::Argb8888)
+            .unwrap()
+            .on_device(file.as_fd(), 9);
+        assert!(read.has_pixels());
+        assert!(read.cropped(1, 1, 2, 2).unwrap().device().is_none());
     }
 
     #[test]

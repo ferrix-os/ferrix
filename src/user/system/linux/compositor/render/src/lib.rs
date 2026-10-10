@@ -117,7 +117,7 @@ use core::fmt;
 
 pub use backdrop::Backdrop;
 pub use blur::Blur;
-pub use buffer::{Format, Surface, Target};
+pub use buffer::{Format, OnDevice, Surface, Target};
 pub use canvas::{Canvas, MAX_SIZE, Rounding, Shadow, rounded_spans};
 pub use compositor_config::Color;
 pub use compositor_layout::Rect;

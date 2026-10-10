@@ -4,12 +4,17 @@
 # straight into a buffer the display engine scans out.
 #
 # virgl_test_server is virglrenderer 1.2.0, pinned by the SHA-256 of
-# GitLab's tarball of the tag (commit below), with one patch of Ferrix's own:
-# tools/common/data/virgl-server/0001-vtest-ferrix-resource-import-fd.patch,
-# the command VCMD_FERRIX_RESOURCE_IMPORT_FD (vtest_protocol.h, number 64)
-# and the parameter VCMD_PARAM_FERRIX_IMPORT_FD a client asks for first. A
-# stock server answers that parameter "not valid", so hyprix works with
-# either; with the stock one its frames are read back (vtest protocol 2).
+# GitLab's tarball of the tag (commit below), with Ferrix's own patches,
+# tools/common/data/virgl-server/*.patch in their order:
+# 0001-vtest-ferrix-resource-import-fd.patch, the command
+# VCMD_FERRIX_RESOURCE_IMPORT_FD (vtest_protocol.h, number 64) and the
+# parameter VCMD_PARAM_FERRIX_IMPORT_FD a client asks for first; and
+# 0002-vtest-ferrix-dmabuf-modifiers.patch, VCMD_FERRIX_DMABUF_MODIFIERS
+# (65): the modifiers the server's EGL imports a format with, which is what
+# hyprix offers its clients (the parameter's value is then 2). A stock
+# server answers that parameter "not valid", so hyprix works with either;
+# with the stock one its frames are read back (vtest protocol 2) and its
+# clients' buffers are mapped.
 #
 # It is built as an x86-64 glibc program against Debian 13's -dev packages,
 # unpacked into a sysroot here, the way fetch-yserver.sh builds yserver, so
@@ -19,12 +24,12 @@
 # the program, and Debian's libvirglrenderer1 is not loaded by it.
 #
 # virglrenderer is MIT-licensed (its COPYING, copied beside the program as
-# virgl_test_server.COPYING); the patch is Ferrix's, under the same terms.
+# virgl_test_server.COPYING); the patches are Ferrix's, under the same terms.
 #
 # Writes $FERRIX_VIRGL_SERVER/ (default ~/.local/share/ferrix/virgl-server):
 # downloads/, sysroot/, src/, build/, and out/usr/bin/virgl_test_server with
 # out/usr/share/doc/virgl-server/COPYING and out/virgl-server.version (the
-# stamp: tarball, patch and script hashes). Needs curl, sha256sum, tar,
+# stamp: tarball, patches and script hashes). Needs curl, sha256sum, tar,
 # patch, dpkg-deb, meson, ninja, gcc, python3 and readelf; no root.
 #
 # Usage: tools/common/fetch/fetch-virgl-server.sh
@@ -32,7 +37,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-patch_file=$here/../data/virgl-server/0001-vtest-ferrix-resource-import-fd.patch
+patch_dir=$here/../data/virgl-server
 debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 out_dir=${FERRIX_VIRGL_SERVER:-$HOME/.local/share/ferrix/virgl-server}
 
@@ -96,7 +101,9 @@ for entry in "${debs[@]}"; do
     deb_files+=("$file")
 done
 
-stamp="$VERSION source=$SOURCE_SHA256 patch=$(sha256sum < "$patch_file" | cut -d' ' -f1) debs=$(printf '%s\n' "${debs[@]}" | sha256sum | cut -d' ' -f1) script=$(sha256sum < "$0" | cut -d' ' -f1)"
+patch_files=("$patch_dir"/[0-9]*.patch)
+[ -f "${patch_files[0]}" ] || { echo "fetch-virgl-server: no patches in $patch_dir" >&2; exit 1; }
+stamp="$VERSION source=$SOURCE_SHA256 patch=$(cat "${patch_files[@]}" | sha256sum | cut -d' ' -f1) debs=$(printf '%s\n' "${debs[@]}" | sha256sum | cut -d' ' -f1) script=$(sha256sum < "$0" | cut -d' ' -f1)"
 result=$out_dir/out
 if [ -x "$result/usr/bin/virgl_test_server" ] \
     && [ "$(cat "$result/virgl-server.version" 2> /dev/null)" = "$stamp" ]; then
@@ -125,7 +132,9 @@ src=$out_dir/src
 rm -rf "$src"
 mkdir -p "$src"
 tar xzf "$tarball" -C "$src" --strip-components=1
-patch -d "$src" -p1 --quiet < "$patch_file"
+for patch_file in "${patch_files[@]}"; do
+    patch -d "$src" -p1 --quiet < "$patch_file"
+done
 
 # Meson as a cross build, so that the compiler, the linker and pkg-config
 # look only into the sysroot and never at the host's own libraries.
@@ -182,7 +191,7 @@ mkdir -p "$result/usr/bin" "$result/usr/share/doc/virgl-server"
 install -m 755 "$program" "$result/usr/bin/virgl_test_server"
 strip "$result/usr/bin/virgl_test_server"
 install -m 644 "$src/COPYING" "$result/usr/share/doc/virgl-server/COPYING"
-install -m 644 "$patch_file" "$result/usr/share/doc/virgl-server/"
+install -m 644 "${patch_files[@]}" "$result/usr/share/doc/virgl-server/"
 echo "$stamp" > "$result/virgl-server.version"
 echo "fetch-virgl-server: $result/usr/bin/virgl_test_server"
 echo "            virglrenderer $VERSION, sha256 $SOURCE_SHA256, commit $SOURCE_COMMIT"

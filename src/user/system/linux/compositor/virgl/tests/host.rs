@@ -20,6 +20,10 @@ const FRAGMENT: u32 = 7;
 const VIEW: u32 = 8;
 const SAMPLER: u32 = 9;
 
+/// `DRM_FORMAT_ARGB8888` and `DRM_FORMAT_XRGB8888`.
+const DRM_FORMAT_ARGB8888: u32 = 0x3432_5241;
+const DRM_FORMAT_XRGB8888: u32 = 0x3432_5258;
+
 /// A server, or `None` with a line saying the test was skipped.
 #[expect(
     clippy::print_stderr,
@@ -695,6 +699,25 @@ fn a_stock_server_is_never_sent_the_import() {
         )
         .expect_err("a stock server takes no import");
     assert_eq!(error.raw_os_error(), Some(libc::EOPNOTSUPP));
+    // Nor asked which modifiers it imports, a command it does not know: it
+    // has none to offer, and a client's buffer is the upload's.
+    assert!(
+        server
+            .dmabuf_modifiers(DRM_FORMAT_ARGB8888)
+            .expect("asked")
+            .is_empty()
+    );
+    let layout = compositor_virgl::Layout {
+        width: 64,
+        height: 64,
+        stride: 256,
+        offset: 0,
+        modifier: 0,
+    };
+    assert_eq!(
+        compositor_virgl::Device::import(&mut server, buffer.as_fd(), &layout).expect("asked"),
+        None
+    );
     still_draws(&mut server);
 }
 
@@ -908,4 +931,555 @@ fn a_frame_is_drawn_into_an_imported_buffer() {
             "this driver drew into a copy"
         }
     );
+}
+
+/// A patched server that also says which modifiers its EGL imports (the
+/// second patch), or `None` with a line saying why not.
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn modifier_server(name: &str) -> Option<Vtest> {
+    let Some(program) = patched_server() else {
+        eprintln!("{name}: no patched virgl_test_server built; skipped");
+        return None;
+    };
+    let Ok(Some(mut server)) = Vtest::start_program(&program, name, 2) else {
+        eprintln!("{name}: the patched server would not start; skipped");
+        return None;
+    };
+    match server.dmabuf_modifiers(DRM_FORMAT_ARGB8888) {
+        Ok(modifiers) if !modifiers.is_empty() => Some(server),
+        Ok(_) => {
+            eprintln!(
+                "{name}: the patched server names no modifiers (the first patch alone, or an EGL without EGL_EXT_image_dma_buf_import_modifiers); skipped"
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!("{name}: the server's modifiers could not be asked ({error}); skipped");
+            None
+        }
+    }
+}
+
+/// `source`, a texture `side` wide, drawn over the whole of a new target of
+/// the same size, and the target read back.
+#[expect(clippy::expect_used, reason = "a test's helper")]
+fn sampled(server: &mut Vtest, source: u32, side: u32) -> Vec<u8> {
+    let target = server
+        .create(
+            pipe::TEXTURE_2D,
+            pipe::FORMAT_B8G8R8A8_UNORM,
+            pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+            side,
+            side,
+        )
+        .expect("a target");
+    let vertices = server
+        .create(
+            pipe::BUFFER,
+            pipe::FORMAT_R8_UNORM,
+            pipe::BIND_VERTEX_BUFFER,
+            4096,
+            1,
+        )
+        .expect("a vertex buffer");
+    let mut stream = Stream::new();
+    begin(&mut stream, target, side, Blend::REPLACE);
+    stream.clear([0.0, 0.0, 0.0, 1.0]);
+    assert!(stream.create_shader(
+        FRAGMENT,
+        pipe::SHADER_FRAGMENT,
+        shaders::SURFACE,
+        shaders::TOKENS
+    ));
+    stream.bind_shader(FRAGMENT, pipe::SHADER_FRAGMENT);
+    // As the renderer makes a client's view: the one format, alpha read.
+    stream.create_sampler_view(
+        VIEW,
+        View {
+            resource: source,
+            format: pipe::FORMAT_B8G8R8A8_UNORM,
+            opaque: false,
+        },
+    );
+    stream.set_sampler_views(pipe::SHADER_FRAGMENT, &[VIEW]);
+    stream.create_sampler_state(
+        SAMPLER,
+        Sampler {
+            filter: pipe::TEX_FILTER_NEAREST,
+        },
+    );
+    stream.bind_sampler_states(pipe::SHADER_FRAGMENT, &[SAMPLER]);
+    let wide = side as f32;
+    stream.set_constants(
+        pipe::SHADER_FRAGMENT,
+        &[
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, wide, wide, //
+            0.0, 2.0, 0.0, 0.0,
+        ],
+    );
+    quad(&mut stream, vertices, [0.0, 0.0, wide, wide]);
+    server.submit(stream.words()).expect("submitted");
+    server
+        .get(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: side,
+                height: side,
+            },
+        )
+        .expect("read back")
+}
+
+/// The patched server reports its EGL's modifiers for the two formats a
+/// client's buffer may have, each once.
+#[test]
+#[expect(clippy::print_stderr, reason = "what this host's EGL offers is said")]
+fn the_patched_server_says_which_modifiers_its_egl_imports() {
+    let Some(mut server) = modifier_server("modifiers") else {
+        return;
+    };
+    for (name, fourcc) in [
+        ("ARGB8888", DRM_FORMAT_ARGB8888),
+        ("XRGB8888", DRM_FORMAT_XRGB8888),
+    ] {
+        let modifiers = server.dmabuf_modifiers(fourcc).expect("asked");
+        eprintln!(
+            "modifiers: {name}: {}",
+            modifiers
+                .iter()
+                .map(|modifier| format!(
+                    "0x{:016x}{}",
+                    modifier.value,
+                    if modifier.external_only {
+                        " (external only)"
+                    } else {
+                        ""
+                    }
+                ))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let mut values: Vec<u64> = modifiers.iter().map(|modifier| modifier.value).collect();
+        values.sort_unstable();
+        values.dedup();
+        assert_eq!(values.len(), modifiers.len(), "{name}: each modifier once");
+    }
+    // A format no EGL imports has none, and the connection goes on.
+    assert!(server.dmabuf_modifiers(0).expect("asked").is_empty());
+    still_draws(&mut server);
+}
+
+/// A client's linear buffer, its pixels written by the processor, imported
+/// as the renderer imports one ([`compositor_virgl::Device::import`]) and
+/// sampled: the first row of the memory is the top of the picture and the
+/// bytes are blue, green, red, alpha.
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_clients_linear_buffer_is_sampled_the_way_up_it_was_written() {
+    use compositor_virgl::{Device, Layout};
+    use std::os::fd::AsFd;
+    let Some(mut server) = modifier_server("import-sample") else {
+        return;
+    };
+    let side = 64_u32;
+    let stride = 256_u32;
+    let Some((dmabuf, memory)) = udmabuf(u64::from(stride * side).next_multiple_of(4096)) else {
+        eprintln!("import-sample: no /dev/udmabuf to make a dmabuf with; skipped");
+        return;
+    };
+    // Red above, blue below, and green in the top left quarter.
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::from(memory);
+        let pixels: Vec<u8> = (0..side)
+            .flat_map(|y| (0..side).map(move |x| (x, y)))
+            .flat_map(|(x, y)| match (x < side / 2, y < side / 2) {
+                (true, true) => [0, 0xff, 0, 0xff],
+                (false, true) => [0, 0, 0xff, 0xff],
+                (_, false) => [0xff, 0, 0, 0xff],
+            })
+            .collect();
+        file.write_all(&pixels).expect("written");
+    }
+    let layout = Layout {
+        width: side,
+        height: side,
+        stride,
+        offset: 0,
+        modifier: 0,
+    };
+    let source = match Device::import(&mut server, dmabuf.as_fd(), &layout) {
+        Ok(Some(source)) => source,
+        Ok(None) => {
+            eprintln!("import-sample: the server takes no dmabufs after all; skipped");
+            return;
+        }
+        Err(error) => {
+            eprintln!(
+                "import-sample: this host's EGL would not import a udmabuf ({error}); skipped"
+            );
+            return;
+        }
+    };
+    assert_eq!(server.shared_textures(), 0, "no transfer memory for it");
+    let data = sampled(&mut server, source, side);
+    assert_eq!(pixel(&data, side, 8, 8), 0xff00_ff00, "green, top left");
+    assert_eq!(pixel(&data, side, 56, 8), 0xffff_0000, "red, top right");
+    assert_eq!(pixel(&data, side, 8, 56), 0xff00_00ff, "blue, bottom left");
+    assert_eq!(
+        pixel(&data, side, 56, 56),
+        0xff00_00ff,
+        "blue, bottom right"
+    );
+    Device::release(&mut server, source).expect("let go");
+    still_draws(&mut server);
+}
+
+/// libgbm's calls this test makes, by their C signatures.
+type GbmCreateDevice = unsafe extern "C" fn(libc::c_int) -> *mut libc::c_void;
+type GbmCreateBuffer = unsafe extern "C" fn(
+    *mut libc::c_void,
+    u32,
+    u32,
+    u32,
+    *const u64,
+    libc::c_uint,
+    u32,
+) -> *mut libc::c_void;
+type GbmGetFd = unsafe extern "C" fn(*mut libc::c_void) -> libc::c_int;
+type GbmGetWord = unsafe extern "C" fn(*mut libc::c_void) -> u32;
+type GbmGetOffset = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> u32;
+type GbmGetModifier = unsafe extern "C" fn(*mut libc::c_void) -> u64;
+type GbmDestroy = unsafe extern "C" fn(*mut libc::c_void);
+
+/// libgbm, loaded when the test runs: a host without it has no such test.
+#[derive(Clone, Copy)]
+struct Gbm {
+    create_device: GbmCreateDevice,
+    create_buffer: GbmCreateBuffer,
+    get_fd: GbmGetFd,
+    get_stride: GbmGetWord,
+    get_offset: GbmGetOffset,
+    get_modifier: GbmGetModifier,
+    destroy_buffer: GbmDestroy,
+    destroy_device: GbmDestroy,
+}
+
+/// A buffer libgbm made, with what it says of it.
+struct GbmBuffer {
+    fd: std::os::fd::OwnedFd,
+    stride: u32,
+    offset: u32,
+    modifier: u64,
+    /// The buffer object and its device, kept until the test is done, and
+    /// the node the device stands on, closed after them.
+    _held: (GbmHeld, std::fs::File),
+}
+
+/// A `gbm_device` and, once made, a `gbm_bo` of it: destroyed in the other
+/// order.
+struct GbmHeld {
+    gbm: Gbm,
+    device: *mut libc::c_void,
+    buffer: *mut libc::c_void,
+}
+
+impl Drop for GbmHeld {
+    fn drop(&mut self) {
+        if !self.buffer.is_null() {
+            // SAFETY: a `gbm_bo` libgbm made, destroyed once.
+            unsafe { (self.gbm.destroy_buffer)(self.buffer) };
+        }
+        // SAFETY: a `gbm_device` libgbm made, destroyed once, after its
+        // buffer.
+        unsafe { (self.gbm.destroy_device)(self.device) };
+    }
+}
+
+impl Gbm {
+    /// The function `name` of the loaded `library`, as a `T`.
+    fn symbol<T: Copy>(library: *mut libc::c_void, name: &core::ffi::CStr) -> Option<T> {
+        assert_eq!(size_of::<T>(), size_of::<*mut libc::c_void>());
+        // SAFETY: a loaded library and a constant name.
+        let symbol = unsafe { libc::dlsym(library, name.as_ptr()) };
+        if symbol.is_null() {
+            return None;
+        }
+        // SAFETY: `T` is a function pointer type, the size of the pointer
+        // (asserted above), and the symbol is libgbm's function of that
+        // name, whose C signature the caller's `T` writes out.
+        Some(unsafe { core::mem::transmute_copy::<*mut libc::c_void, T>(&symbol) })
+    }
+
+    fn load() -> Option<Self> {
+        // SAFETY: loading a system library by its soname.
+        let library = unsafe { libc::dlopen(c"libgbm.so.1".as_ptr(), libc::RTLD_NOW) };
+        if library.is_null() {
+            return None;
+        }
+        Some(Self {
+            create_device: Self::symbol(library, c"gbm_create_device")?,
+            create_buffer: Self::symbol(library, c"gbm_bo_create_with_modifiers2")?,
+            get_fd: Self::symbol(library, c"gbm_bo_get_fd")?,
+            get_stride: Self::symbol(library, c"gbm_bo_get_stride")?,
+            get_offset: Self::symbol(library, c"gbm_bo_get_offset")?,
+            get_modifier: Self::symbol(library, c"gbm_bo_get_modifier")?,
+            destroy_buffer: Self::symbol(library, c"gbm_bo_destroy")?,
+            destroy_device: Self::symbol(library, c"gbm_device_destroy")?,
+        })
+    }
+
+    /// A `side` x `side` ARGB8888 buffer for rendering with one of
+    /// `modifiers`, from the first render node whose driver makes one.
+    fn buffer(&self, side: u32, modifiers: &[u64]) -> Option<GbmBuffer> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        /// `GBM_BO_USE_RENDERING`.
+        const USE_RENDERING: u32 = 1 << 2;
+        let count = libc::c_uint::try_from(modifiers.len()).ok()?;
+        for number in 128..136 {
+            let Ok(node) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(format!("/dev/dri/renderD{number}"))
+            else {
+                continue;
+            };
+            // SAFETY: a render node this test holds open, and keeps open
+            // for as long as the device made on it.
+            let device = unsafe { (self.create_device)(node.as_raw_fd()) };
+            if device.is_null() {
+                continue;
+            }
+            let mut held = GbmHeld {
+                gbm: *self,
+                device,
+                buffer: core::ptr::null_mut(),
+            };
+            // SAFETY: a live device, and `count` modifiers at the pointer.
+            held.buffer = unsafe {
+                (self.create_buffer)(
+                    device,
+                    side,
+                    side,
+                    DRM_FORMAT_ARGB8888,
+                    modifiers.as_ptr(),
+                    count,
+                    USE_RENDERING,
+                )
+            };
+            if held.buffer.is_null() {
+                continue;
+            }
+            // SAFETY: a live buffer object.
+            let fd = unsafe { (self.get_fd)(held.buffer) };
+            if fd < 0 {
+                continue;
+            }
+            // SAFETY: the descriptor libgbm just made, owned by nothing else.
+            let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+            // SAFETY: a live buffer object.
+            let stride = unsafe { (self.get_stride)(held.buffer) };
+            // SAFETY: a live buffer object and its first plane.
+            let offset = unsafe { (self.get_offset)(held.buffer, 0) };
+            // SAFETY: a live buffer object.
+            let modifier = unsafe { (self.get_modifier)(held.buffer) };
+            return Some(GbmBuffer {
+                fd,
+                stride,
+                offset,
+                modifier,
+                _held: (held, node),
+            });
+        }
+        None
+    }
+}
+
+/// What Chrome's GPU process and hyprix do, each a server of its own: one
+/// process draws into a buffer the driver's GBM made with a modifier the
+/// other's EGL offered -- block-linear video memory on NVIDIA, which no
+/// processor can read -- and the other imports the descriptor, samples it,
+/// and has the first one's picture. No pixel is copied through either.
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_buffer_one_server_drew_in_video_memory_is_sampled_by_another() {
+    use compositor_virgl::{Device, Layout};
+    use std::os::fd::AsFd;
+    let Some(mut compositor) = modifier_server("modifier-compositor") else {
+        return;
+    };
+    // What the compositor would offer: every modifier its EGL imports as a
+    // 2D texture, and here those that are not plain rows.
+    let offered: Vec<u64> = compositor
+        .dmabuf_modifiers(DRM_FORMAT_ARGB8888)
+        .expect("asked")
+        .iter()
+        .filter(|modifier| !modifier.external_only && modifier.value != 0)
+        .map(|modifier| modifier.value)
+        .collect();
+    if offered.is_empty() {
+        eprintln!("modifier-import: this host's EGL imports linear buffers only; skipped");
+        return;
+    }
+    let Some(gbm) = Gbm::load() else {
+        eprintln!("modifier-import: no libgbm.so.1 on this host; skipped");
+        return;
+    };
+    let side = 64_u32;
+    let Some(buffer) = gbm.buffer(side, &offered) else {
+        eprintln!(
+            "modifier-import: no render node's GBM made a buffer with a modifier EGL offered; skipped"
+        );
+        return;
+    };
+    assert!(
+        offered.contains(&buffer.modifier),
+        "GBM chose 0x{:016x}, which was not offered",
+        buffer.modifier
+    );
+    let layout = Layout {
+        width: side,
+        height: side,
+        stride: buffer.stride,
+        offset: buffer.offset,
+        modifier: buffer.modifier,
+    };
+    eprintln!(
+        "modifier-import: a {side}x{side} buffer, modifier 0x{:016x}, stride {}, offset {}",
+        buffer.modifier, buffer.stride, buffer.offset
+    );
+
+    // The client: a server of its own, drawing into the buffer.
+    let Some(mut client) = modifier_server("modifier-client") else {
+        return;
+    };
+    let target = client
+        .import(
+            buffer.fd.as_fd(),
+            pipe::FORMAT_B8G8R8A8_UNORM,
+            pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+            (side, side),
+            buffer.stride,
+            buffer.offset,
+            buffer.modifier,
+        )
+        .expect("the client's server imports the buffer its driver made");
+    let vertices = client
+        .create(
+            pipe::BUFFER,
+            pipe::FORMAT_R8_UNORM,
+            pipe::BIND_VERTEX_BUFFER,
+            4096,
+            1,
+        )
+        .expect("a vertex buffer");
+    let mut stream = Stream::new();
+    begin(&mut stream, target, side, Blend::REPLACE);
+    // Red, and green in the top right quarter.
+    stream.clear([1.0, 0.0, 0.0, 1.0]);
+    assert!(stream.create_shader(
+        FRAGMENT,
+        pipe::SHADER_FRAGMENT,
+        shaders::SOLID,
+        shaders::TOKENS
+    ));
+    stream.bind_shader(FRAGMENT, pipe::SHADER_FRAGMENT);
+    stream.set_constants(
+        pipe::SHADER_FRAGMENT,
+        &[
+            0.0, 1.0, 0.0, 1.0, //
+            32.0, 0.0, 32.0, 32.0, //
+            0.0, 2.0, 0.0, 0.0,
+        ],
+    );
+    quad(&mut stream, vertices, [32.0, 0.0, 64.0, 32.0]);
+    Device::submit(&mut client, stream.words()).expect("submitted");
+    // Reading it back is also what waits for the drawing to be done.
+    let drawn = client
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: side,
+                height: side,
+            },
+        )
+        .expect("the client reads its own frame");
+    assert_eq!(pixel(&drawn, side, 8, 8), 0xffff_0000, "the client's clear");
+    assert_eq!(pixel(&drawn, side, 56, 8), 0xff00_ff00, "the client's quad");
+
+    // The compositor: the same descriptor, imported and sampled.
+    let source = Device::import(&mut compositor, buffer.fd.as_fd(), &layout)
+        .expect("the compositor's server imports a modifier it offered")
+        .expect("a patched server imports");
+    let data = sampled(&mut compositor, source, side);
+    let found = [
+        pixel(&data, side, 8, 8),
+        pixel(&data, side, 56, 8),
+        pixel(&data, side, 8, 56),
+        pixel(&data, side, 56, 56),
+    ];
+    eprintln!(
+        "modifier-import: the compositor sampled {found:08x?} (top left, top right, bottom left, bottom right)"
+    );
+    // The picture is the client's, whichever way up the client's own
+    // renderer put it into the buffer: the quad is in one right-hand
+    // quarter and nowhere else.
+    assert_eq!(found[0], 0xffff_0000, "red, top left");
+    assert_eq!(found[2], 0xffff_0000, "red, bottom left");
+    assert!(
+        matches!(
+            (found[1], found[3]),
+            (0xff00_ff00, 0xffff_0000) | (0xffff_0000, 0xff00_ff00)
+        ),
+        "green in one right-hand quarter: {found:08x?}"
+    );
+
+    // The import is the client's memory and not a copy of it: what the
+    // client draws next is what the compositor samples next, with nothing
+    // imported again. (A buffer drawn into twice is every client's: it has
+    // two or three and takes them in turn.)
+    let mut stream = Stream::new();
+    stream.create_surface(SURFACE, target, pipe::FORMAT_B8G8R8A8_UNORM);
+    stream.set_framebuffer(SURFACE);
+    stream.clear([0.0, 0.0, 1.0, 1.0]);
+    Device::submit(&mut client, stream.words()).expect("submitted");
+    let redrawn = client
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: side,
+                height: side,
+            },
+        )
+        .expect("the client reads its second frame");
+    assert_eq!(pixel(&redrawn, side, 8, 8), 0xff00_00ff, "the second frame");
+    let data = sampled(&mut compositor, source, side);
+    for (x, y) in [(8, 8), (56, 8), (8, 56), (56, 56)] {
+        assert_eq!(
+            pixel(&data, side, x, y),
+            0xff00_00ff,
+            "the client's second frame, sampled through the first import, at ({x}, {y})"
+        );
+    }
+
+    // A layout the buffer does not have is the server's to refuse or the
+    // driver's to misread, never the connection's end: said, not judged.
+    let wrong = Layout {
+        modifier: 0,
+        ..layout
+    };
+    match Device::import(&mut compositor, buffer.fd.as_fd(), &wrong) {
+        Ok(_) => eprintln!("modifier-import: this EGL also took the buffer as linear rows"),
+        Err(error) => eprintln!("modifier-import: said to be linear, it is refused: {error}"),
+    }
+    Device::release(&mut compositor, source).expect("let go");
+    still_draws(&mut compositor);
+    still_draws(&mut client);
 }

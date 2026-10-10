@@ -21,5 +21,10 @@ compositor-virgl = { path = "../virgl" }
 # arrayvec, bytemuck, cfg-if, log, strict-num and tiny-skia-path.
 tiny-skia = { version = "=0.12.0", default-features = false, features = ["std", "simd"] }
 
+[dev-dependencies]
+# tests/imports.rs makes a dmabuf of the host's (memfd, /dev/udmabuf) to
+# hand the GPU painter, which std has no calls for.
+libc = "0.2.189"
+
 [lints]
 workspace = true

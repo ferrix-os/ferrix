@@ -51,7 +51,7 @@ mod blur;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use compositor_virgl::{
@@ -131,6 +131,10 @@ const KEPT_FRAMES: u64 = 120;
 /// otherwise keep a texture for every width they were ever at.
 const MAX_SPARE: usize = 8;
 
+/// How many refused imports are remembered before the memory of them is
+/// let go of and the device asked again.
+const REFUSED_MOST: usize = 256;
+
 /// A texture with the two ways of using it: drawn into, and read from.
 #[derive(Clone, Copy, Debug)]
 struct Image {
@@ -178,6 +182,10 @@ pub struct Canvas<D: Device> {
     /// gave (`Surface::on_device`). Never handed to another surface: the
     /// pixels are the client's, and nothing is uploaded into them.
     imports: BTreeMap<u64, Kept>,
+    /// Clients' GPU buffers the device would not import, by the same key:
+    /// not asked again, which would be a round trip a frame for an answer
+    /// that does not change.
+    refused: BTreeSet<u64>,
     spare: Vec<Image>,
     ramps: Vec<(Gradient, Image)>,
     /// The resources the draws written since the last submission read from.
@@ -269,6 +277,7 @@ impl<D: Device> Canvas<D> {
             bound_view: None,
             surfaces: BTreeMap::new(),
             imports: BTreeMap::new(),
+            refused: BTreeSet::new(),
             spare: Vec::new(),
             ramps: Vec::new(),
             sampled: Vec::new(),
@@ -731,6 +740,11 @@ impl<D: Device> Canvas<D> {
         if let Some(image) = self.imported_image(surface) {
             return Some(image);
         }
+        // Video memory this device would not import has no pixels to
+        // upload instead: nothing is drawn for it, and nothing has failed.
+        if !surface.has_pixels() {
+            return None;
+        }
         let (wide, tall) = (surface.width(), surface.height());
         // A surface with no name is known by where its pixels are, which
         // says nothing about whether they changed: it is moved whole.
@@ -812,20 +826,43 @@ impl<D: Device> Canvas<D> {
     /// `None` sends the caller to the upload, which is also what a buffer
     /// that cannot be imported gets: its pixels came with it.
     fn imported_image(&mut self, surface: &Surface<'_>) -> Option<Image> {
-        let (fd, key) = surface.device()?;
-        let (wide, tall) = (surface.width(), surface.height());
+        let on = surface.device()?;
+        let (fd, key) = (on.fd, on.key);
+        // The whole buffer is what is imported, whatever part of it the
+        // surface is.
+        let (wide, tall) = (on.width, on.height);
         if let Some(kept) = self.imports.get_mut(&key)
             && (kept.image.width, kept.image.height) == (wide, tall)
         {
             kept.used = self.frame;
             return Some(kept.image);
         }
+        if self.refused.contains(&key) {
+            return None;
+        }
         if let Some(old) = self.imports.remove(&key) {
             let _ = self.device.release(old.image.resource);
         }
-        let resource = match self.device.import(fd) {
+        let layout = compositor_virgl::Layout {
+            width: wide,
+            height: tall,
+            stride: surface.stride(),
+            offset: on.offset,
+            modifier: on.modifier,
+        };
+        let resource = match self.device.import(fd, &layout) {
             Ok(Some(resource)) => resource,
-            Ok(None) | Err(_) => return None,
+            Ok(None) => return None,
+            Err(_) => {
+                // A key is a buffer's for its life and no other's after, so
+                // the set only grows by buffers refused; it is emptied
+                // rather than let grow without end.
+                if self.refused.len() >= REFUSED_MOST {
+                    self.refused.clear();
+                }
+                let _ = self.refused.insert(key);
+                return None;
+            }
         };
         let image = Image {
             resource,
@@ -1187,7 +1224,54 @@ impl<D: Device> Painter for Canvas<D> {
     }
 }
 
+/// Where the whole of `image` lies when `surface`, a part of it, lies over
+/// `across`: a texture coordinate is a place in what is drawn across, so a
+/// part of an imported buffer is drawn by laying the whole buffer where its
+/// part comes out over the part's rectangle. `across` itself for a surface
+/// that is all of its image, which every uploaded one is.
+fn spread(across: Rect, surface: &Surface<'_>, image: Image) -> Rect {
+    let Some(on) = surface.device() else {
+        return across;
+    };
+    let part = (surface.width(), surface.height());
+    if (image.width, image.height) != (on.width, on.height)
+        || ((on.x, on.y) == (0, 0) && part == (on.width, on.height))
+        || part.0 == 0
+        || part.1 == 0
+    {
+        return across;
+    }
+    // `pixels` of the buffer in screen pixels, at the stretch the part is
+    // drawn with, to the nearest.
+    let scaled = |pixels: u32, drawn: i64, of: u32| -> i64 {
+        let of = i64::from(of);
+        (i64::from(pixels)
+            .saturating_mul(drawn)
+            .saturating_add(of / 2))
+            / of
+    };
+    Rect::new(
+        across.x.saturating_sub(scaled(on.x, across.width, part.0)),
+        across.y.saturating_sub(scaled(on.y, across.height, part.1)),
+        scaled(on.width, across.width, part.0),
+        scaled(on.height, across.height, part.1),
+    )
+}
+
 impl<D: Device> Canvas<D> {
+    /// Whether this canvas's device takes `surface`'s GPU buffer
+    /// ([`Surface::on_device`]) to sample where it lies: asked when a
+    /// client hands a buffer over whose pixels cannot be read here, which
+    /// is then either shown this way or not at all. The import is kept for
+    /// the frames that follow.
+    pub fn imports(&mut self, surface: &Surface<'_>) -> bool {
+        let imported = self.imported_image(surface).is_some();
+        // Its views are written outside any frame: submitted if many
+        // buffers arrive before the next one.
+        self.room();
+        imported
+    }
+
     /// Blend `surface`, stretched over `across`, inside `shape`.
     fn surface(
         &mut self,
@@ -1232,6 +1316,7 @@ impl<D: Device> Canvas<D> {
         let Some(image) = self.surface_image(surface, part) else {
             return;
         };
+        let across = spread(across, surface, image);
         self.aim(self.target);
         let view = if surface.format() == Format::Xrgb8888 {
             image.opaque_view

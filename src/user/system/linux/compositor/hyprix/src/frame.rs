@@ -88,6 +88,9 @@ pub struct Gpu {
     pub canvas: compositor_render::gpu::Canvas<Box<dyn compositor_virgl::Device>>,
     /// What is behind the windows, and the blur of it.
     pub backdrop: compositor_render::gpu::Backdrop,
+    /// Which kind of device it is, with what it said of the buffers it
+    /// imports: how clients' dmabufs are taken in (`crate::dmabuf`).
+    pub drawn: crate::dmabuf::Drawn,
 }
 
 /// What a frame that could not be drawn on the GPU says first, so that the
@@ -850,6 +853,12 @@ pub(crate) fn cursor_rect(
     ))
 }
 
+/// What a client's dmabuf is called by a renderer that imports it, for as
+/// long as the buffer lives: the connection and the buffer's own key.
+pub(crate) const fn device_key(slot: &Slot, pool: compositor_server::PoolKey) -> u64 {
+    (slot.serial() << 32) | (pool.0 & 0xffff_ffff)
+}
+
 /// The pixels a surface is showing, if it is showing any.
 pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     let (client, pools) = (slot.client(), slot.pools());
@@ -871,6 +880,8 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
         None
     };
     let bytes = match (buffer.solid.as_ref(), imported) {
+        // Video memory: no bytes here, only the buffer on its GPU.
+        (_, Some(imported)) if imported.needs_a_gpu() => &[],
         (_, Some(imported)) => {
             let (start, end) = buffer.range()?;
             imported.bytes().get(start..end)?
@@ -890,13 +901,16 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
         compositor_server::Format::Argb8888 => Format::Argb8888,
         compositor_server::Format::Xrgb8888 => Format::Xrgb8888,
     };
-    Surface::new(
-        bytes,
+    let (width, height, stride) = (
         u32::try_from(buffer.width).ok()?,
         u32::try_from(buffer.height).ok()?,
         u32::try_from(buffer.stride).ok()?,
-        format,
-    )
+    );
+    if imported.is_some_and(crate::dmabuf::Imported::needs_a_gpu) {
+        Surface::without_pixels(width, height, stride, format)
+    } else {
+        Surface::new(bytes, width, height, stride, format)
+    }
     .ok()
     // A single-pixel buffer's four bytes are the buffer's own and may be
     // any colour next frame at the same size, under damage that is the
@@ -907,7 +921,11 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
         (_, Some(imported)) => match imported.device_fd() {
             Some(fd) => made
                 .named(name)
-                .on_device(fd, (slot.serial() << 32) | (buffer.pool.0 & 0xffff_ffff)),
+                .on_device(fd, device_key(slot, buffer.pool))
+                .laid_out(
+                    u32::try_from(buffer.offset).unwrap_or(0),
+                    imported.modifier(),
+                ),
             None => made.named(name),
         },
         (Some(_), None) => made,

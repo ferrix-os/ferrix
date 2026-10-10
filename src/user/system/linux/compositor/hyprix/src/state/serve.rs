@@ -233,13 +233,42 @@ impl Compositor<'_> {
                     (None, _) => Err("no plane was handed over".to_owned()),
                     (_, None) => Err("no render node to import into".to_owned()),
                 };
+                // A buffer no processor can read is one only a GPU renderer
+                // shows, so it is taken only if a screen's renderer imports
+                // it now; the import is kept for the frames that follow.
+                let key = crate::frame::device_key(slot, dmabuf.pool);
+                let imported = imported.and_then(|imported| {
+                    if !imported.needs_a_gpu()
+                        || sampled_by_a_screen(&mut self.screens, &imported, &dmabuf, key)
+                    {
+                        Ok(imported)
+                    } else {
+                        Err(format!(
+                            "{}x{}, modifier 0x{:016x}: it cannot be mapped and no screen's GPU renderer imports it",
+                            dmabuf.width, dmabuf.height, dmabuf.plane.modifier
+                        ))
+                    }
+                });
                 let ok = match imported {
                     Ok(imported) => {
+                        // Said once for each way a buffer is shown: the
+                        // first sampled where it lies on the GPU, and the
+                        // first mapped and read.
+                        let sampled = imported.needs_a_gpu();
                         let _ = slot.dmabufs.insert(dmabuf.pool, imported);
-                        if !core::mem::replace(&mut self.dmabuf_said, true) {
+                        if let Some(said) = self.dmabuf_said.get_mut(usize::from(sampled))
+                            && !core::mem::replace(said, true)
+                        {
                             (self.report)(&format!(
-                                "hyprix: imported a dmabuf, {}x{}, through zwp_linux_dmabuf_v1",
-                                dmabuf.width, dmabuf.height
+                                "hyprix: imported a dmabuf, {}x{}, modifier 0x{:016x}, {}, through zwp_linux_dmabuf_v1",
+                                dmabuf.width,
+                                dmabuf.height,
+                                dmabuf.plane.modifier,
+                                if sampled {
+                                    "in video memory and sampled where it lies"
+                                } else {
+                                    "mapped"
+                                }
                             ));
                         }
                         true
@@ -1163,4 +1192,37 @@ impl Compositor<'_> {
             slot.gone = true;
         }
     }
+}
+
+/// Whether a screen drawn on a GPU imports `imported`, a client's buffer
+/// known to renderers as `key`, to sample where it lies.
+fn sampled_by_a_screen(
+    screens: &mut [super::Screen],
+    imported: &crate::dmabuf::Imported,
+    dmabuf: &compositor_server::Dmabuf,
+    key: u64,
+) -> bool {
+    use compositor_render::{Format, Surface};
+
+    let Some(fd) = imported.device_fd() else {
+        return false;
+    };
+    let format = match dmabuf.format {
+        compositor_server::Format::Argb8888 => Format::Argb8888,
+        compositor_server::Format::Xrgb8888 => Format::Xrgb8888,
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(dmabuf.width), u32::try_from(dmabuf.height))
+    else {
+        return false;
+    };
+    let Ok(surface) = Surface::without_pixels(width, height, dmabuf.plane.stride, format) else {
+        return false;
+    };
+    let surface = surface
+        .on_device(fd, key)
+        .laid_out(dmabuf.plane.offset, dmabuf.plane.modifier);
+    screens
+        .iter_mut()
+        .filter_map(|screen| screen.gpu.as_mut())
+        .any(|gpu| gpu.canvas.imports(&surface))
 }
