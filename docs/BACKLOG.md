@@ -669,6 +669,39 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P3 — hardware variants and later stages
 
+* **xHCI's first run on a PC** (`docs/XHCI.md` §9, 2026-10-10,
+  `xhci-driver`): the driver is gated against QEMU's `qemu-xhci` and a model
+  only, and §8 lists what neither showed -- the hand-over from firmware,
+  scratchpad pages, 64-byte contexts, a BAR cut around its MSI-X table,
+  real reset and link-training times, transaction translators, a low-speed
+  device. `test-usb` shows two input claims held on the xHCI node at once,
+  not the eight `L.device.21` allows (the consultant's X9 and Y7). And on
+  QEMU's AArch64 `virt` under EDK2 the function is left with memory decoding
+  off, gets no aperture, and the driver exits, so no AArch64 boot shows the
+  driver at all (the row below). After INSTALLER.md's H0, on the customer's PC, by
+  the product owner's decision and §9's list. Owner: the product owner.
+* **A USB disk served to the block core** (INSTALLER.md's H4;
+  `docs/XHCI.md` §6): `usbhid` finds and reads a bulk-only disk and serves
+  it to nothing. A block claim on a node that shares its input claims wants
+  a design review first (the consultant's ledger, line 672: block claims at
+  one in their own table, the ring's pins in the host's domain and its
+  quarantine, a parked disk's replay behind a hub that is gone, a
+  requirement with reserved ids and a control); devmgr's disk names are
+  given at boot. `test-install --usb-live` waits on it. Open.
+* **SuperSpeed hubs** (`docs/XHCI.md` §8): refused by design, so a USB 3
+  device behind a USB 3 hub is not found (its USB 2 half works). Needs the
+  hub descriptor of type 2A, `SET_HUB_DEPTH`, and the USB 3 port status
+  bits. Open.
+* **A PCI function firmware left with memory decoding off gets no
+  aperture** (`device.rs`, deliberately: nothing says firmware placed its
+  BAR): QEMU's AArch64 `virt` under EDK2 leaves `qemu-xhci` that way, so
+  `usbhid` exits `stopped at Registers` there and `test-usb` is x86-64
+  only (log `~/.local/share/ferrix/logs/xhci-driver/usb-7-a64-serial.log`,
+  branch `xhci-driver`). If the PC's firmware does the same to a controller, the
+  kernel needs a rule for turning decoding on for a BAR it can vouch for
+  (inside the host bridge's window, clear of everything `Reserved` names);
+  that is a change to the item. Open.
+
 * The `FS`/`GS` skip's `GS` base control on a processor that keeps the base
   over a null load (`docs/OPAQUE-KERNEL.md` §9.8 3c; po10-sel-cert, ledger
   line 445, K2): an AMD part without `NullSelectorClearsBase` (CPUID

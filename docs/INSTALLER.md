@@ -616,6 +616,16 @@ tokens").** What installs Ferrix in a VM today, built from what exists:
   installs on `/dev/vde` with the live system found by itself. A host test
   reads the medium's table back with `ferrix-partition`.
 
+**H3, xHCI with HID, built and gated under QEMU (2026-10-10, session
+`xhci-driver`, branch `xhci-driver`; not run on a PC).** [XHCI.md](XHCI.md):
+`usbhid` drives an xHCI controller behind the host stack the board's EHCI
+had; a USB keyboard and mouse reach `/dev/input`, hot-plug, and survive
+their driver's death; `cargo xtask test-usb`. Of H4, the disk is found and
+read by the driver and not yet served to the block core, which wants a
+design review of its own (XHCI.md §6), so `test-install --usb-live` waits.
+H0 has not run: XHCI.md §8 lists what QEMU's controller never showed, and
+§9 the first run on the PC.
+
 Left for later, in §9's order: a root file system the size of its partition
 (I3), `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),
