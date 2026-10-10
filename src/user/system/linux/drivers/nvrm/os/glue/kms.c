@@ -215,6 +215,16 @@ struct kms_head {
 /* What is on screen, kept so that it stays there. */
 static struct kms_head kms_lit[NV_MAX_GPUS];
 
+/*
+ * The quiesce (docs/NVIDIA.md §13): nvrm_kms_quiesce sets kms_stopped and
+ * frees the devices under kms_lock, and the two threads that use a device
+ * after nvrm_kms_show returned -- the card's, for its copies into the
+ * mapped surface, and the watch for a display -- take the lock around each
+ * use and do nothing once it is set.
+ */
+static nvos_mutex_t kms_lock;
+static NvBool kms_stopped;
+
 static int kms_light(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesInfo *res)
 {
     struct NvKmsKapiDevice *device = lit->device;
@@ -614,8 +624,10 @@ static void kms_serve(void *argument)
         case NVOS_DISPLAY_SCANOUT:
             /* Shown from the next flush; buffer 0 leaves the last frame up. */
             card->shown = kms_buffer(card, event.buffer) != NULL ? event.buffer : 0;
-            if (card->shown != 0)
+            nvos_mutex_lock(&kms_lock);
+            if (card->shown != 0 && !kms_stopped)
                 kms_copy(card, kms_buffer(card, card->shown), 0, 0, 0xffffffffu, 0xffffffffu);
+            nvos_mutex_unlock(&kms_lock);
             break;
         case NVOS_DISPLAY_FLUSH:
         {
@@ -624,7 +636,12 @@ static void kms_serve(void *argument)
             if (buffer != NULL)
             {
                 card->shown = event.buffer;
-                kms_copy(card, buffer, event.x, event.y, event.w, event.h);
+                /* After the quiesce the surface is unmapped: the flush is
+                 * answered and nothing is copied. */
+                nvos_mutex_lock(&kms_lock);
+                if (!kms_stopped)
+                    kms_copy(card, buffer, event.x, event.y, event.w, event.h);
+                nvos_mutex_unlock(&kms_lock);
             }
             card->copy_usec += nvkms_get_usec() - began;
             if (++card->flushes == 1)
@@ -720,9 +737,14 @@ static void kms_watch(void *argument)
     NvKmsKapiDisplay displays[NVKMS_KAPI_MAX_CONNECTORS * 4];
     NvU32 count = NV_ARRAY_ELEMENTS(displays);
     int status = -ENODEV;
+    NvBool ok;
 
-    if (res == NULL || dyn == NULL || !kapi.getDeviceResourcesInfo(lit->device, res) ||
-        !kapi.getDisplays(lit->device, &count, displays))
+    nvos_mutex_lock(&kms_lock);
+    ok = res != NULL && dyn != NULL && !kms_stopped &&
+         kapi.getDeviceResourcesInfo(lit->device, res) &&
+         kapi.getDisplays(lit->device, &count, displays);
+    nvos_mutex_unlock(&kms_lock);
+    if (!ok)
     {
         kms_say("cannot watch for a display\n");
         goto out;
@@ -731,13 +753,20 @@ static void kms_watch(void *argument)
     for (NvU32 looks = 1; status == -ENODEV; looks++)
     {
         nvkms_usleep(2000000);
+        nvos_mutex_lock(&kms_lock);
+        if (kms_stopped)
+        {
+            nvos_mutex_unlock(&kms_lock);
+            goto out;
+        }
         status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
+        if (status == 0 && kms_card.lit == NULL)
+            (void)kms_card_start(lit);
+        nvos_mutex_unlock(&kms_lock);
         /* A line a minute, so a wait is told from a hang. */
         if (status == -ENODEV && looks % 30 == 0)
             kms_say("still no display connected after %u s\n", looks * 2);
     }
-    if (status == 0 && kms_card.lit == NULL)
-        (void)kms_card_start(lit);
 out:
     free(res);
     free(dyn);
@@ -785,4 +814,40 @@ int nvrm_kms_show(void)
             (void)nvos_thread_spawn(kms_watch, &kms_lit[i]);
     }
     return status;
+}
+
+/*
+ * The display's part of the quiesce (docs/NVIDIA.md §13), as nvidia-drm's
+ * nv_drm_dev_unload ends its device: stop every later use of a device,
+ * then release the modeset ownership and free the device. Freeing the last
+ * reference is what shuts the heads down and frees the core channel
+ * (nvFreeDevEvo), and it frees the surface, its memory and its mapping
+ * with the device's clients. With `free_devices` false -- requests were
+ * still under way in os/glue/drm.c, which uses the same device -- the
+ * devices are left to RM's shutdown and only their use here ends. The
+ * devices freed.
+ */
+int nvrm_kms_quiesce(NvBool free_devices)
+{
+    NvU32 i;
+    int freed = 0;
+
+    nvos_mutex_lock(&kms_lock);
+    kms_stopped = NV_TRUE;
+    for (i = 0; free_devices && i < NV_MAX_GPUS; i++)
+    {
+        struct kms_head *lit = &kms_lit[i];
+
+        if (lit->device == NULL)
+            continue;
+        kapi.releaseOwnership(lit->device);
+        kapi.freeDevice(lit->device);
+        lit->device = NULL;
+        lit->memory = NULL;
+        lit->surface = NULL;
+        lit->mapped = NULL;
+        freed++;
+    }
+    nvos_mutex_unlock(&kms_lock);
+    return freed;
 }

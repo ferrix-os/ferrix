@@ -44,6 +44,13 @@
  * thread on the interrupt's path. Not kept: SR-IOV, ATS and SVA, Tegra
  * and self-hosted GPUs, NUMA, resizable BARs (QEMU passes one size), VGA
  * arbitration, dynamic power management, procfs, vGPU and UVM's notices.
+ *
+ * nvrm_gpu_stop (docs/NVIDIA.md §13) is nv.c's nv_shutdown_adapter for the
+ * GPU nvrm_gpu_start started: rm_disable_adapter, the interrupt's end,
+ * rm_shutdown_adapter, in NVIDIA's order. What changed: Linux ends the
+ * interrupt with free_irq, which waits for a running handler; nvos has no
+ * call that gives the vector back, so the handler is told to do nothing
+ * from then on and the one that may be running is waited for.
  */
 
 #include "nv-ferrix.h"
@@ -78,6 +85,12 @@ enum gpu_step {
  * after IRQ_WAKE_THREAD; here the interrupt thread is already a thread
  * that may sleep, and its acknowledgement waits until both halves ran.
  */
+/* The GPU nvrm_gpu_start started, for nvrm_gpu_stop; whether its interrupt
+ * has ended; and the handlers running now. */
+static nv_linux_state_t *nvrm_gpu_started;
+static NvU32 nvrm_gpu_isr_ended;
+static NvU32 nvrm_gpu_isr_running;
+
 static void nvrm_gpu_isr(void *argument)
 {
     nv_linux_state_t *nvl = argument;
@@ -85,12 +98,21 @@ static void nvrm_gpu_isr(void *argument)
     NvU32 need_bottom_half = 0;
     NvU32 faults = 0;
 
+    /* Counted before the look, so that nvrm_gpu_stop, which sets the flag
+     * and then waits for the count, never misses a handler that got in. */
+    __atomic_fetch_add(&nvrm_gpu_isr_running, 1, __ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&nvrm_gpu_isr_ended, __ATOMIC_SEQ_CST))
+    {
+        __atomic_fetch_sub(&nvrm_gpu_isr_running, 1, __ATOMIC_SEQ_CST);
+        return;
+    }
     nvos_isr_enter_leave(NV_TRUE);
     rm_gpu_handle_mmu_faults(nvl->sp_isr, nv, &faults);
     (void)rm_isr(nvl->sp_isr, nv, &need_bottom_half);
     nvos_isr_enter_leave(NV_FALSE);
     if (need_bottom_half || faults != 0)
         rm_isr_bh(nvl->sp_bh, nv);
+    __atomic_fetch_sub(&nvrm_gpu_isr_running, 1, __ATOMIC_SEQ_CST);
 }
 
 /* Fill RM's BAR `j` from aperture `i` of `desc`. */
@@ -260,8 +282,63 @@ int nvrm_gpu_start(void)
     }
 
     nv->flags |= NV_FLAG_OPEN;
+    nvrm_gpu_started = nvl;
     nv_printf(NV_DBG_ERRORS, "NVRM: GPU %04x:%02x:%02x.%x: rm_init_adapter succeeded\n",
               nv->pci_info.domain, nv->pci_info.bus, nv->pci_info.slot,
               nv->pci_info.function);
+    return 0;
+}
+
+/* How long a running interrupt handler is waited for, and how often it is
+ * looked at. */
+#define GPU_STOP_ISR_PATIENCE_MS 2000
+#define GPU_STOP_ISR_POLL_MS     5
+
+/*
+ * Shut the started GPU's adapter down: NVIDIA's nv_shutdown_adapter.
+ * rm_disable_adapter turns the GPU's interrupts off and unloads what the
+ * clients left; rm_shutdown_adapter unloads and destroys the GPU's state,
+ * which unloads the GSP firmware. 0, 1 when no GPU is started, or 2 when
+ * an interrupt handler was still running after the wait, and the adapter
+ * was left disabled but not shut down, since RM would free the state the
+ * handler is in.
+ */
+int nvrm_gpu_stop(void)
+{
+    nv_linux_state_t *nvl = nvrm_gpu_started;
+    nv_state_t *nv;
+    nvidia_stack_t *sp = NULL;
+    NvU32 waited = 0;
+
+    if (nvl == NULL)
+        return 1;
+    nv = NV_STATE_PTR(nvl);
+    if (nv_kmem_cache_alloc_stack(&sp) != 0)
+        return GPU_STEP_MEMORY;
+
+    nvos_sema_down(&nvl->ldata_lock);
+    rm_disable_adapter(sp, nv);
+
+    __atomic_store_n(&nvrm_gpu_isr_ended, 1, __ATOMIC_SEQ_CST);
+    while (__atomic_load_n(&nvrm_gpu_isr_running, __ATOMIC_SEQ_CST) != 0 &&
+           waited < GPU_STOP_ISR_PATIENCE_MS)
+    {
+        (void)os_delay(GPU_STOP_ISR_POLL_MS);
+        waited += GPU_STOP_ISR_POLL_MS;
+    }
+    if (__atomic_load_n(&nvrm_gpu_isr_running, __ATOMIC_SEQ_CST) != 0)
+    {
+        nvos_sema_up(&nvl->ldata_lock);
+        nv_kmem_cache_free_stack(sp);
+        return 2;
+    }
+
+    rm_shutdown_adapter(sp, nv);
+
+    /* As nv_stop_device leaves it: opens find no GPU from here on. */
+    nv->flags &= ~NV_FLAG_OPEN;
+    nvrm_gpu_started = NULL;
+    nvos_sema_up(&nvl->ldata_lock);
+    nv_kmem_cache_free_stack(sp);
     return 0;
 }

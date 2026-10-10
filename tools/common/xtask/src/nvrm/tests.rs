@@ -26,6 +26,9 @@ nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
 nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: quiesce: asked by /run/nvrm-quiesce\n\
+nvrm: quiesce: no GPU is started: nothing to shut down\n\
+nvrm: quiesce: done in 0 ms\n\
 ";
 
 // The same boot under TCG.
@@ -44,6 +47,9 @@ nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
 nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: quiesce: asked by /run/nvrm-quiesce\n\
+nvrm: quiesce: no GPU is started: nothing to shut down\n\
+nvrm: quiesce: done in 0 ms\n\
 ";
 
 // The default 512 MiB machine, KVM.
@@ -122,6 +128,19 @@ fn a_hand_over_missing_a_step_or_out_of_order_fails() {
     let run = HANDED_KVM.replace("started on 00:04.0", "started on 00:05.0");
     assert!(judge_handed(&lines(&run)).is_some());
     let run = format!("{HANDED_KVM}nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
+    assert!(judge_handed(&lines(&run)).is_some());
+}
+
+#[test]
+fn a_hand_over_whose_quiesce_is_not_answered_fails() {
+    let run = HANDED_KVM.replace("nvrm: quiesce: done in 0 ms\n", "");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace("nvrm: quiesce: asked by /run/nvrm-quiesce\n", "");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace(
+        "nvrm: quiesce: no GPU is started: nothing to shut down\n",
+        "nvrm: quiesce: the adapter is shut down\n",
+    );
     assert!(judge_handed(&lines(&run)).is_some());
 }
 

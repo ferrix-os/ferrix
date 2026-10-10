@@ -26,6 +26,12 @@
 //! port read over TCP into a log and onto this command's output until
 //! `nvrm` is up or stops, the kernel panics, or `--timeout` passes, and
 //! then destroyed, whatever happened.
+//!
+//! Before the destroy `nvrm` is asked to quiesce the card (`docs/NVIDIA.md`
+//! §13), so that QEMU is not killed over a running GSP and a lit display:
+//! `run-nvidia`'s script asks at its end, and a desktop with `--ssh` is
+//! asked over it ([`quiesce`]). The wait is bounded, and the domain is
+//! destroyed whatever the answer.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -318,9 +324,31 @@ fn read_line(
     }
 }
 
+/// The serial port, open, and the log its lines go to.
+struct Serial {
+    reader: BufReader<TcpStream>,
+    out: std::fs::File,
+}
+
 /// Read the serial port into `log` and onto the output, until a line of
 /// [`DONE`] and three seconds after it, or `deadline`. The lines read.
 fn capture(log: &Path, deadline: Instant) -> Result<Vec<String>> {
+    capture_keeping(log, deadline).0
+}
+
+/// [`capture`], and the port when it was still open at the end, for
+/// [`quiesce`] to read on.
+fn capture_keeping(log: &Path, deadline: Instant) -> (Result<Vec<String>>, Option<Serial>) {
+    match capture_open(log, deadline) {
+        Ok((lines, serial)) => (lines, serial),
+        Err(error) => (Err(error), None),
+    }
+}
+
+fn capture_open(
+    log: &Path,
+    deadline: Instant,
+) -> Result<(Result<Vec<String>>, Option<Serial>)> {
     let stream = loop {
         match TcpStream::connect(SERIAL) {
             Ok(stream) => break stream,
@@ -337,6 +365,7 @@ fn capture(log: &Path, deadline: Instant) -> Result<Vec<String>> {
     let mut lines: Vec<String> = Vec::new();
     let mut until = deadline;
     let mut ended = false;
+    let mut open = true;
     while Instant::now() < until {
         match read_line(&mut reader, &mut out) {
             Ok(Some(line)) => {
@@ -348,16 +377,151 @@ fn capture(log: &Path, deadline: Instant) -> Result<Vec<String>> {
                 lines.push(line);
             }
             Ok(None) => {}
-            Err(_) => break,
+            Err(_) => {
+                open = false;
+                break;
+            }
         }
     }
-    if ended {
+    let serial = open.then_some(Serial { reader, out });
+    let lines = if ended {
         Ok(lines)
     } else {
         Err(Error::new(format!(
             "no end line within the timeout; serial output is in {}",
             log.display()
         )))
+    };
+    Ok((lines, serial))
+}
+
+/// The file whose appearance asks `nvrm` to quiesce its GPU
+/// (`nvrm/src/main.c`, `QUIESCE_ASK`).
+const QUIESCE_ASK: &str = "/run/nvrm-quiesce";
+
+/// `nvrm`'s last line of a quiesce, and its watchdog's when it is stuck.
+const QUIESCE_DONE: &str = "nvrm: quiesce: done in ";
+const QUIESCE_STUCK: &str = "nvrm: quiesce: not done after ";
+
+/// How long the destroy waits for `nvrm` to say it is done: a little more
+/// than the 20 s after which `nvrm` itself says where it is stuck.
+const QUIESCE_WAIT: Duration = Duration::from_secs(25);
+
+/// What a quiesce's serial lines came to.
+#[derive(Debug, PartialEq, Eq)]
+enum Quiesced {
+    /// `nvrm` said it is done, and whether it said the adapter is shut down.
+    Done { adapter_down: bool },
+    /// `nvrm` said it is stuck.
+    Stuck,
+    /// Neither yet.
+    Pending,
+}
+
+/// Judge the lines read since `nvrm` was asked.
+fn quiesced(lines: &[String]) -> Quiesced {
+    if lines.iter().any(|line| line.contains(QUIESCE_DONE)) {
+        Quiesced::Done {
+            adapter_down: lines
+                .iter()
+                .any(|line| line.contains("nvrm: quiesce: the adapter is shut down")),
+        }
+    } else if lines.iter().any(|line| line.contains(QUIESCE_STUCK)) {
+        Quiesced::Stuck
+    } else {
+        Quiesced::Pending
+    }
+}
+
+/// Before the domain is destroyed: ask `nvrm`, over the guest's sshd on
+/// `port`, to shut its adapter down, and read the serial port until it says
+/// it is done or stuck, or [`QUIESCE_WAIT`] has passed. Nothing here fails
+/// the command or holds the destroy longer than that: a guest that is
+/// gone, has no sshd or does not answer is destroyed as before, and said.
+fn quiesce(port: Option<u16>, serial: Option<Serial>) {
+    let Some(port) = port else {
+        println!("  {DOMAIN}: no --ssh, so nvrm is not asked to quiesce before the destroy");
+        return;
+    };
+    let Some(mut serial) = serial else {
+        println!("  {DOMAIN}: the guest stopped by itself; nothing to quiesce");
+        return;
+    };
+    let key = PathBuf::from(home()).join(".local/share/ferrix/ssh/id_ed25519");
+    let touch = format!(
+        "/bin/busybox touch {QUIESCE_ASK} || touch {QUIESCE_ASK} || : > {QUIESCE_ASK}"
+    );
+    let asked = Command::new("ssh")
+        .args(["-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none"])
+        .args(["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"])
+        .args(["-o", "LogLevel=ERROR", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"])
+        .arg("-i")
+        .arg(&key)
+        .arg("-p")
+        .arg(port.to_string())
+        .arg("root@127.0.0.1")
+        .arg(&touch)
+        .stdin(std::process::Stdio::null())
+        .spawn();
+    let mut asked = match asked {
+        Ok(asked) => asked,
+        Err(error) => {
+            println!("  {DOMAIN}: nvrm not asked to quiesce: running ssh: {error}");
+            return;
+        }
+    };
+    println!(
+        "  {DOMAIN}: asked nvrm to quiesce ({QUIESCE_ASK} over ssh); waiting up to {} s",
+        QUIESCE_WAIT.as_secs()
+    );
+    let began = Instant::now();
+    let mut lines: Vec<String> = Vec::new();
+    let mut verdict = Quiesced::Pending;
+    let mut refused = false;
+    while began.elapsed() < QUIESCE_WAIT {
+        match read_line(&mut serial.reader, &mut serial.out) {
+            Ok(Some(line)) => lines.push(line),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        verdict = quiesced(&lines);
+        if verdict != Quiesced::Pending {
+            break;
+        }
+        // An ssh that failed asked nothing: no answer will come.
+        if let Ok(Some(status)) = asked.try_wait()
+            && !status.success()
+        {
+            refused = true;
+            break;
+        }
+    }
+    let _ = asked.kill();
+    let _ = asked.wait();
+    let after = began.elapsed().as_secs_f32();
+    match verdict {
+        Quiesced::Done { adapter_down: true } => {
+            println!("  {DOMAIN}: nvrm shut the adapter down in {after:.1} s");
+        }
+        Quiesced::Done { adapter_down: false } => println!(
+            "  {DOMAIN}: nvrm ended its quiesce in {after:.1} s WITHOUT shutting the adapter down"
+        ),
+        Quiesced::Stuck => {
+            println!("  {DOMAIN}: nvrm is stuck in its quiesce after {after:.1} s; destroying");
+        }
+        Quiesced::Pending if refused => {
+            println!("  {DOMAIN}: ssh to the guest failed, so nvrm was not asked; destroying");
+        }
+        Quiesced::Pending => println!(
+            "  {DOMAIN}: nvrm did not answer the quiesce within {after:.1} s; destroying"
+        ),
+    }
+    // A moment for what the guest says after its last line.
+    let until = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < until {
+        if read_line(&mut serial.reader, &mut serial.out).is_err() {
+            break;
+        }
     }
 }
 
@@ -366,7 +530,10 @@ fn capture(log: &Path, deadline: Instant) -> Result<Vec<String>> {
 const BUSYBOX: &str = "~/.local/share/ferrix/busybox/x86_64/bin/busybox.static";
 
 /// What init runs: wait for `nvrm` to register `/dev/nvidiactl`, then run
-/// NVIDIA's own `nvidia-smi` from the volume, through glibc.
+/// NVIDIA's own `nvidia-smi` from the volume, through glibc. At its end it
+/// asks `nvrm` to quiesce the card (`docs/NVIDIA.md` §13) and waits, a
+/// bounded while, for it to say it has: the domain is destroyed three
+/// seconds after the shell exits.
 const SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
 cd /tmp
 i=0
@@ -392,6 +559,15 @@ if [ -x /data/chrome/chrome-headless-shell ]; then
   /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
   echo "nvidia-gate: chrome exited $?"
 fi
+/bin/busybox mkdir -p /run
+/bin/busybox touch /run/nvrm-quiesce
+i=0
+while [ ! -e /run/nvrm-quiesced ]; do
+  i=$((i + 1))
+  if [ $i -gt 25 ]; then echo "nvidia-gate: nvrm did not quiesce within 25 s"; exit 16; fi
+  /bin/busybox sleep 1
+done
+echo "nvidia-gate: nvrm quiesced"
 exit 16
 "#;
 
@@ -984,6 +1160,13 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
             stop.display()
         );
         let followed = follow(&log, &stop);
+        let followed = match followed {
+            Ok(serial) => {
+                quiesce(args.ssh, serial);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        };
         let _ = std::fs::remove_file(&state);
         drop(running);
         let _ = std::fs::remove_file(&stop);
@@ -994,7 +1177,8 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
         log.display()
     );
     // A desktop has no end line: the timeout, or the port closing, is the end.
-    let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
+    let (_, serial) = capture_keeping(&log, Instant::now() + Duration::from_secs(timeout));
+    quiesce(args.ssh, serial);
     drop(running);
     Ok(())
 }
@@ -1086,8 +1270,8 @@ fn forward_ssh(port: u16, log: PathBuf) {
 
 /// A kept card VM's serial console, into `log` and onto the output, until
 /// `stop` appears or the port closes (the guest powered off or rebooted;
-/// the domain destroys itself on either).
-fn follow(log: &Path, stop: &Path) -> Result<()> {
+/// the domain destroys itself on either). The port, unless it closed.
+fn follow(log: &Path, stop: &Path) -> Result<Option<Serial>> {
     let stream = loop {
         match TcpStream::connect(SERIAL) {
             Ok(stream) => break stream,
@@ -1098,14 +1282,17 @@ fn follow(log: &Path, stop: &Path) -> Result<()> {
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))
         .map_err(|error| Error::new(format!("serial port: {error}")))?;
-    let mut out = std::fs::File::create(log)
+    let out = std::fs::File::create(log)
         .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
-    let mut reader = BufReader::new(stream);
+    let mut serial = Serial {
+        reader: BufReader::new(stream),
+        out,
+    };
     let mut checked = Instant::now();
     loop {
         if stop.exists() {
             println!("  cardvm: {} is there; stopping", stop.display());
-            return Ok(());
+            return Ok(Some(serial));
         }
         // The card protocol: a want-* file is an agent queued for a boot of
         // its own (a kernel or nvrm change), and the card VM yields to it.
@@ -1113,12 +1300,12 @@ fn follow(log: &Path, stop: &Path) -> Result<()> {
             checked = Instant::now();
             if let Some(want) = wanted(stop) {
                 println!("  cardvm: {want} wants the card; stopping");
-                return Ok(());
+                return Ok(Some(serial));
             }
         }
-        if read_line(&mut reader, &mut out).is_err() {
+        if read_line(&mut serial.reader, &mut serial.out).is_err() {
             println!("  cardvm: the serial port closed: the guest stopped");
-            return Ok(());
+            return Ok(None);
         }
     }
 }
@@ -1130,4 +1317,47 @@ fn wanted(stop: &Path) -> Option<String> {
         .flatten()
         .filter_map(|entry| entry.file_name().into_string().ok())
         .find(|name| name.starts_with("want-") && name != "want-cardvm")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Quiesced, quiesced};
+
+    fn lines(transcript: &str) -> Vec<String> {
+        transcript.lines().map(str::to_owned).collect()
+    }
+
+    // As nvrm prints a quiesce (`nvrm/src/main.c`), between other lines.
+    const DONE: &str = "\
+nvrm: quiesce: asked by /run/nvrm-quiesce
+hyprix: frames 12 slowest of the last 12 100313 us
+nvrm: quiesce: the device files refuse requests; 7 open file(s) closed
+nvrm: quiesce: NVKMS: 1 device(s) released and freed
+nvrm: quiesce: the adapter is shut down
+nvrm: quiesce: NV_PMC_BOOT_0 reads 0xb76000a1
+nvrm: quiesce: done in 1840 ms
+";
+
+    #[test]
+    fn a_quiesce_is_done_only_at_its_last_line() {
+        assert_eq!(quiesced(&lines(DONE)), Quiesced::Done { adapter_down: true });
+        let cut = DONE.replace("nvrm: quiesce: done in 1840 ms\n", "");
+        assert_eq!(quiesced(&lines(&cut)), Quiesced::Pending);
+        assert_eq!(quiesced(&[]), Quiesced::Pending);
+    }
+
+    #[test]
+    fn a_quiesce_that_left_the_adapter_up_or_is_stuck_is_told_apart() {
+        let left = DONE.replace(
+            "nvrm: quiesce: the adapter is shut down\n",
+            "nvrm: quiesce: the adapter was NOT shut down (step 2)\n",
+        );
+        assert_eq!(quiesced(&lines(&left)), Quiesced::Done { adapter_down: false });
+        let skeleton = "nvrm: quiesce: no GPU is started: nothing to shut down\n\
+                        nvrm: quiesce: done in 0 ms\n";
+        assert_eq!(quiesced(&lines(skeleton)), Quiesced::Done { adapter_down: false });
+        let stuck = "nvrm: quiesce: asked by /run/nvrm-quiesce\n\
+                     nvrm: quiesce: not done after 20 s, in NVKMS (freeing its device); the GPU is left as it is\n";
+        assert_eq!(quiesced(&lines(stuck)), Quiesced::Stuck);
+    }
 }

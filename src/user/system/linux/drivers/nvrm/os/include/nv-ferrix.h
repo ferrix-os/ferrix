@@ -219,6 +219,7 @@ NvBool nv_lock_init_locks(nvidia_stack_t *sp, nv_state_t *nv);
 /* os/kept/nv-pci.c: probe the attached GPU and start it, through
  * rm_init_adapter; 0, or the step that failed. */
 int nvrm_gpu_start(void);
+int nvrm_gpu_stop(void);
 void nvrm_module_exit(void);
 nv_linux_file_private_t *nvrm_open_ctl(void);
 nv_linux_file_private_t *nvrm_open_gpu(NvU32 minor);
@@ -228,6 +229,7 @@ nv_linux_file_private_t *nvrm_open_gpu(NvU32 minor);
  * fails. Requests that come between the two wait in the channel. */
 int nvrm_chardev_publish(const NvU16 *minors, NvU32 count);
 int nvrm_chardev_serve(void);
+int nvrm_chardev_quiesce(NvU32 patience_ms);
 int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *arg);
 void nvrm_close(nv_linux_file_private_t *nvlfp);
 
@@ -247,6 +249,7 @@ NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, 
 int nvrm_kms_init(void);
 /* os/glue/kms.c: light the displays on every GPU with a test pattern. */
 int nvrm_kms_show(void);
+int nvrm_kms_quiesce(NvBool free_devices);
 
 /* os/glue/drm.c: nvidia-drm's render node (N3b), served on the chardev
  * core's RENDER_MINOR beside /dev/nvidiactl. */

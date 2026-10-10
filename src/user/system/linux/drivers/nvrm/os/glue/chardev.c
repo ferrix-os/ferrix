@@ -16,9 +16,19 @@
  *    the control file's system memory, the VMO the allocation is. The
  *    kernel checks the answer against the device and the VMO's rights;
  *  - RELEASE closes the file. The kernel sends one for a file it may never
- *    have heard back about, so an unknown file is no error.
+ *    have heard back about, so an unknown file is no error. The close runs
+ *    as the client that opened the file: on Linux a close runs in the
+ *    closing process, and RM validates a user client's teardown against
+ *    that identity (osValidateClientTokens). As nvrm itself, root, every
+ *    mapping a non-root client left was refused its auto-unmap with
+ *    NV_ERR_INVALID_CLIENT and an assertion at rs_client.c:1193.
  *
  * Each OPEN and IOCTL is answered with nvos_chardev_reply.
+ *
+ * nvrm_chardev_quiesce (docs/NVIDIA.md §13) ends the service before the
+ * adapter is shut down: from then on OPEN, IOCTL and MMAP are refused with
+ * ENODEV, the requests under way are waited for, and every file still open
+ * is closed as its RELEASE would close it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -37,11 +47,39 @@ struct chardev_file {
     nv_linux_file_private_t *nvlfp;
     /* An open of the render node (os/glue/drm.c) in place of nvlfp. */
     void *drm;
+    /* Who opened it, for the close (see RELEASE above). */
+    NvU32 pid;
+    NvU32 euid;
     struct chardev_file *next;
 };
 
 static struct chardev_file *files;
 static nvos_mutex_t files_lock;
+
+/* Set once by nvrm_chardev_quiesce, and the requests that were let in
+ * before it and have not finished; both under files_lock. */
+static NvBool quiescing;
+static NvU32 under_way;
+
+/* Let a request in, unless the service has ended. */
+static NvBool request_enter(void)
+{
+    NvBool let_in;
+
+    nvos_mutex_lock(&files_lock);
+    let_in = !quiescing;
+    if (let_in)
+        under_way++;
+    nvos_mutex_unlock(&files_lock);
+    return let_in;
+}
+
+static void request_leave(void)
+{
+    nvos_mutex_lock(&files_lock);
+    under_way--;
+    nvos_mutex_unlock(&files_lock);
+}
 
 /* The request rate and the bytes copied for the clients, said every five
  * seconds while requests come: what decides whether the path wants shared
@@ -68,12 +106,14 @@ static void count_say(void *unused)
     nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
 }
 
-static void remember(NvU64 file, nv_linux_file_private_t *nvlfp, void *drm,
-                     struct chardev_file *entry)
+static void remember(const struct nvos_request *request, nv_linux_file_private_t *nvlfp,
+                     void *drm, struct chardev_file *entry)
 {
-    entry->file = file;
+    entry->file = request->file;
     entry->nvlfp = nvlfp;
     entry->drm = drm;
+    entry->pid = request->pid;
+    entry->euid = request->euid;
     nvos_mutex_lock(&files_lock);
     entry->next = files;
     files = entry;
@@ -129,6 +169,27 @@ static struct chardev_file *forget(NvU64 file)
     return entry;
 }
 
+/* Close `entry`'s file as the client that opened it, and free the entry.
+ * The client has no memory to copy: a close reads none. */
+static void close_entry(struct chardev_file *entry)
+{
+    nvos_client_t client;
+    NvBool entered;
+
+    os_mem_set(&client, 0, sizeof(client));
+    client.pid = entry->pid;
+    client.euid = entry->euid;
+    client.administrator = (entry->euid == 0);
+    entered = nvos_client_enter(&client);
+    if (entry->drm != NULL)
+        nvrm_drm_close(entry->drm);
+    else
+        nvrm_close(entry->nvlfp);
+    if (entered)
+        nvos_client_leave();
+    free(entry);
+}
+
 /* The client's copies, through the bridge, for the request in context. */
 static int bridge_in(void *context, void *to, NvU64 from, NvU32 length)
 {
@@ -173,6 +234,7 @@ static void serve_ioctl(void *argument)
     {
         (void)nvos_chardev_reply(work->request.id, -EBUSY, 0);
         free(work);
+        request_leave();
         return;
     }
     if (work->drm != NULL)
@@ -182,6 +244,7 @@ static void serve_ioctl(void *argument)
     nvos_client_leave();
     (void)nvos_chardev_reply(work->request.id, rc < 0 ? rc : 0, rc > 0 ? rc : 0);
     free(work);
+    request_leave();
 }
 
 #ifndef ENXIO
@@ -253,12 +316,93 @@ static void serve_mmap(const struct nvos_request *request)
     }
 }
 
-static void handle(const struct nvos_request *request)
+/* One request the gate let in. Whether it is still under way on return: an
+ * IOCTL a worker took, which leaves when it has answered. */
+static NvBool handle_one(const struct nvos_request *request)
 {
     nv_linux_file_private_t *nvlfp;
     struct chardev_file *entry;
     struct worker *work;
     void *drm;
+
+    switch (request->op)
+    {
+        case NVOS_REQUEST_OPEN:
+            entry = calloc(1, sizeof(*entry));
+            if (entry == NULL)
+            {
+                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                return NV_FALSE;
+            }
+            if (request->minor == NVRM_RENDER_MINOR)
+            {
+                drm = nvrm_drm_open();
+                if (drm == NULL)
+                {
+                    free(entry);
+                    (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                    return NV_FALSE;
+                }
+                remember(request, NULL, drm, entry);
+                (void)nvos_chardev_reply(request->id, 0, 0);
+                return NV_FALSE;
+            }
+            nvlfp = (request->minor == 255) ? nvrm_open_ctl() : nvrm_open_gpu(request->minor);
+            if (nvlfp == NULL)
+            {
+                free(entry);
+                (void)nvos_chardev_reply(request->id, -ENODEV, 0);
+                return NV_FALSE;
+            }
+            /* RM names files by fd (nv_get_file_private): the kernel's
+             * identity for it, which chardev_file resolves descriptors to. */
+            nvlfp->fd = (NvS32)request->file;
+            remember(request, nvlfp, NULL, entry);
+            (void)nvos_chardev_reply(request->id, 0, 0);
+            return NV_FALSE;
+
+        case NVOS_REQUEST_IOCTL:
+            nvlfp = find(request->file);
+            drm = find_drm(request->file);
+            if (nvlfp == NULL && drm == NULL)
+            {
+                (void)nvos_chardev_reply(request->id, -EBADF, 0);
+                return NV_FALSE;
+            }
+            work = calloc(1, sizeof(*work));
+            if (work == NULL)
+            {
+                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                return NV_FALSE;
+            }
+            work->request = *request;
+            work->nvlfp = nvlfp;
+            work->drm = drm;
+            if (!nvos_thread_spawn(serve_ioctl, work))
+            {
+                free(work);
+                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
+                return NV_FALSE;
+            }
+            return NV_TRUE;
+
+        case NVOS_REQUEST_MMAP:
+            drm = find_drm(request->file);
+            if (drm != NULL)
+                nvrm_drm_mmap(drm, request);
+            else
+                serve_mmap(request);
+            return NV_FALSE;
+
+        default:
+            return NV_FALSE;
+    }
+}
+
+static void handle(const struct nvos_request *request)
+{
+    struct chardev_file *entry;
+    NvBool late;
 
     if (request->op == NVOS_REQUEST_IOCTL)
         __atomic_fetch_add(&count_ioctl, 1, __ATOMIC_RELAXED);
@@ -269,86 +413,43 @@ static void handle(const struct nvos_request *request)
 
     switch (request->op)
     {
-        case NVOS_REQUEST_OPEN:
-            entry = calloc(1, sizeof(*entry));
-            if (entry == NULL)
-            {
-                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
-                return;
-            }
-            if (request->minor == NVRM_RENDER_MINOR)
-            {
-                drm = nvrm_drm_open();
-                if (drm == NULL)
-                {
-                    free(entry);
-                    (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
-                    return;
-                }
-                remember(request->file, NULL, drm, entry);
-                (void)nvos_chardev_reply(request->id, 0, 0);
-                return;
-            }
-            nvlfp = (request->minor == 255) ? nvrm_open_ctl() : nvrm_open_gpu(request->minor);
-            if (nvlfp == NULL)
-            {
-                free(entry);
-                (void)nvos_chardev_reply(request->id, -ENODEV, 0);
-                return;
-            }
-            /* RM names files by fd (nv_get_file_private): the kernel's
-             * identity for it, which chardev_file resolves descriptors to. */
-            nvlfp->fd = (NvS32)request->file;
-            remember(request->file, nvlfp, NULL, entry);
-            (void)nvos_chardev_reply(request->id, 0, 0);
-            return;
-
-        case NVOS_REQUEST_IOCTL:
-            nvlfp = find(request->file);
-            drm = find_drm(request->file);
-            if (nvlfp == NULL && drm == NULL)
-            {
-                (void)nvos_chardev_reply(request->id, -EBADF, 0);
-                return;
-            }
-            work = calloc(1, sizeof(*work));
-            if (work == NULL)
-            {
-                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
-                return;
-            }
-            work->request = *request;
-            work->nvlfp = nvlfp;
-            work->drm = drm;
-            if (!nvos_thread_spawn(serve_ioctl, work))
-            {
-                free(work);
-                (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
-            }
-            return;
-
-        case NVOS_REQUEST_MMAP:
-            drm = find_drm(request->file);
-            if (drm != NULL)
-                nvrm_drm_mmap(drm, request);
-            else
-                serve_mmap(request);
-            return;
-
         case NVOS_REQUEST_RELEASE:
+            /* Never refused: a file the quiesce closed is unknown here, and
+             * one it left is closed as ever (RM frees a client of a GPU that
+             * is shut down, as after a removal). */
             entry = forget(request->file);
-            if (entry != NULL)
-            {
-                if (entry->drm != NULL)
-                    nvrm_drm_close(entry->drm);
-                else
-                    nvrm_close(entry->nvlfp);
+            if (entry == NULL)
+                return;
+            /* A render-node file the quiesce could not close frees its
+             * buffers through NVKMS's device, which is gone by now. */
+            nvos_mutex_lock(&files_lock);
+            late = quiescing;
+            nvos_mutex_unlock(&files_lock);
+            if (late && entry->drm != NULL)
                 free(entry);
-            }
+            else
+                close_entry(entry);
             return;
 
         case NVOS_REQUEST_DMABUF_RELEASE:
+            /* After the quiesce the buffer's memory went with NVKMS's
+             * device; there is nothing left to settle. */
+            if (!request_enter())
+                return;
             nvrm_drm_released(request->arg);
+            request_leave();
+            return;
+
+        case NVOS_REQUEST_OPEN:
+        case NVOS_REQUEST_IOCTL:
+        case NVOS_REQUEST_MMAP:
+            if (!request_enter())
+            {
+                (void)nvos_chardev_reply(request->id, -ENODEV, 0);
+                return;
+            }
+            if (!handle_one(request))
+                request_leave();
             return;
 
         default:
@@ -374,4 +475,55 @@ int nvrm_chardev_serve(void)
             return -2;
         handle(&request);
     }
+}
+
+/* How often the requests under way are looked at while they are waited for. */
+#define QUIESCE_POLL_MS 10
+
+/*
+ * End the service (docs/NVIDIA.md §13): refuse what comes from now on,
+ * wait up to `patience_ms` for the requests under way, then close every
+ * file still open. The files closed, or -1 when requests were still under
+ * way after the wait: then no file is closed, since a worker may be using
+ * one, and RM's shutdown frees what their clients hold on the GPU.
+ */
+int nvrm_chardev_quiesce(NvU32 patience_ms)
+{
+    struct chardev_file *entry;
+    NvU32 waited = 0, left;
+    int closed = 0;
+
+    nvos_mutex_lock(&files_lock);
+    quiescing = NV_TRUE;
+    left = under_way;
+    nvos_mutex_unlock(&files_lock);
+
+    while (left != 0 && waited < patience_ms)
+    {
+        (void)os_delay(QUIESCE_POLL_MS);
+        waited += QUIESCE_POLL_MS;
+        nvos_mutex_lock(&files_lock);
+        left = under_way;
+        nvos_mutex_unlock(&files_lock);
+    }
+    if (left != 0)
+    {
+        nvrm_say("quiesce: %u request(s) still under way after %u ms; no file is closed\n",
+                 left, waited);
+        return -1;
+    }
+
+    for (;;)
+    {
+        nvos_mutex_lock(&files_lock);
+        entry = files;
+        if (entry != NULL)
+            files = entry->next;
+        nvos_mutex_unlock(&files_lock);
+        if (entry == NULL)
+            break;
+        close_entry(entry);
+        closed++;
+    }
+    return closed;
 }

@@ -1595,6 +1595,20 @@ and took the recommended answer for D2, D3 and D5.
   * N3b, dmabufs and Chrome's GPU compositing for 60 fps, is next (branch
     `nvidia-n2`, design OK IF, ledger 316).
 
+* **2026-10-10 — the quiesce, built and not yet run on the card** (branch
+  `nv-quiesce`, on `nv-cardvm`; §13).
+  * `nvrm` shuts its adapter down when `/run/nvrm-quiesce` appears: the
+    device files, NVKMS's device, then NVIDIA's `nv_shutdown_adapter`.
+    `xtask` asks for it over `--ssh` before it destroys the domain and waits
+    25 s at most; `run-nvidia`'s script asks at its end.
+  * A file is closed as the client that opened it, which is what the
+    auto-unmap assertions at a client's death were missing (§13.5).
+  * Checked without the card: the build and the core's link,
+    `test-nvrm` with the skeleton answering the request, `test-nvrm-link`,
+    the unit tests. The adapter's shutdown itself has never run.
+  * No certification review is owed: no ring is touched (§13.7). Owed:
+    the card test of §13.6, with the product owner's word for the card.
+
 ## 11. CUDA (N5)
 
 Written on 2026-10-02, when the customer asked for CUDA now, alongside
@@ -3446,6 +3460,210 @@ finding is **F-58**, recorded in FINDINGS.md's "reserved and not yet
 filed" paragraph by this branch, and filed with its fix.
 
 ---
+
+## 13. Quiescing the card before its machine goes away
+
+Written 2026-10-10 on branch `nv-quiesce`, with the code. **Nothing in this
+section has run on the RTX 3060 yet**: the card was in use, and the first
+card run needs the product owner's word (`AGENTS.md`, hardware). What ran
+without it is in §13.6.
+
+### 13.1 Why
+
+Every boot on the card ends with `xtask` destroying the `ferrix-3060`
+domain, which kills QEMU. Until this section `nvrm` had no stop at all:
+`rm_init_adapter` at start, and nothing that undoes it. The GSP firmware and
+the lit head were left running, and the host's reset of the function at the
+next open was the only clean-up. That worked for every boot from
+2026-10-03 until 2026-10-10 02:00, when the card read `NV_PMC_BOOT_0 =
+0xffffffff` on every boot until the host was restarted.
+
+**The cause of that is not known, and the logs do not show that the missing
+stop was it** (`~/.local/share/ferrix/steam-race/quiesce.md` has the
+evidence): four sessions that night were destroyed in the same state and
+three of them were followed by a healthy boot. A guest killed by its
+hypervisor gives no driver a stop either, NVIDIA's own included. This
+section is therefore not a fix for the wedge. It removes one difference
+between a destroy and what NVIDIA's driver leaves behind, so that the next
+wedge, if one comes, is not explained by it.
+
+### 13.2 What NVIDIA's driver does
+
+Read from 580.173.02 (`kernel-open/nvidia/nv.c`, `nv-pci.c`,
+`src/nvidia/arch/nvalloc/unix/src/osapi.c` and `osinit.c`,
+`src/nvidia-modeset/kapi/src/nvkms-kapi.c`, `src/nvkms-evo.c`). It has two
+ways out, and they differ:
+
+* **The last file closes** (`nvidia_close` → `nv_close_device` →
+  `nv_stop_device` → `nv_shutdown_adapter`). In this order:
+  `rm_disable_adapter` (the GPU's interrupts off, the work queue flushed,
+  what is loaded for clients unloaded); the bottom-half queue stopped;
+  `free_irq` and MSI off; `rm_shutdown_adapter` (`RmShutdownAdapter`:
+  every client's resources on the GPU deleted, `gpuStateUnload`,
+  `gpuStateDestroy`, which unloads the GSP firmware). nvidia-drm, when it
+  holds the display, goes first: `nv_drm_dev_unload` calls KAPI's
+  `releaseOwnership` and `freeDevice`, and freeing NVKMS's last reference
+  to the device (`nvFreeDevEvo`) shuts the heads down and frees the core
+  channel, then drops NVKMS's reference to the GPU (`nvkms_close_gpu`).
+* **The machine shuts down or restarts** (`nv_pci_shutdown`, the PCI
+  driver's `.shutdown`): `nvidia_modeset_remove`, a flag, and bus mastering
+  off. **No adapter shutdown and no GSP unload**: with clients or nvidia-drm
+  still holding the GPU, NVIDIA's own driver leaves the firmware running
+  into the platform's reset.
+
+So the first is the stronger of the two, and the one `nvrm` follows: it is
+the only path NVIDIA has that leaves the firmware unloaded.
+
+### 13.3 The design
+
+**The trigger is a file**, `/run/nvrm-quiesce`, which only root can create.
+A thread of `nvrm` looks for it four times a second from the moment `nvrm`
+is up. A file was chosen over the three alternatives because it needs
+nothing new in the kernel or in devmgr, and because every party that takes
+the machine away can make one:
+
+* a new ioctl on `/dev/nvidiactl` needs a client program in every image
+  and cannot be exercised without the card, where a file can (§13.6);
+* a message on `nvrm`'s bootstrap channel needs devmgr to have a stop
+  protocol for drivers, which it has not (`docs/DEVMGR.md` §4: a driver is
+  killed, and then its device quiesced), and somebody to tell devmgr;
+* the kernel telling drivers at `reboot(2)` is the right end state for a
+  real machine and is an item change (`src/kernel/src/power.rs`).
+
+**The order** is §13.2's first path, with the clients first, since on
+Ferrix they are still alive when the machine is taken away:
+
+1. **The device files** (`os/glue/chardev.c`, `nvrm_chardev_quiesce`).
+   From one instant, taken under the file table's lock, OPEN, IOCTL and
+   MMAP are answered `ENODEV`. The requests let in before that instant are
+   counted, and waited for up to 3 s. Then every open file is closed as
+   its RELEASE would close it, which frees its RM clients the way the death
+   of their processes does. If requests are still under way after 3 s no
+   file is closed, since a worker may be inside one.
+2. **NVKMS** (`os/glue/kms.c`, `nvrm_kms_quiesce`): `releaseOwnership`
+   and `freeDevice` on `nvrm`'s KAPI device, as nvidia-drm's unload. The
+   two threads that use the device afterwards, the card's copies into the
+   mapped surface and the watch for a display, take a lock around each use
+   and do nothing once the device is gone: a flush is still answered, and
+   nothing is copied. Skipped when step 1 closed no file, because the
+   render node's ioctls (`os/glue/drm.c`) use the same device.
+3. **The adapter** (`os/kept/nv-pci.c`, `nvrm_gpu_stop`):
+   `rm_disable_adapter`, the interrupt's end, `rm_shutdown_adapter`. nvos
+   has no call that gives the vector back, so the handler is told to do
+   nothing from then on and one that is running is waited for, up to 2 s;
+   if it is still running the adapter is left disabled and not shut down.
+4. `NV_PMC_BOOT_0` is read once more and said, and `nvrm` creates
+   `/run/nvrm-quiesced`. `nvrm` stays up, refusing its files.
+
+`rm_shutdown_rm` is not called: the process is about to be killed, and
+NVIDIA calls it only when its module is unloaded.
+
+**A GPU that does not answer cannot hold the stop.** Nothing waits on
+`nvrm`. Each waiter has a bound of its own: `nvrm` says after 20 s which
+step it is in (`quiesce: not done after 20 s, in …`), and does not abandon
+the step, since none of them can be left half-way; `xtask` waits 25 s for
+the last line and destroys the domain whatever it read; `run-nvidia`'s
+script waits 25 s.
+
+**The lines**, each from `nvrm` on the console:
+
+```
+nvrm: quiesce: asked by /run/nvrm-quiesce
+nvrm: quiesce: the device files refuse requests; N open file(s) closed
+nvrm: quiesce: NVKMS: N device(s) released and freed
+nvrm: quiesce: the adapter is shut down
+nvrm: quiesce: NV_PMC_BOOT_0 reads 0x…
+nvrm: quiesce: done in N ms
+```
+
+and, in place of the ones they name: `N request(s) still under way after
+N ms; no file is closed`, `NVKMS: its device is left to RM's shutdown`,
+`the adapter was NOT shut down (step N)`, `no GPU is started: nothing to
+shut down` (the skeleton), `not done after 20 s, in …`.
+
+### 13.4 The host's side
+
+`tools/common/xtask/src/nvidia.rs`. Before this, the guest saw nothing
+before `virsh destroy`: `card.sh down`, a `want-*` file and `--timeout` all
+end in `Running`'s drop.
+
+* **A desktop with `--ssh`** (the kept card VM, and a timed run that has
+  it): `quiesce` runs `ssh … root@127.0.0.1 touch /run/nvrm-quiesce` with
+  the guest key, keeps reading the serial port into the same log until
+  `quiesce: done` or `quiesce: not done`, 25 s at most, says what came of
+  it, and then the domain is destroyed as before. An ssh that fails ends
+  the wait at once.
+* **`run-nvidia`**: its script makes the file as its last step and waits
+  for `/run/nvrm-quiesced`, so the gate's boot ends with the adapter shut
+  down and no client alive, which is the simplest first card test.
+* **A desktop without `--ssh`** has no way in, and is destroyed as before,
+  with a line that says so.
+
+Not built: `init` asking for the quiesce at `poweroff` and `reboot`, which
+a real machine needs before a warm restart. It is one unit with a stop
+command once this has passed on the card.
+
+### 13.5 The auto-unmap assertions
+
+`NVRM: clientUnmapResourceRefMappings: Failed to auto-unmap (status=0x23)`
+with `Assertion failed: 0 @ rs_client.c:1193`, about 110 times when a
+Chrome GPU process dies. **It is a bug in `nvrm`'s glue, found by reading
+and not yet confirmed on the card.** The kernel's RELEASE carries no
+identity (`interfaces/chardev/mod.rs` sends it with `pid` and `euid` 0), and
+`chardev.c` closed the file with no client entered, so RM saw `nvrm`
+itself: root, `nvrm`'s pid. A user client's teardown is validated against
+the caller (`rmclientValidate` → `osValidateClientTokens`: refused when
+both the euid and the pid differ from the client's), so each mapping of a
+client that was not root was refused its unmap with `NV_ERR_INVALID_CLIENT`
+(0x23), and its record dropped without the unmap. On Linux the close runs
+in the closing process and passes.
+
+What supports it: on 2026-10-09 and -10 the assertions appear in all four
+desktop boots whose log has `sessiond`'s session for `ferrix` (uid 1000),
+and in none of the eight without one, where the desktop's programs run as
+root; each of the twelve had the same three GPU-process deaths.
+
+The fix: a file remembers who opened it, and its close, from RELEASE or
+from the quiesce, runs as that client. What the failures cost before it is
+BAR1 address space that RM never unmapped for the dead client; they are not
+needed to explain anything about the stop, and the quiesce does not depend
+on the fix.
+
+### 13.6 What was checked, and what was not
+
+* `nvrm` builds with `-Werror`, and its core links with the two new calls
+  into it (`rm_disable_adapter`, `rm_shutdown_adapter`).
+* `cargo xtask test-nvrm`: `nvrm-hold` makes the file, and the skeleton on
+  QEMU's test device answers `quiesce: asked`, `no GPU is started` and
+  `done`; the gate requires the three lines in order, and a unit test
+  fails each of them missing. This shows the watch, the file and the
+  lines. It shows nothing of steps 1 to 3.
+* `cargo xtask test-nvrm-link` passes as before.
+* `xtask`'s reading of the lines has unit tests (done, done without the
+  adapter, stuck, pending).
+* **Not checked, because only the card can:** that the files close
+  cleanly under live clients, that `freeDevice` blanks the head and
+  returns, that `rm_shutdown_adapter` unloads the GSP firmware and returns
+  in our port, how long each takes, that the next boot starts from that
+  state, and §13.5's fix.
+
+**The card test**, in this order, each step only after the one before:
+`run-nvidia` once (no client, no desktop), then twice more; then the kept
+card VM with `card.sh down` five times, the first with only the session's
+own programs running. Healthy is the six lines of §13.3 with `the adapter
+is shut down`, `xtask`'s `nvrm shut the adapter down in N s`, and
+`NV_PMC_BOOT_0 reads 0xb76000a1` at the start of the next boot. Any
+`0xffffffff`, or a boot that stops at `rm_init_adapter`, ends the test.
+
+### 13.7 Certification
+
+Nothing in the item changes: `nvrm`, its test program and `xtask` are
+outside every ring of `tools/common/data/certification-item.json`, and the
+trigger was chosen so that neither the kernel nor devmgr changes
+(`docs/CONVENTIONS.md`, *Changes to the certified item go through review*:
+ring-3 programs and xtask-only changes do not need the consultant).
+`os/kept/nv-pci.c` gains `nvrm_gpu_stop` and the handler's guard, which
+K1's owed provenance of the kept files (`docs/BACKLOG.md`) has to carry.
 
 ## Appendix A: the probe's domain
 
