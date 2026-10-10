@@ -157,6 +157,7 @@ mod vnc;
 mod wallpaper;
 mod waybar;
 mod window;
+mod wine;
 mod workspace;
 mod wsl;
 mod yserver;
@@ -300,6 +301,8 @@ COMMANDS:
                   sign in and require its store on the screen; without the file the store step is skipped (docs/STEAM.md)
     test-steam-game  The same, then require Teeworlds installed from Steam, started by it and drawing in its window;
                   needs the account file
+    test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a
+                  prefix with wineboot and its cmd to print the Windows version (docs/WINE.md)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
@@ -667,7 +670,7 @@ fn run() -> Result<()> {
         "test-claude-code" => claude_code::test_claude_code(&args),
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
-        "test-yserver" | "test-xwindow" => yserver::run(command, &args),
+        "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
