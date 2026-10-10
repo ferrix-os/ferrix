@@ -667,9 +667,16 @@ pub(crate) fn isr_thread_is_this() {
     ISR_TID.store(crate::futex::tid(), Ordering::Release);
 }
 
-fn current_cpu() -> u32 {
+/// The processor the kernel says the calling thread is on.
+fn asked_cpu() -> u32 {
     // SAFETY: `sched_getcpu` takes nothing.
     u32::try_from(unsafe { libc::sched_getcpu() }).unwrap_or(0)
+}
+
+/// The processor the calling thread is on, or was under half a millisecond
+/// ago (`futex::cpu`).
+fn current_cpu() -> u32 {
+    crate::futex::cpu(asked_cpu)
 }
 
 /// `os_get_cpu_number`. RM takes an interrupt to stay on the processor it

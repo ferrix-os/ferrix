@@ -87,6 +87,8 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32, timeout: Option<Timespec>) {
 /// with every thread that wanted it asleep -- RM's API lock, at a session's
 /// start and at a client's end. So the count is capped at `i32::MAX`.
 pub(crate) fn wake(word: &AtomicU32, count: u32) {
+    #[cfg(test)]
+    WAKES.with(|wakes| wakes.set(wakes.get() + 1));
     let count = count.min(i32::MAX as u32);
     // SAFETY: the kernel only uses the word's address as a key.
     let _ = unsafe {
@@ -102,6 +104,31 @@ pub(crate) fn wake(word: &AtomicU32, count: u32) {
             ],
         )
     };
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// How many times the thread has called [`wake`].
+    static WAKES: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+/// How many wakes the calling thread has made: for a test that a path
+/// makes none.
+#[cfg(test)]
+pub(crate) fn wakes_by_this_thread() -> u32 {
+    WAKES.with(core::cell::Cell::get)
+}
+
+/// The time-stamp counter: a clock for what may be a little stale.
+#[cfg(not(test))]
+pub(crate) fn ticks() -> u64 {
+    let (low, high): (u32, u32);
+    // SAFETY: `rdtsc` reads the counter into EAX and EDX and touches
+    // nothing else.
+    unsafe {
+        asm!("rdtsc", out("eax") low, out("edx") high, options(nomem, nostack, preserves_flags));
+    }
+    (u64::from(high) << 32) | u64::from(low)
 }
 
 /// The calling thread's id, from the kernel.
@@ -133,6 +160,64 @@ static TIDS: [(core::sync::atomic::AtomicUsize, AtomicU32); 64] = [const {
         AtomicU32::new(0),
     )
 }; 64];
+
+/// The processor each thread last asked the kernel about, with the thread
+/// pointer and the time-stamp counter then: slots as [`TIDS`]'.
+#[cfg(not(test))]
+static CPUS: [(
+    core::sync::atomic::AtomicUsize,
+    AtomicU32,
+    core::sync::atomic::AtomicU64,
+); 64] = [const {
+    (
+        core::sync::atomic::AtomicUsize::new(0),
+        AtomicU32::new(0),
+        core::sync::atomic::AtomicU64::new(0),
+    )
+}; 64];
+
+/// How long an answer about the processor is kept, in counter ticks: under
+/// half a millisecond on any processor that counts at 8 GHz or less.
+#[cfg(not(test))]
+const CPU_KEPT_TICKS: u64 = 1 << 21;
+
+/// The processor the calling thread is on, or was a moment ago, `ask`
+/// being how the kernel is asked.
+///
+/// A thread may be moved the instant after it asks, on Linux as here, so
+/// every answer is "a moment ago" and RM treats it so. `sched_getcpu` is a
+/// system call and RM asks three times a call; the answer is kept, by the
+/// thread pointer, for [`CPU_KEPT_TICKS`]. A slot another thread wrote in
+/// between is only asked again.
+#[cfg(not(test))]
+pub(crate) fn cpu(ask: fn() -> u32) -> u32 {
+    use core::sync::atomic::Ordering;
+    let pointer = thread_pointer();
+    let index = ((pointer >> 6) ^ (pointer >> 12) ^ (pointer >> 20)) % CPUS.len();
+    let Some((key, cpu, when)) = CPUS.get(index) else {
+        return ask();
+    };
+    let now = ticks();
+    if key.load(Ordering::Acquire) == pointer {
+        let kept = cpu.load(Ordering::Acquire);
+        let since = now.wrapping_sub(when.load(Ordering::Acquire));
+        if since < CPU_KEPT_TICKS && key.load(Ordering::Acquire) == pointer {
+            return kept;
+        }
+    }
+    let asked = ask();
+    key.store(0, Ordering::Release);
+    cpu.store(asked, Ordering::Release);
+    when.store(now, Ordering::Release);
+    key.store(pointer, Ordering::Release);
+    asked
+}
+
+/// See the other [`cpu`]: the host's tests ask every time.
+#[cfg(test)]
+pub(crate) fn cpu(ask: fn() -> u32) -> u32 {
+    ask()
+}
 
 /// What [`slot`] answers if its index were ever out of range.
 #[cfg(not(test))]

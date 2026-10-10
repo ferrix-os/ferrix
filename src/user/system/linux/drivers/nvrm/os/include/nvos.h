@@ -23,7 +23,7 @@ typedef struct { NvU32 state; } nvos_mutex_t;
 /* sync::Semaphore: Linux's struct semaphore. */
 typedef struct { NvU32 count; NvU32 sleepers; } nvos_sema_t;
 /* sync::RwLock. */
-typedef struct { NvU32 state; NvU32 writers_waiting; NvU32 sequence; } nvos_rwlock_t;
+typedef struct { NvU32 state; NvU32 writers_waiting; NvU32 sequence; NvU32 sleepers; } nvos_rwlock_t;
 /* sync::Completion: done once, done for good (complete_all). */
 typedef struct { NvU32 done; } nvos_completion_t;
 /* sync::Event: a sequence a sleeper waits on to move. */

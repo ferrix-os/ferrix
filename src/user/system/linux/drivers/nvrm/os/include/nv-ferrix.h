@@ -72,7 +72,8 @@ int snprintf(char *, size_t, const char *, ...);
 /* RM's alternate stack, handed to every entry point (altstacks are off). */
 static inline int nv_kmem_cache_alloc_stack(nvidia_stack_t **stack)
 {
-    *stack = calloc(1, sizeof(nvidia_stack_t));
+    /* Not zeroed, as Linux's kmem_cache_alloc leaves it: 12 KiB a request. */
+    *stack = malloc(sizeof(nvidia_stack_t));
     if (*stack == NULL)
         return -1;
     (*stack)->size = sizeof((*stack)->stack);

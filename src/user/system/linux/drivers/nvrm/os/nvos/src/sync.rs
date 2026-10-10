@@ -399,6 +399,9 @@ pub struct RwLock {
     writers_waiting: AtomicU32,
     /// Bumped on every release; sleepers wait for it to move.
     sequence: AtomicU32,
+    /// Threads asleep on `sequence`, or about to be: a release with none
+    /// makes no system call.
+    sleepers: AtomicU32,
 }
 
 impl RwLock {
@@ -408,7 +411,23 @@ impl RwLock {
             state: AtomicU32::new(0),
             writers_waiting: AtomicU32::new(0),
             sequence: AtomicU32::new(0),
+            sleepers: AtomicU32::new(0),
         }
+    }
+
+    /// Sleep until `sequence` has moved on from `seen`.
+    ///
+    /// The sleeper counts itself before it sleeps and a release bumps the
+    /// sequence before it reads the count, both in one total order
+    /// (`SeqCst`): a release that read no sleeper bumped the sequence
+    /// before this thread's wait compared it, so the wait returns at once;
+    /// one that read this sleeper wakes it.
+    fn sleep(&self, seen: u32, how: u32) {
+        let _ = self.sleepers.fetch_add(1, Ordering::SeqCst);
+        let slot = watch::sleeps(self, how);
+        futex::wait(&self.sequence, seen, None);
+        watch::woke(slot);
+        let _ = self.sleepers.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// Read it, if no writer holds it or waits, without waiting.
@@ -458,9 +477,7 @@ impl RwLock {
             if self.try_read() {
                 return;
             }
-            let slot = watch::sleeps(self, watch::READ);
-            futex::wait(&self.sequence, seen, None);
-            watch::woke(slot);
+            self.sleep(seen, watch::READ);
         }
     }
 
@@ -473,9 +490,7 @@ impl RwLock {
                 let _ = self.writers_waiting.fetch_sub(1, Ordering::SeqCst);
                 return;
             }
-            let slot = watch::sleeps(self, watch::WRITE);
-            futex::wait(&self.sequence, seen, None);
-            watch::woke(slot);
+            self.sleep(seen, watch::WRITE);
         }
     }
 
@@ -501,10 +516,16 @@ impl RwLock {
         self.release();
     }
 
-    /// Wake everyone asleep on it, to try again.
+    /// Wake everyone asleep on it, to try again; with nobody asleep, no
+    /// system call. Until 2026-10-10 every release made one: three a call
+    /// into RM, whose API lock, its client's lock and nvrm's power lock are
+    /// all of these, on a path a program takes for every request
+    /// (`docs/NVIDIA.md` §4.7).
     fn release(&self) {
-        let _ = self.sequence.fetch_add(1, Ordering::Release);
-        futex::wake(&self.sequence, u32::MAX);
+        let _ = self.sequence.fetch_add(1, Ordering::SeqCst);
+        if self.sleepers.load(Ordering::SeqCst) != 0 {
+            futex::wake(&self.sequence, u32::MAX);
+        }
     }
 }
 
@@ -766,6 +787,42 @@ mod tests {
                 assert!(thread.join().is_ok());
             }
         }
+    }
+
+    /// A lock nobody sleeps on is taken and given back, read and written,
+    /// without a wake: no system call on the path every request into RM
+    /// takes three times. The control is the lock with a sleeper, whose
+    /// release must wake.
+    #[test]
+    fn a_release_with_nobody_asleep_makes_no_wake() {
+        use std::time::Duration;
+
+        let lock = Arc::new(RwLock::new());
+        let before = futex::wakes_by_this_thread();
+        for _ in 0..10 {
+            lock.read();
+            lock.read();
+            lock.read_unlock();
+            lock.read_unlock();
+            lock.write();
+            lock.write_unlock();
+        }
+        assert_eq!(futex::wakes_by_this_thread(), before);
+
+        lock.write();
+        let sleeper = {
+            let lock = Arc::clone(&lock);
+            thread::spawn(move || {
+                lock.read();
+                lock.read_unlock();
+            })
+        };
+        while lock.sleepers.load(Ordering::SeqCst) == 0 {
+            thread::sleep(Duration::from_millis(1));
+        }
+        lock.write_unlock();
+        assert_eq!(futex::wakes_by_this_thread(), before + 1);
+        assert!(sleeper.join().is_ok());
     }
 
     /// `complete_all` wakes every waiter.
