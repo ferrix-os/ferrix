@@ -207,8 +207,9 @@ Nothing here is promised; each is its own landing with its own review.
 
 **Status: a proposal for review. Nothing in this section is built, and no
 kernel code was written for it.** It was asked for with the app so that the
-switch is not designed into a corner. The certification consultant's
-verdict on it is in §7.9.
+switch is not designed into a corner. The certification consultant read it
+as a design on 2026-10-11; the verdict, and what it made this section say,
+is in §7.9.
 
 ### 7.1 What is being asked for
 
@@ -249,7 +250,29 @@ From `docs/OPAQUE-KERNEL.md` §9.2 and requirements `L.object.114` to `116`:
   pairwise or one-directional relation in the item.
 * AoU-14: one domain holds only programs that may read each other's memory;
   MANAGE on a marked job is the authority to place programs there;
-  partitions of different criticality shall not share one.
+  partitions of different criticality shall not share one. It already names
+  "a driver and the client it serves". What would be new here is a client
+  chosen at run time by a user, and a driver that also serves clients
+  outside the domain.
+
+Four precisions, from the consultant's read of the code:
+
+* `CLONE_INTO_CGROUP` is called a move in the design; the code treats the
+  child as born in the target job and puts it out when its domain differs
+  from its parent's (`syscall/process.rs`). The result is the same today.
+  But the fork of an *admitted* process, born in the game's own unmarked
+  job, would not be a member; an admission rule must decide that.
+* There is a fourth way to stop being dumpable, a parent that was not; a
+  space a non-member comes to share is out for good; a marked job inside a
+  marked job is a domain of its own; and every marking is a `DOMAIN` audit
+  record.
+* The equivalence class is forced, not chosen: predictor state survives any
+  chain of switches that leave the barrier out, so no pairwise relation
+  would be sound.
+* **No program an image ships is in a domain today.** The only caller of
+  the marking outside the kernel's own checks is the IPC benchmark. Making
+  `nvrm`'s job marked is by itself a change to what the reference
+  configuration contains.
 
 ### 7.3 The mark must not be the grant
 
@@ -270,13 +293,23 @@ So the proposal separates two lists:
 |---|---|---|
 | Where | `~/.config/ferrix/game-mode.conf` | `/etc/ferrix/game-domain.conf`, root's, `0644` |
 | Who writes it | the user, or any program of theirs | root only: Settings asks `authd` for the user's password and a `wheel` membership, as `su` does (`docs/AUTH.md`), and a small set-up helper writes the line |
-| What it can cost | nothing, later a share of the user's own processor time | the separation between that application and the driver |
+| What it can cost | nothing, later a share of the user's own processor time | the separation between the driver and, in effect, every program of that user while the admitted one runs |
 | Read by | the launcher | the session service only |
 
 An application gets the effect only if it is in **both**: the user wants it
-treated as a game, and an administrator accepted the trade for it. The page
-shows the second switch under the first, disabled with the reason when the
-user is not in `wheel`, with the trade in plain words beside it.
+treated as a game, and an administrator accepted the trade for it.
+
+**What root's list really grants is wider than one application**, and the
+page would have to say so. The list names a desktop-file ID, and what that
+ID runs is the user's: an entry under the user's own directory shadows the
+system's, and the `Exec` line, the game's files and its environment are the
+user's to write. `FERRIX_GAME_MODE_APP` can be set by any program, and a
+window's app id is chosen by the client. Neither the launcher nor hyprix is
+a trusted source of which process is which application. So while an
+admitted process runs, the grant is in effect to *every program of that
+user*, not to "that application". Either the table's cost row and the
+page's words say that, or the list names a root-owned executable that the
+service itself starts, which no Steam game is.
 
 ### 7.4 Who grants it, and how the kernel learns
 
@@ -305,9 +338,15 @@ service starts the game *in that job*.
   process that then runs a Linux program as a given user was **not
   established**.
 * It welds two things together that §5 keeps apart: the game would be in
-  the *driver's* cgroup, charged to it, killed with it, and outside the
-  user's session scope, so the session's end would not end it; and moving
-  it to where G0's weight is written would take it out of the domain.
+  the *driver's* cgroup, charged to its limits and its pin accounting
+  (V-13), killed with it, and outside the user's session scope, so the
+  session's end would not end it; and moving it to where G0's weight is
+  written would take it out of the domain.
+* It is not free of item change either. A native process is made with its
+  creator's ids (`AUDIT.md` §1), so a starter born in `nvrm`'s job would
+  have the service's uid and leave the domain on becoming the user. And the
+  service would hold MANAGE on the driver's job, which is also the right to
+  kill the driver and to start anything there.
 
 **B. By admission, a new rule.** A native call, `domain_admit(job, process)`
 or the like, by which a holder of MANAGE on a marked job admits an existing
@@ -323,14 +362,19 @@ process, which keeps its own job and cgroup.
   space carries the domain only from the next switch, with the barrier
   issued once on every processor that last ran it, as a leave does in
   reverse).
-* Leaving is unchanged and already one-way (`leave_speculation_domain`,
-  with F-60's grace period), so revoking is built: the service makes the
-  process leave, and it cannot be admitted again.
+* Leaving is built and one-way (`leave_speculation_domain`, with F-60's
+  grace period). *Revoking is not*: no call lets one process make another
+  leave, except a move between jobs, which this option says it leaves
+  alone. Revocation by a third party would be a designed call of its own,
+  and an admission should be tied to something whose loss ends it (the
+  admitter's death, the handle's close).
 * The scheduler's and the cgroup's view of the game are untouched.
 
-**Recommended: B, if this is built at all** (§7.7 says when). A is cheaper
-in evidence and wrong in structure; its starter process would be a second,
-privileged way of starting applications beside the launcher.
+**Recommended: B, if this is built at all** (§7.7 says when), and not as
+drafted above: the consultant's conditions for B's own design round are in
+§7.9. A looks cheaper in evidence, is wrong in structure, and needs an item
+change too; its starter process would be a second, privileged way of
+starting applications beside the launcher.
 
 ### 7.5 What a domain is cannot be bent: who else is in it
 
@@ -345,11 +389,16 @@ carries over every switch that leaves the barrier out, admitting a game to
   recommends yserver, hyprix and `nvrm` in one domain among themselves, and
   the game not. A process is in one domain. If `nvrm` is in the system
   path's domain and a game is admitted to it, the game shares a domain with
-  hyprix, which sees every window and every key. So one of three must be
+  hyprix, which sees every window and every key. So one of two must be
   chosen: `nvrm` shares with the system path and no game is ever admitted;
   or `nvrm`'s domain is for admitted games and the system path keeps its
-  barriers towards `nvrm`; or the customer accepts that an admitted game can
-  read the compositor. The third should not be offered as a switch.
+  barriers towards `nvrm`. A third, one domain for all, in which an
+  admitted game can read the compositor, is withdrawn here and not offered.
+* **It collides with the game session as written.** `docs/GAME-PATH.md`
+  §5.4 has the service "move the client's job" into the game domain. If
+  that is a move of the process between jobs, an admitted game leaves its
+  speculation domain for good at the moment it gains its session. One of
+  the two designs has to change before both can exist.
 * **`nvrm` is not a neutral party.** V-10, V-11 and V-13 already record that
   `nvrm` is NVIDIA's closed code, accepted by design, serving every client.
   A game in its domain can aim at whatever `nvrm` holds of *other* clients.
@@ -378,8 +427,11 @@ What this proposal needs said about it, since the two share a page:
   a speculative read and it is not nothing; the barrier into the driver
   does not close it. If `nvrm` also shares a domain with hyprix (question
   4), hyprix's history is in that state too.
-* **At most half.** One of the two barriers a round trip pays is left out:
-  on the bench's figures about 5 of the 11 µs, to be measured.
+* **Less than half.** One of the two barriers a round trip pays is left
+  out. From the stage columns of the same table the way back falls from 5.4
+  to 1.6 µs and the way in with the handler from 9.7 to 3.0 µs: the one-way
+  saving is nearer 3.8 than 5 of the 10.8 µs, plus the client's cold run
+  afterwards, which no column holds.
 * **Whether it is for every client or only for marked ones** is a decision
   (§8). For every client it is a change to the reference configuration's
   behaviour that the mark plays no part in. For marked ones only, the kernel
@@ -392,17 +444,43 @@ So the relation is: the one-way barrier is the default the mark does not
 gate; the full opt-in is the same line taken one step further, for one
 application, by an administrator, through the service.
 
+**What this account leaves open, handed to `nv-trip`'s own review** (the
+consultant's W1 to W7; ledger line 690 is that review's ground):
+
+1. The ledger already refused a rule told per request by the load ring, so
+   the rule is an attribute of a job. The skip is then taken by *whatever
+   space a processor enters after the driver's*, client or not, unless the
+   entering side is named by a core-ring fact too. The design must say
+   which, and what an intervening kernel thread or the idle loop does.
+2. "The driver steering the client adds little" holds only for a client
+   blocked in its own call (V-10). For any other program that follows
+   `nvrm` on a processor it is new reach, and it composes with V-11.
+3. The history channel has an injection side the account above lacks:
+   without compromising `nvrm`, one client chooses which of `nvrm`'s
+   branches run, and so what the next program consumes.
+4. Probing gives a client `nvrm`'s branch targets and so its layout, which
+   makes V-11 easier.
+5. Whether the return-stack refill (or the ERAPS clear) stays on the way
+   back, said for each architecture, or x86-64 stated alone.
+6. A one-way source that is in a domain with others hands their training on
+   to the client: excluded when the job is made, or carried in the
+   vulnerability row.
+7. The saving measured per leg, on bare metal.
+
 ### 7.7 Whether to build it
 
 The opt-in buys what the one-way barrier leaves: on the bench's figures
-about 5 µs a request, 12 ms a second at 2,442 requests a second and 0.3 ms
-a second at 60. It costs a change to the rule the domain's evidence rests on,
+about 7 µs a request on the bench's figures (§7.6), 17 ms a second at 2,442
+requests a second and 0.4 ms a second at 60. It costs a change to the rule the domain's evidence rests on,
 a privileged write path from Settings, a service that does not exist yet,
 and a standing exception to explain in three certification documents.
 
 **Recommended: do not build the opt-in until the one-way barrier is built
-and measured on the rig** (`docs/GAME-PATH.md` §8.1), and then only if the
-remaining barrier shows in M1's tail or M8. Until then game mode's second
+and a bare-metal figure exists**, and then only if the remaining barrier
+shows in M1's tail or M8. The consultant's ledger line 690 rules the same
+way, and the distinction matters: the 11 µs is a KVM bench figure on a
+loaded host, and the rig of `docs/GAME-PATH.md` §8.1 is two guests, so a
+figure "measured on the rig" is not the one owed. Until then game mode's second
 switch is not shown at all: a disabled switch that names a trade is an
 invitation to ask for it.
 
@@ -410,24 +488,32 @@ invitation to ask for it.
 
 If B is built, in the same landing as the code:
 
-* **`certification-item.json`, the reference configuration.** A named
-  setting beside `mitigations` and `devmgr`: the certified setting is *no
-  process admitted to a domain it was not born in*; the mechanism is in the
-  item and verified (its default, its refusals, its audit record), and a
-  system on which an admission was made is outside the reference
-  configuration, as one built with `--mitigations off` is. That is what
-  "a documented departure, off by default" means in the evidence.
-* **`SAFETY-MANUAL.md`, AoU-14.** Today: "The integrator shall place in one
-  domain only programs that may read each other's memory", with membership
-  by birth. Added: an admission is the integrator's act through MANAGE on
-  the marked job and nothing else's; the holder of that right shall admit
-  only on an administrator's authenticated decision, never on a file or a
-  variable the admitted program's own user can write; at most one admitted
-  process per domain at a time; a domain that holds a device driver serving
-  several clients shall admit none whose user may not read the other
-  clients' data; partitions of different criticality still never share. And
-  the sentence "so a privileged program is never in one by accident" gains
-  its counterpart: no program is in one by its own asking.
+* **`certification-item.json`, the reference configuration.** A *boot
+  setting*, read once before any program runs, default off, recorded in the
+  manifest and in the `SYSTEM` audit record exactly as `devmgr` and
+  `devmgr_settings` are. With it off the admission call refuses
+  unconditionally, which a check proves on every boot and a control shows
+  firing. The mechanism is in the item, with requirements, checks, controls
+  and coverage for both states; no claim is made of "on" beyond that off is
+  off. This is the shape the consultant says the four targets can carry.
+  The first draft's "a system on which an admission was made is outside the
+  reference configuration" cannot be: the reference configuration is a
+  build and boot configuration, and a run-time history is something nothing
+  attests; and guidance alone is not enough, since a call reachable in the
+  evaluated build is a TSF interface whether or not guidance forbids it,
+  and for DO-178C is active code or deactivated code with a shown means
+  against activation. Whether the item takes such a mechanism at all is the
+  customer's decision in `CLAIM.md` (§8).
+* **`SAFETY-MANUAL.md`, a new assumption of use**, written beside AoU-14
+  rather than widening it: an admission is the integrator's act through a
+  right of its own on the marked job; its holder shall admit only on an
+  administrator's authenticated decision, never on a file or a variable the
+  admitted program's own user can write; a domain that holds a device
+  driver serving several clients shall admit none whose user may not read
+  the other clients' data; partitions of different criticality still never
+  share; no program is in a domain by its own asking. "At most one admitted
+  process per domain" is not an assumption: the kernel enforces and counts
+  it.
 * **`SECURITY-TARGET.md`.** FDP_IFF.1's speculative exception names
   admission beside birth. **FMT_MSA.3**: the restrictive default is
   unchanged in substance and must say so in the new words ("a process is in
@@ -440,17 +526,27 @@ If B is built, in the same landing as the code:
 * **`SPECULATION.md`.** §3's row "Spectre v2, program → program" and the
   paragraph "Inside a speculation domain the invalidation is left out" name
   admission; §1's statement of the reference configuration names the
-  setting; the measured cost goes in §8 with its conditions.
+  setting; §4, §5, §7 and §9 are read again; the measured cost goes in §8
+  with its conditions.
 * **`VULNERABILITY-ANALYSIS.md`.** V-07 is extended to an admitted member,
   and a new entry records the driver-mediated reach of §7.5 (an admitted
-  client and what `nvrm` holds of others), accepted by design only outside
-  the reference configuration. V-10, V-11 and V-13 are read again against
-  it.
-* **`AUDIT.md`.** A new event beside `DOMAIN`: who admitted which process
-  to which domain; and the leave that revokes it, if leaves are not
-  recorded today.
-* **`TRACEABILITY.md`** and the model: the changed `L.object.115`, the new
-  ids, their checks in `object/domain_check.rs` and a negative control each.
+  client and what `nvrm` holds of clients outside the domain), with the
+  T.MEMORY row. V-10 and V-13 are read again against it, and V-11 against
+  "a client learns `nvrm`'s layout".
+* **`AUDIT.md`** and the Security Target's FAU_GEN.1 event list: an
+  admission as `GRANTED` (admitter, admitted, domain), a refusal as
+  `REFUSED`, the leave that revokes, and the setting in `SYSTEM`.
+* **`TRACEABILITY.md`** and the model: `L.object.115` is *not* stretched;
+  it stays the rule for domains that do not admit, and each admission rule
+  gets an id of its own, reserved first in `requirement-reservations.json`,
+  with one check in `object/domain_check.rs` and one control. `H.TRAP.17`
+  and `H.OBJ.8` are read again.
+* **`ITEM.md` and the native ABI**: a new call number is in the item ring.
+* **`MEMORY-AND-TIMING.md`**: the admit path's locks and their bounds, and
+  that a ring-3 service could now cause the leave's grace period on every
+  processor at will.
+* **`CLAIM.md`**'s open decisions; **`docs/AUTH.md`** for the helper that
+  writes root's list; and coverage carried for both settings.
 
 The one-way barrier needs its own rows in the same documents; they are
 `nv-trip`'s to write, and §7.6's two flows are what its vulnerability entry
@@ -459,9 +555,56 @@ has to state.
 ### 7.9 The review
 
 The certification consultant reviewed this section as a design on
-2026-10-11. The verdict and its conditions are recorded here once given
-(ledger `~/.local/share/ferrix/cert-consultant/reviews.md` on the gate
-host).
+2026-10-11, at commit 21b54b3d7. It is an internal review, not independent
+verification (F-27, F-29). Ledger line 698 of
+`~/.local/share/ferrix/cert-consultant/reviews.md` on the gate host:
+
+> OK IF (G1)-(G9) for §7/§8 to land as a proposal; opt-in code (A or B) NOT
+> YET — a design round of its own on (B1)-(B13), and not before the one-way
+> barrier is built and a bare-metal figure exists (ledger 690); the one-way
+> barrier stays nv-trip's design review under 690, which must also answer
+> (W1)-(W7).
+
+The built game mode changes no defence and got no verdict: the branch
+touches no file of the item.
+
+**G1 to G9** are conditions on this document, and it carries them: the
+four precisions in §7.2; what root's list really grants in §7.3; option
+A's item-side problems and "revoking is not built" in §7.4; the third
+choice withdrawn and the conflict with the game session's move in §7.5; W1
+to W7 and the 3.8 µs reading in §7.6; ledger 690 and the bare-metal figure
+in §7.7; the boot setting, the new assumption of use and the longer list in
+§7.8; the decisions reworded in §8; and this record.
+
+**B1 to B13** are what option B's own design owes before any code:
+
+1. The boot setting of §7.8, with its off-state check and control.
+2. A right of its own, as SET_LIMIT was split from MANAGE for F-40: given
+   only by `job_create` to the maker of a marked job, never through
+   `job_for_cgroup` or a cgroup file; and on the other side a named right
+   on a handle to the process, never a comparison of uids.
+3. Admissibility is a property of the domain fixed at its creation (a
+   second `job_create` option, in the `DOMAIN` record); a domain made
+   without it never admits.
+4. "At most one admitted per domain" enforced and counted by the kernel,
+   with a check and a control.
+5. What an admission covers, stated and checked: threads, forks (out
+   today) and `execve` (kept); and which of a Steam or Proton game's
+   processes makes the requests, measured first.
+6. The admission tied to something whose loss ends it; revocation by a
+   third party a designed call, not a cgroup move.
+7. Every new per-process state enumerated for fork, clone, `execve` and
+   `launch::load_native`, failing closed when absent.
+8. "The barrier issued once on every processor that last ran it" on
+   admission argued or dropped; what needs stating is the order of the
+   space's domain store against a concurrent switch and a concurrent
+   `CLONE_VM`.
+9. `L.object.115` not stretched; an id, a check and a control per rule.
+10. The audit records of §7.8.
+11. Lock bounds in `MEMORY-AND-TIMING.md`.
+12. All three architectures checked; the cost stated as x86-64 only.
+13. The vulnerability row for what `nvrm` holds of clients outside the
+    domain (ledger 690) and the new assumption of use, in the design.
 
 ## 8. Decisions for the customer
 
@@ -482,23 +625,30 @@ None is taken. Each with a recommendation.
    session unless `sessiond` ends it too (`docs/AUTH.md` §6.4)?
    *Recommended: no; give the launcher's programs scopes inside the
    session's instead, which needs init to nest a scope.*
-4. **The one-way barrier: for every client of `nvrm`, or only for
-   applications in game mode?** *Recommended: every client, decided on
-   `nv-trip`'s own design and review, so that the user's file never gates a
-   protection.*
+4. **The one-way barrier: for every program that follows the driver on a
+   processor, or only towards jobs the integrator names?** (§7.6, point 1:
+   as an attribute of the driver's job it is the first unless the entering
+   side is named too.) *Recommended: decided on `nv-trip`'s own design and
+   review; either way the user's file never gates a protection.*
 5. **The full opt-in (§7): build it at all?** *Recommended: not before the
    one-way barrier is measured (§7.7).*
-6. **If it is built: admission (B) or birth (A)?** *Recommended: B.*
-7. **Question 4 of `docs/GAME-PATH.md` §10 becomes a three-way choice**
-   (§7.5): `nvrm` with the system path, `nvrm` with admitted games, or one
-   domain for all. *Recommended: `nvrm` with the system path and no game
-   admitted, unless the rig shows the remaining barrier matters.*
+6. **If it is built: admission (B) or birth (A)?** Both need a change to
+   the item. *Recommended: B, after its own design round (§7.9, B1 to
+   B13).*
+7. **Question 4 of `docs/GAME-PATH.md` §10 becomes a choice of two**
+   (§7.5): `nvrm` with the system path, or `nvrm` with admitted games.
+   *Recommended: `nvrm` with the system path and no game admitted, unless a
+   bare-metal figure shows the remaining barrier matters.*
 8. **Who may turn the second switch**: any member of `wheel` with their
    password, or root alone? *Recommended: `wheel` with the password, as
    `su`.*
 9. **Should hyprix's own `exec` binds and the terminal mark what they
    start** (§4, not covered)? *Recommended: no; a key bound to a game can
    name the launcher's entry instead.*
+10. **Does the certified item take an admission mechanism at all**, in the
+    shape of §7.8: in the item, behind a boot setting that is off in the
+    reference configuration? It is the customer's decision in
+    `docs/certification/CLAIM.md`, and it comes before 5 and 6.
 
 ## 9. Where it stands
 
@@ -508,7 +658,9 @@ launcher's start, the host tests, `test-compositor --boot settings` passing
 on x86-64 under KVM and its negative control fired. Not run: the boot on
 AArch64 and ARMv7-A; the page on the `--everything` desktop as the user
 `ferrix` (the boot's desktop is root's, its home `/`); a screen with a
-buffer scale above one other than in the host test. Not built: any effect
+buffer scale above one other than in the host test. §7 was reviewed as a
+design by the certification consultant (OK IF G1 to G9, which this
+document carries; code NOT YET; ledger line 698, §7.9). Not built: any effect
 (§4), a second page, a pointer cursor other than the arrow, drag on the
 scroll bar, a list that follows the file or the applications changing while
 the window is open (it reads both when it starts and the file again at each
