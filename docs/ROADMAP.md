@@ -130,6 +130,10 @@ Now [`docs/roadmap/stage-22-steam.md`](roadmap/stage-22-steam.md).
 
 Now [`docs/roadmap/stage-23-arknights-endfield.md`](roadmap/stage-23-arknights-endfield.md).
 
+## Stage 24 — The game path  ·  *≈ 68 points before the game domain, about 190 with it and the later rows*
+
+Now [`docs/roadmap/stage-24-game-path.md`](roadmap/stage-24-game-path.md).
+
 ## Written ahead of their stage
 
 Now [`docs/roadmap/written-ahead.md`](roadmap/written-ahead.md).

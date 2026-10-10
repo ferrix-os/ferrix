@@ -795,6 +795,39 @@ package FerrixRoadmap {
              * account, not a boot in CI. */
     }
 
+    #planned requirement <'S24'> stage24GamePath : Stage {
+        attribute :>> number = 24;
+        attribute :>> status = StageStatus::Planned;
+        attribute :>> size = "about 68 points before the game domain, about 190 with it and the later rows";
+        doc /* The game path: a fullscreen game faster on Ferrix than on a
+             * stock Linux desktop on the same hardware, in the time from an
+             * input to the picture that shows it and in how even the frames
+             * are under a background load. docs/GAME-PATH.md is the design
+             * and the build plan, written on 2026-10-10; the customer made
+             * it a stage the same day. Nothing of it is built and nothing
+             * is measured. In order: the measuring rig (R1 to R5, 19 to 21
+             * points), the same binaries on both systems; then the first
+             * cut that can be compared with Linux, 47 points: the flip's
+             * time, the game lane (a fullscreen client's buffer scanned out
+             * as it is), input on its own thread, tearing, the just-in-time
+             * hold, a session with what the scheduler has, and drawing
+             * backwards from the deadline. The game domain (G1 to G5, 52
+             * points) is stage 14's ground, in the item's core ring, and is
+             * outside this stage's points until the customer decides
+             * whether it may open stage 14 early; later rows, 73 points,
+             * are each built only on a measurement. It stands on stage 21's
+             * zero-copy work, which is not landed: displayctl v9, yserver's
+             * dmabuf hand-over and a hardware cursor, other sessions' and
+             * counted elsewhere. Nine of the design's ten questions are
+             * open.
+             * Exit, by the stage's own rig on the RTX 3060 at 1920x1080 and
+             * 60 Hz: input to scan-out with vsync on at a median of at most
+             * half a refresh plus the game's frame time plus 2 ms, and at
+             * least one refresh under stock Linux; and under the background
+             * load at most one missed refresh a minute, and fewer than
+             * stock Linux. A recorded run on the card, not a boot in CI. */
+    }
+
     #inProgress requirement <'S20'> stage20SelfHosting : Stage {
         attribute :>> number = 20;
         attribute :>> status = StageStatus::InProgress;
@@ -851,6 +884,7 @@ package FerrixRoadmap {
     dependency from stage22Steam to stage19HyprlandFidelity, stageDynamicLinking,
         stage12BtrfsWrite, stage13Isolation, stageNetworking;
     dependency from stage23Endfield to stage22Steam, stage21BareMetalGpu;
+    dependency from stage24GamePath to stage21BareMetalGpu, stage19HyprlandFidelity;
 
     #planned requirement <'D.fuzz'> fuzzTargetsOwed : Principles::DesignRule {
         doc /* src/tests/fuzz/ has two targets, elf_parse and frame_alloc. Every

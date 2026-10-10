@@ -1,6 +1,9 @@
 # The game path: where a fullscreen game can be faster on Ferrix than on Linux
 
 Version 1, a draft written on 2026-10-10 for the customer, who decides §10.
+The customer decided question 1 of §10 the same day: this is a roadmap
+stage, [stage 24](roadmap/stage-24-game-path.md). Questions 2 to 10 are
+open.
 The customer asked that day for "an agent that designs the 'faster than
 Linux' path": where and how Ferrix can beat a stock Linux desktop for a
 fullscreen game on the same hardware. This document is that design and its
@@ -18,8 +21,11 @@ It stands beside three pieces of work it does not repeat:
   and `zerocopy.md` in the same directory).
 
 §4 and §9 say what this design needs from each. It writes no requirement
-ids (they are reserved first, `docs/CONVENTIONS.md`), adds no roadmap stage
-and no SysML entry: whether it becomes a stage is question 1 of §10.
+ids (they are reserved first, `docs/CONVENTIONS.md`). The roadmap stage and
+its SysML entry were added with question 1's decision
+(`docs/roadmap/stage-24-game-path.md`, `S24` in
+`docs/sysml/10-roadmap.sysml`); they repeat §8's rows and points and add
+none.
 
 ## 1. What this is, and what it is not
 
@@ -1030,14 +1036,18 @@ that need no card.
 
 ## 10. Decisions for the customer
 
-Each with a recommendation. None is taken.
+Each with a recommendation. Question 1 is decided; none of the others is
+taken.
 
 1. **Does this become a roadmap stage, or stay a design with backlog
    rows?** *Recommended: a stage of its own after stage 21's zero-copy
    landings, "the game path", with the rig as its first step and M1 and
    M4 against stock Linux as its exit;* about 68 points before the game
-   domain. The SysML model and the status table follow that decision and
-   are not touched here.
+   domain. **Decided by the customer on 2026-10-10: a roadmap stage.** It
+   is stage 24, `docs/roadmap/stage-24-game-path.md`, as recommended: the
+   rig first, M1 and M4 as the exit, G1 to G5 listed there as stage 14's
+   ground and outside its 68 points until question 3 is decided. The
+   status table and the SysML model's roadmap carry it.
 2. **Which Linux is the opponent in the exit?** *Recommended: stock for
    the exit (Debian's sway and Xwayland, and Plasma once as the common
    desktop), tuned as a published bar the page reports against.*
@@ -1126,8 +1136,11 @@ KAPI client; whether NVKMS's flip event carries a hardware time.
 
 2026-10-10: this document, written in one session from the tree, the
 night's notes and a web search. No code, no measurement, no card run.
-The branch is `faster-path-design`. It has not been sent to the
-certification consultant; §5 and P1 will need a design review before
-anything is written. The present and `nv-trip` sessions have not seen
+It was written on branch `faster-path-design`. The customer decided the
+same day that it is a roadmap stage (§10, question 1): stage 24,
+`docs/roadmap/stage-24-game-path.md`, not started; questions 2 to 10 are
+open. The certification consultant has seen the document and the stage only
+as a docs landing, not as a design; §5 and P1 will need a design review
+before anything is written. The present and `nv-trip` sessions have not seen
 §4.2's and §6.2's lists. The next step that needs nobody's decision is
 R1 to R3.

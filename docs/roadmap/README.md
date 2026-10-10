@@ -88,6 +88,13 @@ them; what is red, parked and waiting is in
   machine. It waits on the customer for an account and about 110 GB of disk,
   and its GPU steps stand on stage 21's unlanded branches
   ([its page](stage-23-arknights-endfield.md)).
+- **Stage 24 (the game path):** where a fullscreen game can be faster on
+  Ferrix than on a stock Linux desktop: input to scan-out, and even frames
+  under a background load. A design (`docs/GAME-PATH.md`) the customer made a
+  stage on 2026-10-10; nothing is built or measured. About 68 points before
+  the game domain, the measuring rig first; the game domain (52) is stage
+  14's ground and an open decision, as eight more are. It stands on stage
+  21's unlanded zero-copy work ([its page](stage-24-game-path.md)).
 
 **Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
 RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
@@ -100,7 +107,7 @@ booting with `nvidia-smi`, are on `main`.
   day). The scope was 442 on 2026-09-26 and grew as rows were sized; the
   recount and what moved it are in [Status](status.md).
 - Unsized work (self-hosting, bare metal, most of Steam) is not in any date,
-  and neither are stage 23's first guesses.
+  and neither are stage 23's and stage 24's first guesses.
 
 ## Details
 
@@ -156,6 +163,7 @@ single file across.
 | 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ◐ in progress | unsized, over 100 points |
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
 | 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ○ not started | ≈ 205 points as a first guess, step 5 unknown |
+| 24 | [The game path](stage-24-game-path.md) | ○ not started | ≈ 68 points before the game domain, about 190 with it and the later rows |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |
 

@@ -26,7 +26,7 @@ tooling that can check a model for consistency where it cannot check prose.
 | `07-isolation.sysml` | `FerrixIsolation` | Credentials (today); cgroups v2 and the namespaces' mount groundwork (in progress); the namespaces themselves and seccomp (ahead). |
 | `08-drivers.sysml` | `FerrixDrivers` | Table access and MMIO, device nodes, IOMMU domains, `devmgr`, the driver processes, the shared rings and the bootstrap sequence. |
 | `09-storage.sysml` | `FerrixStorage` | Block core, VFS, page cache, the small filesystems, btrfs in three stages (the third, subvolumes, ahead), and the net core. |
-| `10-roadmap.sysml` | `FerrixRoadmap` | Stages 0–23, the ARMv7-A port, networking and dynamic linking as requirements with status and exit criteria, their ordering, what satisfies each, and the boot tests that verify the done ones. |
+| `10-roadmap.sysml` | `FerrixRoadmap` | Stages 0–24, the ARMv7-A port, networking and dynamic linking as requirements with status and exit criteria, their ordering, what satisfies each, and the boot tests that verify the done ones. |
 | `11-assurance.sysml` | `FerrixAssurance` | Every gate `cargo xtask check` and CI run, the xtask boot gates, the commit-authorship check, the assembly budget, what each layer's tests can reach, and the verification later stages owe. |
 | `12-views.sysml` | `FerrixViews` | Views filtering the one model into current, written-ahead, future and deferred. |
 | `13-item-requirements.sysml` | `FerrixItemRequirements` | The certified item's high-level requirements (`H.<AREA>.<n>`), each with a statement, a pass/fail criterion and its parent objective; the definitions the low-level ones (`L.<module>.<n>`) use. `tools/common/check/check-traceability.py` holds them to their checks. |

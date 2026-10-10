@@ -560,7 +560,18 @@ account and about 110 GB of disk. On Ferrix, `arch_prctl` answers
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is
-not landed ([its page](stage-23-arknights-endfield.md)). Ferrix also boots on the customer's Pixel
+not landed ([its page](stage-23-arknights-endfield.md)). Stage 24 is the
+game path: where a fullscreen game can be faster on Ferrix than on a stock
+Linux desktop on the same hardware, which is the time from an input to the
+picture and the evenness of frames under a background load. It is a design,
+`docs/GAME-PATH.md`, that the customer made a stage on 2026-10-10, and it is
+not started: nothing is built, and nothing is measured, on either system,
+of what its exit is judged by. Its first step is the rig that measures it
+(R1 to R5, 19 to 21 points, R1 to R3 with no card), then a first cut of 47
+points; the game domain (52) is stage 14's ground and waits on the
+customer, as eight more decisions do. Its card work stands on displayctl
+v9, yserver's dmabuf hand-over and a hardware cursor, none landed
+([its page](stage-24-game-path.md)). Ferrix also boots on the customer's Pixel
 7: natively on all eight cores to `FERRIX-BOOT-OK stages 1-12`, and as a guest
 of the phone's own crosvm from a launcher app, which shows a desktop in that
 VM with Chromium on it (2026-09-27), and each release carries that desktop,
