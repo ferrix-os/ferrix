@@ -105,6 +105,8 @@ extern int nvrm_kms_init(void);
 extern int nvrm_kms_show(void);
 extern int nvrm_chardev_publish(const uint16_t *minors, uint32_t count);
 extern int nvrm_chardev_serve(void);
+/* os/glue/chardev.c: whether the bench's negative control may be asked for. */
+extern int nvrm_trip_control;
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
 static char place[16];
@@ -427,7 +429,24 @@ int main(void)
 	if (status != 0)
 		return status;
 
-	say("skeleton up on %s; idle", place);
-	for (;;)
-		sleep(3600);
+	say("skeleton up on %s", place);
+
+	/* The round trip's bench (docs/NVIDIA.md §4.7): on the test device,
+	 * RM with no GPU behind /dev/nvidiactl, served as on a card, for
+	 * `nvrm-trip` to time; and the bench's negative control allowed.
+	 * Without a control channel (a kernel that gives this device none)
+	 * nvrm idles as before. */
+	int rc = nvrm_module_init();
+	if (rc != 0)
+		return stop(STEP_RM, "RM did not initialise", rc);
+	static const uint16_t ctl[] = { 255 };
+	if (nvrm_chardev_publish(ctl, 1) != 0) {
+		say("the control device was not published; idle");
+		for (;;)
+			sleep(3600);
+	}
+	nvrm_trip_control = 1;
+	say("serving /dev/nvidiactl with no GPU, for the round trip's bench");
+	int served = nvrm_chardev_serve();
+	return stop(STEP_CHARDEV, "the device files' control failed", served);
 }

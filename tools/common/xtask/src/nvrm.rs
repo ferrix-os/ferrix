@@ -49,6 +49,15 @@ const TIMEOUT: u64 = 300;
 /// How long after the kernel's devmgr report `nvrm` has to say it is up.
 const UP_PATIENCE: Duration = Duration::from_secs(120);
 
+/// How long the round trip's bench has after `nvrm` is up.
+const TRIP_PATIENCE: Duration = Duration::from_secs(180);
+
+/// The bench's last line.
+const TRIP_DONE: &str = "nvrm-trip: done";
+
+/// The prefix of the bench's lines.
+const TRIP: &str = "nvrm-trip: ";
+
 /// How long a refused boot is read on after the report, for a line that
 /// must not come.
 const QUIET: Duration = Duration::from_secs(3);
@@ -307,7 +316,9 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
     let programs = build()?;
     let nvrm = std::fs::read(programs.path("nvrm"))
         .map_err(|error| Error::new(format!("reading nvrm: {error}")))?;
-    let hold = programs.path("nvrm-hold");
+    // The init of every boot: the round trip's bench, which waits for
+    // nvrm's control device and, where none comes, only holds the machine up.
+    let hold = programs.path("nvrm-trip");
     let volume_image = paths::build_dir(arch).join("nvrm-volume.img");
     volume(
         &volume_image,
@@ -349,6 +360,11 @@ pub(crate) fn test_nvrm(args: &Args) -> Result<()> {
             "  {arch}: {} at {} MiB: {shown} lines from devmgr and nvrm as required",
             boot.name, boot.memory
         );
+        if boot.handed {
+            for line in lines.iter().filter(|line| line.contains(TRIP)) {
+                println!("  {}", line.trim());
+            }
+        }
     }
     Ok(())
 }
@@ -360,11 +376,23 @@ fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Res
     qemu::watch_then(arch, image, kernel, args, REPORTED, |at| {
         if boot.handed {
             let deadline = Instant::now() + UP_PATIENCE;
-            let _ = at.read_more(deadline, |lines| {
+            let up = at.read_more(deadline, |lines| {
                 lines.iter().any(|line| {
                     line.contains(UP) || line.contains("nvrm: stopped") || line.contains(REFUSED)
                 })
             })?;
+            // Then the round trip's bench, which the init runs once nvrm
+            // serves its control device.
+            if up {
+                let deadline = Instant::now() + TRIP_PATIENCE;
+                let _ = at.read_more(deadline, |lines| {
+                    lines.iter().any(|line| {
+                        line.contains(TRIP_DONE)
+                            || line.contains("nvrm-trip: stopped")
+                            || line.contains("nvrm: stopped")
+                    })
+                })?;
+            }
         } else {
             at.read_what_was_said(QUIET)?;
         }

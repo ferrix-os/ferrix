@@ -75,7 +75,7 @@ OS_SOURCES := $(wildcard $(NVRM)/os/kept/*.c) $(wildcard $(NVRM)/os/glue/*.c)
 OS_OBJECTS := $(patsubst $(NVRM)/os/%.c,$(OUT)/os/%.o,$(OS_SOURCES)) $(OUT)/os/glue/thunks.o
 
 all: $(OUT)/nvrm $(OUT)/nvrm-core $(OUT)/nvrm-link-test $(OUT)/nvrm-link-test-core \
-	$(OUT)/nvrm-hold
+	$(OUT)/nvrm-hold $(OUT)/nvrm-trip
 
 # cargo decides whether a library is stale, so these always run; the
 # programs below are linked again when one wrote a new one.
@@ -117,6 +117,10 @@ $(OUT)/link.o: $(NVRM)/test/link.c $(OUT)/core-calls.h $(wildcard $(NVRM)/os/inc
 	$(CC) $(OS_CFLAGS) -I$(OUT) -idirafter $(NVSRC)/src/common/sdk/nvidia/inc -c $< -o $@
 
 $(OUT)/hold.o: $(NVRM)/test/hold.c
+	@mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OUT)/trip.o: $(NVRM)/test/trip.c
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -187,6 +191,13 @@ $(eval $(call program,nvrm-link-test,$(OUT)/link.o,crt1))
 $(OUT)/nvrm-hold: $(OUT)/hold.o $(FERROUSLI_LIB)
 	crt1=$$(ls -t $(FERROUSLI_TARGET)/release/build/ferrousli-*/out/crt1.o | head -1) && \
 	$(CC) -static -no-pie -nostdlib -Wl,--strip-debug -o $@ $$crt1 $(OUT)/hold.o \
+		-Wl,--start-group $(FERROUSLI_LIB) -lgcc -Wl,--end-group
+
+# The round trip's bench (docs/NVIDIA.md §4.7): the init of test-nvrm's
+# handed-over boot, and a program to run on a card.
+$(OUT)/nvrm-trip: $(OUT)/trip.o $(FERROUSLI_LIB)
+	crt1=$$(ls -t $(FERROUSLI_TARGET)/release/build/ferrousli-*/out/crt1.o | head -1) && \
+	$(CC) -static -no-pie -nostdlib -Wl,--strip-debug -o $@ $$crt1 $(OUT)/trip.o \
 		-Wl,--start-group $(FERROUSLI_LIB) -lgcc -Wl,--end-group
 
 clean:

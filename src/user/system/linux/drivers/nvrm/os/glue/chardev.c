@@ -30,6 +30,18 @@
 #ifndef ENODEV
 #define ENODEV  19
 #endif
+#ifndef EPERM
+#define EPERM   1
+#endif
+#ifndef EFAULT
+#define EFAULT  14
+#endif
+#ifndef EINVAL
+#define EINVAL  22
+#endif
+#ifndef ENOTTY
+#define ENOTTY  25
+#endif
 
 /* An open file, by the kernel's identity for it. */
 struct chardev_file {
@@ -405,21 +417,67 @@ static struct chardev_file *forget(NvU64 file)
 }
 
 /* The client's copies, through the bridge, for the request in context. */
-static int bridge_in(void *context, void *to, NvU64 from, NvU32 length)
+struct worker;
+static int bridge_in(void *context, void *to, NvU64 from, NvU32 length);
+static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length);
+static NvS64 bridge_fd(void *context, int fd);
+
+/* ------------------------------------------------------------------------
+ * The round trip's own figures (docs/NVIDIA.md §4.7): where one request's
+ * time goes inside nvrm, for the program that made it to read back.
+ *
+ * Every ioctl is stamped with the processor's time-stamp counter when the
+ * bridge hands it over (taken), when the thread that serves it begins
+ * (serving) and when its handler has returned, before the answer is sent
+ * (done), with the copies it made of the program's memory counted. The
+ * stamps of a program's last ioctl are kept by its pid, and the ioctl
+ * NVRM_TRIP_STAMPS on any of nvrm's files reads them: with its own stamps
+ * around the call, a program has the request's four stages. The counter is
+ * the machine's, so the program's stamps and nvrm's are on one clock.
+ *
+ * NVRM_TRIP_MODE says how nvrm serves, and is taken only where
+ * nvrm_trip_control is set, which nvrm's main does on the test device
+ * alone: mode 1 serves every ioctl on a thread started for it.
+ * ---------------------------------------------------------------------- */
+#define NVRM_TRIP_TYPE      0xF7
+#define TRIP_TYPE_OF(cmd)   (((cmd) >> _IOC_TYPESHIFT) & ((1U << _IOC_TYPEBITS) - 1))
+#define NVRM_TRIP_STAMPS    _IOC(2U, NVRM_TRIP_TYPE, 1, sizeof(struct nvrm_trip_stamps))
+#define NVRM_TRIP_MODE      _IOC(1U, NVRM_TRIP_TYPE, 2, sizeof(NvU32))
+
+struct nvrm_trip_stamps {
+    NvU64 id;       /* the request, 0 if the program made none before */
+    NvU64 taken;    /* the bridge handed it to nvrm */
+    NvU64 serving;  /* the thread that serves it began */
+    NvU64 done;     /* its handler returned */
+    NvU32 cmd;
+    NvU32 copies;   /* copies of the program's memory, in and out */
+    NvU32 pid;
+    NvU32 mode;     /* how nvrm serves: NVRM_TRIP_MODE's */
+};
+
+int nvrm_trip_control = 0;
+/* 0 from the pool, 1 a thread started for every ioctl: the one way built
+ * yet. */
+static NvU32 trip_mode = 1;
+
+#define TRIP_SLOTS 16
+static struct { NvU32 busy; struct nvrm_trip_stamps last; } trip_table[TRIP_SLOTS];
+
+static inline NvU64 trip_now(void)
 {
-    __atomic_fetch_add(&bytes_in, length, __ATOMIC_RELAXED);
-    return nvos_chardev_copy_in(*(NvU64 *)context, to, from, length) == 0 ? 0 : -EFAULT;
+    return __builtin_ia32_rdtsc();
 }
 
-static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length)
+/* Keep `stamps` as its program's last; dropped if another thread is at the
+ * slot, which only loses a figure. */
+static void trip_keep(const struct nvrm_trip_stamps *stamps)
 {
-    __atomic_fetch_add(&bytes_out, length, __ATOMIC_RELAXED);
-    return nvos_chardev_copy_out(*(NvU64 *)context, to, from, length) == 0 ? 0 : -EFAULT;
-}
+    NvU32 slot = stamps->pid % TRIP_SLOTS;
 
-static NvS64 bridge_fd(void *context, int fd)
-{
-    return nvos_chardev_file(*(NvU64 *)context, fd);
+    if (__atomic_exchange_n(&trip_table[slot].busy, 1, __ATOMIC_ACQUIRE) != 0)
+        return;
+    trip_table[slot].last = *stamps;
+    __atomic_store_n(&trip_table[slot].busy, 0, __ATOMIC_RELEASE);
 }
 
 /* One ioctl's worker. */
@@ -429,7 +487,70 @@ struct worker {
     void *drm;
     /* Its place in the diagnostic's table, or -1. */
     int diag;
+    /* The round trip's stamps, and the copies counted. */
+    struct nvrm_trip_stamps trip;
 };
+
+/* The trip ioctls, answered here: 0 or a negative errno. */
+static int trip_ioctl(struct worker *work)
+{
+    NvU32 slot = work->request.pid % TRIP_SLOTS;
+    struct nvrm_trip_stamps last;
+    NvU32 mode;
+
+    switch (work->request.cmd)
+    {
+        case NVRM_TRIP_STAMPS:
+            while (__atomic_exchange_n(&trip_table[slot].busy, 1, __ATOMIC_ACQUIRE) != 0)
+                ;
+            last = trip_table[slot].last;
+            __atomic_store_n(&trip_table[slot].busy, 0, __ATOMIC_RELEASE);
+            if (last.pid != work->request.pid)
+                os_mem_set(&last, 0, sizeof(last));
+            last.mode = __atomic_load_n(&trip_mode, __ATOMIC_RELAXED);
+            return nvos_chardev_copy_out(work->request.id, work->request.arg, &last,
+                                         sizeof(last)) == 0 ? 0 : -EFAULT;
+        case NVRM_TRIP_MODE:
+            if (!nvrm_trip_control)
+                return -EPERM;
+            if (nvos_chardev_copy_in(work->request.id, &mode, work->request.arg,
+                                     sizeof(mode)) != 0)
+                return -EFAULT;
+            if (mode != 1)
+                return -EINVAL;
+            __atomic_store_n(&trip_mode, mode, __ATOMIC_RELAXED);
+            return 0;
+        default:
+            return -ENOTTY;
+    }
+}
+
+/* The client's copies, through the bridge, for the request its worker
+ * serves. */
+static int bridge_in(void *context, void *to, NvU64 from, NvU32 length)
+{
+    struct worker *work = context;
+
+    work->trip.copies++;
+    __atomic_fetch_add(&bytes_in, length, __ATOMIC_RELAXED);
+    return nvos_chardev_copy_in(work->request.id, to, from, length) == 0 ? 0 : -EFAULT;
+}
+
+static int bridge_out(void *context, NvU64 to, const void *from, NvU32 length)
+{
+    struct worker *work = context;
+
+    work->trip.copies++;
+    __atomic_fetch_add(&bytes_out, length, __ATOMIC_RELAXED);
+    return nvos_chardev_copy_out(work->request.id, to, from, length) == 0 ? 0 : -EFAULT;
+}
+
+static NvS64 bridge_fd(void *context, int fd)
+{
+    struct worker *work = context;
+
+    return nvos_chardev_file(work->request.id, fd);
+}
 
 static void serve_ioctl(void *argument)
 {
@@ -437,6 +558,7 @@ static void serve_ioctl(void *argument)
     nvos_client_t client;
     int rc;
 
+    work->trip.serving = trip_now();
     diag_serving(work->diag);
 
     os_mem_set(&client, 0, sizeof(client));
@@ -445,7 +567,7 @@ static void serve_ioctl(void *argument)
     client.administrator = (work->request.euid == 0);
     client.copy_in = bridge_in;
     client.copy_out = bridge_out;
-    client.context = &work->request.id;
+    client.context = work;
     client.resolve_fd = bridge_fd;
 
     if (!nvos_client_enter(&client))
@@ -455,11 +577,21 @@ static void serve_ioctl(void *argument)
         free(work);
         return;
     }
-    if (work->drm != NULL)
+    if (TRIP_TYPE_OF(work->request.cmd) == NVRM_TRIP_TYPE)
+        rc = trip_ioctl(work);
+    else if (work->drm != NULL)
         rc = nvrm_drm_ioctl(work->drm, work->request.id, work->request.cmd, work->request.arg);
     else
         rc = nvrm_ioctl(work->nvlfp, work->request.cmd, (void *)(NvUPtr)work->request.arg);
     nvos_client_leave();
+    if (TRIP_TYPE_OF(work->request.cmd) != NVRM_TRIP_TYPE)
+    {
+        work->trip.id = work->request.id;
+        work->trip.cmd = work->request.cmd;
+        work->trip.pid = work->request.pid;
+        work->trip.done = trip_now();
+        trip_keep(&work->trip);
+    }
     (void)nvos_chardev_reply(work->request.id, rc < 0 ? rc : 0, rc > 0 ? rc : 0);
     diag_leave(work->diag);
     free(work);
@@ -534,10 +666,10 @@ static void serve_mmap(const struct nvos_request *request)
     }
 }
 
-static void handle_one(const struct nvos_request *request);
+static void handle_one(const struct nvos_request *request, NvU64 taken);
 
 /* One request, with the watcher told what the dispatch thread is inside. */
-static void handle(const struct nvos_request *request)
+static void handle(const struct nvos_request *request, NvU64 taken)
 {
     if (nvrm_diag)
     {
@@ -547,11 +679,11 @@ static void handle(const struct nvos_request *request)
         diag_dispatch_id = request->id;
         __atomic_store_n(&diag_dispatch_began, os_get_monotonic_time_ns(), __ATOMIC_RELEASE);
     }
-    handle_one(request);
+    handle_one(request, taken);
     __atomic_store_n(&diag_dispatch_began, 0, __ATOMIC_RELEASE);
 }
 
-static void handle_one(const struct nvos_request *request)
+static void handle_one(const struct nvos_request *request, NvU64 taken)
 {
     nv_linux_file_private_t *nvlfp;
     struct chardev_file *entry;
@@ -616,6 +748,7 @@ static void handle_one(const struct nvos_request *request)
                 return;
             }
             work->request = *request;
+            work->trip.taken = taken;
             work->nvlfp = nvlfp;
             work->drm = drm;
             work->diag = diag_enter(request, drm != NULL);
@@ -680,6 +813,6 @@ int nvrm_chardev_serve(void)
     {
         if (nvos_chardev_next(&request) != NV_OK)
             return -2;
-        handle(&request);
+        handle(&request, trip_now());
     }
 }
