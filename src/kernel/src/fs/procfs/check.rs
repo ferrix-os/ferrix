@@ -20,6 +20,7 @@
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::sync::SpinLock;
 use ferrix_bootinfo::PAGE_SIZE;
@@ -121,6 +122,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let blocks = fs::devfs::check::run()?;
     // In the boot task: `/proc/stat` describes the machine, not the reader.
     let (stat_cpus, stat_ticks) = check_stat(fs::namespace())?;
+    check_thread_times()?;
 
     let process = process::new_for_check().map_err(|_| "no address space for the /proc check")?;
     if process.pid() == 0 || registry::find(process.pid()).is_none() {
@@ -521,6 +523,172 @@ fn check_proc(process: &Arc<Process>, layout: &Layout) -> Found {
         return Err("/proc/partitions is not empty, with no block device to list");
     }
     Ok((listed, lines, named, values))
+}
+
+/// How long the busy thread of [`check_thread_times`] runs for, by its own
+/// clock: six ticks at `USER_HZ`, so that its `stat` counts five at least
+/// whatever the first thread has used by then.
+const BUSY_NANOS: u64 = 6 * TICK_NANOS;
+
+/// How often the threads of [`check_thread_times`] look at what they wait
+/// for. Long enough that the first thread, which does nothing else, uses
+/// far less than a tick of processor time while the busy one runs.
+const TIMES_POLL_NANOS: u64 = 10_000_000;
+
+/// Set by the busy thread of [`check_thread_times`] once it has run for
+/// [`BUSY_NANOS`], or given up.
+static TIMES_BUSY_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Set by the boot task once it has read the three files: both threads of
+/// [`check_thread_times`] leave.
+static TIMES_READ: AtomicBool = AtomicBool::new(false);
+
+/// The first thread of [`check_thread_times`]'s process: asleep until the
+/// files have been read, then the end of the process.
+fn times_first_thread(_argument: usize) {
+    while !TIMES_READ.load(Ordering::Acquire) {
+        sched::sleep_for(TIMES_POLL_NANOS);
+    }
+    process::exit_current(REPORTED)
+}
+
+/// The busy thread of [`check_thread_times`]'s process: on a processor
+/// until its own clock, `CLOCK_THREAD_CPUTIME_ID`'s, has counted
+/// [`BUSY_NANOS`], or the boot task's patience is spent; then asleep until
+/// the files have been read, alive so that its time is still the process's.
+fn times_busy_thread(_argument: usize) {
+    let began = crate::timer::now_nanos();
+    let start = sched::current_runtime();
+    while sched::current_runtime().saturating_sub(start) < BUSY_NANOS
+        && crate::timer::now_nanos().saturating_sub(began) < PATIENCE_NANOS
+    {
+        core::hint::spin_loop();
+    }
+    TIMES_BUSY_DONE.store(true, Ordering::Release);
+    while !TIMES_READ.load(Ordering::Acquire) {
+        sched::sleep_for(TIMES_POLL_NANOS);
+    }
+    process::exit_thread_current(REPORTED)
+}
+
+/// Start `thread` of `process`, listed with its task as `clone` lists them,
+/// running `entry` in kernel mode.
+fn spawn_times_thread(
+    process: &Arc<Process>,
+    thread: crate::syscall::thread::Thread,
+    name: &'static str,
+    entry: fn(usize),
+) -> Result<Arc<sched::Task>, &'static str> {
+    let thread = Arc::new(thread);
+    process.add_thread(&thread);
+    let prepared = sched::prepare_user(name, entry, thread, None, None)
+        .map_err(|_| "no task for a thread of the /proc times check")?;
+    crate::object::process::Host::core(&**process)
+        .list_task(prepared.task())
+        .map_err(|_| "no memory to list a thread of the /proc times check")?;
+    Ok(prepared.launch())
+}
+
+/// The processor time a `stat` file counts, in clock ticks: fields 14 and
+/// 15, `utime` and `stime`, the twelfth and thirteenth words after the
+/// name, which is in parentheses and may hold any byte. Their sum, because
+/// the threads read here never leave the kernel: all of it is `utime` while
+/// nothing splits a task's time, and would be `stime` once something does.
+fn ticks_of(stat: &[u8]) -> Option<u64> {
+    let close = stat.iter().rposition(|&byte| byte == b')')?;
+    let mut words = stat
+        .get(close.checked_add(1)?..)?
+        .split(|&byte| byte == b' ' || byte == b'\n')
+        .filter(|word| !word.is_empty())
+        .skip(11);
+    let mut ticks = || -> Option<u64> { core::str::from_utf8(words.next()?).ok()?.parse().ok() };
+    ticks()?.checked_add(ticks()?)
+}
+
+/// `/proc/<pid>/task/<tid>/stat` counts the one thread's processor time,
+/// the first thread's included, and `/proc/<pid>/stat` the whole process's,
+/// as Linux's do.
+///
+/// A process of two threads: the first sleeps, the second runs for six
+/// ticks by its own clock and then sleeps too. The busy thread's file must
+/// count that time; the first thread's must count less than it; and the two
+/// together must not come to more than the process's file, read last, says
+/// the process has used. The first thread's id is the process's, and its
+/// file was given the process's sum until 2026-10-10: then the two came to
+/// the busy thread's time more than the whole. Read by the boot task, by
+/// pid, so that neither thread is charged for the reading.
+fn check_thread_times() -> Result<(), &'static str> {
+    use crate::syscall::thread::Thread;
+    const NO_MEMORY: &str = "no memory for a thread of the /proc times check";
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let process =
+        process::new_for_check().map_err(|_| "no address space for the /proc times check")?;
+    TIMES_BUSY_DONE.store(false, Ordering::Release);
+    TIMES_READ.store(false, Ordering::Release);
+
+    let first = Thread::leader(&process).map_err(|_| NO_MEMORY)?;
+    let tid = registry::allocate_thread(&process)
+        .ok_or("no thread id for the /proc times check's busy thread")?;
+    let busy = Thread::sibling(&process, tid, &first).map_err(|_| NO_MEMORY)?;
+    let outcome = (|| {
+        let first = spawn_times_thread(&process, first, "procfs-times", times_first_thread)?;
+        let busy = spawn_times_thread(&process, busy, "procfs-busy", times_busy_thread)?;
+        let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+        while !TIMES_BUSY_DONE.load(Ordering::Acquire) {
+            if crate::timer::now_nanos() > deadline {
+                return Err("the /proc times check's busy thread never finished running");
+            }
+            sched::sleep_for(TIMES_POLL_NANOS);
+        }
+        let read = |tid: Option<u32>| {
+            let path = match tid {
+                Some(tid) => alloc::format!("/proc/{}/task/{tid}/stat", process.pid()),
+                None => alloc::format!("/proc/{}/stat", process.pid()),
+            };
+            ticks_of(&read_all(ns, &ctx, path.as_bytes(), 64)?)
+                .ok_or("a stat file of the /proc times check has no times to read")
+        };
+        let first_ticks = read(Some(process.pid()))?;
+        let busy_ticks = read(Some(tid))?;
+        // Last: both threads are alive, so it is no less than what the two
+        // had been charged when their own files were read.
+        let process_ticks = read(None)?;
+        drop((first, busy));
+        if busy_ticks < BUSY_NANOS / TICK_NANOS {
+            return Err(
+                "/proc/<pid>/task/<tid>/stat counts less time for a thread than its own \
+                 clock said it ran",
+            );
+        }
+        if first_ticks.saturating_add(busy_ticks) > process_ticks {
+            return Err(
+                "/proc/<pid>/task/<pid>/stat counts another thread's time as the first \
+                 thread's: two threads' times come to more than /proc/<pid>/stat's",
+            );
+        }
+        if first_ticks >= busy_ticks {
+            return Err(
+                "/proc/<pid>/task/<tid>/stat counts as much time for a thread that slept as \
+                 for one that ran",
+            );
+        }
+        Ok(())
+    })();
+
+    // Whatever was found: the threads leave, and no stack stays behind for
+    // a later check's frame count to find (see `run`).
+    TIMES_READ.store(true, Ordering::Release);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let ended = process.wait_for_exit(deadline);
+    drop(process);
+    sched::sleep_for(SETTLE_NANOS);
+    let _ = sched::reap();
+    outcome?;
+    if ended != Some(REPORTED) {
+        return Err("the /proc times check's process never ended");
+    }
+    Ok(())
 }
 
 /// `/proc/<pid>/stat`'s state letter and `/proc/<pid>/status`'s `State:`

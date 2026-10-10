@@ -1229,34 +1229,39 @@ fn capability_lines(
 }
 
 /// `/proc/<pid>/stat`.
+///
+/// Its times are the whole process's: every thread's, as Linux's
+/// `/proc/<pid>/stat` sums the thread group. Until they were counted here,
+/// `top` and `ps` said every process was idle.
 pub(super) fn stat(process: &Process) -> Result<Vec<u8>> {
-    stat_of(process, process.pid())
+    stat_of(process, process.pid(), time::process_runtime(process))
 }
 
 /// `/proc/<pid>/task/<tid>/stat`: the process's, with the thread's own id
-/// first, as Linux's per-thread `stat` starts.
+/// first and the thread's own times, as Linux's per-thread `stat` has them.
+///
+/// The first thread's too. Its id is the process's, and until 2026-10-10 a
+/// `stat` asked for under that id was given the process's sum wherever it
+/// was read, so `/proc/<pid>/task/<pid>/stat` counted every other thread's
+/// time as the first thread's: `top -H` and a sampler reading a thread at a
+/// time charged a program's main thread with what its workers had used.
 pub(super) fn thread_stat(of: &ThreadOf) -> Result<Vec<u8>> {
-    stat_of(&of.process, of.tid)
+    stat_of(&of.process, of.tid, thread_runtime(&of.process, of.tid))
 }
 
-/// The processor time a `stat` file reports, in clock ticks: the whole
-/// process's for `/proc/<pid>/stat`, where `tid` is the process's own id,
-/// and the one thread's for `/proc/<pid>/task/<tid>/stat`, as Linux's are.
-/// Until it was counted here, `top` and `ps` said every process was idle.
-fn cpu_ticks(process: &Process, tid: u32) -> u64 {
-    let nanos = if tid == process.pid() {
-        time::process_runtime(process)
-    } else {
-        process
-            .tasks()
-            .iter()
-            .filter(|task| {
-                crate::syscall::thread::of_task(task).is_some_and(|thread| thread.tid() == tid)
-            })
-            .map(|task| task.runtime())
-            .fold(0, u64::saturating_add)
-    };
-    nanos / (NANOS / CLOCK_TICKS)
+/// Nanoseconds thread `tid` of `process` has run for: what its task was
+/// charged, up to now if it is the thread asking and up to its processor's
+/// last charge otherwise, as [`time::process_runtime`] counts each.
+fn thread_runtime(process: &Process, tid: u32) -> u64 {
+    let _ = sched::current_runtime();
+    process
+        .tasks()
+        .iter()
+        .filter(|task| {
+            crate::syscall::thread::of_task(task).is_some_and(|thread| thread.tid() == tid)
+        })
+        .map(|task| task.runtime())
+        .fold(0, u64::saturating_add)
 }
 
 /// The console's device, 5:1, as `stat`'s `tty_nr` encodes a device:
@@ -1282,8 +1287,9 @@ fn controlling_terminal(session: u32) -> (u32, i32) {
     (CONSOLE_TTY_NR, tpgid)
 }
 
-/// A stat file, for the thread numbered `tid` of `process`.
-fn stat_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
+/// A stat file, for the thread numbered `tid` of `process`, reporting
+/// `runtime` nanoseconds of processor time.
+fn stat_of(process: &Process, tid: u32, runtime: u64) -> Result<Vec<u8>> {
     let memory = Memory::of(process);
     let comm = process.comm();
     let seen = pids_shown(process, tid);
@@ -1307,10 +1313,10 @@ fn stat_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         // No `PF_*` flag applies: in particular `PF_RANDOMIZE` is clear,
         // because nothing randomizes the layout.
         flags: 0,
-        // The time its threads have run, all of it as user time: the
-        // scheduler charges a task for its whole time on a processor and
-        // does not split what it spent in the kernel.
-        utime: cpu_ticks(process, tid),
+        // All of it as user time: the scheduler charges a task for its
+        // whole time on a processor and keeps no count of the part it spent
+        // in the kernel. Only a job's `cpu.stat` is split, by the tick.
+        utime: runtime / (NANOS / CLOCK_TICKS),
         stime: 0,
         priority: 20,
         nice: 0,
