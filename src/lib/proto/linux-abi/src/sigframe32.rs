@@ -180,9 +180,32 @@ pub const RETCODE: [u8; 8] = [0x58, 0xb8, 0x77, 0x00, 0x00, 0x00, 0xcd, 0x80];
 /// conversion for those; Linux's `copy_siginfo_to_user32` does it field by
 /// field because it also carries `clock_t`s and `sigval`s, which a signal
 /// queued by a program brings.
+///
+/// One origin is not the move: a system call a seccomp filter trapped
+/// (`SIGSYS`, `si_code` `SYS_SECCOMP`), whose union starts with a pointer that is
+/// eight bytes wide here and four there, so the two `int`s behind it are at 24
+/// and 28 here and at 16 and 20 there. It is converted field by field:
+/// `si_errno` and `si_code` where they are, `_call_addr` truncated to the low
+/// word at 12, `_syscall` at 16 and `_arch` at 20, as Linux's
+/// `copy_siginfo_to_user32` lays out `_sigsys` for a compat task.
 #[must_use]
 pub fn siginfo_from_64(info: &[u8; SIGINFO_SIZE]) -> [u8; SIGINFO_SIZE] {
     let mut out = [0_u8; SIGINFO_SIZE];
+    if is_seccomp_trap(info) {
+        // `si_signo`, `si_errno`, `si_code`.
+        if let (Some(to), Some(from)) = (out.get_mut(..12), info.get(..12)) {
+            to.copy_from_slice(from);
+        }
+        // `_call_addr`: the low word of the 64-bit pointer.
+        if let (Some(to), Some(from)) = (out.get_mut(12..16), info.get(16..20)) {
+            to.copy_from_slice(from);
+        }
+        // `_syscall` and `_arch`.
+        if let (Some(to), Some(from)) = (out.get_mut(16..24), info.get(24..32)) {
+            to.copy_from_slice(from);
+        }
+        return out;
+    }
     if let (Some(to), Some(from)) = (out.get_mut(..12), info.get(..12)) {
         to.copy_from_slice(from);
     }
@@ -190,6 +213,17 @@ pub fn siginfo_from_64(info: &[u8; SIGINFO_SIZE]) -> [u8; SIGINFO_SIZE] {
         to.copy_from_slice(from);
     }
     out
+}
+
+/// Whether `info` is the `siginfo` of a system call a seccomp filter trapped:
+/// `SIGSYS` (31) with `si_code` `SYS_SECCOMP` (1).
+fn is_seccomp_trap(info: &[u8; SIGINFO_SIZE]) -> bool {
+    let word = |at: usize| {
+        info.get(at..at + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map(i32::from_le_bytes)
+    };
+    word(0) == Some(31) && word(8) == Some(1)
 }
 
 /// A 32-bit program's `struct sigaction`, as `rt_sigaction` reads and writes
