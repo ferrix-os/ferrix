@@ -54,6 +54,17 @@ pub const MOD_LINEAR: u64 = 0;
 /// layout -- linear, for a virgl resource seen from the guest.
 pub const MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
 
+/// Whether the implicit layout goes unannounced: only linear is offered.
+/// A compositor that maps NVIDIA's buffers from the CPU sets it, because
+/// NVIDIA's GBM backend answers "no modifier" with block-linear video
+/// memory, which it cannot map (N3b, `docs/NVIDIA.md` §4.6).
+static LINEAR_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Offer clients the linear modifier only, from the next bind on.
+pub fn offer_linear_only(only: bool) {
+    LINEAR_ONLY.store(only, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The formats offered, each with the modifiers it is offered with.
 const OFFERED: [(u32, Format); 2] = [
     (DRM_FORMAT_ARGB8888, Format::Argb8888),
@@ -145,7 +156,11 @@ impl Client {
                 &[Arg::Uint(code)],
             );
             if version >= 3 {
+                let linear_only = LINEAR_ONLY.load(std::sync::atomic::Ordering::Relaxed);
                 for modifier in [MOD_LINEAR, MOD_INVALID] {
+                    if linear_only && modifier == MOD_INVALID {
+                        continue;
+                    }
                     let (high, low) = halves(modifier);
                     let _ = self.out.write(
                         id,

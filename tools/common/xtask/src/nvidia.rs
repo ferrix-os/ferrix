@@ -390,6 +390,10 @@ echo "nvidia-gate: vulkaninfo exited $?"
 echo "nvidia-gate: vk-offscreen exited $?"
 /bin/vk-dmabuf
 echo "nvidia-gate: vk-dmabuf exited $?"
+if [ -e /bin/extra/extra.sh ]; then
+  /bin/busybox sh /bin/extra/extra.sh
+  echo "nvidia-gate: extra.sh exited $?"
+fi
 if [ -x /data/chrome/chrome-headless-shell ]; then
   /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
   echo "nvidia-gate: chrome exited $?"
@@ -766,6 +770,23 @@ fn initramfs_files(dir: &Path) -> Result<Vec<ports::File>> {
             mode: 0o755,
             content: ports::Content::Bytes(bytes),
         });
+    }
+    // Another: `FERRIX_RUN_NVIDIA_EXTRA` names a directory whose files go to
+    // `/bin/extra`; the script runs its `extra.sh` after vk-offscreen.
+    if let Some(extra) = std::env::var_os("FERRIX_RUN_NVIDIA_EXTRA") {
+        let entries = std::fs::read_dir(&extra)
+            .map_err(|error| Error::new(format!("reading {}: {error}", Path::new(&extra).display())))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| Error::new(format!("reading the extra directory: {error}")))?;
+            let bytes = std::fs::read(entry.path()).map_err(|error| {
+                Error::new(format!("reading {}: {error}", entry.path().display()))
+            })?;
+            files.push(ports::File {
+                path: format!("bin/extra/{}", entry.file_name().to_string_lossy()),
+                mode: 0o755,
+                content: ports::Content::Bytes(bytes),
+            });
+        }
     }
     Ok(files)
 }
