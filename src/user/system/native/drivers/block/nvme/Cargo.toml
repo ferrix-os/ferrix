@@ -1,0 +1,26 @@
+[package]
+name = "ferrix-nvme-driver"
+description = "The NVMe driver process: the block ring's driver end over an NVMe controller's first namespace, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nvme"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-blkserve.workspace = true
+ferrix-driver = { workspace = true, features = ["block"] }
+ferrix-native-abi.workspace = true
+ferrix-nvme.workspace = true
+ferrix-rt.workspace = true
+ferrix-virtio-blk.workspace = true
+
+[lints]
+workspace = true
