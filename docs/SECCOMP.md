@@ -1827,6 +1827,40 @@ its worst (the `seccomp` cost line's last figure) and
 `MEMORY-AND-TIMING.md` §2.2b has the figure and the arithmetic (the
 consultant's condition 2 on S5). Making it one comparison is a BACKLOG row.
 
+**S4 to S6 ported onto `main` (2026-10-11, `land-seccomp-s4`).** The three
+were written on 2026-10-01 on a copy of S3 from before it landed; S3 landed
+reworked on 2026-10-04 and `main` moved about 550 commits. The port replays
+`stage13-s6` (S4, its conditions' commit, S5, its fail-closed commit, S6) and
+changes, beyond resolving text:
+* **The scenarios name their last call.** `main`'s filters check lets a
+  scenario's task make the call that ends it from a frame that holds nothing
+  (`Then::Ending`, ee58d3912), since a thread a filter ends never returns and
+  would keep its thread counted as filtered. The trap scenarios that end
+  their process (`SIGSYS` blocked and ignored; a native-range trap) are
+  written that way now, and the ones that survive report through
+  `Then::Report`.
+* **The count of filtered threads.** `main` counts the threads that hold
+  seccomp state (`FILTERED_THREADS`) where S3 had a flag set once, and its
+  ordering argument said `TSYNC` was refused. With `TSYNC` an install filters
+  other threads too, each through its own `with_seccomp`, so each is counted
+  before its flag is raised; the argument beside the static says what that
+  means for a call another thread has in flight. The check's count comes back
+  to where it started with the TSYNC cases in it.
+* **Tasks are listed.** A thread's task is listed with the core before it
+  runs (`ProcessCore::list_task`), as `main`'s `start_thread` and the check's
+  `spawn_member` do; `Process::add_task` is gone. The check's cloning thread
+  is made through `spawn_member` too.
+* **S5's condition 1 has a look of its own** (the heredity case, above), so
+  S3's control "a clone's thread starts with no filter" still stops the boot,
+  with a message of its own.
+* **S5's condition 2 is measured**: `seccomp::found_in_chain` and the cost
+  line's last figure.
+* **xtask.** `test-seccomp` shares `sem::run`'s arm with the commands added
+  since (`test-shm`, `test-procfs`, the NVIDIA ones).
+x86-64's signal frame gained the fault's `trapno`, `err` and `cr2` on
+2026-10-10 (5541709f7); they are written only for the five signals an
+exception raises, so a `SIGSYS` frame is as it was.
+
 **S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
 test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
 `libc` crate, built for x86-64, i386 (run on x86-64 through `int $0x80`),
