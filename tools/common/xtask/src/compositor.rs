@@ -77,6 +77,7 @@ mod run;
 mod steam_store;
 pub(crate) mod steam_window;
 mod user_desktop;
+pub(crate) mod wine;
 
 pub(crate) use apps::{test_foot, test_vkgears, test_xwindow};
 pub(crate) use bench::{bench_chrome, bench_chrome_video};

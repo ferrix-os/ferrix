@@ -12,19 +12,29 @@ tools/common/fetch/fetch-wine.sh        # once: the volume, about 2 GB
 cargo xtask test-wine --accel kvm       # the gate
 ```
 
-`test-wine` attaches the volume at `/data` under `snapshot=on`, makes a
-prefix in `/tmp` with `wineboot -i`, and passes when `cmd /c ver` prints
-`Microsoft Windows 10.0`. It needs no network. It attaches a volume, so it
-runs on demand, as `test-yserver` does, and is not in `cargo xtask check`.
+`test-wine` attaches the volume at `/data` under `snapshot=on` and boots
+twice. The first boot is a shell: it makes a prefix in `/tmp` with
+`wineboot -i` and requires `cmd /c ver` to print `Microsoft Windows 10.0`.
+The second is hyprix with yserver on `:0`, as `test-xwindow` boots it: the
+same two steps, then `notepad`, which must become a window of hyprix's
+titled "Untitled - Notepad" with its white page on the screen
+(`build/x86_64/wine-notepad.ppm`). It needs no network. It attaches a
+volume, so it runs on demand, as `test-yserver` does, and is not in
+`cargo xtask check`.
 
 The guest has 6 GiB: the prefix is about 800 MB of files, on tmpfs.
+
+What shows: notepad's menu bar, its page with the caret, the scroll bar and
+"Ln 1, Col 1", drawn by Wine's X driver in software, top left in a tile
+that fills the screen.
 
 ## 2. The pieces
 
 | Piece | Where | What |
 |---|---|---|
 | The volume | `tools/common/fetch/fetch-wine.sh` | Debian's `wine64`, `libwine` and `wine`, pinned by SHA-256, unpacked over yserver's tree, with glibc, libunwind, FreeType, fontconfig, Xlib and the X extension libraries, `libz-mingw-w64`'s zlib marked as a Wine builtin (what `libwine`'s postinst does), Wine's and Liberation's fonts, and `strace` |
-| The boot | `tools/common/xtask/src/wine.rs` | zinc as init, busybox, the links Debian's paths need, and the script |
+| The shell boot | `tools/common/xtask/src/wine.rs` | zinc as init, busybox, the links Debian's paths need, and the script |
+| The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, and the script |
 
 Wine is fetched, never vendored. The loader is started directly
 (`/usr/lib/wine/wine64`) with `WINESERVER=/usr/lib/wine/wineserver64`:
@@ -129,18 +139,41 @@ tree). 100 different system calls; two have no number in
 
 ## 5. Where it stands
 
-See the stage's file under `docs/roadmap/` for the list; this section is
-what a session picking Wine up needs first.
+`wineboot`, `cmd /c ver` and notepad's window pass (`test-wine`, KVM,
+2026-10-10). What a session picking Wine up needs first:
 
-* `wineboot` and `cmd /c ver` pass (`test-wine`).
-* A 64-bit signal frame's `sigcontext` now carries a fault's `trapno`,
-  `err` and `cr2`, as a 32-bit one already did. Wine's `SIGSEGV` handler
-  tells a page fault by `trapno` 14 and a write by `err`; with the three
-  zero it logged `err:seh:segv_handler Got unexpected trap 0`, and
-  `wineboot` took 88 s of guest time where it now takes 27.
-* `wineboot` still says `failed to open C:\windows\syswow64\rundll32.exe:
+**One workaround.**
+
+| Workaround | Why | Real fix | Owner |
+|---|---|---|---|
+| The prefix is made with no `DISPLAY`, and `UseXRandR` is `N` in `HKCU\Software\Wine\X11 Driver` before a program gets one | On yserver's RandR 1.5, Wine's X driver registers its XRandR 1.4 display handler and then finds no monitor: `err:system:lock_display_devices Failed to read display config`, over and over. A window's monitor DPI is then 0, wineserver divides by it (`map_dpi_point` in `server/window.c`) and ends with `SIGFPE`, and every Wine program waits on it for ever | whatever `xrandr14_get_gpus`, `_get_adapters` or `_get_monitors` (`dlls/winex11.drv/xrandr.c`) gets from yserver on the Wayland backend that it does not get from Xorg: not found yet. yserver's nested backends report no RandR provider, which Wine has a path for, so the lead is the output and CRTC answers | open (yserver) |
+
+**Leads, none of them in the kernel as far as is known.**
+
+* With XRandR off, `explorer.exe` (Wine's desktop process) ends on an
+  assertion in `dlls/winex11.drv/xvidmode.c:164`, `xf86vm_free_modes`:
+  the XF86VidMode modes yserver lists are not what Wine's fallback
+  expects. Notepad draws without it.
+* Notepad draws at the size it asked for, about 720 by 510, and not at the
+  982 by 726 of the tile hyprix gave its window, which X reports as the
+  window's size. The rest of the tile is black.
+* `wineboot` says `failed to open C:\windows\syswow64\rundll32.exe:
   c0000135`, which it does not say on Linux: a 32-bit Windows program does
-  not start yet.
-* A prefix on the btrfs volume ran out of space with 680 MB free; the gate
-  uses tmpfs.
+  not start yet. Not looked into.
+* A prefix on the btrfs volume ran out of space (`ENOSPC`) with 680 MB
+  free; the gate uses tmpfs.
+* `df` says tmpfs has used 0 of 3.0G with an 800 MB prefix on it.
 * `wineboot` takes 27 s of guest time; on Linux, on the same host, a few.
+
+**What the kernel gained for it.**
+
+* `arch_prctl`'s `GS` base (§3).
+* A 64-bit signal frame's `sigcontext` carries a fault's `trapno`, `err`
+  and `cr2`, as a 32-bit one already did. Wine's `SIGSEGV` handler tells a
+  page fault by `trapno` 14 and a write by `err`; with the three zero it
+  logged `err:seh:segv_handler Got unexpected trap 0`, and `wineboot` took
+  88 s of guest time.
+
+Nothing else was needed for these three programs. In particular not
+`futex_waitv`, `FUTEX_WAKE_OP`, `mlock`, `membarrier`, `ptrace`,
+`process_vm_readv`, `modify_ldt` or `preadv`: none is in the trace of §4.

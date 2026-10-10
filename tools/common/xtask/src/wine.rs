@@ -5,8 +5,9 @@
 //! Debian 13's `wine64` and `libwine` over yserver's tree and makes a btrfs
 //! volume of it. The gate attaches it at `/data` under QEMU's `snapshot=on`,
 //! as `test-yserver` attaches yserver's, and [`RUN`], carried in the image,
-//! makes a prefix on it with `wineboot`, then runs `cmd /c ver`. It passes
-//! when `cmd` printed the Windows version Wine reports.
+//! makes a prefix with `wineboot`, then runs `cmd /c ver`, which must print
+//! the Windows version Wine reports. A second boot, of hyprix with yserver,
+//! must show Wine's notepad in a window (`crate::compositor::wine`).
 //!
 //! The gate needs no network. It attaches a volume, so it runs on demand as
 //! `test-yserver` does and is not in the image row.
@@ -18,7 +19,7 @@ use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, 
 /// The paths Debian's Wine names absolutely, each a link into the volume,
 /// beside glibc's and X's ([`crate::yserver::LINKS`]): its loader and server,
 /// and its data files (`wine.inf`, the fonts).
-const LINKS: &[(&str, &str)] = &[
+pub(crate) const LINKS: &[(&str, &str)] = &[
     ("usr/lib/wine", "/data/usr/lib/wine"),
     ("usr/share/wine", "/data/usr/share/wine"),
 ];
@@ -27,7 +28,7 @@ const LINKS: &[(&str, &str)] = &[
 const RUN_PATH: &str = "bin/wine-test";
 
 /// What `cmd /c ver` prints under Wine 10.0, which reports Windows 10.
-const VERSION: &str = "Microsoft Windows 10.0";
+pub(crate) const VERSION: &str = "Microsoft Windows 10.0";
 
 /// A prefix made with `wineboot`, then `cmd /c ver`. Run by busybox's `sh`;
 /// its status is 0 only when `cmd` printed [`VERSION`].
@@ -91,13 +92,13 @@ fn volume() -> Result<std::path::PathBuf> {
     }
 }
 
-/// Boot a shell whose script makes a Wine prefix on the volume and runs
-/// `cmd /c ver` in it.
+/// Boot a shell whose script makes a Wine prefix and runs `cmd /c ver` in
+/// it, then the desktop with notepad.
 ///
 /// # Errors
 ///
-/// When the volume is missing, the image cannot be built, the boot fails, or
-/// `cmd` did not print the version.
+/// When the volume is missing, an image cannot be built, a boot fails,
+/// `cmd` did not print the version, or notepad's window did not come.
 pub(crate) fn test_wine(args: &Args) -> Result<()> {
     let arch = match args.arches()?.as_slice() {
         [Arch::X86_64] => Arch::X86_64,
@@ -144,7 +145,7 @@ pub(crate) fn test_wine(args: &Args) -> Result<()> {
                 .find(|line| line.contains(VERSION))
                 .map_or(VERSION, |line| line.trim());
             println!("  {arch}: Wine made a prefix on Ferrix and cmd answered `{version}`");
-            Ok(())
+            crate::compositor::wine::test_wine_window(&args, volume()?)
         }
         Some("3") => Err(Error::new(format!(
             "{arch}: /data/usr/lib/wine/wine64 is not there: is the volume attached?"
