@@ -558,38 +558,6 @@ fn usr_merge(tree: &Path, beside: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Where the tree merged in has a top-level directory as a link into
-/// `usr` (`lib -> usr/lib`, Debian's merged /usr) and the NVIDIA tree has
-/// it as a directory (`lib/firmware`), move the directory's entries to
-/// where the link points, so `cp` can put the link in its place.
-fn usr_merge(tree: &Path, beside: &Path) -> Result<()> {
-    for name in ["bin", "lib", "lib64", "sbin"] {
-        let ours = tree.join(name);
-        let Ok(target) = std::fs::read_link(beside.join(name)) else {
-            continue;
-        };
-        if !ours.is_dir() || ours.is_symlink() {
-            continue;
-        }
-        let moved = Command::new("cp")
-            .arg("-al")
-            .arg(format!("{}/.", ours.display()))
-            .arg(tree.join(&target))
-            .status()
-            .map_err(|error| Error::new(format!("running cp: {error}")))?;
-        if !moved.success() {
-            return Err(Error::new(format!(
-                "moving {} into {}: {moved}",
-                ours.display(),
-                target.display()
-            )));
-        }
-        std::fs::remove_dir_all(&ours)
-            .map_err(|error| Error::new(format!("removing {}: {error}", ours.display())))?;
-    }
-    Ok(())
-}
-
 /// What a kept `--everything` volume was made from: the core's and the
 /// everything volume's sizes and times.
 fn volume_stamp(core: &Path, everything: &Path) -> String {
