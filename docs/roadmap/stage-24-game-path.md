@@ -185,8 +185,10 @@ here.**
 
 The game-mode switch raises ten more, in `docs/SETTINGS.md` §8. The
 customer decided three on 2026-10-11: a mark first; then the speculation
-protections and the other latency trades per application, to be built;
-administrator privilege required. Open: where a game's scope may sit,
+protections and the other latency trades, meant per application
+(`docs/SETTINGS.md` §7.3 says what a grant reaches) and meant to be built
+if the certified item takes the mechanism; administrator privilege
+required. Open: where a game's scope may sit,
 whether the one-way barrier is for every client of `nvrm`, how and by which
 administrator a game is let into the driver's speculation domain, whether
 the certified item carries that at all, and question 4 narrowed to a choice

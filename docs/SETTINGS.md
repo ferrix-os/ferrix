@@ -469,11 +469,12 @@ consultant's W1 to W7; ledger line 690 is that review's ground):
 
 ### 7.7 Whether to build it
 
-The opt-in buys what the one-way barrier leaves: on the bench's figures
-about 7 µs a request on the bench's figures (§7.6), 17 ms a second at 2,442
-requests a second and 0.4 ms a second at 60. It costs a change to the rule the domain's evidence rests on,
-a privileged write path from Settings, a service that does not exist yet,
-and a standing exception to explain in three certification documents.
+The opt-in buys what the one-way barrier leaves: about 7 µs a request on
+the bench's figures (§7.6), 17 ms a second at 2,442 requests a second and
+0.4 ms a second at 60. It costs a change to the rule the domain's evidence
+rests on, a privileged write path from Settings, a service that does not
+exist yet, and a standing exception to explain in three certification
+documents.
 
 **Recommended: do not build the opt-in until the one-way barrier is built
 and a bare-metal figure exists**, and then only if the remaining barrier
@@ -623,9 +624,13 @@ rest are open.
    should require admin privileges on the system, as otherwise normal apps
    could disable some protections"*. So the first privileged effect is the
    speculation protections and the other trades of latency and frame rate
-   that a high-assurance program would not accept, for the application
-   switched on and for no other; G0's weights are not first. It is to be
-   designed and built, behind administrator privilege. §7 is the first
+   that a high-assurance program would not accept; G0's weights are not
+   first. "Per application" is the reading of the question that was asked,
+   not the customer's words, and it is the aim rather than what a grant
+   achieves: §7.3 says why a grant reaches every program of that user while
+   the admitted one runs. It is the customer's intent that this be designed
+   and built, behind administrator privilege, and it can be built only if
+   question 10 is answered yes. §7 is the first
    piece of that design and stays a proposal until its design round
    (§7.9, B1 to B13) is reviewed; the full list of protections and trades,
    and which of them can be per application at all, is that round's to
@@ -642,11 +647,13 @@ rest are open.
    side is named too.) *Recommended: decided on `nv-trip`'s own design and
    review; either way the user's file never gates a protection.*
 5. **The full opt-in (§7): build it at all?** *Recommended here: not
-   before the one-way barrier is measured (§7.7).* **Decided by the
-   customer on 2026-10-11 with question 2: build it.** The order the
-   consultant set stands and is not what was decided: the one-way barrier
-   and a bare-metal figure first, then the design round, then code (ledger
-   lines 690 and 698).
+   before the one-way barrier is measured (§7.7).* **The customer's
+   intent, given on 2026-10-11 with question 2, is that it be built.** That
+   is conditional on question 10: the barrier is in the item's core ring,
+   so nothing of the opt-in can be built outside the item, and whether the
+   item takes it is not decided. The order the consultant set also stands:
+   the one-way barrier and a bare-metal figure first, then the design
+   round, then code (ledger lines 690 and 698).
 6. **If it is built: admission (B) or birth (A)?** Both need a change to
    the item. *Recommended: B, after its own design round (§7.9, B1 to
    B13).*
@@ -665,11 +672,13 @@ rest are open.
 10. **Does the certified item take an admission mechanism at all**, in the
     shape of §7.8: in the item, behind a boot setting that is off in the
     reference configuration? It is the customer's decision in
-    `docs/certification/CLAIM.md`. It is **still open**, and the answer to
-    question 2 makes it the hard one: the customer wants the trade per
-    application at run time, and the consultant's shape puts it behind a
-    setting fixed at boot. How a certified configuration and one that can
-    grant game mode relate is the design round's first question.
+    `docs/certification/CLAIM.md`, and it comes before 6 and before any
+    code. It is **still open**. The boot setting gates the mechanism, not
+    each grant: with it on, grants are per application at run time, as the
+    customer asked. What is open is that the reference configuration is the
+    setting *off* and no claim is made of *on*, so a system that can grant
+    game mode is not the evaluated configuration. The design round prepares
+    that choice; the customer answers it in `CLAIM.md`.
 
 ## 9. Where it stands
 
@@ -685,8 +694,10 @@ document carries; code NOT YET; ledger line 698, §7.9). The same day the
 customer decided that the mark with no effect is acceptable as the first
 version, and that the first privileged effect is to be the speculation
 protections and the other latency and frame-rate trades, behind
-administrator privilege (§8, questions 1, 2, 5 and 8); that design round is
-on branch `game-mode-design`. Not built: any effect
+administrator privilege (§8, questions 1, 2, 5 and 8, the last two as far
+as they go); that design round is to be opened on a branch of its own,
+`game-mode-design`. The consultant read this record before it landed (OK
+IF four wordings, carried; ledger line 710). Not built: any effect
 (§4), a second page, a pointer cursor other than the arrow, drag on the
 scroll bar, a list that follows the file or the applications changing while
 the window is open (it reads both when it starts and the file again at each
