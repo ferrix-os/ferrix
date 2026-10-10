@@ -40,8 +40,8 @@
  * device, its memory decoding and bus mastering are the kernel's (the
  * first pin turns bus mastering on). The interrupt is the device's one MSI
  * vector, claimed through nvos_interrupt_start, whose thread runs the top
- * half and, when RM asks for it, the bottom half: there is no other
- * thread on the interrupt's path. Not kept: SR-IOV, ATS and SVA, Tegra
+ * half; the bottom half, when RM asks for it, runs on a thread of its own
+ * (nvrm_gpu_bh), as Linux's does. Not kept: SR-IOV, ATS and SVA, Tegra
  * and self-hosted GPUs, NUMA, resizable BARs (QEMU passes one size), VGA
  * arbitration, dynamic power management, procfs, vGPU and UVM's notices.
  */
@@ -72,11 +72,38 @@ enum gpu_step {
 };
 
 /*
- * NVIDIA's nvidia_isr and nvidia_isr_common_bh, as one handler for the
- * interrupt thread: MMU faults first, then rm_isr, and its bottom half at
- * once when it asks for one. Linux runs the bottom half on a kthread
- * after IRQ_WAKE_THREAD; here the interrupt thread is already a thread
- * that may sleep, and its acknowledgement waits until both halves ran.
+ * NVIDIA's nvidia_isr_kthread_bh: the bottom half, on a thread of its own.
+ * rm_isr_bh takes RM's GPU lock and may wait for it behind a control call.
+ * On the interrupt thread that wait kept the top half from running, and
+ * the top half is what serves the non-stall interrupts -- a fence's
+ * semaphore reaching its value, a client's event -- and re-arms the GPU's
+ * MSI; a lock holder waiting for one of those waited for ever. Linux runs
+ * the two on different contexts for the same reason. Requests coalesce:
+ * one pass serves every interrupt that asked before it started, and one
+ * that asks while it runs gets a pass of its own.
+ */
+static nvos_event_t bh_wanted;
+
+static void nvrm_gpu_bh(void *argument)
+{
+    nv_linux_state_t *nvl = argument;
+    nv_state_t *nv = NV_STATE_PTR(nvl);
+    NvU32 seen = 0;
+
+    for (;;)
+    {
+        nvos_event_wait(&bh_wanted, seen);
+        seen = nvos_event_now(&bh_wanted);
+        rm_isr_bh(nvl->sp_bh, nv);
+    }
+}
+
+/*
+ * NVIDIA's nvidia_isr, for the interrupt thread: MMU faults first, then
+ * rm_isr, and its bottom half asked of nvrm_gpu_bh when RM wants one, as
+ * Linux's IRQ_WAKE_THREAD does. The interrupt was acknowledged before
+ * this ran (nvos's isr_thread), so a message the GPU raises from here on
+ * is delivered and runs this again.
  */
 static void nvrm_gpu_isr(void *argument)
 {
@@ -90,7 +117,7 @@ static void nvrm_gpu_isr(void *argument)
     (void)rm_isr(nvl->sp_isr, nv, &need_bottom_half);
     nvos_isr_enter_leave(NV_FALSE);
     if (need_bottom_half || faults != 0)
-        rm_isr_bh(nvl->sp_bh, nv);
+        nvos_event_signal(&bh_wanted);
 }
 
 /* Fill RM's BAR `j` from aperture `i` of `desc`. */
@@ -244,7 +271,8 @@ int nvrm_gpu_start(void)
                   "NVRM: No interrupts of any type are available. Cannot use this GPU.\n");
         return GPU_STEP_INTERRUPT;
     }
-    if (nvos_interrupt_start(0, nvrm_gpu_isr, nvl) != NV_OK)
+    if (!nvos_thread_spawn(nvrm_gpu_bh, nvl) ||
+        nvos_interrupt_start(0, nvrm_gpu_isr, nvl) != NV_OK)
     {
         nv_printf(NV_DBG_ERRORS, "NVRM: request_irq() failed\n");
         return GPU_STEP_INTERRUPT;
