@@ -345,6 +345,16 @@ pub(crate) fn preempt_enable() {
     enable_from(false);
 }
 
+/// Undo one [`preempt_disable`] for a switch about to be made, with
+/// interrupts masked: no deferred decision, because the switch is one
+/// (`super::block_ending_hold`, F-69's last look). An enable that finds
+/// nothing to lower stops the machine, as [`preempt_enable`]'s does.
+pub(super) fn enable_for_switch() {
+    if let Some(Err(old)) = lower(ONE) {
+        unmatched(old, false);
+    }
+}
+
 /// Count a lock held under the interrupt mask (`sync::try_lock_masked`,
 /// the native round trip's fast path): one lock on this processor's word,
 /// so that A3 (`require_preemption_on`, FX-0503) sees it as it sees any

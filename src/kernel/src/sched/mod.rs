@@ -1659,6 +1659,27 @@ fn block() {
     schedule();
 }
 
+/// [`block`] for a wait whose last look held preemption off (F-69,
+/// `wait::LastLook::block`): the hold is let go inside the switch's own
+/// interrupt mask, and with no decision of its own.
+///
+/// No decision, because the switch that follows is the decision: the look
+/// did not find its condition, so the task is listed or filed and leaves its
+/// processor now in any case, and `choose_next` picks under the queue's lock
+/// with every task as it stands then. A request an interrupt left pending
+/// while the count was raised is not taken: it stays set for this
+/// processor's next way out (`call_left` at count zero, or an interrupt's
+/// exit), as a request always stayed across [`block`], since no switch
+/// clears it. Inside the mask, because then nothing on this processor comes
+/// between the end of the look and the switch. A wake from another processor
+/// still can, and leaves the task runnable and queued, so the switch detaches
+/// nothing and the wait looks again, as before. What it saves is the deferred
+/// decision at the lowering, made and found empty on every blocking wait of a
+/// round trip (`docs/roadmap/stage-05-tasks-scheduler.md`, the cheaper hold).
+fn block_ending_hold() {
+    switch_from(false, true);
+}
+
 /// Where a wake may put the task it wakes.
 ///
 /// A wake onto another processor is an interrupt to it, and under a
@@ -2156,7 +2177,19 @@ fn schedule() {
 /// an interrupt that arrived in user mode -- the case a task counts as a
 /// preemption if it is switched out still runnable.
 fn schedule_from(interrupted_user: bool) {
+    switch_from(interrupted_user, false);
+}
+
+/// The body of [`schedule_from`] and [`block_ending_hold`], one function so
+/// that the two entries cannot drift: mask, with `ending_hold` lower the last
+/// look's hand raise without a decision (`preempt::enable_for_switch`), check
+/// that nothing still holds preemption off, decide and switch.
+#[inline(always)]
+fn switch_from(interrupted_user: bool, ending_hold: bool) {
     let saved = <arch::Irq as IrqControl>::disable();
+    if ending_hold {
+        preempt::enable_for_switch();
+    }
     if let Some(cpu) = this_cpu() {
         require_preemption_on(cpu);
     }
@@ -2167,7 +2200,8 @@ fn schedule_from(interrupted_user: bool) {
 /// A switch with the count raised is a holder of a preemption-disabling lock
 /// going to sleep, which the count cannot survive: see `preempt`. Stops the
 /// machine there (FX-0503). Made before every switch: `schedule_from`'s,
-/// and the direct switch's (A3).
+/// `block_ending_hold`'s (after it lowers the last look's hold), and the
+/// direct switch's (A3).
 fn require_preemption_on(cpu: usize) {
     if preempt_count(cpu) > 0 {
         let site = preempt_site(cpu);

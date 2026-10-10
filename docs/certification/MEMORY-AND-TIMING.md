@@ -669,7 +669,16 @@ it ends: a wait's last look. A wait raises the preemption count before it
 sets its task blocked and lowers it once the look is over, so that no
 switch can take the task off its run queue inside the look. An interrupt
 that asks for a decision inside the span is still taken; only the
-decision waits, until the lowering, where it is made.
+decision waits, until the span ends:
+* on a look that finds its condition, the decision is made at the
+  lowering;
+* on a look that blocks, the span ends inside the switch's own interrupt
+  mask (`block_ending_hold`, F-69's cheaper hold), and the switch is the
+  decision. A request left set reaches this processor's next way out
+  (`call_left` at count zero, or an interrupt's exit), as it did across
+  `block` before F-69, and is decided there again.
+
+The span's contents, its bound and L.sched.7's deferral are unchanged.
 
 The span holds:
 * `set_state`;

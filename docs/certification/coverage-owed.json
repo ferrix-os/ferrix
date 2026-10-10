@@ -278,6 +278,16 @@
       ],
       "dropped": "carried from the evidence's own commits on main 523fc3d50, no anchor dropped.",
       "what": "arch/x86_64/gdt.rs note_tables (every bring-up), noted_table's zero fallback and set_privilege_stack's ask arm (reached on a secondary between set_cpu_local and init_secondary, or argued), ask_privilege_stack's selector == 0 arm (a secondary's first note, in set_cpu_local), task_register_loaded's false outcome (the same secondary note), and gdt/check.rs require_tables_noted's fatal arm (argued: pq4v3-ctl-a-kvm, -b-kvm, -c-kvm and -c-tcg each fired FX-0409). The Arm architectures have no GDT; the two new PerCpu words are zero there."
+    },
+    {
+      "landing": "os07-stall F-69 (d884add58) and os07-hold-fin, F-69's hold made cheaper (branch os07/cheap-hold-fin; the certification consultant's ledger lines 614, 622, 624 and 656)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "Measure and test or argue on every architecture: sched/wait.rs LastLook::hold, drop and block (both arms of LAST_LOOK_HOLDS are one constant: argued), sched/mod.rs block_ending_hold and switch_from's ending_hold arm, sched/preempt.rs enable_for_switch and its unmatched arm (argued: reached only when the kernel is stopping, shown by control k2), syscall/native.rs park_for_reply's hold, sched/direct.rs block_parked's two branches, and sched/check.rs a_drained_waiter_survives_its_last_look, last_look_case, a_blocking_look_ends_in_its_switch and blocks_after_its_last_look with their failure arms (reached only on a failed check)."
     }
   ]
 }

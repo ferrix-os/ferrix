@@ -72,6 +72,7 @@ load, not with the code. The table gives each as its commit measured it.
 | 2026-10-08 20:32 | `cpu.stat`'s charge kept back per run queue (`quota::Pending`, L.object.180), `cpu.max`'s walk only while one is set, `floor_div` inline; the cgroup controllers had put `charge_cpu` into every direction (os-76's profile: 5,198 instructions a round trip on `390d5f278` against 5,011 on `08984c2db`, `account_in` +236 of it) | five rounds turn about, one 30 s long-bench boot each, fast clock mode, cores 11 and 23 at performance, against base `523fc3d50` with os-76's measurement commit, host not quiet (load 14 to 56, SMT sibling 8 to 77% busy): the same job (the bench) 4,804 instructions a trip against 5,041, median ratio 0.952 (0.943 to 0.960), cycles 4,522 against 4,709, 0.958 (0.902 to 1.028); across two jobs 5,042 against 5,041, 1.005: unchanged. About -237 instructions, preliminary; instructions decide and no ns is quoted | `df7ee418c` |
 | 2026-10-08 21:51 | ARMv7-A lazy VFP: a task runs with `FPEXC.EN` clear until its first VFP instruction, so a switch between two programs that never used VFP moves no VFP register (§9.15, F-68) | none: nothing has been timed on ARMv7-A; §9.15 estimates 100 to 160 cycles a round trip, about 125 to 200 ns at 800 MHz, and the DK1 run of stage 9's `lazy` line is owed | `4e2f9024c`, `f42c1ede0` |
 | 2026-10-08 23:08 | F-69's fix: a wait holds preemption off from BLOCKED to the end of its last look, so a wake that drained the entry while the task ran is not lost (L.sched.71-72) | a cost: `bench-ipc --alternate f42c1ede0 --rounds 5`, the general path (the fast path is off by default), mitigations on, one domain, KVM, core 11 at performance, host load 0.9 before and 0.5 after, SMT sibling 0% busy: `domain-call` p50 1,378 / 1,358 / 1,378 / 1,378 / 1,368 ns against 1,308 / 1,298 / 1,308 / 1,318 / 1,308, ratio 1.046 (median of 5, 1.046 to 1.054), about +60 ns, two waits each paying one raise and one lower of the count; `call` p50 5,603 against 5,473. No instruction counts, and no figure with the fast path on. A cheaper hold is os-07's to write | `d884add58` |
+| with this row's commit | F-69's hold made cheaper: a wait that blocks lets the hold go inside its switch's own mask, with no decision of its own (`LastLook::block`, `block_ending_hold`; `stage-05-tasks-scheduler.md`) | the general path, mitigations on, one domain, KVM, core 11 at performance. Instructions a round trip by the long bench with `perf`, one boot a side (preliminary): 10,363 against F-69's 10,442 and 10,443, and 10,300 before F-69, so 79 of F-69's 142 instructions are gone; cycles 7,658 against 7,610 to 7,653, inside the layout band. `bench-ipc --alternate d884add58 --rounds 5`, host load 0.8 to 1.9, SMT sibling 0% busy: `domain-call` p50 1,368 / 1,368 / 1,348 / 1,378 / 1,368 ns against 1,358 / 1,368 / 1,358 / 1,368 / 1,378, ratio 1.000 (median of 5, 0.993 to 1.007): no change in ns. Against `f42c1ede0` 1.046 (1.038 to 1.061): F-69's 60 ns are not won back on x86-64. ARMv7-A: about 46 instructions a blocking wait for the hold against 84 and one `dmb ish` against four, read from the object code, not timed; the DK1 run is owed | (this row's) |
 
 The DK1 itself can now be measured: user mode reads the virtual counter
 (`b17462efe`) and `bench-ipc --board-log` files a board's own log
@@ -101,9 +102,8 @@ directions. The budget for what is left is §9.10.
 Not on `main`; none is written up above as landed.
 
 - The job-load fold, −10 to −25 ns by ablation.
-- A cheaper hold for F-69's last look, to win back about 60 ns on the general
-  path (os-07). The pipe's P2 and P3a, the scheduler's J and K and the slots
-  are branches too (`open-branches.md`).
+- The pipe's P2 and P3a, the scheduler's J and K and the slots are branches
+  too (`open-branches.md`).
 
 Ids reserved on `main` and not written: L.sched.69-70 (the direct switch's
 run-slot take and give-back, and the outgoing task's current reference kept on

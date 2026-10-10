@@ -69,6 +69,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | the chardev core held to its queue's room and checked at boot, F-63 and NVIDIA N12 (branch po5/c1-n12) | x86_64, aarch64, armv7a | Carried onto main 39e520e31 with 0 anchors dropped as unmeasured; only main.rs's anchors moved, by one line. | Measure stages_check.rs's check_chardev (its fatal arm is reached only when the check fails, its not-checked arm only on a machine with no PCI function) and main.rs's new call of it in check_block_ring. |
 | FX-0902, the wait for the reaper counts a program thread part-way through its end (branch po9/fx0902; po9-fx0902's consultant, OK IF C1, ledger 424, 2026-10-07) | x86_64, aarch64, armv7a | Carried onto main 4066f41dd with 0 anchors dropped as unmeasured; only sched/mod.rs's anchors moved. | Measure sched/mod.rs's begin_leaving and exit_leaving, both outcomes of exit_counted's `if leaving` (true from syscall/process.rs end_thread, false from task_start's exit), and wait_for_reaper's LEAVING != 0 arm, which is reached only when a check's frame window races a program thread between its release and exit: measure it under the 3 ms linger control (queue/po9fx-ctl-linger-fix.log) or argue it. |
 | po10-quick Q4, the GDT and RSP0 noted per processor (branch po10-quick/q4-v2; the certification consultant's ledger lines 515, 553 and 574, Q4-L2) | x86_64 | carried from the evidence's own commits on main 523fc3d50, no anchor dropped. | arch/x86_64/gdt.rs note_tables (every bring-up), noted_table's zero fallback and set_privilege_stack's ask arm (reached on a secondary between set_cpu_local and init_secondary, or argued), ask_privilege_stack's selector == 0 arm (a secondary's first note, in set_cpu_local), task_register_loaded's false outcome (the same secondary note), and gdt/check.rs require_tables_noted's fatal arm (argued: pq4v3-ctl-a-kvm, -b-kvm, -c-kvm and -c-tcg each fired FX-0409). The Arm architectures have no GDT; the two new PerCpu words are zero there. |
+| os07-stall F-69 (d884add58) and os07-hold-fin, F-69's hold made cheaper (branch os07/cheap-hold-fin; the certification consultant's ledger lines 614, 622, 624 and 656) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | Measure and test or argue on every architecture: sched/wait.rs LastLook::hold, drop and block (both arms of LAST_LOOK_HOLDS are one constant: argued), sched/mod.rs block_ending_hold and switch_from's ending_hold arm, sched/preempt.rs enable_for_switch and its unmatched arm (argued: reached only when the kernel is stopping, shown by control k2), syscall/native.rs park_for_reply's hold, sched/direct.rs block_parked's two branches, and sched/check.rs a_drained_waiter_survives_its_last_look, last_look_case, a_blocking_look_ends_in_its_switch and blocks_after_its_last_look with their failure arms (reached only on a failed check). |
 
 ---
 
@@ -179,7 +180,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1276, 2232 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1276, 2266 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
