@@ -608,18 +608,29 @@ in §7.7; the boot setting, the new assumption of use and the longer list in
 
 ## 8. Decisions for the customer
 
-None is taken. Each with a recommendation.
+Each with a recommendation. The customer answered three things on
+2026-10-11, which decide questions 1, 2 and 5 and the direction of 8; the
+rest are open.
 
 1. **Is a mark with no effect acceptable as the first version**, with the
-   page saying so? *Recommended: yes; the alternative was a weight only a
-   root desktop could set, which is not the customer's desktop.*
+   page saying so? *Recommended: yes.* **Decided by the customer on
+   2026-10-11: "yes".**
 2. **What should game mode do first** once something privileged can act on
-   the mark: G0's weights (`docs/GAME-PATH.md` §5.3), holding the screen
-   awake, or nothing until the game session? *Recommended: G0, with its
-   review and its measurement on the rig, since it is already in stage 24's
-   68 points.* This is question 8 of `docs/GAME-PATH.md` §10 seen from the
-   switch: with this page, "by a rule the user writes" has a place to be
-   written.
+   the mark? *Recommended here: G0's weights.* **Decided by the customer on
+   2026-10-11, and not as recommended:** *"disable speculative protections
+   and basically everything that brings down latency and brings up fps that
+   might not be acceptable in normal high assurance apps, but this path
+   should require admin privileges on the system, as otherwise normal apps
+   could disable some protections"*. So the first privileged effect is the
+   speculation protections and the other trades of latency and frame rate
+   that a high-assurance program would not accept, for the application
+   switched on and for no other; G0's weights are not first. It is to be
+   designed and built, behind administrator privilege. §7 is the first
+   piece of that design and stays a proposal until its design round
+   (§7.9, B1 to B13) is reviewed; the full list of protections and trades,
+   and which of them can be per application at all, is that round's to
+   write. Nothing of it is built, and the page still says game mode is a
+   mark only.
 3. **May a user's scope for a game sit beside the session's scope**, so
    that a weight has somewhere to be written, although it then outlives the
    session unless `sessiond` ends it too (`docs/AUTH.md` §6.4)?
@@ -630,8 +641,12 @@ None is taken. Each with a recommendation.
    as an attribute of the driver's job it is the first unless the entering
    side is named too.) *Recommended: decided on `nv-trip`'s own design and
    review; either way the user's file never gates a protection.*
-5. **The full opt-in (§7): build it at all?** *Recommended: not before the
-   one-way barrier is measured (§7.7).*
+5. **The full opt-in (§7): build it at all?** *Recommended here: not
+   before the one-way barrier is measured (§7.7).* **Decided by the
+   customer on 2026-10-11 with question 2: build it.** The order the
+   consultant set stands and is not what was decided: the one-way barrier
+   and a bare-metal figure first, then the design round, then code (ledger
+   lines 690 and 698).
 6. **If it is built: admission (B) or birth (A)?** Both need a change to
    the item. *Recommended: B, after its own design round (§7.9, B1 to
    B13).*
@@ -641,14 +656,20 @@ None is taken. Each with a recommendation.
    bare-metal figure shows the remaining barrier matters.*
 8. **Who may turn the second switch**: any member of `wheel` with their
    password, or root alone? *Recommended: `wheel` with the password, as
-   `su`.*
+   `su`.* **The direction is decided (customer, 2026-10-11): administrator
+   privilege is required**, "as otherwise normal apps could disable some
+   protections". Which of the two forms that takes is still open.
 9. **Should hyprix's own `exec` binds and the terminal mark what they
    start** (§4, not covered)? *Recommended: no; a key bound to a game can
    name the launcher's entry instead.*
 10. **Does the certified item take an admission mechanism at all**, in the
     shape of §7.8: in the item, behind a boot setting that is off in the
     reference configuration? It is the customer's decision in
-    `docs/certification/CLAIM.md`, and it comes before 5 and 6.
+    `docs/certification/CLAIM.md`. It is **still open**, and the answer to
+    question 2 makes it the hard one: the customer wants the trade per
+    application at run time, and the consultant's shape puts it behind a
+    setting fixed at boot. How a certified configuration and one that can
+    grant game mode relate is the design round's first question.
 
 ## 9. Where it stands
 
@@ -660,7 +681,12 @@ AArch64 and ARMv7-A; the page on the `--everything` desktop as the user
 `ferrix` (the boot's desktop is root's, its home `/`); a screen with a
 buffer scale above one other than in the host test. §7 was reviewed as a
 design by the certification consultant (OK IF G1 to G9, which this
-document carries; code NOT YET; ledger line 698, §7.9). Not built: any effect
+document carries; code NOT YET; ledger line 698, §7.9). The same day the
+customer decided that the mark with no effect is acceptable as the first
+version, and that the first privileged effect is to be the speculation
+protections and the other latency and frame-rate trades, behind
+administrator privilege (§8, questions 1, 2, 5 and 8); that design round is
+on branch `game-mode-design`. Not built: any effect
 (§4), a second page, a pointer cursor other than the arrow, drag on the
 scroll bar, a list that follows the file or the applications changing while
 the window is open (it reads both when it starts and the file again at each
