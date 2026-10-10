@@ -627,6 +627,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | The rest of ferrix-ea's second pass (2026-09-26): ~~busybox `poweroff` does nothing (it signals pid 1 with `SIGUSR2`, which init does not take; only `kill -TERM 1` powers off)~~ (fixed by b9c825ba, 2026-10-01: `/bin/poweroff`, `/bin/reboot` and `/bin/shutdown` are links to `svc`, which busybox then does not link), ~~and at shutdown init remounts only `/` and `/data` read-only, both `EINVAL`~~ (fixed by N1, 2026-09-28); an ELF whose `e_type` is `ET_REL` runs (Linux: `ENOEXEC`) -- 89 other malformed ELF and `#!` files were all refused; sshdt moves bulk data at about 400 KB/s; Chrome's Ctrl+O opens no file chooser | open |
 | What btop showed on the desktop after its fixes (3e0a94b8, 2026-09-27) that is still wrong, none of which it depends on: `/proc/self/mounts` lists the initramfs's mounts from before the switch to the btrfs root (`tmpfs /`, `/dev`, `/proc`, `/tmp`, `/sys` twice) beside the new ones, where Linux shows only mounts reachable from the reader's root, so `mount` and `df` name `tmpfs` for `/`; `statfs` answers `f_type` 0 for btrfs and tmpfs alike (`stat -f` prints `UNKNOWN`), where Linux gives `BTRFS_SUPER_MAGIC` and `TMPFS_MAGIC`; and the terminal's Hack face has no U+2074, so btop's panel number `⁴proc` is the replacement box. Seen in `run-compositor --release --no-gl --ssh` on x86-64 | open |
 | `bench-ipc --alternate <ref>` without `--init` fails at once: the other tree's xtask is run with `--init` and an empty value (`other_tree` in `tools/common/xtask/src/ipc.rs`, `args.init.clone().unwrap_or_default()`), and answers "no program at  for x86_64" (2026-10-06, `~/.local/share/ferrix/logs/queue/po6-ipcB-s3-bench-1.log` on nazuna). Passing an explicit `--init` works around it (`po6-ipcB-s3-bench-2`). Fix: leave `--init` out of the other tree's command when none was given. Outside the item. | unowned |
+| The game path: where a fullscreen game can be faster on Ferrix than on a stock Linux desktop (`docs/GAME-PATH.md`, a design of 2026-10-10 at the customer's request; nothing built). Metrics M1 to M9 with a target each, the first being input to scan-out and frame times under a background load. The plan, about 190 points as a first guess: the measuring rig first (R1 to R5, 19 to 21, R1 to R3 with no card); then the flip's time, the game lane (a fullscreen client's buffer scanned out as it is), input on its own thread, tearing, the just-in-time hold and a session with what the scheduler has (47); then a game domain on stage 14's ground (52, the item's core ring: design review first); the rest on measurements. It stands on displayctl v9, yserver's dmabuf hand-over and `nv-trip`, none landed, and waits on §10's decisions | open |
 
 ### The desktop and the GPU, what is left
 
@@ -1337,6 +1338,14 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
 
 ## Waiting on the customer
 
+* The game path (`docs/GAME-PATH.md` §10, 2026-10-10): whether it becomes a
+  roadmap stage; which Linux its exit is judged against; whether the game
+  domain may open stage 14 early, in the item's core ring; speculation
+  domains for yserver, hyprix and `nvrm`; whether the display on the card
+  offers VRR; hardware to check the software latency measure against light
+  (a photodiode device, or the Pixel 7's 240 frames-a-second camera); a
+  native render process in place of `virgl_test_server`; the session's
+  defaults; and a bare-metal run before any figure leaves the tree.
 * Stage 23, Arknights: Endfield (2026-10-10), before its step 0 can run: a
   game account the customer can afford to lose, since nobody can rule out a
   ban for playing under Wine on a kernel no other player has; about 110 GB
