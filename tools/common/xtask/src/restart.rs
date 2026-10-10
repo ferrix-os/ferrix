@@ -27,7 +27,11 @@
 //! * `blk`: every disk's driver on a machine whose `/` is a btrfs root made
 //!   fresh for the run; a file is written and read back on `/` after each
 //!   round, and host `btrfs check` reads the volume afterwards.
-//! * `all`: each of those, one boot each.
+//! * `nvme`: the same root on an NVMe drive below a PCIe switch, and its
+//!   `nvme` driver killed: the controller is left enabled with its queues
+//!   in memory the kernel quarantines, and the next driver must reset it,
+//!   take the parked disk up and serve the requests the kernel kept.
+//! * `all`: each of gpu, input, net and blk, one boot each.
 //!
 //! The drivers it kills are looked up afresh each round, and must be ones it
 //! has not killed already: a driver killed in round one may still be listed
@@ -108,7 +112,7 @@ const KEYBOARD: &str = "QEMU Virtio Keyboard";
 
 /// The kinds of driver the gate kills.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     /// The display's `gpu`.
     Gpu,
     /// The keyboard's and tablet's `input`.
@@ -117,6 +121,8 @@ enum Kind {
     Net,
     /// Every disk's `blk`, `/` among them.
     Blk,
+    /// The `nvme` of the NVMe drive `/` is on (`docs/NVME.md`).
+    Nvme,
 }
 
 impl Kind {
@@ -127,10 +133,11 @@ impl Kind {
             Some("input") => vec![Kind::Input],
             Some("net") => vec![Kind::Net],
             Some("blk") => vec![Kind::Blk],
+            Some("nvme") => vec![Kind::Nvme],
             Some("all") => vec![Kind::Gpu, Kind::Input, Kind::Net, Kind::Blk],
             Some(other) => {
                 return Err(Error::new(format!(
-                    "test-restart --boot takes gpu, input, net, blk or all, not `{other}`"
+                    "test-restart --boot takes gpu, input, net, blk, nvme or all, not `{other}`"
                 )));
             }
         })
@@ -143,6 +150,7 @@ impl Kind {
             Kind::Input => "input",
             Kind::Net => "net",
             Kind::Blk => "blk",
+            Kind::Nvme => "nvme",
         }
     }
 
@@ -153,6 +161,7 @@ impl Kind {
             Kind::Input => "input drivers",
             Kind::Net => "network driver",
             Kind::Blk => "disk drivers",
+            Kind::Nvme => "NVMe driver",
         }
     }
 
@@ -162,7 +171,7 @@ impl Kind {
         match self {
             Kind::Gpu => &["display  card0 is"],
             Kind::Input => &["input    event0 ", "input    event1 "],
-            Kind::Net | Kind::Blk => &[],
+            Kind::Net | Kind::Blk | Kind::Nvme => &[],
         }
     }
 }
@@ -269,9 +278,16 @@ fn restart_one(
         Kind::Net => booted.net = true,
         // `/` on a btrfs root made fresh for the run (`qemu::attach_root_disk`).
         Kind::Blk => booted.btrfs_root = true,
+        // The same root, on an NVMe drive below a PCIe switch
+        // (`qemu::attach_nvme_root`); the virtio disks' drivers are left
+        // alone.
+        Kind::Nvme => {
+            booted.btrfs_root = true;
+            booted.nvme = true;
+        }
     }
     let checker = match kind {
-        Kind::Blk => Some(btrfs_check::Checker::required()?),
+        Kind::Blk | Kind::Nvme => Some(btrfs_check::Checker::required()?),
         _ => None,
     };
     println!(
@@ -406,7 +422,7 @@ fn prepare(
             }
             Ok(links)
         }
-        Kind::Input | Kind::Blk => Ok(Vec::new()),
+        Kind::Input | Kind::Blk | Kind::Nvme => Ok(Vec::new()),
     }
 }
 
@@ -437,7 +453,7 @@ fn hold_the_card(watching: &mut qemu::Watching<'_>) -> std::result::Result<(), S
 /// One round: find the drivers, kill them, and require a DIED for each, a
 /// restart for each and what the kind publishes, then a live shell. `killed`
 /// is the pids earlier rounds killed, which this one adds to.
-fn kill_and_expect_back(
+pub(crate) fn kill_and_expect_back(
     watching: &mut qemu::Watching<'_>,
     kind: Kind,
     round: u32,
@@ -547,7 +563,7 @@ fn serves_again(
                 ))
             }
         }
-        Kind::Blk => write_and_read_back(watching, round),
+        Kind::Blk | Kind::Nvme => write_and_read_back(watching, round),
         Kind::Input => a_key_arrives(watching, round, qmp_port),
         Kind::Gpu => Ok(()),
     }
@@ -639,7 +655,7 @@ fn links(
 }
 
 /// Write a line to a file on `/`, sync it, and read it back.
-fn write_and_read_back(
+pub(crate) fn write_and_read_back(
     watching: &mut qemu::Watching<'_>,
     round: u32,
 ) -> std::result::Result<(), String> {
@@ -668,7 +684,7 @@ fn write_and_read_back(
     }
 }
 
-fn panicked(lines: &[String]) -> bool {
+pub(crate) fn panicked(lines: &[String]) -> bool {
     lines.iter().any(|line| line.contains(qemu::PANIC_MARKER))
 }
 

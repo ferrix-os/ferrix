@@ -114,6 +114,7 @@ mod native;
 mod net;
 mod noise;
 mod nvidia;
+mod nvme;
 mod nvrm;
 mod nvrm_link;
 mod omz;
@@ -255,7 +256,11 @@ COMMANDS:
     test-auth     Boot init with authd, type at the shell its getty gives, and require each refusal of
                   docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
                   (with --sabotage NAME, against an authd with that refusal turned off, which must fail)
-    test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|all; gpu if not given)
+    test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|nvme|all; gpu if not given)
+    test-nvme     Boot a shell with / on an NVMe drive below a PCIe switch and a second drive of 4096-byte blocks:
+                  read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);
+                  a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
+                  virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
     test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64)
     test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
     test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
@@ -654,7 +659,7 @@ fn run() -> Result<()> {
         "test-jobs" => jobs::test_jobs(&args),
         "test-init" => init::test_init(&args),
         "test-auth" => auth::test_auth(&args),
-        "test-restart" => restart::test_restart(&args),
+        "test-restart" | "test-nvme" => driver_gate(command, &args),
         "bench-seam" | "bench-ipc" => bench(command, &args),
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
@@ -951,7 +956,7 @@ pub(crate) fn image_cmdline(args: &Args) -> Option<String> {
 /// architecture it is built for. Without a program the image is the one it
 /// always was. Either way the initramfs carries the tree's native
 /// programs in `/sbin`, built and checked for `arch` first.
-fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
+pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
     let natives = native::build(arch, args.release)?;
     // Only the apps `--app` names: this is test-boot's image too, which
     // carries no app it was not asked for (`docs/APPS.md` §5).
@@ -1065,6 +1070,16 @@ fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
         initramfs,
         defaults: None,
     })
+}
+
+/// The gates that kill drivers from a shell: every kind's
+/// (`test-restart`), and the NVMe driver's own with its drives (`test-nvme`).
+fn driver_gate(command: &str, args: &Args) -> Result<()> {
+    if command == "test-nvme" {
+        nvme::test_nvme(args)
+    } else {
+        restart::test_restart(args)
+    }
 }
 
 /// The boot benchmarks: the seam's disk read against Linux's (`bench-seam`),
