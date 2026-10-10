@@ -82,8 +82,8 @@ use crate::user::vmo::Vmo;
 
 pub(crate) mod check;
 pub(crate) mod dmabuf;
-pub(crate) mod sync;
 pub(crate) mod file;
+pub(crate) mod sync;
 
 /// The most requests one control has outstanding; the next is `EBUSY`.
 pub(crate) const MAX_OUTSTANDING: usize = 256;
@@ -201,9 +201,14 @@ struct State {
 /// One message the task has yet to write.
 enum Outgoing {
     Request(Arc<Request>),
-    Release { file: u64, minor: u16 },
+    Release {
+        file: u64,
+        minor: u16,
+    },
     /// A dmabuf's last reference went ([`dmabuf`]).
-    DmabufRelease { cookie: u64 },
+    DmabufRelease {
+        cookie: u64,
+    },
 }
 
 /// One program's request, outstanding until answered or abandoned.

@@ -150,7 +150,11 @@ pub fn dmabuf_install<S: Syscall>(
 /// # Errors
 ///
 /// As [`reply`], and [`Error::BadHandle`] for any other descriptor.
-pub fn dmabuf_resolve<S: Syscall>(control: &Channel<S>, request: u64, fd: i32) -> Result<u64, Error> {
+pub fn dmabuf_resolve<S: Syscall>(
+    control: &Channel<S>,
+    request: u64,
+    fd: i32,
+) -> Result<u64, Error> {
     let mut cookie = [0u8; 8];
     let value = Call::new(nr::CHARDEV_DMABUF_RESOLVE)
         .value(register(control.handle()))

@@ -64,8 +64,14 @@ const FILE_INFO_BYTES: usize = 56;
 /// `struct sync_fence_info`: `obj_name[32]`, `driver_name[32]`, `status`,
 /// `flags`, `timestamp_ns`.
 const FENCE_INFO_BYTES: usize = 80;
-const _: () = assert!(FILE_INFO_BYTES == 32 + 4 + 4 + 4 + 4 + 8, "sync_file_info's size");
-const _: () = assert!(FENCE_INFO_BYTES == 32 + 32 + 4 + 4 + 8, "sync_fence_info's size");
+const _: () = assert!(
+    FILE_INFO_BYTES == 32 + 4 + 4 + 4 + 4 + 8,
+    "sync_file_info's size"
+);
+const _: () = assert!(
+    FENCE_INFO_BYTES == 32 + 32 + 4 + 4 + 8,
+    "sync_fence_info's size"
+);
 
 /// The largest errno a signal may carry, as Linux's `MAX_ERRNO`.
 const MAX_ERRNO: i64 = 4095;
@@ -358,12 +364,18 @@ pub(crate) fn signal(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, E
     if unused.iter().any(|&register| register != 0) {
         return Err(status::INVALID_ARGS);
     }
-    #[expect(clippy::cast_possible_wrap, reason = "the register carries a signed status")]
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "the register carries a signed status"
+    )]
     let code = code as i64;
     if code > 0 || code < -MAX_ERRNO {
         return Err(status::INVALID_ARGS);
     }
-    #[expect(clippy::cast_possible_truncation, reason = "checked to -4095..=0 above")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "checked to -4095..=0 above"
+    )]
     let code = code as i32;
     let control = super::control_of(caller, handle)?;
     let fence = take(&control, cookie).ok_or(status::BAD_STATE)?;

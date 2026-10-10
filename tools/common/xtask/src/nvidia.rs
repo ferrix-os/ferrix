@@ -759,10 +759,12 @@ fn initramfs_files(dir: &Path) -> Result<Vec<ports::File>> {
     // Another: `FERRIX_RUN_NVIDIA_EXTRA` names a directory whose files go to
     // `/bin/extra`; the script runs its `extra.sh` after vk-offscreen.
     if let Some(extra) = std::env::var_os("FERRIX_RUN_NVIDIA_EXTRA") {
-        let entries = std::fs::read_dir(&extra)
-            .map_err(|error| Error::new(format!("reading {}: {error}", Path::new(&extra).display())))?;
+        let entries = std::fs::read_dir(&extra).map_err(|error| {
+            Error::new(format!("reading {}: {error}", Path::new(&extra).display()))
+        })?;
         for entry in entries {
-            let entry = entry.map_err(|error| Error::new(format!("reading the extra directory: {error}")))?;
+            let entry = entry
+                .map_err(|error| Error::new(format!("reading the extra directory: {error}")))?;
             let bytes = std::fs::read(entry.path()).map_err(|error| {
                 Error::new(format!("reading {}: {error}", entry.path().display()))
             })?;
@@ -1081,7 +1083,9 @@ const CARDVM_STATE: &str = "cardvm.env";
 
 /// `name` in `~/.local/share/ferrix/nvidia`, beside the card lock.
 fn cardvm_file(name: &str) -> PathBuf {
-    PathBuf::from(home()).join(".local/share/ferrix/nvidia").join(name)
+    PathBuf::from(home())
+        .join(".local/share/ferrix/nvidia")
+        .join(name)
 }
 
 /// The guest's IPv4 address from libvirt's DHCP lease for [`CARDVM_MAC`].

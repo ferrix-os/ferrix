@@ -1096,8 +1096,7 @@ impl Inode for Node {
             // `renderD<N>` first: a card's name cannot be mistaken for one,
             // and a render node is not a card with another name.
             if let Some(index) = crate::interfaces::render::node::render_number(name) {
-                let _served =
-                    crate::interfaces::render::node_device(index).ok_or(Errno::ENOENT)?;
+                let _served = crate::interfaces::render::node_device(index).ok_or(Errno::ENOENT)?;
                 return Ok(Arc::new(Node {
                     place: Place::Render(index),
                     made: self.made,

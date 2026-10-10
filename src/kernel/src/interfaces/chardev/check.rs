@@ -659,15 +659,38 @@ fn fences(
         )
     };
     let signal = |cookie: u64, code: i64| {
-        side.call(nr::CHARDEV_SYNC_SIGNAL, &[reg(control), cookie, code as u64])
+        side.call(
+            nr::CHARDEV_SYNC_SIGNAL,
+            &[reg(control), cookie, code as u64],
+        )
     };
     let before = super::sync::alive(core);
     for (refused, wanted, what) in [
-        (install(FENCE, 0, 1 << 5, 0), status::INVALID_ARGS, "a fence with an unknown flag was installed"),
-        (install(FENCE, 0, 0, 1), status::INVALID_ARGS, "a fence with a stray register was installed"),
-        (signal(FENCE, 1), status::INVALID_ARGS, "a fence was signalled with a positive status"),
-        (signal(FENCE, -4096), status::INVALID_ARGS, "a fence was signalled past the errno range"),
-        (signal(FENCE, 0), status::BAD_STATE, "a cookie with no fence was signalled"),
+        (
+            install(FENCE, 0, 1 << 5, 0),
+            status::INVALID_ARGS,
+            "a fence with an unknown flag was installed",
+        ),
+        (
+            install(FENCE, 0, 0, 1),
+            status::INVALID_ARGS,
+            "a fence with a stray register was installed",
+        ),
+        (
+            signal(FENCE, 1),
+            status::INVALID_ARGS,
+            "a fence was signalled with a positive status",
+        ),
+        (
+            signal(FENCE, -4096),
+            status::INVALID_ARGS,
+            "a fence was signalled past the errno range",
+        ),
+        (
+            signal(FENCE, 0),
+            status::BAD_STATE,
+            "a cookie with no fence was signalled",
+        ),
     ] {
         if refused != Err(wanted) {
             return Err(what);
@@ -683,7 +706,10 @@ fn fences(
     }
     report.sync_refusals += 1;
     let resolve = |fd: i32| {
-        side.call(nr::CHARDEV_SYNC_RESOLVE, &[reg(control), wire.id, fd as u64, BUFFER])
+        side.call(
+            nr::CHARDEV_SYNC_RESOLVE,
+            &[reg(control), wire.id, fd as u64, BUFFER],
+        )
     };
     if resolve(once) != Ok(0) || side.get(BUFFER, 8)? != FENCE.to_ne_bytes() {
         return Err("an unsignalled fence did not resolve to its cookie");
@@ -703,7 +729,8 @@ fn fences(
         return Err("a fence's signal did not wake its queue");
     }
     file_info(program, once, report)?;
-    if signal(FENCE, -5) != Err(status::BAD_STATE) || fence_status(&program.process, once)? != Some(0)
+    if signal(FENCE, -5) != Err(status::BAD_STATE)
+        || fence_status(&program.process, once)? != Some(0)
     {
         return Err("a fence was signalled twice");
     }
@@ -713,7 +740,8 @@ fn fences(
     }
     // A short deadline: ETIMEDOUT, and the thread's signal takes the cookie
     // out of the table.
-    let late = install(FENCE + 1, 1, 0, 0).map_err(|_| "a fence with a deadline was refused")? as i32;
+    let late =
+        install(FENCE + 1, 1, 0, 0).map_err(|_| "a fence with a deadline was refused")? as i32;
     sched::sleep_for(STILL_NANOS);
     if fence_status(&program.process, late)? != Some(-(Errno::ETIMEDOUT.0 as i32)) {
         return Err("a fence past its deadline did not read as ETIMEDOUT");
@@ -753,11 +781,17 @@ fn fence_wakes(process: &Process, fd: i32) -> Result<Option<u64>, &'static str> 
 fn file_info(program: &Side, fd: i32, report: &mut Report) -> Result<(), &'static str> {
     const FILE_INFO: u32 = 0xC038_3E04;
     const MERGE: u32 = 0xC030_3E03;
-    let file = crate::syscall::fd::file(&program.process, fd).map_err(|_| "a fence's descriptor went")?;
+    let file =
+        crate::syscall::fd::file(&program.process, fd).map_err(|_| "a fence's descriptor went")?;
     let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
     let ask = |info: &[u8; 56]| -> Result<Result<usize, Errno>, &'static str> {
         program.put(BUFFER, info)?;
-        Ok(super::sync::ioctl(&program.process, &fence, FILE_INFO, BUFFER))
+        Ok(super::sync::ioctl(
+            &program.process,
+            &fence,
+            FILE_INFO,
+            BUFFER,
+        ))
     };
     let word = |bytes: &[u8], at: usize| -> u32 {
         let mut word = [0u8; 4];
@@ -784,8 +818,16 @@ fn file_info(program: &Side, fd: i32, report: &mut Report) -> Result<(), &'stati
     let mut stray = info;
     stray[48..56].copy_from_slice(&u64::MAX.to_ne_bytes());
     for (refused, wanted, what) in [
-        (ask(&flagged)?, Errno::EINVAL, "SYNC_IOC_FILE_INFO with flags set was answered"),
-        (ask(&stray)?, Errno::EFAULT, "SYNC_IOC_FILE_INFO wrote through a bad pointer"),
+        (
+            ask(&flagged)?,
+            Errno::EINVAL,
+            "SYNC_IOC_FILE_INFO with flags set was answered",
+        ),
+        (
+            ask(&stray)?,
+            Errno::EFAULT,
+            "SYNC_IOC_FILE_INFO wrote through a bad pointer",
+        ),
         (
             super::sync::ioctl(&program.process, &fence, MERGE, BUFFER),
             Errno::ENOTTY,

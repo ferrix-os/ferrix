@@ -155,7 +155,8 @@ impl core::fmt::Debug for ChardevFile {
 
 impl Inode for ChardevFile {
     fn metadata(&self) -> Metadata {
-        self.render.map_or_else(|| metadata(self.minor), render_metadata)
+        self.render
+            .map_or_else(|| metadata(self.minor), render_metadata)
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
