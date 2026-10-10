@@ -376,6 +376,40 @@ pub(crate) fn drain() {
     crate::arch::drain_console();
 }
 
+/// The line every power-off prints last, before the console drains and the
+/// firmware or QEMU is asked to stop the machine. A run that ends by itself
+/// without it did not power off: xtask's power-off gates require it, because
+/// a triple fault or a reset under `-no-reboot` ends QEMU just as quietly
+/// (F-46). Nothing but the drain and the power-off write comes after it.
+///
+/// Here rather than in `power.rs`, which orchestrates the power-off but is
+/// outside the core: every `arch::shutdown` calls this itself, and the core
+/// may not depend upward on the item (`docs/certification/ITEM.md`).
+pub(crate) fn announce_power_off() {
+    println!("FERRIX-POWER-OFF");
+}
+
+/// How long a power-off write is given to take hold before the kernel says it
+/// did not. QEMU 10.2's debug-exit device, unlike 8.2's, only asks its main
+/// loop to stop the machine and lets the write return, and the processor runs
+/// on until the main loop gets to it.
+const POWER_OFF_GRACE_NANOS: u64 = 1_000_000_000;
+
+/// Said when the power-off write returned and the machine is still running a
+/// second later: no firmware's power-off, or no QEMU debug-exit device. The
+/// gates refuse a run that shows it after [`announce_power_off`]'s line.
+pub(crate) fn announce_power_off_failed() {
+    // An uncalibrated counter reads 0 forever, and a wait on it would never end.
+    if crate::timer::counter_hz() != 0 {
+        let asked = crate::timer::now_nanos();
+        while crate::timer::now_nanos().wrapping_sub(asked) < POWER_OFF_GRACE_NANOS {
+            spin_loop();
+        }
+    }
+    println!("FERRIX-POWER-OFF-FAILED");
+    drain();
+}
+
 /// Write raw bytes to the console.
 ///
 /// What `write(2)` to file descriptor 1 or 2 ends up calling. Separate from

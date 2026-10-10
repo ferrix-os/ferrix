@@ -1030,7 +1030,8 @@ What this slice found, for review:
   But a triple fault under `-no-reboot` after the marker exits 0 by itself as
   well, so a run that faults on its way down passes as powered off
   (`L.x86_64.98`, `H.BOOT.6`); telling them apart needs the kernel's own
-  power-off line.
+  power-off line. Closed on 2026-10-11 as F-46: the kernel prints
+  `FERRIX-POWER-OFF` and `watch_to_power_off` requires it, with status 33.
 * `check_compat` accepts SIGILL for SYSCALL from compatibility mode, so the
   return from 0x23 to 0x33 is proved only on the -ENOSYS path.
 * **Time.** Drafted by five agents in parallel, one per group of files,

@@ -302,6 +302,16 @@
       "architectures": ["x86_64", "aarch64", "armv7a"],
       "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
       "what": "Measure on every architecture: device.rs DeviceNode::input_functions' PCI arm (reached on every boot by device/check.rs check_input_functions' xHCI and EHCI rows), and device/check.rs check_input_functions with its failure arms (reached only on a failed check or a row that could not be built: argued). The row that turned in TRACEABILITY.md: L.device.21 leaves the unverified baseline, and its check reads not reached on x86-64 and not built on the others because it is newer than the last measurement."
+      },
+      {
+      "landing": "land-f46, F-46: the kernel's own power-off line and the judge that requires it (the port of branch f46-power-off; the certification consultant's ledger line 706, condition 1)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
+      "what": "console.rs announce_power_off and announce_power_off_failed, and the two calls each arch::shutdown gained (arch/x86_64/mod.rs, arch/aarch64/mod.rs, arch/armv7a/mod.rs): measure them on every architecture. Expected: announce_power_off and its call reached on every boot that powers off. announce_power_off_failed's FERRIX-POWER-OFF-FAILED line and its drain unreached on a passing boot on all three, to be argued as reached only when something has already failed (a power-off write that returned; shown once on AArch64 by the control f46-ctl-a64-returned); its wait may be reached on x86-64, where QEMU 10.2's debug-exit write returns and the processor runs on until QEMU's main loop stops it, and is unreached on the Arm pair, where PSCI SYSTEM_OFF does not return."
     }
   ]
 }

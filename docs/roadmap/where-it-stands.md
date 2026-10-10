@@ -335,7 +335,6 @@ without waiting".
 |---|---|---|
 | `boot-21b` | W-8 boot requirements, part b (root, init, power, random, F-51) | the consultant's diff review, a rebase with carry, then 21c (`devmgr`) |
 | `w8-armv7a` | W-8 file 24, ARMv7-A and `arch/arm_common` (drafts) | write the SysML file against the code as F-48 and F-50 left it |
-| `f46-power-off` | F-46, power-off gates that took a triple fault for a power-off | correct the message, rebase, gate, the consultant's OK |
 
 **Next**, in the order the customer last gave: test and gate run time
 (the rest of cut 2, then KVM by default on x86-64 where the host has it,

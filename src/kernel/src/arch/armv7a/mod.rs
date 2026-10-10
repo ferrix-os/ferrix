@@ -1354,10 +1354,12 @@ pub(crate) fn frame_pointer() -> u64 {
 
 /// Stop the machine, once the console has sent its last line.
 pub(crate) fn shutdown() -> ! {
+    crate::console::announce_power_off();
     crate::console::drain();
     if let Some(conduit) = psci_conduit() {
         cpu::psci_system_off(conduit);
     }
+    crate::console::announce_power_off_failed();
     halt()
 }
 
