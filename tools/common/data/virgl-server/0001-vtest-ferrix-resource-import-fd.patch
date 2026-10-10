@@ -1,0 +1,376 @@
+--- a/src/virglrenderer.c
++++ b/src/virglrenderer.c
+@@ -135,6 +135,40 @@
+    return virgl_renderer_resource_create_internal(args, NULL, 0, image);
+ }
+ 
++int virgl_renderer_ferrix_import_dmabuf(struct virgl_renderer_resource_create_args *args,
++                                        int fd, uint32_t stride, uint32_t offset,
++                                        uint64_t modifier)
++{
++   uint32_t fourcc;
++   void *image;
++   int ret;
++
++   TRACE_FUNC();
++   switch (args->format) {
++   case VIRGL_FORMAT_B8G8R8X8_UNORM:
++      fourcc = 0x34325258; /* DRM_FORMAT_XRGB8888 */
++      break;
++   case VIRGL_FORMAT_B8G8R8A8_UNORM:
++      fourcc = 0x34325241; /* DRM_FORMAT_ARGB8888 */
++      break;
++   default:
++      return EINVAL;
++   }
++   image = vrend_winsys_ferrix_image_from_dmabuf(args->width, args->height, fourcc, modifier,
++                                                 fd, stride, offset);
++   if (!image)
++      return EIO;
++   ret = virgl_renderer_resource_create_internal(args, NULL, 0, image);
++   /* The texture holds the storage; the image is not needed past it. */
++   vrend_winsys_ferrix_image_destroy(image);
++   return ret;
++}
++
++bool virgl_renderer_ferrix_can_import_dmabuf(void)
++{
++   return vrend_winsys_ferrix_can_import_dmabuf();
++}
++
+ void virgl_renderer_resource_set_priv(uint32_t res_handle, void *priv)
+ {
+    struct virgl_resource *res = virgl_resource_lookup(res_handle);
+--- a/src/virglrenderer.h
++++ b/src/virglrenderer.h
+@@ -277,6 +277,16 @@
+ 
+ VIRGL_EXPORT int virgl_renderer_resource_create(struct virgl_renderer_resource_create_args *args, struct iovec *iov, uint32_t num_iovs);
+ VIRGL_EXPORT int virgl_renderer_resource_import_eglimage(struct virgl_renderer_resource_create_args *args, void *image);
++/*
++ * Ferrix: a 2D texture whose storage is the dmabuf `fd` (one plane, four
++ * bytes a pixel), imported as an EGLImage on the renderer's own display.
++ * The caller keeps `fd`. 0, or an errno.
++ */
++VIRGL_EXPORT int virgl_renderer_ferrix_import_dmabuf(struct virgl_renderer_resource_create_args *args,
++                                                     int fd, uint32_t stride, uint32_t offset,
++                                                     uint64_t modifier);
++/* Ferrix: whether virgl_renderer_ferrix_import_dmabuf can work here. */
++VIRGL_EXPORT bool virgl_renderer_ferrix_can_import_dmabuf(void);
+ VIRGL_EXPORT void virgl_renderer_resource_unref(uint32_t res_handle);
+ 
+ VIRGL_EXPORT void virgl_renderer_resource_set_priv(uint32_t res_handle, void *priv);
+--- a/src/vrend/vrend_winsys.c
++++ b/src/vrend/vrend_winsys.c
+@@ -241,6 +241,41 @@
+ #endif
+ }
+ 
++void *vrend_winsys_ferrix_image_from_dmabuf(uint32_t width, uint32_t height, uint32_t fourcc,
++                                            uint64_t modifier, int fd, uint32_t stride,
++                                            uint32_t offset)
++{
++#ifdef ENABLE_GBM
++   if (!egl)
++      return NULL;
++   return virgl_egl_image_from_dmabuf(egl, width, height, fourcc, modifier, 1, &fd, &stride,
++                                      &offset);
++#else
++   (void)width; (void)height; (void)fourcc; (void)modifier; (void)fd; (void)stride;
++   (void)offset;
++   return NULL;
++#endif
++}
++
++void vrend_winsys_ferrix_image_destroy(void *image)
++{
++#ifdef ENABLE_GBM
++   if (egl && image)
++      virgl_egl_image_destroy(egl, image);
++#else
++   (void)image;
++#endif
++}
++
++bool vrend_winsys_ferrix_can_import_dmabuf(void)
++{
++#ifdef ENABLE_GBM
++   return egl != NULL && virgl_egl_ferrix_has_dmabuf_import(egl);
++#else
++   return false;
++#endif
++}
++
+ int vrend_winsys_get_fd_for_texture2(uint32_t tex_id, int *fd, int *stride, int *offset)
+ {
+ #ifdef ENABLE_GBM
+--- a/src/vrend/vrend_winsys_egl.c
++++ b/src/vrend/vrend_winsys_egl.c
+@@ -772,6 +772,11 @@
+ }
+ #endif
+ 
++bool virgl_egl_ferrix_has_dmabuf_import(struct virgl_egl *egl)
++{
++   return has_bit(egl->extension_bits, EGL_EXT_IMAGE_DMA_BUF_IMPORT);
++}
++
+ bool virgl_has_egl_khr_gl_colorspace(struct virgl_egl *egl)
+ {
+    return has_bit(egl->extension_bits, EGL_KHR_GL_COLORSPACE);
+--- a/src/vrend/vrend_winsys_egl.h
++++ b/src/vrend/vrend_winsys_egl.h
+@@ -61,6 +61,9 @@
+ 
+ bool virgl_has_egl_khr_gl_colorspace(struct virgl_egl *egl);
+ 
++/* Ferrix: whether the display imports dmabufs (EGL_EXT_image_dma_buf_import). */
++bool virgl_egl_ferrix_has_dmabuf_import(struct virgl_egl *egl);
++
+ #ifdef ENABLE_GBM
+ int virgl_egl_get_attrs_for_texture(struct virgl_egl *egl, uint32_t tex_id, uint32_t format,
+                                     int *fourcc, bool *has_dmabuf_export,
+--- a/src/vrend/vrend_winsys.h
++++ b/src/vrend/vrend_winsys.h
+@@ -64,6 +64,13 @@
+ int vrend_winsys_get_fd_for_texture(uint32_t tex_id, int *fd);
+ int vrend_winsys_get_fd_for_texture2(uint32_t tex_id, int *fd, int *stride, int *offset);
+ 
++/* Ferrix: a one-plane dmabuf as an EGLImage on the renderer's display. */
++void *vrend_winsys_ferrix_image_from_dmabuf(uint32_t width, uint32_t height, uint32_t fourcc,
++                                            uint64_t modifier, int fd, uint32_t stride,
++                                            uint32_t offset);
++void vrend_winsys_ferrix_image_destroy(void *image);
++bool vrend_winsys_ferrix_can_import_dmabuf(void);
++
+ uint32_t vrend_winsys_query_video_memory(void);
+ bool vrend_winsys_different_gpu(void);
+ 
+--- a/vtest/vtest.h
++++ b/vtest/vtest.h
+@@ -112,6 +112,7 @@
+ int vtest_drm_sync_query(uint32_t length_dw);
+ int vtest_drm_sync_transfer(uint32_t length_dw);
+ int vtest_resource_export_fd(uint32_t length_dw);
++int vtest_ferrix_resource_import_fd(uint32_t length_dw);
+ 
+ void vtest_set_max_length(uint32_t length);
+ 
+--- a/vtest/vtest_protocol.h
++++ b/vtest/vtest_protocol.h
+@@ -94,6 +94,16 @@
+ #define VCMD_DRM_SYNC_TRANSFER 37
+ #define VCMD_RESOURCE_EXPORT_FD 38
+ 
++/*
++ * Ferrix's own command (not upstream): make a texture resource whose storage
++ * is a dmabuf the client passes, imported as an EGLImage, so that what the
++ * client draws lands in a buffer the display engine can scan out. A client
++ * asks VCMD_GET_PARAM for VCMD_PARAM_FERRIX_IMPORT_FD first: a stock server
++ * answers "not valid" there, where an unknown command would end the
++ * connection.
++ */
++#define VCMD_FERRIX_RESOURCE_IMPORT_FD 64
++
+ #define VCMD_RES_CREATE_SIZE 10
+ #define VCMD_RES_CREATE_RES_HANDLE 0 /* must be 0 since protocol version 3 */
+ #define VCMD_RES_CREATE_TARGET 1
+@@ -163,6 +173,8 @@
+ enum vcmd_param  {
+    VCMD_PARAM_MAX_TIMELINE_COUNT = 1,
+    VCMD_PARAM_HAS_TIMELINE_SYNCOBJ = 2,
++   /* Ferrix: VCMD_FERRIX_RESOURCE_IMPORT_FD, its version in the value. */
++   VCMD_PARAM_FERRIX_IMPORT_FD = 0x46580001,
+ };
+ #define VCMD_GET_PARAM_SIZE 1
+ #define VCMD_GET_PARAM_PARAM 0
+@@ -347,6 +359,32 @@
+ 
+ #define VCMD_RESOURCE_EXPORT_FD_SIZE 1
+ #define VCMD_RESOURCE_EXPORT_FD_RES_HANDLE 0
++
++/*
++ * VCMD_FERRIX_RESOURCE_IMPORT_FD: the words, then one byte carrying the
++ * dmabuf as SCM_RIGHTS. The answer is always sent: a header and one word, 0
++ * or a positive errno, so a refused import leaves the connection usable.
++ * The handle is the client's below protocol version 3 and must be 0 from it
++ * (the server's number then follows the status). Shared memory needs
++ * protocol version 2.
++ */
++#define VCMD_FERRIX_IMPORT_FD_SIZE 10
++#define VCMD_FERRIX_IMPORT_FD_RES_HANDLE 0
++#define VCMD_FERRIX_IMPORT_FD_FORMAT 1
++#define VCMD_FERRIX_IMPORT_FD_BIND 2
++#define VCMD_FERRIX_IMPORT_FD_WIDTH 3
++#define VCMD_FERRIX_IMPORT_FD_HEIGHT 4
++#define VCMD_FERRIX_IMPORT_FD_STRIDE 5
++#define VCMD_FERRIX_IMPORT_FD_OFFSET 6
++#define VCMD_FERRIX_IMPORT_FD_MODIFIER_LO 7
++#define VCMD_FERRIX_IMPORT_FD_MODIFIER_HI 8
++/*
++ * Bytes of shared memory for transfers, as VCMD_RESOURCE_CREATE2's
++ * DATA_SIZE: when not 0 and the import succeeded, the memfd follows the
++ * answer as one byte with SCM_RIGHTS, and TRANSFER_GET2/PUT2 work on the
++ * resource as on one made by VCMD_RESOURCE_CREATE2.
++ */
++#define VCMD_FERRIX_IMPORT_FD_DATA_SIZE 9
+ /* rsp fd */
+ 
+ #endif /* VTEST_PROTOCOL */
+--- a/vtest/vtest_renderer.c
++++ b/vtest/vtest_renderer.c
+@@ -966,6 +966,10 @@
+          resp[1] = VTEST_MAX_TIMELINE_COUNT;
+ #endif
+       break;
++   case VCMD_PARAM_FERRIX_IMPORT_FD:
++      resp[0] = virgl_renderer_ferrix_can_import_dmabuf();
++      resp[1] = resp[0] ? 1 : 0;
++      break;
+    case VCMD_PARAM_HAS_TIMELINE_SYNCOBJ: {
+ #ifdef ENABLE_DRM
+       int fd = virgl_renderer_get_dev_fd(ctx->ctx_id);
+@@ -3053,6 +3057,131 @@
+    return ret;
+ }
+ 
++/*
++ * Ferrix: the largest side an imported buffer may have, which keeps
++ * stride * height inside 64 bits with room and is past any display.
++ */
++#define FERRIX_IMPORT_MAX_SIDE 16384
++
++static int vtest_ferrix_import_answer(struct vtest_context *ctx, uint32_t status,
++                                      uint32_t res_id)
++{
++   uint32_t resp_buf[VTEST_HDR_SIZE + 2];
++   uint32_t words = ctx->protocol_version >= 3 ? 2 : 1;
++
++   resp_buf[VTEST_CMD_LEN] = words;
++   resp_buf[VTEST_CMD_ID] = VCMD_FERRIX_RESOURCE_IMPORT_FD;
++   resp_buf[VTEST_CMD_DATA_START] = status;
++   resp_buf[VTEST_CMD_DATA_START + 1] = res_id;
++   return vtest_block_write(ctx->out_fd, resp_buf, (VTEST_HDR_SIZE + words) * sizeof(uint32_t));
++}
++
++int vtest_ferrix_resource_import_fd(UNUSED uint32_t length_dw)
++{
++   struct vtest_context *ctx = vtest_get_current_context();
++   uint32_t buf[VCMD_FERRIX_IMPORT_FD_SIZE];
++   struct virgl_renderer_resource_create_args args;
++   struct vtest_resource *res;
++   uint64_t modifier, need;
++   uint32_t shm_size;
++   off_t end;
++   int fd, ret, shm_fd = -1;
++
++   ret = ctx->input->read(ctx->input, buf, sizeof(buf));
++   if (ret != sizeof(buf))
++      return -1;
++   fd = vtest_receive_fd(ctx->input->data.fd);
++   if (fd < 0)
++      return fd;
++
++   memset(&args, 0, sizeof(args));
++   args.handle = buf[VCMD_FERRIX_IMPORT_FD_RES_HANDLE];
++   args.target = PIPE_TEXTURE_2D;
++   args.format = buf[VCMD_FERRIX_IMPORT_FD_FORMAT];
++   args.bind = buf[VCMD_FERRIX_IMPORT_FD_BIND];
++   args.width = buf[VCMD_FERRIX_IMPORT_FD_WIDTH];
++   args.height = buf[VCMD_FERRIX_IMPORT_FD_HEIGHT];
++   args.depth = 1;
++   args.array_size = 1;
++   modifier = buf[VCMD_FERRIX_IMPORT_FD_MODIFIER_LO] |
++              (uint64_t)buf[VCMD_FERRIX_IMPORT_FD_MODIFIER_HI] << 32;
++
++   /*
++    * The geometry against the buffer it was given: four bytes a pixel, a
++    * stride that holds a row, and the last row inside the dmabuf's size,
++    * which lseek to its end answers. Anything else is refused, never
++    * imported.
++    */
++   if (args.width == 0 || args.height == 0 || args.width > FERRIX_IMPORT_MAX_SIDE ||
++       args.height > FERRIX_IMPORT_MAX_SIDE ||
++       buf[VCMD_FERRIX_IMPORT_FD_STRIDE] < args.width * 4) {
++      close(fd);
++      return vtest_ferrix_import_answer(ctx, EINVAL, 0);
++   }
++   need = (uint64_t)buf[VCMD_FERRIX_IMPORT_FD_OFFSET] +
++          (uint64_t)buf[VCMD_FERRIX_IMPORT_FD_STRIDE] * args.height;
++   end = lseek(fd, 0, SEEK_END);
++   if (end < 0 || (uint64_t)end < need) {
++      close(fd);
++      return vtest_ferrix_import_answer(ctx, end < 0 ? EBADF : EINVAL, 0);
++   }
++
++   if (ctx->protocol_version >= 3) {
++      if (args.handle) {
++         close(fd);
++         return vtest_ferrix_import_answer(ctx, EINVAL, 0);
++      }
++   } else if (util_hash_table_get(ctx->resource_table, intptr_to_pointer(args.handle))) {
++      close(fd);
++      return vtest_ferrix_import_answer(ctx, EEXIST, 0);
++   }
++
++   res = vtest_new_resource(args.handle);
++   if (!res) {
++      close(fd);
++      return vtest_ferrix_import_answer(ctx, ENOMEM, 0);
++   }
++   args.handle = res->res_id;
++
++   ret = virgl_renderer_ferrix_import_dmabuf(&args, fd, buf[VCMD_FERRIX_IMPORT_FD_STRIDE],
++                                             buf[VCMD_FERRIX_IMPORT_FD_OFFSET], modifier);
++   /* The EGLImage, and the texture made from it, hold the buffer now. */
++   close(fd);
++   if (ret) {
++      vtest_unref_resource(res);
++      return vtest_ferrix_import_answer(ctx, ret > 0 ? (uint32_t)ret : (uint32_t)-ret, 0);
++   }
++
++   virgl_renderer_ctx_attach_resource(ctx->ctx_id, res->res_id);
++
++   shm_size = buf[VCMD_FERRIX_IMPORT_FD_DATA_SIZE];
++   if (shm_size && ctx->protocol_version >= 2) {
++      shm_fd = vtest_create_resource_setup_shm(res, shm_size);
++      if (shm_fd < 0) {
++         vtest_unref_resource(res);
++         return vtest_ferrix_import_answer(ctx, ENOMEM, 0);
++      }
++   }
++   ret = vtest_ferrix_import_answer(ctx, 0, res->res_id);
++   if (ret < 0) {
++      if (shm_fd >= 0)
++         close(shm_fd);
++      vtest_unref_resource(res);
++      return ret;
++   }
++   if (shm_fd >= 0) {
++      ret = vtest_send_fd(ctx->out_fd, shm_fd);
++      close(shm_fd);
++      if (ret < 0) {
++         vtest_unref_resource(res);
++         return ret;
++      }
++      virgl_renderer_resource_attach_iov(res->res_id, &res->iov, 1);
++   }
++   util_hash_table_set(ctx->resource_table, intptr_to_pointer(res->res_id), res);
++   return 0;
++}
++
+ void vtest_set_max_length(uint32_t length)
+ {
+    renderer.max_length = length;
+--- a/vtest/vtest_server.c
++++ b/vtest/vtest_server.c
+@@ -730,6 +730,9 @@
+    HANDLER(DRM_SYNC_TRANSFER,           drm_sync_transfer,         true   ),
+ #endif /* ENABLE_DRM */
+    HANDLER(RESOURCE_EXPORT_FD,          resource_export_fd,        true   ),
++
++   /* Ferrix's own (vtest_protocol.h) */
++   HANDLER(FERRIX_RESOURCE_IMPORT_FD,   ferrix_resource_import_fd, true   ),
+ };
+ 
+ static int vtest_client_dispatch_commands(struct vtest_client *client)

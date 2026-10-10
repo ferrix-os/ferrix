@@ -502,6 +502,39 @@ impl Render {
         self.ioctl(drm::IOCTL_GEM_CLOSE, &mut request)
     }
 
+    /// A pitch-linear buffer NVKMS can scan out, `size` bytes, from
+    /// nvidia-drm's `DRM_IOCTL_NVIDIA_GEM_ALLOC_NVKMS_MEMORY`, answering its
+    /// handle (nvrm's `drm.c` `drm_alloc`: pitch-linear is system memory
+    /// today, video memory once name-only dmabufs land, vramdmabuf).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the node said; `ENOTTY` from a node that is not
+    /// nvidia-drm's, `EOPNOTSUPP` from one with no display.
+    pub fn nvidia_alloc_scanout(&self, size: u64) -> io::Result<u32> {
+        // `struct drm_nvidia_gem_alloc_nvkms_memory_params`, 24 bytes:
+        // handle u32, block_linear u8, compressible u8, pad0 u16,
+        // memory_size u64, flags u32 (0: a scanout buffer), pad1 u32.
+        const ALLOC_NVKMS_MEMORY: u32 = 0xC018_644B;
+        let mut bytes = [0_u8; 24];
+        let (_, size_field) = bytes.split_at_mut(8);
+        if let Some(field) = size_field.get_mut(..8) {
+            field.copy_from_slice(&size.to_le_bytes());
+        }
+        // SAFETY: a live buffer of exactly the 24 bytes the request's number
+        // encodes, which the driver reads and writes within.
+        let result = unsafe { libc::ioctl(self.fd, ALLOC_NVKMS_MEMORY as _, bytes.as_mut_ptr()) };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut handle = [0_u8; 4];
+        handle.copy_from_slice(bytes.get(..4).unwrap_or(&[0; 4]));
+        match u32::from_le_bytes(handle) {
+            0 => Err(io::Error::other("the driver gave no handle")),
+            handle => Ok(handle),
+        }
+    }
+
     /// What `VIRTGPU_RESOURCE_INFO` says is behind object `handle`: its
     /// resource and its size.
     ///
@@ -560,10 +593,7 @@ impl Mapping {
         if at == libc::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self {
-            at: at.cast(),
-            len,
-        })
+        Ok(Self { at: at.cast(), len })
     }
 }
 

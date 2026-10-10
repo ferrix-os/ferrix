@@ -371,6 +371,19 @@ fn shared_memory_is_mapped_only_sealed_and_big_enough() {
     let sealed = unsafe { libc::fcntl(wrong.as_raw_fd(), libc::F_ADD_SEALS, libc::F_SEAL_SEAL) };
     assert_eq!(sealed, 0);
     assert!(!crate::vtest::adopt_for_test(wrong.as_fd(), 16, 16).expect("asked"));
+    // A file its maker sealed against writes through new mappings cannot be
+    // mapped writable: that texture goes without, it is not an error.
+    let unwritable = memfd(16 * 16 * 4, true);
+    // SAFETY: as above; only the file's seals change.
+    let sealed = unsafe {
+        libc::fcntl(
+            unwritable.as_raw_fd(),
+            libc::F_ADD_SEALS,
+            libc::F_SEAL_FUTURE_WRITE,
+        )
+    };
+    assert_eq!(sealed, 0);
+    assert!(!crate::vtest::adopt_for_test(unwritable.as_fd(), 16, 16).expect("not an error"));
     // An empty texture has nothing to map.
     let any = memfd(4096, true);
     assert!(!crate::vtest::adopt_for_test(any.as_fd(), 0, 16).expect("asked"));

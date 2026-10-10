@@ -3077,7 +3077,10 @@ fn gpu_for(
         Renderer::Vtest => compositor_virgl::vtest::Vtest::start(&format!("hyprix-{screen}"))
             .map_err(|error| error.to_string())
             .and_then(|server| server.ok_or_else(|| "no virgl_test_server".to_owned()))
-            .map(|server| Box::new(server) as Box<dyn compositor_virgl::Device>),
+            .map(|mut server| {
+                scanouts_for(&mut server);
+                Box::new(server) as Box<dyn compositor_virgl::Device>
+            }),
         Renderer::Auto | Renderer::Gpu => render_node(),
     };
     let made = device.and_then(|device| {
@@ -3136,6 +3139,19 @@ fn adopt(
         )),
     }
 }
+
+/// Give the test server nvidia-drm's buffers to draw frames into, where
+/// there is an nvidia-drm render node (`crate::scanouts`).
+#[cfg(target_os = "linux")]
+fn scanouts_for(server: &mut compositor_virgl::vtest::Vtest) {
+    if let Some(source) = crate::scanouts::NvidiaScanouts::open() {
+        server.set_scanout_source(Box::new(source));
+    }
+}
+
+/// The same, where there is no `/dev/dri`.
+#[cfg(not(target_os = "linux"))]
+fn scanouts_for(_server: &mut compositor_virgl::vtest::Vtest) {}
 
 /// The card's render node, when its driver speaks virgl.
 #[cfg(target_os = "linux")]

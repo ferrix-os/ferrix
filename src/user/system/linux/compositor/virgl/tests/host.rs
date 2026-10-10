@@ -603,3 +603,309 @@ fn shared_memory_moves_the_pixels_the_socket_does() {
     assert_eq!(uploaded, &expected, "the second upload");
     assert_eq!(socket, shared, "version 0 and version 2 agree");
 }
+
+/// Ferrix's patched server, built by tools/common/fetch/fetch-virgl-server.sh:
+/// `FERRIX_VIRGL_SERVER_BIN`, or where that script puts it.
+fn patched_server() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("FERRIX_VIRGL_SERVER_BIN")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                std::path::PathBuf::from(home)
+                    .join(".local/share/ferrix/virgl-server/out/usr/bin/virgl_test_server")
+            })
+        })?;
+    path.is_file().then_some(path)
+}
+
+/// One texture drawn and read back, to show the connection still works.
+#[expect(clippy::expect_used, reason = "a test's helper")]
+fn still_draws(server: &mut Vtest) {
+    use compositor_virgl::{Device, Texture};
+    let target = server
+        .texture(Texture {
+            width: 8,
+            height: 8,
+            format: pipe::FORMAT_B8G8R8A8_UNORM,
+            bind: pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+            moved: true,
+            scanout: false,
+        })
+        .expect("a texture after the import");
+    let mut stream = Stream::new();
+    stream.create_surface(SURFACE, target, pipe::FORMAT_B8G8R8A8_UNORM);
+    stream.set_framebuffer(SURFACE);
+    stream.clear([0.0, 0.0, 1.0, 1.0]);
+    Device::submit(server, stream.words()).expect("submitted");
+    let pixels = server
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 8,
+            },
+        )
+        .expect("read back");
+    assert_eq!(
+        pixel(&pixels, 8, 3, 3),
+        0xff00_00ff,
+        "the clear, after the import"
+    );
+}
+
+/// A memfd standing in for a dmabuf: `lseek` gives its size, as a dmabuf's,
+/// and no EGL takes it as one.
+#[expect(clippy::expect_used, reason = "a test's helper")]
+fn not_a_dmabuf(len: i64) -> std::os::fd::OwnedFd {
+    use std::os::fd::FromRawFd;
+    // SAFETY: a fresh descriptor from a constant name.
+    let raw = unsafe { libc::memfd_create(c"not-a-dmabuf".as_ptr(), libc::MFD_CLOEXEC) };
+    assert!(raw >= 0);
+    // SAFETY: just made, owned by nothing else.
+    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    // SAFETY: a descriptor this test holds.
+    assert_eq!(unsafe { libc::ftruncate(raw, len) }, 0);
+    let _ = fd.try_clone().expect("cloneable");
+    fd
+}
+
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_stock_server_is_never_sent_the_import() {
+    use std::os::fd::AsFd;
+    let Some(mut server) = server("stock-import") else {
+        return;
+    };
+    if server.can_import().expect("asked") {
+        eprintln!("stock-import: the server on PATH is a patched one; skipped");
+        return;
+    }
+    let buffer = not_a_dmabuf(64 * 64 * 4);
+    let error = server
+        .import(
+            buffer.as_fd(),
+            pipe::FORMAT_B8G8R8X8_UNORM,
+            pipe::BIND_RENDER_TARGET,
+            (64, 64),
+            256,
+            0,
+            0,
+        )
+        .expect_err("a stock server takes no import");
+    assert_eq!(error.raw_os_error(), Some(libc::EOPNOTSUPP));
+    still_draws(&mut server);
+}
+
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn the_patched_server_refuses_a_buffer_its_geometry_does_not_fit() {
+    use std::os::fd::AsFd;
+    let Some(program) = patched_server() else {
+        eprintln!("patched-import: no patched virgl_test_server built; skipped");
+        return;
+    };
+    let Ok(Some(mut server)) = Vtest::start_program(&program, "patched-import", 2) else {
+        eprintln!("patched-import: the patched server would not start; skipped");
+        return;
+    };
+    assert!(
+        server.can_import().expect("asked"),
+        "the patched server says it imports"
+    );
+    let refuse = |server: &mut Vtest, len: i64, size: (u32, u32), stride: u32, offset: u32| {
+        let buffer = not_a_dmabuf(len);
+        server
+            .import(
+                buffer.as_fd(),
+                pipe::FORMAT_B8G8R8X8_UNORM,
+                pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+                size,
+                stride,
+                offset,
+                0,
+            )
+            .expect_err("refused")
+            .raw_os_error()
+    };
+    // A stride shorter than a row, a buffer shorter than its rows, an offset
+    // pushing the last row past the end, and no size: each EINVAL, before
+    // EGL is asked anything.
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4, (64, 64), 255, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4 - 1, (64, 64), 256, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 64 * 64 * 4, (64, 64), 256, 4),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 4096, (0, 64), 256, 0),
+        Some(libc::EINVAL)
+    );
+    assert_eq!(
+        refuse(&mut server, 1 << 30, (20000, 4), 80000, 0),
+        Some(libc::EINVAL)
+    );
+    // A geometry that fits, of a file that is no dmabuf: EGL refuses it, and
+    // the server says so rather than ending the connection.
+    let fits = refuse(&mut server, 64 * 64 * 4, (64, 64), 256, 0);
+    assert!(
+        fits.is_some_and(|errno| errno != 0),
+        "refused by EGL: {fits:?}"
+    );
+    assert_eq!(server.imported_textures(), 0);
+    still_draws(&mut server);
+}
+
+/// A dmabuf of system memory, from the host's `/dev/udmabuf` over a sealed
+/// memfd, and the memfd: `None` where the host has none to give.
+fn udmabuf(len: u64) -> Option<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    // SAFETY: a fresh descriptor from a constant name.
+    let raw = unsafe {
+        libc::memfd_create(
+            c"udmabuf".as_ptr(),
+            libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+        )
+    };
+    if raw < 0 {
+        return None;
+    }
+    // SAFETY: just made, owned by nothing else.
+    let memory = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    // SAFETY: a descriptor this test holds.
+    if unsafe { libc::ftruncate(raw, i64::try_from(len).ok()?) } != 0 {
+        return None;
+    }
+    // SAFETY: as above; only the seals change.
+    if unsafe { libc::fcntl(raw, libc::F_ADD_SEALS, libc::F_SEAL_SHRINK) } != 0 {
+        return None;
+    }
+    let device = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/udmabuf")
+        .ok()?;
+    // `struct udmabuf_create`: memfd, flags, offset, size.
+    let mut create = [0_u8; 24];
+    create[..4].copy_from_slice(&(memory.as_raw_fd() as u32).to_le_bytes());
+    create[4..8].copy_from_slice(&1_u32.to_le_bytes()); // UDMABUF_FLAGS_CLOEXEC
+    create[16..24].copy_from_slice(&len.to_le_bytes());
+    // SAFETY: UDMABUF_CREATE reads the 24 bytes it is given.
+    let made = unsafe { libc::ioctl(device.as_raw_fd(), 0x4018_7542, create.as_mut_ptr()) };
+    if made < 0 {
+        return None;
+    }
+    // SAFETY: the descriptor the ioctl just made, owned by nothing else.
+    Some((unsafe { std::os::fd::OwnedFd::from_raw_fd(made) }, memory))
+}
+
+#[test]
+#[expect(clippy::print_stderr, reason = "a test that did not run says so")]
+fn a_frame_is_drawn_into_an_imported_buffer() {
+    use compositor_virgl::Device;
+    use std::os::fd::AsFd;
+    let Some(program) = patched_server() else {
+        eprintln!("import-draw: no patched virgl_test_server built; skipped");
+        return;
+    };
+    let Ok(Some(mut server)) = Vtest::start_program(&program, "import-draw", 2) else {
+        eprintln!("import-draw: the patched server would not start; skipped");
+        return;
+    };
+    let side = 64_u32;
+    let stride = 256_u32;
+    let Some((dmabuf, memory)) = udmabuf(u64::from(stride * side).next_multiple_of(4096)) else {
+        eprintln!("import-draw: no /dev/udmabuf to make a dmabuf with; skipped");
+        return;
+    };
+    // Blue in the memory first, as a client's frame would be.
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::from(memory.try_clone().expect("cloned"));
+        let blue: Vec<u8> = (0..stride * side / 4)
+            .flat_map(|_| [0xff_u8, 0, 0, 0xff])
+            .collect();
+        file.write_all(&blue).expect("written");
+    }
+    let target = match server.import(
+        dmabuf.as_fd(),
+        pipe::FORMAT_B8G8R8X8_UNORM,
+        pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW,
+        (side, side),
+        stride,
+        0,
+        0,
+    ) {
+        Ok(target) => target,
+        Err(error) => {
+            eprintln!("import-draw: this host's EGL would not import a udmabuf ({error}); skipped");
+            return;
+        }
+    };
+    let before = server
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: side,
+                height: side,
+            },
+        )
+        .expect("read back before");
+    eprintln!(
+        "import-draw: before drawing the texture reads {:08x}",
+        pixel(&before, side, 5, 5)
+    );
+    let mut stream = Stream::new();
+    stream.create_surface(SURFACE, target, pipe::FORMAT_B8G8R8X8_UNORM);
+    stream.set_framebuffer(SURFACE);
+    stream.clear([0.0, 1.0, 0.0, 1.0]);
+    Device::submit(&mut server, stream.words()).expect("submitted");
+    // Read back through the server: the GL texture is the buffer.
+    let pixels = server
+        .read(
+            target,
+            Region {
+                x: 0,
+                y: 0,
+                width: side,
+                height: side,
+            },
+        )
+        .expect("read back");
+    assert_eq!(
+        pixel(&pixels, side, 5, 5) & 0x00ff_ffff,
+        0x0000_ff00,
+        "the clear, read back"
+    );
+    // And in the buffer's own memory, with no transfer: the frame is where
+    // a display engine would scan it out.
+    // (At its own offset: the descriptor's position is shared with the
+    // clone the blue was written through.)
+    let file = std::fs::File::from(memory);
+    let mut bytes = [0_u8; 4];
+    std::os::unix::fs::FileExt::read_exact_at(&file, &mut bytes, u64::from(5 * stride + 5 * 4))
+        .expect("the memory");
+    // Whether the drawing lands in the memory is the importing driver's:
+    // NVIDIA's EGL on a host takes a foreign (udmabuf) buffer's pixels in
+    // and draws into a copy of its own (measured 2026-10-10: blue stays),
+    // where a buffer nvidia-drm made is its own memory. Said, not judged;
+    // the card run judges it.
+    eprintln!(
+        "import-draw: the dmabuf's memory holds {:02x?} after the clear ({})",
+        &bytes[..3],
+        if bytes[..3] == [0, 0xff, 0] {
+            "the drawing is in the buffer"
+        } else {
+            "this driver drew into a copy"
+        }
+    );
+}

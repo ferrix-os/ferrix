@@ -535,24 +535,28 @@ pub(super) fn build_parts(
         carried_too.pulsed.as_deref(),
         args.session_user.as_deref(),
     )?;
-    // `FERRIX_VTEST_PROTOCOL` from the host, for hyprix's test-server client
-    // under `--nvidia`: `0` keeps the frames on the socket, which is how
-    // protocol 2's shared memory is measured against it (N3c).
-    if let Some(protocol) = std::env::var("FERRIX_VTEST_PROTOCOL")
-        .ok()
-        .filter(|value| args.nvidia && value.bytes().all(|byte| byte.is_ascii_digit()))
-    {
+    // `FERRIX_VTEST_PROTOCOL` and `FERRIX_VTEST_SCANOUT` from the host, for
+    // hyprix's test-server client under `--nvidia`: protocol `0` keeps the
+    // frames on the socket, which is how protocol 2's shared memory is
+    // measured against it (N3c); scanout `1` draws frames into nvidia-drm's
+    // own buffers (zerocopy).
+    for name in ["FERRIX_VTEST_PROTOCOL", "FERRIX_VTEST_SCANOUT"] {
+        let Some(value) = std::env::var(name).ok().filter(|value| {
+            args.nvidia && !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+        }) else {
+            continue;
+        };
         for file in &mut carried {
             if file.path == "etc/ferrix/units/hyprix.service"
                 && let crate::ports::Content::Bytes(bytes) = &mut file.content
             {
                 let unit = String::from_utf8_lossy(bytes).replacen(
                     "[Service]\n",
-                    &format!("[Service]\nEnvironment=FERRIX_VTEST_PROTOCOL={protocol}\n"),
+                    &format!("[Service]\nEnvironment={name}={value}\n"),
                     1,
                 );
                 *bytes = unit.into_bytes();
-                println!("  n3c: hyprix runs with FERRIX_VTEST_PROTOCOL={protocol}");
+                println!("  hyprix runs with {name}={value}");
             }
         }
     }

@@ -44,6 +44,8 @@ pub mod plane;
 pub mod plugins;
 pub mod pool;
 pub mod rules;
+#[cfg(target_os = "linux")]
+pub(crate) mod scanouts;
 pub mod scope;
 pub mod seat;
 pub mod select;
