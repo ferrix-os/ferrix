@@ -336,6 +336,10 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     let (image, _) = build_desktop_image(arch, &programs, &config, carried, args, &defaults)?;
     // On the 3060's own monitor: libvirt's domain, not a QEMU window.
     if args.nvidia {
+        if std::env::var_os("FERRIX_N3C_BUILD_ONLY").is_some() {
+            println!("  n3c: built {}; not booting", image.display());
+            return Ok(());
+        }
         return crate::nvidia::run_desktop(&image, args);
     }
     // The host's GPU behind the card where it can be had: `window::watched_gl`
