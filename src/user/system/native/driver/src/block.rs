@@ -297,6 +297,11 @@ fn serve_until<D: Device>(
             Ok(packet) => packet,
             Err(Error::TimedOut) => {
                 serve.on_watch().map_err(faulted)?;
+                // A watch that found completions no interrupt announced,
+                // or finished requests itself, has them taken now.
+                if serve.wants_drain() {
+                    ring_bell(kernel_port, serve.on_interrupt(&mut out).map_err(faulted)?);
+                }
                 continue;
             }
             Err(_) => return Err(Step::Events),
