@@ -214,7 +214,9 @@ of the 580.173.02 libraries on nazuna (`libnvidia-glcore`, `libnvidia-eglcore`,
   `~/ferrix-nvidia-vm/ferrix.img`.
 * **Machine**:
   * q35 with OVMF (`OVMF_CODE_4M.fd`, no Secure Boot) and KVM;
-  * 2 vCPUs (`host-passthrough`, `maxphysaddr` passthrough) and 4 GiB;
+  * 2 vCPUs (`host-passthrough`, `maxphysaddr` passthrough, `invtsc`
+    required with `migratable='off'`: without that bit the kernel's clock
+    is the HPET, three exits to QEMU a reading) and 4 GiB;
   * a VT-d unit (`intremap='off' caching_mode='on' aw_bits='48'`), with
     `caching_mode` because VFIO requires it behind a vIOMMU;
   * a virtio-rng that goes through the IOMMU (`<driver iommu='on'/>`);
@@ -3465,7 +3467,7 @@ filed" paragraph by this branch, and filed with its fix.
     <nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd' templateFormat='raw' format='raw'>/var/lib/libvirt/qemu/nvram/ferrix-3060_VARS.fd</nvram>
   </os>
   <features><acpi/><apic/></features>
-  <cpu mode='host-passthrough' check='none'><maxphysaddr mode='passthrough'/></cpu>
+  <cpu mode='host-passthrough' check='none' migratable='off'><maxphysaddr mode='passthrough'/><feature policy='require' name='invtsc'/></cpu>
   <on_poweroff>destroy</on_poweroff><on_reboot>destroy</on_reboot><on_crash>destroy</on_crash>
   <devices>
     <disk type='file' device='disk'>
