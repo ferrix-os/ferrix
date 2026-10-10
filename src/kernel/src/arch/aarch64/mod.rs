@@ -1555,6 +1555,13 @@ pub(crate) const fn thread_area(_index: usize) -> Option<u64> {
     None
 }
 
+/// The `FS` or `GS` base `arch_prctl`'s `code` asks for: x86-64's, which
+/// this architecture has neither of. Never asked, since no table here maps
+/// the call.
+pub(crate) const fn user_base(_code: u64) -> Option<u64> {
+    None
+}
+
 /// Permit this processor to touch user pages until [`forbid_user_access`].
 ///
 /// Clears `PSTATE.PAN`. `cpu::permit_user_access` explains why almost nothing

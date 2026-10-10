@@ -80,6 +80,10 @@ const CR4_UMIP: u64 = 1 << 11;
 /// unless `EFLAGS.AC` is set.
 const CR4_SMAP: u64 = 1 << 21;
 
+/// `CR4.FSGSBASE` — `RDFSBASE`, `RDGSBASE`, `WRFSBASE` and `WRGSBASE` may run,
+/// in ring 3 too. Kept clear ([`forbid_user_base_writes`]).
+pub(crate) const CR4_FSGSBASE: u64 = 1 << 16;
+
 /// `CR4.OSXSAVE` — `XSAVE`, `XRSTOR` and `XSETBV` may run, and `CPUID` tells
 /// a program so (leaf 1, `ECX` bit 27), which is what it reads before it
 /// asks `XGETBV` whether it may use AVX.
@@ -354,6 +358,25 @@ pub(crate) fn enable_user_access_protection() -> (bool, bool) {
     SMAP_ON.store(smap, Ordering::Relaxed);
 
     (smep, smap)
+}
+
+/// Clear `CR4.FSGSBASE` on the boot processor, whatever firmware left there.
+///
+/// With it set, `WRGSBASE` in ring 3 writes any canonical address to
+/// `GS_BASE`, a kernel one included, with no call for the kernel to refuse.
+/// The paranoid entries tell the kernel's `GS` from a program's by the base's
+/// sign bit (`super::paranoid`), so a program holding an upper-half base
+/// would run an NMI's or a breakpoint's handler on its own "per-CPU
+/// record". `arch_prctl(ARCH_SET_GS)` is the way to set the base, and it
+/// refuses such an address. Nothing in the kernel uses the four
+/// instructions, and `AT_HWCAP2` does not offer them (`user_hwcaps`).
+///
+/// Secondary processors inherit it with the rest of the boot processor's
+/// `CR4`.
+pub(crate) fn forbid_user_base_writes() {
+    // SAFETY: (PROTECT) clearing the bit is legal on every processor, and
+    // changes only whether four instructions the kernel never executes run.
+    unsafe { write_cr4(read_cr4() & !CR4_FSGSBASE) };
 }
 
 /// Keep the descriptor tables' addresses from ring 3, where the processor

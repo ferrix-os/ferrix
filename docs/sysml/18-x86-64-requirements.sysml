@@ -187,25 +187,31 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::load_user_gs");
         }
         requirement <'L.x86_64.9'> fsGsBaseTravelsWithTask : ItemLowLevel {
-            doc /* The GS half of 3b (OPAQUE-KERNEL.md §9.8), in a row of its own
-                and unverified (the consultant's condition (a), ledger 387): no
-                call sets a 64-bit program's GS base (arch_prctl answers ARCH_SET_GS
-                with EINVAL), so every record is zero and no case can tell a written
-                zero from a kept one; on the gate host a null selector load clears
-                the base besides. The FS half is L.x86_64.61 and L.x86_64.158. */
+            doc /* The GS half of 3b (OPAQUE-KERNEL.md §9.8), in a row of its own.
+                Until arch_prctl answered ARCH_SET_GS no call set a 64-bit
+                program's GS base, every record was zero, and the row stood
+                unverified (the consultant's condition (a), ledger 387). The call
+                sets one now (docs/WINE.md §3), so two programs with different
+                bases tell a written base from a kept one. The FS half is
+                L.x86_64.61 and L.x86_64.158. */
             attribute :>> statement = "A task's program GS base shall be its
-                UserState's record, zeroed by execve beside the MSR and never read
-                back at a switch, and restore_user_state shall write it at every
-                switch to a task with user state whose GS selector is null.";
-            attribute :>> criterion = "A 64-bit program with a null GS selector,
-                pinned to one processor with an i386 program whose GS selector is a
-                thread-local entry, reads its recorded GS base through %gs after
-                each of N sched_yields: 0 foreign reads.";
+                UserState's record, written by arch_prctl(ARCH_SET_GS) beside the
+                shadow MSR with interrupts masked, zeroed by execve beside the MSR
+                and never read back at a switch, and restore_user_state shall
+                write it at every switch to a task with user state whose GS
+                selector is null.";
+            attribute :>> criterion = "Two 64-bit programs pinned to one processor
+                each set a distinct GS base with ARCH_SET_GS and read their own
+                words through %gs 10,000 times across sched_yield (the `fsbase`
+                line's GS half); with the call writing the MSR and not the record,
+                the first read after a switch faults and the check fails by name.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::switch::save_user_state",
                 "arch::x86_64::switch::restore_user_state",
                 "arch::x86_64::switch::load_selectors",
-                "arch::x86_64::switch::UserState::set_bases");
+                "arch::x86_64::switch::UserState::set_bases",
+                "arch::x86_64::switch::UserState::set_gs_base",
+                "arch::x86_64::syscall::arch_prctl");
         }
         requirement <'L.x86_64.10'> fpuStateTravelsWithTask : ItemLowLevel {
             attribute :>> statement = "save_user_state shall save the outgoing
@@ -1118,14 +1124,32 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::read_gdt");
         }
         requirement <'L.x86_64.60'> archPrctlRefusals : ItemLowLevel {
-            attribute :>> statement = "arch_prctl shall refuse ARCH_SET_FS with an
-                address outside the user half with EPERM, and any other request with
-                EINVAL.";
-            attribute :>> criterion = "A program's ARCH_SET_FS with
-                0xffff800000000000 answers -1 and its ARCH_GET_FS -22, and it exits
-                0 (the `prctl` line).";
+            doc /* ARCH_SET_GS's refusal is what the paranoid entries' rule rests
+                on (L.x86_64.25, arch/x86_64/paranoid.rs): a
+                program's GS base never has its sign bit set, so GS_BASE itself
+                says whose it is. CR4.FSGSBASE stays clear for the same reason
+                (docs/WINE.md §3). */
+            attribute :>> statement = "arch_prctl shall refuse ARCH_SET_FS and
+                ARCH_SET_GS with an address outside the user half with EPERM,
+                ARCH_GET_FS and ARCH_GET_GS with an unwritable address with
+                EFAULT, and any request but those four with EINVAL; ARCH_GET_FS
+                and ARCH_GET_GS shall write the calling thread's base to the
+                address given; and forbid_user_base_writes shall clear
+                CR4.FSGSBASE, so that no program writes a base without the
+                call.";
+            attribute :>> criterion = "A program's ARCH_SET_FS and ARCH_SET_GS with
+                0xffff800000000000 and its ARCH_SET_GS with 0x800000000000 answer
+                -1, its request 0x1000 -22 and its ARCH_GET_FS into address 0 -14;
+                the GS base it then sets reads back through %gs:0 and ARCH_GET_GS,
+                and the FS base through ARCH_GET_FS; it exits 0; CR4.FSGSBASE
+                reads clear and a program's WRGSBASE ends it with SIGILL (the
+                `prctl` line). With the GS refusal dropped the program exits 2,
+                and on a processor with FSGSBASE and the bit set the check fails
+                by name.";
             attribute :>> parent = "H.TRAP.1";
-            attribute :>> unit = "arch::x86_64::syscall::arch_prctl";
+            attribute :>> unit = ("arch::x86_64::syscall::arch_prctl",
+                "arch::x86_64::syscall::user_base",
+                "arch::x86_64::cpu::forbid_user_base_writes");
         }
         requirement <'L.x86_64.61'> threadPointerPerTask : ItemLowLevel {
             attribute :>> statement = "arch_prctl(ARCH_SET_FS) with a user address

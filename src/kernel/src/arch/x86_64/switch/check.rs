@@ -55,6 +55,8 @@ pub(crate) struct Report {
     pub(crate) kept: u32,
     /// Times two programs traded the processor with their own `FS` bases.
     pub(crate) traded: u32,
+    /// The same, with their own `GS` bases, set by `ARCH_SET_GS`.
+    pub(crate) traded_gs: u32,
     /// Whether the processor saves with `XSAVE`, without which the vector
     /// cases are not run: the reset is an `XRSTOR` of an empty header.
     pub(crate) xsave: bool,
@@ -625,6 +627,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         }
     }
     report.traded = check_programs_trade_their_fs_bases()?;
+    report.traded_gs = check_programs_trade_their_gs_bases()?;
     check_a_cleared_base_comes_back_and_leaks_nowhere()?;
     Ok(report)
 }
@@ -1131,6 +1134,33 @@ fn check_programs_trade_their_fs_bases() -> Result<u32, &'static str> {
     Ok(FS_ROUNDS * 2)
 }
 
+/// The same trade with `GS` bases, each set with `arch_prctl(ARCH_SET_GS)`:
+/// the call writes the base to the task's record beside the shadow MSR, and
+/// the switch writes the incoming task's from its record. A call that
+/// wrote the MSR alone would leave the record zero, and the first switch
+/// back to the program would hand it a `GS` base of zero, where nothing is
+/// mapped.
+///
+/// Verifies: `L.x86_64.9`
+fn check_programs_trade_their_gs_bases() -> Result<u32, &'static str> {
+    let first = gs_program(BASE_LOW, 0x9999_AAAA_BBBB_CCCC)?;
+    let second = gs_program(BASE_HIGH, 0xDDDD_EEEE_FFFF_0001)?;
+    let [first, second] = run_fs_pair(&first, &second)?;
+    for status in [first, second] {
+        match status {
+            Some(0) => {}
+            Some(8 | 9) => return Err("a GS program's mmap or arch_prctl failed"),
+            Some(_) => {
+                return Err(
+                    "two programs trading one processor did not each read their own GS base",
+                );
+            }
+            None => return Err("a GS program never ended"),
+        }
+    }
+    Ok(FS_ROUNDS * 2)
+}
+
 /// A program that loads `USER_DS` and then a null selector into `FS` --
 /// which leaves the base the descriptor's or cleared, by vendor -- gets its
 /// recorded base back after a switch (Linux's rule); and a second program,
@@ -1201,6 +1231,33 @@ fn fs_program(mode: u8, base: u64, magic: u64) -> Result<Arc<Process>, &'static 
     patch(&mut code, 24, &(gdt::USER_DATA | 3).to_le_bytes())?;
     patch(&mut code, 28, &FS_ROUNDS.to_le_bytes())?;
     load(b"/fs-base", &code)
+}
+
+/// Where [`FS_PROGRAM`]'s `read_fs` has its `FS` prefix, and where its
+/// `set_fs` has the low byte of `ARCH_SET_FS`: the two bytes that make it a
+/// `GS` program.
+const FS_PREFIX_AT: usize = 0xe9;
+/// See [`FS_PREFIX_AT`].
+const SET_FS_AT: usize = 0x102;
+
+/// [`FS_PROGRAM`] in mode `t`, reading through `%gs:0` a base it set with
+/// `ARCH_SET_GS` (`0x1001`): the same program with a `GS` prefix (`0x65`)
+/// for its `FS` one and the other request's number.
+fn gs_program(base: u64, magic: u64) -> Result<Arc<Process>, &'static str> {
+    let mut code = FS_PROGRAM.to_vec();
+    if code.get(4) != Some(&b'?')
+        || code.get(FS_PREFIX_AT) != Some(&0x64)
+        || code.get(SET_FS_AT..SET_FS_AT + 2) != Some(&[0x02, 0x10])
+    {
+        return Err("the FS program's FS prefix or request is not where its layout says");
+    }
+    patch(&mut code, 4, b"t")?;
+    patch(&mut code, 8, &base.to_le_bytes())?;
+    patch(&mut code, 16, &magic.to_le_bytes())?;
+    patch(&mut code, 28, &FS_ROUNDS.to_le_bytes())?;
+    patch(&mut code, FS_PREFIX_AT, &[0x65])?;
+    patch(&mut code, SET_FS_AT, &[0x01])?;
+    load(b"/gs-base", &code)
 }
 
 // ---------------------------------------------------------------------------
@@ -1741,8 +1798,8 @@ fn under_tcg() -> bool {
 /// patched at 24 there, makes it its `FS` base by `arch_prctl(ARCH_SET_FS)`,
 /// and after each yield exits 2 or 3 unless `FS` and `GS` read 0, 4 unless
 /// `%fs:0` is its word, and 5 unless `%gs:0x400100` is its own word at
-/// `0x400100` -- which only a `GS` base of 0, its recorded one, gives (Ferrix
-/// has no `ARCH_SET_GS`, the consultant's K2); `T` installs a flat 32-bit
+/// `0x400100` -- which only a `GS` base of 0, its recorded one, gives (it
+/// sets none; the consultant's K2); `T` installs a flat 32-bit
 /// data descriptor based at the data segment through `set_thread_area` and
 /// before each yield loads its selector into `FS` and `GS`, then 0; `C` and
 /// `G` yield, then far-return into compatibility mode and read through `FS`

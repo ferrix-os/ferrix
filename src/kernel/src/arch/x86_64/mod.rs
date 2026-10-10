@@ -220,8 +220,10 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
     }
     crate::console::println!(
         "  fsbase   {} switches between two FS bases, each its own; a base cleared by a null \
-         selector came back as recorded, and leaked to no program",
-        report.traded
+         selector came back as recorded, and leaked to no program; {} switches between two GS \
+         bases set with ARCH_SET_GS, each its own",
+        report.traded,
+        report.traded_gs
     );
     let selectors = switch::check::run_selectors()?;
     let compat = if selectors.compat_decided {
@@ -265,6 +267,9 @@ pub(crate) unsafe fn init_traps() {
         if smep { "on" } else { "unavailable" },
         if smap { "on" } else { "unavailable" },
     );
+    // The paranoid entries' rule: no program writes its `GS` base without a
+    // call that can refuse the address.
+    cpu::forbid_user_base_writes();
     // KASLR's: a moved image is no secret while ring 3 can ask for the IDT's
     // address. Not in a kernel built `--mitigations off`, which does not move.
     let umip = if super::HARDENED {
@@ -1902,7 +1907,7 @@ pub(crate) use switch::{
     UserState, prepare_stack, reset_user_state, restore_user_state, save_user_state,
     selector_skips_total, set_thread_area, switch_to, thread_area,
 };
-pub(crate) use syscall::{UserRegs, resume_user};
+pub(crate) use syscall::{UserRegs, resume_user, user_base};
 
 /// Nothing to clean: every device a PC's kernel drives snoops the caches, so
 /// what a processor wrote is what the device reads.

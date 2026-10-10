@@ -68,6 +68,21 @@ pub(crate) fn sys_get_thread_area(process: &Process, u_info: u64) -> Result<usiz
     Ok(0)
 }
 
+/// `arch_prctl(ARCH_GET_FS, addr)` and `arch_prctl(ARCH_GET_GS, addr)`: write
+/// the calling thread's `FS` or `GS` base to `addr`. The requests that set
+/// a base never get here: x86-64's entry answers them itself, before the
+/// dispatcher, and every other request with them.
+///
+/// # Errors
+///
+/// `EINVAL` for a `code` that is neither request, and `EFAULT` for an
+/// unwritable `addr`.
+pub(crate) fn sys_arch_prctl(process: &Process, code: u64, addr: u64) -> Result<usize, Errno> {
+    let base = arch::user_base(code).ok_or(Errno::EINVAL)?;
+    uaccess::put_word(process.space(), addr, base)?;
+    Ok(0)
+}
+
 /// The thread-local slot and descriptor a 32-bit program's `clone` with
 /// `CLONE_SETTLS` asks its child to start with: the `struct user_desc` at
 /// `u_info`, which must name its entry -- Linux's `do_set_thread_area` for a

@@ -685,8 +685,13 @@ fn answer_here(
     // architecture-neutral dispatch table to say about it. The value survives a
     // switch to another task because the scheduler saves `FS_BASE` with the
     // rest of the program's user state.
-    if call == ferrix_linux_abi::nr::Syscall::ArchPrctl {
-        frame.rax = arch_prctl(args.args[0], args.args[1]) as u64;
+    // `ARCH_GET_FS` and `ARCH_GET_GS` are not: they write through a pointer
+    // of the program's, which wants its address space and interrupts open,
+    // so those two go on to the dispatcher (`syscall::thread_area`).
+    if call == ferrix_linux_abi::nr::Syscall::ArchPrctl
+        && let Some(answer) = arch_prctl(args.args[0], args.args[1])
+    {
+        frame.rax = answer as u64;
         return true;
     }
 
@@ -767,45 +772,117 @@ fn enter_compat_after_execve(entry: u64, stack: u64) -> ! {
     unsafe { super::signal::resume_context(&context) }
 }
 
-/// `ARCH_SET_FS`, and the three requests that are not it.
-///
-/// Only the first matters: a static binary cannot start without it, because a
-/// libc that cannot place its thread-local block aborts before `main`. The
-/// others are answered rather than dispatched so that a program asking gets
-/// `EINVAL` and not `ENOSYS`, which is the difference between "this kernel
-/// does not know that request" and "this kernel has no `arch_prctl`".
-fn arch_prctl(code: u64, value: u64) -> isize {
-    /// Set the base `FS` resolves against: the thread pointer.
-    const ARCH_SET_FS: u64 = 0x1002;
+/// `ARCH_SET_GS`: set the base a program's `GS` resolves against.
+const ARCH_SET_GS: u64 = 0x1001;
+/// `ARCH_SET_FS`: set the base `FS` resolves against, the thread pointer.
+const ARCH_SET_FS: u64 = 0x1002;
+/// `ARCH_GET_FS`: write the `FS` base to the address given.
+const ARCH_GET_FS: u64 = 0x1003;
+/// `ARCH_GET_GS`: write the `GS` base to the address given.
+const ARCH_GET_GS: u64 = 0x1004;
 
-    match code {
+/// `arch_prctl`'s requests that write a base, answered here; `None` for the
+/// two that read one, which the dispatcher answers ([`user_base`]).
+///
+/// `ARCH_SET_FS` is the call a static binary cannot start without, because
+/// a libc that cannot place its thread-local block aborts before `main`.
+/// `ARCH_SET_GS` is the same for the other register: a 64-bit Windows
+/// program reads its thread block through `GS`, so Wine sets that base for
+/// every thread it makes (`docs/WINE.md` §3). Any other request is `EINVAL`
+/// and not `ENOSYS`, which is the difference between "this kernel does not
+/// know that request" and "this kernel has no `arch_prctl`".
+///
+/// Both writes go to the register and to the running task's record
+/// together, with interrupts masked: the entry answers this call before it
+/// opens them, so no switch comes between the two.
+fn arch_prctl(code: u64, value: u64) -> Option<isize> {
+    use ferrix_linux_abi::errno::Errno;
+
+    let answer = match code {
         ARCH_SET_FS => {
             // A thread pointer must be a user address. Nothing here follows
             // it, but a program that set it to a kernel address would have
             // every `FS`-relative access it made afterwards resolve there.
             if !ferrix_bootinfo::is_user_address(value) {
-                return ferrix_linux_abi::errno::Errno::EPERM.as_return_value();
+                return Some(Errno::EPERM.as_return_value());
             }
             // SAFETY: (CONTEXT) a canonical user address, written to this processor's
             // `FS_BASE`; it changes only how user accesses resolve.
             unsafe { set_thread_pointer(value) };
             // And to the running task's record, which the switch loads and
-            // never reads back (3b). The entry answers this call before it
-            // opens interrupts, so no switch comes between the two writes.
+            // never reads back (3b).
             // SAFETY: (CONTEXT) interrupts masked, in the running task's own call.
             let _ = unsafe {
                 crate::sched::with_own_user_state(|state| state.set_thread_pointer(value))
             };
             0
         }
-        // Everything else, `ARCH_GET_FS` included. Reading the thread pointer
-        // back means writing it through a user pointer, which needs the
-        // caller's address space -- and this path deliberately does not have
-        // one, because it is answering a question about the processor. No
-        // libc asks at startup; when something does, it belongs in the
-        // dispatch table with a `Process` in hand rather than here.
-        _ => ferrix_linux_abi::errno::Errno::EINVAL.as_return_value(),
+        ARCH_SET_GS => {
+            // The paranoid entries tell the kernel's `GS` base from a
+            // program's by its sign bit (`super::paranoid`), so a program
+            // must never hold an upper-half one: refused as Linux refuses
+            // it, and a non-canonical address with it.
+            if !ferrix_bootinfo::is_user_address(value) {
+                return Some(Errno::EPERM.as_return_value());
+            }
+            // A null selector first, as Linux's `ARCH_SET_GS` loads one: a
+            // `GS` naming a thread-local descriptor would bring that
+            // descriptor's base back at the next switch, over the one asked
+            // for here. The load is skipped where the register already
+            // reads 0, as the switch skips it (`load_selectors`).
+            let [_, _, _, held_gs] = cpu::read_data_selectors();
+            if held_gs != 0 {
+                // SAFETY: (CONTEXT) the null selector always loads; in the kernel,
+                // on its own `GS`, with interrupts masked.
+                unsafe { cpu::load_user_gs(0) };
+            }
+            // SAFETY: (CONTEXT) the kernel's own `GS` is installed here, past the
+            // stub's `swapgs`, and `value` is a user address: the shadow
+            // the way out's `swapgs` hands to the program.
+            unsafe { set_program_gs_base(value) };
+            // SAFETY: (CONTEXT) interrupts masked, in the running task's own call.
+            let _ = unsafe { crate::sched::with_own_user_state(|state| state.set_gs_base(value)) };
+            0
+        }
+        ARCH_GET_FS | ARCH_GET_GS => return None,
+        _ => Errno::EINVAL.as_return_value(),
+    };
+    Some(answer)
+}
+
+/// The running program's `FS` base, or its `GS` base: what `ARCH_GET_FS` and
+/// `ARCH_GET_GS` write back.
+///
+/// Read from the processor, not from the task's record: a program whose
+/// selector names a thread-local descriptor has that descriptor's base, which
+/// the record does not hold. Interrupts are masked for the read, so the
+/// thread cannot move between processors inside it, and the switch that
+/// brought it here loaded its bases, so whichever processor answers holds
+/// this thread's.
+///
+/// `None` for a `code` that is neither, which is every code on an
+/// architecture with no such bases.
+pub(crate) fn user_base(code: u64) -> Option<u64> {
+    let of_gs = match code {
+        ARCH_GET_FS => false,
+        ARCH_GET_GS => true,
+        _ => return None,
+    };
+    let open = cpu::read_rflags() & (1 << 9) != 0;
+    cpu::disable_interrupts();
+    let base = if of_gs {
+        // SAFETY: (CONTEXT) in a system call, on the kernel's side of
+        // `swapgs`, where the shadow holds the program's base.
+        unsafe { program_gs_base() }
+    } else {
+        // SAFETY: (CONTEXT) reading the MSR has no side effects; the calling
+        // thread's own.
+        unsafe { thread_pointer() }
+    };
+    if open {
+        cpu::enable_interrupts();
     }
+    Some(base)
 }
 
 /// Turn `SYSCALL` on for this processor.
