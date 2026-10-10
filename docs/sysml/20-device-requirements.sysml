@@ -333,10 +333,12 @@ package FerrixDeviceRequirements {
         }
         requirement <'L.device.21'> inputFunctionsOfAHost : ItemLowLevel {
             attribute :>> statement = "DeviceNode::input_functions shall allow
-                eight input claims of an STM32 USB host's node, and one of every
-                other.";
-            attribute :>> criterion = "An STM32 USB host's node answers 8 and a PCI
-                function answers 1.";
+                eight input claims of a USB host's node -- an STM32 USB host's,
+                or a PCI function whose class code is exactly xHCI's, 0C:03:30
+                -- and one of every other.";
+            attribute :>> criterion = "An STM32 USB host's node and a PCI
+                function of class 0C:03:30 answer 8; a PCI function of class
+                0C:03:20 and a virtio PCI function answer 1.";
             attribute :>> parent = "H.DEV.1";
             attribute :>> unit = "device::DeviceNode::input_functions";
         }

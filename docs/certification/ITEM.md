@@ -98,7 +98,8 @@ firmware tables that say where the CPUs and timers are, the device registry
 that makes an MMIO claim exclusive, and the panic path.
 
 A device's claim by a driver's control channel (`claim.rs`) is exclusive
-too, but for one caller: the input core may claim the STM32 USB host's node
+too, but for one caller: the input core may claim a USB host's node -- the
+STM32 USB host's, or a PCI function whose class code is xHCI's, 0C:03:30 --
 once per keyboard or mouse, up to eight, because an input channel carries
 only ports, never memory, and the node's `MANAGE` handle is one driver's,
 so the extra claims open no DMA path; a core whose channel carries DMA

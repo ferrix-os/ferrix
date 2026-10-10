@@ -767,8 +767,9 @@ package FerrixItemRequirements {
         requirement <'H.DEV.1'> servedByItsClaimsAlone : ItemHighLevel {
             attribute :>> statement = "A device shall be claimed through no more of
                 its core's control channels at once than the core allows -- one,
-                but for an STM32 USB host's input functions -- and a claim shall
-                stand until the core lets it go.";
+                but for the input functions of a USB host, an STM32 board's or a
+                PCI xHCI function -- and a claim shall stand until the core lets
+                it go.";
             attribute :>> criterion = "A second claim of a node is refused, a
                 shared node's claims stop at its limit, and one claim let go leaves
                 the others (the `services` line).";
