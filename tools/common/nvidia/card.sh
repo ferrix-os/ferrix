@@ -7,7 +7,7 @@
 #   card.sh ssh <command...>                  run a command in the guest as root
 #   card.sh push <local> <guest-path>         copy a file in (atomic rename)
 #   card.sh exec <command line>               start a program in the session (hyprctl dispatch exec)
-#   card.sh swap yserver <binary>             /data/yserver/yserver, server restarted
+#   card.sh swap yserver <binary>             the yserver the boot runs (/yserver-dev or /data/yserver), server restarted
 #   card.sh swap hyprix <binary>              /bin/hyprix, hyprix.service restarted (the session restarts)
 #   card.sh swap chrome-flags "<flags>"       Chrome restarted with its desktop line plus <flags>
 #   card.sh swap <program> <binary>           /bin/<program>; <program>.service restarted if there is one
@@ -129,10 +129,25 @@ swap() {
   t0=$(date +%s.%N)
   case $what in
     yserver)
-      push "$2" /data/yserver/yserver
-      gssh "pkill -f '[/]data/yserver/yserver'; i=0; while pgrep -f '[/]data/yserver/yserver' >/dev/null && [ \$i -lt 50 ]; do sleep 0.1; i=\$((i+1)); done; \
-            rm -f /tmp/.X11-unix/X0 /tmp/.X0-lock"
-      dispatch "/bin/busybox sh /etc/yserver.sh"
+      # /etc/yserver.sh runs /yserver-dev/yserver when the boot carries one
+      # (FERRIX_YSERVER_DEV) and the volume's /data/yserver/yserver otherwise:
+      # the one it runs is the one replaced. The running server is found by
+      # its command line (either path, ":0") and ended by pid; a client that
+      # does not leave with its server is said, not killed.
+      # CARD_YSERVER_LOG=<RUST_LOG value> starts it with that log filter.
+      local where
+      where=$(gssh '[ -x /yserver-dev/yserver ] && echo /yserver-dev/yserver || echo /data/yserver/yserver')
+      push "$2" "$where"
+      gssh 'old=$(ps | grep "[y]server :0" | awk "{print \$1}")
+            for p in $old; do kill $p; done; i=0
+            while [ -n "$old" ] && ps | grep -q "[y]server :0" && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+            ps | grep "[y]server :0" && echo "card: the old yserver is still there"
+            rm -f /tmp/.X11-unix/X0 /tmp/.X0-lock'
+      if [ -n "${CARD_YSERVER_LOG:-}" ]; then
+        dispatch "export RUST_LOG='$CARD_YSERVER_LOG'; exec /bin/busybox sh /etc/yserver.sh"
+      else
+        dispatch "/bin/busybox sh /etc/yserver.sh"
+      fi
       gssh 'i=0; while [ ! -S /tmp/.X11-unix/X0 ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; [ -S /tmp/.X11-unix/X0 ] && echo "card: :0 is back" || { echo "card: no :0 after 30 s"; tail -5 /tmp/yserver.log; }'
       ;;
     hyprix)
