@@ -791,6 +791,10 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
      * freed, and its context closed, before the next line here runs. So
      * what is said below was copied out first.
      */
+    if (nvrm_diag)
+        drm_say("fence %llu: registering on semaphore %llu for %llu, fd %d\n",
+                (unsigned long long)cookie, (unsigned long long)sem_index,
+                (unsigned long long)p.wait_value, p.fd);
     result = kapi->registerSemaphoreSurfaceCallback(device, ctx->semsurf, drm_fence_reached, fence,
                                                     sem_index, p.wait_value, 0, &handle);
     if (nvrm_trace_drm)
@@ -944,9 +948,17 @@ int nvrm_trace_drm = 1;
 
 int nvrm_drm_ioctl(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
 {
-    int rc = drm_ioctl_one(opened, request, cmd, arg);
+    NvU32 pid = os_get_current_process();
+    int rc;
 
-    if (nvrm_trace_drm)
+    /* The stall diagnostic: said going in too, so one that never comes
+     * back is in the log, and by whom. */
+    if (nvrm_diag)
+        drm_say("ioctl 0x%x enter, pid %u\n", cmd, pid);
+    rc = drm_ioctl_one(opened, request, cmd, arg);
+    if (nvrm_diag)
+        drm_say("ioctl 0x%x = %d, pid %u\n", cmd, rc, pid);
+    else if (nvrm_trace_drm)
         drm_say("ioctl 0x%x = %d\n", cmd, rc);
     return rc;
 }

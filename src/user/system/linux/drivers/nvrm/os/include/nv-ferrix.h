@@ -257,6 +257,11 @@ int nvrm_drm_ioctl(void *file, NvU64 request, NvU32 cmd, NvU64 arg);
 void nvrm_drm_mmap(void *file, const struct nvos_request *request);
 void nvrm_drm_released(NvU64 cookie);
 
+/* os/glue/chardev.c: the stall diagnostic's switch, and what os/kept/nv.c
+ * tells it of an RM ioctl once its argument is read. */
+extern int nvrm_diag;
+void nvrm_diag_rm(NvU32 escape, const void *argument, NvU32 size);
+
 /* The ioctl encoding of Linux's asm-generic/ioctl.h, which RM's numbers use. */
 #define _IOC_NRBITS     8
 #define _IOC_TYPEBITS   8

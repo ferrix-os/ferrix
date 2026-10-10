@@ -644,6 +644,9 @@ int nvrm_ioctl(nv_linux_file_private_t *nvlfp, unsigned int cmd, void *i_arg)
         goto done_early;
     }
 
+    /* Ferrix: the stall diagnostic keeps which call this request is. */
+    nvrm_diag_rm((NvU32)arg_cmd, arg_copy, (NvU32)arg_size);
+
     /*
      * Handle NV_ESC_WAIT_OPEN_COMPLETE early as it is allowed to work
      * with or without nvl.

@@ -68,6 +68,277 @@ static void count_say(void *unused)
     nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
 }
 
+/* ------------------------------------------------------------------------
+ * The stall diagnostic (2026-10-10, the desktop stall of nv-next on the
+ * RTX 3060): which requests are in nvrm and not answered. On that boot two
+ * ioctl threads never finished and nothing said which calls they were.
+ *
+ * Every ioctl is kept in a table from the moment it is taken until it is
+ * answered: its id, the program's pid, the node, the command, and for an RM
+ * call what os/kept/nv.c read of it (nvrm_diag_rm: the escape and its first
+ * four words, which are a control's client, object and command and an
+ * allocation's parent, handle and class). A thread of its own, which takes
+ * none of RM's locks and no lock of the glue but the table's, says every
+ * five seconds each request that has been in for five or more, and says so
+ * too when the dispatch thread itself has been inside one request that
+ * long: nothing is taken from the kernel meanwhile. A request said once is
+ * said again when it is answered after all.
+ *
+ * One switch, nvrm_diag, which os/glue/drm.c reads too. On in this branch;
+ * to be 0 before it lands.
+ * ---------------------------------------------------------------------- */
+int nvrm_diag = 1;
+
+#define DIAG_SLOTS      128
+#define DIAG_OLD_NS     (5ULL * 1000000000ULL)
+#define DIAG_LOOK_MS    1000
+/* The most requests said in one look; the rest are counted. */
+#define DIAG_SAID       16
+
+struct diag_request {
+    NvBool used;
+    NvBool drm;
+    NvBool rm_known;
+    NvU64 id;
+    NvU64 began;
+    NvU64 said;         /* when it was last said, 0 if never */
+    NvU64 thread;       /* the worker serving it, 0 before it runs */
+    NvU32 pid;
+    NvU32 minor;
+    NvU32 cmd;
+    NvU32 escape;
+    NvU32 words[4];
+};
+
+static struct diag_request diag_table[DIAG_SLOTS];
+static nvos_mutex_t diag_lock;
+/* Requests that found the table full, so are not watched. */
+static NvU64 diag_unwatched;
+
+/* What the dispatch thread is inside, 0 in `began` when it waits for the
+ * next request. Written by that thread alone, read by the watcher. */
+static NvU64 diag_dispatch_began;
+static NvU32 diag_dispatch_op, diag_dispatch_pid, diag_dispatch_minor;
+static NvU64 diag_dispatch_id;
+
+/*
+ * A line of the diagnostic's own. Not through nv_printf: that takes the
+ * print lock, and the watcher must be able to speak whatever another thread
+ * holds. One write a line, so it is not cut by another thread's.
+ */
+__attribute__((format(printf, 1, 2))) static void diag_line(const char *format, ...)
+{
+    char line[320];
+    va_list arguments;
+    int used = snprintf(line, sizeof(line), "nvrm: diag: ");
+
+    va_start(arguments, format);
+    (void)vsnprintf(line + used, sizeof(line) - (size_t)used - 1, format, arguments);
+    va_end(arguments);
+    used = (int)strlen(line);
+    line[used] = '\n';
+    line[used + 1] = '\0';
+    nvos_write_line(line);
+}
+
+static const char *diag_op_name(NvU32 op)
+{
+    switch (op)
+    {
+        case NVOS_REQUEST_OPEN:           return "OPEN";
+        case NVOS_REQUEST_IOCTL:          return "IOCTL (starting its thread)";
+        case NVOS_REQUEST_RELEASE:        return "RELEASE";
+        case NVOS_REQUEST_MMAP:           return "MMAP";
+        case NVOS_REQUEST_DMABUF_RELEASE: return "DMABUF_RELEASE";
+        default:                          return "an unknown request";
+    }
+}
+
+/* Keep an ioctl just taken; its slot, or -1. */
+static int diag_enter(const struct nvos_request *request, NvBool drm)
+{
+    int slot = -1, i;
+
+    if (!nvrm_diag)
+        return -1;
+    nvos_mutex_lock(&diag_lock);
+    for (i = 0; i < DIAG_SLOTS; i++)
+    {
+        if (!diag_table[i].used)
+        {
+            os_mem_set(&diag_table[i], 0, sizeof(diag_table[i]));
+            diag_table[i].used = NV_TRUE;
+            diag_table[i].drm = drm;
+            diag_table[i].id = request->id;
+            diag_table[i].began = os_get_monotonic_time_ns();
+            diag_table[i].pid = request->pid;
+            diag_table[i].minor = request->minor;
+            diag_table[i].cmd = request->cmd;
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        diag_unwatched++;
+    nvos_mutex_unlock(&diag_lock);
+    return slot;
+}
+
+/* The calling thread serves the request in `slot`. */
+static void diag_serving(int slot)
+{
+    NvU64 thread = 0;
+
+    if (slot < 0)
+        return;
+    (void)os_get_current_thread(&thread);
+    nvos_mutex_lock(&diag_lock);
+    diag_table[slot].thread = thread;
+    nvos_mutex_unlock(&diag_lock);
+}
+
+/* The request in `slot` is answered, or was never started. */
+static void diag_leave(int slot)
+{
+    struct diag_request was;
+
+    if (slot < 0)
+        return;
+    nvos_mutex_lock(&diag_lock);
+    was = diag_table[slot];
+    diag_table[slot].used = NV_FALSE;
+    nvos_mutex_unlock(&diag_lock);
+    if (was.said != 0)
+        diag_line("request %llu (pid %u, ioctl 0x%x) is answered after %llu ms",
+                 (unsigned long long)was.id, was.pid, was.cmd,
+                 (unsigned long long)((os_get_monotonic_time_ns() - was.began) / 1000000ULL));
+}
+
+/*
+ * From os/kept/nv.c, once an RM ioctl's argument is read: which call the
+ * calling thread's request is.
+ */
+void nvrm_diag_rm(NvU32 escape, const void *argument, NvU32 size)
+{
+    const NvU32 *words = argument;
+    NvU64 thread = 0;
+    int i, w;
+
+    if (!nvrm_diag)
+        return;
+    (void)os_get_current_thread(&thread);
+    nvos_mutex_lock(&diag_lock);
+    for (i = 0; i < DIAG_SLOTS; i++)
+    {
+        if (diag_table[i].used && diag_table[i].thread == thread && thread != 0)
+        {
+            diag_table[i].rm_known = NV_TRUE;
+            diag_table[i].escape = escape;
+            for (w = 0; w < 4; w++)
+                diag_table[i].words[w] =
+                    (words != NULL && size >= (NvU32)(w + 1) * sizeof(NvU32)) ? words[w] : 0;
+            break;
+        }
+    }
+    nvos_mutex_unlock(&diag_lock);
+}
+
+static void diag_say(const struct diag_request *request, NvU64 now)
+{
+    unsigned long long seconds = (unsigned long long)((now - request->began) / 1000000000ULL);
+    char what[96];
+
+    if (request->drm)
+        snprintf(what, sizeof(what), "render ioctl 0x%x", request->cmd);
+    else if (!request->rm_known)
+        snprintf(what, sizeof(what), "%s ioctl 0x%x, argument not read yet",
+                 request->minor == 255 ? "ctl" : "gpu", request->cmd);
+    else if (request->escape == 0x2A)   /* NV_ESC_RM_CONTROL */
+        snprintf(what, sizeof(what), "%s control 0x%x on object 0x%x of client 0x%x",
+                 request->minor == 255 ? "ctl" : "gpu", request->words[2], request->words[1],
+                 request->words[0]);
+    else if (request->escape == 0x2B)   /* NV_ESC_RM_ALLOC */
+        snprintf(what, sizeof(what), "%s alloc of class 0x%x as 0x%x under 0x%x of client 0x%x",
+                 request->minor == 255 ? "ctl" : "gpu", request->words[3], request->words[2],
+                 request->words[1], request->words[0]);
+    else
+        snprintf(what, sizeof(what), "%s escape 0x%x, words 0x%x 0x%x 0x%x 0x%x",
+                 request->minor == 255 ? "ctl" : "gpu", request->escape, request->words[0],
+                 request->words[1], request->words[2], request->words[3]);
+    diag_line("request %llu of pid %u unanswered for %llu s on thread %llu: %s",
+             (unsigned long long)request->id, request->pid, seconds,
+             (unsigned long long)request->thread, what);
+}
+
+/* The watcher's thread. */
+static void diag_watch(void *unused)
+{
+    static struct diag_request old[DIAG_SAID];
+    NvU64 dispatch_said = 0, dispatch_said_for = 0;
+
+    (void)unused;
+    for (;;)
+    {
+        NvU64 now, began, unwatched;
+        NvU32 count = 0, more = 0, in = 0;
+        int i;
+
+        (void)os_delay(DIAG_LOOK_MS);
+        now = os_get_monotonic_time_ns();
+
+        nvos_mutex_lock(&diag_lock);
+        for (i = 0; i < DIAG_SLOTS; i++)
+        {
+            struct diag_request *request = &diag_table[i];
+
+            if (!request->used)
+                continue;
+            in++;
+            if (now - request->began < DIAG_OLD_NS ||
+                (request->said != 0 && now - request->said < DIAG_OLD_NS))
+                continue;
+            if (count == DIAG_SAID)
+            {
+                more++;
+                continue;
+            }
+            request->said = now;
+            old[count++] = *request;
+        }
+        unwatched = diag_unwatched;
+        nvos_mutex_unlock(&diag_lock);
+
+        for (i = 0; i < (int)count; i++)
+            diag_say(&old[i], now);
+        if (count != 0)
+            diag_line("%u request(s) are in nvrm%s; %llu were never watched (table full)",
+                     in, more != 0 ? ", more old ones than are said at once" : "",
+                     (unsigned long long)unwatched);
+
+        began = __atomic_load_n(&diag_dispatch_began, __ATOMIC_ACQUIRE);
+        if (began != 0 && now - began >= DIAG_OLD_NS &&
+            (dispatch_said_for != began || now - dispatch_said >= DIAG_OLD_NS))
+        {
+            dispatch_said = now;
+            dispatch_said_for = began;
+            diag_line("the dispatch thread has been inside %s (request %llu, pid %u, minor 0x%x) for %llu s; no request is taken meanwhile",
+                     diag_op_name(diag_dispatch_op), (unsigned long long)diag_dispatch_id,
+                     diag_dispatch_pid, diag_dispatch_minor,
+                     (unsigned long long)((now - began) / 1000000000ULL));
+        }
+        else if (began == 0 && dispatch_said_for != 0)
+        {
+            diag_line("the dispatch thread takes requests again");
+            dispatch_said_for = 0;
+        }
+        else if (began != 0 && dispatch_said_for != 0 && dispatch_said_for != began)
+        {
+            diag_line("the dispatch thread left the request it was inside");
+            dispatch_said_for = 0;
+        }
+    }
+}
+
 static void remember(NvU64 file, nv_linux_file_private_t *nvlfp, void *drm,
                      struct chardev_file *entry)
 {
@@ -152,6 +423,8 @@ struct worker {
     struct nvos_request request;
     nv_linux_file_private_t *nvlfp;
     void *drm;
+    /* Its place in the diagnostic's table, or -1. */
+    int diag;
 };
 
 static void serve_ioctl(void *argument)
@@ -159,6 +432,8 @@ static void serve_ioctl(void *argument)
     struct worker *work = argument;
     nvos_client_t client;
     int rc;
+
+    diag_serving(work->diag);
 
     os_mem_set(&client, 0, sizeof(client));
     client.pid = work->request.pid;
@@ -172,6 +447,7 @@ static void serve_ioctl(void *argument)
     if (!nvos_client_enter(&client))
     {
         (void)nvos_chardev_reply(work->request.id, -EBUSY, 0);
+        diag_leave(work->diag);
         free(work);
         return;
     }
@@ -181,6 +457,7 @@ static void serve_ioctl(void *argument)
         rc = nvrm_ioctl(work->nvlfp, work->request.cmd, (void *)(NvUPtr)work->request.arg);
     nvos_client_leave();
     (void)nvos_chardev_reply(work->request.id, rc < 0 ? rc : 0, rc > 0 ? rc : 0);
+    diag_leave(work->diag);
     free(work);
 }
 
@@ -253,7 +530,24 @@ static void serve_mmap(const struct nvos_request *request)
     }
 }
 
+static void handle_one(const struct nvos_request *request);
+
+/* One request, with the watcher told what the dispatch thread is inside. */
 static void handle(const struct nvos_request *request)
+{
+    if (nvrm_diag)
+    {
+        diag_dispatch_op = request->op;
+        diag_dispatch_pid = request->pid;
+        diag_dispatch_minor = request->minor;
+        diag_dispatch_id = request->id;
+        __atomic_store_n(&diag_dispatch_began, os_get_monotonic_time_ns(), __ATOMIC_RELEASE);
+    }
+    handle_one(request);
+    __atomic_store_n(&diag_dispatch_began, 0, __ATOMIC_RELEASE);
+}
+
+static void handle_one(const struct nvos_request *request)
 {
     nv_linux_file_private_t *nvlfp;
     struct chardev_file *entry;
@@ -320,8 +614,10 @@ static void handle(const struct nvos_request *request)
             work->request = *request;
             work->nvlfp = nvlfp;
             work->drm = drm;
+            work->diag = diag_enter(request, drm != NULL);
             if (!nvos_thread_spawn(serve_ioctl, work))
             {
+                diag_leave(work->diag);
                 free(work);
                 (void)nvos_chardev_reply(request->id, -ENOMEM, 0);
             }
@@ -368,6 +664,13 @@ int nvrm_chardev_serve(void)
     count_timer = nvos_timer_create(count_say, NULL);
     if (count_timer != NULL)
         nvos_timer_start(count_timer, (NvU64)COUNT_SPAN * 1000000000ULL);
+    if (nvrm_diag)
+    {
+        if (nvos_thread_spawn(diag_watch, NULL))
+            diag_line("on: requests unanswered for 5 s are said, every 5 s");
+        else
+            diag_line("no thread for the watcher; nothing will be said");
+    }
     for (;;)
     {
         if (nvos_chardev_next(&request) != NV_OK)
