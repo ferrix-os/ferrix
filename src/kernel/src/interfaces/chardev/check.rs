@@ -196,8 +196,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let control = accepted(&driver, first, &[0])?;
     let core = control_of(first)?;
     duplicate_refused(&driver, control, &mut report)?;
-    if driver.call(nr::CHARDEV_NEXT, &[reg(control), INBOX, 0, 0, 0, 0]) != Err(status::BAD_STATE)
-    {
+    if driver.call(nr::CHARDEV_NEXT, &[reg(control), INBOX, 0, 0, 0, 0]) != Err(status::BAD_STATE) {
         return Err("chardev_next on a control made without CHARDEV_DIRECT was not refused");
     }
     report.refusals += 1;
@@ -329,7 +328,9 @@ fn direct(
     {
         return Err("chardev_next took another request than the ioctl made");
     }
-    if replied != 0 || head.len() != message::inline_len(COMMAND) || head.get(..8) != Some(&PING[..])
+    if replied != 0
+        || head.len() != message::inline_len(COMMAND)
+        || head.get(..8) != Some(&PING[..])
     {
         return Err("an ioctl was not taken with the first bytes of its argument");
     }
@@ -350,7 +351,8 @@ fn direct(
     // value, with the tail's bytes at its argument.
     let second = admit(&core, &program.process, IOCTL).map_err(|_| "a second ioctl was refused")?;
     side.put(BUFFER, &PONG)?;
-    let _ = next(wire.id, VALUE, BUFFER, 8).map_err(|_| "an answer with the next take was refused")?;
+    let _ =
+        next(wire.id, VALUE, BUFFER, 8).map_err(|_| "an answer with the next take was refused")?;
     if finish()? != Ok(VALUE as usize) {
         return Err("an answer given with the next take did not return the program's call");
     }
@@ -366,7 +368,8 @@ fn direct(
 
     // An answer for a request not outstanding is said, and the take takes.
     let third = admit(&core, &program.process, IOCTL).map_err(|_| "a third ioctl was refused")?;
-    let _ = next(first.wire.id, VALUE, 0, 0).map_err(|_| "a take with a stale answer did not take")?;
+    let _ =
+        next(first.wire.id, VALUE, 0, 0).map_err(|_| "a take with a stale answer did not take")?;
     let (wire, replied, _) = taken(side)?;
     if wire.id != third.wire.id || replied != -i32::from(status::BAD_STATE.0) {
         return Err("an answer for a request not outstanding was not said in the take");

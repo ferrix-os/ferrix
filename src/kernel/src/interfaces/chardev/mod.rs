@@ -804,12 +804,7 @@ fn answer(request: &Request, outcome: Result<Answer, Errno>) {
 
 /// Answer `request`, once, with `tail` for its program's thread to write at
 /// the ioctl's argument, and wake the program as `how` says.
-fn answer_with(
-    request: &Request,
-    outcome: Result<Answer, Errno>,
-    tail: &Inline,
-    how: sched::Wake,
-) {
+fn answer_with(request: &Request, outcome: Result<Answer, Errno>, tail: &Inline, how: sched::Wake) {
     {
         let mut inner = request.inner.lock();
         if inner.answer.is_none() {
@@ -1224,11 +1219,7 @@ fn next(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
             sched::Wake::Home
         };
         let signed = result as i64;
-        let (status_word, value) = if signed < 0 {
-            (result, 0)
-        } else {
-            (0, result)
-        };
+        let (status_word, value) = if signed < 0 { (result, 0) } else { (0, result) };
         if let Err(errno) = conclude(caller, &control, [id, status_word, value, 0, 0], &tail, how) {
             replied = -i32::from(errno.0);
         }

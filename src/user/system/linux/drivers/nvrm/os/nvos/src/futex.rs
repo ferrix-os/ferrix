@@ -154,12 +154,8 @@ fn thread_pointer() -> usize {
 
 /// The ids kept: a thread pointer and its thread's id, by the pointer.
 #[cfg(not(test))]
-static TIDS: [(core::sync::atomic::AtomicUsize, AtomicU32); 64] = [const {
-    (
-        core::sync::atomic::AtomicUsize::new(0),
-        AtomicU32::new(0),
-    )
-}; 64];
+static TIDS: [(core::sync::atomic::AtomicUsize, AtomicU32); 64] =
+    [const { (core::sync::atomic::AtomicUsize::new(0), AtomicU32::new(0)) }; 64];
 
 /// The processor each thread last asked the kernel about, with the thread
 /// pointer and the time-stamp counter then: slots as [`TIDS`]'.
