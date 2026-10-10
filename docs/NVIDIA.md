@@ -563,7 +563,13 @@ Ferrix code.
   is not programmed"). N0c programs it and adds a `write_combining` flag to
   `IoMapping` and to client mappings.
 * **Apertures.** BAR1 is 16 GiB at about 56 TiB. `nvrm` maps only what it
-  touches: BAR0 whole, and BAR1 windows on demand. Clients' BAR1 windows
+  touches: BAR0 whole, and BAR1 windows on demand. Each
+  `os_map_kernel_space` is a mapping of its own and `os_unmap_kernel_space`
+  ends it (`munmap`, and its `IoMapping` handle closed), as `ioremap` and
+  `iounmap` do: RM maps a page of BAR1 per channel, so mappings kept past
+  their unmap ran a table of 64 out at 29 Vulkan queues. At most 1024 are
+  alive at once, a quarter of the process's handles
+  (`os/nvos/src/mappings.rs`). Clients' BAR1 windows
   are mapped by the kernel from the aperture (§4.4). `DeviceInfo` reports
   aperture *counts*, not addresses, and its `DeviceBlock.length` is a
   `u32`. N0d adds a call that reports each aperture's 64-bit address and
