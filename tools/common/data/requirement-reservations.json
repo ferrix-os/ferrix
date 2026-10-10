@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["L.trap.8"],
-      "owner": "os-7c",
-      "branch": "stage13-s4",
-      "date": "2026-10-01",
-      "purpose": "S4: Verdict::Trap (allocated by os-bd)"
-    },
-    {
       "ids": ["L.user.111-124", "L.object.121-125", "H.MEM.20-21"],
       "owner": "nvidia",
       "branch": "nvidia-c3k",
