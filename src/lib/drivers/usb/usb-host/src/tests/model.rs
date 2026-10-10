@@ -22,6 +22,8 @@ use crate::ehci::AREA_BYTES;
 use crate::usb::Speed;
 use crate::{Clock, Dma, MILLISECOND, Registers};
 
+pub(super) mod xhci;
+
 /// Where each page of the area is, as the controller sees it: scattered
 /// and out of order, as a pin of single frames gives them.
 pub(super) const PAGES: [u32; 4] = [0x4003_0000, 0x4001_0000, 0x4007_0000, 0x4000_2000];
@@ -525,7 +527,8 @@ impl Model {
         let expected = match speed {
             Speed::Full => 0,
             Speed::Low => 1,
-            Speed::High => 2,
+            // No SuperSpeed device is ever on an EHCI bus.
+            Speed::High | Speed::Super => 2,
         };
         if eps != expected {
             self.violations.push(format!(
@@ -696,7 +699,7 @@ impl Model {
             match self.devices[child].speed {
                 Speed::Low => status |= 1 << 9,
                 Speed::High => status |= 1 << 10,
-                Speed::Full => {}
+                Speed::Full | Speed::Super => {}
             }
         }
         if state.enabled {

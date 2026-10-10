@@ -10,6 +10,9 @@ pub enum Speed {
     Full,
     /// 480 Mbit/s.
     High,
+    /// 5 Gbit/s and faster: USB 3's `SuperSpeed` and `SuperSpeedPlus`, which
+    /// differ in nothing this driver does.
+    Super,
 }
 
 impl Speed {
@@ -18,6 +21,7 @@ impl Speed {
     #[must_use]
     pub const fn default_max_packet(self) -> u16 {
         match self {
+            Speed::Super => 512,
             Speed::High => 64,
             Speed::Low | Speed::Full => 8,
         }
@@ -146,6 +150,20 @@ impl Setup {
             request: SET_ADDRESS,
             value: address as u16,
             index: 0,
+            length: 0,
+        }
+    }
+
+    /// `CLEAR_FEATURE(ENDPOINT_HALT)` to the endpoint at `address`, its
+    /// direction bit included.
+    #[must_use]
+    pub const fn clear_endpoint_halt(address: u8) -> Setup {
+        Setup {
+            // Recipient: endpoint. The feature selector, ENDPOINT_HALT, is 0.
+            request_type: 0x02,
+            request: CLEAR_FEATURE,
+            value: 0,
+            index: address as u16,
             length: 0,
         }
     }
@@ -283,6 +301,12 @@ pub struct Interface {
     /// Its first interrupt IN endpoint: the address, without the direction
     /// bit, and the largest packet.
     pub interrupt_in: Option<(u8, u16)>,
+    /// That endpoint's `bInterval`.
+    pub interval: u8,
+    /// Its first bulk IN endpoint, the same way.
+    pub bulk_in: Option<(u8, u16)>,
+    /// Its first bulk OUT endpoint.
+    pub bulk_out: Option<(u8, u16)>,
     /// For a HID interface, how long its report descriptor is, as its HID
     /// class descriptor says; 0 when it says nothing.
     pub report_length: u16,
@@ -365,6 +389,9 @@ impl Configuration {
             subclass: *descriptor.get(6)?,
             protocol: *descriptor.get(7)?,
             interrupt_in: None,
+            interval: 0,
+            bulk_in: None,
+            bulk_out: None,
             report_length: 0,
         };
         self.count += 1;
@@ -379,7 +406,7 @@ impl Configuration {
 }
 
 /// Keep an endpoint descriptor's address if it is the interface's first
-/// interrupt IN endpoint.
+/// interrupt IN, bulk IN or bulk OUT endpoint.
 fn note_endpoint(interface: &mut Interface, descriptor: &[u8]) {
     let (Some(&address), Some(&attributes), Some(&low), Some(&high)) = (
         descriptor.get(2),
@@ -390,10 +417,17 @@ fn note_endpoint(interface: &mut Interface, descriptor: &[u8]) {
         return;
     };
     let interrupt = attributes & 0x3 == 3;
+    let bulk = attributes & 0x3 == 2;
     let inward = address & 0x80 != 0;
+    let size = u16::from_le_bytes([low, high]) & 0x7FF;
+    let found = Some((address & 0x0F, size));
     if interrupt && inward && interface.interrupt_in.is_none() {
-        let size = u16::from_le_bytes([low, high]) & 0x7FF;
-        interface.interrupt_in = Some((address & 0x0F, size));
+        interface.interrupt_in = found;
+        interface.interval = descriptor.get(6).copied().unwrap_or(0);
+    } else if bulk && inward && interface.bulk_in.is_none() {
+        interface.bulk_in = found;
+    } else if bulk && !inward && interface.bulk_out.is_none() {
+        interface.bulk_out = found;
     }
 }
 

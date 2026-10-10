@@ -40,9 +40,12 @@
 pub mod bus;
 pub mod ehci;
 pub mod hid;
+pub mod host;
 pub mod hub;
 pub mod report;
+pub mod storage;
 pub mod usb;
+pub mod xhci;
 
 #[cfg(test)]
 extern crate std;
@@ -78,6 +81,11 @@ pub trait Dma {
     /// The address the controller reaches the byte at `offset` by, if it
     /// has one below 4 GiB: EHCI's pointers are 32 bits.
     fn device_address(&self, offset: usize) -> Option<u32>;
+    /// The address the controller reaches the byte at `offset` by, however
+    /// high: for a controller whose pointers are 64 bits.
+    fn wide_address(&self, offset: usize) -> Option<u64> {
+        self.device_address(offset).map(u64::from)
+    }
     /// Make every write before this visible to the controller before any
     /// write after it, to memory or to a register.
     fn barrier(&self);

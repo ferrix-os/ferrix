@@ -18,7 +18,7 @@ use crate::hid::Kind;
 use crate::usb::Speed;
 use crate::{MILLISECOND, Parts};
 
-type TestBus = Bus<Regs, Memory, Time>;
+type TestBus = Bus<crate::ehci::Controller<Regs, Memory, Time>>;
 
 const KEY_A: u16 = 30;
 const KEY_B: u16 = 48;
