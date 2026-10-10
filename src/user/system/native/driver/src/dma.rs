@@ -173,6 +173,90 @@ impl Dma {
     }
 }
 
+/// The most pages one [`Run`] holds: the kernel's largest contiguous pin,
+/// 4 MiB.
+pub const MAX_RUN_PAGES: usize = 1024;
+
+/// Memory this process made and pinned for a device as one run of device
+/// addresses, and never mapped: what a device is lent for its own use, as
+/// an NVMe controller's host memory buffer is.
+///
+/// Like a [`Dma`], dropping it frees nothing; only [`Run::free`] does, with
+/// the proof of a reset.
+pub struct Run {
+    pin: ManuallyDrop<Pin<Kernel>>,
+    vmo: ManuallyDrop<Vmo<Kernel>>,
+    address: u64,
+    pages: usize,
+}
+
+impl core::fmt::Debug for Run {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Run")
+            .field("address", &self.address)
+            .field("pages", &self.pages)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Run {
+    /// `pages` pages for `device`, pinned as one run.
+    ///
+    /// # Errors
+    ///
+    /// [`Step::Memory`] if they cannot be made or pinned as one run, or if
+    /// the addresses the kernel names are not one.
+    pub fn new(device: &Device<Kernel>, pages: usize) -> Result<Run, Step> {
+        if pages == 0 || pages > MAX_RUN_PAGES {
+            return Err(Step::Memory);
+        }
+        let bytes = pages * PAGE;
+        let vmo = vmo::create(Kernel, bytes).map_err(|_| Step::Memory)?;
+        let pin = device
+            .pin(&vmo, 0, bytes, PinAccess::Contiguous)
+            .map_err(|_| Step::Memory)?;
+        let mut raw = [[0_u8; 8]; MAX_RUN_PAGES];
+        let asked = raw.get_mut(..pages).ok_or(Step::Memory)?;
+        let got = pin.addresses(asked).map_err(|_| Step::Memory)?;
+        let first = asked.first().copied().map(device_address);
+        let one_run = asked.iter().enumerate().all(|(index, bytes)| {
+            first.map(|first| first + (index * PAGE) as u64) == Some(device_address(*bytes))
+        });
+        let run = Run {
+            pin: ManuallyDrop::new(pin),
+            vmo: ManuallyDrop::new(vmo),
+            address: first.unwrap_or(0),
+            pages,
+        };
+        // A pin that is not what was asked stays pinned, as any other
+        // memory a device might reach: the caller never learns its address.
+        if !got.is_complete() || got.pages != pages || !one_run {
+            return Err(Step::Memory);
+        }
+        Ok(run)
+    }
+
+    /// The device address of the first byte.
+    #[must_use]
+    pub fn address(&self) -> u64 {
+        self.address
+    }
+
+    /// Pages in the run.
+    #[must_use]
+    pub fn pages(&self) -> usize {
+        self.pages
+    }
+
+    /// Unpin and free the memory: the device was reset, so it can no longer
+    /// write here.
+    pub fn free(self, _reset: &Stopped) {
+        let Run { pin, vmo, .. } = self;
+        drop(ManuallyDrop::into_inner(pin));
+        drop(ManuallyDrop::into_inner(vmo));
+    }
+}
+
 // SAFETY: one VMO, pinned so the device sees the pages `device_pages` names
 // and mapped so this process sees them, both until `free`, which only a
 // reset allows. Every access is volatile and `barrier` is a full fence. Each

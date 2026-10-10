@@ -77,9 +77,30 @@ pub trait Disk {
     /// [`DeviceError`] once the device broke the protocol.
     fn drain(&mut self, out: &mut [Completion]) -> Result<Drained, DeviceError>;
 
+    /// Submit a write that must be durable when it completes: the ring's
+    /// force unit access, which only a device that announced
+    /// `DeviceFlags::FUA` is sent. One that did not is never asked, so the
+    /// default, a plain [`Disk::submit`], is never reached with a promise
+    /// to keep.
+    ///
+    /// # Errors
+    ///
+    /// As [`Disk::submit`].
+    fn submit_fua(&mut self, request: &Request) -> Result<Accepted, SubmitError> {
+        self.submit(request)
+    }
+
     /// Whether the device holds requests whose completion is waited for;
     /// see [`Serve::device_busy`].
     fn busy(&self) -> bool {
+        false
+    }
+
+    /// Whether [`Disk::drain`] has completions no interrupt will announce:
+    /// ones [`Disk::check`] found waiting, or made by failing or finishing
+    /// requests itself. The glue then drains after its watch without
+    /// waiting for an interrupt; see [`Serve::wants_drain`].
+    fn wants_drain(&self) -> bool {
         false
     }
 
@@ -395,6 +416,14 @@ impl<M: RingMemory, K: Disk, const PENDING: usize> Serve<M, K, PENDING> {
         self.fail(checked)
     }
 
+    /// Whether the device has completions to hand over that no interrupt
+    /// will announce: the glue calls [`Serve::on_interrupt`] after a watch
+    /// that left this set.
+    #[must_use]
+    pub fn wants_drain(&self) -> bool {
+        self.disk.wants_drain()
+    }
+
     /// Take the loop apart, for the glue to shut the device down and finish
     /// the ring: the requests the device abandons on reset are completed
     /// `IoError` on the ring side by the glue, one `complete` each.
@@ -434,7 +463,12 @@ impl<M: RingMemory, K: Disk, const PENDING: usize> Serve<M, K, PENDING> {
     /// loop.
     fn hand(&mut self, submission: &Submission) -> Result<Handed, Fault> {
         let request = self.request(submission);
-        match self.disk.submit(&request) {
+        let submitted = if submission.fua {
+            self.disk.submit_fua(&request)
+        } else {
+            self.disk.submit(&request)
+        };
+        match submitted {
             Ok(Accepted::Queued { .. }) => {
                 self.start(submission.id);
                 Ok(Handed::Taken)
