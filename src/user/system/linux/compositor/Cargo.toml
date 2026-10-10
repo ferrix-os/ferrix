@@ -12,7 +12,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "anim", "blank", "caption", "clip", "config", "ctl", "drm", "evecho", "fan",
+    "anim", "blank", "caption", "clip", "config", "ctl", "desktop", "drm", "evecho", "fan",
     "gbm", "hyprix", "hyprlang", "image", "ipc", "layout",
     "lock", "lswt", "pattern", "plug", "protocol", "reboot", "regex", "render",
     "server", "sessiond", "shm", "shot", "socket", "seat", "text", "tone", "toolkit", "vdagent", "virgl",
