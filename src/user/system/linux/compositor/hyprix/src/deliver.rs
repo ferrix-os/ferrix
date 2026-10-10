@@ -62,11 +62,6 @@ impl Placement {
 pub struct Focus {
     keyboard: Option<(usize, ObjectId)>,
     pointer: Option<(usize, ObjectId)>,
-    /// Where the pointer was last put, so that a movement can be reported
-    /// as a distance as well as a place: `zwp_relative_pointer_v1` carries
-    /// the distance, and a client that locked the pointer reads nothing
-    /// else.
-    was: Option<(f64, f64)>,
 }
 
 impl Focus {
@@ -76,7 +71,6 @@ impl Focus {
         Self {
             keyboard: None,
             pointer: None,
-            was: None,
         }
     }
 
@@ -395,24 +389,23 @@ pub fn deliver(
                     let _ = slot.client_mut().keyboard_modifiers(*modifiers);
                 }
             }
-            Action::Pointer { x, y } => {
+            Action::Relative { dx, dy } => {
                 // The distance, for every `zwp_relative_pointer_v1` of the
-                // client the pointer is over. It is sent whether or not the
-                // pointer is constrained: the protocol says the events are
-                // "not limited by the surface", and a client that locked
-                // the pointer has no other way to know it moved.
-                let moved = focus.was.map(|(was_x, was_y)| (x - was_x, y - was_y));
-                focus.was = Some((*x, *y));
-                if let Some((dx, dy)) = moved.filter(|(dx, dy)| *dx != 0.0 || *dy != 0.0)
-                    && let Some((client, _)) = focus.pointer
+                // client the pointer is over. It is the device's own and is
+                // sent whether or not the pointer moved: the protocol says
+                // the events are "not limited by the surface", and a client
+                // that locked the pointer has no other way to know it moved.
+                if let Some((client, _)) = focus.pointer
                     && let Some(slot) = slots.get_mut(client)
                 {
                     slot.client_mut().relative_motion(
                         u64::from(time).saturating_mul(1_000),
-                        dx,
-                        dy,
+                        *dx,
+                        *dy,
                     );
                 }
+            }
+            Action::Pointer { x, y } => {
                 // While a drag is on the pointer enters and leaves
                 // nothing: the drag's own `enter` and `leave` are what a
                 // window is told, and a `wl_pointer.enter` mid-drag would

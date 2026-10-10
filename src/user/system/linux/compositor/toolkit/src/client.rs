@@ -964,6 +964,15 @@ impl Client {
         self.surfaces.get(&surface).map(|state| state.surface)
     }
 
+    /// The seat's `wl_pointer`, once the compositor's seat has one, for a
+    /// request of the program's own that names it: an X server's
+    /// `zwp_relative_pointer_manager_v1.get_relative_pointer` and
+    /// `zwp_pointer_constraints_v1.lock_pointer` do.
+    #[must_use]
+    pub const fn pointer_object(&self) -> Option<ObjectId> {
+        self.seat.pointer
+    }
+
     /// Draw a frame: `paint` is given the surface's pixels at its configured
     /// size times its scale, cleared to transparent, in tiny-skia's
     /// premultiplied RGBA; then the frame is copied into a free `wl_shm`
