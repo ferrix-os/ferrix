@@ -100,6 +100,17 @@ const DISPLAY_CLASS: u8 = 0x03;
 const TEST_GPU_VENDOR: u16 = 0x1B36;
 const TEST_GPU_IDS: [u16; 1] = [0x0005];
 
+/// In [`PCI_DRIVERS`]' vendor column: a function of any vendor, matched by
+/// what it is alone. No function has this vendor: it is what a slot with
+/// nothing in it reads as.
+const ANY_VENDOR: u16 = 0xFFFF;
+
+/// The class code of an NVM Express controller: mass storage (`01`),
+/// non-volatile memory (`08`), NVMe I/O (`02`). Every NVMe drive of every
+/// vendor has it, and is driven by `nvme` (`docs/NVME.md`), wherever on the
+/// bus it sits: on a root port, or below a switch as a chipset's slot is.
+const NVME_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x08, 0x02);
+
 /// How a PCI function that is not virtio is matched.
 #[derive(Clone, Copy)]
 enum PciMatch {
@@ -107,11 +118,15 @@ enum PciMatch {
     Class(u8),
     /// The vendor's functions with these device ids.
     Devices(&'static [u16]),
+    /// The functions whose whole class code is this: base class, subclass
+    /// and programming interface.
+    Interface(u8, u8, u8),
 }
 
 /// The PCI functions that are not virtio transports: which driver, by name
 /// in the initramfs, drives which, and as which kind.
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 2] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 3] = [
+    (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
     (
         NVIDIA_VENDOR,
         PciMatch::Class(DISPLAY_CLASS),
@@ -1486,7 +1501,7 @@ fn driver_for<'a>(
         _ if info.location != DEVICE_NOT_PCI => PCI_DRIVERS
             .iter()
             .find(|(vendor, matched, _, _)| {
-                *vendor == info.vendor_id && pci_matches(*matched, info)
+                (*vendor == ANY_VENDOR || *vendor == info.vendor_id) && pci_matches(*matched, info)
             })
             .map(|(_, _, wanted, kind)| (wanted, kind))?,
         _ => return None,
@@ -1544,6 +1559,10 @@ fn pci_matches(matched: PciMatch, info: &DeviceInfo) -> bool {
     match matched {
         PciMatch::Class(base) => (info.class >> 16) as u8 == base,
         PciMatch::Devices(ids) => ids.contains(&info.device_id),
+        PciMatch::Interface(base, sub, interface) => {
+            info.class & 0x00FF_FFFF
+                == (u32::from(base) << 16) | (u32::from(sub) << 8) | u32::from(interface)
+        }
     }
 }
 
@@ -1654,8 +1673,10 @@ impl fmt::Write for Line {
     }
 }
 
-/// A disk's driver -- virtio-blk's, or an STM32MP15's SD card's -- over a
-/// block ring, for the disk to be `name`.
+/// A disk's driver -- virtio-blk's, an NVMe controller's, or an STM32MP15's
+/// SD card's -- over a block ring, for the disk to be `name`. START's
+/// register blocks are virtio's or the tree node's; an NVMe controller has
+/// neither, and its driver finds its BAR through `device_aperture`.
 fn start_block(
     job: &Job<Kernel>,
     device: Device<Kernel>,
@@ -1697,10 +1718,10 @@ fn start_block(
         .map_err(|_| ())?;
     let encoded = Ring::Start(start).encode();
     // The process's name: the table chose the image already.
-    let program = if info.virtio == DEVICE_TREE_BLOCKS {
-        "sdmmc"
-    } else {
-        "blk"
+    let program = match info.virtio {
+        DEVICE_TREE_BLOCKS => "sdmmc",
+        DEVICE_VIRTIO_PCI => "blk",
+        _ => "nvme",
     };
     launch(
         job,

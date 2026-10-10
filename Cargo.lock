@@ -459,6 +459,23 @@ name = "ferrix-netwire"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-nvme"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-nvme-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-blkserve",
+ "ferrix-driver",
+ "ferrix-native-abi",
+ "ferrix-nvme",
+ "ferrix-rt",
+ "ferrix-virtio-blk",
+]
+
+[[package]]
 name = "ferrix-objects"
 version = "0.1.0"
 dependencies = [
