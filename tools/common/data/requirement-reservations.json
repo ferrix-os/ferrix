@@ -52,6 +52,13 @@
       "branch": "os07/asid",
       "date": "2026-10-08",
       "purpose": "ARMv7-A ASIDs for the DK1 IPC matrix (B6 step 4): the per-processor generation allocator, the rollover flush, the uninstall to ASID 0, broadcast shootdowns, the drop of a space, and F-67's break-before-make order on the remap paths (OPAQUE-KERNEL.md 9.13; consultant os07-asid-cert, ledger 2026-10-08 lines 590 and 594, A1 and B5)"
+    },
+    {
+      "ids": ["L.x86_64.166-169"],
+      "owner": "softgl-gap",
+      "branch": "softgl-clock",
+      "date": "2026-10-10",
+      "purpose": "The x86-64 clock under a hypervisor (docs/CLOCK.md): the TSC taken on KVM's word where CPUID reports no invariant TSC, the rate its paravirtual clock states, the time page read whole and given back, and the HPET said aloud with its reason when it is the counter"
     }
   ]
 }
