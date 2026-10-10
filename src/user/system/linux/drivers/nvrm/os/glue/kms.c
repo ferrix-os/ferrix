@@ -822,19 +822,18 @@ int nvrm_kms_show(void)
  * then release the modeset ownership and free the device. Freeing the last
  * reference is what shuts the heads down and frees the core channel
  * (nvFreeDevEvo), and it frees the surface, its memory and its mapping
- * with the device's clients. With `free_devices` false -- requests were
- * still under way in os/glue/drm.c, which uses the same device -- the
- * devices are left to RM's shutdown and only their use here ends. The
- * devices freed.
+ * with the device's clients. Called only when no request is under way and
+ * every file is closed, since os/glue/drm.c uses the same device, and only
+ * after nvrm_kms_show has returned. The devices freed.
  */
-int nvrm_kms_quiesce(NvBool free_devices)
+int nvrm_kms_quiesce(void)
 {
     NvU32 i;
     int freed = 0;
 
     nvos_mutex_lock(&kms_lock);
     kms_stopped = NV_TRUE;
-    for (i = 0; free_devices && i < NV_MAX_GPUS; i++)
+    for (i = 0; i < NV_MAX_GPUS; i++)
     {
         struct kms_head *lit = &kms_lit[i];
 

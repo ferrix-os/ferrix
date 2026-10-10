@@ -3538,15 +3538,19 @@ Ferrix they are still alive when the machine is taken away:
    MMAP are answered `ENODEV`. The requests let in before that instant are
    counted, and waited for up to 3 s. Then every open file is closed as
    its RELEASE would close it, which frees its RM clients the way the death
-   of their processes does. If requests are still under way after 3 s no
-   file is closed, since a worker may be inside one.
+   of their processes does. A RELEASE that began before the instant is
+   waited for as well. If requests are still under way after 3 s no file
+   is closed, since a worker may be inside one, **and steps 2 and 3 are
+   left out**: NVIDIA shuts an adapter down only when nothing holds it.
+   The line then says the adapter was not shut down.
 2. **NVKMS** (`os/glue/kms.c`, `nvrm_kms_quiesce`): `releaseOwnership`
    and `freeDevice` on `nvrm`'s KAPI device, as nvidia-drm's unload. The
    two threads that use the device afterwards, the card's copies into the
    mapped surface and the watch for a display, take a lock around each use
    and do nothing once the device is gone: a flush is still answered, and
-   nothing is copied. Skipped when step 1 closed no file, because the
-   render node's ioctls (`os/glue/drm.c`) use the same device.
+   nothing is copied. The watch is armed only after `nvrm_kms_show` has
+   returned, because until then `nvrm`'s main thread uses the device with
+   no lock; a request made earlier is answered when it has.
 3. **The adapter** (`os/kept/nv-pci.c`, `nvrm_gpu_stop`):
    `rm_disable_adapter`, the interrupt's end, `rm_shutdown_adapter`. nvos
    has no call that gives the vector back, so the handler is told to do
@@ -3577,8 +3581,8 @@ nvrm: quiesce: done in N ms
 ```
 
 and, in place of the ones they name: `N request(s) still under way after
-N ms; no file is closed`, `NVKMS: its device is left to RM's shutdown`,
-`the adapter was NOT shut down (step N)`, `no GPU is started: nothing to
+N ms; no file is closed`, `the adapter was NOT shut down: requests are
+still under way, …`, `the adapter was NOT shut down (step N)`, `no GPU is started: nothing to
 shut down` (the skeleton), `not done after 20 s, in …`.
 
 ### 13.4 The host's side
@@ -3598,6 +3602,9 @@ end in `Running`'s drop.
   down and no client alive, which is the simplest first card test.
 * **A desktop without `--ssh`** has no way in, and is destroyed as before,
   with a line that says so.
+* **`FERRIX_NVIDIA_NO_QUIESCE=1`** in `xtask`'s environment leaves all of
+  this out, script and destroy alike: a boot as before §13, for telling a
+  fault of the quiesce from a fault it was meant to prevent.
 
 Not built: `init` asking for the quiesce at `poweroff` and `reboot`, which
 a real machine needs before a warm restart. It is one unit with a stop
@@ -3641,6 +3648,16 @@ on the fix.
 * `cargo xtask test-nvrm-link` passes as before.
 * `xtask`'s reading of the lines has unit tests (done, done without the
   adapter, stuck, pending).
+* A second session read the commit against NVIDIA's sources without my
+  conclusions (`~/.local/share/ferrix/nv-quiesce/review-1.md`). Its three
+  defects are fixed: a RELEASE under way was not waited for, the watch
+  was armed while `nvrm_kms_show` still used the device, and the adapter
+  was shut down even when requests were still under way. Its open risks
+  are for the card: `freeDevice` with the surface and its mapping alive
+  (nvidia-drm frees those first), the console-restore modeset that
+  `releaseOwnership` causes, and the vector that is never given back.
+  This is one session reading another's code, not a review in the
+  standards' sense.
 * **Not checked, because only the card can:** that the files close
   cleanly under live clients, that `freeDevice` blanks the head and
   returns, that `rm_shutdown_adapter` unloads the GSP firmware and returns

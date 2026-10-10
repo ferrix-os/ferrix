@@ -103,7 +103,7 @@ extern int nvrm_kms_show(void);
 extern int nvrm_chardev_publish(const uint16_t *minors, uint32_t count);
 extern int nvrm_chardev_serve(void);
 extern int nvrm_chardev_quiesce(uint32_t patience_ms);
-extern int nvrm_kms_quiesce(unsigned char free_devices);
+extern int nvrm_kms_quiesce(void);
 extern int nvrm_gpu_stop(void);
 extern unsigned char nvos_thread_spawn(void (*run)(void *), void *argument);
 
@@ -147,6 +147,8 @@ static int stop(enum step step, const char *what, long status)
  *     clients as the death of their processes would;
  *  2. NVKMS's device is released and freed, which shuts the heads down and
  *     frees the display's channels;
+ *     (when requests are still under way after the wait of step 1, steps
+ *     2 and 3 are left out and the line says so);
  *  3. the adapter is shut down (NVIDIA's nv_shutdown_adapter), which
  *     unloads the GSP firmware.
  *
@@ -207,27 +209,29 @@ static void quiesce(void)
 
 		quiesce_step = "the device files (requests under way)";
 		int closed = nvrm_chardev_quiesce(QUIESCE_DRAIN_MS);
-		if (closed >= 0)
+		if (closed < 0) {
+			/* NVIDIA shuts an adapter down only when nothing
+			 * holds it; a request still inside RM does. */
+			say("quiesce: the adapter was NOT shut down: requests "
+			    "are still under way, and NVKMS and the adapter "
+			    "are left as they are");
+		} else {
 			say("quiesce: the device files refuse requests; %d "
 			    "open file(s) closed", closed);
 
-		quiesce_step = "NVKMS (freeing its device)";
-		int freed = nvrm_kms_quiesce(closed >= 0);
-		if (closed >= 0)
+			quiesce_step = "NVKMS (freeing its device)";
 			say("quiesce: NVKMS: %d device(s) released and freed",
-			    freed);
-		else
-			say("quiesce: NVKMS: its device is left to RM's "
-			    "shutdown");
+			    nvrm_kms_quiesce());
 
-		quiesce_step = "the adapter (rm_disable_adapter, "
-			       "rm_shutdown_adapter)";
-		int stopped = nvrm_gpu_stop();
-		if (stopped == 0)
-			say("quiesce: the adapter is shut down");
-		else
-			say("quiesce: the adapter was NOT shut down (step %d)",
-			    stopped);
+			quiesce_step = "the adapter (rm_disable_adapter, "
+				       "rm_shutdown_adapter)";
+			int stopped = nvrm_gpu_stop();
+			if (stopped == 0)
+				say("quiesce: the adapter is shut down");
+			else
+				say("quiesce: the adapter was NOT shut down "
+				    "(step %d)", stopped);
+		}
 		if (boot0)
 			say("quiesce: NV_PMC_BOOT_0 reads 0x%08x", *boot0);
 	}
@@ -444,8 +448,6 @@ int main(void)
 			return status;
 		}
 		say("GPU started on %s", place);
-		gpu_started = 1;
-		quiesce_arm();
 
 		/* N1e: /dev/nvidiactl and /dev/nvidia0, through the kernel's
 		 * chardev core: published first, since the display core
@@ -465,6 +467,11 @@ int main(void)
 			say("NVKMS did not load (%d)", kms);
 		else
 			say("NVKMS loaded; display test %d", nvrm_kms_show());
+
+		/* Armed only now: until nvrm_kms_show has returned, this
+		 * thread uses NVKMS's device with no lock. */
+		gpu_started = 1;
+		quiesce_arm();
 
 		/* The device files, for nvrm's life. */
 		int served = nvrm_chardev_serve();

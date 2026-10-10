@@ -439,6 +439,10 @@ fn quiesced(lines: &[String]) -> Quiesced {
 /// the command or holds the destroy longer than that: a guest that is
 /// gone, has no sshd or does not answer is destroyed as before, and said.
 fn quiesce(port: Option<u16>, serial: Option<Serial>) {
+    if no_quiesce() {
+        println!("  {DOMAIN}: {NO_QUIESCE} is set, so nvrm is not asked to quiesce");
+        return;
+    }
     let Some(port) = port else {
         println!("  {DOMAIN}: no --ssh, so nvrm is not asked to quiesce before the destroy");
         return;
@@ -449,7 +453,8 @@ fn quiesce(port: Option<u16>, serial: Option<Serial>) {
     };
     let key = PathBuf::from(home()).join(".local/share/ferrix/ssh/id_ed25519");
     let touch = format!(
-        "/bin/busybox touch {QUIESCE_ASK} || touch {QUIESCE_ASK} || : > {QUIESCE_ASK}"
+        "/bin/busybox mkdir -p /run; \
+         /bin/busybox touch {QUIESCE_ASK} || touch {QUIESCE_ASK} || : > {QUIESCE_ASK}"
     );
     let asked = Command::new("ssh")
         .args(["-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none"])
@@ -532,8 +537,8 @@ const BUSYBOX: &str = "~/.local/share/ferrix/busybox/x86_64/bin/busybox.static";
 /// What init runs: wait for `nvrm` to register `/dev/nvidiactl`, then run
 /// NVIDIA's own `nvidia-smi` from the volume, through glibc. At its end it
 /// asks `nvrm` to quiesce the card (`docs/NVIDIA.md` §13) and waits, a
-/// bounded while, for it to say it has: the domain is destroyed three
-/// seconds after the shell exits.
+/// bounded while, for it to say it has ([`SCRIPT_QUIESCE`]): the domain is
+/// destroyed three seconds after the shell exits.
 const SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
 cd /tmp
 i=0
@@ -559,7 +564,10 @@ if [ -x /data/chrome/chrome-headless-shell ]; then
   /data/chrome/chrome-headless-shell --no-sandbox --use-angle=vulkan --enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE --ignore-gpu-blocklist --enable-gpu-rasterization --dump-dom 'data:text/html,<p>webgl_renderer=<b id=r>none</b></p><script>var%20g=document.createElement("canvas").getContext("webgl");var%20e=g&&g.getExtension("WEBGL_debug_renderer_info");document.getElementById("r").textContent=g?g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER):"no_webgl";</script>'
   echo "nvidia-gate: chrome exited $?"
 fi
-/bin/busybox mkdir -p /run
+"#;
+
+/// The script's end: ask `nvrm` to quiesce, and wait for it.
+const SCRIPT_QUIESCE: &str = r#"/bin/busybox mkdir -p /run
 /bin/busybox touch /run/nvrm-quiesce
 i=0
 while [ ! -e /run/nvrm-quiesced ]; do
@@ -568,8 +576,20 @@ while [ ! -e /run/nvrm-quiesced ]; do
   /bin/busybox sleep 1
 done
 echo "nvidia-gate: nvrm quiesced"
-exit 16
 "#;
+
+/// The script's last line: the status `run-nvidia` has always ended with.
+const SCRIPT_EXIT: &str = "exit 16\n";
+
+/// Set to anything to leave the card as every boot before §13 left it: no
+/// request to quiesce from `run-nvidia`'s script or before a destroy. For
+/// telling a fault of the quiesce from a fault it was meant to prevent.
+const NO_QUIESCE: &str = "FERRIX_NVIDIA_NO_QUIESCE";
+
+/// Whether [`NO_QUIESCE`] is set.
+fn no_quiesce() -> bool {
+    std::env::var_os(NO_QUIESCE).is_some()
+}
 
 /// `vk-offscreen` (`nvrm/test/vk-offscreen.c`): a clear on the GPU read
 /// back, N2's smallest proof of work. Built with the host's compiler against
@@ -921,7 +941,13 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     let shell_bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
     let loader = cargo::build_loader(arch, args.release)?;
-    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
+    let script = if no_quiesce() {
+        println!("  {NO_QUIESCE} is set: the script does not ask nvrm to quiesce");
+        format!("{SCRIPT}{SCRIPT_EXIT}")
+    } else {
+        format!("{SCRIPT}{SCRIPT_QUIESCE}{SCRIPT_EXIT}")
+    };
+    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, &script)?;
     let mut natives = native::build(arch, args.release)?;
     natives.push(Built {
         name: "nvrm",
@@ -1350,7 +1376,7 @@ nvrm: quiesce: done in 1840 ms
     fn a_quiesce_that_left_the_adapter_up_or_is_stuck_is_told_apart() {
         let left = DONE.replace(
             "nvrm: quiesce: the adapter is shut down\n",
-            "nvrm: quiesce: the adapter was NOT shut down (step 2)\n",
+            "nvrm: quiesce: the adapter was NOT shut down: requests are still under way, and NVKMS and the adapter are left as they are\n",
         );
         assert_eq!(quiesced(&lines(&left)), Quiesced::Done { adapter_down: false });
         let skeleton = "nvrm: quiesce: no GPU is started: nothing to shut down\n\

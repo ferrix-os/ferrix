@@ -414,21 +414,25 @@ static void handle(const struct nvos_request *request)
     switch (request->op)
     {
         case NVOS_REQUEST_RELEASE:
-            /* Never refused: a file the quiesce closed is unknown here, and
-             * one it left is closed as ever (RM frees a client of a GPU that
-             * is shut down, as after a removal). */
-            entry = forget(request->file);
-            if (entry == NULL)
-                return;
-            /* A render-node file the quiesce could not close frees its
-             * buffers through NVKMS's device, which is gone by now. */
+            /* Never refused: a file the quiesce closed is unknown here. One
+             * it left, because requests were still under way, is closed as
+             * ever: the adapter is not shut down then either. */
+            /* Counted as under way whenever it comes, so that the quiesce
+             * waits for a close that began before it: the close uses
+             * NVKMS's device and the adapter, which the quiesce frees. */
             nvos_mutex_lock(&files_lock);
             late = quiescing;
+            under_way++;
             nvos_mutex_unlock(&files_lock);
-            if (late && entry->drm != NULL)
+            entry = forget(request->file);
+            /* A render-node file left open by a quiesce that closed none
+             * would free its buffers through NVKMS's device; it is only
+             * forgotten. */
+            if (entry != NULL && late && entry->drm != NULL)
                 free(entry);
-            else
+            else if (entry != NULL)
                 close_entry(entry);
+            request_leave();
             return;
 
         case NVOS_REQUEST_DMABUF_RELEASE:
@@ -485,7 +489,7 @@ int nvrm_chardev_serve(void)
  * wait up to `patience_ms` for the requests under way, then close every
  * file still open. The files closed, or -1 when requests were still under
  * way after the wait: then no file is closed, since a worker may be using
- * one, and RM's shutdown frees what their clients hold on the GPU.
+ * one, and the caller leaves NVKMS and the adapter as they are.
  */
 int nvrm_chardev_quiesce(NvU32 patience_ms)
 {

@@ -249,7 +249,7 @@ NvU32 nv_linux_devices_each(NvU32 limit, void (*each)(const nv_linux_state_t *, 
 int nvrm_kms_init(void);
 /* os/glue/kms.c: light the displays on every GPU with a test pattern. */
 int nvrm_kms_show(void);
-int nvrm_kms_quiesce(NvBool free_devices);
+int nvrm_kms_quiesce(void);
 
 /* os/glue/drm.c: nvidia-drm's render node (N3b), served on the chardev
  * core's RENDER_MINOR beside /dev/nvidiactl. */

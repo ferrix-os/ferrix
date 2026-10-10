@@ -298,10 +298,10 @@ int nvrm_gpu_start(void)
  * Shut the started GPU's adapter down: NVIDIA's nv_shutdown_adapter.
  * rm_disable_adapter turns the GPU's interrupts off and unloads what the
  * clients left; rm_shutdown_adapter unloads and destroys the GPU's state,
- * which unloads the GSP firmware. 0, 1 when no GPU is started, or 2 when
- * an interrupt handler was still running after the wait, and the adapter
- * was left disabled but not shut down, since RM would free the state the
- * handler is in.
+ * which unloads the GSP firmware. 0, 1 when no GPU is started, 3 when
+ * there was no memory for RM's stack, or 2 when an interrupt handler was
+ * still running after the wait, and the adapter was left disabled but not
+ * shut down, since RM would free the state the handler is in.
  */
 int nvrm_gpu_stop(void)
 {
@@ -314,7 +314,7 @@ int nvrm_gpu_stop(void)
         return 1;
     nv = NV_STATE_PTR(nvl);
     if (nv_kmem_cache_alloc_stack(&sp) != 0)
-        return GPU_STEP_MEMORY;
+        return 3;
 
     nvos_sema_down(&nvl->ldata_lock);
     rm_disable_adapter(sp, nv);
