@@ -167,16 +167,16 @@ as a program does in a real thread of a check process and makes the calls
 through the core's own entry; thirteen negative controls each stopped the
 boot with the check's own message (`docs/SECCOMP.md` §12).
 
-**Done -- seccomp S4, `TRAP` (2026-10-01, 4 points).** A filter's `TRAP`
+**Done -- seccomp S4, `TRAP` (built 2026-10-01, ported onto `main` 2026-10-11, 4 points).** A filter's `TRAP`
 forces `SIGSYS` with Linux's `_sigsys` information (field by field for i386),
 and the core rolls the call's registers back (`Verdict::Trap`, `L.trap.8`)
 so that a handler finds the call in its context and can answer it, as
 Chromium's renderers do. A trap cannot be blocked or ignored; a trapped
 native-range call kills its process. `PR_{GET,SET}_SPECULATION_CTRL` report
-both mitigations force-disabled and refuse to enable them. Six negative
+both mitigations force-disabled and refuse to enable them. Seven negative
 controls (`docs/SECCOMP.md` §12).
 
-**Done -- seccomp S5, `TSYNC` (2026-10-01, 3 points).** A filter can be
+**Done -- seccomp S5, `TSYNC` (built 2026-10-01, ported onto `main` 2026-10-11, 3 points).** A filter can be
 given to every thread of a process at once, or to none: a thread with a chain
 of its own or in strict mode makes the call answer its id (`ESRCH` with
 `TSYNC_ESRCH`), and a thread made while the sync runs copies its creator's
@@ -184,7 +184,7 @@ chain under the lock the sync holds, so it cannot be left out. The `seccomp`
 line checks it with 49 threads, forty of them made during the sync; four
 negative controls.
 
-**Done -- seccomp S6, the guest test (2026-10-01, 2 points).** `cargo xtask
+**Done -- seccomp S6, the guest test (built 2026-10-01, ported onto `main` 2026-10-11, 2 points).** `cargo xtask
 test-seccomp` boots `src/tests/seccomp` as init on x86-64, i386, AArch64 and
 ARMv7-A: Chromium's probes and its `SIGSYS` emulation, Flatpak's filter for two
 architectures, bubblewrap's `prctl` then `execve`, the kill actions with a
@@ -295,9 +295,7 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 |---|---|---|
 | `stage13-cgctl` (`po6/cgctl`, `po10-cgctl/cgctl`) | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | **2026-10-05:** po6 fixed the consultant's D1 (the freeze posts `STOP` through the pending-work word; a parked process moved out of a frozen cgroup is released) and all 23 controls of `CGROUPS.md` §14 FIRED (`po6-cgctl-ctl-*`). **2026-10-07:** rebased onto main 4466212c3 by po10-cgctl; the fast path's exits now honour `cpu.max`, and the `cpu.max` cut is armed for the task a switch picks (main's 2f arms the timer before it stores the pick, which left a lone thread unthrottled on armv7a `--smp 2`); rows and the controls the rebase touched re-run (`po10-cgctl-*`); consultant OK IF (po10-cgctl-cert), its conditions met; **landed 2026-10-07** (batch 08984c2db..8ec24ef0e) |
 | `stage13-s3-on-netns` 0527dd365 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions), on main 22384874f | **2026-10-04:** every row PASSED on 6c539b276 (`l13s3f-*`: check, three boots, `test-threads`, `test-init`, `test-shell`, `test-vfs`) and all 19 controls FIRED; consultant OK (ledger line 336). Rebased onto netns: k7, k13, k17 FIRED on 0527dd365 (`l13s3n2-*`), the other 16 carry by range-diff. Batch 20261004T135748Z stopped at the wind-down undecided: every gate PASSED but `test-selfhost` (red on main) and `test-shell` (QEMU killed from outside); owed: one batch re-run, then the consultant's final OK. `stage13-s3`, `-onmain`, `-rebase` are history |
-| `stage13-s4` 9ad2c718e | `SECCOMP_RET_TRAP` | consultant: OK if five conditions; three written; controls t2-t7 and the rows owed; lands after S3 |
-| `stage13-s5` 298399f1e | `TSYNC` | consultant: OK if; a new thread fails closed (written); owed: a measured bound for the TSYNC ancestor walk, the rows, four controls |
-| `stage13-s6` 64e891f7e | `cargo xtask test-seccomp` (S6a) | passed on all four ABIs in a direct run; pool INDEX lines owed; Linux's `seccomp_bpf` selftest not done |
+| `stage13-s4` 9ad2c718e, `stage13-s5` 298399f1e, `stage13-s6` 64e891f7e | `SECCOMP_RET_TRAP`, `TSYNC`, `cargo xtask test-seccomp` (S6a) | **2026-10-11:** ported onto main 9c3e0df30 as `land-seccomp-s4` with the consultant's conditions of 2026-10-01 written (`docs/SECCOMP.md` §12, "S4 to S6 ported"); the rows, the controls and the consultant's verdict on the ported hashes are in the landing's messages. Linux's `seccomp_bpf` selftest is not done (BACKLOG) |
 | `stage13-fdinfo` | **landed 2026-10-04** (NP, as AUTH P2.1) | see above |
 | `stage13-n5` 7a0c04fdd | unprivileged mounting | on fdinfo; consultant asked for changes, built (remount by the superblock's owner, the bottom mount locked, a sleeping write-out), not gated; earlier tip's boots, `test-vfs`, `test-shell`, `test-bwrap` PASSED |
 | `stage13-bwrap-user` dad30e7f2 | `test-bwrap` as uid 1000 | passes (a new tmpfs is now 1777 and the mounter's); needs a rebase onto N5, a control for the tmpfs case, review |

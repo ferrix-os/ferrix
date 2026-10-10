@@ -495,7 +495,9 @@ Seccomp filters (S3) landed on 2026-10-04 (248799bdd: `seccomp(2)`, `prctl(PR_SE
 the cgroup controllers (reclaim of a read-only mount's clean pages,
 `memory.high`, freezing, `cpu.max`, `io`; 23 negative controls) landed on
 2026-10-07, and on 2026-10-08 `cpu.stat`'s charge moved off the fast path's
-every direction (df7ee418c); time namespaces and S4 to S6 are on branches
+every direction (df7ee418c); seccomp's `TRAP`, `TSYNC` and `cargo xtask
+test-seccomp` (S4 to S6) were ported onto `main` on 2026-10-11
+(`docs/SECCOMP.md` §12); time namespaces are on a branch
 (`stage-13-handover.md`).
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
