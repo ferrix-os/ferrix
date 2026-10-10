@@ -1679,7 +1679,7 @@ the boot with the check's own message:
 | the hook never learns a thread holds a filter | `a filtered getppid ran` |
 | the chain keeps the oldest filter's answer | `the newest filter's data did not stand on a tie` |
 | a fork child's thread starts with no filter | `a forked child of a filtered process was not filtered` |
-| a clone's thread starts with no filter | `a thread of a filtered process was not filtered` |
+| a clone's thread starts with no filter | `a thread of a filtered process was made unfiltered, before it was listed` (since S5, which copies the chain a second time as the thread is listed: the first copy has a look of its own) |
 | a native child is given no filter | `a native child of a filtered process was not filtered once its start was refused and made again` |
 | a killed last thread ends its process as exit 0 | `a killed thread's process exited otherwise than by SIGSYS` |
 | an ERRNO of 512 is answered 4 | `a filter's ERESTARTSYS restarted the call` |
@@ -1789,12 +1789,18 @@ given-up chains are dropped after it, so nothing is allocated or freed under
 it. `TSYNC_ESRCH` without `TSYNC` is `EINVAL`.
 
 The race SR10 names is closed where the design put it: a thread made by
-`clone(CLONE_THREAD)` no longer copies its creator's chain when the `Thread`
-is built (the consultant's note on S5: `Thread::sibling` copied it outside the
-lock) but in `Process::add_thread_from`, under the thread-list lock, as it is
-listed. A thread being made during a sync is therefore either listed already,
-and reached by the sync, or copies its creator's chain after the sync gave it
-the new one.
+`clone(CLONE_THREAD)` copies its creator's chain in
+`Process::add_thread_from`, under the thread-list lock, as it is listed. A
+thread being made during a sync is therefore either listed already, and
+reached by the sync, or copies its creator's chain after the sync gave it the
+new one. The `Thread` is also built with its creator's chain
+(`Thread::sibling_numbered`, outside the lock), which the copy under the lock
+then replaces: a path that listed a thread without `add_thread_from` would
+still list a filtered one, never an unfiltered one (the consultant's
+condition 1 on S5, fail closed). The state the second copy replaces is
+dropped after the lock is released. Each copy has a look and a control of
+its own: the heredity case judges a sibling before it is listed, and the
+running-threads case below needs the copy under the lock.
 
 Evidence: the `seccomp` line of FX-1303. On thread objects: a thread made
 before any filter and one made after the first both take the second filter by
@@ -1815,8 +1821,11 @@ Negative controls, each through `fleet/gate.sh control --expect`:
 
 What stands on the code: `EAGAIN` for an `execve` in progress (no boot check
 claims an exec), a BACKLOG row. The walk of each other thread's chain for
-`is_ancestor` runs under the thread-list lock and is bounded by the chain's
-length (6,554), a cost recorded in BACKLOG.
+`is_ancestor` runs under the thread-list lock, a spin lock, and is bounded
+by the chain's length (6,554) for each thread; the boot times that walk at
+its worst (the `seccomp` cost line's last figure) and
+`MEMORY-AND-TIMING.md` §2.2b has the figure and the arithmetic (the
+consultant's condition 2 on S5). Making it one comparison is a BACKLOG row.
 
 **S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
 test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
