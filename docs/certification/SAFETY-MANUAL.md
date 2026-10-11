@@ -597,3 +597,31 @@ is that [FINDINGS.md](FINDINGS.md) F-20 and F-22 are no longer blocked on a
 device that does not exist: the element-level analysis is §5, the element-level
 safety argument is §2 to §4, and what remains is the integrator's half, which
 is exported rather than missing.
+
+### AoU-28 — A/B slots bring a system back at the next reset, and no sooner
+On a disk with A/B system slots (`docs/AB-BOOT.md`) the UEFI loader, which is
+outside the element (SECURITY-TARGET A.FIRMWARE), is specified to:
+
+* **P1** start a trial slot only after the boot control record with one try
+  fewer was written, flushed and read back;
+* **P2** with no try left, start the good slot, and never a failed trial
+  before the ESP's rescue files;
+* **P3** start a slot only if its header and every blob verify;
+* **P4** write only the control record's two blocks, inside a partition that
+  overlaps no other GPT entry;
+* **P5** begin a slot boot's command line with its slot words, and never
+  truncate it.
+
+`cargo xtask test-ab-boot` shows each, with its negative controls. So a
+kernel or system that fails a trial boot is not started again once its tries
+are spent, and the machine boots the good slot -- **on the next reset**. The
+integrator shall provide that reset: the element halts on a panic (§3), and
+nothing resets a machine whose trial halted or hung. Not covered: a trial
+that hangs with no reset; damage a trial does to the root volume, which both
+slots share; a storage device that acknowledges a flush, returns the written
+block and then loses it (AoU-16); and the loader itself, which is not in a
+slot and is replaced only by an install. The reference configuration's
+options apply to a slot's command line as they do to the ESP's
+`CMDLINE.TXT` (§1, AoU-8), and a slot is only as authentic as whoever wrote
+it (AoU-15's argument: root, through the raw device).
+

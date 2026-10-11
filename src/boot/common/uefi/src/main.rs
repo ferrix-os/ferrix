@@ -22,6 +22,7 @@ mod console;
 mod kaslr;
 mod load;
 mod services;
+mod slots;
 mod uefi;
 
 use core::convert::Infallible;
@@ -154,9 +155,10 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
 
     // Before the kernel is placed, because the command line can say
     // `nokaslr`, and that decides where the kernel goes.
-    let (info_area, cmdline_len) = boot_info_area(&services)?;
+    let area = boot_info_area(&services)?;
     let loader = services.image_range()?;
-    let (kernel, choice) = stage_kernel(&services, (direct, loader), (info_area, cmdline_len))?;
+    let (kernel, choice) = stage_kernel(&services, (direct, loader), &area)?;
+    let (info_area, cmdline_len, source) = area;
     let direct = direct.at(choice.physmap_base);
     let mut memory = LoaderMemory::new(&services)?;
 
@@ -166,7 +168,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         MemoryType::FERRIX_BOOT_STACK,
     )?;
     let device_tree = copy_device_tree(&services)?;
-    let initrd = load_initrd(&services)?;
+    let initrd = initrd_of(&services, &source)?;
     let switch = load::place_switch(
         &services,
         direct,
@@ -280,6 +282,14 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     }
 }
 
+/// The initramfs: the slot's, or the ESP's when the kernel comes from there.
+fn initrd_of(services: &Services, source: &slots::Choice) -> Result<Option<(Allocation, u64)>> {
+    match source {
+        slots::Choice::Slot(slot) => Ok(slot.initrd),
+        slots::Choice::NoSlots | slots::Choice::Rescue => load_initrd(services),
+    }
+}
+
 /// Read the initramfs, if the image carries one.
 ///
 /// Absent is not an error: a board card flashed before stage 8, or an image
@@ -372,15 +382,34 @@ impl StagedKernel {
     }
 }
 
-/// Allocate the boot info area and read the command line into it, and say
-/// how many bytes that came to.
-fn boot_info_area(services: &Services) -> Result<(Allocation, u64)> {
+/// Allocate the boot info area, choose a slot or the ESP (`slots`), and
+/// put the command line in the area; say how many bytes it came to, and
+/// where the kernel and initramfs come from.
+fn boot_info_area(services: &Services) -> Result<(Allocation, u64, slots::Choice)> {
     let info_area = services.allocate(
         "allocating the boot info",
         BOOT_INFO_BYTES,
         MemoryType::FERRIX_BOOT_INFO,
     )?;
-    Ok((info_area, load_cmdline(services, info_area)))
+    let capacity = (REGIONS_OFFSET - CMDLINE_OFFSET) as usize;
+    // SAFETY: these bytes are inside `info_area`, the loader's own zeroed
+    // allocation of BOOT_INFO_BYTES, between the `BootInfo` and the region
+    // array, which nothing else refers to until the kernel is entered.
+    let destination = unsafe {
+        core::slice::from_raw_parts_mut((info_area.address + CMDLINE_OFFSET) as *mut u8, capacity)
+    };
+    let choice = slots::choose(services, destination)?;
+    if let slots::Choice::Slot(slot) = &choice {
+        if let Some(text) = destination
+            .get(..slot.cmdline_len as usize)
+            .and_then(|bytes| core::str::from_utf8(bytes).ok())
+        {
+            println!("  cmdline  {text}  (from the slot)");
+        }
+        return Ok((info_area, slot.cmdline_len, choice));
+    }
+    println!("  boot     esp");
+    Ok((info_area, load_cmdline(services, info_area), choice))
 }
 
 /// Read the kernel, decide where it and the other moving regions go, and copy
@@ -391,9 +420,21 @@ fn boot_info_area(services: &Services) -> Result<(Allocation, u64)> {
 fn stage_kernel(
     services: &Services,
     (direct, loader): (DirectMap, (u64, u64)),
-    (info_area, cmdline_len): (Allocation, u64),
+    (info_area, cmdline_len, source): &(Allocation, u64, slots::Choice),
 ) -> Result<(StagedKernel, kaslr::Choice)> {
-    let (file, file_len) = load::read_kernel_file(services, KERNEL_PATH)?;
+    let (info_area, cmdline_len) = (*info_area, *cmdline_len);
+    let (file, file_len) = match source {
+        slots::Choice::Slot(slot) => slot.kernel,
+        slots::Choice::NoSlots => load::read_kernel_file(services, KERNEL_PATH)?,
+        slots::Choice::Rescue => match load::read_kernel_file(services, KERNEL_PATH) {
+            Err(error) if error.status == Some(Status::NOT_FOUND) => {
+                return Err(BootError::plain(
+                    "no slot verifies and the ESP holds no kernel",
+                ));
+            }
+            other => other?,
+        },
+    };
     let staged = StagedKernel {
         file,
         file_len,

@@ -1049,6 +1049,29 @@ pub(crate) fn watch_lines(
     }
 }
 
+/// Boot, and say whether `until` came or the kernel (or the loader)
+/// panicked first, with the lines and the serial log's path. For a gate that
+/// expects some boots to panic (`test-ab-boot`); neither, within the
+/// timeout, is an error.
+pub(crate) fn boot_until(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    until: &str,
+) -> Result<(bool, Vec<String>, PathBuf)> {
+    let watched = watch(arch, image, kernel, args, until)?;
+    match watched.verdict {
+        Verdict::Reached => Ok((false, watched.lines, watched.log)),
+        Verdict::Panicked => Ok((true, watched.lines, watched.log)),
+        Verdict::Silent => Err(Error::new(format!(
+            "{arch}: neither `{until}` nor a panic within {}s.\n  Serial output is in {}",
+            args.timeout,
+            watched.log.display()
+        ))),
+    }
+}
+
 /// [`watch`], calling `at_marker` once `until` has been printed, while QEMU
 /// is still running, and returning the lines. The hook sees the lines so far
 /// and may read the ones that follow ([`Watching`]). A boot that panicked or

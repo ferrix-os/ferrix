@@ -65,6 +65,7 @@
     reason = "AUDIT: xtask is a CLI build tool; the terminal is its interface"
 )]
 
+mod ab_boot;
 mod adbd;
 mod apps;
 mod args;
@@ -269,6 +270,7 @@ COMMANDS:
                   read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);
                   a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
                   virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
+    test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)
     test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64)
     test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
     test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
@@ -676,8 +678,7 @@ fn run() -> Result<()> {
         "hw-fingerprint" => hotpath::hw_fingerprint(&args),
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
-        "live" => installer::live(&args),
-        "test-install" => installer::test_install(&args),
+        "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
