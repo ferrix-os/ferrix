@@ -142,5 +142,35 @@ bound keep garbage out.
 
 ## 4. Where it stands
 
-2026-10-11: this design; PM1 and PM2 in progress on branch `postmortem`;
-PM3 waits for the certification consultant's design verdict.
+2026-10-11:
+
+* **Design verdict: OK IF P1-P10** (consultant ledger
+  `~/.local/share/ferrix/cert-consultant/reviews.md` line 744). PM1 outside
+  the item; PM2 outside the TOE (no code review, but P1's doc restatements:
+  A.FIRMWARE, the A/B AoU -- renumbered AoU-29 first, AoU-28 is taken -- and
+  line 727's "writes nothing but one control block" must name the
+  BOOTLOG/LASTKERNEL files and the NV variable, with PM2's commit;
+  test-ab-boot's p1-hash rule must hold with logging on). PM3 is CORE:
+  one ring algorithm shared with `console/log.rs` (P2), fail-closed region
+  check (P3), Pstore never free with no wildcard matches and a boot check
+  (P4), panic write-back after other CPUs stop, region-only clean on Arm,
+  bound in MEMORY-AND-TIMING (P5), requirement ids reserved first plus
+  four controls (P6), a VA row and an off switch by boot option or absent
+  variable, ITEM.md row (P7), BootInfo v8 refused on mismatch (P8),
+  test-postmortem with a QMP reset on x86-64 and AArch64, BACKLOG row for
+  the first SN720 PC run (P9), code review before land.sh take (P10).
+* **PM1 landed-ready** (this commit): `tools/common/debug/ferrix-postmortem.sh`
+  and `ferrix-slots-decode.py`. The decoder is Python, not `ferrix-slots`,
+  so the customer's host needs no build; checked by hand against a record
+  built to §3 (CRC-32C check value, a failed-trial record). Not yet run
+  against a loop-mounted image (needs root); `shellcheck` is not installed.
+  Owed: a host test that decodes records and headers `ferrix-slots` wrote.
+* **PM2 in progress**, uncommitted / WIP on branch `postmortem`:
+  `bootlog.rs` (console tee into a 32 KiB buffer, `save` writes
+  BOOTLOG.TXT and moves the old one to BOOTLOG.PRV), `Services::replace_file`
+  and `firmware_vendor`, FileProtocol `write`/`delete` bindings. Still to do:
+  call `bootlog::firmware` after `Services::new`, a memory-map summary line,
+  `handing over to the kernel` then `bootlog::save` before
+  `console::shutdown()`, `save` on `efi_main`'s error path (a fresh
+  `Services`), build, test-ab-boot with BOOTLOG checks, P1's doc edits.
+* **PM3 not started.**
