@@ -124,16 +124,19 @@ pub struct LoaderWords {
     pub kind: Kind,
     /// The sequence of the record acted on: the one written, for a trial.
     pub sequence: u64,
+    /// The boot disk's GPT disk GUID, so `bootctl` writes only that disk.
+    pub disk: crate::gpt::Guid,
 }
 
 impl fmt::Display for LoaderWords {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ferrix.slot={} ferrix.slot.boot={} ferrix.slot.seq={}",
+            "ferrix.slot={} ferrix.slot.boot={} ferrix.slot.seq={} ferrix.slot.disk={}",
             self.slot.letter(),
             self.kind.word(),
-            self.sequence
+            self.sequence,
+            crate::gpt::GuidText(self.disk)
         )
     }
 }

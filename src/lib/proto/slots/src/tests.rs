@@ -2,6 +2,7 @@
 
 extern crate std;
 
+use std::string::ToString;
 use std::vec;
 use std::vec::Vec;
 
@@ -254,6 +255,7 @@ fn loader_words_are_written_or_refused() {
         slot: Slot::B,
         kind: Kind::Trial,
         sequence: 12,
+        disk: DISK,
     };
     let mut out = [0u8; 128];
     let Some(len) = write_words(&words, &mut out) else {
@@ -261,7 +263,8 @@ fn loader_words_are_written_or_refused() {
     };
     assert_eq!(
         &out[..len],
-        b"ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=12"
+        b"ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=12 \
+          ferrix.slot.disk=12345678-9abc-def0-1122-334455667788"
     );
     assert_eq!(write_words(&words, &mut [0u8; 20]), None);
 }
@@ -350,6 +353,9 @@ fn a_slot_header_refuses_what_it_must() {
 }
 
 const DISK_BLOCKS: u64 = 1 << 16;
+
+/// A disk GUID whose text is easy to read.
+const DISK: gpt::Guid = gpt::guid(0x1234_5678, 0x9abc, 0xdef0, 0x1122, 0x3344_5566_7788);
 
 fn table(parts: &[(ferrix_partition::Guid, u64, u64)]) -> (Vec<u8>, Vec<u8>) {
     let partitions: Vec<_> = parts
@@ -702,17 +708,73 @@ fn a_slot_command_line_is_composed_whole_or_not_at_all() {
         slot: Slot::A,
         kind: Kind::Good,
         sequence: 3,
+        disk: DISK,
     };
-    let mut out = [0u8; 80];
+    let full: &[u8] = b"ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 \
+        ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.root=tmpfs";
+    let mut out = [0u8; 200];
     let len = compose(&words, b"  ferrix.root=tmpfs\n", &mut out);
+    assert_eq!(len.map(|len| &out[..len]), Some(full));
+    assert_eq!(compose(&words, b"", &mut out), Some(full.len() - 18));
+    // Exactly enough room, and one byte short: refused, never cut.
+    let mut exact = vec![0u8; full.len()];
     assert_eq!(
-        len.map(|len| &out[..len]),
-        Some(&b"ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.root=tmpfs"[..])
+        compose(&words, b"ferrix.root=tmpfs", &mut exact),
+        Some(full.len())
     );
-    let len = compose(&words, b"", &mut out);
-    assert_eq!(len, Some(53));
-    // One byte short: refused, never cut.
-    let mut short = [0u8; 70];
+    let mut short = vec![0u8; full.len() - 1];
     assert_eq!(compose(&words, b"ferrix.root=tmpfs", &mut short), None);
     assert_eq!(compose(&words, &[0xFF, 0xFE], &mut out), None);
+}
+
+#[test]
+fn the_longest_slot_command_line_fits_the_boot_info() {
+    use crate::plan::compose;
+    use crate::slot::MAX_CMDLINE;
+    // The loader's command-line area: the page of the boot info after the
+    // `BootInfo` (src/boot/common/uefi/src/main.rs, CMDLINE_OFFSET to
+    // REGIONS_OFFSET).
+    let capacity = ferrix_bootinfo::PAGE_SIZE as usize - size_of::<ferrix_bootinfo::BootInfo>();
+    let words = LoaderWords {
+        slot: Slot::B,
+        kind: Kind::Fallback,
+        sequence: u64::MAX,
+        disk: [0xFF; 16],
+    };
+    let line = vec![b'x'; MAX_CMDLINE as usize];
+    let mut out = vec![0u8; capacity];
+    assert!(
+        compose(&words, &line, &mut out).is_some(),
+        "capacity {capacity}"
+    );
+}
+
+#[test]
+fn a_ferrix_partition_outside_the_usable_blocks_is_refused() {
+    let slot = ferrix_partition::Guid(SLOT_TYPE);
+    let control = ferrix_partition::Guid(CONTROL_TYPE);
+    let parts = [
+        (control, 4096, 8191),
+        (slot, 8192, 12287),
+        (slot, 12288, 16383),
+    ];
+    // The control partition moved onto the primary header at LBA 1.
+    assert_eq!(
+        edited(&parts, &|_, array| set_lba(array, 0, 32, 1)),
+        Err(GptError::Range)
+    );
+    // A slot running into the backup table past the last usable block.
+    assert_eq!(
+        edited(&parts, &|_, array| set_lba(array, 2, 40, DISK_BLOCKS - 2)),
+        Err(GptError::Range)
+    );
+    // The disk GUID is carried to the layout.
+    let Ok(layout) = edited(&parts, &|_, _| {}) else {
+        panic!("layout");
+    };
+    assert_eq!(gpt::GuidText(layout.disk).to_string().len(), 36);
+    assert_eq!(
+        gpt::GuidText(DISK).to_string(),
+        "12345678-9abc-def0-1122-334455667788"
+    );
 }

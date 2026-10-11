@@ -57,6 +57,8 @@ const CONTROL_MIB: u64 = 1;
 const ROOT_MIB: u64 = 16;
 /// Linux swap's partition type.
 const SWAP_TYPE: Guid = Guid::from_fields(0x0657_FD6D, 0xA4AB, 0x43C4, 0x84E5, 0x0933_C84B_4F4F);
+/// The test disk's GUID, which the loader names as `ferrix.slot.disk`.
+const DISK_GUID: Guid = Guid::random([7; 16]);
 /// The slots' own command line: `/` in memory, so no boot touches p6.
 const SLOT_CMDLINE: &str = "ferrix.root=tmpfs";
 /// The ESP's rescue command line.
@@ -199,7 +201,7 @@ impl Bench {
             partition(Guid(SLOT_TYPE), l.b, 5, "ferrix-slot-b"),
             partition(LINUX_FILESYSTEM, l.root, 6, "ferrix-root"),
         ];
-        let table = write_table(l.sectors, SECTOR as u32, Guid::random([7; 16]), &partitions)
+        let table = write_table(l.sectors, SECTOR as u32, DISK_GUID, &partitions)
             .map_err(|error| Error::new(format!("test-ab-boot's partition table: {error}")))?;
         for (lba, bytes) in table {
             file.write_all_at(&bytes, lba * SECTOR).map_err(on)?;
@@ -389,15 +391,9 @@ fn case_1(bench: &Bench, good: &[u8], panics: &[u8]) -> Result<()> {
     if !panicked {
         return Err(fail("case 1, boot 1: B's system did not panic"));
     }
-    let tried = armed.after_try().unwrap_or(armed);
-    require_record(
-        bench,
-        Current::Valid {
-            copy: 0,
-            record: tried,
-        },
-        "case 1, boot 1: the try was not recorded",
-    )?;
+    // Read now, judged after boot 2: a missing decrement then shows as the
+    // loop it causes -- B started again -- which is what its control expects.
+    let after_boot_1 = bench.current()?;
     let (panicked, lines) = bench.boot("case 1, boot 2: the reset after the panic")?;
     if lines.iter().any(|line| line.contains("boot     slot b")) {
         return Err(fail(
@@ -411,9 +407,24 @@ fn case_1(bench: &Bench, good: &[u8], panics: &[u8]) -> Result<()> {
     )?;
     require(
         &lines,
-        "cmdline  ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.root=tmpfs",
+        &format!(
+            "cmdline  ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.slot.disk={} \
+             ferrix.root=tmpfs",
+            ferrix_slots::gpt::GuidText(DISK_GUID.0)
+        ),
         "case 1, boot 2: the command line does not begin with the loader's words",
     )?;
+    let tried = armed.after_try().unwrap_or(armed);
+    let wanted = Current::Valid {
+        copy: 0,
+        record: tried,
+    };
+    if after_boot_1 != wanted {
+        return Err(fail(&format!(
+            "case 1, boot 1: the try was not recorded: the record was {after_boot_1:?}, not \
+             {wanted:?}"
+        )));
+    }
     if panicked {
         return Err(fail("case 1, boot 2: A's system panicked"));
     }
