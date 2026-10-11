@@ -34,6 +34,12 @@
 //!    corrupted slot, and `try` refuses to write (the idle slot would be
 //!    the running one).
 //!
+//! 7. End to end, through the loader: a system whose shell runs `bootctl`
+//!    is installed on a fresh disk and booted from it alone: slot A, good,
+//!    writes and arms slot B with `bootctl try`; at the next reset the
+//!    loader starts B's trial and `bootctl good` keeps it; at the next, B
+//!    boots as good.
+//!
 //! Throughout: the target's swap pattern, the premade disk's swap and
 //! table, and the SN720 copy hash the same at the end as before.
 
@@ -116,6 +122,23 @@ echo \"bootctl: verify corrupted exited $?\"\n\
 /sbin/bootctl status\n\
 /sbin/bootctl try /dev/vdd\n\
 echo \"bootctl: try stale exited $?\"\n\
+exit 0\n";
+
+/// The end-to-end system's script: the same system in both slots, doing
+/// what a person does -- on slot A, good, `bootctl try` the new image; on
+/// the trial of B, `bootctl good`.
+const E2E: &str = "read line < /proc/cmdline\n\
+echo \"e2e: booted with $line\"\n\
+case \"$line\" in\n\
+*ferrix.slot.boot=trial*) /sbin/bootctl good; echo \"e2e: good exited $?\" ;;\n\
+*ferrix.slot=a*) /sbin/bootctl try /dev/vde; echo \"e2e: try exited $?\" ;;\n\
+esac\n\
+/sbin/bootctl status\n\
+exit 0\n";
+
+/// The end-to-end install, from the end-to-end system's live medium.
+const E2E_INSTALL: &str = "/sbin/ferrix-install --yes --slots --esp-mib 512 --slot-mib 600 /dev/vde\n\
+echo \"slots: e2e exited $?\"\n\
 exit 0\n";
 
 /// What boot 1 must print.
@@ -281,6 +304,7 @@ pub(super) fn test(args: &Args) -> Result<()> {
     // 2. The installed disk alone.
     gate.installed()?;
     gate.bootctl_boots()?;
+    gate.end_to_end()?;
 
     same(
         &gate.target,
@@ -388,6 +412,91 @@ impl<'a> Gate<'a> {
             )],
         )?;
         println!("  x86_64: the installed disk booted with / on vdd6");
+        Ok(())
+    }
+
+    /// Boots 7 to 10, end to end through the loader (`docs/AB-BOOT.md`):
+    /// install a system whose shell runs [`E2E`], boot it from the disk alone
+    /// (slot A, good), where it writes and arms slot B with `bootctl try`;
+    /// reset into B's trial, where `bootctl good` keeps it; reset into B,
+    /// good.
+    fn end_to_end(&self) -> Result<()> {
+        let arch = Arch::X86_64;
+        let build = paths::build_dir(arch);
+        let system = cargo::build_kernel_with_init(arch, self.args.release, &self.zinc, E2E)?;
+        let medium = build.join("ab-e2e-live.img");
+        write_medium(arch, &self.loader, &system, &self.initramfs, &medium)?;
+        let disk = build.join("ab-e2e.img");
+        let _ = fresh(&disk, DISK_BYTES)?;
+        let lines = self.run(
+            E2E_INSTALL,
+            "ferrix.root=tmpfs",
+            (medium, disk.clone()),
+            Vec::new(),
+        )?;
+        require(
+            &lines,
+            &[("slots: e2e exited 0", "the end-to-end install failed")],
+        )?;
+        // The new system: this one again, as `cargo xtask slot-image` writes it.
+        let image = build.join("ab-e2e-new.img");
+        let kernel_bytes = std::fs::read(&system.elf)?;
+        let archive = system.initramfs(&self.initramfs)?;
+        let label = "ferrix e2e new";
+        crate::slot_image::write(&image, label, &kernel_bytes, &archive, b"ferrix.root=btrfs")?;
+
+        let mut booted = self.args.clone();
+        booted.boot_virtio = true;
+        booted.extra_disks = vec![image];
+        if !booted.timeout_given {
+            booted.timeout = BOOT_SECONDS;
+        }
+        let boot = || qemu::watch_lines(arch, &disk, &system, &booted, crate::shell::EXITED);
+        require(
+            &boot()?,
+            &[
+                (
+                    "boot     slot a good seq 1",
+                    "the loader did not boot slot A as good",
+                ),
+                (
+                    "bootctl: slot b read back and verified",
+                    "bootctl try did not write slot B",
+                ),
+                (
+                    "e2e: try exited 0",
+                    "bootctl try failed on the installed system",
+                ),
+                ("trial:   b, 1 tries left", "bootctl try did not arm slot B"),
+            ],
+        )?;
+        println!("  {arch}: installed, booted slot a through the loader, wrote and armed b");
+        require(
+            &boot()?,
+            &[
+                (
+                    "boot     slot b trial seq 3",
+                    "the loader did not start B's trial after the reset",
+                ),
+                ("e2e: good exited 0", "bootctl good failed on B's trial"),
+                ("good:    b", "the record does not say b is good"),
+            ],
+        )?;
+        println!("  {arch}: reset into b's trial, and bootctl good kept it");
+        require(
+            &boot()?,
+            &[
+                (
+                    "boot     slot b good seq 4",
+                    "the loader did not boot B as good after the reset",
+                ),
+                (
+                    "booted:  b as good, under record 4",
+                    "bootctl status does not say B booted as good",
+                ),
+            ],
+        )?;
+        println!("  {arch}: reset into b, good: end to end through the loader");
         Ok(())
     }
 
