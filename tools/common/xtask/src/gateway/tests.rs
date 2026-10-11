@@ -709,6 +709,105 @@ fn carries_a_tcp_connection_in_both_directions_and_closes_it() {
     );
 }
 
+/// A far end that reads `GET /` and answers it, and where it listens.
+fn a_host_that_answers() -> (SocketAddrV4, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = match listener.local_addr().unwrap() {
+        std::net::SocketAddr::V4(address) => address,
+        other => panic!("a listener bound to 127.0.0.1 is not {other}"),
+    };
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 5];
+        stream.read_exact(&mut request).unwrap();
+        stream.write_all(b"hello from the host").unwrap();
+    });
+    (address, server)
+}
+
+/// A guest on a loaded host acknowledges the SYN-ACK later than the
+/// gateway's retransmission timer, and the connection opens all the same.
+///
+/// Until 2026-10-11 the timer wound `snd_nxt` back over the SYN-ACK, the late
+/// acknowledgment was then of something "never sent" and was ignored, and the
+/// connection never opened: the host's answer was never passed on.
+#[test]
+fn an_acknowledgment_later_than_the_retransmission_timer_opens_the_connection() {
+    let guest = Guest::start();
+    let (address, server) = a_host_that_answers();
+    let mut stream = Stream {
+        guest: &guest,
+        port: 40_010,
+        peer: address,
+        sequence: 0x0BAD_0000,
+        expected: 0,
+    };
+    stream.send(Flags::SYN, &[]);
+    stream.sequence = stream.sequence.wrapping_add(1);
+    let (header, _) = stream.segment();
+    assert!(header.flags.contains(Flags::SYN.union(Flags::ACK)));
+    stream.expected = header.sequence.wrapping_add(1);
+
+    // Five of the gateway's timers, and less than one of the handshake's own.
+    std::thread::sleep(super::tcp::RETRANSMIT * 5);
+    stream.send(Flags::ACK, &[]);
+    stream.write(b"GET /");
+    let answer = stream.read_to_fin();
+    assert_eq!(
+        answer, b"hello from the host",
+        "the host's answer reaches a guest whose acknowledgment was late"
+    );
+    stream.finish();
+    server.join().unwrap();
+}
+
+/// A guest whose SYN-ACK was lost sends its SYN again, and gets the SYN-ACK
+/// again, with the same numbers: a bare acknowledgment is nothing a guest
+/// still connecting takes. One that says nothing gets it again on a timer.
+#[test]
+fn a_lost_syn_ack_is_sent_again_for_a_second_syn_and_on_a_timer() {
+    let guest = Guest::start();
+    let (address, server) = a_host_that_answers();
+    let mut stream = Stream {
+        guest: &guest,
+        port: 40_011,
+        peer: address,
+        sequence: 0x0BAD_0000,
+        expected: 0,
+    };
+    stream.send(Flags::SYN, &[]);
+    let (first, _) = stream.segment();
+    assert!(first.flags.contains(Flags::SYN.union(Flags::ACK)));
+
+    // The SYN again, as a guest that never saw the answer sends it.
+    stream.send(Flags::SYN, &[]);
+    let (again, _) = stream.segment();
+    assert!(
+        again.flags.contains(Flags::SYN.union(Flags::ACK)),
+        "a second SYN is answered with the SYN-ACK again, not {:?}",
+        again.flags
+    );
+    assert_eq!(
+        (again.sequence, again.acknowledgment),
+        (first.sequence, first.acknowledgment)
+    );
+
+    // And silence: the SYN-ACK comes again by itself.
+    let (timed, _) = stream.segment();
+    assert!(
+        timed.flags.contains(Flags::SYN.union(Flags::ACK)) && timed.sequence == first.sequence,
+        "an unacknowledged SYN-ACK is sent again on its timer"
+    );
+
+    stream.sequence = stream.sequence.wrapping_add(1);
+    stream.expected = first.sequence.wrapping_add(1);
+    stream.send(Flags::ACK, &[]);
+    stream.write(b"GET /");
+    assert_eq!(stream.read_to_fin(), b"hello from the host");
+    stream.finish();
+    server.join().unwrap();
+}
+
 /// Have the guest say something, so the gateway knows where it is: a forward
 /// is only opened to a guest that has been heard from.
 fn introduce(guest: &Guest) {

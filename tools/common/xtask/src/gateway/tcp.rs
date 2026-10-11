@@ -384,6 +384,12 @@ impl Connection {
         self.stream = Some(stream);
         self.state = State::Handshaking;
         self.syn_pending = true;
+        self.send_syn_ack(out);
+        self.snd_nxt = self.iss.wrapping_add(1);
+    }
+
+    /// The answer to the guest's SYN, first or again.
+    fn send_syn_ack(&mut self, out: &mut Vec<Outgoing>) {
         let mss = u16::try_from(MAX_SEGMENT).unwrap_or(u16::MAX);
         out.push(Outgoing {
             flags: Flags::SYN.union(Flags::ACK),
@@ -393,8 +399,28 @@ impl Connection {
             mss: Some(mss),
             payload: Vec::new(),
         });
-        self.snd_nxt = self.iss.wrapping_add(1);
         self.sent_at = Instant::now();
+    }
+
+    /// The SYN-ACK again, if the guest has not acknowledged it for
+    /// [`REDIAL`]: it was lost, or the guest's acknowledgment was.
+    ///
+    /// This is the handshake's own timer, and [`Connection::expire_retransmit`]
+    /// must not stand in for it. That one winds `snd_nxt` back to `snd_una`
+    /// for [`Connection::push_next`] to walk the bytes again, and until the
+    /// connection is open nothing walks them: the SYN-ACK's sequence number
+    /// was left looking never sent, the guest's acknowledgment of it was then
+    /// an acknowledgment of something never sent and was ignored, and the
+    /// connection stayed half open for good, with every later segment of the
+    /// gateway's numbered one too low for the guest to take. It took only an
+    /// acknowledgment later than [`RETRANSMIT`], 20 ms, which a loaded host
+    /// gives one handshake in a few dozen: a guest's `git clone` then stood
+    /// still with its request unacknowledged (2026-10-11, three of nine boots
+    /// of `test-devloop` at a load of 30 to 50).
+    fn resend_syn_ack(&mut self, out: &mut Vec<Outgoing>) {
+        if self.syn_pending && self.sent_at.elapsed() >= REDIAL {
+            self.send_syn_ack(out);
+        }
     }
 
     /// The host refused, or the connection has to be torn down: reset the guest.
@@ -449,6 +475,12 @@ impl Connection {
         if header.flags.contains(Flags::SYN) && self.state == State::Connecting {
             // The SYN again, because the host connect has not finished. There
             // is nothing to answer with yet, and answering late is correct.
+            return;
+        }
+        if header.flags.contains(Flags::SYN) && self.state == State::Handshaking {
+            // The SYN again, because its answer was lost: the answer again,
+            // which is the only thing a guest still connecting will take.
+            self.send_syn_ack(out);
             return;
         }
         if header.flags.contains(Flags::ACK) {
@@ -565,6 +597,10 @@ impl Connection {
         }
         self.write_to_host();
         self.read_from_host();
+        if self.state == State::Handshaking {
+            self.resend_syn_ack(out);
+            return;
+        }
         self.expire_retransmit();
         if self.state != State::Open {
             return;
