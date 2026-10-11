@@ -76,6 +76,10 @@ struct FakeDisk {
     done: Vec<Completion>,
     read_only: bool,
     broken: Option<DeviceError>,
+    /// The writes that came by `submit_fua`.
+    forced: Vec<u64>,
+    /// What `wants_drain` answers.
+    waiting: bool,
 }
 
 impl FakeDisk {
@@ -86,6 +90,8 @@ impl FakeDisk {
             done: Vec::new(),
             read_only: false,
             broken: None,
+            forced: Vec::new(),
+            waiting: false,
         }
     }
 
@@ -130,8 +136,17 @@ impl Disk for FakeDisk {
         })
     }
 
+    fn submit_fua(&mut self, request: &Request) -> Result<Accepted, SubmitError> {
+        self.forced.push(request.id);
+        self.submit(request)
+    }
+
     fn busy(&self) -> bool {
         !self.in_flight.is_empty()
+    }
+
+    fn wants_drain(&self) -> bool {
+        self.waiting
     }
 
     fn check(&mut self) -> Result<(), DeviceError> {
@@ -161,6 +176,60 @@ fn pair(
     let driver = DriverSide::new(memory.clone(), RING_BYTES, layout, device()).unwrap();
     let kernel = KernelSide::attach(memory.clone(), RING_BYTES, device(), storage).unwrap();
     (Serve::new(driver, disk), kernel, memory)
+}
+
+/// [`pair`], over a device that honours force unit access.
+fn pair_forcing(
+    disk: FakeDisk,
+    storage: &mut [Slot],
+) -> (Serve<Mem, FakeDisk, 8>, KernelSide<'_, Mem>) {
+    let device = Device::new(
+        BLOCK,
+        CAPACITY_BLOCKS,
+        MAX_SECTORS,
+        DeviceFlags::FLUSH.union(DeviceFlags::FUA),
+        DATA_BYTES,
+    )
+    .unwrap();
+    let memory = Mem::new();
+    let layout = RingLayout::standard(ENTRIES).unwrap();
+    let driver = DriverSide::new(memory.clone(), RING_BYTES, layout, device).unwrap();
+    let kernel = KernelSide::attach(memory, RING_BYTES, device, storage).unwrap();
+    (Serve::new(driver, disk), kernel)
+}
+
+#[test]
+fn a_forced_write_reaches_the_device_as_one_and_a_plain_write_does_not() {
+    let mut storage = [Slot::EMPTY; 8];
+    let (mut serve, mut kernel) = pair_forcing(FakeDisk::new(4), &mut storage);
+    kernel.submit(Submission::write(1, 0, 1, 0)).unwrap();
+    kernel
+        .submit(Submission::write(2, 1, 1, 4096).with_fua())
+        .unwrap();
+    let _ = kernel.publish();
+    assert_eq!(serve.on_bell(), Ok(None));
+    assert_eq!(serve.disk.in_flight.len(), 2);
+    assert_eq!(serve.disk.forced, [2]);
+}
+
+#[test]
+fn a_device_with_completions_no_interrupt_announces_says_so_through_the_loop() {
+    let mut storage = [Slot::EMPTY; 8];
+    let (mut serve, mut kernel, _) = pair(FakeDisk::new(4), &mut storage);
+    assert!(!serve.wants_drain());
+    kernel.submit(Submission::read(5, 0, 1, 0)).unwrap();
+    let _ = kernel.publish();
+    assert_eq!(serve.on_bell(), Ok(None));
+    // The watch found the request finished without an interrupt: the glue
+    // is told to drain, and the drain hands the completion over.
+    serve.disk.finish(5, Status::Ok, 4096);
+    serve.disk.waiting = true;
+    assert_eq!(serve.on_watch(), Ok(()));
+    assert!(serve.wants_drain());
+    let mut out = none();
+    let _ = serve.on_interrupt(&mut out).unwrap();
+    let done = kernel.poll().unwrap().expect("completed");
+    assert_eq!((done.submission.id, done.status), (5, RingStatus::Ok));
 }
 
 fn none() -> [Completion; 4] {

@@ -6,8 +6,6 @@
 //! keyboard layout, the network and `--everything`'s additions appended to
 //! it; `desktop` builds what the image carries beside it.
 
-use std::path::Path;
-
 use super::boot::{build_desktop_image, build_parts};
 use super::browser::chrome_libc;
 use super::desktop::{
@@ -71,7 +69,13 @@ bind = SUPER, W, exec, /bin/hyprctl activewindow
 /// feature of a watched desktop like the others `--everything` turns on, and
 /// fuzzel then lists vkgears. Elsewhere the card stays virgl's, as it was.
 fn everything_venus(arch: Arch, args: &mut Args) {
-    if args.everything && args.gl && !args.venus && crate::window::offers_venus(arch) {
+    // Not on the 3060 (`--nvidia`), whose domain has no virtio-gpu.
+    if args.everything
+        && args.gl
+        && !args.venus
+        && !args.nvidia
+        && crate::window::offers_venus(arch)
+    {
         println!("  gpu: Venus on the 3D card, so Vulkan runs on the host's GPU");
         args.venus = true;
     }
@@ -99,10 +103,10 @@ pub(super) fn everything_config(args: &mut Args) -> Result<Option<String>> {
     if args.config.is_some() || !args.everything || args.no_dotfiles {
         return Ok(None);
     }
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = crate::dotfiles::home() else {
         return Ok(None);
     };
-    let path = Path::new(&home).join(".config/hypr/hyprland.conf");
+    let path = home.join(".config/hypr/hyprland.conf");
     if !path.exists() {
         return Ok(None);
     }

@@ -68,6 +68,15 @@ is the measurement that question waits for. If G0 alone does not reach M4's
 target, the exit waits on question 3 (this page's reading of the plan; the
 design says only that G0 goes "as far as a heuristic goes").
 
+**The switch a person turns exists, with nothing behind it yet.** Since
+2026-10-11 Settings has a game-mode page (`docs/SETTINGS.md`): a list of
+the installed applications with a switch each, kept in the user's
+`~/.config/ferrix/game-mode.conf`, and the launcher starts a switched-on
+application with `FERRIX_GAME_MODE=1`. That is the design's "the user
+turned the session on for it" (§5.4) written down, and what G0 and G5 will
+read. It changes no weight, processor or defence, carries no points of this
+stage, and `test-compositor --boot settings` holds it.
+
 ## The steps
 
 Points are first guesses in the roadmap's sizes, made before any of it ran.
@@ -173,6 +182,17 @@ here.**
 9. A bare-metal run before any figure leaves the tree.
 10. Who settles the design's §4.2 and §6.2 lists with the present and
     `nv-trip` sessions.
+
+The game-mode switch raises ten more, in `docs/SETTINGS.md` §8. The
+customer decided three on 2026-10-11: a mark first; then the speculation
+protections and the other latency trades, meant per application
+(`docs/SETTINGS.md` §7.3 says what a grant reaches) and meant to be built
+if the certified item takes the mechanism; administrator privilege
+required. Open: where a game's scope may sit,
+whether the one-way barrier is for every client of `nvrm`, how and by which
+administrator a game is let into the driver's speculation domain, whether
+the certified item carries that at all, and question 4 narrowed to a choice
+of two (§7 there, a proposal, reviewed as a design: ledger line 698).
 
 ## What it cannot win, and what can go wrong
 

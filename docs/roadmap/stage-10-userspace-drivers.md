@@ -743,6 +743,20 @@ repeat.
   before the reset does not compile. virtio-input (642 to 117 lines) and
   virtio-blk (841 to 182 lines, 31b16d72) are on it.
 
+**Done — an NVMe driver, on QEMU's controller (2026-10-10).** The first
+driver for a disk a PC has (`docs/INSTALLER.md` H1; `docs/NVME.md`):
+`src/lib/drivers/block/nvme` is the controller as logic, with 40 host tests
+against a model, and `src/user/system/native/drivers/block/nvme` its process
+on `ferrix-driver`, whose new `pci` module is the bus of a PCI function that
+is not virtio. `devmgr` matches class code `01:08:02`. The kernel is not
+changed: the disk arrives over the block ring as a virtio disk does.
+`cargo xtask test-nvme` boots `/` from an NVMe drive below a root port and a
+PCIe switch, reads, writes and flushes a second drive of 4096-byte blocks,
+and kills both drivers under load; `test-restart --boot nvme` is the restart
+gate's rounds on that root. It has not run on a real drive, and
+`docs/NVME.md` §8 says what that leaves unshown: the Host Memory Buffer, a
+command timeout and the shutdown notification among it.
+
 **Still to do:** the other seven drivers onto `ferrix-driver` (net, snd,
 vport, gpu, then stm32-ltdc, gc400, usbhid, usbdev; `docs/BACKLOG.md` P2);
 a graceful STOP, since no kernel code sends one to a real driver and every

@@ -17,8 +17,9 @@ use ferrix_pci::ConfigSpace as _;
 use ferrix_pci::header::{COMMAND, COMMAND_BUS_MASTER, COMMAND_MEMORY_SPACE};
 
 use super::{
-    ConfigWrites, DeviceNode, FIRST_SHARED_INTERRUPT, Failure, Location, MsiFunction, Report,
-    Reserved, Trigger, Vector,
+    Address, ConfigWrites, DeviceNode, DmaShape, FIRST_SHARED_INTERRUPT, Failure, Location,
+    MsiFunction, PCI_CLASS_XHCI, PciFunction, RegisterBlock, Report, Reserved, TREE_STM32_USBH,
+    Trigger, USB_INPUT_FUNCTIONS, Vector, VirtioBlocks,
 };
 use crate::mmio::Mmio;
 use crate::object::interrupt::Interrupt;
@@ -421,6 +422,94 @@ fn deliver(node: &DeviceNode, edu: Mmio, vector: Vector) -> Result<usize, &'stat
     node.disable_dma()?;
     result
 }
+
+/// Require a USB host's node to allow eight input claims and every other
+/// node one: an STM32 board's USB host by its binding and a PCI function of
+/// exactly xHCI's class answer [`USB_INPUT_FUNCTIONS`]; a PCI function of
+/// EHCI's class -- one programming interface away -- and a virtio one answer
+/// one. The nodes are built here, not found, so every machine checks all
+/// four.
+///
+/// Verifies: L.device.21
+pub(super) fn check_input_functions() -> Result<(), Failure> {
+    let function = |class, virtio| PciFunction {
+        vendor: 0x1B36,
+        device: 0x000D,
+        class,
+        revision: 0,
+        subsystem_vendor: 0,
+        subsystem: 0,
+        secondary_bus: None,
+        config_phys: None,
+        virtio,
+        msix_table_size: 0,
+        host_visible: None,
+    };
+    let block = RegisterBlock {
+        phys: 0,
+        offset: 0,
+        length: 0,
+    };
+    let virtio = VirtioBlocks {
+        common: block,
+        notify: block,
+        isr: block,
+        device: None,
+        notify_multiplier: 0,
+    };
+    let pci = |class, virtio| {
+        let location = Location::Pci(Address::new(0, 0, 0, 0)?);
+        let mut node = DeviceNode::empty(location);
+        node.pci = Some(function(class, virtio));
+        Some(node)
+    };
+    let mut host = DeviceNode::empty(Location::Tree(0));
+    host.bind_board(TREE_STM32_USBH, DmaShape::ORDINARY);
+    let wanted = [
+        (
+            Some(host),
+            USB_INPUT_FUNCTIONS,
+            "an STM32 USB host's node does not allow eight input claims",
+        ),
+        (
+            pci(PCI_CLASS_XHCI, None),
+            USB_INPUT_FUNCTIONS,
+            "an xHCI function's node does not allow eight input claims",
+        ),
+        (
+            pci(PCI_CLASS_EHCI, None),
+            1,
+            "an EHCI function's node allows more than one input claim",
+        ),
+        (
+            pci(PCI_CLASS_INPUT, Some(virtio)),
+            1,
+            "a virtio function's node allows more than one input claim",
+        ),
+    ];
+    for (node, functions, what) in wanted {
+        // A row that could not be built is a check that did not run.
+        let Some(node) = node else {
+            return Err(Failure {
+                location: Location::Tree(0),
+                what: "a node of the input claims check could not be built",
+            });
+        };
+        if node.input_functions() != functions {
+            return Err(Failure {
+                location: node.location,
+                what,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// A USB host controller with EHCI's programming interface, 20, where xHCI's
+/// is 30: the nearest class that must not be taken for a USB host's.
+const PCI_CLASS_EHCI: u32 = 0x000C_0320;
+/// An input device controller, as a virtio-input function reports itself.
+const PCI_CLASS_INPUT: u32 = 0x0009_8000;
 
 /// Require no two apertures anywhere to overlap, no vector to be held twice,
 /// and every device tree vector to be a shared peripheral interrupt.

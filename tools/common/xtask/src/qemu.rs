@@ -31,6 +31,14 @@ pub(crate) const PANIC_MARKER: &str = "FERRIX-PANIC";
 /// once, and says why, rather than waiting out its timeout.
 pub(crate) const UNCHECKED_MARKER: &str = "FERRIX-BOOT-UNCHECKED";
 
+/// What the kernel prints last before it powers the machine off
+/// (`src/kernel/src/console.rs`, `announce_power_off`), matched as a whole
+/// line. A QEMU that exits by itself without it was not powered off: a triple
+/// fault under `-no-reboot`, or a reset there, ends it as quietly (F-46).
+const POWER_OFF_MARKER: &str = "FERRIX-POWER-OFF";
+/// What the kernel prints when its power-off write returned instead.
+const POWER_OFF_FAILED: &str = "FERRIX-POWER-OFF-FAILED";
+
 /// The option `--reset` puts in the image's `CMDLINE.TXT`.
 pub(crate) const RESET_OPTION: &str = "ferrix.onexit=reset";
 
@@ -1102,18 +1110,78 @@ pub(crate) fn watch_to_power_off(
             )));
         }
     }
-    let code = watched.ended.status.code();
-    // A QEMU asked to stop exits 0 as well, so the status alone would pass a
-    // guest that never powered off.
-    if !watched.ended.powered_off || (code != Some(0) && code != Some(DEBUG_EXIT_SUCCESS)) {
+    if let Some(problem) = power_off_problem(
+        arch,
+        &watched.lines,
+        until,
+        watched.ended.powered_off,
+        watched.ended.status.code(),
+    ) {
         return Err(Error::new(format!(
-            "{arch}: the guest did not power itself off ({}), so what it wrote to /data may \
-             not be committed.\n  Serial output is in {}",
-            watched.ended.status,
+            "{arch}: {problem}, so what it wrote to /data may not be committed.\n  Serial output \
+             is in {}",
             watched.log.display()
         )));
     }
     Ok(watched.lines)
+}
+
+/// Why a run that reached `until` did not end in the kernel's own power-off,
+/// or nothing when it did.
+///
+/// Three things together, since each alone passes something that is not one.
+/// QEMU exited by itself: one asked to stop exits 0 as well. The kernel's
+/// power-off line came after `until` and its failure line did not follow: a
+/// triple fault under `-no-reboot`, or a PSCI reset there, also ends QEMU by
+/// itself with 0 (F-46). And the status is the one the architecture's
+/// power-off gives: 33 from x86-64's debug-exit device, its only way off, and
+/// 0 from PSCI's `SYSTEM_OFF` on Arm.
+fn power_off_problem(
+    arch: Arch,
+    lines: &[String],
+    until: &str,
+    exited_by_itself: bool,
+    code: Option<i32>,
+) -> Option<String> {
+    let after = lines
+        .iter()
+        .position(|line| line.contains(until))
+        .and_then(|at| lines.get(at + 1..))
+        .unwrap_or_default();
+    let announced = after
+        .iter()
+        .position(|line| line.trim() == POWER_OFF_MARKER);
+    if let Some(at) = announced
+        && after
+            .get(at + 1..)
+            .is_some_and(|rest| rest.iter().any(|line| line.trim() == POWER_OFF_FAILED))
+    {
+        return Some(format!(
+            "the kernel's power-off returned ({POWER_OFF_FAILED}), and the machine was left running"
+        ));
+    }
+    let status = code.map_or_else(|| "no status".to_owned(), |code| format!("status {code}"));
+    if !exited_by_itself {
+        return Some(format!(
+            "the guest did not power itself off: QEMU had to be stopped ({status})"
+        ));
+    }
+    if announced.is_none() {
+        return Some(format!(
+            "QEMU exited by itself with {status} after `{until}`, but the kernel never printed \
+             {POWER_OFF_MARKER}: a fault or a reset on the way down, not a power-off"
+        ));
+    }
+    let expected = match arch {
+        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
+        Arch::AArch64 | Arch::Armv7a => 0,
+    };
+    (code != Some(expected)).then(|| {
+        format!(
+            "QEMU exited with {status} after {POWER_OFF_MARKER}, not the {expected} {arch}'s \
+             power-off gives: something else ended the run"
+        )
+    })
 }
 
 /// The hook [`watch_then`] runs at the marker.
@@ -2319,6 +2387,7 @@ fn qemu_command(
     attach_btrfs_disk(&mut command, arch)?;
     attach_install_disks(&mut command, arch, image, args);
     attach_root_disk(&mut command, arch, args)?;
+    attach_nvme_scratch(&mut command, arch, args);
     attach_data_image(&mut command, arch, args)?;
     if let Some(home) = &args.home_image {
         attach_home(&mut command, arch, home, "kept for the next boot");
@@ -2470,10 +2539,11 @@ fn attach_clipboard(command: &mut Command, arch: Arch, args: &Args) {
 }
 
 /// The devices a flag asks for and nothing else brings: the clipboard's
-/// virtio-serial port and the sound card.
+/// virtio-serial port, the sound card and `test-usb`'s bus, in that order.
 fn attach_asked_for(command: &mut Command, arch: Arch, args: &Args, binary: &Path) {
     attach_clipboard(command, arch, args);
     attach_audio(command, arch, args, binary);
+    attach_usb(command, arch, args);
 }
 
 /// A virtio-snd card (`docs/AUDIO.md` §4), when `--audio` names a backend,
@@ -2751,6 +2821,52 @@ fn report_network(network: &Network) {
 /// `bootindex`: the first sector holds no partition table and no filesystem,
 /// so firmware that looks at the disk finds nothing to boot and goes on to the
 /// image.
+/// `test-usb`'s bus: a `qemu-xhci` controller, a hub on its first port with a
+/// keyboard behind it, a mouse on its second, and a memory stick on its
+/// third. Emulated devices only: nothing of the host's is ever
+/// attached.
+fn attach_usb(command: &mut Command, arch: Arch, args: &Args) {
+    let Some(stick) = &args.usb else {
+        return;
+    };
+    println!(
+        "  {arch}: qemu-xhci with a hub, a keyboard behind it, a mouse, and {} as a stick",
+        display(stick)
+    );
+    // Each of the controller's four sockets is a USB 3 root port (1 to 4)
+    // and a USB 2 one (5 to 8), and a device shows on the one its speed
+    // takes: the hub and the mouse at full speed on ports 5 and 6, the stick
+    // at SuperSpeed on port 3.
+    let _ = command.args(["-device", &format!("qemu-xhci,id={USB_BUS}")]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-hub,bus={USB_BUS}.0,port=1,id=usbhub"),
+    ]);
+    let _ = command.args(["-device", &usb_keyboard(USB_KEYBOARD_ID)]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-mouse,bus={USB_BUS}.0,port=2,id=usbmouse"),
+    ]);
+    let _ = command.args([
+        "-drive",
+        &format!("file={},if=none,format=raw,id=usbstick", display(stick)),
+    ]);
+    let _ = command.args([
+        "-device",
+        &format!("usb-storage,bus={USB_BUS}.0,port=3,drive=usbstick,id=usbdisk"),
+    ]);
+}
+
+/// The xHCI controller's id on QEMU's command line.
+const USB_BUS: &str = "xhci";
+/// The id of the keyboard the boot starts with.
+pub(crate) const USB_KEYBOARD_ID: &str = "usbkbd";
+
+/// A `usb-kbd` behind the hub, as `-device` and QMP's `device_add` take it.
+pub(crate) fn usb_keyboard(id: &str) -> String {
+    format!("usb-kbd,bus={USB_BUS}.0,port=1.1,id={id}")
+}
+
 fn attach_test_disk(command: &mut Command, arch: Arch) -> Result<()> {
     let disk = test_disk::ensure()?;
     println!(
@@ -2902,7 +3018,7 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
     let test = (args.btrfs_root
         && matches!(
             args.command.as_deref(),
-            Some("test-chrome-window" | "test-restart")
+            Some("test-chrome-window" | "test-restart" | "test-nvme")
         ))
         || matches!(
             args.command.as_deref(),
@@ -2941,12 +3057,16 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
             display(&disk)
         ),
     ]);
-    let device = if arch == Arch::Armv7a {
-        "virtio-blk-pci,drive=btrfsroot,disable-legacy=on"
+    if args.nvme && arch != Arch::Armv7a {
+        attach_nvme_root(command, arch);
     } else {
-        "virtio-blk-pci,drive=btrfsroot,disable-legacy=on,iommu_platform=on"
-    };
-    let _ = command.args(["-device", device]);
+        let device = if arch == Arch::Armv7a {
+            "virtio-blk-pci,drive=btrfsroot,disable-legacy=on"
+        } else {
+            "virtio-blk-pci,drive=btrfsroot,disable-legacy=on,iommu_platform=on"
+        };
+        let _ = command.args(["-device", device]);
+    }
     // The users' files, beside the root and kept when it starts over: the
     // kernel mounts the disk at `/home` by its label.
     if let Some((home, made)) = home {
@@ -2958,6 +3078,104 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
         attach_home(command, arch, &home, said);
     }
     Ok(())
+}
+
+/// The serial number of the NVMe drive the root is on under `--nvme`.
+pub(crate) const NVME_ROOT_SERIAL: &str = "ferrix-nvme-root";
+/// The serial number of `test-nvme`'s scratch drive.
+pub(crate) const NVME_SCRATCH_SERIAL: &str = "ferrix-nvme-4k";
+
+/// Attach the drive `btrfsroot` as an NVMe drive below a PCIe switch: a
+/// root port, the switch's upstream port, one downstream port, and the
+/// controller on that.
+///
+/// That is where a PC's chipset puts an M.2 slot -- the first real drive
+/// goes into one (`docs/NVME.md`) -- and it is two bridges more than the
+/// root port every other device here sits on, so the function's bus number
+/// is one firmware assigned through three levels, and its IOMMU scope is a
+/// path through them. Chassis and slot numbers continue from
+/// [`attach_rng`]'s two ports.
+fn attach_nvme_root(command: &mut Command, arch: Arch) {
+    println!(
+        "  {arch}: the btrfs root is an NVMe drive ({NVME_ROOT_SERIAL}) below a root port and a \
+         PCIe switch"
+    );
+    let _ = command.args([
+        "-device",
+        "pcie-root-port,id=ferrix.nvme.root,chassis=3,slot=3",
+        "-device",
+        "x3130-upstream,id=ferrix.nvme.up,bus=ferrix.nvme.root",
+        "-device",
+        "xio3130-downstream,id=ferrix.nvme.down,bus=ferrix.nvme.up,chassis=4,slot=4",
+        "-device",
+        &format!("nvme,drive=btrfsroot,serial={NVME_ROOT_SERIAL},bus=ferrix.nvme.down"),
+    ]);
+}
+
+/// Attach `test-nvme`'s scratch image as a second NVMe drive, with
+/// 4096-byte logical blocks, on a root port of its own (the root bus on
+/// AArch64, unless `FERRIX_NVME_BELOW_PORT` is set); through blkdebug
+/// when the gate injects a fault, and with QEMU's trace of the NVMe model
+/// when it asks for the witness.
+fn attach_nvme_scratch(command: &mut Command, arch: Arch, args: &Args) {
+    if let Some(trace) = &args.nvme_trace {
+        for event in [
+            "pci_nvme_flush_ns",
+            "pci_nvme_mmio_shutdown_set",
+            "pci_nvme_mmio_stopped",
+            "pci_nvme_mmio_start_success",
+        ] {
+            let _ = command.args(["-trace", &format!("enable={event}")]);
+        }
+        // The trace comes on QEMU's standard error, beside the DMA fault
+        // trace this tool judges every run by; the sieve puts these lines
+        // in the file.
+        crate::noise::keep("pci_nvme_", trace);
+    }
+    let Some(scratch) = &args.nvme_scratch else {
+        return;
+    };
+    println!(
+        "  {arch}: scratch NVMe drive {} ({NVME_SCRATCH_SERIAL}), 4096-byte blocks{}",
+        display(scratch),
+        if args.nvme_fault.is_some() {
+            ", read through blkdebug"
+        } else {
+            ""
+        }
+    );
+    let file = match &args.nvme_fault {
+        Some(rules) => format!(
+            "file=blkdebug:{}:{},if=none,format=raw,id=nvmescratch,cache=writeback",
+            display(rules),
+            display(scratch)
+        ),
+        None => format!(
+            "file={},if=none,format=raw,id=nvmescratch,cache=writeback",
+            display(scratch)
+        ),
+    };
+    let _ = command.args(["-drive", &file]);
+    // On x86-64, a root port of its own. On AArch64, the root bus: a
+    // function below a bridge there has its DMA faulted by the SMMUv3
+    // (`docs/BACKLOG.md`, found by this gate on 2026-10-10), and nothing
+    // else on that machine sits below one.
+    let bus = if std::env::var_os("FERRIX_NVME_BELOW_PORT").is_some() || arch == Arch::X86_64 {
+        let _ = command.args([
+            "-device",
+            "pcie-root-port,id=ferrix.nvme.port,chassis=5,slot=5",
+        ]);
+        ",bus=ferrix.nvme.port"
+    } else {
+        ""
+    };
+    let _ = command.args([
+        "-device",
+        &format!(
+            "nvme,drive=nvmescratch,serial={NVME_SCRATCH_SERIAL}{bus},\
+             logical_block_size=4096,physical_block_size=4096"
+        ),
+    ]);
 }
 
 /// Attach `home`, a btrfs volume labelled `ferrix-home`, written through:
@@ -3338,10 +3556,11 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 #[cfg(test)]
 mod tests {
     use super::{
-        Arch, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER, blocks_compatibility_format,
-        cleaning_problem, config_problem, devmgr_problem, entropy_problem, fault_problem,
-        iommu_problem, msi_problem, namespace_problem, parse_qemu_version, queue_problem,
-        remap_problem, send_lines, version_translates, xstate_problem,
+        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER,
+        blocks_compatibility_format, cleaning_problem, config_problem, devmgr_problem,
+        entropy_problem, fault_problem, iommu_problem, msi_problem, namespace_problem,
+        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
+        version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -3462,6 +3681,89 @@ mod tests {
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|line| (*line).to_owned()).collect()
+    }
+
+    /// F-46: only the kernel's own power-off, with the architecture's status,
+    /// passes; a fault or a reset after the marker that ends QEMU by itself
+    /// does not, and neither does a power-off write that returned.
+    #[test]
+    fn only_the_kernels_power_off_is_a_power_off() {
+        let off = lines(&[
+            "boot",
+            SUCCESS_MARKER,
+            "reboot: Power down",
+            POWER_OFF_MARKER,
+        ]);
+        let problem = |arch, lines: &[String], by_itself, code| {
+            power_off_problem(arch, lines, SUCCESS_MARKER, by_itself, code)
+        };
+        assert_eq!(
+            problem(Arch::X86_64, &off, true, Some(33)),
+            None,
+            "x86-64's debug exit"
+        );
+        assert_eq!(
+            problem(Arch::AArch64, &off, true, Some(0)),
+            None,
+            "PSCI SYSTEM_OFF"
+        );
+        assert_eq!(
+            problem(Arch::Armv7a, &off, true, Some(0)),
+            None,
+            "PSCI SYSTEM_OFF"
+        );
+        let crlf = lines(&[SUCCESS_MARKER, "FERRIX-POWER-OFF\r"]);
+        assert_eq!(
+            problem(Arch::Armv7a, &crlf, true, Some(0)),
+            None,
+            "a carriage return"
+        );
+
+        let faulted = lines(&["boot", SUCCESS_MARKER, "reboot: Power down"]);
+        let why = problem(Arch::X86_64, &faulted, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("never printed FERRIX-POWER-OFF"),
+            "a triple fault: {why}"
+        );
+        let why = problem(Arch::AArch64, &faulted, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("never printed FERRIX-POWER-OFF"),
+            "a PSCI reset: {why}"
+        );
+        let before = lines(&[POWER_OFF_MARKER, SUCCESS_MARKER]);
+        assert!(
+            problem(Arch::Armv7a, &before, true, Some(0)).is_some(),
+            "only after the marker"
+        );
+        let quoted = lines(&[SUCCESS_MARKER, "echo FERRIX-POWER-OFF"]);
+        assert!(
+            problem(Arch::Armv7a, &quoted, true, Some(0)).is_some(),
+            "a whole line only"
+        );
+
+        let why = problem(Arch::X86_64, &off, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("not the 33"),
+            "x86-64 exiting 0 after its line: {why}"
+        );
+        assert!(
+            problem(Arch::AArch64, &off, true, Some(33)).is_some(),
+            "Arm exiting 33"
+        );
+        let why = problem(Arch::X86_64, &off, false, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains("had to be stopped"),
+            "a QEMU asked to stop: {why}"
+        );
+
+        let returned = lines(&[SUCCESS_MARKER, POWER_OFF_MARKER, POWER_OFF_FAILED]);
+        let why = problem(Arch::AArch64, &returned, true, Some(0)).unwrap_or_default();
+        assert!(
+            why.contains(POWER_OFF_FAILED),
+            "a power-off that returned: {why}"
+        );
+        let why = problem(Arch::X86_64, &returned, false, None).unwrap_or_default();
+        assert!(why.contains(POWER_OFF_FAILED), "and was halted: {why}");
     }
 
     #[test]

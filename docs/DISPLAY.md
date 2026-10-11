@@ -996,11 +996,14 @@ same path in the guest, where `src/user/system/linux/compositor/drm`'s `register
 into `Lenovo Group Limited`. Neither file is ever committed: both are read
 from the machine the image is built on. On a host without `pnp.ids` the
 make is the code and the description `LEN R27qe Gen2 UTP03KBB`, which the
-user's `desc:Lenovo…` line does not match; xtask says so. On a host without
-the monitor xtask says `edid: no monitor of this machine describes itself
-as …; the screen has no EDID and is only Virtual-1`, carries nothing and
-adds no argument, and the desktop is what it was before. `--edid none`
-asks for that.
+user's `desc:Lenovo…` line does not match; xtask says so. A monitor found
+is also saved, with the registry, under `~/.local/share/ferrix/edid/`, and
+a host where it is asleep or was never plugged in takes it from there; a
+copy of that directory is how a Windows machine gets it. On a host with
+neither xtask says `edid: no monitor of this machine describes itself
+as …, and none was saved when one did; the screen has no EDID and is only
+Virtual-1`, carries nothing and adds no argument, and the desktop is what
+it was before. `--edid none` asks for that.
 
 **What the user's configuration then does.** Hyprland picks a monitor's
 rule as the last line that *names* it, by connector or `desc:`, and only

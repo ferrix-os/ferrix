@@ -121,12 +121,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 137 packages, 6725 elements, 217 relations. Model digest `4db6ec9d35e48b24`.
+26 files, 137 packages, 6726 elements, 217 relations. Model digest `ad23ec59cd9d21ab`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
 | `#implemented` | 281 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 22 | The owning stage has started; part of the element runs. |
+| `#inProgress` | 23 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 26 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -2270,6 +2270,7 @@ flowchart TB
   n5_FerrixDrivers_UsbHidDriver["UsbHidDriver<br>stage 17"]
   n6_FerrixDrivers_Gc400Driver["Gc400Driver<br>stage 19"]
   n7_FerrixDrivers_Stm32SdmmcDriver["Stm32SdmmcDriver<br>stage 10"]
+  n8_FerrixDrivers_NvmeDriver["NvmeDriver<br>stage 10"]
   n1_FerrixDrivers_VirtioBlkDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n2_FerrixDrivers_VirtioNetDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n3_FerrixDrivers_VirtioGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
@@ -2277,13 +2278,14 @@ flowchart TB
   n5_FerrixDrivers_UsbHidDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n6_FerrixDrivers_Gc400Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n7_FerrixDrivers_Stm32SdmmcDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n8_FerrixDrivers_NvmeDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   class n0_FerrixDrivers_DriverProcess,n1_FerrixDrivers_VirtioBlkDriver,n2_FerrixDrivers_VirtioNetDriver,n3_FerrixDrivers_VirtioGpuDriver,n4_FerrixDrivers_VirtioInputDriver,n5_FerrixDrivers_UsbHidDriver implemented
-  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver inProgress
+  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver,n8_FerrixDrivers_NvmeDriver inProgress
 ```
 
-**Figure 13 — Driver process and its subtypes.** 7 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
+**Figure 13 — Driver process and its subtypes.** 8 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
 
 ```mermaid
 flowchart TB
@@ -2398,7 +2400,7 @@ Where the hardware is: src/lib/platform/acpi's dmar module (VT-d units and their
 
 `#implemented`  ·  stage 10
 
-An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Eleven exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.
+An ordinary user process in its own Job, holding exactly the capabilities devmgr gave it. A driver fault is a process fault; a wedged driver is a Job kill. Twelve exist, native programs on src/user/system/native/rt under /lib/drivers: virtio-blk, stm32-sdmmc, nvme, virtio-net, virtio-gpu, stm32-ltdc, gc400, virtio-input, usbhid, usbdev, virtio-snd and vport, each a thin layer of handles over its src/lib/ crates.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2484,6 +2486,12 @@ src/user/system/native/drivers/gpu/gc400 over src/lib/drivers/gpu/gc400: the STM
 `#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
 
 src/user/system/native/drivers/block/stm32-sdmmc over src/lib/drivers/block/stm32-sdmmc: the STM32MP157's SDMMC1 as a disk behind the block ring, so the kernel's GPT scan publishes the card's partitions and btrfs mounts from one (docs/CHROME.md 10.1). The kernel publishes the controller as a device tree node and writes none of its registers: U-Boot left it running. The driver moves every word through the FIFO with hardware flow control and never turns the internal DMA on, and serves a write only inside a partition named ferrix-\*. Its gates are the library's host tests against a model of the controller and a card, and the boot check of the one tree disk; no emulator has the controller, and it has not run on the board (2026-10-08).
+
+#### NvmeDriver
+
+`#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/block/nvme over src/lib/drivers/block/nvme: an NVM Express controller's first namespace as a disk behind the block ring (docs/NVME.md), the first driver for a disk a PC has. devmgr starts it on any function of class code 01:08:02; the kernel is not changed. It resets and enables the controller, transfers straight into the ring's data region through PRP lists, lends a drive without DRAM its host memory buffer, aborts and resets on a command that does not come back, and notifies the controller before it disables it. Its gates are the library's host tests against a model of a controller, and cargo xtask test-nvme on QEMU's emulated one, with / on a drive below a PCIe switch. It has not run on a real drive (2026-10-10).
 
 #### DriverBootstrap
 
@@ -4921,6 +4929,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::DrvUpdated` | part | `#inProgress` |
 | 10 | `FerrixDrivers::VirtioBlkDriver` | part | `#implemented` |
 | 10 | `FerrixDrivers::Stm32SdmmcDriver` | part | `#inProgress` |
+| 10 | `FerrixDrivers::NvmeDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
 | 11 | `FerrixStructure::Workspace::btrfs` | part | `#implemented` |
@@ -4975,7 +4984,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 19 | `FerrixDrivers::Gc400Driver` | part | `#inProgress` |
 | 19 | `FerrixAssurance::VideoTest` | verification | `#implemented` |
 
-187 elements across 18 stages.
+188 elements across 18 stages.
 
 ## Figures
 
@@ -4995,7 +5004,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 10 | Demand fault | 5 nodes, 4 edges | `04-memory.sysml` | [ferrix-memory-demand-fault.svg](diagrams/ferrix-memory-demand-fault.svg) |
 | 11 | Domain lifecycle | 5 nodes, 5 edges | `05-scheduling.sysml` | [ferrix-scheduling-domain-lifecycle.svg](diagrams/ferrix-scheduling-domain-lifecycle.svg) |
 | 12 | Kernel object and its subtypes | 10 nodes, 9 edges | `06-objects.sysml` | [ferrix-objects-kernel-object.svg](diagrams/ferrix-objects-kernel-object.svg) |
-| 13 | Driver process and its subtypes | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
+| 13 | Driver process and its subtypes | 9 nodes, 8 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |

@@ -868,11 +868,18 @@ frame, with the DK1's bus behind it as U-Boot's `usb tree` showed it.
   keymap's locked modifiers to every keyboard that declares LEDs, as
   libinput's compositors do, so the lights follow the keys on the desktop.
 
-### 7.5 Not done
+### 7.5 Behind xHCI
+
+Since 2026-10-10 the same program drives a PC's xHCI controllers, and the
+bus is generic over the controller: [XHCI.md](XHCI.md). What §7.3 and §7.4
+say of the bus, HID and LEDs holds behind both; what they say of schedules,
+queue heads and split transactions is EHCI's.
+
+### 7.6 Not done
 
 Absolute axes (tablets, touch screens), multi-touch and force feedback;
 vendor pages (the G502's HID++ report); bulk and isochronous
-transfers, and a full- or low-speed device on a root port, which
+transfers behind EHCI, and a full- or low-speed device on an EHCI root port, which
 EHCI hands to its companion OHCI controller -- not reachable on a DK board,
 whose root port has the hub. A process writing the 115200-baud console flat
 out starves the driver: hexdumping both event nodes to it lost the clicks

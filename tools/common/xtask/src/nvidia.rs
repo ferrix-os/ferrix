@@ -170,6 +170,8 @@ struct Machine {
     vcpus: u32,
     /// Devices added as they are, such as a network interface.
     devices: String,
+    /// The volume's file in [`vm_dir`]: `--everything`'s is its own, kept.
+    volume: &'static str,
 }
 
 /// `run-nvidia`'s machine: the card, the disks and the serial port alone.
@@ -177,7 +179,14 @@ const GATE_MACHINE: Machine = Machine {
     memory: MEMORY,
     vcpus: 2,
     devices: String::new(),
+    volume: VOLUME,
 };
+
+/// The NVIDIA volume's file in [`vm_dir`].
+const VOLUME: &str = "nvidia.img";
+
+/// `run-compositor --nvidia --everything`'s, kept from run to run.
+const EVERYTHING_VOLUME: &str = "nvidia-everything.img";
 
 /// The domain, as libvirt defines it.
 ///
@@ -267,7 +276,7 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
         vda = virtio("pattern.img", 8, true),
         vdb = virtio("btrfs.img", 9, true),
         vdc = virtio("btrfs-write.img", 10, false),
-        vdd = virtio("nvidia.img", 11, false),
+        vdd = virtio(machine.volume, 11, false),
     )
 }
 
@@ -430,10 +439,172 @@ fn home() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+/// Merge Chrome's tree, or `--everything`'s whole one `beside`, into the
+/// NVIDIA volume's `tree`.
+fn merge_beside(tree: &Path, beside: Option<&Path>) -> Result<()> {
+    // Chrome's tree beside it, when fetch-chrome.sh has made it: the two are
+    // Debian-shaped and pin the same glibc, so they merge, and Chrome's GPU
+    // process finds NVIDIA's ICD where its Vulkan loader looks (N4). Or,
+    // for `--everything`, the whole merged tree `beside` (Chrome's among
+    // them): yserver, Steam, the compiler.
+    let chrome = match beside {
+        Some(tree) => Ok(tree.join("everything.img")),
+        None => chrome::volume(),
+    };
+    if let Ok(chrome) = chrome {
+        let chrome_tree = chrome.with_file_name("tree");
+        if chrome_tree.is_dir() {
+            usr_merge(tree, &chrome_tree)?;
+            let merged = Command::new("cp")
+                .arg("-a")
+                .arg("--link")
+                .arg("--remove-destination")
+                .arg(format!("{}/.", chrome_tree.display()))
+                .arg(tree)
+                .status()
+                .map_err(|error| Error::new(format!("running cp: {error}")))?;
+            if !merged.success() {
+                return Err(Error::new(format!(
+                    "merging {} into {}: {merged}",
+                    chrome_tree.display(),
+                    tree.display()
+                )));
+            }
+            println!(
+                "  volume: Chrome's tree merged from {}",
+                chrome_tree.display()
+            );
+        }
+    }
+    // virtio-gpu's Vulkan driver, for a card this domain has not. lavapipe
+    // stays: yserver renders on it.
+    if beside.is_some() {
+        let _ = std::fs::remove_file(tree.join("usr/share/vulkan/icd.d/virtio_icd.json"));
+        extras(tree)?;
+    }
+    Ok(())
+}
+
+/// `--everything`'s extras on the 3060: `FERRIX_NVIDIA_YSERVER`, a yserver
+/// binary in the volume's one's place (a dev build, as ydev.sh swaps one),
+/// and `FERRIX_NVIDIA_TEEWORLDS`, a directory (Teeworlds' bundle: `lib/`,
+/// `tw/`, `tw.sh`) at `/data/tw`, which the desktop copies to `/tmp/tw` and
+/// starts a match from.
+fn extras(tree: &Path) -> Result<()> {
+    let copy = |from: &std::ffi::OsStr, to: &Path, recursive: bool| -> Result<()> {
+        let mut cp = Command::new("cp");
+        let _ = cp.arg("--remove-destination");
+        if recursive {
+            let _ = cp.arg("-rL");
+        }
+        let done = cp
+            .arg(from)
+            .arg(to)
+            .status()
+            .map_err(|error| Error::new(format!("running cp: {error}")))?;
+        if done.success() {
+            println!(
+                "  volume: {} at {}",
+                Path::new(from).display(),
+                to.display()
+            );
+            Ok(())
+        } else {
+            Err(Error::new(format!(
+                "copying {} to {}: {done}",
+                Path::new(from).display(),
+                to.display()
+            )))
+        }
+    };
+    if let Some(yserver) = std::env::var_os("FERRIX_NVIDIA_YSERVER") {
+        copy(&yserver, &tree.join("yserver/yserver"), false)?;
+    }
+    if let Some(teeworlds) = std::env::var_os("FERRIX_NVIDIA_TEEWORLDS") {
+        let to = tree.join("tw");
+        let _ = std::fs::remove_dir_all(&to);
+        copy(&teeworlds, &to, true)?;
+    }
+    Ok(())
+}
+
+/// Where the tree merged in has a top-level directory as a link into
+/// `usr` (`lib -> usr/lib`, Debian's merged /usr) and the NVIDIA tree has
+/// it as a directory (`lib/firmware`), move the directory's entries to
+/// where the link points, so `cp` can put the link in its place.
+fn usr_merge(tree: &Path, beside: &Path) -> Result<()> {
+    for name in ["bin", "lib", "lib64", "sbin"] {
+        let ours = tree.join(name);
+        let Ok(target) = std::fs::read_link(beside.join(name)) else {
+            continue;
+        };
+        if !ours.is_dir() || ours.is_symlink() {
+            continue;
+        }
+        let moved = Command::new("cp")
+            .arg("-al")
+            .arg(format!("{}/.", ours.display()))
+            .arg(tree.join(&target))
+            .status()
+            .map_err(|error| Error::new(format!("running cp: {error}")))?;
+        if !moved.success() {
+            return Err(Error::new(format!(
+                "moving {} into {}: {moved}",
+                ours.display(),
+                target.display()
+            )));
+        }
+        std::fs::remove_dir_all(&ours)
+            .map_err(|error| Error::new(format!("removing {}: {error}", ours.display())))?;
+    }
+    Ok(())
+}
+
+/// What a kept `--everything` volume was made from: the core's and the
+/// everything volume's sizes and times.
+fn volume_stamp(core: &Path, everything: &Path) -> String {
+    let seen = |path: &Path| {
+        std::fs::metadata(path).map_or_else(
+            |_| "-".to_owned(),
+            |meta| format!("{} {:?}", meta.len(), meta.modified().ok()),
+        )
+    };
+    let named = |name: &str| std::env::var(name).unwrap_or_default();
+    format!(
+        "{}\n{}\n{}\n{}\n",
+        seen(core),
+        seen(&everything.join("everything.img")),
+        named("FERRIX_NVIDIA_YSERVER"),
+        named("FERRIX_NVIDIA_TEEWORLDS")
+    )
+}
+
 /// The NVIDIA volume: the fetched release's whole tree, hard-linked into
 /// [`vm_dir`] (the same filesystem), with `nvrm`'s core beside it at
 /// [`CORE_IN_VOLUME`], made into a btrfs image.
-fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
+fn whole_volume(dir: &Path, core: &Path, beside: Option<&Path>) -> Result<()> {
+    // `--everything`'s volume is kept from run to run while the core and the
+    // everything volume are the ones it was made from: what Steam installed
+    // and signed in to is on it. FERRIX_NVIDIA_FRESH_VOLUME makes it anew.
+    let image = dir.join(if beside.is_some() {
+        EVERYTHING_VOLUME
+    } else {
+        VOLUME
+    });
+    let kept = image.with_extension("kept");
+    let stamp = beside.map(|everything| volume_stamp(core, everything));
+    if let Some(stamp) = &stamp
+        && std::env::var_os("FERRIX_NVIDIA_FRESH_VOLUME").is_none()
+        && image.is_file()
+        && std::fs::read_to_string(&kept).ok().as_deref() == Some(stamp.as_str())
+    {
+        println!(
+            "  volume: {} kept, with what Steam put on it",
+            image.display()
+        );
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(&kept);
     let tree = dir.join("nvidia.tree");
     if tree.exists() {
         std::fs::remove_dir_all(&tree)
@@ -453,33 +624,7 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             tree.display()
         )));
     }
-    // Chrome's tree beside it, when fetch-chrome.sh has made it: the two are
-    // Debian-shaped and pin the same glibc, so they merge, and Chrome's GPU
-    // process finds NVIDIA's ICD where its Vulkan loader looks (N4).
-    if let Ok(chrome) = chrome::volume() {
-        let chrome_tree = chrome.with_file_name("tree");
-        if chrome_tree.is_dir() {
-            let merged = Command::new("cp")
-                .arg("-a")
-                .arg("--link")
-                .arg("--remove-destination")
-                .arg(format!("{}/.", chrome_tree.display()))
-                .arg(&tree)
-                .status()
-                .map_err(|error| Error::new(format!("running cp: {error}")))?;
-            if !merged.success() {
-                return Err(Error::new(format!(
-                    "merging {} into {}: {merged}",
-                    chrome_tree.display(),
-                    tree.display()
-                )));
-            }
-            println!(
-                "  volume: Chrome's tree merged from {}",
-                chrome_tree.display()
-            );
-        }
-    }
+    merge_beside(&tree, beside)?;
     let to = tree.join(CORE_IN_VOLUME);
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)
@@ -498,13 +643,19 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
         )));
     }
     let bytes = tree_bytes(&tree);
-    let image = dir.join("nvidia.img");
     let _ = std::fs::remove_file(&image);
     let file = std::fs::File::create(&image)
         .map_err(|error| Error::new(format!("creating {}: {error}", image.display())))?;
     // Room for btrfs's own trees beside the files, and for what programs
     // write to /data while they run.
-    file.set_len(bytes + bytes / 4 + (512 << 20))
+    // `--everything` has Steam's client and games to install: 16 GiB more,
+    // sparse until written.
+    let spare: u64 = if beside.is_some() {
+        16 << 30
+    } else {
+        512 << 20
+    };
+    file.set_len(bytes + bytes / 4 + spare)
         .map_err(|error| Error::new(format!("sizing {}: {error}", image.display())))?;
     drop(file);
     let made = Command::new("mkfs.btrfs")
@@ -519,6 +670,9 @@ fn whole_volume(dir: &Path, core: &Path) -> Result<()> {
             "mkfs.btrfs {}: {made}",
             image.display()
         )));
+    }
+    if let Some(stamp) = stamp {
+        let _ = std::fs::write(&kept, stamp);
     }
     Ok(())
 }
@@ -628,7 +782,7 @@ pub(crate) fn run_nvidia(args: &Args) -> Result<()> {
     place(&test_disk::ensure()?, &dir, "pattern.img")?;
     place(&btrfs_disk::ensure()?, &dir, "btrfs.img")?;
     place(&btrfs_disk::ensure_blank(arch)?, &dir, "btrfs-write.img")?;
-    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    whole_volume(&dir, &programs.path("nvrm-core"), None)?;
     println!(
         "  {}: image, fixture disks and the NVIDIA volume",
         dir.display()
@@ -713,6 +867,41 @@ pub(crate) fn data_links() -> Vec<ports::File> {
 /// WebGL, said large, over a cube spun on it, with its frame rate.
 pub(crate) const WEBGL_PAGE: &str = "file:///etc/ferrix/nvidia-webgl.html";
 
+/// The host's keyboards and mice the desktop on the 3060's monitor is
+/// driven with: `FERRIX_NVIDIA_INPUT`, a colon-separated list of evdev
+/// devices (`/dev/input/by-id/...-event-kbd`, `...-event-mouse`), each
+/// grabbed for the guest alone while it runs. Devices kept for the 3060's
+/// monitor, not the host's own: a grabbed device types into the guest only.
+/// The guest gets a virtio keyboard and mouse, which the host's events
+/// reach; none without the variable.
+fn input_devices() -> String {
+    let Some(list) = std::env::var_os("FERRIX_NVIDIA_INPUT") else {
+        return String::new();
+    };
+    let mut xml = String::from(
+        "    <input type='keyboard' bus='virtio'>\n\
+         \x20     <driver iommu='on'/>\n\
+         \x20   </input>\n\
+         \x20   <input type='mouse' bus='virtio'>\n\
+         \x20     <driver iommu='on'/>\n\
+         \x20   </input>\n",
+    );
+    for device in std::env::split_paths(&list) {
+        if !device.exists() {
+            println!("  input: {} is not there; left out", device.display());
+            continue;
+        }
+        println!("  input: {} grabbed for the guest", device.display());
+        xml.push_str(&format!(
+            "    <input type='evdev'>\n\
+             \x20     <source dev='{}' grab='all' repeat='on'/>\n\
+             \x20   </input>\n",
+            device.display()
+        ));
+    }
+    xml
+}
+
 /// How long `run-compositor --nvidia` keeps the desktop up when `--timeout`
 /// does not say: an hour.
 const DESKTOP_TIMEOUT: u64 = 3600;
@@ -730,6 +919,11 @@ const DESKTOP_TIMEOUT: u64 = 3600;
 ///
 /// The guard's, a volume or disk that cannot be made, or libvirt refusing.
 pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
+    // `FERRIX_N3C_BUILD_ONLY`: the image is built, and the card is not booted.
+    if std::env::var_os("FERRIX_N3C_BUILD_ONLY").is_some() {
+        println!("  n3c: built {}; not booting", image.display());
+        return Ok(());
+    }
     guard()?;
     let dir = vm_dir();
     std::fs::create_dir_all(&dir)
@@ -743,16 +937,35 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
         &dir,
         "btrfs-write.img",
     )?;
-    whole_volume(&dir, &programs.path("nvrm-core"))?;
+    // `--everything`: its volume's tree (yserver, Steam, the compiler,
+    // Chrome) merged with NVIDIA's, and Steam's memory.
+    let everything = if args.everything {
+        args.data_image.as_deref().and_then(Path::parent)
+    } else {
+        None
+    };
+    whole_volume(&dir, &programs.path("nvrm-core"), everything)?;
     let machine = Machine {
-        memory: MEMORY,
+        memory: if everything.is_some() {
+            crate::compositor::steam_window::MEMORY
+        } else {
+            MEMORY
+        },
+        volume: if everything.is_some() {
+            EVERYTHING_VOLUME
+        } else {
+            VOLUME
+        },
         vcpus: 8,
-        devices: "    <interface type='network'>\n\
-                  \x20     <source network='default'/>\n\
-                  \x20     <model type='virtio-non-transitional'/>\n\
-                  \x20     <driver iommu='on'/>\n\
-                  \x20   </interface>\n"
-            .to_owned(),
+        devices: format!(
+            "    <interface type='network'>\n\
+             \x20     <mac address='{CARDVM_MAC}'/>\n\
+             \x20     <source network='default'/>\n\
+             \x20     <model type='virtio-non-transitional'/>\n\
+             \x20     <driver iommu='on'/>\n\
+             \x20   </interface>\n{}",
+            input_devices()
+        ),
     };
     let xml = dir.join(format!("{DOMAIN}.desktop.xml"));
     std::fs::write(&xml, domain_xml(&dir, &machine))
@@ -768,8 +981,30 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     } else {
         DESKTOP_TIMEOUT
     };
+    // `--ssh` without `--timeout`: the long-lived card VM (`tools/common/nvidia/card.sh`).
+    let kept = args.ssh.is_some() && !args.timeout_given;
+    let stop = cardvm_file(CARDVM_STOP);
+    let state = cardvm_file(CARDVM_STATE);
+    let _ = std::fs::remove_file(&stop);
+    let _ = std::fs::remove_file(&state);
     let _ = virsh(&["start", DOMAIN])?;
     let running = Running;
+    if let Some(port) = args.ssh {
+        forward_ssh(port, log.clone());
+    }
+    if kept {
+        println!(
+            "  {DOMAIN}: the card VM is starting on the 3060's monitor; serial in {}; \
+             kept until {} appears (`tools/common/nvidia/card.sh down`)",
+            log.display(),
+            stop.display()
+        );
+        let followed = follow(&log, &stop);
+        let _ = std::fs::remove_file(&state);
+        drop(running);
+        let _ = std::fs::remove_file(&stop);
+        return followed;
+    }
     println!(
         "  {DOMAIN}: the desktop is starting on the 3060's monitor; serial in {} for {timeout} s",
         log.display()
@@ -778,6 +1013,141 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
     let _ = capture(&log, Instant::now() + Duration::from_secs(timeout));
     drop(running);
     Ok(())
+}
+
+/// The card VM's network address: fixed, so that its lease is found by it.
+const CARDVM_MAC: &str = "52:54:00:fe:30:60";
+
+/// The file whose appearance ends a kept card VM (`card.sh down`).
+const CARDVM_STOP: &str = "cardvm-stop";
+
+/// Where a kept card VM says how to reach it: shell assignments `PORT=`,
+/// `ADDRESS=`, `LOG=`, `PID=` (`card.sh` sources it).
+const CARDVM_STATE: &str = "cardvm.env";
+
+/// `name` in `~/.local/share/ferrix/nvidia`, beside the card lock.
+fn cardvm_file(name: &str) -> PathBuf {
+    PathBuf::from(home())
+        .join(".local/share/ferrix/nvidia")
+        .join(name)
+}
+
+/// The guest's IPv4 address from libvirt's DHCP lease for [`CARDVM_MAC`].
+fn guest_address() -> Option<String> {
+    let leases = virsh(&["domifaddr", DOMAIN, "--source", "lease"]).ok()?;
+    leases
+        .lines()
+        .filter(|line| line.contains(CARDVM_MAC) && line.contains("ipv4"))
+        .find_map(|line| line.split_whitespace().last())
+        .and_then(|address| address.split('/').next())
+        .map(str::to_owned)
+}
+
+/// `--ssh <port>` on the 3060: the guest is on libvirt's NAT network, so
+/// `127.0.0.1:<port>` is forwarded to its port 22 here, by this process,
+/// once its lease is there -- the same address and port a QEMU boot's
+/// `--ssh` gives. The state file is written when the forward listens.
+fn forward_ssh(port: u16, log: PathBuf) {
+    let _ = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(900);
+        let address = loop {
+            if let Some(address) = guest_address() {
+                break address;
+            }
+            if Instant::now() > deadline {
+                println!("  cardvm: no DHCP lease for {CARDVM_MAC} after 900 s; no ssh");
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        };
+        let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                println!("  cardvm: cannot listen on 127.0.0.1:{port}: {error}");
+                return;
+            }
+        };
+        let target = format!("{address}:{}", crate::ssh::GUEST_PORT);
+        let state = format!(
+            "PORT={port}\nADDRESS={address}\nLOG={}\nPID={}\n",
+            log.display(),
+            std::process::id()
+        );
+        let _ = std::fs::write(cardvm_file(CARDVM_STATE), state);
+        println!(
+            "  cardvm: the guest is {address}; 127.0.0.1:{port} forwards to its sshd \
+             (tools/common/nvidia/card.sh ssh <command>)"
+        );
+        for client in listener.incoming().flatten() {
+            let target = target.clone();
+            let _ = std::thread::spawn(move || {
+                let Ok(server) = TcpStream::connect(&target) else {
+                    return;
+                };
+                let (Ok(mut client_read), Ok(mut server_read)) =
+                    (client.try_clone(), server.try_clone())
+                else {
+                    return;
+                };
+                let (mut client, mut server) = (client, server);
+                let up = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut client_read, &mut server);
+                    let _ = server.shutdown(std::net::Shutdown::Write);
+                });
+                let _ = std::io::copy(&mut server_read, &mut client);
+                let _ = client.shutdown(std::net::Shutdown::Write);
+                let _ = up.join();
+            });
+        }
+    });
+}
+
+/// A kept card VM's serial console, into `log` and onto the output, until
+/// `stop` appears or the port closes (the guest powered off or rebooted;
+/// the domain destroys itself on either).
+fn follow(log: &Path, stop: &Path) -> Result<()> {
+    let stream = loop {
+        match TcpStream::connect(SERIAL) {
+            Ok(stream) => break stream,
+            Err(_) if !stop.exists() => std::thread::sleep(Duration::from_millis(100)),
+            Err(error) => return Err(Error::new(format!("no serial port at {SERIAL}: {error}"))),
+        }
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| Error::new(format!("serial port: {error}")))?;
+    let mut out = std::fs::File::create(log)
+        .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
+    let mut reader = BufReader::new(stream);
+    let mut checked = Instant::now();
+    loop {
+        if stop.exists() {
+            println!("  cardvm: {} is there; stopping", stop.display());
+            return Ok(());
+        }
+        // The card protocol: a want-* file is an agent queued for a boot of
+        // its own (a kernel or nvrm change), and the card VM yields to it.
+        if checked.elapsed() >= Duration::from_secs(2) {
+            checked = Instant::now();
+            if let Some(want) = wanted(stop) {
+                println!("  cardvm: {want} wants the card; stopping");
+                return Ok(());
+            }
+        }
+        if read_line(&mut reader, &mut out).is_err() {
+            println!("  cardvm: the serial port closed: the guest stopped");
+            return Ok(());
+        }
+    }
+}
+
+/// A `want-*` file beside `stop` other than the card VM's own, if any.
+fn wanted(stop: &Path) -> Option<String> {
+    std::fs::read_dir(stop.parent()?)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .find(|name| name.starts_with("want-") && name != "want-cardvm")
 }
 
 #[cfg(test)]

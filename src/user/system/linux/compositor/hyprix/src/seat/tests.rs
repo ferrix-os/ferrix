@@ -2,7 +2,7 @@
 
 use compositor_config::{Config, NoSources};
 
-use super::{Action, Input, Seat};
+use super::{Action, Hold, Input, Seat};
 use compositor_xkb::generated;
 
 /// The evdev codes the tests name.
@@ -223,7 +223,13 @@ fn the_pointer_starts_in_the_middle_and_stays_on_the_screen() {
             dx: 10.0,
             dy: -20.0
         }),
-        [Action::Pointer { x: 522.0, y: 364.0 }]
+        [
+            Action::Relative {
+                dx: 10.0,
+                dy: -20.0
+            },
+            Action::Pointer { x: 522.0, y: 364.0 }
+        ]
     );
     // Past the edge in both directions, and past the other edge.
     let _ = seat.input(Input::Motion {
@@ -510,4 +516,22 @@ fn a_screen_placed_away_from_the_corner_is_where_the_pointer_moves() {
     // The screen moving takes a used pointer with it.
     seat.place_at(0, 0);
     assert_eq!(seat.pointer(), (1023.0, 767.0));
+}
+
+#[test]
+fn a_locked_pointer_stays_put_and_still_reports_the_distance() {
+    let mut seat = seat("");
+    seat.set_hold(Hold::Locked);
+    assert_eq!(
+        seat.input(Input::Motion { dx: 5.0, dy: 7.0 }),
+        [Action::Relative { dx: 5.0, dy: 7.0 }]
+    );
+    assert_eq!(seat.pointer(), (512.0, 384.0));
+    // A tablet's distance is between its own reports, held or not.
+    assert_eq!(seat.input(Input::Absolute { x: 0.5, y: 0.5 }), []);
+    assert_eq!(
+        seat.input(Input::Absolute { x: 0.75, y: 0.5 }),
+        [Action::Relative { dx: 256.0, dy: 0.0 }]
+    );
+    assert_eq!(seat.pointer(), (512.0, 384.0));
 }

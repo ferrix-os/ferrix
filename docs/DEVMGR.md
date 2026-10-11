@@ -119,7 +119,13 @@ a driver's death or of its restart (§4), printed the same way.
    controller, is a GPU driven by `nvrm` (NVIDIA's N1b, §3.2); and QEMU's
    `pci-testdev` (`1B36:0005`) is a GPU driven by `nvrm-test`, an image only
    `cargo xtask test-nvrm` puts in the driver directory, since QEMU emulates
-   no NVIDIA function.
+   no NVIDIA function; a function of any vendor whose class code is
+   0C:03:30, an xHCI USB host controller, is a bus host driven by `usbhid`
+   ([XHCI.md](XHCI.md)). And a function of any vendor whose class code is
+   `01:08:02`, an NVM Express controller, is a disk driven by `nvme`
+   (`docs/NVME.md`): matched by what it is, since every vendor's drive has
+   that class and none of them a row of its own. Its START carries no
+   register blocks; the driver asks `device_aperture` for its BAR.
 2. Each device keeps the kernel's default pin budget, 66560 pages, unless
    its kind's rule says otherwise (§3.1). Devices of one kind are named in
    PCI order — `vda`, `vdb`, … for disks, as `docs/BLOCK-RING.md` §6.1
@@ -354,10 +360,15 @@ What each kind gets back (2026-09-27, T0 of the live kernel update plan):
 
 Each core gives a dead driver's quarantined pins back only once it has
 accepted the next driver's HELLO, which that driver sends after resetting
-the device (`object::pin::quarantine_release`). Every other kind is not
-started again: the serial port (`vport`) has no core to wait for, and the
-USB host (`usbhid`), the GPU engine (`gc400`), the gadget (`usbdev`) and a GPU
-under `nvrm` (§3.2) stay quiesced after their driver dies. `devmgr` itself stays fatal until the
+the device (`object::pin::quarantine_release`). A bus host on PCI, an xHCI
+controller's `usbhid`, is started again as well ([XHCI.md](XHCI.md) §5): its
+driver resets the controller as it starts, the input core waits out every
+claim the dead one held, and its keyboards and mice come back as the new
+driver finds them (`cargo xtask test-usb`). Every other kind is not
+started again: the serial port (`vport`) has no core to wait for, and a
+board's USB host (`usbhid` on a tree node), the GPU engine (`gc400`), the
+gadget (`usbdev`) and a GPU under `nvrm` (§3.2) stay quiesced after their
+driver dies. `devmgr` itself stays fatal until the
 kernel can offer a new `devmgr` the devices again (`docs/INIT.md` L12).
 
 It began as a bug. With no restart, `kill -9` of the `gpu` driver under the

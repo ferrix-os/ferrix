@@ -779,6 +779,14 @@ of one processor.
   (closed code beside the compositor that sees every window) and yes for
   yserver, hyprix and `nvrm` among themselves, if the rig shows the
   barrier in M1's tail.
+* *A switch for it* exists since 2026-10-11 as a place and not as an
+  effect: Settings' game-mode page (`docs/SETTINGS.md`) keeps the user's
+  list of games and the launcher marks what it starts from it. The mark
+  changes no defence. How an opt-in that puts one game in `nvrm`'s domain
+  could attach to it, who would have to grant it, and why the user's own
+  list must not, is `docs/SETTINGS.md` §7: a proposal, not built, reviewed
+  as a design (ledger line 698), which narrows question 4 to a choice of
+  two and finds §5.4's move of the client's job in conflict with it.
 
 **A vDSO or a shared ring to remove calls.** The clock is done. A ring
 for socket traffic to the X server would save a few 300 ns calls a frame
@@ -1147,3 +1155,9 @@ as a docs landing, not as a design; §5 and P1 will need a design review
 before anything is written. The present and `nv-trip` sessions have not seen
 §4.2's and §6.2's lists. The next step that needs nobody's decision is
 R1 to R3.
+
+2026-10-11: §5.4's "the user turned the session on for it" has a place to
+be written: Settings' game-mode page and the launcher's mark
+(`docs/SETTINGS.md`). It is a list and a mark with no effect; G0 to G5 and
+every question of §10 stand as they were, and `docs/SETTINGS.md` §8 adds
+the decisions the switch raises.

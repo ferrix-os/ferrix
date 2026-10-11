@@ -1,16 +1,21 @@
-//! The STM32MP15 board's USB host driver process: a ring-3 program that
-//! finds the keyboards and mice behind the board's EHCI controller and
-//! serves each to the kernel's input core (`docs/INPUT.md` §7).
+//! The USB host driver process: a ring-3 program that finds the keyboards
+//! and mice behind a USB host controller and serves each to the kernel's
+//! input core (`docs/INPUT.md` §7). The controller is an STM32MP15 board's
+//! EHCI, which the kernel publishes as a device tree node, or a PC's xHCI,
+//! a PCI function of class 0C:03:30 (`docs/XHCI.md`).
 //!
 //! Everything that knows anything about USB is `ferrix-usb-host`, tested on
-//! the host against a model of the controller and the board's bus. This
+//! the host against a model of each controller and a bus behind it. This
 //! program is the handles it was written to be wrapped in:
 //!
-//! 1. START, as a bus host's: only the device, whose common window is the
-//!    EHCI controller's registers. devmgr does not wait for it.
+//! 1. START, as a bus host's: only the device. An EHCI node's common window
+//!    is its registers; an xHCI function's are the apertures of its first
+//!    BAR, which the kernel cuts around the MSI-X table. devmgr does not
+//!    wait for it.
 //! 2. The controller's memory is one VMO pinned with `PIN_COHERENT` before
-//!    it is mapped: the controller does not snoop the caches, so the kernel
-//!    maps it past them, and it is seen alike from both sides.
+//!    it is mapped: where a controller does not snoop the caches, the
+//!    kernel maps it past them, and it is seen alike from both sides. An
+//!    xHCI controller says how much it needs, and takes 64-bit addresses.
 //! 3. One port carries every event: the controller's interrupt, and each
 //!    input control channel becoming readable. The wait on it ends at the
 //!    next port poll, which is when keyboards and mice are found and lost.
@@ -34,7 +39,10 @@ use ferrix_inputctl::message::{Events, MAX_BYTES, Message, PORT_RIGHTS};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::signals::Signals;
-use ferrix_native_abi::types::{IoMappingSpec, PACKET_INTERRUPT, PACKET_SIGNAL, TREE_STM32_USBH};
+use ferrix_native_abi::types::{
+    APERTURE_WHOLE_PAGES, DEVICE_NOT_PCI, IoMappingSpec, PACKET_INTERRUPT, PACKET_SIGNAL,
+    PCI_CLASS_XHCI, TREE_STM32_USBH,
+};
 use ferrix_rt::native::channel::{Channel, ReadError};
 use ferrix_rt::native::device::{Device, Interrupt, IoMapping};
 use ferrix_rt::native::error::Error;
@@ -44,17 +52,24 @@ use ferrix_rt::native::pin::{Pin, PinAccess, device_address};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
-use ferrix_usb_host::bus::{Bus, MAX_FUNCTIONS, Note, Output};
-use ferrix_usb_host::ehci::AREA_BYTES;
+use ferrix_usb_host::bus::{Bus, DiskChange, MAX_FUNCTIONS, Note, Output};
 use ferrix_usb_host::hid::Kind;
-use ferrix_usb_host::{Clock, Dma, Parts, Registers};
+use ferrix_usb_host::host::{self, Host as Controller};
+use ferrix_usb_host::{Clock, Dma, MILLISECOND, Parts, Registers, ehci, xhci};
 
 ferrix_rt::entry!(main);
 
 /// A page, on every architecture this runs on.
 const PAGE: usize = 4096;
-/// The controller's memory, in pages.
-const AREA_PAGES: usize = AREA_BYTES / PAGE;
+/// The most pages a controller's memory is: what an xHCI controller that
+/// wants every scratchpad page asks for.
+const MAX_AREA_PAGES: usize = xhci::MAX_AREA_PAGES;
+/// The most apertures a controller's registers lie in: a BAR, cut in two
+/// around the MSI-X table and again around its pending bits.
+const MAX_WINDOWS: usize = 4;
+/// How long an xHCI controller's ports are given to see what is plugged in
+/// before the first poll: USB 2.0's debounce interval.
+const XHCI_SETTLE: u64 = 100 * MILLISECOND;
 
 /// Port keys: the interrupt, then one per function's control channel.
 const KEY_INTERRUPT: u64 = 1;
@@ -151,34 +166,74 @@ impl fmt::Write for Line {
 // Registers, memory, time
 // ---------------------------------------------------------------------------
 
-/// The controller's register page.
-struct Window {
+/// One mapped run of the controller's registers.
+struct Part {
     _mapping: IoMapping<Kernel>,
     base: usize,
+    /// Where it starts among the registers, and how long it is.
+    offset: usize,
     len: usize,
 }
 
+/// The controller's registers: one page for EHCI, and for xHCI the
+/// apertures of its BAR, whose gaps -- the MSI-X table, which is the
+/// kernel's -- read as ones and take no write.
+struct Window {
+    parts: [Option<Part>; MAX_WINDOWS],
+}
+
 impl Window {
-    fn address(&self, offset: u32) -> usize {
+    /// Map `len` bytes at `phys` as the registers from `offset` on.
+    fn add(&mut self, device: &Device<Kernel>, phys: u64, offset: usize, len: usize) -> bool {
+        let Some(slot) = self.parts.iter_mut().find(|part| part.is_none()) else {
+            return false;
+        };
+        let Ok(mapping) = device.io_mapping(IoMappingSpec {
+            phys,
+            len: len as u64,
+        }) else {
+            return false;
+        };
+        let Ok(base) = mapping.map(None) else {
+            return false;
+        };
+        *slot = Some(Part {
+            _mapping: mapping,
+            base,
+            offset,
+            len,
+        });
+        true
+    }
+
+    fn address(&self, offset: u32) -> Option<usize> {
         let offset = offset as usize;
-        assert!(
-            offset + 4 <= self.len && offset.is_multiple_of(4),
-            "a register inside the window, aligned"
-        );
-        self.base + offset
+        if !offset.is_multiple_of(4) {
+            return None;
+        }
+        self.parts.iter().flatten().find_map(|part| {
+            let within = offset.checked_sub(part.offset)?;
+            (within + 4 <= part.len).then_some(part.base + within)
+        })
     }
 }
 
 impl Registers for Window {
     fn read32(&self, offset: u32) -> u32 {
+        let Some(address) = self.address(offset) else {
+            return u32::MAX;
+        };
         // SAFETY: mapped device memory the kernel gave this process, the
-        // offset inside it and aligned, read volatile.
-        unsafe { ptr::read_volatile(self.address(offset) as *const u32) }
+        // offset inside one mapping and aligned, read volatile.
+        unsafe { ptr::read_volatile(address as *const u32) }
     }
 
     fn write32(&mut self, offset: u32, value: u32) {
+        let Some(address) = self.address(offset) else {
+            return;
+        };
         // SAFETY: as for `read32`, and the mapping is writable.
-        unsafe { ptr::write_volatile(self.address(offset) as *mut u32, value) }
+        unsafe { ptr::write_volatile(address as *mut u32, value) }
     }
 }
 
@@ -187,40 +242,46 @@ struct Area {
     _pin: Pin<Kernel>,
     _vmo: Vmo<Kernel>,
     base: usize,
-    addresses: [u64; AREA_PAGES],
+    bytes: usize,
+    addresses: [u64; MAX_AREA_PAGES],
 }
 
 impl Area {
-    fn new(device: &Device<Kernel>) -> Result<Area, Step> {
-        let vmo = vmo::create(Kernel, AREA_BYTES).map_err(|_| Step::Memory)?;
+    fn new(device: &Device<Kernel>, bytes: usize) -> Result<Area, Step> {
+        let pages = bytes / PAGE;
+        if bytes == 0 || !bytes.is_multiple_of(PAGE) || pages > MAX_AREA_PAGES {
+            return Err(Step::Memory);
+        }
+        let vmo = vmo::create(Kernel, bytes).map_err(|_| Step::Memory)?;
         // Pinned before it is mapped: a coherent pin refuses a VMO anything
         // maps, since its mappings are the ones that bypass the caches.
         let pin = device
-            .pin(&vmo, 0, AREA_BYTES, PinAccess::Coherent)
+            .pin(&vmo, 0, bytes, PinAccess::Coherent)
             .map_err(|_| Step::Memory)?;
-        let mut raw = [[0_u8; 8]; AREA_PAGES];
+        let mut raw = [[0_u8; 8]; MAX_AREA_PAGES];
         let got = pin.addresses(&mut raw).map_err(|_| Step::Memory)?;
-        if !got.is_complete() || got.pages != AREA_PAGES {
+        if !got.is_complete() || got.pages != pages {
             return Err(Step::Memory);
         }
-        let mut addresses = [0_u64; AREA_PAGES];
+        let mut addresses = [0_u64; MAX_AREA_PAGES];
         for (slot, bytes) in addresses.iter_mut().zip(raw.iter()) {
             *slot = device_address(*bytes);
         }
         let base = vmo
-            .map(None, AREA_BYTES, Protection::ReadWrite, 0)
+            .map(None, bytes, Protection::ReadWrite, 0)
             .map_err(|_| Step::Memory)?;
         Ok(Area {
             _pin: pin,
             _vmo: vmo,
             base,
+            bytes,
             addresses,
         })
     }
 
     fn at(&self, offset: usize, size: usize) -> usize {
         assert!(
-            offset + size <= AREA_BYTES && offset.is_multiple_of(size),
+            offset + size <= self.bytes && offset.is_multiple_of(size),
             "inside the area, aligned"
         );
         self.base + offset
@@ -229,7 +290,7 @@ impl Area {
 
 impl Dma for Area {
     fn len(&self) -> usize {
-        AREA_BYTES
+        self.bytes
     }
 
     fn read32(&self, offset: usize) -> u32 {
@@ -255,8 +316,15 @@ impl Dma for Area {
     }
 
     fn device_address(&self, offset: usize) -> Option<u32> {
+        u32::try_from(self.wide_address(offset)?).ok()
+    }
+
+    fn wide_address(&self, offset: usize) -> Option<u64> {
+        if offset >= self.bytes {
+            return None;
+        }
         let page = self.addresses.get(offset / PAGE)?;
-        u32::try_from(page + (offset % PAGE) as u64).ok()
+        Some(page + (offset % PAGE) as u64)
     }
 
     fn barrier(&self) {
@@ -286,7 +354,8 @@ impl Clock for Time {
 // The run
 // ---------------------------------------------------------------------------
 
-type Host = Bus<Window, Area, Time>;
+type Ehci = ehci::Controller<Window, Area, Time>;
+type Xhci = xhci::Controller<Window, Area, Time>;
 
 fn started(boot: &Channel<Kernel>) -> Result<(Start, Device<Kernel>), Step> {
     let _ = boot
@@ -307,28 +376,62 @@ fn started(boot: &Channel<Kernel>) -> Result<(Start, Device<Kernel>), Step> {
     }
 }
 
-fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
-    let (start, device) = started(boot)?;
-    if start.pci_device_id != TREE_STM32_USBH {
-        return Err(Step::Identity);
-    }
+/// An EHCI node's registers: START's common window, whole pages from its
+/// first byte.
+fn tree_window(start: &Start, device: &Device<Kernel>) -> Result<Window, Step> {
     let len = start.common.length as usize;
     if start.common.offset != 0 || len == 0 || !len.is_multiple_of(PAGE) {
         return Err(Step::Registers);
     }
-    let mapping = device
-        .io_mapping(IoMappingSpec {
-            phys: start.common.phys,
-            len: len as u64,
-        })
-        .map_err(|_| Step::Registers)?;
-    let base = mapping.map(None).map_err(|_| Step::Registers)?;
-    let registers = Window {
-        _mapping: mapping,
-        base,
-        len,
+    let mut window = Window {
+        parts: [const { None }; MAX_WINDOWS],
     };
-    let memory = Area::new(&device)?;
+    if window.add(device, start.common.phys, 0, len) {
+        Ok(window)
+    } else {
+        Err(Step::Registers)
+    }
+}
+
+/// An xHCI function's registers: every aperture of its first BAR, each at
+/// its place in the BAR. The first must start the BAR, since that is where
+/// the capability registers are.
+fn bar_window(device: &Device<Kernel>) -> Result<Window, Step> {
+    let info = device.info().map_err(|_| Step::Identity)?;
+    if info.class != PCI_CLASS_XHCI {
+        return Err(Step::Identity);
+    }
+    let mut window = Window {
+        parts: [const { None }; MAX_WINDOWS],
+    };
+    let mut starts = false;
+    for index in 0..info.apertures as usize {
+        let Ok(aperture) = device.aperture(index) else {
+            continue;
+        };
+        if aperture.bar != 0 || aperture.flags & APERTURE_WHOLE_PAGES == 0 {
+            continue;
+        }
+        let (Ok(offset), Ok(len)) = (
+            usize::try_from(aperture.offset),
+            usize::try_from(aperture.len),
+        ) else {
+            continue;
+        };
+        if window.add(device, aperture.phys, offset, len) {
+            starts |= offset == 0;
+        }
+    }
+    if starts {
+        Ok(window)
+    } else {
+        Err(Step::Registers)
+    }
+}
+
+/// The port, the interrupt bound to it, and the clock: what every
+/// controller's driver waits on.
+fn events(device: &Device<Kernel>) -> Result<(Port<Kernel>, Interrupt<Kernel>, Time), Step> {
     let port = port::create(Kernel).map_err(|_| Step::Events)?;
     let interrupt = device.interrupt(0).map_err(|_| Step::Registers)?;
     interrupt
@@ -337,35 +440,90 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let clock = Time {
         idle: port::create(Kernel).map_err(|_| Step::Events)?,
     };
+    Ok((port, interrupt, clock))
+}
 
-    let bus = match Bus::start(Parts {
-        registers,
-        memory,
-        clock,
-    }) {
-        Ok(bus) => bus,
+fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
+    let (start, device) = started(boot)?;
+    if start.location == DEVICE_NOT_PCI {
+        if start.pci_device_id != TREE_STM32_USBH {
+            return Err(Step::Identity);
+        }
+        let registers = tree_window(&start, &device)?;
+        let memory = Area::new(&device, ehci::AREA_BYTES)?;
+        let (port, interrupt, clock) = events(&device)?;
+        let controller = Ehci::start(Parts {
+            registers,
+            memory,
+            clock,
+        });
+        serve_on(controller, "EHCI", 0, boot, device, port, interrupt, &start)
+    } else {
+        let registers = bar_window(&device)?;
+        let bytes = xhci::area_bytes(&registers).ok_or(Step::Memory)?;
+        let memory = Area::new(&device, bytes)?;
+        let (port, interrupt, clock) = events(&device)?;
+        let controller = Xhci::start(Parts {
+            registers,
+            memory,
+            clock,
+        });
+        serve_on(
+            controller,
+            "xHCI",
+            XHCI_SETTLE,
+            boot,
+            device,
+            port,
+            interrupt,
+            &start,
+        )
+    }
+}
+
+/// Serve the bus behind a controller that started, until it stops; then
+/// shut it down, keeping its memory for good if it will not halt.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the handles a driver is made of, each used once"
+)]
+fn serve_on<H>(
+    controller: Result<H, (host::Error, Parts<Window, Area, Time>)>,
+    name: &str,
+    settle: u64,
+    boot: &Channel<Kernel>,
+    device: Device<Kernel>,
+    port: Port<Kernel>,
+    interrupt: Interrupt<Kernel>,
+    start: &Start,
+) -> Result<(), Step>
+where
+    H: Controller<Clock = Time, Parts = Parts<Window, Area, Time>>,
+{
+    let controller = match controller {
+        Ok(controller) => controller,
         Err((error, parts)) => {
             say(format_args!(
-                "usbhid: the controller would not start: {error:?}"
+                "usbhid: the {name} controller would not start: {error:?}"
             ));
             // Unresponsive may mean still running: its memory stays.
-            if matches!(error, ferrix_usb_host::ehci::Error::Unresponsive) {
+            if matches!(error, host::Error::Unresponsive) {
                 let _kept_for_good = core::mem::ManuallyDrop::new(parts);
                 return Err(Step::Wedged);
             }
             return Err(Step::Controller);
         }
     };
-    say(format_args!("usbhid: EHCI running"));
+    say(format_args!("usbhid: {name} running"));
     let mut driver = Driver {
-        bus,
+        bus: Bus::with(controller),
         device,
         port,
         interrupt,
         location: start.location,
         channels: [const { None }; MAX_FUNCTIONS],
     };
-    let ended = driver.serve(boot);
+    let ended = driver.serve(boot, settle);
     let Driver { bus, .. } = driver;
     match bus.shutdown() {
         Ok(parts) => {
@@ -379,8 +537,8 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     }
 }
 
-struct Driver {
-    bus: Host,
+struct Driver<H> {
+    bus: Bus<H>,
     device: Device<Kernel>,
     port: Port<Kernel>,
     interrupt: Interrupt<Kernel>,
@@ -390,14 +548,20 @@ struct Driver {
     channels: [Option<Channel<Kernel>>; MAX_FUNCTIONS],
 }
 
-impl Driver {
+impl<H: Controller<Clock = Time>> Driver<H> {
     /// Poll, forward, and wait, for as long as the controller runs.
     ///
     /// Once what was plugged in at boot is found and introduced, the
     /// bootstrap channel is told: devmgr waits for that before its REPORT,
     /// which the kernel starts init at, so a compositor that reads
     /// `/dev/input` once finds the keyboard (`docs/INPUT.md` §7.3).
-    fn serve(&mut self, boot: &Channel<Kernel>) -> Result<(), Step> {
+    fn serve(&mut self, boot: &Channel<Kernel>, settle: u64) -> Result<(), Step> {
+        if settle > 0 {
+            let until = ferrix_rt::linux::monotonic_nanos()
+                .unwrap_or(0)
+                .saturating_add(settle);
+            let _ = self.port.wait(Deadline::At(until));
+        }
         self.bus.poll();
         self.forward();
         let _ = boot.write(SETTLED);
@@ -429,6 +593,9 @@ impl Driver {
         while let Some(note) = self.bus.next_note() {
             tell(note);
         }
+        while let Some(change) = self.bus.next_disk_change() {
+            self.tell_disk(change);
+        }
         while let Some(output) = self.bus.next_output() {
             match output {
                 Output::Attached(function) => self.introduce(function),
@@ -447,6 +614,48 @@ impl Driver {
                     say(format_args!("usbhid: function {function} unplugged"));
                 }
             }
+        }
+    }
+
+    /// Say what a disk that came is, with its first block read as proof the
+    /// bulk pipes carry data; a disk is not served to the block core yet
+    /// (`docs/XHCI.md` §6).
+    fn tell_disk(&mut self, change: DiskChange) {
+        let disk = match change {
+            DiskChange::Detached(disk) => {
+                say(format_args!("usbhid: disk {disk} unplugged"));
+                return;
+            }
+            DiskChange::Attached(disk) => disk,
+        };
+        let Some(found) = self.bus.disk(disk).copied() else {
+            return;
+        };
+        let vendor = core::str::from_utf8(&found.vendor)
+            .unwrap_or("?")
+            .trim_end();
+        let product = core::str::from_utf8(&found.product)
+            .unwrap_or("?")
+            .trim_end();
+        let mut block = [0_u8; 4096];
+        let Some(first) = block.get_mut(..found.block_bytes as usize) else {
+            return;
+        };
+        match self.bus.disk_read(disk, 0, first) {
+            Ok(()) => {
+                // FNV-1a over the block: a line a gate can hold against the
+                // image it attached.
+                let sum = first.iter().fold(0xCBF2_9CE4_8422_2325_u64, |sum, &byte| {
+                    (sum ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01B3)
+                });
+                say(format_args!(
+                    "usbhid: disk {disk} {vendor} {product}: {} blocks of {} bytes, block 0 fnv {sum:016x}",
+                    found.blocks, found.block_bytes
+                ));
+            }
+            Err(error) => say(format_args!(
+                "usbhid: disk {disk} {vendor} {product} would not read: {error:?}"
+            )),
         }
     }
 
@@ -586,6 +795,10 @@ fn tell(note: Note) {
                 "usbhid: a device at {parent:?} could not be set up: {error:?}"
             ));
         }
+        Note::Disk { .. } => {}
+        Note::DiskFailed { error } => say(format_args!(
+            "usbhid: a mass-storage interface would not open as a disk: {error:?}"
+        )),
         Note::Handed { port } => say(format_args!(
             "usbhid: root port {port} has a full- or low-speed device, which EHCI hands to its companion"
         )),

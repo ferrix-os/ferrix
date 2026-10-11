@@ -170,7 +170,9 @@ terminal window. `docs/DISPLAY.md` §6 has the design.
 host and starts its PHY, and publishes a device-tree node; `vmo_pin`'s
 `PIN_COHERENT` gives a driver memory a device that does not snoop sees as the
 CPU does, mapped past the caches; the input core lets a USB host's node hold
-a control channel per keyboard or mouse. `src/user/system/native/drivers/usb/usbhid`, over `src/lib/drivers/usb/usb-host`
+a control channel per keyboard or mouse (and, since 2026-10-10, for a PC's
+xHCI controllers, gated under QEMU by `cargo xtask test-usb` and not yet run
+on a PC: `docs/XHCI.md`). `src/user/system/native/drivers/usb/usbhid`, over `src/lib/drivers/usb/usb-host`
 and tested against a model of EHCI and the board's bus, drives the
 controller, the USB2514B hub and HID boot-protocol devices through the hub's
 transaction translator. On the board a G502 mouse became `event0` and a

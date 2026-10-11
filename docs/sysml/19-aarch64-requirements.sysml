@@ -836,8 +836,9 @@ package FerrixAarch64Requirements {
         }
         requirement <'L.aarch64.47'> theMachineStops : ItemLowLevel {
             attribute :>> statement = "shutdown and reset shall drain the console
-                and then ask PSCI for SYSTEM_OFF or SYSTEM_RESET, powering off
-                where reset returns and halting where power-off returns.";
+                and then ask PSCI for SYSTEM_OFF or SYSTEM_RESET, shutdown
+                announcing the power-off first, powering off where reset
+                returns, and saying so and halting where power-off returns.";
             attribute :>> criterion = "Every gate's QEMU exits when the boot
                 powers off, and boot-reset's ferrix.onexit=reset is x86-64's; a
                 reset on this architecture is not asserted.";

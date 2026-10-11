@@ -19,8 +19,9 @@
 //!    490 MiB of the RAM the kernel counts) and starts `nvrm-test`,
 //!    which reads its device from bootstrap, prints `device_isolation` with
 //!    bit 1, its budget -- the one devmgr set --, its apertures, the
-//!    configuration window, BAR0's first register, runs a thread, and
-//!    idles.
+//!    configuration window, BAR0's first register, runs a thread, maps
+//!    and unmaps BAR0's first page through ferrix-nvos more times than a
+//!    mapping that outlived its unmap would allow, and idles.
 //! 2. **Refused, budget too small**, at the default 512 MiB: an eighth of a
 //!    quarter of that is under the 256 MiB `nvrm` needs, and devmgr starts
 //!    nothing.
@@ -80,6 +81,7 @@ const STEPS: &[&str] = &[
     "configuration window: vendor 1b36 device 0005",
     "BAR0 mapped, ",
     "a thread ran and was joined",
+    "kernel mappings: ",
     "skeleton up on ",
 ];
 

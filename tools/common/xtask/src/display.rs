@@ -233,6 +233,36 @@ impl Qmp {
         let arguments = format!("{{\"events\":[{}]}}", events.join(","));
         self.execute("input-send-event", Some(&arguments)).map(drop)
     }
+
+    /// Unplug the device with `id`.
+    ///
+    /// # Errors
+    ///
+    /// Whatever QMP said.
+    pub(crate) fn device_del(&mut self, id: &str) -> Result<()> {
+        let arguments = format!("{{\"id\":{}}}", json_string(id));
+        self.execute("device_del", Some(&arguments)).map(drop)
+    }
+
+    /// Plug in the device `-device` would make of `properties`: a driver
+    /// name, then `key=value` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Whatever QMP said.
+    pub(crate) fn device_add(&mut self, properties: &str) -> Result<()> {
+        let mut fields = Vec::new();
+        for (index, field) in properties.split(',').enumerate() {
+            let (key, value) = if index == 0 {
+                ("driver", field)
+            } else {
+                field.split_once('=').unwrap_or((field, ""))
+            };
+            fields.push(format!("{}:{}", json_string(key), json_string(value)));
+        }
+        let arguments = format!("{{{}}}", fields.join(","));
+        self.execute("device_add", Some(&arguments)).map(drop)
+    }
 }
 
 /// `text` as a JSON string literal.

@@ -616,6 +616,26 @@ tokens").** What installs Ferrix in a VM today, built from what exists:
   installs on `/dev/vde` with the live system found by itself. A host test
   reads the medium's table back with `ferrix-partition`.
 
+**H1, the NVMe driver (2026-10-10, nvme-driver, 8 points estimated).**
+`docs/NVME.md`. Built ahead of H0, since it needs no PC to gate: a ring-3
+driver behind `blkring`, started by `devmgr` on class code `01:08:02`, as §6
+says. It departs from this document in two places, both in `docs/NVME.md`
+§3: the disk is `/dev/vdX` and not `/dev/nvme0n1` (§5.2's names need the
+kernel's block ring to take them), and its gate is its own (`cargo xtask
+test-nvme`, with the target below a PCIe switch) rather than `test-install
+--usb-live`, which still waits for H3 and H4. Shown on QEMU's controller
+only.
+
+**H3, xHCI with HID, built and gated under QEMU (2026-10-10, session
+`xhci-driver`, branch `xhci-driver`; not run on a PC).** [XHCI.md](XHCI.md):
+`usbhid` drives an xHCI controller behind the host stack the board's EHCI
+had; a USB keyboard and mouse reach `/dev/input`, hot-plug, and survive
+their driver's death; `cargo xtask test-usb`. Of H4, the disk is found and
+read by the driver and not yet served to the block core, which wants a
+design review of its own (XHCI.md §6), so `test-install --usb-live` waits.
+H0 has not run: XHCI.md §8 lists what QEMU's controller never showed, and
+§9 the first run on the PC.
+
 Left for later, in §9's order: a root file system the size of its partition
 (I3), `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),

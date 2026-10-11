@@ -118,6 +118,19 @@ pub(crate) struct Args {
     /// `--update`: `test-restart` updates the driver to new images before it
     /// kills it (`docs/DEVMGR.md` §4.1).
     pub(crate) update: bool,
+    /// `--nvme`: the btrfs root disk is an NVMe drive below a PCIe switch
+    /// rather than a virtio-blk function, driven by `nvme`
+    /// (`docs/NVME.md`). Not on ARMv7-A, whose machine keeps virtio.
+    pub(crate) nvme: bool,
+    /// `test-nvme`'s second drive: an image attached as an NVMe drive with
+    /// 4096-byte logical blocks on a root port of its own, written through.
+    pub(crate) nvme_scratch: Option<std::path::PathBuf>,
+    /// `test-nvme`'s fault: a blkdebug configuration the scratch drive's
+    /// image is opened through, which fails the reads it names.
+    pub(crate) nvme_fault: Option<std::path::PathBuf>,
+    /// `test-nvme`'s witness: where QEMU writes its trace of the NVMe
+    /// model's flushes, shutdown notifications and stops.
+    pub(crate) nvme_trace: Option<std::path::PathBuf>,
     /// `--net`: give the guest a virtio-net device, with `xtask`'s own gateway
     /// behind it. Off by default for a boot that is judged, because every boot
     /// that does not need a network is a boot with one fewer device on the bus
@@ -352,6 +365,10 @@ pub(crate) struct Args {
     /// QMP's `input-send-event` drives. `test-input` turns it on, and
     /// `--display` brings them as well.
     pub(crate) input: bool,
+    /// A `qemu-xhci` controller with a hub, a keyboard behind the hub, a
+    /// mouse and a memory stick holding this image (`docs/XHCI.md` §7). No
+    /// flag sets it: `test-usb` does.
+    pub(crate) usb: Option<std::path::PathBuf>,
     /// `--screens N`: how many virtio-gpu devices are on the bus, one
     /// screen each. Zero and one both mean one. A second device rather than
     /// a second output of the first, because QEMU enables a second output
@@ -711,13 +728,15 @@ impl Args {
 
     /// Parse an iterator of arguments, `cargo xtask` and the command name
     /// having already been stripped by the caller.
-    /// A flag that only turns something on: `--chrome`, `--login`, and
-    /// `--nvidia`, which is the `--chrome` desktop on the 3060's monitor.
+    /// A flag that only turns something on: `--chrome`, `--login`,
+    /// `--update`, `--nvme`, and `--nvidia`, which is the `--chrome` desktop
+    /// on the 3060's monitor.
     fn switch(&mut self, flag: &str) {
         match flag {
             "--chrome" => self.chrome = true,
             "--login" => self.login = true,
             "--update" => self.update = true,
+            "--nvme" => self.nvme = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -756,7 +775,9 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" | "--login" | "--nvidia" | "--update" => args.switch(&item),
+                "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" => {
+                    args.switch(&item);
+                }
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;

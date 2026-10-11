@@ -74,6 +74,7 @@ mod picture;
 mod pointer;
 mod protocols;
 mod run;
+mod settings;
 mod steam_store;
 pub(crate) mod steam_window;
 mod user_desktop;
@@ -356,6 +357,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["fuzzel"]) {
         let _ = crate::apps::program(arch, "fuzzel", "fuzzel")?;
     }
+    if asked(&["settings"]) {
+        settings::build_ahead(arch)?;
+    }
     Ok(())
 }
 
@@ -479,7 +483,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 41] = [
+const BOOTS: [(&str, Boot); 42] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -521,6 +525,7 @@ const BOOTS: [(&str, Boot); 41] = [
     ("fuzzel", test_fuzzel),
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
+    ("settings", settings::test_settings),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the

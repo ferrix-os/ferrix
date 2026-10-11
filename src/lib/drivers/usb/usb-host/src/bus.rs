@@ -25,19 +25,27 @@
 
 use ferrix_inputctl::message::{Hello, RawEvent, Text};
 
-use crate::ehci::{self, CONTROL_BYTES, Controller, Data, PIPE_BYTES, RootReset, Target};
+use crate::ehci;
 use crate::hid::{BOOT_KEYBOARD, BOOT_MOUSE, EventBuf, Identity, Interpreter, Kind};
+use crate::host::{
+    self, CONTROL_BYTES, Data, Endpoint, Host, PIPE_BYTES, Place, RootReset, Target,
+};
 use crate::hub::{
     self, CHANGE_CONNECTION, CHANGE_RESET, HubDescriptor, PORT_POWER, PORT_RESET, PortStatus,
     STATUS_ENABLE,
 };
 use crate::report::Descriptor;
+use crate::storage::{self, Disk};
 use crate::usb::{
     CLASS_HID, CLASS_HUB, CONFIGURATION, Configuration, DEVICE, DeviceDescriptor, Interface,
     LANGUAGE_US, PROTOCOL_KEYBOARD, PROTOCOL_MOUSE, STRING, SUBCLASS_BOOT, Setup, Speed,
     first_language, is_control_packet, string_ascii,
 };
 use crate::{Clock, Dma, MILLISECOND, Parts, Registers};
+
+/// The largest packet a `SuperSpeed` control endpoint takes, which its device
+/// descriptor gives as the exponent 9.
+const SUPER_MAX_PACKET: u16 = 512;
 
 /// How often the ports are polled.
 pub const POLL_INTERVAL: u64 = 250 * MILLISECOND;
@@ -46,6 +54,9 @@ pub const MAX_DEVICES: usize = 16;
 /// The most keyboards and mice at once: the kernel's
 /// `USB_INPUT_FUNCTIONS`, the input channels one host may hold.
 pub const MAX_FUNCTIONS: usize = 8;
+
+/// The most disks at once.
+pub const MAX_DISKS: usize = 2;
 
 /// How long a connection must stay before it is reset: USB 2.0's
 /// `TATTDB`.
@@ -56,9 +67,6 @@ const HUB_RESET_PATIENCE: u64 = 500 * MILLISECOND;
 const HUB_RESET_STEP: u64 = 10 * MILLISECOND;
 /// The rest a device gets after its port reset: `TRSTRCY`.
 const RESET_RECOVERY: u64 = 10 * MILLISECOND;
-/// The rest after `SET_ADDRESS`: two milliseconds by the specification,
-/// ten as Linux gives.
-const ADDRESS_RECOVERY: u64 = 10 * MILLISECOND;
 /// The configuration descriptor bytes read.
 const CONFIGURATION_BYTES: usize = 256;
 /// The longest string descriptor.
@@ -74,17 +82,19 @@ const NOTES: usize = 16;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
     /// A transfer failed.
-    Transfer(ehci::Error),
+    Transfer(host::Error),
     /// A descriptor made no sense.
     Descriptor,
     /// Every address, device slot or function slot is taken.
     Full,
     /// A hub would not reset or enable the port.
     PortReset,
+    /// A `SuperSpeed` hub, whose ports this driver does not walk.
+    Unsupported,
 }
 
-impl From<ehci::Error> for Error {
-    fn from(error: ehci::Error) -> Self {
+impl From<host::Error> for Error {
+    fn from(error: host::Error) -> Self {
         Error::Transfer(error)
     }
 }
@@ -140,6 +150,20 @@ pub enum Note {
         /// The function.
         function: usize,
     },
+    /// A disk was found.
+    Disk {
+        /// Its index.
+        disk: usize,
+        /// How many blocks it has.
+        blocks: u64,
+        /// How many bytes a block is.
+        block_bytes: u32,
+    },
+    /// A mass-storage interface would not open as a disk.
+    DiskFailed {
+        /// Why.
+        error: storage::Error,
+    },
     /// A full- or low-speed device on a root port went to the companion
     /// controller, which nothing drives.
     Handed {
@@ -161,6 +185,15 @@ pub enum Output {
     Detached(usize),
 }
 
+/// A disk coming or going, which [`Bus::next_disk_change`] hands on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DiskChange {
+    /// A disk appeared: [`Bus::disk`] says what it is.
+    Attached(usize),
+    /// A disk went: its index is free again.
+    Detached(usize),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Pending {
     Attached(usize),
@@ -170,6 +203,15 @@ enum Pending {
         len: usize,
     },
     Detached(usize),
+}
+
+/// A disk and the device it is on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Held {
+    device: usize,
+    disk: Disk,
+    /// Unplugged, with its [`Output::DiskDetached`] still to be read.
+    gone: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -252,10 +294,12 @@ impl<T: Copy, const N: usize> Ring<T, N> {
 
 /// The bus, its controller, and everything found on it.
 #[derive(Debug)]
-pub struct Bus<R, D, C> {
-    hc: Controller<R, D, C>,
+pub struct Bus<H> {
+    hc: H,
     devices: [Option<Device>; MAX_DEVICES],
     functions: [Option<Function>; MAX_FUNCTIONS],
+    disks: [Option<Held>; MAX_DISKS],
+    disk_changes: Ring<DiskChange, { 2 * MAX_DISKS }>,
     pending: Ring<Pending, PENDING>,
     /// The events of the last [`Output::Events`].
     events: EventBuf,
@@ -265,33 +309,42 @@ pub struct Bus<R, D, C> {
     next_poll: u64,
 }
 
-impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
-    /// Start the controller with nothing found yet; the first [`Bus::poll`]
-    /// finds what is plugged in.
+impl<R: Registers, D: Dma, C: Clock> Bus<ehci::Controller<R, D, C>> {
+    /// Start an EHCI controller with nothing found yet; the first
+    /// [`Bus::poll`] finds what is plugged in.
     ///
     /// # Errors
     ///
-    /// As [`Controller::start`].
+    /// As [`ehci::Controller::start`].
     pub fn start(parts: Parts<R, D, C>) -> Result<Self, (ehci::Error, Parts<R, D, C>)> {
-        let hc = Controller::start(parts)?;
-        Ok(Bus {
+        Ok(Bus::with(ehci::Controller::start(parts)?))
+    }
+}
+
+impl<H: Host> Bus<H> {
+    /// The bus behind a controller already running, with nothing found yet;
+    /// the first [`Bus::poll`] finds what is plugged in.
+    pub fn with(hc: H) -> Self {
+        Bus {
             hc,
             devices: [None; MAX_DEVICES],
             functions: [None; MAX_FUNCTIONS],
+            disks: [None; MAX_DISKS],
+            disk_changes: Ring::new(),
             pending: Ring::new(),
             events: EventBuf::default(),
             notes: Ring::new(),
             root_failed: 0,
             next_poll: 0,
-        })
+        }
     }
 
     /// Stop the controller.
     ///
     /// # Errors
     ///
-    /// As [`Controller::shutdown`]: the parts, whose memory must be kept.
-    pub fn shutdown(self) -> Result<Parts<R, D, C>, Parts<R, D, C>> {
+    /// As [`Host::shutdown`]: the parts, whose memory must be kept.
+    pub fn shutdown(self) -> Result<H::Parts, H::Parts> {
         self.hc.shutdown()
     }
 
@@ -304,7 +357,8 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
     /// Poll every port, setting up what was plugged in and letting go of
     /// what was unplugged.
     pub fn poll(&mut self) {
-        for port in 0..self.hc.ports() {
+        // The failed-port marks are a bit a port.
+        for port in 0..self.hc.ports().min(u32::BITS) {
             self.poll_root(port);
         }
         // A hub found in this pass is polled in it too, whatever its slot.
@@ -321,8 +375,8 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
     ///
     /// # Errors
     ///
-    /// As [`Controller::service`]: the controller halted.
-    pub fn on_interrupt(&mut self) -> Result<(), ehci::Error> {
+    /// As [`Host::service`]: the controller halted.
+    pub fn on_interrupt(&mut self) -> Result<(), host::Error> {
         let Bus {
             hc,
             functions,
@@ -351,6 +405,10 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
                 self.notes.push_over(Note::Stopped { function: index });
             }
         }
+        // A controller that says a port changed is polled at once.
+        if self.hc.ports_changed() {
+            self.next_poll = self.hc.clock().now_nanos();
+        }
         serviced
     }
 
@@ -365,6 +423,7 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
                     }
                     return Some(Output::Detached(function));
                 }
+
                 Pending::Report {
                     function,
                     bytes,
@@ -448,6 +507,80 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
         first_error.map_or(Ok(sent), Err)
     }
 
+    /// The next disk to have come or gone, if any.
+    pub fn next_disk_change(&mut self) -> Option<DiskChange> {
+        let change = self.disk_changes.pop()?;
+        if let DiskChange::Detached(disk) = change
+            && let Some(slot) = self.disks.get_mut(disk)
+        {
+            *slot = None;
+        }
+        Some(change)
+    }
+
+    /// Disk `disk`, if it is there.
+    #[must_use]
+    pub fn disk(&self, disk: usize) -> Option<&Disk> {
+        self.disks
+            .get(disk)?
+            .as_ref()
+            .filter(|held| !held.gone)
+            .map(|held| &held.disk)
+    }
+
+    /// Read whole blocks of disk `disk` from `lba`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Disk::read`]; [`storage::Error::Unsupported`] for a disk that is
+    /// not there.
+    pub fn disk_read(
+        &mut self,
+        disk: usize,
+        lba: u64,
+        buffer: &mut [u8],
+    ) -> Result<(), storage::Error> {
+        let Bus { hc, disks, .. } = self;
+        Self::held(disks, disk)?.read(hc, lba, buffer)
+    }
+
+    /// Write whole blocks of disk `disk` at `lba`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bus::disk_read`].
+    pub fn disk_write(
+        &mut self,
+        disk: usize,
+        lba: u64,
+        buffer: &[u8],
+    ) -> Result<(), storage::Error> {
+        let Bus { hc, disks, .. } = self;
+        Self::held(disks, disk)?.write(hc, lba, buffer)
+    }
+
+    /// Have disk `disk` write its cache out.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bus::disk_read`].
+    pub fn disk_flush(&mut self, disk: usize) -> Result<(), storage::Error> {
+        let Bus { hc, disks, .. } = self;
+        Self::held(disks, disk)?.flush(hc)
+    }
+
+    fn held(
+        disks: &mut [Option<Held>; MAX_DISKS],
+        disk: usize,
+    ) -> Result<&mut Disk, storage::Error> {
+        disks
+            .get_mut(disk)
+            .and_then(Option::as_mut)
+            .filter(|held| !held.gone)
+            .map(|held| &mut held.disk)
+            .ok_or(storage::Error::Unsupported)
+    }
+
     /// What `function` is.
     #[must_use]
     pub fn kind(&self, function: usize) -> Option<Kind> {
@@ -483,9 +616,15 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
             return;
         }
         match self.hc.reset_root_port(port) {
-            RootReset::HighSpeed => {
+            RootReset::Ready(speed) => {
                 self.hc.clear_root_changes(port);
-                if let Err(error) = self.enumerate(Parent::Root(port), Speed::High, None) {
+                let place = Place {
+                    root_port: port,
+                    route: 0,
+                    speed,
+                    translator: None,
+                };
+                if let Err(error) = self.enumerate(Parent::Root(port), &place) {
                     self.root_failed |= bit;
                     self.notes.push_over(Note::Failed {
                         parent: Parent::Root(port),
@@ -496,6 +635,13 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
             RootReset::Handed => {
                 self.root_failed |= bit;
                 self.notes.push_over(Note::Handed { port });
+            }
+            RootReset::Failed => {
+                self.root_failed |= bit;
+                self.notes.push_over(Note::Failed {
+                    parent: Parent::Root(port),
+                    error: Error::PortReset,
+                });
             }
             RootReset::Gone => {}
         }
@@ -574,11 +720,19 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
         let translator = if speed == Speed::High {
             None
         } else if target.speed == Speed::High {
-            Some((target.address, port))
+            Some((target.handle(), port))
         } else {
             target.translator
         };
-        self.enumerate(Parent::Hub { device, port }, speed, translator)
+        // The route gains this hub's port in the tier below the hub's own.
+        let tier = (u32::BITS - target.route.leading_zeros()).div_ceil(4);
+        let place = Place {
+            root_port: target.root_port,
+            route: target.route | (u32::from(port.min(15)) << (4 * tier.min(4))),
+            speed,
+            translator,
+        };
+        self.enumerate(Parent::Hub { device, port }, &place)
     }
 
     fn port_status(&mut self, target: &Target, port: u8) -> Result<PortStatus, Error> {
@@ -620,41 +774,54 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
     /// Give a device in its default state an address, read what it is, and
     /// configure it: a hub is powered and its ports left to the next poll,
     /// and every keyboard and mouse boot interface becomes a function.
-    fn enumerate(
-        &mut self,
-        parent: Parent,
-        speed: Speed,
-        translator: Option<(u8, u8)>,
-    ) -> Result<(), Error> {
+    fn enumerate(&mut self, parent: Parent, place: &Place) -> Result<(), Error> {
         let slot = self
             .devices
             .iter()
             .position(Option::is_none)
             .ok_or(Error::Full)?;
         let address = self.free_address().ok_or(Error::Full)?;
-        let mut target = Target {
-            address: 0,
-            speed,
-            max_packet: speed.default_max_packet(),
-            translator,
-        };
+        let mut target = self.hc.open(place)?;
+        let set_up = self.set_up(slot, parent, &mut target, address);
+        if set_up.is_err() {
+            if let Some(entry) = self.devices.get_mut(slot) {
+                *entry = None;
+            }
+            self.hc.release(&target);
+        }
+        set_up
+    }
+
+    /// [`Bus::enumerate`], from the first transfer on.
+    fn set_up(
+        &mut self,
+        slot: usize,
+        parent: Parent,
+        target: &mut Target,
+        address: u8,
+    ) -> Result<(), Error> {
+        let speed = target.speed;
         let mut bytes = [0_u8; 18];
         let head = bytes.get_mut(..8).ok_or(Error::Descriptor)?;
         let got = self.hc.control(
-            &target,
+            target,
             &Setup::get_descriptor(DEVICE, 0, 0, 8),
             Data::In(head),
         )?;
         let max_packet = bytes.get(7).copied().unwrap_or(0);
-        if got < 8 || !is_control_packet(max_packet) {
+        let max_packet = if speed == Speed::Super {
+            SUPER_MAX_PACKET
+        } else if is_control_packet(max_packet) {
+            u16::from(max_packet)
+        } else {
+            0
+        };
+        if got < 8 || max_packet == 0 {
             return Err(Error::Descriptor);
         }
-        let _ = self
-            .hc
-            .control(&target, &Setup::set_address(address), Data::None)?;
-        self.hc.clock().sleep_nanos(ADDRESS_RECOVERY);
-        target.address = address;
-        target.max_packet = u16::from(max_packet);
+        self.hc.assign(target, address, max_packet)?;
+        let target = *target;
+        let address = target.address;
 
         let got = self.hc.control(
             &target,
@@ -664,6 +831,14 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
         let descriptor =
             DeviceDescriptor::parse(bytes.get(..got).unwrap_or(&[])).ok_or(Error::Descriptor)?;
         let configuration = self.configuration(&target)?;
+        let is_hub = descriptor.class == CLASS_HUB
+            || configuration
+                .interfaces()
+                .iter()
+                .any(|interface| interface.class == CLASS_HUB);
+        if is_hub && speed == Speed::Super {
+            return Err(Error::Unsupported);
+        }
         let _ = self.hc.control(
             &target,
             &Setup::set_configuration(configuration.value),
@@ -677,14 +852,10 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
                 hub: None,
             });
         }
-        let is_hub = descriptor.class == CLASS_HUB
-            || configuration
-                .interfaces()
-                .iter()
-                .any(|interface| interface.class == CLASS_HUB);
         let (hub_ports, functions) = if is_hub {
             (Some(self.set_up_hub(slot, &target)?), 0)
         } else {
+            self.set_up_disks(slot, &target, &configuration);
             (
                 None,
                 self.set_up_functions(slot, &target, &descriptor, &configuration),
@@ -730,6 +901,8 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
             .control(target, &hub::get_hub_descriptor(8), Data::In(&mut bytes))?;
         let descriptor =
             HubDescriptor::parse(bytes.get(..got).unwrap_or(&[])).ok_or(Error::Descriptor)?;
+        self.hc
+            .set_hub(target, descriptor.ports, descriptor.think_time)?;
         for port in 1..=descriptor.ports {
             let _ =
                 self.hc
@@ -745,6 +918,39 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
             });
         }
         Ok(descriptor.ports)
+    }
+
+    /// Open every bulk-only mass-storage interface of the device in `slot`
+    /// as a disk, behind a controller that moves bulk data.
+    fn set_up_disks(&mut self, slot: usize, target: &Target, configuration: &Configuration) {
+        for interface in configuration.interfaces() {
+            if !storage::is_disk(interface) {
+                continue;
+            }
+            let Some(index) = self.disks.iter().position(Option::is_none) else {
+                break;
+            };
+            match Disk::open(&mut self.hc, target, interface) {
+                Ok(disk) => {
+                    if let Some(entry) = self.disks.get_mut(index) {
+                        *entry = Some(Held {
+                            device: slot,
+                            disk,
+                            gone: false,
+                        });
+                    }
+                    let _ = self.disk_changes.push(DiskChange::Attached(index));
+                    self.notes.push_over(Note::Disk {
+                        disk: index,
+                        blocks: disk.blocks,
+                        block_bytes: disk.block_bytes,
+                    });
+                }
+                // A controller with no bulk pipes has no disks, silently.
+                Err(storage::Error::Transfer(host::Error::Unsupported)) => {}
+                Err(error) => self.notes.push_over(Note::DiskFailed { error }),
+            }
+        }
     }
 
     /// Turn every HID interface of the device in `slot` whose reports map
@@ -780,7 +986,12 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
                 );
             }
             let packet = packet.min(PIPE_BYTES as u16);
-            let Ok(pipe) = self.hc.open_pipe(target, endpoint, packet) else {
+            let endpoint = Endpoint {
+                number: endpoint,
+                max_packet: packet,
+                interval: interface.interval,
+            };
+            let Ok(pipe) = self.hc.open_pipe(target, &endpoint) else {
                 break;
             };
             let names = *identity.get_or_insert_with(|| self.names(target, descriptor));
@@ -919,9 +1130,23 @@ impl<R: Registers, D: Dma, C: Clock> Bus<R, D, C> {
             }
             let _ = self.pending.push(Pending::Detached(index));
         }
+        for index in 0..MAX_DISKS {
+            let Some(Some(held)) = self.disks.get(index).copied() else {
+                continue;
+            };
+            if held.device != slot || held.gone {
+                continue;
+            }
+            held.disk.close(&mut self.hc);
+            if let Some(Some(entry)) = self.disks.get_mut(index) {
+                entry.gone = true;
+            }
+            let _ = self.disk_changes.push(DiskChange::Detached(index));
+        }
         if let Some(entry) = self.devices.get_mut(slot) {
             *entry = None;
         }
+        self.hc.release(&device.target);
         self.notes.push_over(Note::Gone {
             address: device.target.address,
         });

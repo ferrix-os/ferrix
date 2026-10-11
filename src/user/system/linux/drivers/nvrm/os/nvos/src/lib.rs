@@ -29,6 +29,7 @@ pub mod display;
 mod futex;
 mod libc;
 pub mod log;
+mod mappings;
 pub mod os;
 pub mod pages;
 pub mod rmcore;

@@ -4,3 +4,4 @@
 mod bus;
 mod model;
 mod parsing;
+mod xhci;

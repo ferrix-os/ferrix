@@ -80,9 +80,12 @@ impl Claims {
     ///
     /// # Which callers share a node, and why that is safe
     ///
-    /// One only: the input core, for the STM32 USB host's node, whose
+    /// One only: the input core, for a USB host's node -- the STM32 USB
+    /// host's, and a PCI function of xHCI's class (0C:03:30) -- whose
     /// `DeviceNode::input_functions` is `USB_INPUT_FUNCTIONS` (eight); every
-    /// other node, and every other core, claims with a limit of one. Sharing
+    /// other node, and every other core, claims with a limit of one. The
+    /// argument is the same for both hosts, since neither part of it depends
+    /// on how the node was found. Sharing
     /// opens no DMA path (T.DMA): an input control channel carries no memory
     /// -- HELLO hands over only the driver's port and READY only the core's
     /// (`ferrix-inputctl`), so no VMO, pin or IOMMU mapping passes through
