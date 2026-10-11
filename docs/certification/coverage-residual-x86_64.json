@@ -8,7 +8,7 @@
   ],
   "arch": "x86_64",
   "profile": "debug",
-  "unreached": 670,
+  "unreached": 724,
   "files": {
     "iommu/smmuv3.rs": {
       "ring": "core",
