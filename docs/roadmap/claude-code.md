@@ -34,9 +34,18 @@ had booted with glibc's links. ferrousli now has the POSIX timers and
 `__cxa_at_quick_exit`, and `test-claude-code --everything` runs Claude Code
 on ferrousli as the desktop does, with a negative control (§5).
 
+**Done (2026-10-11).** A developer's whole session by hand, in term on
+the desktop and over `ssh -tt`, against a scripted API: onboarding, a
+turn of Bash, Write, Read, Grep, Glob, Edit and `cargo test`, permission
+prompts, Esc and Ctrl-C (the running command's process group goes too),
+resizes and `/exit`, as on the host. It found `rustdoc` missing from the
+desktop's `PATH` and ten of the TUI's characters drawn as boxes by term;
+both are fixed (§5.1).
+
 **Still to do:**
 
-* A real account over the real network (§5).
+* A real account: the network, TLS and the browser hand-off are measured
+  up to the sign-in page, which is the customer's own step (§5.2).
 * An i386 signal frame with the `XSAVE` area: a first attempt backed out,
   what it takes in §3 (`docs/BACKLOG.md`).
 * linux-arm64 on AArch64 (§6).
