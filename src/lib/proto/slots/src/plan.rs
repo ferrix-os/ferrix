@@ -20,6 +20,17 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The kind `ferrix.slot.boot=` names.
+    #[must_use]
+    pub fn from_word(word: &str) -> Option<Kind> {
+        match word {
+            "trial" => Some(Kind::Trial),
+            "good" => Some(Kind::Good),
+            "fallback" => Some(Kind::Fallback),
+            _ => None,
+        }
+    }
+
     /// The word `ferrix.slot.boot=` says.
     #[must_use]
     pub const fn word(self) -> &'static str {
@@ -182,4 +193,25 @@ pub fn compose(words: &LoaderWords, slot_line: &[u8], out: &mut [u8]) -> Option<
     *space = b' ';
     text.copy_from_slice(line.as_bytes());
     Some(end)
+}
+
+/// The loader's words read back from a command line, as `bootctl` reads
+/// `/proc/cmdline`: the first word with each key, as the kernel's
+/// `option_in` takes it, so the loader's words, which come first, are the
+/// ones read. `None` unless all four are there and each parses: the
+/// inverse of [`LoaderWords`]' `Display`.
+#[must_use]
+pub fn parse_words(cmdline: &str) -> Option<LoaderWords> {
+    let first = |key: &str| {
+        cmdline.split_whitespace().find_map(|word| {
+            let (name, value) = word.split_once('=')?;
+            (name == key).then_some(value)
+        })
+    };
+    Some(LoaderWords {
+        slot: Slot::from_letter(first("ferrix.slot")?)?,
+        kind: Kind::from_word(first("ferrix.slot.boot")?)?,
+        sequence: first("ferrix.slot.seq")?.parse().ok()?,
+        disk: crate::gpt::parse_guid(first("ferrix.slot.disk")?)?,
+    })
 }

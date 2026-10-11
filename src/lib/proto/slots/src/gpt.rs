@@ -292,21 +292,48 @@ fn entry_part(index: usize, entry: &[u8]) -> Result<Option<(Guid, Part)>, GptErr
     Ok(Some((kind, part)))
 }
 
-/// A GUID in its usual text form, `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
-/// lowercase, from the table's byte order.
+/// The table byte each text position prints, in order.
+const TEXT_ORDER: [usize; 16] = [3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+
+/// A GUID in its usual text form, `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX`,
+/// upper case as `ferrix-partition`'s `Guid` prints it, from the table's
+/// byte order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuidText(pub Guid);
 
 impl core::fmt::Display for GuidText {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let g = &self.0;
-        let order = [3usize, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
-        for (at, &index) in order.iter().enumerate() {
+        for (at, &index) in TEXT_ORDER.iter().enumerate() {
             if matches!(at, 4 | 6 | 8 | 10) {
                 f.write_str("-")?;
             }
-            write!(f, "{:02x}", g.get(index).copied().unwrap_or(0))?;
+            write!(f, "{:02X}", g.get(index).copied().unwrap_or(0))?;
         }
         Ok(())
     }
+}
+
+/// The GUID `text` names, in either case, in the table's byte order: the
+/// inverse of [`GuidText`].
+#[must_use]
+pub fn parse_guid(text: &str) -> Option<Guid> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 36 {
+        return None;
+    }
+    let mut guid = [0u8; 16];
+    let mut at = 0usize;
+    for &index in &TEXT_ORDER {
+        if matches!(at, 8 | 13 | 18 | 23) {
+            if bytes.get(at) != Some(&b'-') {
+                return None;
+            }
+            at += 1;
+        }
+        let pair = core::str::from_utf8(bytes.get(at..at + 2)?).ok()?;
+        *guid.get_mut(index)? = u8::from_str_radix(pair, 16).ok()?;
+        at += 2;
+    }
+    Some(guid)
 }

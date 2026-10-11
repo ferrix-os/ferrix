@@ -264,7 +264,7 @@ fn loader_words_are_written_or_refused() {
     assert_eq!(
         &out[..len],
         b"ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=12 \
-          ferrix.slot.disk=12345678-9abc-def0-1122-334455667788"
+          ferrix.slot.disk=12345678-9ABC-DEF0-1122-334455667788"
     );
     assert_eq!(write_words(&words, &mut [0u8; 20]), None);
 }
@@ -711,7 +711,7 @@ fn a_slot_command_line_is_composed_whole_or_not_at_all() {
         disk: DISK,
     };
     let full: &[u8] = b"ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 \
-        ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.root=tmpfs";
+        ferrix.slot.disk=12345678-9ABC-DEF0-1122-334455667788 ferrix.root=tmpfs";
     let mut out = [0u8; 200];
     let len = compose(&words, b"  ferrix.root=tmpfs\n", &mut out);
     assert_eq!(len.map(|len| &out[..len]), Some(full));
@@ -775,6 +775,61 @@ fn a_ferrix_partition_outside_the_usable_blocks_is_refused() {
     assert_eq!(gpt::GuidText(layout.disk).to_string().len(), 36);
     assert_eq!(
         gpt::GuidText(DISK).to_string(),
-        "12345678-9abc-def0-1122-334455667788"
+        "12345678-9ABC-DEF0-1122-334455667788"
     );
+}
+
+#[test]
+fn the_loader_words_parse_back_first_match() {
+    use crate::plan::parse_words;
+    for slot in Slot::BOTH {
+        for kind in [Kind::Trial, Kind::Good, Kind::Fallback] {
+            for sequence in [0, 3, u64::MAX] {
+                let words = LoaderWords {
+                    slot,
+                    kind,
+                    sequence,
+                    disk: DISK,
+                };
+                let line = std::format!("{words} ferrix.root=tmpfs");
+                assert_eq!(parse_words(&line), Some(words), "{line}");
+            }
+        }
+    }
+    let words = LoaderWords {
+        slot: Slot::A,
+        kind: Kind::Good,
+        sequence: 3,
+        disk: DISK,
+    };
+    // A slot's own line cannot override the loader's words, which come first.
+    let forged = std::format!("{words} ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=9");
+    assert_eq!(parse_words(&forged), Some(words));
+    // Lower case is read too; a word missing or malformed is no words at all.
+    let lower = std::format!("{words}").to_lowercase();
+    assert_eq!(parse_words(&lower), Some(words));
+    assert_eq!(
+        parse_words("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3"),
+        None
+    );
+    assert_eq!(
+        parse_words(
+            "ferrix.slot=c ferrix.slot.boot=good ferrix.slot.seq=3 \
+             ferrix.slot.disk=12345678-9ABC-DEF0-1122-334455667788"
+        ),
+        None
+    );
+    assert_eq!(gpt::parse_guid("12345678-9ABC-DEF0-1122-33445566778"), None);
+    assert_eq!(
+        gpt::parse_guid("12345678x9ABC-DEF0-1122-334455667788"),
+        None
+    );
+    assert_eq!(
+        gpt::parse_guid("12345678-9ABC-DEF0-1122-3344556677GG"),
+        None
+    );
+    let text = gpt::GuidText(SLOT_TYPE).to_string();
+    assert_eq!(text, "5475B681-82F5-47DA-A5A1-55DB0E7E2BD3");
+    assert_eq!(gpt::parse_guid(&text), Some(SLOT_TYPE));
+    assert_eq!(text, ferrix_partition::Guid(SLOT_TYPE).to_string());
 }

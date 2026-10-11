@@ -171,8 +171,8 @@ command line cannot forge them -- then the slot's:
 ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> ferrix.slot.disk=<disk GUID> <the slot's command line>
 ```
 
-`ferrix.slot.disk` is the boot disk's GPT disk GUID, lowercase in its usual
-text form, so that `bootctl` writes only the disk the loader booted from
+`ferrix.slot.disk` is the boot disk's GPT disk GUID, in its usual text form
+upper case, as `ferrix-partition` prints it, so that `bootctl` writes only the disk the loader booted from
 (the consultant's G4, for ab-sys's S1). The longest words -- `fallback`, a
 sequence of 2^64 - 1, the GUID -- and the longest slot command line (2048
 bytes) fit the boot info's command-line area with room to spare; a host
@@ -205,7 +205,19 @@ well under a second at hundreds of MB/s).
   `ferrix.slot.boot=trial`, and the record's trial is that slot and its
   sequence is the `ferrix.slot.seq` booted (so a later re-arm is not marked
   by an older boot). Writes good = that slot, trial none, tries 0.
-* `bootctl status`: the record, both slots' verification, and what booted.
+* `bootctl rollback`: writes `Record::disarmed()` -- trial none, tries 0,
+  `good` unchanged -- and nothing else, whether the trial is armed or the
+  running one; the next reset boots the good slot. It never marks a slot
+  good, and there is no command that makes the other slot good without a
+  trial boot of it. Refused without the loader's words on the command line
+  (a rescue or ESP boot has none), as `try` and `good` are.
+* `bootctl status`: the record, both slots' verification, and what booted;
+  a trial with tries 0 shows as "exhausted (failed: the loader boots the
+  good slot)".
+* `bootctl` reads the loader's words only through
+  `ferrix_slots::plan::parse_words` (first match per key, as the kernel's
+  `option_in`), and writes only the disk whose GPT disk GUID is
+  `ferrix.slot.disk`; a slot boot without that word is refused.
 * `bootctl init`: writes a first record (good = the slot that verifies, A if
   both) when there is no valid copy; refuses otherwise.
 
