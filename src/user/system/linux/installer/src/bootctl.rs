@@ -36,6 +36,7 @@ use ferrix_install::layout::{self, AbDisk, Slot};
 use ferrix_install::record::{self, Blocks};
 use ferrix_install::slotio;
 use ferrix_partition::Guid;
+use ferrix_slots::plan::parse_words;
 use ferrix_slots::record::{Current, MAX_TRIES, Record};
 
 fn main() -> ExitCode {
@@ -126,8 +127,9 @@ fn run() -> Result<(), String> {
     // and repair, never change what boots (the consultant's S2).
     if booted.slot.is_none() && command.changes_what_boots() {
         return Err(
-            "this system did not boot from a slot (no ferrix.slot= on the command line): try, \
-             good and rollback refuse; status, verify and init work"
+            "this system did not boot from a slot (the loader's four ferrix.slot words are not \
+             all on the command line): try, good and rollback refuse; status, verify and init \
+             work"
                 .into(),
         );
     }
@@ -185,9 +187,9 @@ struct Booted {
 }
 
 impl Booted {
-    /// From `/proc/cmdline`: the first word with each key, as the kernel
-    /// takes them, so a slot's own command line cannot override the
-    /// loader's.
+    /// From `/proc/cmdline`, read by `ferrix-slots`' own `parse_words`,
+    /// the inverse of the loader's writing of them: the first word with each
+    /// key, all four or none (the consultant's S1 and S5).
     fn read() -> Result<Booted, String> {
         let line =
             std::fs::read_to_string("/proc/cmdline").map_err(|e| format!("/proc/cmdline: {e}"))?;
@@ -195,42 +197,25 @@ impl Booted {
     }
 
     fn parse(line: &str) -> Booted {
-        let first = |key: &str| {
-            line.split_whitespace()
-                .find_map(|word| word.strip_prefix(key))
-                .map(str::to_owned)
-        };
-        Booted {
-            slot: first("ferrix.slot=").and_then(|s| Slot::from_letter(&s)),
-            disk: first("ferrix.slot.disk=").and_then(|s| parse_guid(&s)),
-            how: first("ferrix.slot.boot="),
-            sequence: first("ferrix.slot.seq=").and_then(|s| s.parse().ok()),
+        match parse_words(line) {
+            Some(words) => Booted {
+                slot: Some(words.slot),
+                disk: Some(Guid(words.disk)),
+                how: Some(words.kind.word().to_owned()),
+                sequence: Some(words.sequence),
+            },
+            None => Booted {
+                slot: None,
+                disk: None,
+                how: None,
+                sequence: None,
+            },
         }
     }
 
     fn is_trial(&self) -> bool {
         self.how.as_deref() == Some("trial")
     }
-}
-
-/// A GUID as GPT tools print it, `8-4-4-4-12` hex, either case.
-fn parse_guid(text: &str) -> Option<Guid> {
-    let hex: String = text.chars().filter(|&c| c != '-').collect();
-    if hex.len() != 32 || text.len() != 36 {
-        return None;
-    }
-    let byte = |i: usize| u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok();
-    let mut printed = [0_u8; 16];
-    for (i, out) in printed.iter_mut().enumerate() {
-        *out = byte(i)?;
-    }
-    // The first three fields are stored little-endian.
-    let order = [3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
-    let mut stored = [0_u8; 16];
-    for (to, &from) in stored.iter_mut().zip(&order) {
-        *to = printed[from];
-    }
-    Some(Guid(stored))
 }
 
 /// The control record, on the whole disk, in its logical blocks.
@@ -578,17 +563,23 @@ mod tests {
         }
     }
 
+    const DISK: &str = "ferrix.slot.disk=12345678-9abc-def0-1122-334455667788";
+
+    fn words(text: &str) -> Booted {
+        Booted::parse(&format!("{text} {DISK}"))
+    }
+
     #[test]
     fn the_idle_slot_is_never_the_running_one() {
-        let good_a = Booted::parse("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=5");
+        let good_a = words("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=5");
         assert_eq!(idle(&record(Slot::A, None), &good_a), Ok(Slot::B));
         // Armed but not booted yet: B is rewritten (after being disarmed).
         assert_eq!(idle(&record(Slot::A, Some(Slot::B)), &good_a), Ok(Slot::B));
         // Running B on trial: the idle slot would be the good one, A.
-        let trial_b = Booted::parse("ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=5");
+        let trial_b = words("ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=5");
         assert!(idle(&record(Slot::A, Some(Slot::B)), &trial_b).is_err());
         // Booted A as a fallback: the good slot B is the idle one.
-        let fallback = Booted::parse("ferrix.slot=a ferrix.slot.boot=fallback");
+        let fallback = words("ferrix.slot=a ferrix.slot.boot=fallback ferrix.slot.seq=5");
         assert!(idle(&record(Slot::B, None), &fallback).is_err());
         // Not booted from a slot: the one not good.
         let none = Booted::parse("ferrix.root=btrfs");
@@ -599,6 +590,9 @@ mod tests {
     fn a_rescue_boot_changes_nothing() {
         let rescue = Booted::parse("ferrix.root=btrfs");
         assert!(rescue.slot.is_none());
+        // Without the disk word a slot boot is no slot boot: S1.
+        let no_disk = Booted::parse("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1");
+        assert!(no_disk.slot.is_none() && no_disk.disk.is_none());
         for command in [Command::Good, Command::Rollback] {
             assert!(command.changes_what_boots());
         }
@@ -609,20 +603,14 @@ mod tests {
 
     #[test]
     fn the_boot_disk_is_named_by_its_guid() {
-        let printed = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
-        let guid = parse_guid(printed).unwrap();
-        assert_eq!(guid, ferrix_partition::ESP);
-        assert_eq!(guid.to_string(), printed);
-        assert_eq!(parse_guid(&printed.to_lowercase()), Some(guid));
-        assert_eq!(parse_guid("C12A7328F81F11D2BA4B00A0C93EC93B"), None);
-        let booted = Booted::parse(&format!("ferrix.slot=a ferrix.slot.disk={printed}"));
-        assert_eq!(booted.disk, Some(guid));
+        let booted = words("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1");
+        let guid = booted.disk.unwrap();
+        assert_eq!(guid.to_string(), "12345678-9ABC-DEF0-1122-334455667788");
     }
 
     #[test]
     fn the_loaders_words_come_first() {
-        let booted =
-            Booted::parse("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.slot=b");
+        let booted = words("ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.slot=b");
         assert_eq!(booted.slot, Some(Slot::A));
         assert_eq!(booted.sequence, Some(3));
     }
