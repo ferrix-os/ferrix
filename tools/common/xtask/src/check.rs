@@ -688,6 +688,7 @@ fn userland(root: &std::path::Path) -> Result<()> {
     linux_workspace(root, "init", "src/user/system/linux/init")?;
     linux_workspace(root, "auth", "src/user/system/linux/auth")?;
     linux_workspace(root, "pkg", "src/user/system/linux/pkg")?;
+    linux_workspace(root, "installer", "src/user/system/linux/installer")?;
     step("auth: no sabotage in the environment", no_sabotage)?;
     media(root)
 }

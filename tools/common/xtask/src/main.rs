@@ -144,6 +144,7 @@ mod session;
 mod sha256;
 mod shell;
 mod shm;
+mod slot_image;
 mod ssh;
 mod start_page;
 mod steam;
@@ -212,6 +213,8 @@ USAGE:
 
 COMMANDS:
     build         Compile the loader and kernel and write a bootable image
+    slot-image    build, and also write build/<arch>/ferrix-slot.img: the image's kernel, initramfs and command line
+                  as a system slot, for `bootctl try` (docs/AB-BOOT.md)
     live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and
                   an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)
     run           Boot the image under QEMU, attached to the terminal
@@ -271,7 +274,8 @@ COMMANDS:
                   a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
                   virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
     test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)
-    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64)
+    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);
+                  --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals
     test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
     test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
                   image runs a 32-bit x86 build of it)
@@ -639,7 +643,7 @@ fn run() -> Result<()> {
     }
 
     match command {
-        "build" => build(&args),
+        "build" | "slot-image" => slot_image::build(command, &args),
         "run" => run_machine(args),
         "test-btrfs" => btrfs_check::test_btrfs(&args, |arch| build_image(arch, &args)),
         "test-powerfail" => powerfail::test_powerfail(&args, |arch| build_parts(arch, &args)),

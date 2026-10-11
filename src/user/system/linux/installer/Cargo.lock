@@ -7,8 +7,13 @@ name = "ferrix-install"
 version = "0.1.0"
 dependencies = [
  "ferrix-partition",
+ "ferrix-slots",
 ]
 
 [[package]]
 name = "ferrix-partition"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-slots"
 version = "0.1.0"

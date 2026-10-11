@@ -636,6 +636,23 @@ design review of its own (XHCI.md §6), so `test-install --usb-live` waits.
 H0 has not run: XHCI.md §8 lists what QEMU's controller never showed, and
 §9 the first run on the PC.
 
+**The A/B layout (2026-10-11, ab-sys, D8 of `docs/DEV-ON-FERRIX.md`).**
+`ferrix-install --slots [--swap-mib N] [--esp-mib N] [--slot-mib N]`
+gives a blank disk the layout the customer's SN720 was given -- an
+optional swap partition, `ferrix-esp`, the boot control partition, two
+system slots and `ferrix-root` -- or reuses a disk that already has it,
+found by Ferrix's partition types (`docs/AB-BOOT.md` §2, §3), writing no
+partition table and no partition but Ferrix's own. Any other disk with a
+table is refused: this mode erases nothing it did not make. It fills the
+ESP (the loader, and the live system as the loader's rescue path), slot A
+(verified after writing as the loader verifies it), the first control
+record and the root. `/sbin/bootctl` is the running system's half:
+`status`, `try`, `verify`, `good`, `rollback`, `init` (`docs/AB-BOOT.md`
+§5). `cargo xtask slot-image` writes `build/<arch>/ferrix-slot.img` beside
+the image; `bootctl try` also takes an image's FAT volume as it is. Proved
+by `cargo xtask test-install --slots` (x86-64, KVM), not in `check` yet;
+the host tests of the installer's workspace are.
+
 Left for later, in §9's order: a root file system the size of its partition
 (I3), `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),

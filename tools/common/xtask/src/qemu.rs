@@ -3025,6 +3025,16 @@ fn attach_install_disks(command: &mut Command, arch: Arch, image: &Path, args: &
             &virtio("target", false),
         ]);
     }
+    for (index, extra) in args.extra_disks.iter().enumerate() {
+        println!("  {arch}: {} as a further disk", display(extra));
+        let id = format!("extra{index}");
+        let _ = command.args([
+            "-drive",
+            &format!("file={},if=none,format=raw,id={id}", display(extra)),
+            "-device",
+            &virtio(&id, false),
+        ]);
+    }
 }
 
 /// Attach the root disk as the fifth virtio device, so it is `vdd` and the

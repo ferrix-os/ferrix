@@ -29,6 +29,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;
 
+use ferrix_install::fat::Fat;
+
+mod slots;
 use ferrix_partition::{
     ESP, Guid, LINUX_FILESYSTEM, Partition, parse_entries, parse_header, usable, write_table,
 };
@@ -72,31 +75,52 @@ struct Asked {
     yes: bool,
     from: Option<String>,
     target: String,
+    /// `--slots`: the A/B layout (`slots.rs`), with its sizes.
+    slots: Option<slots::Sizes>,
 }
 
 fn parse() -> Result<Asked, String> {
     let mut yes = false;
     let mut from = None;
     let mut target = None;
+    let mut slots: Option<slots::Sizes> = None;
     let mut args = std::env::args().skip(1);
+    let mib = |args: &mut dyn Iterator<Item = String>, what: &str| -> Result<u64, String> {
+        args.next()
+            .and_then(|n| n.parse().ok())
+            .ok_or(format!("{what} needs a size in MiB"))
+    };
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--slots" => slots = Some(slots.unwrap_or_default()),
+            "--swap-mib" => slots.get_or_insert_default().swap_mib = mib(&mut args, &arg)?,
+            "--esp-mib" => slots.get_or_insert_default().esp_mib = mib(&mut args, &arg)?,
+            "--slot-mib" => slots.get_or_insert_default().slot_mib = mib(&mut args, &arg)?,
             "--yes" | "-y" => yes = true,
             "--from" => from = Some(args.next().ok_or("--from needs a disk")?),
             "--help" | "-h" => {
-                return Err("usage: ferrix-install [--yes] [--from /dev/vdX] /dev/vdY".into());
+                return Err(
+                    "usage: ferrix-install [--yes] [--from /dev/vdX] [--slots [--swap-mib N] \
+                            [--esp-mib N] [--slot-mib N]] /dev/vdY"
+                        .into(),
+                );
             }
             _ if target.is_none() => target = Some(arg),
             _ => return Err(format!("unexpected argument {arg}")),
         }
     }
     let target = target.ok_or("name the disk to install on, as /dev/vdY")?;
-    Ok(Asked { yes, from, target })
+    Ok(Asked {
+        yes,
+        from,
+        target,
+        slots,
+    })
 }
 
 fn run() -> Result<(), String> {
     let asked = parse()?;
-    let live = match asked.from {
+    let live = match asked.from.clone() {
         Some(from) => from,
         None => {
             let found = find_live()?;
@@ -115,6 +139,9 @@ fn run() -> Result<(), String> {
     }
     let mut source = File::open(&live).map_err(|e| format!("{live}: {e}"))?;
     let esp_bytes = fat_volume_bytes(&mut source).map_err(|e| format!("{live}: {e}"))?;
+    if let Some(sizes) = asked.slots {
+        return slots::install(&asked, &sizes, &live, &mut source, esp_bytes);
+    }
     let mut disk = OpenOptions::new()
         .read(true)
         .write(true)
@@ -304,107 +331,6 @@ fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
     text[position..position + INSTALLED_ROOT.len()].copy_from_slice(INSTALLED_ROOT);
     write_at(disk, offset, &text)?;
     Ok(true)
-}
-
-/// A FAT32 volume's geometry, from its boot sector.
-struct Fat {
-    /// Where the volume starts on the disk, in bytes.
-    at: u64,
-    sectors_per_cluster: u64,
-    /// Where the first allocation table starts, in bytes from `at`.
-    table: u64,
-    /// Where cluster 2 starts, in bytes from `at`.
-    data: u64,
-    /// The root directory's first cluster.
-    root: u32,
-}
-
-/// A directory entry found: its first cluster and size.
-struct Entry {
-    cluster: u32,
-    size: u32,
-}
-
-impl Fat {
-    /// Clusters followed in one chain before it is taken for a loop.
-    const LONGEST: usize = 1 << 16;
-
-    fn read(disk: &mut File, at: u64) -> io::Result<Fat> {
-        let mut sector = [0_u8; 512];
-        disk.seek(SeekFrom::Start(at))?;
-        disk.read_exact(&mut sector)?;
-        let u16_at = |i: usize| u64::from(u16::from_le_bytes([sector[i], sector[i + 1]]));
-        let u32_at =
-            |i: usize| u32::from_le_bytes([sector[i], sector[i + 1], sector[i + 2], sector[i + 3]]);
-        let sectors_per_cluster = u64::from(sector[13]);
-        if u16_at(11) != SECTOR || sectors_per_cluster == 0 || &sector[82..90] != b"FAT32   " {
-            return Err(io::Error::other("not a FAT32 volume of 512-byte sectors"));
-        }
-        let reserved = u16_at(14);
-        let tables = u64::from(sector[16]);
-        let table_sectors = u64::from(u32_at(36));
-        Ok(Fat {
-            at,
-            sectors_per_cluster,
-            table: reserved * SECTOR,
-            data: (reserved + tables * table_sectors) * SECTOR,
-            root: u32_at(44),
-        })
-    }
-
-    fn cluster_bytes(&self) -> usize {
-        usize::try_from(self.sectors_per_cluster * SECTOR).unwrap_or(usize::MAX)
-    }
-
-    fn cluster_offset(&self, cluster: u32) -> io::Result<u64> {
-        let index = u64::from(cluster)
-            .checked_sub(2)
-            .ok_or_else(|| io::Error::other("a cluster number below 2"))?;
-        Ok(self.at + self.data + index * self.sectors_per_cluster * SECTOR)
-    }
-
-    /// The cluster after `cluster` in its chain, or `None` at its end.
-    fn next(&self, disk: &mut File, cluster: u32) -> io::Result<Option<u32>> {
-        let mut entry = [0_u8; 4];
-        disk.seek(SeekFrom::Start(
-            self.at + self.table + u64::from(cluster) * 4,
-        ))?;
-        disk.read_exact(&mut entry)?;
-        let value = u32::from_le_bytes(entry) & 0x0FFF_FFFF;
-        Ok((2..0x0FFF_FFF8).contains(&value).then_some(value))
-    }
-
-    /// The entry named `name` (8.3, space-padded) in the directory starting
-    /// at `directory`, skipping the volume label and long-name entries.
-    fn find(&self, disk: &mut File, directory: u32, name: &[u8; 11]) -> io::Result<Option<Entry>> {
-        let mut cluster = directory;
-        let mut bytes = vec![0_u8; self.cluster_bytes()];
-        for _ in 0..Self::LONGEST {
-            disk.seek(SeekFrom::Start(self.cluster_offset(cluster)?))?;
-            disk.read_exact(&mut bytes)?;
-            for entry in bytes.chunks_exact(32) {
-                match entry[0] {
-                    0x00 => return Ok(None),
-                    0xE5 => continue,
-                    _ => {}
-                }
-                if entry[11] & 0x08 != 0 || &entry[..11] != name {
-                    continue;
-                }
-                let high = u32::from(u16::from_le_bytes([entry[20], entry[21]]));
-                let low = u32::from(u16::from_le_bytes([entry[26], entry[27]]));
-                return Ok(Some(Entry {
-                    cluster: (high << 16) | low,
-                    size: u32::from_le_bytes([entry[28], entry[29], entry[30], entry[31]]),
-                }));
-            }
-            match self.next(disk, cluster)? {
-                Some(next) => cluster = next,
-                None => return Ok(None),
-            }
-        }
-        Err(io::Error::other("a directory's cluster chain does not end"))
-    }
 }
 
 /// Whether anything is mounted from `disk` or one of its partitions.

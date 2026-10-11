@@ -11,12 +11,22 @@ license = "MIT OR Apache-2.0"
 # (tools/common/xtask/src/installer.rs).
 [workspace]
 
+[lib]
+name = "ferrix_install"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ferrix-install"
 path = "src/main.rs"
 
+# The running system's half of the second slot (docs/DEV-ON-FERRIX.md §4.4, D8).
+[[bin]]
+name = "bootctl"
+path = "src/bootctl.rs"
+
 [dependencies]
 ferrix-partition = { path = "../../../../lib/fs/partition" }
+ferrix-slots = { path = "../../../../lib/proto/slots" }
 
 [profile.release]
 opt-level = "s"

@@ -140,6 +140,7 @@ directory:
 |---|---|
 | `src/user/system/linux/compositor/` | hyprix, the terminal and every Wayland piece. |
 | `src/user/system/linux/init/` | `/sbin/init`, getty and the unit files. |
+| `src/user/system/linux/installer/` | `/sbin/ferrix-install`, which puts the live system on a disk (`docs/INSTALLER.md`), and `/sbin/bootctl`, which writes the idle system slot and arms a trial boot (`docs/AB-BOOT.md`); a library of what both share: GPT reading, the A/B layout, the control record's and a slot's file I/O over `ferrix-slots`. |
 | `src/user/system/linux/pkg/` | `/bin/pkg`, the package manager: lists, installs and removes the apps' packages (`docs/APPS.md` §7). |
 | `src/user/system/linux/zinc/` | The zsh-compatible shell. Its own repository, ferrix-os/zinc, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/media/` | The resampler and the playback through `/dev/snd` that the sound server and the `badapple` app share (`docs/MEDIA.md`), and the PulseAudio-protocol server and its client (`docs/AUDIO.md`, U2). ferrix-90's since 2026-09-27. Bad Apple!!'s player and its video format are the `badapple` app since 2026-10-01. |
