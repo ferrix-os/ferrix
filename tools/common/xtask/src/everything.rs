@@ -67,16 +67,45 @@ const YSERVER_SPARE_MIB: u64 = 256;
 /// browser's cache.
 const STEAM_SPARE_MIB: u64 = 4096;
 
-/// `--steam-preinstall`: merge the Steam library
+/// Whether the everything volume carries the Steam library
 /// `tools/common/fetch/fetch-steam-preinstall.sh` installed on the host
-/// (Teeworlds and the Steam Linux Runtime by default) into `/data/steam`,
-/// so Steam in the guest finds those apps installed and neither downloads
-/// nor stages them (docs/STEAM.md §7, item 7).
-static STEAM_PREINSTALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// (Teeworlds and the Steam Linux Runtimes by default) at `/data/steam`, so
+/// Steam in the guest finds those apps installed and neither downloads nor
+/// stages them (docs/STEAM.md §7, item 7).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SteamPreinstall {
+    /// Neither flag: carried when this host has the library. It is the one
+    /// part of `--everything` that is not fetched when missing, since only a
+    /// host with a Steam account can install it; a run without it says so.
+    #[default]
+    WhenThere,
+    /// `--steam-preinstall`: carried, and a host without it stops the run.
+    Always,
+    /// `--no-steam-preinstall`: left out, so Steam downloads and stages the
+    /// game itself, the path `test-steam-game` walked before the bypass.
+    Never,
+}
+
+/// [`SteamPreinstall`] as a number, set once from the command line.
+static STEAM_PREINSTALL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// Set once from the command line, as `crate::fat::set_strip_kernel`.
-pub(crate) fn set_steam_preinstall(on: bool) {
-    STEAM_PREINSTALL.store(on, std::sync::atomic::Ordering::Relaxed);
+pub(crate) fn set_steam_preinstall(choice: SteamPreinstall) {
+    let number = match choice {
+        SteamPreinstall::WhenThere => 0,
+        SteamPreinstall::Always => 1,
+        SteamPreinstall::Never => 2,
+    };
+    STEAM_PREINSTALL.store(number, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What [`set_steam_preinstall`] set.
+fn steam_preinstall_choice() -> SteamPreinstall {
+    match STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => SteamPreinstall::Always,
+        2 => SteamPreinstall::Never,
+        _ => SteamPreinstall::WhenThere,
+    }
 }
 
 /// The preinstalled library's stamp and its tree, beside each other in
@@ -307,8 +336,13 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
         + STEAM_SPARE_MIB;
     let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam];
     // Last, under Steam's tree: only `steam/steamapps`, which no other tree has.
-    if STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
-        sources.push(steam_preinstall()?);
+    match steam_preinstall_choice() {
+        SteamPreinstall::Always => sources.push(steam_preinstall()?),
+        SteamPreinstall::WhenThere => match steam_preinstall() {
+            Ok(library) => sources.push(library),
+            Err(why) => println!("  everything: no preinstalled Steam games: {why}"),
+        },
+        SteamPreinstall::Never => {}
     }
     Ok((sources, spare))
 }

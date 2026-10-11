@@ -145,10 +145,11 @@ pub(crate) struct Args {
     /// of the two (`crate::everything`). The network and the hypervisor a
     /// watched boot has already.
     pub(crate) everything: bool,
-    /// `--steam-preinstall`: the everything volume carries the Steam
-    /// library `fetch-steam-preinstall.sh` installed on the host
-    /// (`crate::everything`).
-    pub(crate) steam_preinstall: bool,
+    /// `--steam-preinstall` and `--no-steam-preinstall`: whether the
+    /// everything volume carries the Steam library
+    /// `fetch-steam-preinstall.sh` installed on the host; by default it
+    /// does when the host has one (`crate::everything::SteamPreinstall`).
+    pub(crate) steam_preinstall: crate::everything::SteamPreinstall,
     /// `--login`: `run`'s getty asks who is there with `/bin/login`
     /// instead of starting root's shell (`docs/AUTH.md` §6.2), and the image
     /// carries `authd` for it. A person's account with no password chooses
@@ -730,6 +731,15 @@ impl Args {
         }
     }
 
+    /// `--steam-preinstall` or `--no-steam-preinstall`.
+    fn steam_preinstall(&mut self, flag: &str) {
+        self.steam_preinstall = if flag == "--steam-preinstall" {
+            crate::everything::SteamPreinstall::Always
+        } else {
+            crate::everything::SteamPreinstall::Never
+        };
+    }
+
     pub(crate) fn parse(raw: impl Iterator<Item = String>) -> Result<Self> {
         let mut args = Args {
             smp: 4,
@@ -762,7 +772,7 @@ impl Args {
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
                 "--chrome" | "--login" | "--nvidia" | "--update" => args.switch(&item),
                 "--everything" => args.everything(),
-                "--steam-preinstall" => args.steam_preinstall = true,
+                "--steam-preinstall" | "--no-steam-preinstall" => args.steam_preinstall(&item),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;
                     args.forwards.push(crate::gateway::Forward::parse(&raw)?);

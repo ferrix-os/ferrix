@@ -358,8 +358,12 @@ as the install's download; it does not pass yet. In order:
    tree into the everything volume last, so Steam in the guest finds both
    installed at `/data/steam/steamapps` and neither downloads nor stages
    them; `game-watch.sh` then skips `steam://install` and hands the client
-   `steam://rungameid/380840` at once. The volume is made again whenever the
-   flag is given or left out, so a run that wants to keep the default
+   `steam://rungameid/380840` at once. Since 2026-10-11 `--everything`
+   merges the library whenever the host has it, so the desktop the customer
+   plays on has Teeworlds installed; `--steam-preinstall` makes a missing
+   library an error, and `--no-steam-preinstall` leaves it out, for a run
+   that walks Steam's own download and staging. The volume is made again
+   whenever that choice changes, so a run that wants to keep the default
    volume names its own with `FERRIX_EVERYTHING_VOLUME`.
 
 Two things on the way were not Steam's. Steam's sign-in window showed game

@@ -395,8 +395,10 @@ OPTIONS:
                                          dotfiles unless --config or --no-dotfiles says otherwise
     --steam-preinstall                   run-compositor --everything, test-steam-game: merge the Steam
                                          library fetch-steam-preinstall.sh installed on the host
-                                         (Teeworlds, the Steam Linux Runtime) into /data/steam, so
-                                         Steam finds them installed and does not download them
+                                         (Teeworlds, the Steam Linux Runtimes) into /data/steam, so
+                                         Steam finds them installed and does not download them;
+                                         without the flag it is merged when the host has it
+    --no-steam-preinstall                leave that library out: Steam downloads and stages the game
     --session                            flash --compositor: the desktop runs as the user ferrix,
                                          started by sessiond, as --everything's does; --config's
                                          dotfiles seed the home disk once and edits there are kept,
