@@ -69,6 +69,11 @@ pub(crate) struct Args {
     pub(crate) installer: bool,
     /// `test-install`'s live disk and target, attached as `vdd` and `vde`.
     pub(crate) install_disks: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    /// `test-install --slots`' further disks, attached after those.
+    pub(crate) extra_disks: Vec<std::path::PathBuf>,
+    /// `--slots`: `test-install` of the A/B layout and `bootctl`
+    /// (`docs/AB-BOOT.md`).
+    pub(crate) slots: bool,
     /// Boot the image as a virtio disk after the others, as an installed
     /// disk is, rather than on x86-64's AHCI port.
     pub(crate) boot_virtio: bool,
@@ -748,6 +753,7 @@ impl Args {
                 "--zinc" => args.zinc = true,
                 "--statd" | "--installer" => args.carry(&item),
                 "--i686" => args.i686 = true,
+                "--slots" => args.slots = true,
                 "--adbd" | "--app" | "--no-apps" | "--abi" => args.carry_more(&item, &mut items)?,
                 "--miri" => args.miri = true,
                 "--reset" => args.reset = true,

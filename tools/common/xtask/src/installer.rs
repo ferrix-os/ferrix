@@ -39,6 +39,8 @@ use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, zinc};
 
 /// Where the installer goes in the initramfs.
 const PROGRAM_PATH: &str = "sbin/ferrix-install";
+/// Where `bootctl`, built in the installer's workspace, goes.
+const BOOTCTL_PATH: &str = "sbin/bootctl";
 /// Where the empty root volume goes.
 const ROOT_PATH: &str = "usr/share/ferrix/root.img.packed";
 /// The empty root volume, packed as `src/lib/fs/btrfs/testdata` keeps it.
@@ -112,13 +114,22 @@ pub(crate) fn files(arch: Arch) -> Result<Option<Vec<ports::File>>> {
     .env("RUSTFLAGS", zinc::RUSTFLAGS)
     .output(&program)
     .run()?;
-    let bytes = std::fs::read(&program)
-        .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
+    let read = |path: &Path| {
+        std::fs::read(path)
+            .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
+    };
+    let bytes = read(&program)?;
+    let bootctl = read(&program.with_file_name("bootctl"))?;
     Ok(Some(vec![
         ports::File {
             path: PROGRAM_PATH.to_owned(),
             mode: 0o755,
             content: ports::Content::Bytes(bytes),
+        },
+        ports::File {
+            path: BOOTCTL_PATH.to_owned(),
+            mode: 0o755,
+            content: ports::Content::Bytes(bootctl),
         },
         ports::File {
             path: ROOT_PATH.to_owned(),
@@ -151,7 +162,7 @@ pub(crate) fn live(args: &Args) -> Result<()> {
 }
 
 /// Write the live medium for `arch` at `path`.
-fn write_medium(
+pub(super) fn write_medium(
     arch: Arch,
     loader: &Path,
     kernel: &cargo::Kernel,
@@ -254,6 +265,9 @@ fn hide(volume: &mut [u8], first: u64) -> Result<()> {
 
 /// `test-install`: see the module documentation.
 pub(crate) fn test_install(args: &Args) -> Result<()> {
+    if args.slots {
+        return slots::test(args);
+    }
     let arch = Arch::X86_64;
     if args.arches()?.iter().any(|&asked| asked != arch) {
         return Err(Error::new(
@@ -342,6 +356,8 @@ fn blank(path: &PathBuf) -> Result<()> {
     file.set_len(TARGET_BYTES)
         .map_err(|error| Error::new(format!("{}: {error}", path.display())))
 }
+
+mod slots;
 
 #[cfg(test)]
 mod tests;

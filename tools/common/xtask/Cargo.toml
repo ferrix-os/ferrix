@@ -51,6 +51,7 @@ ferrix-pkg.workspace = true
 # `ferrix-install` partitions a target with and the kernel's reader checks,
 # so the medium, the installer and the kernel cannot disagree about a table.
 ferrix-partition.workspace = true
+ferrix-slots.workspace = true
 
 [dev-dependencies]
 # The native ABI's numbers, which a host test holds nvrm's C header to

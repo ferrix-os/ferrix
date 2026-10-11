@@ -140,6 +140,7 @@ mod session;
 mod sha256;
 mod shell;
 mod shm;
+mod slot_image;
 mod ssh;
 mod start_page;
 mod steam;
@@ -208,6 +209,8 @@ USAGE:
 
 COMMANDS:
     build         Compile the loader and kernel and write a bootable image
+    slot-image    build, and also write build/<arch>/ferrix-slot.img: the image's kernel, initramfs and command line
+                  as a system slot, for `bootctl try` (docs/AB-BOOT.md)
     live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and
                   an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)
     run           Boot the image under QEMU, attached to the terminal
@@ -256,7 +259,8 @@ COMMANDS:
                   docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
                   (with --sabotage NAME, against an authd with that refusal turned off, which must fail)
     test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|all; gpu if not given)
-    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64)
+    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);
+                  --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals
     test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
     test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
                   image runs a 32-bit x86 build of it)
@@ -621,6 +625,10 @@ fn run() -> Result<()> {
 
     match command {
         "build" => build(&args),
+        "slot-image" => {
+            slot_image::set_wanted(true);
+            build(&args)
+        }
         "run" => run_machine(args),
         "test-btrfs" => btrfs_check::test_btrfs(&args, |arch| build_image(arch, &args)),
         "test-powerfail" => powerfail::test_powerfail(&args, |arch| build_parts(arch, &args)),

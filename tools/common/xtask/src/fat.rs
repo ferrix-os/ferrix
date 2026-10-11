@@ -576,6 +576,7 @@ pub(crate) fn write_image_carrying(
 
     let directory = paths::build_dir(arch);
     std::fs::create_dir_all(&directory)?;
+    let _ = crate::slot_image::write_if_wanted(arch, &kernel_bytes, initramfs, cmdline, defaults)?;
     let image = directory.join("ferrix.img");
     std::fs::write(&image, fs.finish())?;
 
