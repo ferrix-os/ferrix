@@ -25,6 +25,9 @@
 # which is also where they are fetched from, since the mirrors drop a package
 # a point release replaces; and the channel manifest channel-rust-1.97.1.toml
 # (the `xz_hash` of each component).
+# With them come rustfmt, clippy, rust-analyzer and the standard library's
+# source, of the same release: what `cargo xtask check` and an editor run
+# when the tree is worked on from within Ferrix (docs/DEV-ON-FERRIX.md).
 # Beside the compiler is what stage 20's builds of Ferrix's C programs run:
 # busybox, uutils and the ports against ferrousli are compiled by gcc and
 # g++ 15 (`cc1` and `cc1plus`) and assembled and archived by binutils,
@@ -248,6 +251,14 @@ components=(
     "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-linux-musl.tar.xz 51d83178680556f73a5fa8ad865b76a1ff541867445c00fc65dc67246bc2de66"
     "dist/2026-07-16/rust-std-1.97.1-aarch64-unknown-linux-musl.tar.xz 49ff0879d94e2e8e86d5e85eb15a9215943e8c78b51363d6553443598cab5d31"
     "dist/2026-07-16/cargo-1.97.1-x86_64-unknown-linux-gnu.tar.xz e1be5f5ff7f7f80ca506fb65770b759edbdc6d303781ed71c5de8ec8a8394779"
+    # What working on the tree from within Ferrix needs beside the compiler
+    # (docs/DEV-ON-FERRIX.md): `cargo xtask check` starts with `cargo fmt`
+    # and runs clippy, and an editor's language server reads the standard
+    # library's source.
+    "dist/2026-07-16/rustfmt-1.97.1-x86_64-unknown-linux-gnu.tar.xz 907fe97d6afbde1eca1b34c992c76e1406d422e2e6f137813d382acec7eb4d14"
+    "dist/2026-07-16/clippy-1.97.1-x86_64-unknown-linux-gnu.tar.xz 3441df8fb54db985f8c8a3e8356b8874a3f92cc8cca8565cfe36f1dc15935e72"
+    "dist/2026-07-16/rust-analyzer-1.97.1-x86_64-unknown-linux-gnu.tar.xz 4d6b6055bea92ed2b2e53a35577d9b43dd4d0c6234be72044d3097b7d3f16572"
+    "dist/2026-07-16/rust-src-1.97.1.tar.xz e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b"
 )
 
 # The same packages and components for an AArch64 host, in place of the lists
@@ -298,7 +309,9 @@ done
 mkdir -p "$tree/rust"
 for component in "$unpacked"/*/*/; do
     case "$component" in
-        */rustc/ | */cargo/ | */rust-std-*/) cp -a "$component". "$tree/rust/" ;;
+        */rustc/ | */cargo/ | */rust-std-*/ \
+            | */rustfmt-preview/ | */clippy-preview/ | */rust-analyzer-preview/ | */rust-src/)
+            cp -a "$component". "$tree/rust/" ;;
     esac
 done
 
@@ -318,6 +331,11 @@ rm -rf "$tree/usr/share/doc" "$tree/usr/share/man" "$tree/usr/share/lintian" "$t
 
 test -x "$tree/rust/bin/rustc" || { echo "fetch-rustc-sysroot: no rustc in the tree" >&2; exit 1; }
 test -x "$tree/rust/bin/cargo" || { echo "fetch-rustc-sysroot: no cargo in the tree" >&2; exit 1; }
+for tool in rustfmt cargo-fmt clippy-driver cargo-clippy rust-analyzer; do
+    test -x "$tree/rust/bin/$tool" || { echo "fetch-rustc-sysroot: no $tool in the tree" >&2; exit 1; }
+done
+test -e "$tree/rust/lib/rustlib/src/rust/library/core/src/lib.rs" \
+    || { echo "fetch-rustc-sysroot: no standard library source in the tree" >&2; exit 1; }
 test -x "$tree/rust/lib/rustlib/$triple/bin/rust-lld" \
     || { echo "fetch-rustc-sysroot: no rust-lld in the tree" >&2; exit 1; }
 for target in x86_64-unknown-none x86_64-unknown-uefi aarch64-unknown-none-softfloat     aarch64-unknown-uefi armv7a-none-eabi armv7-unknown-linux-musleabi     x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
