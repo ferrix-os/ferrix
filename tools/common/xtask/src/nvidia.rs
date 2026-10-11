@@ -1027,7 +1027,9 @@ const CARDVM_STATE: &str = "cardvm.env";
 
 /// `name` in `~/.local/share/ferrix/nvidia`, beside the card lock.
 fn cardvm_file(name: &str) -> PathBuf {
-    PathBuf::from(home()).join(".local/share/ferrix/nvidia").join(name)
+    PathBuf::from(home())
+        .join(".local/share/ferrix/nvidia")
+        .join(name)
 }
 
 /// The guest's IPv4 address from libvirt's DHCP lease for [`CARDVM_MAC`].
