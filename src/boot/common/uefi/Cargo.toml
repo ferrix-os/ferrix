@@ -15,6 +15,7 @@ path = "src/main.rs"
 ferrix-bootinfo.workspace = true
 ferrix-elf.workspace = true
 ferrix-paging.workspace = true
+ferrix-slots.workspace = true
 
 [lints]
 workspace = true

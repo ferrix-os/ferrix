@@ -159,7 +159,13 @@ pub(crate) struct BootServices {
     reserved: usize,
     register_protocol_notify: usize,
     locate_handle: usize,
-    locate_device_path: usize,
+    /// The handle supporting `protocol` whose device path is the longest
+    /// prefix of `*device_path`; advances `*device_path` past that prefix.
+    pub(crate) locate_device_path: unsafe extern "efiapi" fn(
+        protocol: *const Guid,
+        device_path: *mut *const u8,
+        device: *mut Handle,
+    ) -> Status,
     install_configuration_table: usize,
 
     // Images.
