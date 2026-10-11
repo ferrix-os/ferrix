@@ -128,9 +128,23 @@ pub(crate) fn open(
     name: &[u8],
     nonblock: bool,
 ) -> Result<Arc<OpenFile>, Errno> {
+    open_mode(inode, name, nonblock, true)
+}
+
+/// An open file on `inode`, readable, and writable only if `write`.
+///
+/// # Errors
+///
+/// As [`open`].
+pub(crate) fn open_mode(
+    inode: Arc<dyn Inode>,
+    name: &[u8],
+    nonblock: bool,
+    write: bool,
+) -> Result<Arc<OpenFile>, Errno> {
     let flags = OpenFlags {
         read: true,
-        write: true,
+        write,
         nonblock,
         ..OpenFlags::default()
     };

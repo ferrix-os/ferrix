@@ -327,9 +327,10 @@ struct Compositor<'r> {
     requests: Vec<crate::control::Pending>,
     /// The connections.
     slots: Vec<Slot>,
-    /// The render node clients' dmabufs are imported through, when the
-    /// frames are drawn on the GPU and `zwp_linux_dmabuf_v1` is offered.
-    dmabuf: Option<std::rc::Rc<compositor_drm::Render>>,
+    /// How clients' dmabufs are taken in, when `zwp_linux_dmabuf_v1` is
+    /// offered: through the render node when the frames are drawn on the
+    /// GPU, or mapped beside NVIDIA's (N3b).
+    dmabuf: Option<crate::dmabuf::Importer>,
     /// Whether the first import has been said, which a test waits for.
     dmabuf_said: bool,
     /// How many connections there have been: a slot's serial.
@@ -598,12 +599,7 @@ impl<'r> Compositor<'r> {
             style,
             overlay: crate::overlay::Overlay::default(),
             overlay_was: false,
-            dmabuf: screens
-                .iter()
-                .any(Screen::on_gpu)
-                .then(compositor_drm::Render::open)
-                .and_then(Result::ok)
-                .map(std::rc::Rc::new),
+            dmabuf: crate::dmabuf::Importer::find(screens.iter().any(Screen::on_gpu)),
             dmabuf_said: false,
             screens,
             window_rules,

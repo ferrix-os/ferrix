@@ -367,6 +367,11 @@ fn map_file(
     if !file.readable() || (vma.shared && vma.write && !file.writable()) {
         return Err(Errno::EACCES);
     }
+    // A chardev driver's dmabuf is never executable (N3b; the consultant's
+    // B1, ledger 316).
+    if vma.execute && crate::interfaces::chardev::dmabuf::of(file.io()).is_some() {
+        return Err(Errno::EPERM);
+    }
     // Linux's `do_mmap`: a file on a `noexec` mount is never mapped
     // executable.
     if vma.execute && file.location().mount.no_exec() {
@@ -782,10 +787,11 @@ pub(crate) fn sys_mprotect(
     Ok(0)
 }
 
-/// Whether any region in `[addr, addr + len)` maps a file on a `noexec`
-/// mount: what Linux's cleared `VM_MAYEXEC` refuses `mprotect(PROT_EXEC)`
-/// on with `EACCES`, so a mapping `mmap` could not have made executable is
-/// not made so afterwards.
+/// Whether any region in `[addr, addr + len)` maps a file `mmap` never maps
+/// executable -- one on a `noexec` mount, or a chardev driver's dmabuf (N3b;
+/// the consultant's B1, ledgers 316 and 726): what Linux's cleared
+/// `VM_MAYEXEC` refuses `mprotect(PROT_EXEC)` on with `EACCES`, so a mapping
+/// `mmap` could not have made executable is not made so afterwards.
 ///
 /// # Errors
 ///
@@ -811,7 +817,10 @@ fn maps_noexec_file(process: &Process, addr: u64, len: u64) -> Result<bool, Errn
             .space()
             .mapped_file(id)
             .and_then(|file| file.downcast::<OpenFile>().ok())
-            .is_some_and(|file| file.location().mount.no_exec())
+            .is_some_and(|file| {
+                file.location().mount.no_exec()
+                    || crate::interfaces::chardev::dmabuf::of(file.io()).is_some()
+            })
     }))
 }
 

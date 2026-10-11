@@ -1763,6 +1763,20 @@ package FerrixMemoryRequirements {
                 "user::memory_type::claims", "user::space::WindowPages::all",
                 "user::space::WindowPages::check");
         }
+        requirement <'L.user.126'> onlyPlainMemoryIsAnonymous : ItemLowLevel {
+            attribute :>> statement = "Vmo::is_anonymous shall answer true for a
+                VMO iff it has no filler and no file bound: plain anonymous
+                memory, never a file's object on a disk or in memory, so that
+                what asks it -- a chardev driver's dmabuf install -- refuses a
+                file's VMO with INVALID_ARGS.";
+            attribute :>> criterion = "In stage 10's chardev self-check, a
+                dmabuf install of a memfd's VMO, its handle holding READ, WRITE,
+                MAP and TRANSFER, is refused INVALID_ARGS, and one of a VMO from
+                vmo_create is installed; with is_anonymous answering true for
+                every VMO, stage 10 fails naming the memfd's dmabuf.";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = "user::vmo::Vmo::is_anonymous";
+        }
         requirement <'L.user.107'> aCopyThroughADevicePageIsRefused : ItemLowLevel {
             attribute :>> statement = "with_page and with_present_page shall refuse
                 a copy to or from a page of a device region with Refused, before the

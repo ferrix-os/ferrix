@@ -7,6 +7,11 @@
 //! other program expects, and every node is mode 0666, root's, with no
 //! execute or set-id bit, as NVIDIA's `NVreg_DeviceFileMode` default leaves
 //! them.
+//!
+//! And one render node (N3b; the consultant's B8, ledger 316): a HELLO may
+//! list [`RENDER_MINOR`] once, which is not a minor of major 195 but asks
+//! for `/dev/dri/renderD<N>`, 226:N. The kernel, not the driver, picks N,
+//! from the render core's numbers, so the driver can name no number either.
 
 /// NVIDIA's static character major.
 pub const MAJOR: u32 = 195;
@@ -19,6 +24,11 @@ pub const CONTROL_MINOR: u16 = 255;
 
 /// NVKMS's minor.
 pub const MODESET_MINOR: u16 = 254;
+
+/// What a HELLO lists for the device's render node, `/dev/dri/renderD<N>`:
+/// outside major 195's minors, so it is never one of them, and named by the
+/// kernel with a number of its choosing rather than by [`name`].
+pub const RENDER_MINOR: u16 = 0x1000;
 
 /// The longest name: `nvidia-modeset`.
 pub const NAME_MAX: usize = 14;
@@ -65,6 +75,13 @@ pub fn name(minor: u16) -> Option<Name> {
         _ => return None,
     }
     Some(Name { bytes, len })
+}
+
+/// Whether a HELLO may list `minor`: one [`name`] names, or
+/// [`RENDER_MINOR`].
+#[must_use]
+pub fn may_serve(minor: u16) -> bool {
+    minor == RENDER_MINOR || name(minor).is_some()
 }
 
 /// The minor a name in `/dev` is, if it is one [`name`] gives.

@@ -121,6 +121,12 @@
 //!   (`docs/GPU.md` §3.13). Offered only where the compositor draws on the
 //!   GPU, so it is not in [`GLOBALS`].
 //!
+//! * **`linux_dmabuf`** is `zwp_linux_dmabuf_v1`: a buffer a GPU driver
+//!   allocated, handed over as a dmabuf descriptor rather than drawn into
+//!   shared memory. Chrome composites on the GPU only where it is offered,
+//!   and the compositor offers it only on a machine with a GPU whose
+//!   buffers it can map (`hyprix`'s `dmabuf.rs` says which).
+//!
 //! The list of protocols is `FILES` in the generator. Adding one is vendoring
 //! its XML, adding a line there and a module to `generated/mod.rs`, and
 //! naming its interfaces in `probe/interfaces.c` and `probe/interfaces.sh`,
@@ -208,6 +214,10 @@ pub const GLOBALS: &[&Interface] = &[
     &capture_source::EXT_OUTPUT_IMAGE_CAPTURE_SOURCE_MANAGER_V1,
     &capture_source::EXT_FOREIGN_TOPLEVEL_IMAGE_CAPTURE_SOURCE_MANAGER_V1,
     &image_copy::EXT_IMAGE_COPY_CAPTURE_MANAGER_V1,
+    // Offered only where there is a GPU whose buffers can be imported, and
+    // so last: a machine without one announces every other global under the
+    // name it always had.
+    &linux_dmabuf::ZWP_LINUX_DMABUF_V1,
 ];
 
 #[cfg(test)]

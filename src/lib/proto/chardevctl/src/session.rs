@@ -12,7 +12,7 @@ pub enum Refusal {
     Version,
     /// It names another device than the one the control was made for.
     Location,
-    /// It lists a minor no name is given for ([`node::name`]).
+    /// It lists a minor no name is given for ([`node::may_serve`]).
     Minor,
     /// It lists one minor twice.
     Duplicate,
@@ -102,7 +102,7 @@ pub fn judge(hello: &Hello, location: u32) -> Result<Publication, Refusal> {
         return Err(Refusal::Protocol);
     }
     for (index, minor) in minors.iter().enumerate() {
-        if node::name(*minor).is_none() {
+        if !node::may_serve(*minor) {
             return Err(Refusal::Minor);
         }
         if minors.iter().skip(index + 1).any(|other| other == minor) {

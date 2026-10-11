@@ -1601,7 +1601,16 @@ and took the recommended answer for D2, D3 and D5.
     D10 and the display core's uncharged path; ledger 310's E1–E6, devfs
     D2–D5, C3, C4, C10 and K1–K7; ledgers 294 and 300's rows; F-61.
   * N3b, dmabufs and Chrome's GPU compositing for 60 fps, is next (branch
-    `nvidia-n2`, design OK IF, ledger 316).
+    `nvidia-n2`, design OK IF, ledger 316). Its kernel half, the chardev
+    render node and VMO dmabufs (`interfaces/chardev/dmabuf.rs`, calls
+    0x1060/0x1061), came back from code review NOT YET (ledger 726, beside
+    316) and was fixed on `land-dmabuf`: `mprotect` refuses `PROT_EXEC` on
+    a dmabuf's mapping (B1), one object per cookie while the last is still
+    going (`SHOULD_WAIT`, nvrm retries; B2), none for a dead control (B3),
+    `Vmo::is_anonymous` under L.user.126 (B4), stage 10's self-check cases
+    (B5), gate controls (B6), VULNERABILITY-ANALYSIS and MEMORY-AND-TIMING
+    rows (B7, B8). Owed after landing: the B14 rows and run-nvidia's Chrome
+    run with its fps.
 
 ## 11. CUDA (N5)
 

@@ -41,6 +41,10 @@ static struct NvKmsKapiFunctionsTable kapi = {
 };
 
 static nv_gpu_info_t kms_gpus[NV_MAX_GPUS];
+
+/* The first GPU's id and generic page kind, for os/glue/drm.c's GET_DEV_INFO. */
+static NvU32 kms_drm_gpu_id;
+static NvU32 kms_drm_page_kind;
 static NvU32 kms_gpu_count;
 
 static void kms_gpu_found(const struct NvKmsKapiGpuInfo *info)
@@ -446,6 +450,11 @@ static int kms_show_gpu(NvU32 index)
         status = -EIO;
         goto out;
     }
+    if (index == 0)
+    {
+        kms_drm_gpu_id = params.gpuId;
+        kms_drm_page_kind = res->caps.genericPageKind;
+    }
     kms_say("GPU %x: %u heads, %u connectors, video memory %u, max %ux%u\n",
             params.gpuId, res->numHeads, res->numConnectors, res->caps.hasVideoMemory,
             res->caps.maxWidthInPixels, res->caps.maxHeightInPixels);
@@ -732,6 +741,23 @@ static void kms_watch(void *argument)
 out:
     free(res);
     free(dyn);
+}
+
+/*
+ * For os/glue/drm.c, nvidia-drm's render node over the same KAPI device
+ * (N3b): the table, and the first GPU's device, id and generic page kind;
+ * NULL before NVKMS has a device.
+ */
+const struct NvKmsKapiFunctionsTable *nvrm_kms_kapi(void)
+{
+    return &kapi;
+}
+
+struct NvKmsKapiDevice *nvrm_kms_device(NvU32 *gpu_id, NvU32 *page_kind)
+{
+    *gpu_id = kms_drm_gpu_id;
+    *page_kind = kms_drm_page_kind;
+    return kms_lit[0].device;
 }
 
 int nvrm_kms_show(void)

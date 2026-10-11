@@ -805,9 +805,9 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
             beneath(at, &connector_name(card, head)?)
         }
         Dir::Render(index) => {
-            let renderer = render::renderer(index)?;
+            let node = render::node_device(index)?;
             beneath(
-                class_dir_path(Some(renderer.node), Class::Drm)?,
+                class_dir_path(Some(node), Class::Drm)?,
                 &numbered("renderD", index),
             )
         }
@@ -867,9 +867,9 @@ fn has_class(node: usize, class: Class) -> bool {
             display::card_indices()
                 .into_iter()
                 .any(|index| display::card(index).is_some_and(|card| card.node == node))
-                || render::renderer_indices()
+                || render::node_indices()
                     .into_iter()
-                    .any(|index| render::renderer(index).is_some_and(|shown| shown.node == node))
+                    .any(|index| render::node_device(index) == Some(node))
         }
         Class::Block => devfs::disks()
             .iter()
@@ -1087,10 +1087,12 @@ fn drm_and_disk_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             list.link_to(b"device", Dir::Card(card));
         }
         Dir::Render(index) => {
-            let renderer = render::renderer(index).ok_or(Errno::ENOENT)?;
+            // The device a chardev driver's render node is lent for is the
+            // one its control claims (the consultant's B8, ledger 316).
+            let node = render::node_device(index).ok_or(Errno::ENOENT)?;
             list.files(dir, &[Attr::Dev, Attr::Uevent]);
             list.link_to(b"subsystem", Dir::ClassOf(Class::Drm));
-            list.link_to(b"device", Dir::Device(renderer.node));
+            list.link_to(b"device", Dir::Device(node));
         }
         Dir::Disk(registration) => {
             let disk = disk(registration).ok_or(Errno::ENOENT)?;
@@ -1290,8 +1292,8 @@ fn device_class_entries(list: &mut Listing, index: usize, class: Class) {
                     list.dir(&numbered("card", card), Dir::Card(card));
                 }
             }
-            for renderer in render::renderer_indices() {
-                if render::renderer(renderer).is_some_and(|shown| shown.node == index) {
+            for renderer in render::node_indices() {
+                if render::node_device(renderer) == Some(index) {
                     list.dir(&numbered("renderD", renderer), Dir::Render(renderer));
                 }
             }
@@ -1372,7 +1374,7 @@ fn class_links(list: &mut Listing, class: Class) {
                     }
                 }
             }
-            for renderer in render::renderer_indices() {
+            for renderer in render::node_indices() {
                 list.link_to(&numbered("renderD", renderer), Dir::Render(renderer));
             }
         }
@@ -1412,7 +1414,7 @@ fn dev_char_links(list: &mut Listing) {
     for card in display::card_indices() {
         link(DRM_MAJOR, card, Dir::Card(card));
     }
-    for renderer in render::renderer_indices() {
+    for renderer in render::node_indices() {
         link(DRM_MAJOR, renderer, Dir::Render(renderer));
     }
     for device in input::device_indices() {
@@ -1458,7 +1460,7 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
             );
         }
         Dir::Render(index) => {
-            let _ = render::renderer(index).ok_or(Errno::ENOENT)?;
+            let _ = render::node_device(index).ok_or(Errno::ENOENT)?;
             node_file(
                 &mut out,
                 attr,

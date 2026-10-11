@@ -463,6 +463,15 @@ impl Vmo {
         Ok(vmo)
     }
 
+    /// Whether this is plain anonymous memory: not a file's object, whose
+    /// pages are the file's, on a disk or in memory. What a chardev driver
+    /// may hand a program as a dmabuf (`interfaces::chardev::dmabuf`; the
+    /// certification consultant's ledger 316, (2)). The same test as
+    /// [`Vmo::commit_run`]'s.
+    pub(crate) fn is_anonymous(&self) -> bool {
+        self.filler.is_none() && self.bound.load(Ordering::SeqCst) == u64::MAX
+    }
+
     /// Whether this is the object of a file on a disk.
     pub(crate) fn is_disk_file(&self) -> bool {
         self.filler.is_some()

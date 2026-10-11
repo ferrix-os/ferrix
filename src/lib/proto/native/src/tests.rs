@@ -1129,6 +1129,8 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = chardev::copy_in(&channel, 1, 0, &mut []);
     let _ = chardev::copy_out(&channel, 1, 0, &[]);
     let _ = chardev::file(&channel, 1, 3);
+    let _ = chardev::dmabuf_install(&channel, 1, &vmo, 7, 0);
+    let _ = chardev::dmabuf_resolve(&channel, 1, 3);
     let _ = device.log_control();
     let _ = device.info();
     let _ = device.quiesce();

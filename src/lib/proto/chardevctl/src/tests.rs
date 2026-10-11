@@ -1,5 +1,5 @@
 use crate::message::{Hello, MAX_NODES, Malformed, Message, Op, Request, VERSION};
-use crate::node::{self, CONTROL_MINOR, MODESET_MINOR};
+use crate::node::{self, CONTROL_MINOR, MODESET_MINOR, RENDER_MINOR};
 use crate::session::{self, Refusal};
 
 fn hello(minors: &[u16]) -> Hello {
@@ -30,7 +30,14 @@ fn every_minor_has_nvidias_name_and_no_other_name_is_had() {
     for minor in 0..=255 {
         let name = node::name(minor).unwrap();
         assert_eq!(node::minor_of(name.as_bytes()), Some(minor));
+        assert!(node::may_serve(minor));
     }
+    // The render node has no name of major 195: the kernel names it.
+    assert_eq!(node::name(RENDER_MINOR), None);
+    assert!(node::may_serve(RENDER_MINOR));
+    assert!(!node::may_serve(256));
+    assert!(!node::may_serve(RENDER_MINOR + 1));
+    assert_eq!(node::minor_of(b"renderD128"), None);
     for name in [
         &b"kvm"[..],
         b"nvidia",
@@ -63,11 +70,24 @@ fn messages_round_trip() {
         arg: 0x7fff_0000_1000,
         pages: 0,
     };
+    let release = Request {
+        id: 0,
+        file: 0,
+        op: Op::DmabufRelease,
+        minor: 0,
+        pid: 0,
+        euid: 0,
+        egid: 0,
+        cmd: 0,
+        arg: 0xdead_beef_0000_0001,
+        pages: 0,
+    };
     for message in [
-        Message::Hello(hello(&[255, 0])),
-        Message::Ready(2),
+        Message::Hello(hello(&[255, 0, RENDER_MINOR])),
+        Message::Ready(3),
         Message::Refused(Refusal::Taken),
         Message::Request(request),
+        Message::Request(release),
     ] {
         assert_eq!(Message::decode(message.encode().as_bytes()), Ok(message));
     }
@@ -103,6 +123,17 @@ fn malformed_bytes_are_refused() {
     request.copy_from_slice(encoded.as_bytes());
     request[1] = 9;
     assert_eq!(Message::decode(&request), Err(Malformed));
+    // DMABUF_RELEASE is op 5, and carries no pages.
+    request[1] = 5;
+    assert!(matches!(
+        Message::decode(&request),
+        Ok(Message::Request(Request {
+            op: Op::DmabufRelease,
+            ..
+        }))
+    ));
+    request[36] = 1;
+    assert_eq!(Message::decode(&request), Err(Malformed));
 }
 
 #[test]
@@ -118,6 +149,16 @@ fn the_judge_takes_nvidias_minors_and_refuses_the_rest() {
         Err(Refusal::Duplicate)
     );
     assert_eq!(session::judge(&hello(&[256]), 0x0200), Err(Refusal::Minor));
+    let rendering = session::judge(&hello(&[255, 0, RENDER_MINOR]), 0x0200).unwrap();
+    assert_eq!(rendering.minors(), &[255, 0, RENDER_MINOR]);
+    assert_eq!(
+        session::judge(&hello(&[RENDER_MINOR, RENDER_MINOR]), 0x0200),
+        Err(Refusal::Duplicate)
+    );
+    assert_eq!(
+        session::judge(&hello(&[RENDER_MINOR + 1]), 0x0200),
+        Err(Refusal::Minor)
+    );
     let mut old = hello(&[255]);
     old.version = 0;
     assert_eq!(session::judge(&old, 0x0200), Err(Refusal::Version));

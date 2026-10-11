@@ -11,7 +11,8 @@ pub const KIND_HELLO: u8 = 1;
 pub const KIND_READY: u8 = 2;
 /// REFUSED, the kernel's answer to one it did not.
 pub const KIND_REFUSED: u8 = 3;
-/// REQUEST, the kernel's for each open, ioctl and release.
+/// REQUEST, the kernel's for each open, ioctl, mmap and release, and for a
+/// dmabuf's release.
 pub const KIND_REQUEST: u8 = 4;
 
 /// The protocol version a HELLO names.
@@ -43,6 +44,12 @@ pub enum Op {
     /// flags (`PROT_*` and `MAP_*` << 8), `pages` its length in pages.
     /// Answered with one of the [`MAP_VMO`] or [`MAP_APERTURE`] kinds.
     Mmap,
+    /// The last reference to a dmabuf the driver made with
+    /// `chardev_dmabuf_install` went: its last descriptor closed and its
+    /// last mapping unmapped (N3b; the consultant's B4, ledger 316). `arg`
+    /// is the cookie the driver gave it; `id`, `file` and every other field
+    /// are zero. One per dmabuf object, answered by nobody.
+    DmabufRelease,
 }
 
 /// A reply's kind for an [`Op::Mmap`]: the reply's value is a VMO handle in
@@ -64,6 +71,7 @@ impl Op {
             Op::Ioctl => 2,
             Op::Release => 3,
             Op::Mmap => 4,
+            Op::DmabufRelease => 5,
         }
     }
 
@@ -73,6 +81,7 @@ impl Op {
             2 => Some(Op::Ioctl),
             3 => Some(Op::Release),
             4 => Some(Op::Mmap),
+            5 => Some(Op::DmabufRelease),
             _ => None,
         }
     }
@@ -101,7 +110,8 @@ pub struct Request {
     pub file: u64,
     /// What is asked.
     pub op: Op,
-    /// The node's minor.
+    /// The node's minor: [`crate::node::RENDER_MINOR`] for the render node,
+    /// zero for [`Op::DmabufRelease`].
     pub minor: u16,
     /// The caller's process id.
     pub pid: u32,

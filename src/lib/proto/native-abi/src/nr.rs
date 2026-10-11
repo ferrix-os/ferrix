@@ -170,6 +170,11 @@ pub const CHARDEV_COPY_IN: usize = 0x105C;
 pub const CHARDEV_COPY_OUT: usize = 0x105D;
 /// [`NativeCall::ChardevFile`].
 pub const CHARDEV_FILE: usize = 0x105E;
+/// [`NativeCall::ChardevDmabufInstall`]. `0x105F` is left for the chardev
+/// core's event call.
+pub const CHARDEV_DMABUF_INSTALL: usize = 0x1060;
+/// [`NativeCall::ChardevDmabufResolve`].
+pub const CHARDEV_DMABUF_RESOLVE: usize = 0x1061;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -550,10 +555,30 @@ pub enum NativeCall {
     /// descriptor that is not one of this control's files. Only while the
     /// request is outstanding. Answered by the load ring.
     ChardevFile,
+    /// `(control, request, vmo, cookie, flags)` → descriptor. A dmabuf over
+    /// the whole of `vmo`, installed as a new descriptor in the program
+    /// waiting in the request: what `DRM_IOCTL_PRIME_HANDLE_TO_FD` answers
+    /// (`docs/NVIDIA.md` §4.4, N3b). `flags` are
+    /// [`crate::types::DMABUF_WRITABLE`] (the descriptor is read and write,
+    /// which needs `WRITE` on `vmo`), [`crate::types::DMABUF_CLOEXEC`] and
+    /// [`crate::types::DMABUF_TELL_MADE`]. One dmabuf per cookie on a
+    /// control: while one lives, the call gives a new descriptor to it, and
+    /// `ALREADY_BOUND` if `vmo` is another VMO; when the last reference to it
+    /// goes, the driver gets one `DMABUF_RELEASE` naming the cookie. Needs
+    /// `READ` and `TRANSFER` on `vmo`, which must be plain anonymous memory;
+    /// `LIMIT_REACHED` past the control's dmabufs. Only while the request is
+    /// outstanding. Answered by the load ring.
+    ChardevDmabufInstall,
+    /// `(control, request, descriptor, cookie: *u64)`. The cookie of the
+    /// dmabuf the waiting program's `descriptor` names, if this same
+    /// control made it: `PRIME_FD_TO_HANDLE`'s question. `BAD_HANDLE` for
+    /// any other descriptor, a dmabuf of another control included. Only
+    /// while the request is outstanding. Answered by the load ring.
+    ChardevDmabufResolve,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 59] = [
+pub const ALL: [NativeCall; 61] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -613,6 +638,8 @@ pub const ALL: [NativeCall; 59] = [
     NativeCall::ChardevCopyIn,
     NativeCall::ChardevCopyOut,
     NativeCall::ChardevFile,
+    NativeCall::ChardevDmabufInstall,
+    NativeCall::ChardevDmabufResolve,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -687,6 +714,8 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_COPY_IN => NativeCall::ChardevCopyIn,
         CHARDEV_COPY_OUT => NativeCall::ChardevCopyOut,
         CHARDEV_FILE => NativeCall::ChardevFile,
+        CHARDEV_DMABUF_INSTALL => NativeCall::ChardevDmabufInstall,
+        CHARDEV_DMABUF_RESOLVE => NativeCall::ChardevDmabufResolve,
         _ => return None,
     };
     Some(call)
@@ -755,5 +784,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevCopyIn => CHARDEV_COPY_IN,
         NativeCall::ChardevCopyOut => CHARDEV_COPY_OUT,
         NativeCall::ChardevFile => CHARDEV_FILE,
+        NativeCall::ChardevDmabufInstall => CHARDEV_DMABUF_INSTALL,
+        NativeCall::ChardevDmabufResolve => CHARDEV_DMABUF_RESOLVE,
     }
 }

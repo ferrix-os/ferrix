@@ -1010,6 +1010,26 @@ waiters switched out mid-turn kept all four processors spinning in
 `metadata` for as long as Steam ran (docs/STEAM.md §7; the same convoy
 875b66f3b took out of the rest of `ferrix-vfs` on 2026-10-03).
 
+**The dmabufs (N3b, ledgers 316 and 726).** A control's `dmabufs` table
+holds one entry per live dmabuf it made, at most `MAX_DMABUFS`, 4096; the
+4097th install is `LIMIT_REACHED`, and stage 10's check makes 4096 through
+the product's `find_or_make` and requires the refusal. Making one reserves
+its table entry and its release's queue slot (`hold_release`) before the
+object exists, so its drop allocates nothing. Under the table's spin lock:
+an install's scan for its cookie and the gone test (at most 4096 entries),
+a drop's `retain` (at most 4096), and the self-check's `alive` count (at
+most 4096); nothing is copied, waited for or mapped under it, and the one
+lock taken beneath it is the control's `state` (an install's
+`hold_release`, a drop queueing its release before it lets the table go);
+`state` is never held while the table's lock is taken. `finish` takes the table's lock
+once, empty-handed, after storing gone. The render numbers a chardev
+driver is lent sit in `RENDERS` (one per control, so at most one per
+device) and the render core's `LENT` (the same count), each walked under
+its own lock at publish, unpublish and `/dev/dri`'s listing; `LENT` is
+taken under `RENDERS` and never the other way. A dmabuf's install and
+resolve each count as a copy of their request, so a program's call does
+not return while one runs (N4).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
