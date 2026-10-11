@@ -134,6 +134,11 @@ NvS64 nvos_chardev_file(NvU64 id, int fd);
 #define NVOS_DMABUF_TELL_MADE 4
 #define NVOS_DMABUF_MADE     (1LL << 31)
 NvS64 nvos_chardev_dmabuf_install(NvU64 id, NvU32 vmo, NvU64 cookie, NvU32 flags);
+/*
+ * A name-only dmabuf of `size` bytes (video memory): no VMO, unmappable,
+ * meaningful only to this driver's resolve (docs/NVIDIA.md §4.4, N3b).
+ */
+NvS64 nvos_chardev_dmabuf_install_name(NvU64 id, NvU64 size, NvU64 cookie, NvU32 flags);
 int nvos_chardev_dmabuf_resolve(NvU64 id, int fd, NvU64 *cookie);
 void nvos_isr_enter_leave(NvBool entering);
 

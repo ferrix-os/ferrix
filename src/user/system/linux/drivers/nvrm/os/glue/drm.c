@@ -15,8 +15,9 @@
  * Placement is this file's policy: a pitch-linear buffer is allocated in
  * system memory, where it is one of nvrm's VMOs, so that its dmabuf can be
  * mapped by the compositor, which composites on the processor. A
- * block-linear buffer stays in video memory and is an NVIDIA-only token:
- * it has no dmabuf. No synchronisation is offered yet: GET_DEV_INFO says
+ * block-linear buffer stays in video memory; its dmabuf is name-only (no
+ * VMO, unmappable), which NVIDIA's userspace in another process imports
+ * again through PRIME_FD_TO_HANDLE (docs/NVIDIA.md §4.4, N3b). No synchronisation is offered yet: GET_DEV_INFO says
  * supports_sync_fd and supports_semsurf 0, and GET_CAP says no syncobj.
  *
  * A GEM object lives while a handle names it or a dmabuf of it is open;
@@ -603,13 +604,19 @@ static int drm_gem_close(struct drm_file *file, NvU64 arg)
     return handle_close(file, p.handle);
 }
 
+/* A name-only dmabuf's size: the object's, in whole pages. */
+static NvU64 gem_name_size(const struct drm_gem *gem)
+{
+    return (gem->size + PAGE_SIZE - 1) & ~(NvU64)(PAGE_SIZE - 1);
+}
+
 static int drm_handle_to_fd(struct drm_file *file, NvU64 request, NvU64 arg)
 {
     struct drm_prime_handle p;
     struct drm_gem *gem;
     NvU32 vmo = 0, flags = 0;
     NvS64 fd;
-    NvBool made;
+    NvBool made, named;
     int tries;
 
     if (copy_in(&p, arg, sizeof(p)) != 0)
@@ -617,24 +624,32 @@ static int drm_handle_to_fd(struct drm_file *file, NvU64 request, NvU64 arg)
     gem = handle_gem(file, p.handle);
     if (gem == NULL)
         return -ENOENT;
-    /* Only system memory is a dmabuf a compositor can map. */
-    if (gem->at == NULL || gem->at->pages == NULL || nvos_pages_vmo(gem->at->pages, &vmo) != NV_OK)
-    {
-        drm_say("PRIME export of a buffer in video memory is not offered\n");
-        return -EOPNOTSUPP;
-    }
     if (p.flags & DRM_RDWR)
         flags |= NVOS_DMABUF_WRITABLE;
     if (p.flags & DRM_CLOEXEC)
         flags |= NVOS_DMABUF_CLOEXEC;
-    fd = nvos_chardev_dmabuf_install(request, vmo, gem->cookie, flags | NVOS_DMABUF_TELL_MADE);
+    flags |= NVOS_DMABUF_TELL_MADE;
+    /*
+     * System memory is a dmabuf a compositor can map: its VMO. Anything
+     * else lives in video memory and is a name-only dmabuf, which only
+     * NVIDIA's userspace imports again, through PRIME_FD_TO_HANDLE here.
+     * A name-only one is never writable (ledger 724, V3): the kernel
+     * refuses DMABUF_WRITABLE with it, so DRM_RDWR is dropped for it.
+     */
+    named = !(gem->at != NULL && gem->at->pages != NULL && nvos_pages_vmo(gem->at->pages, &vmo) == NV_OK);
     /* EAGAIN: the cookie's last dmabuf is still leaving the kernel's table
      * (one object per cookie at a time, ledger 726 B2). Its drop takes one
      * lock, so a retry a millisecond later finds it gone. */
-    for (tries = 0; fd == -EAGAIN && tries < 100; tries++)
+    for (tries = 0;; tries++)
     {
+        if (named)
+            fd = nvos_chardev_dmabuf_install_name(request, gem_name_size(gem), gem->cookie,
+                                                  flags & ~NVOS_DMABUF_WRITABLE);
+        else
+            fd = nvos_chardev_dmabuf_install(request, vmo, gem->cookie, flags);
+        if (fd != -EAGAIN || tries >= 100)
+            break;
         os_delay(1);
-        fd = nvos_chardev_dmabuf_install(request, vmo, gem->cookie, flags | NVOS_DMABUF_TELL_MADE);
     }
     if (fd < 0)
         return (int)fd;
