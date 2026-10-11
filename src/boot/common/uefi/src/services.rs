@@ -24,6 +24,12 @@ use crate::uefi::{Guid, Handle, Status};
 /// `LocateHandleBuffer`'s search by protocol.
 const BY_PROTOCOL: u32 = 2;
 
+/// Descriptors of room [`Services::memory_map_size`] adds to what the map
+/// needs when asked. Eight was enough for OVMF; a desktop board's firmware,
+/// with a map several times as long and events of its own allocating between
+/// the loader's calls, is given the 32 Linux's stub gives it, twice over.
+const MAP_SLACK: u64 = 64;
+
 /// How much a framebuffer is worth keeping, highest first: one a panic can
 /// be drawn on and the allocator will not own; one a panic can be drawn on;
 /// one the allocator will not own; the rest. Ties go to the output firmware
@@ -346,7 +352,10 @@ impl Services {
     /// How many bytes the memory map currently needs, with slack.
     ///
     /// The slack matters: allocating the buffer adds entries to the map, so a
-    /// buffer sized to today's map is too small by the time it is used.
+    /// buffer sized to today's map is too small by the time it is used, and
+    /// the final map is fetched after several more allocations (graphics
+    /// output handles, the random number protocol) and, after a refused
+    /// `exit_boot_services`, again with no chance to allocate a bigger one.
     pub(crate) fn memory_map_size(&self) -> Result<u64> {
         let mut size = 0usize;
         let mut key = 0usize;
@@ -367,7 +376,7 @@ impl Services {
         if status != Status::BUFFER_TOO_SMALL && status.is_error() {
             return Err(BootError::firmware("sizing the memory map", status));
         }
-        Ok(size as u64 + 8 * descriptor_size as u64)
+        Ok(size as u64 + MAP_SLACK * descriptor_size as u64)
     }
 
     // -- files -------------------------------------------------------------

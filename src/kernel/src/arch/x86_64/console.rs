@@ -24,6 +24,8 @@ const LINE_CONTROL: u16 = COM1 + 3;
 const MODEM_CONTROL: u16 = COM1 + 4;
 /// Line status.
 const LINE_STATUS: u16 = COM1 + 5;
+/// Scratch: a byte of storage every 16450 and 16550 has and nothing reads.
+const SCRATCH: u16 = COM1 + 7;
 
 /// `LINE_CONTROL`: open the divisor latch.
 const DIVISOR_LATCH: u8 = 0x80;
@@ -46,6 +48,10 @@ const DIVISOR: u16 = 1;
 /// Firmware has usually done this already, but "usually" is not a property to
 /// build a panic handler on.
 pub(crate) fn init() {
+    if !probe() {
+        return;
+    }
+    PRESENT.store(true, Ordering::Relaxed);
     // Interrupts off: there is no interrupt controller yet, and a panic must be
     // able to print without one. `enable_receive_interrupt` turns receive on
     // once the I/O APIC routes the line.
@@ -82,6 +88,32 @@ const FIFOS_ENABLED: u8 = 0xC0;
 /// How many bytes the transmit FIFO holds.
 const FIFO_DEPTH: usize = 16;
 
+/// Whether [`init`] found a UART at `COM1`. A PC without one -- most desktop
+/// boards today have no COM1 on their back panel and many none at all --
+/// reads every register of the absent port as `0xFF`; nothing is sent to it,
+/// and its interrupt is never routed, rather than the console trusting a
+/// line status that always says "empty" and a receiver that always says
+/// "ready" (`docs/BAREMETAL.md`).
+static PRESENT: AtomicBool = AtomicBool::new(false);
+
+/// Whether a UART answers at `COM1`: its line status is not the all-ones an
+/// absent port reads as, and its scratch register keeps what is written to it.
+fn probe() -> bool {
+    if read_register(LINE_STATUS) == 0xFF {
+        return false;
+    }
+    [0x5A, 0xA5].into_iter().all(|pattern| {
+        write_register(SCRATCH, pattern);
+        read_register(SCRATCH) == pattern
+    })
+}
+
+/// Whether [`init`] found a port: what the console's interrupt routing and
+/// the boot line ask before using it.
+pub(crate) fn present() -> bool {
+    PRESENT.load(Ordering::Relaxed)
+}
+
 /// Whether [`init`] found the FIFOs on. Asked once, there: reading
 /// [`INTERRUPT_ID`] also acknowledges a transmit interrupt, which a question
 /// asked on every write must not do.
@@ -94,6 +126,9 @@ static HAS_FIFOS: AtomicBool = AtomicBool::new(false);
 /// output to the interrupt controller at all. The transmit half is left as it
 /// is: `console::output` turns it on and off as it has something to send.
 pub(crate) fn enable_receive_interrupt() {
+    if !present() {
+        return;
+    }
     write_register(
         INTERRUPT_ENABLE,
         read_register(INTERRUPT_ENABLE) | RECEIVE_DATA_AVAILABLE,
@@ -104,6 +139,11 @@ pub(crate) fn enable_receive_interrupt() {
 /// worth once the holding register says it is empty, nothing until then. A
 /// port without FIFOs takes one.
 pub(crate) fn transmit_room() -> usize {
+    // No port: every byte is taken at once and goes nowhere, so the ring
+    // never waits on an interrupt that cannot come.
+    if !present() {
+        return FIFO_DEPTH;
+    }
     if read_register(LINE_STATUS) & TRANSMIT_EMPTY == 0 {
         return 0;
     }
@@ -117,6 +157,9 @@ pub(crate) fn transmit_room() -> usize {
 /// Hand the port one byte, for a caller [`transmit_room`] said it had room
 /// for.
 pub(crate) fn put(byte: u8) {
+    if !present() {
+        return;
+    }
     write_register(DATA, byte);
 }
 
@@ -125,6 +168,9 @@ pub(crate) fn put(byte: u8) {
 /// Turned on with the holding register already empty, a 16550 interrupts at
 /// once, which is how a queue that starts on an idle port gets going.
 pub(crate) fn transmit_interrupt(on: bool) {
+    if !present() {
+        return;
+    }
     let enabled = read_register(INTERRUPT_ENABLE);
     let wanted = if on {
         enabled | TRANSMIT_HOLDING_EMPTY
@@ -142,12 +188,18 @@ pub(crate) fn transmit_interrupt(on: bool) {
 /// interrupt, and the handler wants exactly that: an empty FIFO it has
 /// nothing more for should stop asking.
 pub(crate) fn interrupt_pending() -> bool {
+    if !present() {
+        return false;
+    }
     read_register(INTERRUPT_ID) & NO_INTERRUPT_PENDING == 0
 }
 
 /// What the port sends from, for the boot line that says how the console
 /// sends.
 pub(crate) fn transmit_buffer() -> &'static str {
+    if !present() {
+        return "no port: COM1 does not answer";
+    }
     if HAS_FIFOS.load(Ordering::Relaxed) {
         "a 16550's FIFO"
     } else {
@@ -172,6 +224,9 @@ pub(crate) fn loop_back(byte: u8) {
     /// `LINE_STATUS`: the holding register and the shift register are both
     /// empty.
     const TRANSMITTER_IDLE: u8 = 1 << 6;
+    if !present() {
+        return;
+    }
     write_register(MODEM_CONTROL, MODEM_READY | LOOPBACK);
     write_register(DATA, byte);
     for _ in 0..1_000_000 {
@@ -206,6 +261,9 @@ fn read_register(port: u16) -> u8 {
 pub(crate) fn write_byte(byte: u8) {
     const SPIN_LIMIT: u32 = 100_000;
 
+    if !present() {
+        return;
+    }
     for _ in 0..SPIN_LIMIT {
         if read_register(LINE_STATUS) & TRANSMIT_EMPTY != 0 {
             break;
@@ -233,6 +291,9 @@ pub(crate) fn drain() {
     /// Far longer than a sixteen-byte FIFO takes to empty at 115200 baud.
     const DRAIN_LIMIT: u32 = 10_000_000;
 
+    if !present() {
+        return;
+    }
     for _ in 0..DRAIN_LIMIT {
         if read_register(LINE_STATUS) & TRANSMITTER_IDLE != 0 {
             return;
@@ -248,6 +309,9 @@ pub(crate) fn drain() {
 /// interrupts off; and called from that interrupt once `console::input` has
 /// routed it, to empty the port into the receive ring.
 pub(crate) fn read_byte() -> Option<u8> {
+    if !present() {
+        return None;
+    }
     if read_register(LINE_STATUS) & DATA_READY == 0 {
         return None;
     }

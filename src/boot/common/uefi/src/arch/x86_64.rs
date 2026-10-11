@@ -25,6 +25,16 @@ const CR4_PGE: u64 = 1 << 7;
 /// kernel can write its own text and rodata, and the W^X sweep, which reads
 /// entries rather than trying a write, would not notice.
 const CR0_WP: u64 = 1 << 16;
+/// `CR4.LA57` — five-level paging. Firmware that runs with it has page tables
+/// of five levels, and the loader's four-level tree loaded into `CR3` under it
+/// would be walked one level off: the first fetch after the switch faults,
+/// with no handler, and the machine resets. It cannot be cleared in long mode.
+const CR4_LA57: u64 = 1 << 12;
+/// `CR4.CET` — control-flow enforcement. Firmware that turned on indirect
+/// branch tracking or shadow stacks for itself would have the kernel's first
+/// indirect jump, which lands on no `endbr64`, raise #CP with no handler; the
+/// kernel does not use CET, so the jump clears it.
+const CR4_CET: u64 = 1 << 23;
 
 /// Enable the CPU features the page tables the loader built depend on.
 ///
@@ -33,6 +43,11 @@ const CR0_WP: u64 = 1 << 16;
 /// set does not mean "no execute" — it means every access through that entry
 /// takes a page fault.
 pub(crate) fn prepare_cpu() -> Result<(), &'static str> {
+    if control_registers().is_some_and(|(_, cr4, _)| cr4 & CR4_LA57 != 0) {
+        return Err(
+            "firmware runs five-level paging (CR4.LA57), and the kernel's tables have four",
+        );
+    }
     // SAFETY: reading IA32_EFER is architecturally defined on every 64-bit x86
     // and has no side effects.
     let efer = unsafe { read_msr(IA32_EFER) };
@@ -52,6 +67,27 @@ pub(crate) fn prepare_cpu() -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+/// `CR0`, `CR4` and `EFER` as firmware and [`prepare_cpu`] left them, for the
+/// line the loader prints when breadcrumbs are on: what a bare-metal boot that
+/// stops after the jump most needs to be compared with QEMU's.
+pub(crate) fn control_registers() -> Option<(u64, u64, u64)> {
+    let (cr0, cr4): (u64, u64);
+    // SAFETY: reading CR0 and CR4 has no side effects.
+    unsafe {
+        asm!(
+            "mov {}, cr0",
+            "mov {}, cr4",
+            out(reg) cr0,
+            out(reg) cr4,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+    // SAFETY: IA32_EFER exists on every 64-bit x86; reading it has no side
+    // effects.
+    let efer = unsafe { read_msr(IA32_EFER) };
+    Some((cr0, cr4, efer))
 }
 
 /// Nothing to do: x86-64 caches are coherent with the page table walker, so a
@@ -171,6 +207,12 @@ pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
             "mov rax, cr0",
             "or rax, {wp}",
             "mov cr0, rax",
+            // Control-flow enforcement off, if firmware left it on: the jump
+            // below lands on no `endbr64`, and the kernel keeps no shadow
+            // stack. A no-op on every machine whose firmware did not.
+            "mov rax, cr4",
+            "btr rax, {cet_bit}",
+            "mov cr4, rax",
             "mov cr3, rcx",
             // From here the loader is running out of its identity mapping in
             // the kernel's tables.
@@ -180,6 +222,7 @@ pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
             "xor rbp, rbp",
             "jmp rsi",
             wp = const CR0_WP,
+            cet_bit = const CR4_CET.trailing_zeros(),
             in("rcx") handoff.root_table,
             in("rdx") handoff.stack_top,
             in("rsi") handoff.entry,

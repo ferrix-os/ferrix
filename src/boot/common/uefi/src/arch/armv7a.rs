@@ -333,3 +333,9 @@ pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
         );
     }
 }
+
+/// The control registers the breadcrumbs line prints: x86-64's alone, so
+/// none here.
+pub(crate) const fn control_registers() -> Option<(u64, u64, u64)> {
+    None
+}

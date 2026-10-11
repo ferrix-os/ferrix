@@ -15,6 +15,7 @@ extern crate alloc;
 mod arch;
 mod audit;
 mod backtrace;
+mod breadcrumbs;
 mod checks;
 mod claim;
 mod console;
@@ -66,6 +67,7 @@ mod trap;
 mod user;
 mod vmap;
 
+use ferrix_bootinfo::breadcrumbs::Step;
 use ferrix_bootinfo::{BootInfo, BootView, KASLR_FIXED_IMAGE, KASLR_MOVED, MemKind, PAGE_SIZE};
 use ferrix_paging::MapError;
 
@@ -108,11 +110,15 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     };
 
     let mut memory = EarlyMemory::new(&view);
+    // First, so that a boot that stops anywhere after this shows how far it
+    // got (`docs/BAREMETAL.md`): nothing at all unless asked for.
+    breadcrumbs::start(&view, &mut memory);
     if arch::init_console(&view, &mut memory).is_err() {
         arch::halt()
     }
     // SAFETY: (DEVICE) `init_console` configured the port and, on AArch64, mapped it.
     unsafe { console::mark_ready() };
+    breadcrumbs::mark(Step::KernelConsole);
 
     kmain(&view, &mut memory)
 }
@@ -158,6 +164,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
 
     report(view);
+    breadcrumbs::mark(Step::KernelReported);
 
     if let Err(problem) = self_check(view, memory) {
         fatal!(
@@ -166,6 +173,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
         );
     }
     println!("  stage 1  loader hand-off verified");
+    breadcrumbs::mark(Step::KernelStage1);
     // Whether the rest of the stages check what they bring up. Read here,
     // after the one check that always runs and before the first that may not.
     checks::init(view);
@@ -184,8 +192,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
+    breadcrumbs::mark(Step::KernelTraps);
 
     let stats = bring_up_memory(view);
+    breadcrumbs::mark(Step::KernelMemory);
 
     if let Err(problem) = vmap::init(view.raw().kaslr.vmap_end) {
         fatal!(
@@ -193,6 +203,8 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
             "could not bring up the kernel address arena: {problem}"
         );
     }
+
+    breadcrumbs::mark(Step::KernelVmap);
 
     // From here on each self-check runs only when `checks::run` says so; each
     // step that brings something up runs whatever it says. The checks that
@@ -217,6 +229,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
         ),
     };
     report_clocks_and_power(view, &clocks);
+    breadcrumbs::mark(Step::KernelInterrupts);
 
     if let Err(problem) = timer::init() {
         fatal!(
@@ -229,17 +242,20 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     arch::enable_interrupts();
 
     check_timer_and_start_clocks(view);
+    breadcrumbs::mark(Step::KernelTimer);
 
     // Stage 4. It has to be here: after interrupt bring-up, which maps the
     // local APIC x86-64 reads its own identifier from, and before
     // `finish_memory`, which reclaims the tables the processor list comes
     // from and sweeps a set of mappings that bringing processors up adds to.
     let cpus = bring_up_processors(view);
+    breadcrumbs::mark(Step::KernelProcessors);
 
     // Stage 5, after stage 4 because it needs every processor it is going to
     // schedule on, and before `finish_memory` because the task stacks it
     // takes and gives back are mappings the sweep below has to see settled.
     start_scheduler(cpus);
+    breadcrumbs::mark(Step::KernelScheduler);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's
@@ -1660,7 +1676,11 @@ fn check_early_mapper(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(
     if framebuffer.is_present() && !framebuffer.is_reclaimable() {
         let at = vmap::FRAMEBUFFER_WINDOW;
         let len = framebuffer_bytes(&framebuffer).min(vmap::FRAMEBUFFER_WINDOW_SIZE);
-        if memory.map_framebuffer(at, framebuffer.phys, len).is_err() {
+        // Breadcrumbs mapped the same bytes at the same window already, at the
+        // kernel's first step; a second mapping over them would be refused.
+        if breadcrumbs::window() != Some((at, len))
+            && memory.map_framebuffer(at, framebuffer.phys, len).is_err()
+        {
             return Err("could not map the framebuffer");
         }
         if memory.translate(at) != Some(framebuffer.phys) {

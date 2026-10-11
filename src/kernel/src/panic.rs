@@ -97,6 +97,9 @@ pub(crate) fn explain(entry: &'static Explanation) {
 /// and stops the processor it is running on.
 #[panic_handler]
 fn panic(info: &PanicInfo<'_>) -> ! {
+    // Before anything that could fault or stop: a red block after the last
+    // breadcrumb, when they are on (`docs/BAREMETAL.md`).
+    crate::breadcrumbs::failed();
     let first = begin_report();
     println!();
     println!("FERRIX-PANIC {}", info.message());

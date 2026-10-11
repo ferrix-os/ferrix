@@ -44,6 +44,7 @@
 
 use core::fmt;
 
+pub mod breadcrumbs;
 mod kaslr;
 pub use kaslr::{
     KASLR_DECLINED, KASLR_FIXED_IMAGE, KASLR_MOVED, KASLR_NO_ENTROPY, KASLR_NOT_OFFERED,

@@ -19,6 +19,7 @@
 
 mod arch;
 mod console;
+mod crumbs;
 mod kaslr;
 mod load;
 mod services;
@@ -29,6 +30,7 @@ use core::convert::Infallible;
 use core::panic::PanicInfo;
 use core::ptr;
 
+use ferrix_bootinfo::breadcrumbs::{self, Step};
 use ferrix_bootinfo::{
     BOOT_STACK_SIZE, BOOTINFO_MAGIC, BOOTINFO_VERSION, BootInfo, FIRMWARE_SEED, FIRMWARE_TIME,
     Framebuffer, MemRegion, PAGE_SIZE,
@@ -225,6 +227,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     // After the address space is built from `first_look`: asking firmware
     // for its graphics outputs allocates, which changes the map.
     let framebuffer = report_framebuffer(services.framebuffer(&first_look));
+    arm_breadcrumbs(framebuffer, command_line(info_area, cmdline_len));
 
     write_boot_info(
         &services,
@@ -242,7 +245,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
 
     // Past this line firmware is gone: no allocation, no console, no protocols.
     console::shutdown();
-    let map = leave_firmware(&services, map_buffer)?;
+    let map = leave_firmware_marked(&services, map_buffer)?;
     let regions = record_memory_map(&map, info_area);
     finish_boot_info(info_area, regions, direct, &map);
 
@@ -264,6 +267,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         arch::clean_dcache(file.address, file.len);
     }
 
+    crumbs::mark(Step::LoaderJump);
     // SAFETY: boot services are gone, `prepare_cpu` ran above, and the tables
     // in `space` identity map the page the switch runs from — the loader's own
     // code, or the trampoline — which is what makes the instruction after the
@@ -578,19 +582,92 @@ fn report_framebuffer((framebuffer, outputs): (Option<Framebuffer>, usize)) -> O
     framebuffer
 }
 
-/// Take the final memory map and leave boot services.
+/// Say the breadcrumbs are on, when the command line asks for them, with the
+/// control registers firmware left; and arm them. Only when asked, so that
+/// every other boot's log is the log it was.
+fn arm_breadcrumbs(framebuffer: Option<Framebuffer>, cmdline: &str) {
+    if !crumbs::arm(framebuffer, cmdline) {
+        return;
+    }
+    if let Some((cr0, cr4, efer)) = arch::control_registers() {
+        println!("  breadcrumbs on; cpu cr0 {cr0:#x} cr4 {cr4:#x} efer {efer:#x}");
+    } else {
+        println!("  breadcrumbs on");
+    }
+}
+
+/// [`leave_firmware`], with the breadcrumbs either side of it: the first block
+/// before, the second after, orange if it took a retry, red if it never
+/// succeeded.
+fn leave_firmware_marked(services: &Services, buffer: Allocation) -> Result<MemoryMap> {
+    crumbs::mark(Step::LoaderReady);
+    match leave_firmware(services, buffer) {
+        Ok((map, retried)) => {
+            if retried {
+                crumbs::paint(Step::LoaderLeft as u8, breadcrumbs::RETRY);
+            } else {
+                crumbs::mark(Step::LoaderLeft);
+            }
+            Ok(map)
+        }
+        Err(error) => {
+            // Firmware may have shut down part of itself on the first try,
+            // and the console with it, so nothing would show the error a
+            // return carries; with breadcrumbs on, a red block does, and the
+            // machine stops here rather than in a half-exited firmware.
+            if crumbs::armed() {
+                crumbs::paint(Step::LoaderLeft as u8, breadcrumbs::FAILED);
+                loop {
+                    core::hint::spin_loop();
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+/// How many times [`leave_firmware`] fetches the map and asks again after a
+/// refusal. Firmware with timer events of its own (seen on desktop boards'
+/// firmware, not OVMF) can change the map between the two calls more than
+/// once; Linux's stub likewise loops.
+const EXIT_RETRIES: usize = 4;
+
+/// Take the final memory map and leave boot services; and say whether it took
+/// more than one try.
 ///
 /// The specification allows `exit_boot_services` to fail if the map changed
-/// between fetching it and the call, and says to fetch it again and retry once.
-fn leave_firmware(services: &Services, buffer: Allocation) -> Result<MemoryMap> {
+/// between fetching it and the call, and says to fetch it again and retry.
+/// After the first call only `get_memory_map` and `exit_boot_services` may be
+/// called, so the retry reuses the buffer, whose slack
+/// ([`Services::memory_map_size`]) is what makes it big enough.
+fn leave_firmware(services: &Services, buffer: Allocation) -> Result<(MemoryMap, bool)> {
     let map = services.memory_map(buffer)?;
-    if services.exit_boot_services(map.key).is_ok() {
-        return Ok(map);
+    let mut refused = match services.exit_boot_services(map.key) {
+        Ok(()) => return Ok((map, false)),
+        Err(error) => error,
+    };
+    for _ in 0..EXIT_RETRIES {
+        let map = services.memory_map(buffer)?;
+        match services.exit_boot_services(map.key) {
+            Ok(()) => return Ok((map, true)),
+            Err(error) => refused = error,
+        }
     }
+    Err(refused)
+}
 
-    let map = services.memory_map(buffer)?;
-    services.exit_boot_services(map.key)?;
-    Ok(map)
+/// The command line `load_cmdline` or the slot put in the boot info area.
+fn command_line(info_area: Allocation, cmdline_len: u64) -> &'static str {
+    // SAFETY: `load_cmdline` or `slots::choose` wrote `cmdline_len` bytes there,
+    // inside the loader's own allocation, which is never freed and not
+    // written again.
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (info_area.address + CMDLINE_OFFSET) as *const u8,
+            cmdline_len as usize,
+        )
+    };
+    core::str::from_utf8(bytes).unwrap_or("")
 }
 
 /// Read `CMDLINE.TXT` and then `DEFAULTS.TXT`, where the volume has them, into

@@ -1309,7 +1309,14 @@ static CONSOLE_INPUT: SpinLock<Option<(apic::IoApicInput, u64)>> = SpinLock::new
 /// this architecture at stage 10: the vectors handed out, and this line,
 /// which it converts to remappable format (`iommu::remapping`).
 pub(crate) fn console_receive_irq(view: &BootView<'_>) -> Option<u32> {
-    let routed = route_console(view);
+    // No port, no line: routed, an absent UART's floating line could raise
+    // interrupts no byte answers, and interrupt remapping's checks would loop
+    // bytes back through a port that keeps none.
+    let routed = if console::present() {
+        route_console(view)
+    } else {
+        None
+    };
     crate::iommu::remapping::note_hooks(crate::iommu::remapping::Hooks {
         vector: msi::take_vector,
         taken: msi::taken,
