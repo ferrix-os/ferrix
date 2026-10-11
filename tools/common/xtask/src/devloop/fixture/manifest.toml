@@ -1,0 +1,11 @@
+# The fixture component `cargo xtask test-devloop` has Ferrix clone, build,
+# test, run as a service, change and replace (docs/DEV-ON-FERRIX.md). It
+# takes nothing from crates.io: the gate's guest has no way there.
+[package]
+name = "greeter"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# A workspace of its own, wherever it is cloned to.
+[workspace]

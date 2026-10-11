@@ -65,7 +65,7 @@ const SPEED_PATH: &str = "/speed";
 const SPEED_BYTES: usize = 32 * 1024 * 1024;
 
 /// Where the repository [`make_repository`] writes is served from.
-const GIT_REPO_PATH: &str = "/repo.git";
+pub(crate) const GIT_REPO_PATH: &str = "/repo.git";
 
 /// The one file in it, and what is in that file.
 const GIT_FILE: &str = "greeting";
@@ -186,6 +186,21 @@ impl Servers {
     ///
     /// A socket that cannot be bound, or a thread that cannot be started.
     pub(crate) fn start() -> Result<Servers> {
+        // The repository the guest clones over HTTP, written before anything
+        // can ask for it. It costs a few files and one process per run, and
+        // having it always means the HTTP stub answers the same paths whether
+        // or not this run tests git.
+        Servers::start_serving(make_repository()?)
+    }
+
+    /// [`Servers::start`], with `repository` -- a bare repository
+    /// `update-server-info` has been run in ([`write_repository_of`]) -- at
+    /// [`GIT_REPO_PATH`] in place of test-net's own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Servers::start`].
+    pub(crate) fn start_serving(repository: PathBuf) -> Result<Servers> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|error| Error::new(format!("could not bind the HTTP stub: {error}")))?;
         listener.set_nonblocking(true)?;
@@ -200,12 +215,6 @@ impl Servers {
             .map_err(|error| Error::new(format!("could not bind the UDP echo: {error}")))?;
         echo.set_read_timeout(Some(TURN))?;
         let udp = local_v4(echo.local_addr()?)?;
-
-        // The repository the guest clones over HTTP, written before anything
-        // can ask for it. It costs a few files and one process per run, and
-        // having it always means the HTTP stub answers the same paths whether
-        // or not this run tests git.
-        let repository = make_repository()?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let threads = vec![
@@ -235,6 +244,11 @@ impl Servers {
     /// Where the gateway's `10.0.2.3:53` must forward to for the run.
     pub(crate) fn dns(&self) -> SocketAddrV4 {
         self.dns
+    }
+
+    /// Where the HTTP stub listens, which the guest reaches at `10.0.2.2`.
+    pub(crate) fn http(&self) -> SocketAddrV4 {
+        self.http
     }
 
     /// A line describing what is listening, for the run's report.
@@ -392,18 +406,45 @@ fn make_repository() -> Result<PathBuf> {
 /// Write it, as [`make_repository`] describes.
 fn write_repository() -> Result<PathBuf> {
     let directory = crate::paths::workspace_root().join("build").join("net-git");
-    let _ = std::fs::remove_dir_all(&directory);
+    write_repository_of(
+        &directory,
+        &[(GIT_FILE, &format!("{GIT_CONTENT}\n"))],
+        GIT_SUBJECT,
+    )
+}
+
+/// Write a repository under `directory`, made empty first: a work tree
+/// holding `files`, each a path and its text, in one commit whose subject is
+/// `subject`, and the bare clone of it that [`Servers::start_serving`]
+/// serves, which is returned.
+///
+/// # Errors
+///
+/// A file that cannot be written, or a git command that fails.
+pub(crate) fn write_repository_of(
+    directory: &Path,
+    files: &[(&str, &str)],
+    subject: &str,
+) -> Result<PathBuf> {
+    let _ = std::fs::remove_dir_all(directory);
     let work = directory.join("work");
     let bare = directory.join("repo.git");
     std::fs::create_dir_all(&work)
         .map_err(|error| Error::new(format!("making {}: {error}", work.display())))?;
-    std::fs::write(work.join(GIT_FILE), format!("{GIT_CONTENT}\n"))
-        .map_err(|error| Error::new(format!("writing {GIT_FILE}: {error}")))?;
+    for (name, text) in files {
+        let path = work.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| Error::new(format!("making {}: {error}", parent.display())))?;
+        }
+        std::fs::write(&path, text)
+            .map_err(|error| Error::new(format!("writing {name}: {error}")))?;
+    }
     let git = |arguments: &[&str]| -> Result<()> {
         let mut command = std::process::Command::new("git");
         let _ = command
             .args(arguments)
-            .current_dir(&directory)
+            .current_dir(directory)
             .env("GIT_AUTHOR_NAME", "ferrix")
             .env("GIT_AUTHOR_EMAIL", "ferrix@ferrix.test")
             .env("GIT_AUTHOR_DATE", GIT_DATE)
@@ -425,8 +466,8 @@ fn write_repository() -> Result<PathBuf> {
         )))
     };
     git(&["-C", "work", "init", "-q", "-b", "main"])?;
-    git(&["-C", "work", "add", GIT_FILE])?;
-    git(&["-C", "work", "commit", "-q", "-m", GIT_SUBJECT])?;
+    git(&["-C", "work", "add", "."])?;
+    git(&["-C", "work", "commit", "-q", "-m", subject])?;
     git(&["clone", "-q", "--bare", "work", "repo.git"])?;
     git(&["-C", "repo.git", "update-server-info"])?;
     Ok(bare)
