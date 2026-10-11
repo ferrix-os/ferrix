@@ -16,12 +16,13 @@ pub struct Fat {
     /// Where the volume starts on the disk, in bytes.
     at: u64,
     sectors_per_cluster: u64,
-    /// Where the first allocation table starts, in bytes from `at`.
-    table: u64,
     /// Where cluster 2 starts, in bytes from `at`.
     data: u64,
     /// The root directory's first cluster.
     pub root: u32,
+    /// The first allocation table, read once: following a chain through
+    /// the disk a cluster at a time is a read per cluster.
+    entries: Vec<u8>,
 }
 
 /// A directory entry found: its first cluster and size.
@@ -48,12 +49,16 @@ impl Fat {
         let reserved = u16_at(14);
         let tables = u64::from(sector[16]);
         let table_sectors = u64::from(u32_at(36));
+        let mut entries =
+            vec![0_u8; usize::try_from(table_sectors * SECTOR).map_err(io::Error::other)?];
+        disk.seek(SeekFrom::Start(at + reserved * SECTOR))?;
+        disk.read_exact(&mut entries)?;
         Ok(Fat {
             at,
             sectors_per_cluster,
-            table: reserved * SECTOR,
             data: (reserved + tables * table_sectors) * SECTOR,
             root: u32_at(44),
+            entries,
         })
     }
 
@@ -70,12 +75,13 @@ impl Fat {
 
     /// The cluster after `cluster` in its chain, or `None` at its end.
     pub fn next(&self, disk: &mut File, cluster: u32) -> io::Result<Option<u32>> {
-        let mut entry = [0_u8; 4];
-        disk.seek(SeekFrom::Start(
-            self.at + self.table + u64::from(cluster) * 4,
-        ))?;
-        disk.read_exact(&mut entry)?;
-        let value = u32::from_le_bytes(entry) & 0x0FFF_FFFF;
+        let _ = disk;
+        let at = usize::try_from(cluster).map_err(io::Error::other)? * 4;
+        let entry = self
+            .entries
+            .get(at..at + 4)
+            .ok_or_else(|| io::Error::other("a cluster past the allocation table"))?;
+        let value = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]) & 0x0FFF_FFFF;
         Ok((2..0x0FFF_FFF8).contains(&value).then_some(value))
     }
 
@@ -123,17 +129,26 @@ impl Fat {
     /// A read error, or a chain shorter than the file.
     pub fn read_file(&self, disk: &mut File, entry: &Entry) -> io::Result<Vec<u8>> {
         let size = usize::try_from(entry.size).map_err(io::Error::other)?;
-        let mut out = Vec::with_capacity(size);
+        let mut out = vec![0_u8; size];
+        let mut done = 0;
         let mut cluster = Some(entry.cluster);
-        let mut bytes = vec![0_u8; self.cluster_bytes()];
-        while out.len() < size {
-            let at =
+        let cluster_bytes = self.cluster_bytes();
+        while done < size {
+            let first =
                 cluster.ok_or_else(|| io::Error::other("a file's cluster chain ends early"))?;
-            disk.seek(SeekFrom::Start(self.cluster_offset(at)?))?;
-            disk.read_exact(&mut bytes)?;
-            let take = (size - out.len()).min(bytes.len());
-            out.extend_from_slice(&bytes[..take]);
-            cluster = self.next(disk, at)?;
+            // A run of consecutive clusters is one read: xtask writes each
+            // file contiguously, so a file is usually one run.
+            let mut run = 1;
+            let mut next = self.next(disk, first)?;
+            while next == Some(first + run) && done + run as usize * cluster_bytes < size {
+                run += 1;
+                next = self.next(disk, first + run - 1)?;
+            }
+            let take = (size - done).min(run as usize * cluster_bytes);
+            disk.seek(SeekFrom::Start(self.cluster_offset(first)?))?;
+            disk.read_exact(&mut out[done..done + take])?;
+            done += take;
+            cluster = next;
         }
         Ok(out)
     }

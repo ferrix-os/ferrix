@@ -29,11 +29,14 @@
 
 use std::process::ExitCode;
 
+use std::fs::File;
+
 use ferrix_install::disk::{self, SECTOR};
 use ferrix_install::layout::{self, AbDisk, Slot};
-use ferrix_install::record::{self, Copies};
+use ferrix_install::record::{self, Blocks};
 use ferrix_install::slotio;
-use ferrix_slots::record::{MAX_TRIES, Record};
+use ferrix_partition::Guid;
+use ferrix_slots::record::{Current, MAX_TRIES, Record};
 
 fn main() -> ExitCode {
     match run() {
@@ -47,6 +50,16 @@ fn main() -> ExitCode {
 
 const USAGE: &str = "usage: bootctl [--disk /dev/vdX] status | try <image> [--tries N] \
                      [--cmdline \"words\"] | verify <a|b> | good | rollback | init";
+
+impl Command {
+    /// Whether it writes the record or a slot on a slot boot's behalf.
+    fn changes_what_boots(&self) -> bool {
+        matches!(
+            self,
+            Command::Try { .. } | Command::Good | Command::Rollback
+        )
+    }
+}
 
 enum Command {
     Status,
@@ -108,8 +121,25 @@ fn run() -> Result<(), String> {
     if !is_root() {
         return Err("only root may read or change what this machine boots".into());
     }
-    let ab = layout::locate(disk.as_deref())?;
     let booted = Booted::read()?;
+    // A boot that did not come from a slot (the ESP's rescue files) may look
+    // and repair, never change what boots (the consultant's S2).
+    if booted.slot.is_none() && command.changes_what_boots() {
+        return Err(
+            "this system did not boot from a slot (no ferrix.slot= on the command line): try, \
+             good and rollback refuse; status, verify and init work"
+                .into(),
+        );
+    }
+    let ab = layout::locate(disk.as_deref(), booted.disk)?;
+    let block = disk::logical_block_size(&ab.disk)?;
+    if u64::from(block) != SECTOR {
+        return Err(format!(
+            "{} has {block}-byte logical blocks; bootctl writes only disks of 512-byte blocks \
+             until 4 KiB ones are supported",
+            ab.disk
+        ));
+    }
     match command {
         Command::Status => status(&ab, &booted),
         Command::Try {
@@ -147,6 +177,8 @@ fn is_root() -> bool {
 /// What the loader said about this boot.
 struct Booted {
     slot: Option<Slot>,
+    /// The GUID of the disk the loader booted from.
+    disk: Option<Guid>,
     /// `trial`, `good` or `fallback`.
     how: Option<String>,
     sequence: Option<u64>,
@@ -170,6 +202,7 @@ impl Booted {
         };
         Booted {
             slot: first("ferrix.slot=").and_then(|s| Slot::from_letter(&s)),
+            disk: first("ferrix.slot.disk=").and_then(|s| parse_guid(&s)),
             how: first("ferrix.slot.boot="),
             sequence: first("ferrix.slot.seq=").and_then(|s| s.parse().ok()),
         }
@@ -180,21 +213,68 @@ impl Booted {
     }
 }
 
-fn read_record(ab: &AbDisk) -> Result<(std::fs::File, Copies), String> {
-    let node = &ab.control.node;
-    let mut file = disk::open_rw(node).map_err(|e| format!("{node}: {e}"))?;
-    layout::check_writable(&ab.control, &mut file)?;
-    let copies = record::read(&mut file, 0).map_err(|e| format!("{node}: {e}"))?;
-    Ok((file, copies))
+/// A GUID as GPT tools print it, `8-4-4-4-12` hex, either case.
+fn parse_guid(text: &str) -> Option<Guid> {
+    let hex: String = text.chars().filter(|&c| c != '-').collect();
+    if hex.len() != 32 || text.len() != 36 {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok();
+    let mut printed = [0_u8; 16];
+    for (i, out) in printed.iter_mut().enumerate() {
+        *out = byte(i)?;
+    }
+    // The first three fields are stored little-endian.
+    let order = [3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+    let mut stored = [0_u8; 16];
+    for (to, &from) in stored.iter_mut().zip(&order) {
+        *to = printed[from];
+    }
+    Some(Guid(stored))
 }
 
-fn write_record(
-    file: &mut std::fs::File,
-    copies: &Copies,
-    next: Option<Record>,
-) -> Result<Record, String> {
-    let next = next.ok_or("the record has no next state for this (sequence at its end?)")?;
-    record::write(file, 0, copies, next, SECTOR as usize)
+/// The control record, on the whole disk, in its logical blocks.
+struct Control {
+    file: File,
+    part: ferrix_slots::gpt::Part,
+    current: Current,
+}
+
+impl Control {
+    fn open(ab: &AbDisk) -> Result<Control, String> {
+        let mut node =
+            disk::open_rw(&ab.control.node).map_err(|e| format!("{}: {e}", ab.control.node))?;
+        layout::check_writable(&ab.control, &mut node)?;
+        let mut file = disk::open_rw(&ab.disk).map_err(|e| format!("{}: {e}", ab.disk))?;
+        let part = ab.slots_layout.control;
+        let current = record::read(&mut blocks(&mut file), &part)?;
+        Ok(Control {
+            file,
+            part,
+            current,
+        })
+    }
+
+    fn record(&self) -> Option<Record> {
+        record::current(&self.current)
+    }
+
+    fn write(&mut self, next: Option<Record>) -> Result<Record, String> {
+        let written = record::write(&mut blocks(&mut self.file), &self.part, &self.current, next)?;
+        self.current = record::read(&mut blocks(&mut self.file), &self.part)?;
+        Ok(written)
+    }
+
+    fn copies_valid(&mut self) -> [bool; 2] {
+        record::copies_valid(&mut blocks(&mut self.file), &self.part)
+    }
+}
+
+fn blocks(file: &mut File) -> Blocks<'_> {
+    Blocks {
+        file,
+        block: SECTOR as u32,
+    }
 }
 
 fn verify(ab: &AbDisk, slot: Slot) -> Result<ferrix_slots::slot::SlotHeader, String> {
@@ -210,10 +290,10 @@ fn verify(ab: &AbDisk, slot: Slot) -> Result<ferrix_slots::slot::SlotHeader, Str
 }
 
 fn status(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
-    let (_, copies) = read_record(ab)?;
+    let mut control = Control::open(ab)?;
     println!(
-        "disk:    {} (control {}, slot a {}, slot b {})",
-        ab.disk, ab.control.node, ab.slots[0].node, ab.slots[1].node
+        "disk:    {} {} (control {}, slot a {}, slot b {})",
+        ab.disk, ab.guid, ab.control.node, ab.slots[0].node, ab.slots[1].node
     );
     match booted.slot {
         None => println!("booted:  not from a slot (no ferrix.slot= on the command line)"),
@@ -226,19 +306,23 @@ fn status(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
                 .map_or_else(|| "?".to_owned(), |s| s.to_string())
         ),
     }
-    match copies.record() {
+    let valid = control.copies_valid();
+    match control.record() {
         None => println!(
             "record:  none valid (uninitialised): the loader tries a, then b; `bootctl init`"
         ),
         Some(r) => {
             println!(
                 "record:  sequence {}; copies valid: {}, {}",
-                r.sequence,
-                copies.valid(0),
-                copies.valid(1)
+                r.sequence, valid[0], valid[1]
             );
             println!("good:    {}", r.good.letter());
             match r.trial {
+                Some(t) if r.tries == 0 => println!(
+                    "trial:   {}, exhausted: it failed, and the loader boots {}",
+                    t.letter(),
+                    r.good.letter()
+                ),
                 Some(t) => println!("trial:   {}, {} tries left", t.letter(), r.tries),
                 None => println!("trial:   none"),
             }
@@ -299,8 +383,8 @@ fn try_image(
     tries: u8,
     cmdline: Option<&str>,
 ) -> Result<(), String> {
-    let (mut control, copies) = read_record(ab)?;
-    let current = copies
+    let mut control = Control::open(ab)?;
+    let current = control
         .record()
         .ok_or("the control record is uninitialised; run `bootctl init` first")?;
     let target = idle(&current, booted)?;
@@ -319,16 +403,14 @@ fn try_image(
 
     // A trial armed on the slot about to be overwritten is taken back first:
     // a slot half written must never be tried.
-    let mut copies = copies;
     let mut current = current;
     if current.trial == Some(target) {
-        current = write_record(&mut control, &copies, current.disarmed())?;
+        current = control.write(current.disarmed())?;
         println!(
             "bootctl: took back the trial armed on slot {} before writing it (record {})",
             target.letter(),
             current.sequence
         );
-        copies = record::read(&mut control, 0).map_err(|e| e.to_string())?;
     }
 
     let generation = current.sequence + 1;
@@ -357,7 +439,7 @@ fn try_image(
         back.needed() >> 20
     );
 
-    let armed = write_record(&mut control, &copies, current.armed(target, tries))?;
+    let armed = control.write(current.armed(target, tries))?;
     println!(
         "bootctl: slot {} armed for {tries} trial boot{} (record {}); slot {} stays good. \
          Restart to try it, then `bootctl good`.",
@@ -383,8 +465,8 @@ fn label_of(image: &slotio::Image) -> String {
 }
 
 fn good(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
-    let (mut control, copies) = read_record(ab)?;
-    let r = copies
+    let mut control = Control::open(ab)?;
+    let r = control
         .record()
         .ok_or("the control record is uninitialised")?;
     let Some(slot) = booted.slot else {
@@ -420,7 +502,7 @@ fn good(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
             r.sequence
         ));
     }
-    let next = write_record(&mut control, &copies, r.marked_good())?;
+    let next = control.write(r.marked_good())?;
     println!(
         "bootctl: slot {} is good (record {}); slot {} is idle",
         slot.letter(),
@@ -431,8 +513,8 @@ fn good(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
 }
 
 fn rollback(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
-    let (mut control, copies) = read_record(ab)?;
-    let r = copies
+    let mut control = Control::open(ab)?;
+    let r = control
         .record()
         .ok_or("the control record is uninitialised")?;
     let Some(trial) = r.trial else {
@@ -442,7 +524,9 @@ fn rollback(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
         );
         return Ok(());
     };
-    let next = write_record(&mut control, &copies, r.disarmed())?;
+    // Rollback takes a trial back and writes nothing else: it never makes
+    // a slot good (docs/AB-BOOT.md §5; the consultant's S4).
+    let next = control.write(r.disarmed())?;
     let running = booted.slot == Some(trial);
     println!(
         "bootctl: the trial of slot {} is taken back (record {}); {}",
@@ -458,8 +542,8 @@ fn rollback(ab: &AbDisk, booted: &Booted) -> Result<(), String> {
 }
 
 fn init(ab: &AbDisk) -> Result<(), String> {
-    let (mut control, copies) = read_record(ab)?;
-    if let Some(r) = copies.record() {
+    let mut control = Control::open(ab)?;
+    if let Some(r) = control.record() {
         return Err(format!(
             "the control record is already written (sequence {}, good {}); init only writes a \
              first one",
@@ -472,7 +556,7 @@ fn init(ab: &AbDisk) -> Result<(), String> {
         (Err(_), Ok(_)) => Slot::B,
         (Err(a), Err(b)) => return Err(format!("neither slot verifies: {a}; {b}")),
     };
-    let first = write_record(&mut control, &copies, Some(Record::initial(good)))?;
+    let first = control.write(Some(Record::initial(good)))?;
     println!(
         "bootctl: the first control record is written: slot {} is good (record {})",
         good.letter(),
@@ -509,6 +593,30 @@ mod tests {
         // Not booted from a slot: the one not good.
         let none = Booted::parse("ferrix.root=btrfs");
         assert_eq!(idle(&record(Slot::B, None), &none), Ok(Slot::A));
+    }
+
+    #[test]
+    fn a_rescue_boot_changes_nothing() {
+        let rescue = Booted::parse("ferrix.root=btrfs");
+        assert!(rescue.slot.is_none());
+        for command in [Command::Good, Command::Rollback] {
+            assert!(command.changes_what_boots());
+        }
+        assert!(!Command::Status.changes_what_boots());
+        assert!(!Command::Init.changes_what_boots());
+        assert!(!Command::Verify(Slot::A).changes_what_boots());
+    }
+
+    #[test]
+    fn the_boot_disk_is_named_by_its_guid() {
+        let printed = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
+        let guid = parse_guid(printed).unwrap();
+        assert_eq!(guid, ferrix_partition::ESP);
+        assert_eq!(guid.to_string(), printed);
+        assert_eq!(parse_guid(&printed.to_lowercase()), Some(guid));
+        assert_eq!(parse_guid("C12A7328F81F11D2BA4B00A0C93EC93B"), None);
+        let booted = Booted::parse(&format!("ferrix.slot=a ferrix.slot.disk={printed}"));
+        assert_eq!(booted.disk, Some(guid));
     }
 
     #[test]

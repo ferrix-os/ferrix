@@ -20,8 +20,14 @@ use crate::{Error, Result};
 static WANTED: AtomicBool = AtomicBool::new(false);
 
 /// Have every image this run writes get a slot image beside it.
-pub(crate) fn set_wanted(wanted: bool) {
+fn set_wanted(wanted: bool) {
     WANTED.store(wanted, Ordering::Relaxed);
+}
+
+/// `build`, and with `slot-image` the slot image beside each image.
+pub(crate) fn build(command: &str, args: &crate::args::Args) -> Result<()> {
+    set_wanted(command == "slot-image");
+    super::build(args)
 }
 
 /// Write the slot image for `arch` beside its `ferrix.img` when

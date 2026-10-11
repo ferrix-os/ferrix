@@ -19,13 +19,11 @@ use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM, Partition};
 
 use crate::disk::{self, SECTOR, Table};
 
-/// Ferrix's own partition types, proposed 2026-10-11 (the dev-on-ferrix
-/// handover). The customer's disk carries Linux's data type on its slots
-/// until these are written there (the product owner's write phase).
-pub const SLOT_TYPE: Guid =
-    Guid::from_fields(0x5475_b681, 0x82f5, 0x47da, 0xa5a1, 0x55db_0e7e_2bd3);
-pub const CONTROL_TYPE: Guid =
-    Guid::from_fields(0xc29a_a8c5, 0xc19c, 0x4147, 0x838f, 0x01ac_cca2_8be4);
+/// Ferrix's own partition types (`docs/AB-BOOT.md` §2, §3), `ferrix-slots`'.
+/// The customer's disk carries Linux's data type on its slots until these
+/// are written there (the product owner's write phase).
+pub const SLOT_TYPE: Guid = Guid(ferrix_slots::gpt::SLOT_TYPE);
+pub const CONTROL_TYPE: Guid = Guid(ferrix_slots::gpt::CONTROL_TYPE);
 /// Linux swap, which a disk shared with a Linux host may hold beside Ferrix.
 pub const LINUX_SWAP: Guid =
     Guid::from_fields(0x0657_fd6d, 0xa4ab, 0x43c4, 0x84e5, 0x0933_c84b_4f4f);
@@ -61,6 +59,11 @@ impl Part {
 #[derive(Debug, Clone)]
 pub struct AbDisk {
     pub disk: String,
+    /// The disk's GUID, which the loader names (`ferrix.slot.disk=`).
+    pub guid: Guid,
+    /// The layout as `ferrix-slots` reads it, the loader's reading: the
+    /// control record is written through it.
+    pub slots_layout: ferrix_slots::gpt::Layout,
     pub esp: Option<Part>,
     pub control: Part,
     pub slots: [Part; 2],
@@ -142,8 +145,24 @@ pub fn find(disk: &str, table: &Table) -> Result<Option<AbDisk>, String> {
         .or_else(|| of_type(ESP).into_iter().next())
         .filter(|esp| esp.entry.type_guid == ESP);
     let root = named(ROOT_NAME).filter(|root| root.entry.type_guid == LINUX_FILESYSTEM);
+    // The loader's own reading of the same table must find the same three.
+    let slots_layout = loaders_reading(table)
+        .map_err(|why| format!("{disk}: ferrix-slots refuses its table: {why:?}"))?;
+    let agrees = |mine: &Part, theirs: &ferrix_slots::gpt::Part| {
+        mine.entry.first == theirs.first_lba && mine.entry.last == theirs.last_lba
+    };
+    if !agrees(control, &slots_layout.control)
+        || !agrees(a, &slots_layout.a)
+        || !agrees(b, &slots_layout.b)
+    {
+        return Err(format!(
+            "{disk}: the loader's reading of its table disagrees with this one"
+        ));
+    }
     Ok(Some(AbDisk {
         disk: disk.to_owned(),
+        guid: table.header.disk,
+        slots_layout,
         esp,
         control: control.clone(),
         slots: [a.clone(), b.clone()],
@@ -151,43 +170,96 @@ pub fn find(disk: &str, table: &Table) -> Result<Option<AbDisk>, String> {
     }))
 }
 
-/// Find the one disk with the A/B layout, or the one named.
+/// `ferrix-slots`' reading of `table`: the loader's.
+fn loaders_reading(
+    table: &Table,
+) -> Result<ferrix_slots::gpt::Layout, ferrix_slots::gpt::GptError> {
+    let block = SECTOR as u32;
+    let header = ferrix_slots::gpt::parse_header(&table.raw_header, table.sectors, block)?;
+    ferrix_slots::gpt::find(&header, &table.raw_array, table.sectors, block)
+}
+
+/// Whether `table` has any partition of Ferrix's boot control type.
+fn has_control(table: &Table) -> bool {
+    table
+        .entries
+        .iter()
+        .any(|(_, entry)| entry.type_guid == CONTROL_TYPE)
+}
+
+/// The one disk with the A/B layout (`docs/AB-BOOT.md` §5; the
+/// consultant's S1): of `disks`, each a path and its table, exactly one
+/// may carry a partition of Ferrix's boot control type, and it must be the
+/// one the loader names by its GUID (`booted`) when it named one, and the
+/// one `named` when a disk is named. A disk named that has no control
+/// partition is refused with what is wrong with it.
 ///
 /// # Errors
 ///
-/// None found, more than one, or a layout that is wrong.
-pub fn locate(named: Option<&str>) -> Result<AbDisk, String> {
-    let candidates = match named {
-        Some(disk) => vec![disk.to_owned()],
-        None => disk::whole_disks(),
+/// None, more than one, not the disk asked for, or a wrong layout.
+pub fn choose(
+    disks: &[(String, Table)],
+    named: Option<&str>,
+    booted: Option<Guid>,
+) -> Result<AbDisk, String> {
+    let carrying: Vec<&(String, Table)> = disks.iter().filter(|(_, t)| has_control(t)).collect();
+    if let Some(name) = named
+        && !carrying.iter().any(|(path, _)| path == name)
+    {
+        return Err(match disks.iter().find(|(path, _)| path == name) {
+            Some((path, table)) => match find(path, table)? {
+                Some(_) => unreachable_layout(path),
+                None => format!("{path} has no partition of Ferrix's boot control type"),
+            },
+            None => format!("{name} has no GUID partition table"),
+        });
+    }
+    let [(path, table)] = carrying.as_slice() else {
+        return Err(if carrying.is_empty() {
+            "no disk has a partition of Ferrix's boot control type".to_owned()
+        } else {
+            format!(
+                "more than one disk has a partition of Ferrix's boot control type ({}); \
+                 bootctl acts only when there is one",
+                carrying
+                    .iter()
+                    .map(|(path, _)| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
     };
-    let mut found = Vec::new();
-    for path in candidates {
+    if let Some(guid) = booted
+        && table.header.disk != guid
+    {
+        return Err(format!(
+            "{path} is disk {}, but this system booted from disk {guid}",
+            table.header.disk
+        ));
+    }
+    find(path, table)?.ok_or_else(|| unreachable_layout(path))
+}
+
+fn unreachable_layout(path: &str) -> String {
+    format!("{path}: its table changed while it was read")
+}
+
+/// [`choose`] over every whole disk this system has.
+///
+/// # Errors
+///
+/// As [`choose`], or a disk that cannot be read.
+pub fn locate(named: Option<&str>, booted: Option<Guid>) -> Result<AbDisk, String> {
+    let mut disks = Vec::new();
+    for path in disk::whole_disks() {
         let Ok(mut file) = disk::open(&path) else {
             continue;
         };
-        let table = disk::table(&mut file).map_err(|e| format!("{path}: {e}"))?;
-        if let Some(table) = table
-            && let Some(ab) = find(&path, &table)?
-        {
-            found.push(ab);
+        if let Some(table) = disk::table(&mut file).map_err(|e| format!("{path}: {e}"))? {
+            disks.push((path, table));
         }
     }
-    match found.len() {
-        1 => Ok(found.remove(0)),
-        0 => Err(match named {
-            Some(disk) => format!("{disk} has no partition named {CONTROL_NAME}"),
-            None => format!("no disk has a partition named {CONTROL_NAME}; name one with --disk"),
-        }),
-        _ => Err(format!(
-            "more than one disk has the A/B layout: {}; name one with --disk",
-            found
-                .iter()
-                .map(|ab| ab.disk.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
+    choose(&disks, named, booted)
 }
 
 /// What a partition's first 68 KiB say it holds, by the file systems'
@@ -242,8 +314,8 @@ mod tests {
     use super::*;
     use ferrix_partition::{parse_entries, parse_header, write_table};
 
-    /// The customer's layout, in MiB, scaled down.
-    fn table(slot_type: Guid) -> Table {
+    /// The customer's layout, in MiB, scaled down, on disk `disk`.
+    fn table_of(slot_type: Guid, disk: u8) -> Table {
         let mib = 2048;
         let control_type = if slot_type == SLOT_TYPE {
             CONTROL_TYPE
@@ -268,10 +340,20 @@ mod tests {
             )
         });
         let sectors = 36 * mib;
-        let written = write_table(sectors, 512, Guid([9; 16]), &parts).unwrap();
+        let written = write_table(sectors, 512, Guid([disk; 16]), &parts).unwrap();
         let header = parse_header(&written[1].1, sectors).unwrap();
         let entries = parse_entries(&header, &written[2].1).unwrap();
-        Table { header, entries }
+        Table {
+            header,
+            entries,
+            raw_header: written[1].1.clone(),
+            raw_array: written[2].1.clone(),
+            sectors,
+        }
+    }
+
+    fn table(slot_type: Guid) -> Table {
+        table_of(slot_type, 9)
     }
 
     #[test]
@@ -290,6 +372,39 @@ mod tests {
         // The customer's disk as partitioned: named, but Linux's data type.
         let why = find("/dev/nvme0n1", &table(LINUX_FILESYSTEM)).unwrap_err();
         assert!(why.contains("not Ferrix's boot control type"), "{why}");
+    }
+
+    #[test]
+    fn one_disk_only_and_the_one_the_loader_names() {
+        let ab = |disk| {
+            (
+                "/dev/vd".to_owned() + disk,
+                table_of(SLOT_TYPE, disk.as_bytes()[0]),
+            )
+        };
+        let linux = ("/dev/vdf".to_owned(), table(LINUX_FILESYSTEM));
+        // One carrying disk beside the SN720 as it is: that one.
+        let one = vec![ab("d"), linux];
+        let found = choose(&one, None, None).unwrap();
+        assert_eq!(found.disk, "/dev/vdd");
+        assert_eq!(found.guid, Guid([b'd'; 16]));
+        // The loader named it: still that one; named another: refused.
+        assert!(choose(&one, None, Some(Guid([b'd'; 16]))).is_ok());
+        let why = choose(&one, None, Some(Guid([b'e'; 16]))).unwrap_err();
+        assert!(why.contains("booted from disk"), "{why}");
+        // The SN720 as it is, named: refused, saying why.
+        let why = choose(&one, Some("/dev/vdf"), None).unwrap_err();
+        assert!(why.contains("not Ferrix's boot control type"), "{why}");
+        // Two carrying disks: refused, whichever is named or booted.
+        let two = vec![ab("d"), ab("e")];
+        for (named, booted) in [
+            (None, None),
+            (Some("/dev/vdd"), None),
+            (None, Some(Guid([b'd'; 16]))),
+        ] {
+            let why = choose(&two, named, booted).unwrap_err();
+            assert!(why.contains("more than one disk"), "{why}");
+        }
     }
 
     #[test]

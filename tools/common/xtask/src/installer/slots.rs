@@ -16,7 +16,9 @@
 //! The boots:
 //!
 //! 1. The installer, from the live medium: `--slots` on the blank disk, on
-//!    the premade one, and on the SN720 copy (refused).
+//!    the premade one, and on the SN720 copy (refused). Then `bootctl`
+//!    refuses to act with two disks carrying a control partition, and
+//!    refuses `try` on a boot that did not come from a slot.
 //! 2. The installed disk alone through OVMF: it must put `/` on its root
 //!    partition, `vdd6`. (Until ab-boot's loader lands this boots the ESP's
 //!    rescue files; afterwards slot A.)
@@ -62,6 +64,8 @@ const DISK_BYTES: u64 = 3 << 30;
 const SWAP_MIB: u64 = 16;
 const ESP_MIB: u64 = 512;
 const SLOT_MIB: u64 = 600;
+/// How long each boot may take, unless `--timeout` says.
+const BOOT_SECONDS: u64 = 900;
 
 /// The installer boot's script.
 const INSTALL: &str = "/sbin/ferrix-install --yes --slots --swap-mib 16 --esp-mib 512 --slot-mib 600 /dev/vde\n\
@@ -70,6 +74,10 @@ echo \"slots: blank exited $?\"\n\
 echo \"slots: premade exited $?\"\n\
 /sbin/ferrix-install --yes --slots /dev/vdg\n\
 echo \"slots: sn720 exited $?\"\n\
+/sbin/bootctl status\n\
+echo \"bootctl: two disks exited $?\"\n\
+/sbin/bootctl --disk /dev/vdf try /dev/vdd1\n\
+echo \"bootctl: rescue try exited $?\"\n\
 exit 0\n";
 
 /// Boot 3: slot A, good.
@@ -110,6 +118,130 @@ echo \"bootctl: verify corrupted exited $?\"\n\
 echo \"bootctl: try stale exited $?\"\n\
 exit 0\n";
 
+/// What boot 1 must print.
+const INSTALL_EXPECT: &[(&str, &str)] = &[
+    (
+        "slots: blank exited 0",
+        "the installer did not make the layout on the blank disk",
+    ),
+    (
+        "will be given the A/B layout",
+        "the installer did not say it makes the layout",
+    ),
+    ("slot a verified", "the installer did not verify slot a"),
+    (
+        "slots: premade exited 0",
+        "the installer did not install on the premade layout",
+    ),
+    (
+        "has the A/B layout and keeps its partition table",
+        "the installer did not reuse the premade layout",
+    ),
+    (
+        "slots: sn720 exited 1",
+        "the installer did not refuse the SN720 as partitioned",
+    ),
+    (
+        "not Ferrix's boot control type",
+        "the installer's refusal of the SN720 does not say why",
+    ),
+    (
+        "bootctl: two disks exited 1",
+        "bootctl acted with two disks carrying a control partition",
+    ),
+    (
+        "more than one disk has a partition of Ferrix's boot control type",
+        "bootctl's two-disk refusal does not say why",
+    ),
+    (
+        "bootctl: rescue try exited 1",
+        "bootctl try ran on a boot that did not come from a slot",
+    ),
+    (
+        "did not boot from a slot",
+        "bootctl's rescue-boot refusal does not say why",
+    ),
+];
+
+/// What boot 3 must print.
+const AS_A_EXPECT: &[(&str, &str)] = &[
+    ("bootctl: status exited 0", "bootctl status failed"),
+    (
+        "verifies: ferrix installed",
+        "slot a, as installed, does not verify",
+    ),
+    (
+        "bootctl: slot a is already good",
+        "bootctl good on a good slot did not say so",
+    ),
+    (
+        "bootctl: slot b read back and verified",
+        "bootctl try did not verify slot b",
+    ),
+    ("bootctl: try exited 0", "bootctl try failed"),
+    ("trial:   b, 1 tries left", "bootctl try did not arm slot b"),
+    (
+        "bootctl: sn720 exited 1",
+        "bootctl did not refuse the SN720 as partitioned",
+    ),
+    (
+        "not Ferrix's boot control type",
+        "bootctl's refusal of the SN720 does not say why",
+    ),
+];
+
+/// What boot 4 must print.
+const AS_TRIAL_B_EXPECT: &[(&str, &str)] = &[
+    (
+        "bootctl: try on trial exited 1",
+        "bootctl try wrote a slot while running a trial",
+    ),
+    (
+        "runs slot b on trial",
+        "bootctl's refusal on trial does not say why",
+    ),
+    ("bootctl: good exited 0", "bootctl good failed on the trial"),
+    ("good:    b", "the record does not say b is good"),
+];
+
+/// What boot 5 must print.
+const AS_B_EXPECT: &[(&str, &str)] = &[
+    (
+        "bootctl: try fat exited 0",
+        "bootctl try of a FAT image failed",
+    ),
+    (
+        "writing the FAT image /dev/vdg to slot a",
+        "bootctl did not take the FAT image",
+    ),
+    (
+        "bootctl: verify exited 0",
+        "slot a does not verify after try",
+    ),
+    ("bootctl: rollback exited 0", "bootctl rollback failed"),
+    ("trial:   none", "rollback left a trial armed"),
+];
+
+/// What boot 6 must print.
+const AS_STALE_A_EXPECT: &[(&str, &str)] = &[
+    (
+        "bootctl: verify corrupted exited 1",
+        "bootctl verify passed a corrupted slot",
+    ),
+    (
+        "its initramfs does not match the header's SHA-256",
+        "the corrupted slot's refusal does not say why",
+    ),
+    (
+        "bootctl: try stale exited 1",
+        "bootctl try wrote while booted from a slot the record does not call good",
+    ),
+    (
+        "but the record says b is good",
+        "the stale refusal does not say why",
+    ),
+];
+
 /// `test-install --slots`: see the module documentation.
 pub(super) fn test(args: &Args) -> Result<()> {
     let arch = Arch::X86_64;
@@ -118,282 +250,100 @@ pub(super) fn test(args: &Args) -> Result<()> {
             "test-install --slots runs on x86-64 only for now",
         ));
     }
-    let carried = files(arch)?.ok_or_else(|| Error::new("ferrix-install is not built"))?;
-    let natives = native::build(arch, args.release)?;
-    let loader = cargo::build_loader(arch, args.release)?;
-    let initramfs = initramfs::build(None, &natives, None, &carried)?;
-    let kernel = cargo::build_kernel(arch, args.release)?;
-    let build = paths::build_dir(arch);
-    let live = build.join("install-live.img");
-    write_medium(arch, &loader, &kernel, &initramfs, &live)?;
-    let zinc = zinc::built(arch)?.ok_or_else(|| Error::new("zinc is not built for x86_64"))?;
-
-    let target = build.join("ab-target.img");
-    let premade = build.join("ab-premade.img");
-    let sn720 = build.join("ab-sn720.img");
-    let _ = fresh(&target, DISK_BYTES)?;
-    make_premade(&premade)?;
-    make_sn720(&sn720)?;
-    let premade_kept = hash_ranges(&premade, &premade_untouched(&premade)?)?;
-    let sn720_hash = hash_ranges(&sn720, &[(0, file_len(&sn720)?)])?;
+    let gate = Gate::prepare(args)?;
+    let premade_kept = hash_ranges(&gate.premade, &premade_untouched(&gate.premade)?)?;
+    let sn720_whole = [(0, file_len(&gate.sn720)?)];
+    let sn720_hash = hash_ranges(&gate.sn720, &sn720_whole)?;
 
     // 1. The installer.
-    let boot = Boot {
-        arch,
-        args,
-        loader: &loader,
-        initramfs: &initramfs,
-        zinc: &zinc,
-    };
-    let lines = boot.run(
+    let lines = gate.run(
         INSTALL,
         "ferrix.root=tmpfs",
-        (live.clone(), target.clone()),
-        vec![premade.clone(), sn720.clone()],
+        (gate.live.clone(), gate.target.clone()),
+        vec![gate.premade.clone(), gate.sn720.clone()],
     )?;
-    require(
-        &lines,
-        &[
-            (
-                "slots: blank exited 0",
-                "the installer did not make the layout on the blank disk",
-            ),
-            (
-                "will be given the A/B layout",
-                "the installer did not say it makes the layout",
-            ),
-            ("slot a verified", "the installer did not verify slot a"),
-            (
-                "slots: premade exited 0",
-                "the installer did not install on the premade layout",
-            ),
-            (
-                "has the A/B layout and keeps its partition table",
-                "the installer did not reuse the premade layout",
-            ),
-            (
-                "slots: sn720 exited 1",
-                "the installer did not refuse the SN720 as partitioned",
-            ),
-            (
-                "not Ferrix's boot control type",
-                "the installer's refusal of the SN720 does not say why",
-            ),
-        ],
-    )?;
+    require(&lines, INSTALL_EXPECT)?;
+    let premade_now = premade_untouched(&gate.premade)?;
     same(
-        &premade,
-        &premade_untouched(&premade)?,
+        &gate.premade,
+        &premade_now,
         &premade_kept,
         "the premade disk's swap or table",
     )?;
-    same(
-        &sn720,
-        &[(0, file_len(&sn720)?)],
-        &sn720_hash,
-        "the SN720 copy",
-    )?;
+    same(&gate.sn720, &sn720_whole, &sn720_hash, "the SN720 copy")?;
     println!("  {arch}: the installer made the layout, reused it, and refused the SN720 as it is");
 
     // The target's swap gets a pattern; it must hash the same at the end.
-    let swap = partition(&target, 1)?;
-    fill(&target, swap)?;
-    let swap_hash = hash_ranges(&target, &[swap])?;
+    let swap = partition(&gate.target, 1)?;
+    fill(&gate.target, swap)?;
+    let swap_hash = hash_ranges(&gate.target, &[swap])?;
 
     // 2. The installed disk alone.
-    let mut installed = args.clone();
-    installed.boot_virtio = true;
-    let lines = qemu::test_boot_lines(arch, &target, &kernel, &installed)?;
-    require(
-        &lines,
-        &[(
-            "/ is btrfs on vdd6; the system was installed on it",
-            "the installed disk did not put / on its root partition",
-        )],
-    )?;
-    println!("  {arch}: the installed disk booted with / on vdd6");
+    gate.installed()?;
+    gate.bootctl_boots()?;
 
-    // A new system to try: the live system's kernel and initramfs as a slot
-    // image, as `cargo xtask slot-image` writes one.
-    let image = build.join("ab-new-slot.img");
-    let kernel_bytes = std::fs::read(&kernel.elf)?;
-    let archive = kernel.initramfs(&initramfs)?;
-    crate::slot_image::write(
-        &image,
-        "ferrix test-install new",
-        &kernel_bytes,
-        &archive,
-        b"ferrix.root=btrfs",
-    )?;
-    let fat_image = build.join("ab-fat.img");
-    let _ = std::fs::copy(
-        fat::write_image_with(
-            arch,
-            &loader,
-            &kernel,
-            &initramfs,
-            Some("ferrix.root=btrfs"),
-        )?,
-        &fat_image,
-    )?;
-
-    // 3. Slot A, good.
-    let disks = |extra: &Path| {
-        (
-            image.clone(),
-            target.clone(),
-            vec![sn720.clone(), extra.to_path_buf()],
-        )
-    };
-    let (d, t, e) = disks(&fat_image);
-    let lines = boot.run(
-        AS_A,
-        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.root=tmpfs",
-        (d, t),
-        e,
-    )?;
-    require(
-        &lines,
-        &[
-            ("bootctl: status exited 0", "bootctl status failed"),
-            (
-                "verifies: ferrix installed",
-                "slot a, as installed, does not verify",
-            ),
-            (
-                "bootctl: slot a is already good",
-                "bootctl good on a good slot did not say so",
-            ),
-            (
-                "bootctl: slot b read back and verified",
-                "bootctl try did not verify slot b",
-            ),
-            ("bootctl: try exited 0", "bootctl try failed"),
-            ("trial:   b, 1 tries left", "bootctl try did not arm slot b"),
-            (
-                "bootctl: sn720 exited 1",
-                "bootctl did not refuse the SN720 as partitioned",
-            ),
-            (
-                "not Ferrix's boot control type",
-                "bootctl's refusal of the SN720 does not say why",
-            ),
-        ],
-    )?;
-    let sequence = loader_takes_a_try(&target)?;
-    println!("  {arch}: slot b written and armed; the loader's decrement made record {sequence}");
-
-    // 4. Slot B on trial.
-    let (d, t, e) = disks(&fat_image);
-    let words = format!(
-        "ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq={sequence} ferrix.root=tmpfs"
-    );
-    let lines = boot.run(AS_TRIAL_B, &words, (d, t), e)?;
-    require(
-        &lines,
-        &[
-            (
-                "bootctl: try on trial exited 1",
-                "bootctl try wrote a slot while running a trial",
-            ),
-            (
-                "runs slot b on trial",
-                "bootctl's refusal on trial does not say why",
-            ),
-            ("bootctl: good exited 0", "bootctl good failed on the trial"),
-            ("good:    b", "the record does not say b is good"),
-        ],
-    )?;
-    println!("  {arch}: on trial, try was refused and good marked slot b");
-
-    // 5. Slot B, good.
-    let (d, t, e) = disks(&fat_image);
-    let words = format!(
-        "ferrix.slot=b ferrix.slot.boot=good ferrix.slot.seq={} ferrix.root=tmpfs",
-        sequence + 1
-    );
-    let lines = boot.run(AS_B, &words, (d, t), e)?;
-    require(
-        &lines,
-        &[
-            (
-                "bootctl: try fat exited 0",
-                "bootctl try of a FAT image failed",
-            ),
-            (
-                "writing the FAT image /dev/vdg to slot a",
-                "bootctl did not take the FAT image",
-            ),
-            (
-                "bootctl: verify exited 0",
-                "slot a does not verify after try",
-            ),
-            ("bootctl: rollback exited 0", "bootctl rollback failed"),
-            ("trial:   none", "rollback left a trial armed"),
-        ],
-    )?;
-    let at = flip_initramfs_byte(&target, 0)?;
-    println!("  {arch}: slot a written from a FAT image and taken back; byte {at} of it flipped");
-
-    // 6. Slot A, stale.
-    let (d, t, e) = disks(&fat_image);
-    let lines = boot.run(
-        AS_STALE_A,
-        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.root=tmpfs",
-        (d, t),
-        e,
-    )?;
-    require(
-        &lines,
-        &[
-            (
-                "bootctl: verify corrupted exited 1",
-                "bootctl verify passed a corrupted slot",
-            ),
-            (
-                "its initramfs does not match the header's SHA-256",
-                "the corrupted slot's refusal does not say why",
-            ),
-            (
-                "bootctl: try stale exited 1",
-                "bootctl try wrote while booted from a slot the record does not call good",
-            ),
-            (
-                "but the record says b is good",
-                "the stale refusal does not say why",
-            ),
-        ],
-    )?;
-
-    same(&target, &[swap], &swap_hash, "the target's swap partition")?;
     same(
-        &premade,
-        &premade_untouched(&premade)?,
+        &gate.target,
+        &[swap],
+        &swap_hash,
+        "the target's swap partition",
+    )?;
+    same(
+        &gate.premade,
+        &premade_now,
         &premade_kept,
         "the premade disk's swap or table",
     )?;
-    same(
-        &sn720,
-        &[(0, file_len(&sn720)?)],
-        &sn720_hash,
-        "the SN720 copy",
-    )?;
+    same(&gate.sn720, &sn720_whole, &sn720_hash, "the SN720 copy")?;
     println!(
         "  {arch}: swap partitions and the SN720 copy hash as before; test-install --slots passed"
     );
     Ok(())
 }
 
-/// What a scripted boot needs.
-struct Boot<'a> {
-    arch: Arch,
+/// What the gate's boots share.
+struct Gate<'a> {
     args: &'a Args,
-    loader: &'a Path,
-    initramfs: &'a [u8],
-    zinc: &'a Path,
+    loader: PathBuf,
+    kernel: cargo::Kernel,
+    initramfs: Vec<u8>,
+    zinc: PathBuf,
+    live: PathBuf,
+    target: PathBuf,
+    premade: PathBuf,
+    sn720: PathBuf,
 }
 
-impl Boot<'_> {
+impl<'a> Gate<'a> {
+    /// Build what the boots need and make the disks.
+    fn prepare(args: &'a Args) -> Result<Gate<'a>> {
+        let arch = Arch::X86_64;
+        let carried = files(arch)?.ok_or_else(|| Error::new("ferrix-install is not built"))?;
+        let natives = native::build(arch, args.release)?;
+        let loader = cargo::build_loader(arch, args.release)?;
+        let initramfs = initramfs::build(None, &natives, None, &carried)?;
+        let kernel = cargo::build_kernel(arch, args.release)?;
+        let build = paths::build_dir(arch);
+        let live = build.join("install-live.img");
+        write_medium(arch, &loader, &kernel, &initramfs, &live)?;
+        let zinc = zinc::built(arch)?.ok_or_else(|| Error::new("zinc is not built for x86_64"))?;
+        let gate = Gate {
+            args,
+            loader,
+            kernel,
+            initramfs,
+            zinc,
+            live,
+            target: build.join("ab-target.img"),
+            premade: build.join("ab-premade.img"),
+            sn720: build.join("ab-sn720.img"),
+        };
+        let _ = fresh(&gate.target, DISK_BYTES)?;
+        make_premade(&gate.premade)?;
+        make_sn720(&gate.sn720)?;
+        Ok(gate)
+    }
+
     /// Boot a kernel whose shell runs `script`, with `cmdline`, the two
     /// disks as `vdd` and `vde` and `extra` after them; its lines.
     fn run(
@@ -403,19 +353,105 @@ impl Boot<'_> {
         disks: (PathBuf, PathBuf),
         extra: Vec<PathBuf>,
     ) -> Result<Vec<String>> {
-        let scripted =
-            cargo::build_kernel_with_init(self.arch, self.args.release, self.zinc, script)?;
+        let arch = Arch::X86_64;
+        let scripted = cargo::build_kernel_with_init(arch, self.args.release, &self.zinc, script)?;
         let image = fat::write_image_with(
-            self.arch,
-            self.loader,
+            arch,
+            &self.loader,
             &scripted,
-            self.initramfs,
+            &self.initramfs,
             Some(cmdline),
         )?;
         let mut booted = self.args.clone();
+        if !booted.timeout_given {
+            // Each boot copies hundreds of MiB through a ring-3 disk driver.
+            booted.timeout = BOOT_SECONDS;
+        }
         booted.install_disks = Some(disks);
         booted.extra_disks = extra;
-        qemu::watch_lines(self.arch, &image, &scripted, &booted, crate::shell::EXITED)
+        qemu::watch_lines(arch, &image, &scripted, &booted, crate::shell::EXITED)
+    }
+
+    /// Boot 2: the installed disk alone, through OVMF.
+    fn installed(&self) -> Result<()> {
+        let mut installed = self.args.clone();
+        installed.boot_virtio = true;
+        if !installed.timeout_given {
+            installed.timeout = BOOT_SECONDS;
+        }
+        let lines = qemu::test_boot_lines(Arch::X86_64, &self.target, &self.kernel, &installed)?;
+        require(
+            &lines,
+            &[(
+                "/ is btrfs on vdd6; the system was installed on it",
+                "the installed disk did not put / on its root partition",
+            )],
+        )?;
+        println!("  x86_64: the installed disk booted with / on vdd6");
+        Ok(())
+    }
+
+    /// Boots 3 to 6: `bootctl` on the installed disk, with the loader's
+    /// words on the command line as a slot boot has them.
+    fn bootctl_boots(&self) -> Result<()> {
+        let build = paths::build_dir(Arch::X86_64);
+        // A new system to try: the live system as a slot image, as `cargo
+        // xtask slot-image` writes one, and as an image's FAT volume.
+        let image = build.join("ab-new-slot.img");
+        let kernel_bytes = std::fs::read(&self.kernel.elf)?;
+        let archive = self.kernel.initramfs(&self.initramfs)?;
+        let label = "ferrix test-install new";
+        crate::slot_image::write(&image, label, &kernel_bytes, &archive, b"ferrix.root=btrfs")?;
+        let fat_image = build.join("ab-fat.img");
+        let written = fat::write_image_with(
+            Arch::X86_64,
+            &self.loader,
+            &self.kernel,
+            &self.initramfs,
+            Some("ferrix.root=btrfs"),
+        )?;
+        let _ = std::fs::copy(written, &fat_image)?;
+        // The loader names the disk it booted from by its GUID.
+        let disk = format!(
+            "ferrix.slot.disk={} ferrix.root=tmpfs",
+            disk_guid(&self.target)?
+        );
+        let boot = |script: &str, words: String| {
+            let extra = vec![self.sn720.clone(), fat_image.clone()];
+            self.run(
+                script,
+                &format!("{words} {disk}"),
+                (image.clone(), self.target.clone()),
+                extra,
+            )
+        };
+
+        // 3. Slot A, good.
+        let a_good = "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1";
+        require(&boot(AS_A, a_good.to_owned())?, AS_A_EXPECT)?;
+        let sequence = loader_takes_a_try(&self.target)?;
+        println!(
+            "  x86_64: slot b written and armed; the loader's decrement made record {sequence}"
+        );
+
+        // 4. Slot B on trial.
+        let words = format!("ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq={sequence}");
+        require(&boot(AS_TRIAL_B, words)?, AS_TRIAL_B_EXPECT)?;
+        println!("  x86_64: on trial, try was refused and good marked slot b");
+
+        // 5. Slot B, good.
+        let words = format!(
+            "ferrix.slot=b ferrix.slot.boot=good ferrix.slot.seq={}",
+            sequence + 1
+        );
+        require(&boot(AS_B, words)?, AS_B_EXPECT)?;
+        let at = flip_initramfs_byte(&self.target, 0)?;
+        println!(
+            "  x86_64: slot a written from a FAT image and taken back; byte {at} of it flipped"
+        );
+
+        // 6. Slot A, which the record no longer calls good.
+        require(&boot(AS_STALE_A, a_good.to_owned())?, AS_STALE_A_EXPECT)
     }
 }
 
@@ -500,7 +536,10 @@ fn make_premade(path: &Path) -> Result<()> {
         DISK_BYTES,
         &sn720_parts(CONTROL_TYPE, SLOT_TYPE, ESP_MIB, SLOT_MIB),
     )?;
-    fill(path, ranges[0])
+    let swap = *ranges
+        .first()
+        .ok_or_else(|| Error::new("a layout with no partitions"))?;
+    fill(path, swap)
 }
 
 fn make_sn720(path: &Path) -> Result<()> {
@@ -509,7 +548,10 @@ fn make_sn720(path: &Path) -> Result<()> {
         256 * MIB,
         &sn720_parts(LINUX_FILESYSTEM, LINUX_FILESYSTEM, 8, 64),
     )?;
-    fill(path, ranges[0])
+    let swap = *ranges
+        .first()
+        .ok_or_else(|| Error::new("a layout with no partitions"))?;
+    fill(path, swap)
 }
 
 /// The premade disk's ranges the installer must not write: its swap, and
@@ -519,7 +561,7 @@ fn premade_untouched(path: &Path) -> Result<Vec<(u64, u64)>> {
     Ok(vec![
         partition(path, 1)?,
         (0, 34 * SECTOR),
-        (len - 33 * SECTOR, 33 * SECTOR),
+        (len.saturating_sub(33 * SECTOR), 33 * SECTOR),
     ])
 }
 
@@ -528,12 +570,12 @@ fn premade_untouched(path: &Path) -> Result<Vec<(u64, u64)>> {
 fn fill(path: &Path, (at, len): (u64, u64)) -> Result<()> {
     let mut file = OpenOptions::new().write(true).open(path)?;
     let mut chunk: Vec<u8> = (0..MIB).map(|i| (i * 7 + 3) as u8).collect();
-    chunk[4086..4096].copy_from_slice(b"SWAPSPACE2");
+    drop(chunk.splice(4086..4096, *b"SWAPSPACE2"));
     let _ = file.seek(SeekFrom::Start(at))?;
     let mut done = 0;
     while done < len {
         let n = (len - done).min(MIB) as usize;
-        file.write_all(&chunk[..n])?;
+        file.write_all(chunk.get(..n).unwrap_or_default())?;
         done += n as u64;
     }
     file.sync_all()?;
@@ -562,6 +604,17 @@ fn same(path: &Path, ranges: &[(u64, u64)], before: &[String], what: &str) -> Re
         )));
     }
     Ok(())
+}
+
+/// The GUID of the disk at `path`, as GPT tools print it.
+fn disk_guid(path: &Path) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut sector = [0_u8; SECTOR as usize];
+    let _ = file.seek(SeekFrom::Start(SECTOR))?;
+    file.read_exact(&mut sector)?;
+    let header = parse_header(&sector, file_len(path)? / SECTOR)
+        .map_err(|e| Error::new(format!("{}: {e}", path.display())))?;
+    Ok(header.disk.to_string())
 }
 
 /// The byte range of partition `number` (1-based) of the disk at `path`.
@@ -604,7 +657,10 @@ fn loader_takes_a_try(path: &Path) -> Result<u64> {
     let next = record
         .after_try()
         .ok_or_else(|| Error::new(format!("x86_64: the record has no try to take: {record:?}")))?;
-    let _ = file.seek(SeekFrom::Start(base + COPY_OFFSETS[write_copy(&current)]))?;
+    let copy = COPY_OFFSETS
+        .get(write_copy(&current))
+        .ok_or_else(|| Error::new("a record copy past the two"))?;
+    let _ = file.seek(SeekFrom::Start(base + copy))?;
     file.write_all(&next.encode())?;
     file.sync_all()?;
     Ok(next.sequence)

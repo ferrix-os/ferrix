@@ -35,8 +35,11 @@ use ferrix_install::layout::{
     self, AbDisk, CONTROL_NAME, CONTROL_TYPE, ESP_NAME, LINUX_SWAP, Part, ROOT_NAME, SLOT_NAMES,
     SLOT_TYPE,
 };
+use ferrix_install::record::Blocks;
 use ferrix_install::{record, slotio};
-use ferrix_partition::{ESP, LINUX_FILESYSTEM, Partition, usable, write_table};
+use ferrix_partition::{
+    ESP, LINUX_FILESYSTEM, Partition, parse_entries, parse_header, usable, write_table,
+};
 use ferrix_slots::Slot;
 use ferrix_slots::record::{COPY_OFFSETS, Record};
 use ferrix_slots::slot::HEADER_LEN;
@@ -83,6 +86,12 @@ pub fn install(
     let mut whole = disk::open_rw(target).map_err(on)?;
     let size = disk::size(&mut whole).map_err(on)?;
     let sectors = size / SECTOR;
+    let block = disk::logical_block_size(target)?;
+    if u64::from(block) != SECTOR {
+        return Err(format!(
+            "{target} has {block}-byte logical blocks; --slots writes only 512-byte ones for now"
+        ));
+    }
 
     let (ab, table) = match disk::table(&mut whole).map_err(on)? {
         Some(table) => match layout::find(target, &table)? {
@@ -105,7 +114,7 @@ pub fn install(
             let partitions = new_layout(sectors, sizes, target)?;
             let table = write_table(sectors, SECTOR as u32, random_guid()?, &partitions)
                 .map_err(|e| e.to_string())?;
-            let ab = AbDisk::from_new(target, &partitions)?;
+            let ab = planned(target, sectors, &table)?;
             (ab, Some(table))
         }
     };
@@ -223,14 +232,13 @@ pub fn install(
         }
         whole.sync_all()
     })?;
-    let blank = record::read(&mut whole, control).map_err(on)?;
-    let first = record::write(
-        &mut whole,
-        control,
-        &blank,
-        Record::initial(Slot::A),
-        SECTOR as usize,
-    )?;
+    let part = ab.slots_layout.control;
+    let mut blocks = Blocks {
+        file: &mut whole,
+        block: SECTOR as u32,
+    };
+    let blank = record::read(&mut blocks, &part)?;
+    let first = record::write(&mut blocks, &part, &blank, Some(Record::initial(Slot::A)))?;
     println!(
         "ferrix-install: the control record says slot a is good (record {})",
         first.sequence
@@ -323,29 +331,27 @@ fn new_layout(sectors: u64, sizes: &Sizes, target: &str) -> Result<Vec<Partition
     Ok(out)
 }
 
-/// The layout just planned, as `layout::find` would see it once written.
-trait FromNew: Sized {
-    fn from_new(target: &str, partitions: &[Partition]) -> Result<Self, String>;
-}
-
-impl FromNew for AbDisk {
-    fn from_new(target: &str, partitions: &[Partition]) -> Result<AbDisk, String> {
-        let entries = partitions
+/// The layout just planned, as `layout::find` will see it once `table` is
+/// written to the disk of `sectors` sectors at `target`.
+fn planned(target: &str, sectors: u64, table: &[(u64, Vec<u8>)]) -> Result<AbDisk, String> {
+    let at = |lba: u64| {
+        table
             .iter()
-            .enumerate()
-            .map(|(i, p)| (u32::try_from(i).unwrap_or(u32::MAX), *p))
-            .collect();
-        let header = ferrix_partition::Header {
-            disk: ferrix_partition::Guid::default(),
-            alternate: 0,
-            first_usable: 0,
-            last_usable: 0,
-            entries_at: 0,
-            entries: 0,
-            entry_size: 0,
-            entries_crc: 0,
-        };
-        layout::find(target, &disk::Table { header, entries })?
-            .ok_or_else(|| "the new layout has no control partition".to_owned())
-    }
+            .find(|(first, _)| *first == lba)
+            .map(|(_, bytes)| bytes.clone())
+            .ok_or_else(|| format!("the new table has no sector {lba}"))
+    };
+    let raw_header = at(1)?;
+    let raw_array = at(2)?;
+    let header = parse_header(&raw_header, sectors).map_err(|e| e.to_string())?;
+    let entries = parse_entries(&header, &raw_array).map_err(|e| e.to_string())?;
+    let table = disk::Table {
+        header,
+        entries,
+        raw_header,
+        raw_array,
+        sectors,
+    };
+    layout::find(target, &table)?
+        .ok_or_else(|| "the new layout has no control partition".to_owned())
 }

@@ -902,5 +902,6 @@ dependencies = [
  "ferrix-netwire",
  "ferrix-partition",
  "ferrix-pkg",
+ "ferrix-slots",
  "ferrix-vdagent",
 ]

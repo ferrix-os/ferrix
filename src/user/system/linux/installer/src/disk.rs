@@ -11,10 +11,16 @@ pub const SECTOR: u64 = 512;
 /// Bytes copied or compared at a time.
 pub const CHUNK: usize = 1 << 20;
 
-/// A disk's table: its header and its used entries, each with its index.
+/// A disk's table: its header and its used entries, each with its index,
+/// and the bytes they were read from, for `ferrix-slots`' own reading.
 pub struct Table {
     pub header: Header,
     pub entries: Vec<(u32, Partition)>,
+    /// The primary header's sector and the entry array, as read.
+    pub raw_header: Vec<u8>,
+    pub raw_array: Vec<u8>,
+    /// The disk's size in sectors.
+    pub sectors: u64,
 }
 
 /// Open `path` to read.
@@ -50,9 +56,13 @@ pub fn table(disk: &mut File) -> io::Result<Option<Table>> {
             .ok_or_else(|| io::Error::other("an entry array past the end"))?,
         &mut array,
     )?;
-    Ok(parse_entries(&header, &array)
-        .ok()
-        .map(|entries| Table { header, entries }))
+    Ok(parse_entries(&header, &array).ok().map(|entries| Table {
+        header,
+        entries,
+        raw_header: sector.to_vec(),
+        raw_array: array,
+        sectors,
+    }))
 }
 
 /// The ASCII name of a partition, up to its first zero.
@@ -94,6 +104,25 @@ pub fn whole_disks() -> Vec<String> {
         .into_iter()
         .filter(|path| std::path::Path::new(path).exists())
         .collect()
+}
+
+/// The logical block size of the whole disk `disk` (`/dev/vdd`), from
+/// sysfs.
+///
+/// # Errors
+///
+/// When sysfs does not say.
+pub fn logical_block_size(disk: &str) -> Result<u32, String> {
+    let name = disk.rsplit('/').next().unwrap_or(disk);
+    let paths = [
+        format!("/sys/class/block/{name}/queue/logical_block_size"),
+        format!("/sys/block/{name}/queue/logical_block_size"),
+    ];
+    paths
+        .iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse().ok())
+        .ok_or_else(|| format!("{disk}: sysfs does not give its logical block size"))
 }
 
 pub fn read_at(file: &mut File, at: u64, bytes: &mut [u8]) -> io::Result<()> {

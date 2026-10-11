@@ -624,11 +624,7 @@ fn run() -> Result<()> {
     }
 
     match command {
-        "build" => build(&args),
-        "slot-image" => {
-            slot_image::set_wanted(true);
-            build(&args)
-        }
+        "build" | "slot-image" => slot_image::build(command, &args),
         "run" => run_machine(args),
         "test-btrfs" => btrfs_check::test_btrfs(&args, |arch| build_image(arch, &args)),
         "test-powerfail" => powerfail::test_powerfail(&args, |arch| build_parts(arch, &args)),

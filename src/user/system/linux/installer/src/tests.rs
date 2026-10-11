@@ -24,20 +24,42 @@ fn scratch(name: &str, bytes: u64) -> File {
 
 #[test]
 fn records_alternate_copies_and_a_torn_newest_falls_back() {
-    let mut control = scratch("control", 1 << 20);
-    let first = record::read(&mut control, 0).unwrap();
-    assert_eq!(first.record(), None);
-    let init = record::write(&mut control, 0, &first, Record::initial(Slot::A), 512).unwrap();
-    let read = record::read(&mut control, 0).unwrap();
-    assert_eq!(read.record(), Some(init));
-    let armed =
-        record::write(&mut control, 0, &read, init.armed(Slot::B, 1).unwrap(), 512).unwrap();
-    let read = record::read(&mut control, 0).unwrap();
-    assert_eq!(read.record(), Some(armed));
-    assert!(read.valid(0) && read.valid(1));
+    let mut file = scratch("control", 2 << 20);
+    // A control partition from sector 2048 to the end.
+    let part = ferrix_slots::gpt::Part {
+        index: 2,
+        unique: [0; 16],
+        first_lba: 2048,
+        last_lba: 4095,
+    };
+    let mut blocks = record::Blocks {
+        file: &mut file,
+        block: 512,
+    };
+    let first = record::read(&mut blocks, &part).unwrap();
+    assert_eq!(record::current(&first), None);
+    let init = record::write(&mut blocks, &part, &first, Some(Record::initial(Slot::A))).unwrap();
+    let read = record::read(&mut blocks, &part).unwrap();
+    assert_eq!(record::current(&read), Some(init));
+    let armed = record::write(&mut blocks, &part, &read, init.armed(Slot::B, 1)).unwrap();
+    assert_eq!(
+        record::current(&record::read(&mut blocks, &part).unwrap()),
+        Some(armed)
+    );
+    assert_eq!(record::copies_valid(&mut blocks, &part), [true, true]);
+    // A write that goes nowhere: a sequence not above the current one.
+    let current = record::read(&mut blocks, &part).unwrap();
+    assert!(record::write(&mut blocks, &part, &current, Some(init)).is_err());
     // Tear the newest copy (copy 1): the record is the one before it.
-    disk::write_at(&mut control, COPY_OFFSETS[1] + 20, &[0xAA]).unwrap();
-    assert_eq!(record::read(&mut control, 0).unwrap().record(), Some(init));
+    disk::write_at(&mut file, 2048 * 512 + COPY_OFFSETS[1] + 20, &[0xAA]).unwrap();
+    let mut blocks = record::Blocks {
+        file: &mut file,
+        block: 512,
+    };
+    assert_eq!(
+        record::current(&record::read(&mut blocks, &part).unwrap()),
+        Some(init)
+    );
 }
 
 fn image() -> slotio::Image {
