@@ -18,6 +18,7 @@
 #![no_main]
 
 mod arch;
+mod bootlog;
 mod console;
 mod kaslr;
 mod load;

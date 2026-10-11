@@ -12,7 +12,7 @@ use core::ptr;
 use ferrix_bootinfo::PAGE_SIZE;
 
 use crate::uefi::protocols::{
-    BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_READ, FILE_POSITION_END, FileProtocol,
+    BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_CREATE, FILE_MODE_READ, FILE_MODE_WRITE, FILE_POSITION_END, FileProtocol,
     GRAPHICS_OUTPUT_GUID, GraphicsOutput, LOADED_IMAGE_GUID, LoadedImage, RNG_GUID, Rng,
     SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
 };
@@ -379,7 +379,7 @@ impl Services {
     /// pages.
     pub(crate) fn read_file(&self, path: &str, kind: MemoryType) -> Result<(Allocation, u64)> {
         let root = self.open_volume()?;
-        let file = match self.open_file(root, path) {
+        let file = match self.open_file(root, path, FILE_MODE_READ) {
             Ok(file) => file,
             Err(error) => {
                 // A missing file is an answer a caller may expect -- the
@@ -431,6 +431,73 @@ impl Services {
         Ok((allocation, size))
     }
 
+    /// Make `path` on the loader's own volume hold exactly `bytes`: delete
+    /// it if it is there, create it, write, close. Only the boot log calls
+    /// this (`bootlog.rs`), and only for its own files under `FERRIX/`.
+    pub(crate) fn replace_file(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        let root = self.open_volume()?;
+        let written = self.replace_under(root, path, bytes);
+        // SAFETY: firmware returned `root` from `open_volume`, so it is a live
+        // `FileProtocol`.
+        let volume = unsafe { &*root };
+        // SAFETY: `root` is open and is closed exactly once, here.
+        let _ = unsafe { (volume.close)(root) };
+        written
+    }
+
+    /// [`Services::replace_file`] under an open root directory.
+    fn replace_under(&self, root: *mut FileProtocol, path: &str, bytes: &[u8]) -> Result<()> {
+        // FAT through UEFI has no truncate short of `SetInfo`: delete first.
+        if let Ok(old) = self.open_file(root, path, FILE_MODE_READ | FILE_MODE_WRITE) {
+            // SAFETY: firmware returned `old` from `open`, so it is live.
+            let handle = unsafe { &*old };
+            // SAFETY: `delete` closes `old` whatever it returns, so it is not
+            // used again.
+            let status = unsafe { (handle.delete)(old) };
+            check("deleting a log file", status)?;
+        }
+        let file = self.open_file(
+            root,
+            path,
+            FILE_MODE_READ | FILE_MODE_WRITE | FILE_MODE_CREATE,
+        )?;
+        // SAFETY: firmware returned `file` from `open`, so it is live until it
+        // is closed below.
+        let handle = unsafe { &*file };
+        let mut len = bytes.len();
+        // SAFETY: `bytes` is `len` readable bytes, and `len` is a live local
+        // firmware writes the count it wrote into.
+        let status = unsafe { (handle.write)(file, &raw mut len, bytes.as_ptr()) };
+        // SAFETY: `file` is open and is closed exactly once, here; closing
+        // flushes it.
+        let closed = unsafe { (handle.close)(file) };
+        check("writing a log file", status)?;
+        if len != bytes.len() {
+            return Err(BootError::plain("a log file was written short"));
+        }
+        check("closing a log file", closed)
+    }
+
+    /// The firmware's vendor string, as far as it is ASCII, and its revision.
+    pub(crate) fn firmware_vendor(&self, out: &mut [u8]) -> (usize, u32) {
+        let table = self.table();
+        let mut used = 0;
+        let vendor = table.firmware_vendor;
+        if !vendor.is_null() {
+            for (index, slot) in out.iter_mut().enumerate() {
+                // SAFETY: firmware's vendor string is NUL-terminated UCS-2,
+                // and the walk stops at the terminator or the buffer's end.
+                let unit = unsafe { vendor.add(index).read_unaligned() };
+                if unit == 0 {
+                    break;
+                }
+                *slot = u8::try_from(unit).ok().filter(u8::is_ascii_graphic).unwrap_or(b' ');
+                used += 1;
+            }
+        }
+        (used, table.firmware_revision)
+    }
+
     /// Where firmware loaded this program, and how many bytes of it there are.
     ///
     /// The switch to the loader's own tables fetches its next instruction at
@@ -466,8 +533,13 @@ impl Services {
         Ok(root)
     }
 
-    /// Open one file under `root`.
-    fn open_file(&self, root: *mut FileProtocol, path: &str) -> Result<*mut FileProtocol> {
+    /// Open one file under `root`, in `mode`.
+    fn open_file(
+        &self,
+        root: *mut FileProtocol,
+        path: &str,
+        mode: u64,
+    ) -> Result<*mut FileProtocol> {
         let mut wide = [0u16; MAX_PATH];
         widen(path, &mut wide)?;
 
@@ -477,7 +549,7 @@ impl Services {
         // SAFETY: `wide` is NUL terminated by `widen`, and `file` is a live
         // local for firmware to write the new handle into.
         let status =
-            unsafe { (directory.open)(root, &raw mut file, wide.as_ptr(), FILE_MODE_READ, 0) };
+            unsafe { (directory.open)(root, &raw mut file, wide.as_ptr(), mode, 0) };
         check("opening a file", status)?;
         Ok(file)
     }

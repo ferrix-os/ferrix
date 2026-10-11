@@ -112,8 +112,10 @@ impl Write for Writer {
     }
 }
 
-/// Write formatted output to the console, if there is one.
+/// Write formatted output to the console, if there is one, and to the boot
+/// log (`bootlog.rs`) whether or not there is.
 pub(crate) fn write(arguments: fmt::Arguments<'_>) {
+    crate::bootlog::record(arguments);
     // SAFETY: single-threaded, as documented on the `Sync` impl above.
     let Some(output) = (unsafe { *CONSOLE.0.get() }) else {
         return;

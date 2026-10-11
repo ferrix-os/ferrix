@@ -112,6 +112,12 @@ pub(crate) struct SimpleFileSystem {
 /// Open a file for reading.
 pub(crate) const FILE_MODE_READ: u64 = 0x0000_0000_0000_0001;
 
+/// Open a file for writing too; only together with [`FILE_MODE_READ`].
+pub(crate) const FILE_MODE_WRITE: u64 = 0x0000_0000_0000_0002;
+
+/// Create the file if it is missing; only with read and write.
+pub(crate) const FILE_MODE_CREATE: u64 = 0x8000_0000_0000_0000;
+
 /// A file or directory.
 #[repr(C)]
 pub(crate) struct FileProtocol {
@@ -124,13 +130,18 @@ pub(crate) struct FileProtocol {
         attributes: u64,
     ) -> Status,
     pub(crate) close: unsafe extern "efiapi" fn(this: *mut FileProtocol) -> Status,
-    delete: usize,
+    /// Delete the file and close the handle, whatever the status says.
+    pub(crate) delete: unsafe extern "efiapi" fn(this: *mut FileProtocol) -> Status,
     pub(crate) read: unsafe extern "efiapi" fn(
         this: *mut FileProtocol,
         buffer_size: *mut usize,
         buffer: *mut u8,
     ) -> Status,
-    write: usize,
+    pub(crate) write: unsafe extern "efiapi" fn(
+        this: *mut FileProtocol,
+        buffer_size: *mut usize,
+        buffer: *const u8,
+    ) -> Status,
     pub(crate) get_position:
         unsafe extern "efiapi" fn(this: *mut FileProtocol, position: *mut u64) -> Status,
     pub(crate) set_position:
