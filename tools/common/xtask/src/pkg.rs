@@ -83,9 +83,22 @@ const PACKAGES: &str = "var/lib/pkg-test";
 /// one line of text at `bin/<name>`: the boot reads it rather than runs it,
 /// since its image has no `/bin/sh` for a script.
 fn made(name: &str, depends: &[&str], arch: Arch) -> Result<Vec<u8>> {
+    made_at(name, "1.0", "here", None, depends, arch)
+}
+
+/// [`made`], of `version`, its line saying `says`, and with `extra` a
+/// second file, `bin/<extra>`, saying the same.
+fn made_at(
+    name: &str,
+    version: &str,
+    says: &str,
+    extra: Option<&str>,
+    depends: &[&str],
+    arch: Arch,
+) -> Result<Vec<u8>> {
     let depends: Vec<String> = depends.iter().map(|name| format!("\"{name}\"")).collect();
     let text = format!(
-        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test-pkg's {name}\"\nlicense = \"MIT\"\n\
+        "[package]\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"test-pkg's {name}\"\nlicense = \"MIT\"\n\
          abi = \"linux\"\narches = [\"{arch}\"]\ndepends = [{}]\n\n\
          [[package.files]]\nfrom = \"{name}\"\nto = \"bin/{name}\"\nmode = \"755\"\n",
         depends.join(", "),
@@ -95,24 +108,28 @@ fn made(name: &str, depends: &[&str], arch: Arch) -> Result<Vec<u8>> {
         .map_err(|error| Error::new(format!("test-pkg's {name}: {error}")))?
         .package;
     package.arches = vec![arch.name().to_owned()];
-    let script = format!("{name}: here\n").into_bytes();
-    let path = format!("bin/{name}");
+    let script = format!("{name}: {says}\n").into_bytes();
+    let mut files: Vec<File> = std::iter::once(name)
+        .chain(extra)
+        .map(|file| File {
+            path: format!("bin/{file}"),
+            mode: 0o755,
+            content: Content::Bytes(script.clone()),
+        })
+        .collect();
     let record = Record {
         package,
-        files: vec![Installed::of(&path, 0o755, &script)],
+        files: files
+            .iter()
+            .map(|file| Installed::of(&file.path, 0o755, &script))
+            .collect(),
     };
-    initramfs::package(&[
-        File {
-            path,
-            mode: 0o755,
-            content: Content::Bytes(script),
-        },
-        File {
-            path: record::path(name),
-            mode: 0o644,
-            content: Content::Bytes(record::render(&record).into_bytes()),
-        },
-    ])
+    files.push(File {
+        path: record::path(name),
+        mode: 0o644,
+        content: Content::Bytes(record::render(&record).into_bytes()),
+    });
+    initramfs::package(&files)
 }
 
 /// What the boot's shell runs. Each check echoes `pkg-test: ok <what>`.
@@ -132,12 +149,22 @@ read -r line < /bin/pkg-base || echo "pkg-test: ok nothing of it went in"
 pkg install $P/user.fxpkg || echo "pkg-test: ok refused a missing dependency"
 pkg install $P/user.fxpkg $P/base.fxpkg && echo "pkg-test: ok installed together"
 read -r line < /bin/pkg-user && case "$line" in 'pkg-user: here') echo "pkg-test: ok user is there";; esac
+pkg install $P/base2.fxpkg || echo "pkg-test: ok refused an installed package without --replace"
+pkg install --replace $P/changed2.fxpkg || echo "pkg-test: ok refused a changed replacement"
+read -r line < /bin/pkg-base && case "$line" in 'pkg-base: here') echo "pkg-test: ok the old version stayed";; esac
+pkg install --replace $P/base2.fxpkg && echo "pkg-test: ok replaced"
+read -r line < /bin/pkg-base && case "$line" in 'pkg-base: two') echo "pkg-test: ok the new version is there";; esac
+read -r line < /bin/pkg-base-two && echo "pkg-test: ok its new file is there"
+pkg list | while read -r line; do case "$line" in 'pkg-base '*' 2.0 '*) echo "pkg-test: ok listed as 2.0";; esac; done
+read -r line < /bin/pkg-user && echo "pkg-test: ok what depends on it stayed"
+pkg install --replace $P/base.fxpkg && echo "pkg-test: ok replaced back"
+read -r line < /bin/pkg-base-two || echo "pkg-test: ok the newer version's own file went with it"
 pkg remove pkg-base || echo "pkg-test: ok refused removing a dependency"
 pkg remove pkg-user && pkg remove pkg-base && echo "pkg-test: ok removed both"
 "#;
 
 /// The lines the boot must print, in any order.
-const WANTED: [&str; 14] = [
+const WANTED: [&str; 24] = [
     "pkg-test: started",
     "pkg-test: ok installed",
     "pkg-test: ok listed",
@@ -150,6 +177,16 @@ const WANTED: [&str; 14] = [
     "pkg-test: ok refused a missing dependency",
     "pkg-test: ok installed together",
     "pkg-test: ok user is there",
+    "pkg-test: ok refused an installed package without --replace",
+    "pkg-test: ok refused a changed replacement",
+    "pkg-test: ok the old version stayed",
+    "pkg-test: ok replaced",
+    "pkg-test: ok the new version is there",
+    "pkg-test: ok its new file is there",
+    "pkg-test: ok listed as 2.0",
+    "pkg-test: ok what depends on it stayed",
+    "pkg-test: ok replaced back",
+    "pkg-test: ok the newer version's own file went with it",
     "pkg-test: ok refused removing a dependency",
     "pkg-test: ok removed both",
 ];
@@ -174,6 +211,12 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
         let changed = initramfs::with_files_changed(&base, |name, data| {
             Ok((name == "bin/pkg-base").then(|| [data, b"changed\n".as_slice()].concat()))
         })?;
+        // pkg-base 2.0: its line changed and a file of its own added, and
+        // a copy of it with one byte changed after its record was written.
+        let base2 = made_at("pkg-base", "2.0", "two", Some("pkg-base-two"), &[], arch)?;
+        let changed2 = initramfs::with_files_changed(&base2, |name, data| {
+            Ok((name == "bin/pkg-base").then(|| [data, b"changed\n".as_slice()].concat()))
+        })?;
         let package = |name: &str, bytes: Vec<u8>| File {
             path: format!("{PACKAGES}/{name}.fxpkg"),
             mode: 0o644,
@@ -189,6 +232,8 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
             package("base", base),
             package("changed", changed),
             package("user", made("pkg-user", &["pkg-base"], arch)?),
+            package("base2", base2),
+            package("changed2", changed2),
         ];
         let shell_program = zinc::built(arch)?.ok_or_else(|| {
             Error::new(format!(
@@ -220,14 +265,122 @@ pub(crate) fn test_pkg(args: &Args) -> Result<()> {
                 tail.join("\n    ")
             )));
         }
-        println!("{arch}: pkg installed, ran and removed the stat service, and refused all three");
+        println!(
+            "{arch}: pkg installed, ran and removed the stat service, replaced a package and back, \
+             and refused all five"
+        );
     }
     Ok(())
 }
 
+/// `test-pkg`, or `install-app`: the package manager's two commands.
+///
+/// # Errors
+///
+/// As [`test_pkg`] and [`install_app`].
+pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
+    if command == "install-app" {
+        install_app(args)
+    } else {
+        test_pkg(args)
+    }
+}
+
+/// `cargo xtask install-app --app NAME [--to DIR]`: build each app named
+/// for this machine and put it in the running system, each in the place of
+/// the version installed (`docs/DEV-ON-FERRIX.md` §4.4, D5): what a developer
+/// on Ferrix types between an edit and running the result.
+///
+/// It is `build-apps` and then `pkg install --replace`, with the `pkg` this
+/// tree builds, so that the tree being worked on decides what a replacement
+/// is. On Ferrix the root is `/`, and writing it is root's, as `pkg`'s is;
+/// anywhere else the root has to be named with `--to`, since `/` there is
+/// not a Ferrix system and an app's files have no business in it.
+///
+/// # Errors
+///
+/// No `--app`, a root that is not named off Ferrix, a build that fails, or a
+/// refusal of `pkg`'s, which it prints.
+pub(crate) fn install_app(args: &Args) -> Result<()> {
+    if args.apps.is_empty() {
+        return Err(Error::new("install-app needs the app: --app NAME"));
+    }
+    let arch = Arch::host();
+    let root = install_root(args.to.as_deref(), on_ferrix())?;
+    let program = build(arch)?.ok_or_else(|| Error::new(format!("pkg is not built for {arch}")))?;
+    let mut packages = Vec::new();
+    for name in &args.apps {
+        let package = crate::apps::built_package(name, arch, args.release)?
+            .ok_or_else(|| Error::new(format!("the app {name} is not built for {arch}")))?;
+        packages.push(package);
+    }
+    let status = std::process::Command::new(&program)
+        .args(pkg_arguments(&root, &packages))
+        .status()
+        .map_err(|error| Error::new(format!("running {}: {error}", program.display())))?;
+    if !status.success() {
+        return Err(Error::new(format!(
+            "pkg did not replace {}: it said why above{}",
+            args.apps.join(", "),
+            if on_ferrix() && root == "/" {
+                " (writing / is root's: `su -c 'cargo xtask install-app ...'`)"
+            } else {
+                ""
+            }
+        )));
+    }
+    Ok(())
+}
+
+/// The root [`install_app`] writes: `--to`'s, or `/` on Ferrix alone.
+fn install_root(to: Option<&str>, on_ferrix: bool) -> Result<String> {
+    match to {
+        Some(dir) => Ok(dir.to_owned()),
+        None if on_ferrix => Ok("/".to_owned()),
+        None => Err(Error::new(
+            "install-app puts an app into a running Ferrix; on another system name the root to \
+             install into with --to DIR",
+        )),
+    }
+}
+
+/// `pkg`'s command line for [`install_app`].
+fn pkg_arguments(root: &str, packages: &[PathBuf]) -> Vec<std::ffi::OsString> {
+    let mut arguments: Vec<std::ffi::OsString> = vec![
+        "--root".into(),
+        root.into(),
+        "install".into(),
+        "--replace".into(),
+    ];
+    arguments.extend(packages.iter().map(|path| path.as_os_str().to_owned()));
+    arguments
+}
+
+/// Whether this process runs on Ferrix, whose `uname -s` says so.
+fn on_ferrix() -> bool {
+    std::process::Command::new("uname")
+        .arg("-s")
+        .output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Ferrix")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SCRIPT, WANTED};
+    use super::{SCRIPT, WANTED, install_root, pkg_arguments};
+
+    #[test]
+    fn install_app_writes_slash_on_ferrix_alone() {
+        assert_eq!(install_root(None, true).unwrap(), "/");
+        assert!(install_root(None, false).is_err());
+        assert_eq!(install_root(Some("/tmp/r"), false).unwrap(), "/tmp/r");
+    }
+
+    #[test]
+    fn install_app_asks_pkg_to_replace() {
+        let arguments = pkg_arguments("/", &[std::path::PathBuf::from("/b/x.fxpkg")]);
+        let words: Vec<&str> = arguments.iter().filter_map(|a| a.to_str()).collect();
+        assert_eq!(words, ["--root", "/", "install", "--replace", "/b/x.fxpkg"]);
+    }
 
     #[test]
     fn every_wanted_line_is_one_the_script_echoes() {

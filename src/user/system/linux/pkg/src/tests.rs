@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use ferrix_pkg::manifest;
 use ferrix_pkg::record::{self, Installed, Record};
 
-use super::{Package, info_lines, install, installed, read, remove, this_arch};
+use super::{Package, info_lines, install, install_replacing, installed, read, remove, this_arch};
 
 /// What one entry of a test package is.
 enum Made {
@@ -57,10 +57,16 @@ fn newc(entries: &[(String, u32, Vec<u8>)]) -> Vec<u8> {
 }
 
 /// The record of `name`, depending on `depends`, built for `arch`.
-fn record_of(name: &str, depends: &[&str], arch: &str, files: Vec<Installed>) -> Record {
+fn record_of(
+    name: &str,
+    version: &str,
+    depends: &[&str],
+    arch: &str,
+    files: Vec<Installed>,
+) -> Record {
     let depends: Vec<String> = depends.iter().map(|d| format!("\"{d}\"")).collect();
     let text = format!(
-        "[package]\nname = \"{name}\"\nversion = \"1.0\"\ndescription = \"test {name}\"\nlicense = \"MIT\"\n\
+        "[package]\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"test {name}\"\nlicense = \"MIT\"\n\
          abi = \"linux\"\narches = [\"{arch}\"]\ndepends = [{}]\n\n\
          [[package.files]]\nfrom = \"x\"\nto = \"bin/x\"\nmode = \"755\"\n",
         depends.join(", ")
@@ -74,6 +80,18 @@ fn record_of(name: &str, depends: &[&str], arch: &str, files: Vec<Installed>) ->
 /// (all of them when `None`).
 fn package(
     name: &str,
+    depends: &[&str],
+    files: &[(&str, Made)],
+    arch: &str,
+    tamper: Option<&str>,
+) -> Vec<u8> {
+    package_at(name, "1.0", depends, files, arch, tamper)
+}
+
+/// [`package`], of `version`.
+fn package_at(
+    name: &str,
+    version: &str,
     depends: &[&str],
     files: &[(&str, Made)],
     arch: &str,
@@ -97,7 +115,7 @@ fn package(
             }
         }
     }
-    let record = record_of(name, depends, arch, listed);
+    let record = record_of(name, version, depends, arch, listed);
     entries.push((
         record::path(name),
         0o100_644,
@@ -270,4 +288,128 @@ fn a_file_already_gone_is_said_and_the_rest_removed() {
     let error = remove(&root, "base").unwrap_err();
     assert!(error.0.contains("is not installed"), "{error}");
     let _ = fs::remove_dir_all(&root);
+}
+
+/// `base` 2.0: its program changed, its data gone, a file of its own added.
+fn base_two(tamper: Option<&str>) -> Vec<u8> {
+    package_at(
+        "base",
+        "2.0",
+        &[],
+        &[
+            ("bin/base", Made::File(b"#!/bin/sh\necho base two\n")),
+            ("bin/base-too", Made::Link("base")),
+            ("usr/lib/base/two", Made::File(b"new in two")),
+        ],
+        this_arch(),
+        tamper,
+    )
+}
+
+#[test]
+fn a_replacement_takes_the_old_version_place_whole() {
+    let root = root("replace");
+    let _ = install(&root, read_all(&[base(), user()])).unwrap();
+    let error = install(&root, read_all(&[base_two(None)])).unwrap_err();
+    assert!(error.0.contains("installed already"), "{error}");
+    assert!(error.0.contains("--replace"), "{error}");
+
+    let done = install_replacing(&root, read_all(&[base_two(None)])).unwrap();
+    assert_eq!(done.len(), 1);
+    let (new, old) = &done[0];
+    assert_eq!(new.package.version.as_str(), "2.0");
+    assert_eq!(old.as_ref().unwrap().package.version.as_str(), "1.0");
+    assert_eq!(
+        fs::read(root.join("bin/base")).unwrap(),
+        b"#!/bin/sh\necho base two\n"
+    );
+    assert_eq!(
+        fs::read(root.join("usr/lib/base/two")).unwrap(),
+        b"new in two"
+    );
+    assert!(
+        !root.join("usr/lib/base/data").exists(),
+        "a file only the old version had goes"
+    );
+    let records = installed(&root).unwrap();
+    let record = records.iter().find(|r| r.package.name == "base").unwrap();
+    assert_eq!(record.package.version.as_str(), "2.0");
+    assert_eq!(names(&root), ["base", "user"], "what depends on it stays");
+    let leftovers: Vec<_> = walk(&root)
+        .into_iter()
+        .filter(|path| path.to_string_lossy().ends_with(".pkg-new"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+
+    // And back: the newer version's own file goes with it.
+    let _ = install_replacing(&root, read_all(&[base()])).unwrap();
+    assert!(!root.join("usr/lib/base/two").exists());
+    assert_eq!(
+        fs::read(root.join("usr/lib/base/data")).unwrap(),
+        b"base data"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_replacement_that_is_refused_changes_nothing() {
+    let root = root("replace-refused");
+    let _ = install(&root, read_all(&[base()])).unwrap();
+    // Unlike its record: refused as it is read.
+    assert!(read(&base_two(Some("bin/base"))).is_err());
+    // A path of the system's, not the old version's: refused before a write.
+    fs::create_dir_all(root.join("usr/lib/base")).unwrap();
+    fs::write(root.join("usr/lib/base/two"), b"the system's").unwrap();
+    let error = install_replacing(&root, read_all(&[base_two(None)])).unwrap_err();
+    assert!(
+        error
+            .0
+            .contains("/usr/lib/base/two, which is there already"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(root.join("bin/base")).unwrap(),
+        b"#!/bin/sh\necho base\n"
+    );
+    assert_eq!(
+        fs::read(root.join("usr/lib/base/two")).unwrap(),
+        b"the system's"
+    );
+    assert_eq!(installed(&root).unwrap()[0].package.version.as_str(), "1.0");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn replacing_what_is_not_installed_installs_it() {
+    let root = root("replace-depends");
+    let _ = install(&root, read_all(&[base(), user()])).unwrap();
+    let other = package(
+        "other",
+        &[],
+        &[("bin/other", Made::File(b"x"))],
+        this_arch(),
+        None,
+    );
+    // Replacing nothing is an install.
+    let done = install_replacing(&root, read_all(&[other])).unwrap();
+    assert!(done[0].1.is_none());
+    assert_eq!(names(&root), ["base", "other", "user"]);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Every file under `root`.
+fn walk(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if fs::symlink_metadata(&path).unwrap().is_dir() {
+                todo.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
 }

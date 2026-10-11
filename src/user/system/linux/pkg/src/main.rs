@@ -4,6 +4,9 @@
 //! pkg [--root DIR] list               the packages installed
 //! pkg [--root DIR] info NAME          one package: what it is and its files
 //! pkg [--root DIR] install FILE...    install packages (.fxpkg), together
+//! pkg [--root DIR] install --replace FILE...
+//!                                     the same, each in the place of the
+//!                                     version installed, if one is
 //! pkg [--root DIR] remove NAME        remove a package
 //! ```
 //!
@@ -15,9 +18,10 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use pkg::{Error, info_lines, install, installed, read, remove};
+use pkg::{Error, info_lines, install, install_replacing, installed, read, remove};
 
-const USAGE: &str = "usage: pkg [--root DIR] list | info NAME | install FILE... | remove NAME";
+const USAGE: &str =
+    "usage: pkg [--root DIR] list | info NAME | install [--replace] FILE... | remove NAME";
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,6 +39,9 @@ fn main() -> ExitCode {
     let done = match (command.as_str(), rest) {
         ("list", []) => list(&root),
         ("info", [name]) => info(&root, name),
+        ("install", [flag, files @ ..]) if flag == "--replace" && !files.is_empty() => {
+            replace_files(&root, files)
+        }
         ("install", files) if !files.is_empty() => install_files(&root, files),
         ("remove", [name]) => remove_one(&root, name),
         _ => return usage(),
@@ -86,13 +93,43 @@ fn info(root: &std::path::Path, name: &str) -> Result<(), Error> {
     say(&info_lines(&record))
 }
 
-fn install_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> {
+/// Each file read as a package.
+fn read_files(files: &[String]) -> Result<Vec<pkg::Package>, Error> {
     let mut packages = Vec::new();
     for file in files {
         let bytes = std::fs::read(file).map_err(|error| Error(format!("{file}: {error}")))?;
         packages.push(read(&bytes).map_err(|error| Error(format!("{file}: {error}")))?);
     }
-    let lines: Vec<String> = install(root, packages)?
+    Ok(packages)
+}
+
+fn replace_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> {
+    let lines: Vec<String> = install_replacing(root, read_files(files)?)?
+        .iter()
+        .map(|(record, old)| {
+            let package = &record.package;
+            match old {
+                Some(old) => format!(
+                    "pkg: replaced {} {} with {} ({} files)",
+                    package.name,
+                    old.package.version.as_str(),
+                    package.version.as_str(),
+                    record.files.len()
+                ),
+                None => format!(
+                    "pkg: installed {} {} ({} files)",
+                    package.name,
+                    package.version.as_str(),
+                    record.files.len()
+                ),
+            }
+        })
+        .collect();
+    say(&lines)
+}
+
+fn install_files(root: &std::path::Path, files: &[String]) -> Result<(), Error> {
+    let lines: Vec<String> = install(root, read_files(files)?)?
         .iter()
         .map(|record| {
             format!(

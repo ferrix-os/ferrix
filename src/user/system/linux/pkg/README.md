@@ -9,6 +9,8 @@ root. `pkg` does the same on a running Ferrix:
 pkg [--root DIR] list               the packages installed
 pkg [--root DIR] info NAME          one package: what it is and its files
 pkg [--root DIR] install FILE...    install packages (.fxpkg), together
+pkg [--root DIR] install --replace FILE...
+                                    the same, each in its installed version's place
 pkg [--root DIR] remove NAME        remove a package
 ```
 
@@ -20,4 +22,4 @@ builds images with, and the archive reader is the kernel's
 
 `cargo test` here runs it against a directory as the root;
 `cargo xtask test-pkg` boots it, installs, runs and removes the stat
-service, and requires its three refusals.
+service, replaces a package and back, and requires its five refusals.

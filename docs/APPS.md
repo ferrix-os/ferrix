@@ -224,6 +224,8 @@ in a directory:
 pkg list               the packages installed: their records
 pkg info NAME          one package: what it is, and each file
 pkg install FILE...    install packages (.fxpkg), together
+pkg install --replace FILE...
+                       the same, each in the place of its installed version
 pkg remove NAME        remove a package
 ```
 
@@ -235,15 +237,29 @@ nor coming with it (`ferrix_pkg::plan`), or when it would put down a path
 that is there -- another package's or the system's. The record is written
 last and removed first, so a package half put down is not installed. A
 removal is refused while an installed package depends on it; it deletes what
-the record lists and the directories it leaves empty. `cargo xtask test-pkg`
-boots it on every architecture: it installs, runs and removes the stat
-service and refuses a changed file, a missing dependency and a needed
-removal.
+the record lists and the directories it leaves empty.
+
+`pkg install --replace` (2026-10-11, `docs/DEV-ON-FERRIX.md` D5) takes an
+installed package's place in one transaction instead of refusing it. Every
+check is made first, against the set as it will be; a path that is there may
+be put down only where the version being replaced owns it. Then every new
+file is written beside its place, each is renamed over it, each file only
+the old version had is deleted, and the new record is renamed over the old
+one last: until then the old record is the package's and owns every path, so
+a replacement that stopped part way is finished by running it again. A
+running program keeps the file it started from. `cargo xtask install-app
+--app NAME` builds an app and replaces it in the running system that way.
+
+`cargo xtask test-pkg` boots it on every architecture: it installs, runs and
+removes the stat service, replaces a package with its next version and back
+(the newer version's own file goes with it), and refuses a changed file, a
+changed replacement, a package installed already without `--replace`, a
+missing dependency and a needed removal.
 
 What this leaves room for, and deliberately does not build yet:
 
-* **Upgrades.** `pkg install` of a package already installed is refused;
-  remove it first. An upgrade is a removal and an install in one plan.
+* **Upgrades from a repository.** `pkg install --replace` replaces what it
+  is given; finding a newer version is the repository's.
 * **A repository.** An index of packages per architecture, built by CI and
   served statically (GitHub's releases or Pages), fetched with the curl
   app.

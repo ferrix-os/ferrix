@@ -281,10 +281,12 @@ steps need a nightly toolchain the volume does not carry.
 ### 4.4 The inner loop, by kind of component
 
 **A user-space program or app.** Works today: `cargo xtask build-apps --app
-<name>`, then `pkg remove` and `pkg install`. The design adds `pkg install
---replace` (one transaction: the new files beside the old, renamed over
-them, the record rewritten last) and `cargo xtask install-app <name>`, which
-builds and replaces. It stays root's: a person in `wheel` runs it through
+<name>`, then `pkg remove` and `pkg install`. D5 (built 2026-10-11) adds
+`pkg install --replace` (one transaction: the new files beside the old,
+renamed over them, what only the old version had deleted, the record renamed
+over the old one last, so running it again finishes a replacement that
+stopped) and `cargo xtask install-app --app <name>`, which builds and
+replaces. It stays root's: a person in `wheel` runs it through
 `su`. 20 s from edit to running, today.
 
 **A service.** Works today: replace the file, `svc restart <unit>`. This is
@@ -566,7 +568,7 @@ where marked.
 | D2 | ferrousli's gaps in the volume's programs (§3.4), found by an audit of every ELF's imports against ferrousli's exports rather than by starting them | 5, a guess | the audit clean in `check --ferrousli`; `dash`, `gawk`, `perl`, `cmake`, `gzip` each run in `test-devloop`'s walk |
 | D3 | Credentials: a push over HTTPS with a token through `credential-store`; then OpenSSH's client as an app, with an agent unit | 3 + 8, the second a guess | `test-devloop` pushes to a stub that asks for Basic authentication in front of `git http-backend`, and a control with the wrong token; `test-ssh` gains a client leg |
 | D4 | `cargo xtask check --fast` on Ferrix, a step at a time | 5, a guess | `test-selfhost --check` runs it on the volume; the steps it cannot run are named, not skipped |
-| D5 | `pkg install --replace`, `cargo xtask install-app` | 3 | `test-pkg`; the walk's step 5 for an app |
+| D5 | `pkg install --replace`, `cargo xtask install-app`. **Built 2026-10-11**: `test-pkg` replaces a package with its next version and back, and its control (the old version's own files left behind) fires; `pkg`'s host tests; the walk's step for an app is not added | 3 | `test-pkg`; the walk's step 5 for an app |
 | D6 | Live driver updates on a developer image, the remaining kinds, `cargo xtask update-driver` | with po10-drv's row (26 there) | `test-restart --update` per kind |
 | D7 | hyprix nested in a window | 8, a guess | `test-compositor` boots one hyprix inside another and a client draws in it |
 | D8 | The second slot: the control record, `bootctl`, the loader's trial boot, the installer's layout. Moved on 2026-10-11 to two streams of its own, `ab-boot` (the design, its review, the loader) and `ab-sys` (the record, `bootctl`, the installer, `test-install`), designed against the customer's SN720 as partitioned that day | 13, a guess; a design review first | `test-install`: a kernel that panics at boot comes back on the good slot; a good one is marked |

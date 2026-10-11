@@ -228,7 +228,11 @@ COMMANDS:
     test-apps     Boot once with every app in src/user/apps that has [[smoke]] checks, and require each
                   check's line
     test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat
-                  service, and to refuse a changed package, a missing dependency and a needed removal
+                  service, to replace a package with its next version and back (`pkg install --replace`),
+                  and to refuse a changed package or replacement, a missing dependency and a needed removal
+    install-app   Build the app --app NAME for this machine and put it in the running system in the place of
+                  the version installed, with `pkg install --replace` (on Ferrix, as root; --to DIR installs
+                  into the root at DIR instead, which is the only way it runs on another system)
     test-vfs      Boot with busybox in the initramfs and require stage 8's exit programs and applets
     test-net      Boot with a network device and require busybox to configure it and fetch a file
     test-clipboard  Boot the desktop with its clipboard port on a socket xtask speaks vdagent over, and carry text both ways
@@ -670,7 +674,7 @@ fn run() -> Result<()> {
         "test-threads" | "test-sem" | "test-shm" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
-        "test-pkg" => pkg::test_pkg(&args),
+        "test-pkg" | "install-app" => pkg::run(command, &args),
         "coverage" => coverage::run(&args),
         "test-rustc" => rustc::test_rustc(&args),
         "test-chrome" | "test-chrome-window" | "test-chrome-audio" => chrome::run(command, &args),
