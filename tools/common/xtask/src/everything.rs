@@ -67,6 +67,66 @@ const YSERVER_SPARE_MIB: u64 = 256;
 /// browser's cache.
 const STEAM_SPARE_MIB: u64 = 4096;
 
+/// Whether the everything volume carries the Steam library
+/// `tools/common/fetch/fetch-steam-preinstall.sh` installed on the host
+/// (Teeworlds and the Steam Linux Runtimes by default) at `/data/steam`, so
+/// Steam in the guest finds those apps installed and neither downloads nor
+/// stages them (docs/STEAM.md §7, item 7).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SteamPreinstall {
+    /// Neither flag: carried when this host has the library. It is the one
+    /// part of `--everything` that is not fetched when missing, since only a
+    /// host with a Steam account can install it; a run without it says so.
+    #[default]
+    WhenThere,
+    /// `--steam-preinstall`: carried, and a host without it stops the run.
+    Always,
+    /// `--no-steam-preinstall`: left out, so Steam downloads and stages the
+    /// game itself, the path `test-steam-game` walked before the bypass.
+    Never,
+}
+
+/// [`SteamPreinstall`] as a number, set once from the command line.
+static STEAM_PREINSTALL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Set once from the command line, as `crate::fat::set_strip_kernel`.
+pub(crate) fn set_steam_preinstall(choice: SteamPreinstall) {
+    let number = match choice {
+        SteamPreinstall::WhenThere => 0,
+        SteamPreinstall::Always => 1,
+        SteamPreinstall::Never => 2,
+    };
+    STEAM_PREINSTALL.store(number, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What [`set_steam_preinstall`] set.
+fn steam_preinstall_choice() -> SteamPreinstall {
+    match STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => SteamPreinstall::Always,
+        2 => SteamPreinstall::Never,
+        _ => SteamPreinstall::WhenThere,
+    }
+}
+
+/// The preinstalled library's stamp and its tree, beside each other in
+/// `FERRIX_STEAM_PREINSTALL` (default `~/.local/share/ferrix/steam-preinstall`).
+fn steam_preinstall() -> Result<(PathBuf, PathBuf)> {
+    let directory = match std::env::var_os("FERRIX_STEAM_PREINSTALL") {
+        Some(directory) => PathBuf::from(directory),
+        None => crate::paths::volume_directory("steam-preinstall")?,
+    };
+    let stamp = directory.join("steam-preinstall.stamp");
+    let tree = directory.join("tree");
+    if !stamp.is_file() || !tree.join("steam/steamapps").is_dir() {
+        return Err(Error::new(format!(
+            "--steam-preinstall: no library in {}: tools/common/fetch/fetch-steam-preinstall.sh \
+             installs it with steamcmd on this host",
+            directory.display()
+        )));
+    }
+    Ok((stamp, tree))
+}
+
 /// The volume, made or made again from the two trees when it is missing or
 /// older than either of the images they were packed into.
 ///
@@ -274,7 +334,17 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
         + CLAUDE_CODE_SPARE_MIB
         + YSERVER_SPARE_MIB
         + STEAM_SPARE_MIB;
-    Ok((vec![rustc, chrome, steamcmd, claude_code, steam], spare))
+    let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam];
+    // Last, under Steam's tree: only `steam/steamapps`, which no other tree has.
+    match steam_preinstall_choice() {
+        SteamPreinstall::Always => sources.push(steam_preinstall()?),
+        SteamPreinstall::WhenThere => match steam_preinstall() {
+            Ok(library) => sources.push(library),
+            Err(why) => println!("  everything: no preinstalled Steam games: {why}"),
+        },
+        SteamPreinstall::Never => {}
+    }
+    Ok((sources, spare))
 }
 
 /// The image `volume` finds, after running `tools/common/fetch/<script>`

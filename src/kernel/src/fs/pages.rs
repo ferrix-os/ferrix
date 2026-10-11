@@ -91,6 +91,13 @@ impl Storage for VmoStorage {
         MAX_FILE_SIZE
     }
 
+    /// The scheduler's: a task waiting for a tmpfs file's I/O lock behind a
+    /// write that commits frames, a read throttled at `memory.high` or a
+    /// truncation's shootdown sleeps, as every kernel `SleepLock` does.
+    fn parker(&self) -> &dyn ferrix_sync::Parker {
+        &crate::sync::SchedParker
+    }
+
     /// Half of memory in total, which is Linux's default `size=` for a tmpfs
     /// mounted without one, and whatever the allocator has free up to that.
     ///

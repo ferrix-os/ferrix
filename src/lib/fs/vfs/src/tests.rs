@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicI64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use ferrix_sync::SpinParker;
 
@@ -2401,8 +2401,6 @@ fn a_directory_that_does_not_cache_lookups_is_asked_every_time() {
 
 // -- Streams, detached locations and statfs layouts ------------------------
 
-use core::sync::atomic::AtomicBool;
-
 use crate::StatFs;
 use crate::file::Status;
 use crate::pipe::PIPEFS_MAGIC;
@@ -4780,5 +4778,141 @@ mod charged {
         assert_eq!(copy.get(100), Ok(&3));
         drop((table, copy));
         assert_eq!((job.used(), job.holds()), (0, 0));
+    }
+}
+
+/// A store whose writes wait at a gate until the test opens it, to hold a
+/// tmpfs write in the middle of its bytes.
+#[derive(Debug)]
+struct Gated {
+    inner: alloc::boxed::Box<dyn Pages>,
+    entered: Arc<AtomicBool>,
+    open: Arc<AtomicBool>,
+}
+
+impl Pages for Gated {
+    fn read(&self, offset: u64, buf: &mut [u8]) -> Result<(), Errno> {
+        self.inner.read(offset, buf)
+    }
+    fn write(&self, offset: u64, data: &[u8]) -> Result<(), Errno> {
+        self.entered.store(true, Ordering::SeqCst);
+        while !self.open.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        self.inner.write(offset, data)
+    }
+    fn discard_from(&self, offset: u64) {
+        self.inner.discard_from(offset);
+    }
+    fn committed_bytes(&self) -> u64 {
+        self.inner.committed_bytes()
+    }
+    fn resize(&self, len: u64) {
+        self.inner.resize(len);
+    }
+}
+
+#[derive(Debug)]
+struct GatedStorage {
+    entered: Arc<AtomicBool>,
+    open: Arc<AtomicBool>,
+}
+
+impl Storage for GatedStorage {
+    fn allocate(&self) -> Result<alloc::boxed::Box<dyn Pages>, Errno> {
+        Ok(alloc::boxed::Box::new(Gated {
+            inner: HeapStorage::new(1 << 20).allocate()?,
+            entered: Arc::clone(&self.entered),
+            open: Arc::clone(&self.open),
+        }))
+    }
+    fn max_file_size(&self) -> u64 {
+        1 << 20
+    }
+}
+
+/// The inode lock is not held across a write's bytes (2026-10-10, Steam's
+/// staging stall): while one write waits inside its store, `stat` of the
+/// file and a listing of its directory answer, and a second write to the
+/// same file waits for the first rather than interleaving with it.
+#[test]
+fn stat_and_listing_answer_while_a_write_is_inside_its_store() {
+    let entered = Arc::new(AtomicBool::new(false));
+    let open = Arc::new(AtomicBool::new(false));
+    let fs = Tmpfs::for_kernel(
+        1,
+        Arc::new(Ticking::default()),
+        Arc::new(GatedStorage {
+            entered: Arc::clone(&entered),
+            open: Arc::clone(&open),
+        }),
+        0o755,
+    );
+    let ns = Arc::new(Namespace::new(fs, Arc::new(SpinParker)));
+    let ctx = ns.context();
+    let file = ns.open(&ctx, None, b"/f", &RW_CREATE, 0o644).unwrap();
+    let writer = std::thread::spawn(move || file.write(&[0xAB; 6000]).unwrap());
+    while !entered.load(Ordering::SeqCst) {
+        std::thread::yield_now();
+    }
+    // The write is inside its store, holding the file's I/O lock: these
+    // would spin for ever on the inode lock if it were held there too.
+    let at = ns.resolve(&ctx, None, b"/f", true).unwrap();
+    assert_eq!(ns.stat(&at).unwrap().metadata.size, 0);
+    let root = ns.open(&ctx, None, b"/", &DIRECTORY, 0).unwrap();
+    assert!(names(&root).contains(&String::from("f")));
+    open.store(true, Ordering::SeqCst);
+    assert_eq!(writer.join().unwrap(), 6000);
+    assert_eq!(ns.stat(&at).unwrap().metadata.size, 6000);
+}
+
+/// Writes, shrinks, grows and reads of one file from four threads at once,
+/// with `stat` and listings beside them: every byte read is one a write put
+/// there or a zero a shrink left, and the length never runs backwards past
+/// what a read returned.
+#[test]
+fn reads_writes_and_shrinks_of_one_file_from_many_threads_stay_whole() {
+    let ns = Arc::new(Namespace::new(tmpfs(1), Arc::new(SpinParker)));
+    let ctx = ns.context();
+    write_file(&ns, &ctx, "/f", &[0xAB; 20000]);
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut threads = Vec::new();
+    for role in 0..4_u8 {
+        let ns = Arc::clone(&ns);
+        let stop = Arc::clone(&stop);
+        threads.push(std::thread::spawn(move || {
+            let ctx = ns.context();
+            let at = ns.resolve(&ctx, None, b"/f", true).unwrap();
+            let file = ns.open(&ctx, None, b"/f", &RW_CREATE, 0o644).unwrap();
+            let mut round = 0_u64;
+            while !stop.load(Ordering::Relaxed) {
+                round += 1;
+                match role {
+                    0 => {
+                        let _ = file.seek(0, Whence::Set);
+                        let _ = file.write(&[0xAB; 20000]);
+                    }
+                    1 => {
+                        ns.truncate(&at, (round * 977) % 20000).unwrap();
+                    }
+                    2 => {
+                        let mut buf = [0_u8; 4096];
+                        let _ = file.seek((round * 131) as i64 % 20000, Whence::Set);
+                        let n = file.read(&mut buf).unwrap();
+                        assert!(buf[..n].iter().all(|&b| b == 0xAB || b == 0));
+                    }
+                    _ => {
+                        let _ = ns.stat(&at).unwrap();
+                        let root = ns.open(&ctx, None, b"/", &DIRECTORY, 0).unwrap();
+                        assert!(names(&root).contains(&String::from("f")));
+                    }
+                }
+            }
+        }));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    stop.store(true, Ordering::Relaxed);
+    for thread in threads {
+        thread.join().unwrap();
     }
 }

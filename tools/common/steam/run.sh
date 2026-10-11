@@ -42,7 +42,7 @@ chown -R 1000:1000 /data/home /data/steam
         sleep 3
     done
 ) &
-su -p -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1
+su -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1
 for log in bootstrap_log.txt console_log.txt transport_client.txt webhelper.txt; do
     [ -f /data/steam/logs/$log ] && tail -n 40 /data/steam/logs/$log | sed "s/^/steam-window: $log: /"
 done
