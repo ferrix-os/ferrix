@@ -4,7 +4,7 @@ Asked by the customer on 2026-09-30: "add Claude Code (CLI first, then the
 desktop) to Ferrix". This is the account of the first half -- the command
 line -- and of what running it found. The desktop app is §7.
 
-## Where it stands, 2026-10-01
+## Where it stands, 2026-10-11
 
 **Claude Code runs on Ferrix, since 2026-09-30.** Anthropic's prebuilt
 native release 2.1.280 for linux-x64 -- not one built here -- starts on
@@ -23,7 +23,8 @@ an API xtask serves itself (§4), in about two seconds of the guest's time.
 | The interactive TUI, typed at on the console: a prompt, the tool's answer drawn, `/exit` | **done** 2026-09-30, the same gate's second half (§5) |
 | Claude Code in the `--everything` desktop's launcher, in a terminal of its own | **done** 2026-09-30, `claude.desktop` (§5) |
 | Zenbleed and Gather Data Sampling: AVX withheld where nothing covers them | **done** 2026-09-30, `speculation::vector_leak` (§3) |
-| A real account | not tried: it needs the customer's (§5) |
+| A developer's session, by hand: onboarding, a ten-step turn with Bash, Write, Read, Grep, Glob, Edit and `cargo test`, permission prompts, Esc and Ctrl-C, resizes, `/exit`, in term and over `ssh -tt` | **works** 2026-10-11; two fixes, rustdoc on `PATH` and term's glyphs (§5.1) |
+| A real account | the network, TLS and the browser hand-off work up to the sign-in page; the sign-in itself is the customer's (§5.2) |
 | AVX state in a 32-bit program's signal frame | a first attempt backed out; what it takes is in §3 |
 | On AArch64 with the linux-arm64 build | not started (§6) |
 | The Claude desktop app, which Anthropic builds for macOS and Windows only | assessment next (§7) |
@@ -334,12 +335,69 @@ mode on a real terminal is the proof.
 **In the launcher**: `claude.desktop`, carried with `/bin/claude` where the
 volume has been fetched, `Terminal=true`, so fuzzel opens it in a terminal.
 
+### 5.1 A developer's session, measured (2026-10-11)
+
+On `run-compositor --everything --accel kvm`, against a scripted Messages
+API on the host reached as `10.0.2.2` (streamed replies, tool calls, a
+dummy key; no account, nothing leaving the host), Claude Code was driven
+as a developer drives it: in term with zinc on the desktop, as `ferrix`,
+over VNC, and over `ssh -tt` through a host pty rendered by a terminal
+emulator. The same binary ran on the host against the same API as the
+reference. Everything below behaved as on the host:
+
+* start-up and onboarding (theme, the key, the security notes, the trust
+  dialog), drawn whole; `~/.claude.json` on the home disk survives a
+  reboot, so the second start goes straight to the prompt;
+* one turn of ten tool calls in a fresh crate under git -- Bash
+  (`git init`, `uname`), Write, Read, Grep, Glob (both through the bundled
+  ripgrep), `cargo test` failing, Edit, `cargo test` passing, a `git
+  commit` -- with each permission prompt answered;
+* Esc and Ctrl-C while a Bash command runs: the turn is interrupted and
+  the command's whole process group is gone; Esc while a reply streams;
+  Ctrl-C clears the input, two end the program with status 0 and the
+  terminal restored; `/exit`;
+* the window resized (a second terminal tiled beside it, then closed; and
+  `TIOCSWINSZ` over ssh): the TUI redraws at the new width each time;
+* `!` shell mode, the `/` command menu, `@` file completion, `claude
+  doctor` (whose only warnings are about an install it did not make).
+
+Two things failed, both outside Claude Code and the kernel, and both are
+fixed: `cargo test` on any library crate stopped at its doctests, because
+the desktop's `/bin` had `rustc` and `cargo` but not `rustdoc`
+(`rustc::DEFAULT_LINKS`); and term drew ten of the TUI's characters as
+boxes -- the elbow under each tool call (⎿), the mode line's ⏸ and ⏵,
+⏺, ✔ and every frame of the spinner -- because Hack has none of them.
+term now draws each with a stand-in Hack has (`gen-font.py`'s
+`STAND_INS`), the spinner's frames with different ones so it still turns.
+
+### 5.2 A real account
+
+From the guest, TLS to `api.anthropic.com`, `platform.claude.com`,
+`claude.ai` and `claude.com` works: `claude -p` with a made-up key gets the
+API's own 401 and says `Invalid API key`. Started with no key in a
+terminal on the desktop, `claude` offers its three login methods; the
+first (a Claude subscription) runs `xdg-open`, which opens Chrome on the
+same desktop at the claude.ai sign-in page, while Claude Code listens on a
+loopback port for the browser's redirect and also prints the URL with a
+"Paste code here" field for the manual path. Nothing past the sign-in
+page was done: that is the customer's own step. What they do: in a
+terminal on the desktop run `claude`, pick a text style, choose "Claude
+account with subscription" (or "Anthropic Console account" for API
+billing), sign in in the Chrome window that opens, and approve; Chrome
+returns to Claude Code on `localhost` and the session starts. If the
+redirect does not arrive, they copy the code the page shows into "Paste
+code here". The credential is then kept in `~/.claude` on Ferrix's home
+disk, across reboots, and in no other place. `ANTHROPIC_API_KEY` in the
+environment is the other way, without a browser.
+
+Once, right after another session, the start-up check reported
+"Connection to platform.claude.com timed out after 10 seconds"; three
+fresh starts after it reached the login menu in about a second, and curl
+reached the same host at once. Not reproduced; noted in case it returns.
+
 What is left:
 
-* **A real account.** `claude` logs in through a browser, or takes
-  `ANTHROPIC_API_KEY`; both need the real internet through the gateway,
-  which a watched desktop has. Unmeasured on Ferrix.
-* **Resizes** of the TUI's terminal, which the console gate cannot make.
+* **The sign-in itself**, the customer's (§5.2).
 
 ## 6. Elsewhere
 
