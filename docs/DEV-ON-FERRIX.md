@@ -444,6 +444,13 @@ devloop: the service's main pid changed
 devloop: done
 ```
 
+Where the volume has helix (D1), two lines follow the lint step, `devloop:
+hx finds rust-analyzer` and `devloop: rust-analyzer answered the editor`:
+`hx --health rust` must name the server, and a language-server session
+(`tools/common/xtask/src/devloop/lsp.py`, on the volume's python3) must have
+rust-analyzer initialize, list the fixture file's symbols and find
+`greeting` in the workspace, as an editor asks first.
+
 It runs the toolchain on ferrousli's loader and `libc.so.6`, as the desktop
 does, unless `--interpreter glibc`. One of the fixture's tests must panic
 and one catches a panic, so the gate is §3.1's proof. 24 to 28 s of guest
@@ -564,7 +571,7 @@ where marked.
 | | Landing | Points | Proved by |
 |---|---|---|---|
 | D0 | **This branch**: ferrousli's `_dl_find_object`; `test-devloop`; rustfmt, clippy, rust-analyzer and `rust-src` in the fetch script; this document | 5, spent | `test-devloop` and its two controls; ferrousli's `cxxrt/link`; the fetch script run on a private path |
-| D1 | helix on the volume (`/bin/hx`), rust-analyzer found by it, the session's `PATH` (§4.3) | 3 | `test-devloop` gains: `hx --health rust` names the language server, and a scripted LSP session (initialize, `documentSymbol`, `workspace/symbol`) answers on the fixture |
+| D1 | helix on the volume (`/bin/hx`), rust-analyzer found by it, the session's `PATH` (§4.3). **Built 2026-10-11 but for the `PATH`**: helix 25.07.1's release under `helix/` on the volume, `/bin/hx` and `/bin/rust-analyzer` among the toolchain's links; `test-devloop` on a private volume says `hx finds rust-analyzer` and the session's three answers (`run2/d1-1.log`), and its control, a server that is not one, fires (`run2/d1-ctl-noserver.log`). Whether the `--everything` desktop's `/bin` gets the two links is not checked: they are the default system's | 3 | `test-devloop` gains: `hx --health rust` names the language server, and a scripted LSP session (initialize, `documentSymbol`, `workspace/symbol`) answers on the fixture |
 | D2 | ferrousli's gaps in the volume's programs (§3.4), found by an audit of every ELF's imports against ferrousli's exports rather than by starting them | 5, a guess | the audit clean in `check --ferrousli`; `dash`, `gawk`, `perl`, `cmake`, `gzip` each run in `test-devloop`'s walk |
 | D3 | Credentials: a push over HTTPS with a token through `credential-store`; then OpenSSH's client as an app, with an agent unit | 3 + 8, the second a guess | `test-devloop` pushes to a stub that asks for Basic authentication in front of `git http-backend`, and a control with the wrong token; `test-ssh` gains a client leg |
 | D4 | `cargo xtask check --fast` on Ferrix, a step at a time | 5, a guess | `test-selfhost --check` runs it on the volume; the steps it cannot run are named, not skipped |

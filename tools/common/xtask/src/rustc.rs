@@ -108,7 +108,11 @@ pub(crate) const LINKS: &[(&str, &str)] = &[
 /// directory can be linked there. Put the compiler and its C driver on the
 /// shell's `/bin` PATH; the gate sets its own PATH instead. glibc's and the
 /// kernel's headers are the volume's `/usr/include`, where gcc looks: without
-/// them `cc hello.c` stops at `stdio.h`.
+/// them `cc hello.c` stops at `stdio.h`. The editor and its language
+/// server are there too (`docs/DEV-ON-FERRIX.md`, D1): helix finds its
+/// runtime beside its program, and rust-analyzer on `PATH`. On a volume
+/// fetched before 2026-10-11 the two links lead nowhere, and `hx` is not
+/// found, as on a system without it.
 pub(crate) const DEFAULT_LINKS: &[(&str, &str)] = &[
     ("lib64", "/data/usr/lib64"),
     ("lib/x86_64-linux-gnu", "/data/usr/lib/x86_64-linux-gnu"),
@@ -124,6 +128,8 @@ pub(crate) const DEFAULT_LINKS: &[(&str, &str)] = &[
     ("bin/rustdoc", "/data/rust/bin/rustdoc"),
     ("bin/cc", "/data/usr/bin/cc"),
     ("bin/gcc", "/data/usr/bin/gcc"),
+    ("bin/hx", "/data/helix/hx"),
+    ("bin/rust-analyzer", "/data/rust/bin/rust-analyzer"),
 ];
 
 /// Guest memory unless `--memory` says otherwise: the compiler's libraries

@@ -252,8 +252,13 @@ pushes, and `svc restart` must put the new build in the running system:
 ```
 
 It needs git among the built apps (`cargo xtask build-apps --app curl --app
-git`), and it walks without `cargo fmt` and `cargo clippy`, saying so, on a
-toolchain volume fetched before 2026-10-11.
+git`), and it walks without `cargo fmt` and `cargo clippy`, and without
+helix and rust-analyzer's session, saying so, on a toolchain volume fetched
+before 2026-10-11.
+
+On a running Ferrix, `cargo xtask install-app --app NAME`, as root, builds an
+app and puts it in place of the installed version with `pkg install
+--replace`.
 
 On Arm the build runs on a Pixel 7 (2026-10-03). `FERRIX_SYSROOT_ARCH=arm64
 tools/common/fetch/fetch-rustc-sysroot.sh` makes the toolchain for an AArch64

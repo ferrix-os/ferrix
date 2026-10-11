@@ -11,6 +11,9 @@
 //!    which catches a panic: a test program that cannot unwind ends at the
 //!    first of them. Where the volume has rustfmt and clippy ([`lints`]),
 //!    `cargo fmt --check` and `cargo clippy` follow, as `check` starts.
+//!    Where the volume has helix ([`editor`]), `hx --health rust` must
+//!    name rust-analyzer, and a language-server session ([`LSP`]) must get
+//!    the fixture's symbols from it: what the editor asks first.
 //! 3. **Run.** The program is installed and started as a service of init's,
 //!    `greeter.service`, and answers a connection with its line.
 //! 4. **Edit, build, test, commit, push.** One word of the source is
@@ -53,6 +56,13 @@ const FIXTURE: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("devloop/fixture/lib.rs")),
     ("src/main.rs", include_str!("devloop/fixture/main.rs")),
 ];
+
+/// The language-server session the walk runs where the volume has the
+/// editor: an editor's first questions to rust-analyzer, on the fixture.
+const LSP: &str = include_str!("devloop/lsp.py");
+
+/// Where it goes in the image.
+const LSP_PATH: &str = "etc/ferrix/devloop-lsp.py";
 
 /// Its first commit's subject, which the guest prints after cloning.
 const SUBJECT: &str = "greeter: say version one";
@@ -136,6 +146,7 @@ cargo build || fail "the first build"
 cargo test || fail "the first tests"
 say "tests passed (one)"
 @LINT@
+@EDITOR@
 
 # 3. Run it as a service.
 cp target/debug/greeter /usr/local/bin/greeter || fail "the install"
@@ -180,6 +191,23 @@ const LINT: &str = r#"cargo fmt --check || fail "cargo fmt --check"
 cargo clippy -- -D warnings || fail "cargo clippy"
 say "fmt and clippy clean""#;
 
+/// What the walk does after [`LINT`] where the volume has helix
+/// ([`editor`]): helix must find rust-analyzer, and rust-analyzer must
+/// answer an editor's first questions about the fixture.
+const EDITOR: &str = r#"hx --health rust > /tmp/hx-health 2>&1 || { cat /tmp/hx-health; fail "hx --health rust"; }
+grep 'rust-analyzer: ' /tmp/hx-health | grep -q '/bin/rust-analyzer' \
+    || { cat /tmp/hx-health; fail "hx finding rust-analyzer"; }
+say "hx finds rust-analyzer"
+python3 /@LSP_PATH@ /data/rust/bin/rust-analyzer "$PWD" "$PWD/src/lib.rs" \
+    || { cat /tmp/rust-analyzer.err; fail "the language server session"; }
+say "rust-analyzer answered the editor""#;
+
+/// What the walk says when [`EDITOR`]'s steps passed.
+const EDITED: [&str; 2] = [
+    "devloop: hx finds rust-analyzer",
+    "devloop: rust-analyzer answered the editor",
+];
+
 /// What the walk says when [`LINT`]'s steps passed.
 const LINTED: &str = "devloop: fmt and clippy clean";
 
@@ -195,6 +223,15 @@ fn lints() -> bool {
     })
 }
 
+/// Whether the toolchain volume has helix and rust-analyzer, by the tree
+/// beside it, as [`lints`] judges: the script fetches both since
+/// 2026-10-11.
+fn editor() -> bool {
+    rustc::tree().is_ok_and(|tree| {
+        tree.join("helix/hx").is_file() && tree.join("rust/bin/rust-analyzer").is_file()
+    })
+}
+
 /// Guest memory unless `--memory` says otherwise: the compiler's libraries,
 /// and the clone and its target directory in `/tmp`.
 const MEMORY: u32 = 4096;
@@ -204,8 +241,8 @@ const MEMORY: u32 = 4096;
 const TIMEOUT: u64 = 1800;
 
 /// The script, for a stub listening on `port`, with [`LINT`]'s steps when
-/// `lint`.
-fn script(port: u16, ferrousli: bool, lint: bool) -> String {
+/// `lint` and [`EDITOR`]'s when `edit`.
+fn script(port: u16, ferrousli: bool, lint: bool, edit: bool) -> String {
     let library_path = if ferrousli {
         format!("export LD_LIBRARY_PATH={LIBRARY_PATH}")
     } else {
@@ -216,6 +253,8 @@ fn script(port: u16, ferrousli: bool, lint: bool) -> String {
         .replace("@REPO@", net::GIT_REPO_PATH)
         .replace("@LIBRARY_PATH@", &library_path)
         .replace("@LINT@", if lint { LINT } else { "" })
+        .replace("@EDITOR@", if edit { EDITOR } else { "" })
+        .replace("@LSP_PATH@", LSP_PATH)
 }
 
 /// A file of the image holding `text`.
@@ -239,6 +278,7 @@ fn walk_files(script: &str) -> Vec<File> {
             content: Content::Link("/etc/ferrix/units/devloop.service".to_owned()),
         },
         text_file(SCRIPT_PATH, script),
+        text_file(LSP_PATH, LSP),
         // No shell on the console, as on a desktop that wants none: its
         // prompt would be drawn into the walk's lines.
         File {
@@ -339,15 +379,13 @@ fn test_devloop(args: &Args) -> Result<()> {
     }
     files.extend(ports);
     files.extend(toolchain_files(arch, &args, ferrousli)?);
-    let lint = lints();
-    if !lint {
-        println!(
-            "  warning: the toolchain volume has no rustfmt or clippy, so the walk goes without \
-             `cargo fmt --check` and `cargo clippy`; it is from before the script fetched them \
-             -- run tools/common/fetch/fetch-rustc-sysroot.sh again"
-        );
-    }
-    files.extend(walk_files(&script(servers.http().port(), ferrousli, lint)));
+    let (lint, edit) = volume_steps();
+    files.extend(walk_files(&script(
+        servers.http().port(),
+        ferrousli,
+        lint,
+        edit,
+    )));
 
     let libc = if ferrousli { "ferrousli" } else { "glibc" };
     println!("  {arch}: building an image whose init walks the development loop on {libc}");
@@ -369,22 +407,54 @@ fn test_devloop(args: &Args) -> Result<()> {
     );
     let lines = qemu::watch_to_power_off(arch, &image, &kernel, &args, qemu::SUCCESS_MARKER)?;
     drop(servers);
-    judge(&lines, lint).map_err(|failure| {
+    judge(&lines, lint, edit).map_err(|failure| {
         Error::new(format!(
             "{arch}: the development loop did not close: {failure}\n  Serial output is in {}",
             paths::build_dir(arch).join("serial.log").display()
         ))
     })?;
-    println!(
-        "  {arch}: Ferrix cloned the fixture, built and tested it{}, ran it as a service, changed \
-         it, pushed the change, and replaced the running service with the new build",
+    println!("  {arch}: {}", closed_line(lint, edit));
+    Ok(())
+}
+
+/// Which of the volume's own steps the walk takes, [`LINT`]'s and
+/// [`EDITOR`]'s, saying of each it cannot take why.
+fn volume_steps() -> (bool, bool) {
+    let lint = lints();
+    if !lint {
+        println!(
+            "  warning: the toolchain volume has no rustfmt or clippy, so the walk goes without \
+             `cargo fmt --check` and `cargo clippy`; it is from before the script fetched them \
+             -- run tools/common/fetch/fetch-rustc-sysroot.sh again"
+        );
+    }
+    let edit = editor();
+    if !edit {
+        println!(
+            "  warning: the toolchain volume has no helix, so the walk goes without the editor's \
+             steps; it is from before the script fetched it -- run \
+             tools/common/fetch/fetch-rustc-sysroot.sh again"
+        );
+    }
+    (lint, edit)
+}
+
+/// What a walk that closed did.
+fn closed_line(lint: bool, edit: bool) -> String {
+    format!(
+        "Ferrix cloned the fixture, built and tested it{}{}, ran it as a service, changed it, \
+         pushed the change, and replaced the running service with the new build",
         if lint {
             ", found it formatted and free of clippy's warnings"
         } else {
             ""
+        },
+        if edit {
+            ", had helix find rust-analyzer and rust-analyzer answer an editor about it"
+        } else {
+            ""
         }
-    );
-    Ok(())
+    )
 }
 
 /// A file's bytes, or an error naming it.
@@ -393,14 +463,17 @@ fn read(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// What the walk says, in the order it must say it; [`LINTED`] among it
-/// when the walk linted.
-fn expected(lint: bool) -> Vec<String> {
+/// when the walk linted, and [`EDITED`] when it asked the editor.
+fn expected(lint: bool, edit: bool) -> Vec<String> {
     let mut lines = vec![
         format!("devloop: cloned {SUBJECT}"),
         "devloop: tests passed (one)".to_owned(),
     ];
     if lint {
         lines.push(LINTED.to_owned());
+    }
+    if edit {
+        lines.extend(EDITED.iter().map(|line| (*line).to_owned()));
     }
     lines.extend([
         format!("devloop: before {BEFORE}"),
@@ -416,7 +489,7 @@ fn expected(lint: bool) -> Vec<String> {
 /// Whether the transcript is a walk that closed: every line of
 /// [`expected`], in order, after the boot marker, and no step that failed.
 /// The first thing wrong is the error.
-fn judge(lines: &[String], lint: bool) -> std::result::Result<(), String> {
+fn judge(lines: &[String], lint: bool, edit: bool) -> std::result::Result<(), String> {
     let after_boot = lines
         .iter()
         .position(|line| line.contains(qemu::SUCCESS_MARKER))
@@ -431,7 +504,7 @@ fn judge(lines: &[String], lint: bool) -> std::result::Result<(), String> {
         return Err(format!("the walk said `{failed}`"));
     }
     let mut rest = said.iter();
-    for want in expected(lint) {
+    for want in expected(lint, edit) {
         if !rest.any(|line| *line == want) {
             let near = said
                 .iter()
@@ -465,7 +538,7 @@ mod tests {
 
     /// The walk as the guest says it when every step works.
     fn closed() -> Vec<String> {
-        expected(false)
+        expected(false, false)
     }
 
     #[test]
@@ -473,7 +546,7 @@ mod tests {
         let mut lines = transcript(&[]);
         lines.push("   Compiling greeter v0.1.0 (/tmp/home/greeter)".to_owned());
         lines.extend(closed());
-        assert_eq!(judge(&lines, false), Ok(()));
+        assert_eq!(judge(&lines, false, false), Ok(()));
     }
 
     #[test]
@@ -482,7 +555,7 @@ mod tests {
         walk[5] = format!("devloop: after {BEFORE}");
         let mut lines = transcript(&[]);
         lines.extend(walk);
-        let failure = judge(&lines, false).expect_err("the old words are not the new ones");
+        let failure = judge(&lines, false, false).expect_err("the old words are not the new ones");
         assert!(failure.contains(&format!("never said `devloop: after {AFTER}`")));
         assert!(failure.contains(&format!("it said `devloop: after {BEFORE}`")));
     }
@@ -493,7 +566,7 @@ mod tests {
             "devloop: cloned greeter: say version one",
             "devloop: FAILED at the first tests",
         ]);
-        let failure = judge(&lines, false).expect_err("a failed step fails the walk");
+        let failure = judge(&lines, false, false).expect_err("a failed step fails the walk");
         assert!(failure.contains("FAILED at the first tests"));
     }
 
@@ -504,7 +577,7 @@ mod tests {
         let mut lines = transcript(&[]);
         lines.extend(walk);
         assert!(
-            judge(&lines, false)
+            judge(&lines, false, false)
                 .expect_err("the same process is not a restart")
                 .contains("main pid changed")
         );
@@ -515,13 +588,43 @@ mod tests {
         let mut lines = transcript(&[]);
         lines.extend(closed());
         assert!(
-            judge(&lines, true)
+            judge(&lines, true, false)
                 .expect_err("the lint line is missing")
                 .contains(LINTED)
         );
         let mut lines = transcript(&[]);
-        lines.extend(expected(true));
-        assert_eq!(judge(&lines, true), Ok(()));
+        lines.extend(expected(true, false));
+        assert_eq!(judge(&lines, true, false), Ok(()));
+    }
+
+    #[test]
+    fn a_walk_that_was_to_ask_the_editor_and_did_not_does_not_close() {
+        let mut lines = transcript(&[]);
+        lines.extend(expected(true, false));
+        assert!(
+            judge(&lines, true, true)
+                .expect_err("the editor's lines are missing")
+                .contains(EDITED[0])
+        );
+        let mut lines = transcript(&[]);
+        lines.extend(expected(true, true));
+        assert_eq!(judge(&lines, true, true), Ok(()));
+    }
+
+    #[test]
+    fn the_walk_carries_the_language_server_session() {
+        let files = walk_files("true\n");
+        assert!(files.iter().any(|file| file.path == LSP_PATH));
+        assert!(LSP.contains("workspace/symbol") && LSP.contains("greeting"));
+        let library = FIXTURE
+            .iter()
+            .find(|(path, _)| *path == "src/lib.rs")
+            .map(|(_, text)| *text)
+            .expect("the fixture has a library");
+        assert!(
+            library.contains("pub fn greeting()"),
+            "the session asks for it"
+        );
     }
 
     #[test]
@@ -530,25 +633,34 @@ mod tests {
         walk.swap(2, 5);
         let mut lines = transcript(&[]);
         lines.extend(walk);
-        assert!(judge(&lines, false).is_err());
+        assert!(judge(&lines, false, false).is_err());
     }
 
     #[test]
     fn lines_before_the_boot_marker_do_not_count() {
         let mut lines = closed();
         lines.push(format!("{} stages 1-12", qemu::SUCCESS_MARKER));
-        assert!(judge(&lines, false).is_err());
+        assert!(judge(&lines, false, false).is_err());
     }
 
     #[test]
     fn the_script_carries_the_port_and_no_placeholder() {
-        let on_ferrousli = script(4321, true, true);
+        let on_ferrousli = script(4321, true, true, true);
         assert!(on_ferrousli.contains("git clone -q http://10.0.2.2:4321/repo.git greeter"));
         assert!(on_ferrousli.contains("export LD_LIBRARY_PATH=/lib:/lib/x86_64-linux-gnu"));
-        let on_glibc = script(4321, false, false);
+        let on_glibc = script(4321, false, false, false);
         assert!(!on_glibc.contains("LD_LIBRARY_PATH"));
         assert!(on_ferrousli.contains("cargo fmt --check") && !on_glibc.contains("cargo fmt"));
-        for placeholder in ["@PORT@", "@REPO@", "@LIBRARY_PATH@", "@LINT@"] {
+        assert!(on_ferrousli.contains("hx --health rust") && !on_glibc.contains("hx "));
+        assert!(on_ferrousli.contains("python3 /etc/ferrix/devloop-lsp.py"));
+        for placeholder in [
+            "@PORT@",
+            "@REPO@",
+            "@LIBRARY_PATH@",
+            "@LINT@",
+            "@EDITOR@",
+            "@LSP_PATH@",
+        ] {
             assert!(!on_ferrousli.contains(placeholder) && !on_glibc.contains(placeholder));
         }
     }

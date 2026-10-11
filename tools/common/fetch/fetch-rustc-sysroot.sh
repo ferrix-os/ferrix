@@ -28,6 +28,12 @@
 # With them come rustfmt, clippy, rust-analyzer and the standard library's
 # source, of the same release: what `cargo xtask check` and an editor run
 # when the tree is worked on from within Ferrix (docs/DEV-ON-FERRIX.md).
+# And an editor that speaks to that language server: helix's own release
+# for the host's architecture, its program and its runtime (grammars,
+# queries, themes) under `helix/`, where the program finds the runtime
+# beside itself; images link `/bin/hx` to it. It is pinned by the SHA-256
+# of the release's tarball as downloaded on 2026-10-11, since the project
+# publishes none.
 # Beside the compiler is what stage 20's builds of Ferrix's C programs run:
 # busybox, uutils and the ports against ferrousli are compiled by gcc and
 # g++ 15 (`cc1` and `cc1plus`) and assembled and archived by binutils,
@@ -51,12 +57,15 @@
 set -euo pipefail
 
 debian=${DEBIAN_MIRROR:-https://snapshot.debian.org/archive/debian/20260923T000000Z}
+helix_releases=${HELIX_RELEASES:-https://github.com/helix-editor/helix/releases/download}
 rust=${RUST_DIST_SERVER:-https://static.rust-lang.org}
 arch=${FERRIX_SYSROOT_ARCH:-amd64}
 case "$arch" in
     amd64) gnu=x86_64-linux-gnu triple=x86_64-unknown-linux-gnu loader=usr/lib64/ld-linux-x86-64.so.2
+        helix="25.07.1/helix-25.07.1-x86_64-linux.tar.xz 3f08e63ecd388fff657ad39722f88bb03dcf326f1f2da2700d99e1dc40ab2e8b"
         out=${FERRIX_RUSTC_SYSROOT:-$HOME/.local/share/ferrix/rustc} ;;
     arm64) gnu=aarch64-linux-gnu triple=aarch64-unknown-linux-gnu loader=usr/lib/ld-linux-aarch64.so.1
+        helix="25.07.1/helix-25.07.1-aarch64-linux.tar.xz ce23fa8d395e633e3e54c052012f11965d91d8d5c2bfa659685f50430b4f8175"
         out=${FERRIX_RUSTC_SYSROOT:-$HOME/.local/share/ferrix/rustc-arm64} ;;
     *) echo "fetch-rustc-sysroot: FERRIX_SYSROOT_ARCH is amd64 or arm64, not $arch" >&2; exit 1 ;;
 esac
@@ -315,6 +324,11 @@ for component in "$unpacked"/*/*/; do
     esac
 done
 
+# helix: its tarball's one directory becomes `helix/`.
+read -r path sum <<< "$helix"
+mkdir -p "$tree/helix"
+tar -xf "$(fetch "$path" "$helix_releases" "$sum")" -C "$tree/helix" --strip-components=1
+
 # What Debian's postinst scripts and alternatives would have made. `cc` is
 # the name rustc runs.
 ln -sf "$gnu-gcc-15" "$tree/usr/bin/cc"
@@ -334,6 +348,8 @@ test -x "$tree/rust/bin/cargo" || { echo "fetch-rustc-sysroot: no cargo in the t
 for tool in rustfmt cargo-fmt clippy-driver cargo-clippy rust-analyzer; do
     test -x "$tree/rust/bin/$tool" || { echo "fetch-rustc-sysroot: no $tool in the tree" >&2; exit 1; }
 done
+test -x "$tree/helix/hx" && test -d "$tree/helix/runtime/grammars" \
+    || { echo "fetch-rustc-sysroot: no helix and its runtime in the tree" >&2; exit 1; }
 test -e "$tree/rust/lib/rustlib/src/rust/library/core/src/lib.rs" \
     || { echo "fetch-rustc-sysroot: no standard library source in the tree" >&2; exit 1; }
 test -x "$tree/rust/lib/rustlib/$triple/bin/rust-lld" \
