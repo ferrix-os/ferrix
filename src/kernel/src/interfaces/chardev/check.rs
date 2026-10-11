@@ -1002,13 +1002,7 @@ fn fences(
     program: &Side,
     report: &mut Report,
 ) -> Result<i32, &'static str> {
-    use ferrix_native_abi::types::{SYNC_DEADLINE_DEFAULT_MS, SYNC_DEADLINE_MAX_MS};
-    if super::sync::deadline_ms(0) != SYNC_DEADLINE_DEFAULT_MS
-        || super::sync::deadline_ms(u64::MAX) != SYNC_DEADLINE_MAX_MS
-        || super::sync::deadline_ms(3) != 3
-    {
-        return Err("a fence's deadline was not clamped as specified");
-    }
+    deadlines_clamped()?;
     drain_channel(side, control);
     let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
     start(Job::Await(
@@ -1086,17 +1080,7 @@ fn fences(
     }
     report.sync_refusals += 1;
     signalled_once(program, once, &signal, &resolve, report)?;
-    // A short deadline: ETIMEDOUT, and the thread's signal takes the cookie
-    // out of the table.
-    let late =
-        install(FENCE + 1, 1, 0, 0).map_err(|_| "a fence with a deadline was refused")? as i32;
-    sched::sleep_for(STILL_NANOS);
-    if fence_status(&program.process, late)? != Some(-(Errno::ETIMEDOUT.0 as i32)) {
-        return Err("a fence past its deadline did not read as ETIMEDOUT");
-    }
-    if signal(FENCE + 1, 0) != Err(status::BAD_STATE) {
-        return Err("a fence past its deadline took the driver's signal");
-    }
+    let late = timed_out(program, &install, &signal)?;
     report.sync_refusals += 1;
     let kept = install(FENCE + 2, u64::MAX, 0, 0).map_err(|_| "a third fence was refused")? as i32;
     reply(side, control, wire.id, VALUE)?;
@@ -1114,6 +1098,40 @@ fn fences(
         return Err("a control counted other than one unsignalled fence");
     }
     Ok(kept)
+}
+
+/// A driver's deadline of 0 is the default, one past the maximum the
+/// maximum, any other kept (S2).
+fn deadlines_clamped() -> Result<(), &'static str> {
+    use ferrix_native_abi::types::{SYNC_DEADLINE_DEFAULT_MS, SYNC_DEADLINE_MAX_MS};
+    if super::sync::deadline_ms(0) != SYNC_DEADLINE_DEFAULT_MS
+        || super::sync::deadline_ms(u64::MAX) != SYNC_DEADLINE_MAX_MS
+        || super::sync::deadline_ms(3) != 3
+    {
+        return Err("a fence's deadline was not clamped as specified");
+    }
+    Ok(())
+}
+
+/// A fence with a short deadline reads `ETIMEDOUT` once it passes, and the
+/// driver's late signal is refused: its descriptor.
+fn timed_out(
+    program: &Side,
+    install: &dyn Fn(u64, u64, u64, u64) -> Result<usize, Errno>,
+    signal: &dyn Fn(u64, i64) -> Result<usize, Errno>,
+) -> Result<i32, &'static str> {
+    // A short deadline: ETIMEDOUT, and the thread's signal takes the cookie
+    // out of the table.
+    let late =
+        install(FENCE + 1, 1, 0, 0).map_err(|_| "a fence with a deadline was refused")? as i32;
+    sched::sleep_for(STILL_NANOS);
+    if fence_status(&program.process, late)? != Some(-(Errno::ETIMEDOUT.0 as i32)) {
+        return Err("a fence past its deadline did not read as ETIMEDOUT");
+    }
+    if signal(FENCE + 1, 0) != Err(status::BAD_STATE) {
+        return Err("a fence past its deadline took the driver's signal");
+    }
+    Ok(late)
 }
 
 /// One fence signalled once with 0: unsignalled before, its queue woken,
