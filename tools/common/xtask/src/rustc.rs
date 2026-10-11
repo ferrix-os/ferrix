@@ -118,6 +118,10 @@ pub(crate) const DEFAULT_LINKS: &[(&str, &str)] = &[
     ("usr/include", "/data/usr/include"),
     ("bin/rustc", "/data/rust/bin/rustc"),
     ("bin/cargo", "/data/rust/bin/cargo"),
+    // cargo runs rustdoc by name from PATH for a library's doctests:
+    // without it `cargo test` on any lib crate ends in "could not execute
+    // process `rustdoc`".
+    ("bin/rustdoc", "/data/rust/bin/rustdoc"),
     ("bin/cc", "/data/usr/bin/cc"),
     ("bin/gcc", "/data/usr/bin/gcc"),
 ];
@@ -420,6 +424,7 @@ mod tests {
         let links = default_links(&args);
         assert!(links.iter().any(|file| file.path == "bin/rustc"));
         assert!(links.iter().any(|file| file.path == "bin/cargo"));
+        assert!(links.iter().any(|file| file.path == "bin/rustdoc"));
         assert!(links.iter().any(|file| file.path == "bin/cc"));
         assert!(links.iter().any(|file| file.path == "usr/libexec/gcc"));
         assert!(links.iter().any(|file| file.path == "usr/include"));
