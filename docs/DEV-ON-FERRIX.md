@@ -355,8 +355,8 @@ measures the second:
    `qemu-system-x86_64` is a glibc program with some forty libraries, POSIX
    timers (which Ferrix's kernel answers `ENOSYS` to today,
    `docs/CLAUDE-CODE.md` §5), `memfd`, signals on its vCPU threads and
-   writable-then-executable mappings for its translator. *Whether it runs is
-   not known.* D9 is a two-point measurement before anything is built.
+   writable-then-executable mappings for its translator. **D9 measured it
+   on 2026-10-11 (§4.5a): it runs, at the host's speed.**
 3. **A second machine.** The DK1 board and the Pixel 7 are driven from the
    Linux host today (`flash`, `deploy`, `selfhost.sh`). From Ferrix they
    need USB host for the serial adapter and `adb`, which is the xHCI work
@@ -381,6 +381,33 @@ anywhere is: push the branch, `batch.sh join`. What Ferrix must run itself
 is the fast half, `check --fast` and the component's own tests, and that is
 D4. Running the boot matrix on Ferrix is not a goal of this design.
 
+### 4.5a D9: QEMU on Ferrix, measured
+
+The host's own `qemu-system-x86_64` (Ubuntu's 10.2.1), carried with its 47
+libraries, its own glibc loader, its ROMs and OVMF as one directory
+(`~/.local/share/ferrix/dev-on-ferrix/d9/bundle`, `boot.sh` in it), copied
+into a Ferrix KVM guest (`run-compositor --no-gl --accel kvm --smp 4
+--memory 8192 --ssh`, headless) and started there with `ld-linux-x86-64.so.2
+--library-path`:
+
+| Point | Linux host | Ferrix guest |
+|---|---|---|
+| 1. `-version`; `-machine none` started and ended by SIGTERM | -- | works (`run2/d9-point1.log`) |
+| 2. TCG, one processor, 1 GiB, q35 and OVMF: a Ferrix image to `FERRIX-BOOT-OK stages 1-12` | 22 s, 23 s (load 23 to 38; `run2/d9-host*.log`) | 25 s, 26 s (load 16 to 17; `run2/d9-guest-boot*.log`) |
+
+So QEMU's translator runs on Ferrix about as fast as on the Linux host
+under it: TCG is processor-bound user code, which a KVM guest runs at the
+host's speed. The boot gates could run on Ferrix under TCG as fast as the
+fleet's TCG rows do. One defect stops it from being usable as it is: **on
+Ferrix QEMU did not end**, neither when its guest powered off
+(`-no-reboot`) nor on SIGTERM, in both runs, with its three threads asleep;
+SIGKILL ended it (`run2/d9-sigterm.log`). With `-machine none` SIGTERM ended
+it. Its main loop waits on an epoll set holding a `signalfd` and three
+`eventfd`s, so the guess is a wake of that set from another thread that
+never arrives; a `docs/BACKLOG.md` row has it. QEMU being carried by an
+image, and the gates finding it there, is not designed: the bundle was a
+measurement.
+
 ### 4.6 The developer image
 
 `--everything` is the developer's desktop today: the toolchain volume merged
@@ -395,6 +422,27 @@ tools*, which writes the volume to a `ferrix-data` partition the kernel
 mounts at `/data` as it does today, sized by the person, with `/home` beside
 it; nothing in the kernel changes, since both labels are already looked for
 on any disk or partition.
+
+**Claude Code is part of the developer image** (the customer's coordinator,
+2026-10-11). Today `/bin/claude` and `/data/claude-code` come only with
+`--everything` (`carry_everything` in `tools/common/xtask/src/compositor/desktop.rs`,
+`claude_code::desktop_files`), because Claude Code's volume is merged into
+`everything.img` there and nowhere else. The developer image is therefore
+the toolchain volume and Claude Code's merged, and not Chrome's or Steam's:
+
+* xtask gains a developer volume, made by `everything.rs`'s merge from the
+  rustc and Claude Code volumes alone (about 3.7 GiB with helix), and a
+  `--developer` switch for `run-compositor` that attaches it and carries
+  what `carry_everything` carries for those two: the toolchain's links
+  (`/bin/hx`, `/bin/rust-analyzer`, `cargo`, `rustc`) and `/bin/claude`.
+  `--everything` stays the superset.
+* The installer's *developer tools* writes that volume, so an installed
+  developer machine has `claude` in every terminal, with its login under
+  `~/.claude` on `/home` (§4.2's rules for secrets apply).
+* `test-devloop` gains `claude --version` when its volume has Claude Code.
+  It is not cheap today: the gate attaches the rustc volume alone, and one
+  disk is `/data`, so it needs the merged volume first. That is the first
+  step of building the above, 2 points with the switch.
 
 ### 4.7 Claude Code
 
@@ -571,7 +619,7 @@ where marked.
 | | Landing | Points | Proved by |
 |---|---|---|---|
 | D0 | **This branch**: ferrousli's `_dl_find_object`; `test-devloop`; rustfmt, clippy, rust-analyzer and `rust-src` in the fetch script; this document | 5, spent | `test-devloop` and its two controls; ferrousli's `cxxrt/link`; the fetch script run on a private path |
-| D1 | helix on the volume (`/bin/hx`), rust-analyzer found by it, the session's `PATH` (§4.3). **Built 2026-10-11 but for the `PATH`**: helix 25.07.1's release under `helix/` on the volume, `/bin/hx` and `/bin/rust-analyzer` among the toolchain's links; `test-devloop` on a private volume says `hx finds rust-analyzer` and the session's three answers (`run2/d1-1.log`), and its control, a server that is not one, fires (`run2/d1-ctl-noserver.log`). Whether the `--everything` desktop's `/bin` gets the two links is not checked: they are the default system's | 3 | `test-devloop` gains: `hx --health rust` names the language server, and a scripted LSP session (initialize, `documentSymbol`, `workspace/symbol`) answers on the fixture |
+| D1 | helix on the volume (`/bin/hx`), rust-analyzer found by it, the session's `PATH` (§4.3). **Built 2026-10-11 but for the `PATH`**: helix 25.07.1's release under `helix/` on the volume, `/bin/hx` and `/bin/rust-analyzer` among the toolchain's links; `test-devloop` on a private volume says `hx finds rust-analyzer` and the session's three answers (`run2/d1-1.log`), and its control, a server that is not one, fires (`run2/d1-ctl-noserver.log`). The `--everything` desktop takes the same links (`rustc_links` in `compositor/desktop.rs` copies `DEFAULT_LINKS`), so its `/bin/hx` works once its volume is made from a rustc volume with helix | 3 | `test-devloop` gains: `hx --health rust` names the language server, and a scripted LSP session (initialize, `documentSymbol`, `workspace/symbol`) answers on the fixture |
 | D2 | ferrousli's gaps in the volume's programs (§3.4), found by an audit of every ELF's imports against ferrousli's exports rather than by starting them | 5, a guess | the audit clean in `check --ferrousli`; `dash`, `gawk`, `perl`, `cmake`, `gzip` each run in `test-devloop`'s walk |
 | D3 | Credentials: a push over HTTPS with a token through `credential-store`; then OpenSSH's client as an app, with an agent unit | 3 + 8, the second a guess | `test-devloop` pushes to a stub that asks for Basic authentication in front of `git http-backend`, and a control with the wrong token; `test-ssh` gains a client leg |
 | D4 | `cargo xtask check --fast` on Ferrix, a step at a time | 5, a guess | `test-selfhost --check` runs it on the volume; the steps it cannot run are named, not skipped |
@@ -579,9 +627,9 @@ where marked.
 | D6 | Live driver updates on a developer image, the remaining kinds, `cargo xtask update-driver` | with po10-drv's row (26 there) | `test-restart --update` per kind |
 | D7 | hyprix nested in a window | 8, a guess | `test-compositor` boots one hyprix inside another and a client draws in it |
 | D8 | The second slot: the control record, `bootctl`, the loader's trial boot, the installer's layout. Moved on 2026-10-11 to two streams of its own, `ab-boot` (the design, its review, the loader) and `ab-sys` (the record, `bootctl`, the installer, `test-install`), designed against the customer's SN720 as partitioned that day | 13, a guess; a design review first | `test-install`: a kernel that panics at boot comes back on the good slot; a good one is marked |
-| D9 | QEMU on Ferrix under TCG: does it run, and how slowly | 2 for the measurement | `test-boot` run inside `test-selfhost`'s guest |
+| D9 | QEMU on Ferrix under TCG: does it run, and how slowly. **Measured 2026-10-11 (§4.5a)**: it runs, a TCG boot in 25 s against the host's 22; it does not end on its guest's power-off or on SIGTERM | 2, spent | the host's QEMU carried into a KVM guest and booting a Ferrix image there |
 | D10 | Claude Code on a real account, on the customer's desktop | 2, the customer's step | a session that edits a file and runs `cargo test` |
-| D11 | The developer image on an installed disk (§4.6) | 5, after I3 | `test-install` with developer tools: `cargo -V` from the installed disk |
+| D11 | The developer image on an installed disk (§4.6), with Claude Code | 5, after I3, and 2 for the developer volume and `--developer` | `test-install` with developer tools: `cargo -V` from the installed disk |
 
 The order for "the customer boots Ferrix and works on Ferrix from inside
 it":
@@ -602,3 +650,11 @@ landed. The component lands first (push ferrousli's `main`, `cargo xtask
 pin-components`), since `test-devloop` fails on the pinned ferrousli, as
 its control shows. D8 moved to the `ab-boot` and `ab-sys` streams the same
 day.
+
+Later the same day: the branch handed to the fast-track product owner at
+e2609b992 with ferrousli 11cc94a pinned (`f0c1d55` and a fix for clippy on
+ARMv7-A, both on ferrousli's `main`); D5 and D1 built and gated on it; D9
+measured (§4.5a); Claude Code put into the developer image's design (§4.6).
+`cargo xtask check --ferrousli` is green up to ferrousli's tests, where
+`c_mount`'s sync test timed out in every run that day while the host's own
+`sync` took 9 to 21 s; ferrousli's other tests pass.
