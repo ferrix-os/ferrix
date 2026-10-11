@@ -59,6 +59,13 @@
       "branch": "softgl-clock",
       "date": "2026-10-10",
       "purpose": "The x86-64 clock under a hypervisor (docs/CLOCK.md): the TSC taken on KVM's word where CPUID reports no invariant TSC, the rate its paravirtual clock states, the time page read whole and given back, and the HPET said aloud with its reason when it is the counter"
+    },
+    {
+      "ids": ["L.user.126"],
+      "owner": "dmabuf-fix",
+      "branch": "land-dmabuf",
+      "date": "2026-10-11",
+      "purpose": "N3b entry 6, the chardev render node's VMO dmabufs: Vmo::is_anonymous, a VMO is plain anonymous memory iff it has no filler and no file bound (the consultant's B4, ledger 726)"
     }
   ]
 }
