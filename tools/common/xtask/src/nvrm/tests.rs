@@ -25,6 +25,7 @@ nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
 nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
+nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
 nvrm: skeleton up on 00:04.0; idle\n\
 ";
 
@@ -43,6 +44,7 @@ nvrm: aperture 1: BAR 2, 0xc000000000, 8388608 KiB, 64-bit, prefetchable\n\
 nvrm: configuration window: vendor 1b36 device 0005\n\
 nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no NV_PMC_BOOT_0)\n\
 nvrm: a thread ran and was joined\n\
+nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
 nvrm: skeleton up on 00:04.0; idle\n\
 ";
 
