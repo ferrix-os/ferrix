@@ -19,6 +19,7 @@
 //! cargo xtask test-rustc [--accel kvm] [--memory M] [--timeout SECONDS]
 //! cargo xtask test-selfhost [--accel kvm] [--release] [--smp N] [--memory M] [--timeout SECONDS] [--plan DIR]
 //! cargo xtask test-selfhost --arch x86_64|aarch64 --volume IMG [--release]
+//! cargo xtask test-devloop [--accel kvm] [--release] [--interpreter glibc] [--memory M] [--timeout SECONDS]
 //! cargo xtask builds-execute --plan DIR
 //! cargo xtask check     [--fast] [--ferrousli] [--zinc] [--miri]
 //! cargo xtask miri      [--jobs N]
@@ -89,6 +90,7 @@ use ferrix_vdagent as _;
 mod compositor;
 mod console;
 mod coverage;
+mod devloop;
 mod display;
 mod dma_faults;
 mod dotfiles;
@@ -324,6 +326,10 @@ COMMANDS:
                   with --plan DIR, have Ferrix make every build a FERRIX_BUILDS=record:DIR run wrote down;
                   with --volume IMG, judge a volume Ferrix built on elsewhere (the Pixel 7's selfhost.sh):
                   btrfs check, then boot the image it holds
+    test-devloop  Walk the development loop on Ferrix (docs/DEV-ON-FERRIX.md): clone a fixture over HTTP, build and
+                  test it with the volume's Cargo, run it as a service, change it, commit and push, and require
+                  `svc restart` to put the new build in the running system (on ferrousli's loader and libc.so.6,
+                  as run-compositor --everything runs the toolchain, unless --interpreter glibc; x86_64)
     builds-execute  Make every build in --plan DIR here, keeping the outputs in DIR/store (see tools/common/xtask/src/builds.rs)
     coverage      Run every boot gate under QEMU's drcov plugin (FERRIX_DRCOV) with --init, and
                   require the certified item's statement coverage to hold its recorded floor
@@ -685,7 +691,7 @@ fn run() -> Result<()> {
         "test-steam-store" | "test-steam-game" => compositor::test_steam_store(command, &args),
         "bench-chrome" => compositor::bench_chrome(&args),
         "bench-chrome-video" => compositor::bench_chrome_video(&args),
-        "test-selfhost" => selfhost::test_selfhost(&args),
+        "test-selfhost" | "test-devloop" => devloop::run(command, &args),
         "builds-execute" => builds_execute(&args),
         name if check::COMMANDS.contains(&name) => check::command(command, &args),
         "native-clippy" => args

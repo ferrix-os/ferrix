@@ -237,6 +237,24 @@ guest powers off, `btrfs check` judges the volume, `btrfs restore` takes the
 image out, and the boot test boots it. The build boot's serial log is kept in
 `build/x86_64/selfhost/build-serial.log`.
 
+`cargo xtask test-devloop --accel kvm` is the loop a person works in rather
+than the whole image (`docs/DEV-ON-FERRIX.md`, 2026-10-11). Ferrix clones a
+small fixture over HTTP with git, builds and tests it with the volume's Cargo
+on ferrousli, as the `--everything` desktop runs the toolchain, starts it as
+a service of init's, changes a word of its source, builds, tests, commits and
+pushes, and `svc restart` must put the new build in the running system:
+
+```
+   25.45 | devloop: before greeter: hello from version one
+   26.55 | devloop: pushed greeter: say version two
+   26.57 | devloop: after greeter: hello from version two
+  x86_64: Ferrix cloned the fixture, built and tested it, ran it as a service, changed it, pushed the change, and replaced the running service with the new build
+```
+
+It needs git among the built apps (`cargo xtask build-apps --app curl --app
+git`), and it walks without `cargo fmt` and `cargo clippy`, saying so, on a
+toolchain volume fetched before 2026-10-11.
+
 On Arm the build runs on a Pixel 7 (2026-10-03). `FERRIX_SYSROOT_ARCH=arm64
 tools/common/fetch/fetch-rustc-sysroot.sh` makes the toolchain for an AArch64
 host, and `tools/vendor/google/pixel7/selfhost.sh stage`, `push`, `run` and
