@@ -567,6 +567,13 @@ name = "ferrix-seccomp"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-slots"
+version = "0.1.0"
+dependencies = [
+ "ferrix-partition",
+]
+
+[[package]]
 name = "ferrix-snd"
 version = "0.1.0"
 dependencies = [
