@@ -187,4 +187,8 @@ components=(
     "dist/2026-07-16/rust-std-1.97.1-x86_64-unknown-linux-musl.tar.xz 51d83178680556f73a5fa8ad865b76a1ff541867445c00fc65dc67246bc2de66"
     "dist/2026-07-16/rust-std-1.97.1-aarch64-unknown-linux-musl.tar.xz 49ff0879d94e2e8e86d5e85eb15a9215943e8c78b51363d6553443598cab5d31"
     "dist/2026-07-16/cargo-1.97.1-aarch64-unknown-linux-gnu.tar.xz 8f70bcaccea5ba4db187c3fd4d64e24592b4e16af513497201f5909d61691dbe"
+    "dist/2026-07-16/rustfmt-1.97.1-aarch64-unknown-linux-gnu.tar.xz 3dbde15d30794924195ae446f3d2ceb542a131306d22ae7912c7634d414622a8"
+    "dist/2026-07-16/clippy-1.97.1-aarch64-unknown-linux-gnu.tar.xz d8bac7b0ba5ca9bb868ccb9e367a1d52f4837f3ebf4892eaf64cda37ce362bb5"
+    "dist/2026-07-16/rust-analyzer-1.97.1-aarch64-unknown-linux-gnu.tar.xz 143c111d62925163e9b9f8184dc80ea37fd6612010bd32000b1bf8278e3d2d9e"
+    "dist/2026-07-16/rust-src-1.97.1.tar.xz e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b"
 )
