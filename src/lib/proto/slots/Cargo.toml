@@ -1,0 +1,16 @@
+[package]
+name = "ferrix-slots"
+description = "A/B system slots: the slot header, the boot control record and the loader's plan (docs/AB-BOOT.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+ferrix-partition.workspace = true
+
+[lints]
+workspace = true

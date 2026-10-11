@@ -3,7 +3,8 @@
 Version 1, written 2026-10-11 by ab-boot for D8 of `docs/DEV-ON-FERRIX.md`
 (§4.4 (1), §10). The customer's ask: rebuild and update Ferrix from inside
 Ferrix, its kernel included, and a kernel that panics at boot must come back
-on the good slot by itself. This document is the loader's half and the
+on the good slot by itself -- in this design, on the next reset, with no
+other action (§6.3). This document is the loader's half and the
 on-disk formats both halves share; the user-space half (`bootctl`, the
 installer's layout, `test-install --slots`) is ab-sys's, built on the crate
 named in §3.
@@ -124,15 +125,23 @@ the record's states.
    bare FAT image, `run`, the DK1 card) -> step 7, exactly as today.
 2. Read the GPT through that BlockIo: primary header at LBA 1 (signature,
    header CRC-32, MyLBA = 1, sizes), entry array (CRC-32). Find exactly one
-   control partition and exactly two slots, each inside the disk. Anything
-   else -> say why, step 7. The loader reads no other disk.
+   control partition and exactly two slots, each inside the disk. The GPT
+   is hostile input: a header or entry size or count out of bounds, an
+   entry whose first LBA is past its last, and a control or slot partition
+   overlapping any other entry are each refused. Anything else -> say
+   why, step 7. The loader reads no other disk.
 3. Read both record copies; select (§3).
 4. Make the attempt list (a pure function, `ferrix_slots::plan`):
       record                          attempts, in order
       uninitialised                   A, B                    (no write, ever)
-      trial t, tries > 0              t as TRIAL, good, other as FALLBACK
-      no trial, or tries = 0          good, other as FALLBACK
-5. For each attempt: read the slot header and blobs into memory, verify (§2).
+      trial t, tries > 0              t as TRIAL, good  (no fallback: the
+                                      good slot's other is t, unrecorded)
+      trial t, tries = 0 (failed)     good only (a failed trial is never a
+                                      fallback; the ESP's rescue comes first)
+      no trial                        good, other as FALLBACK
+5. For each attempt: read the slot header and blobs into memory, verify (§2);
+   a slot whose command line with the loader's words does not fit the boot
+   info's command-line area does not verify (no truncation).
    Not verified -> say why, free, next attempt. A TRIAL attempt that
    verified: write the record with tries - 1 (§3's write, read back);
    not confirmed -> say so, free, next attempt (the good slot). Only then
@@ -147,7 +156,11 @@ the record's states.
 The loader **writes nothing but one block of the control partition**, at the
 byte offset of one copy, and only in step 5. The block address is computed
 by a pure function of the GPT entry, the copy index and the block size, and
-checked inside the control partition's range before the call.
+checked inside the control partition's range -- a range the scan already
+proved overlaps no other entry -- before the call.
+
+**The loader says which path it took**, in one line the gate reads:
+`  boot     slot <a|b> <trial|good|fallback> seq <n>` or `  boot     esp`.
 
 **The command line** handed to a kernel started from a slot is the loader's
 words first -- the kernel takes the first word with a key, so a slot's own
@@ -161,7 +174,9 @@ ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> 
 it wrote, for a trial). The ESP's `CMDLINE.TXT` and `DEFAULTS.TXT` are not
 read on a slot boot: the slot carries the whole command line. The kernel
 needs no change: it ignores keys it does not know, and `/proc/cmdline` shows
-them to `bootctl`.
+them to `bootctl`, which reads them first-match, as the kernel's
+`option_in` does. The reference configuration's options apply to a slot's
+command line as they do to `CMDLINE.TXT` (SAFETY-MANUAL).
 
 Cost: one GPT read, two record reads, one write + flush + read for a trial,
 and SHA-256 over the kernel and initramfs (measured in §9's gate, expected
@@ -196,6 +211,7 @@ well under a second at hundreds of MB/s).
 | Trial kernel panics at boot | the kernel halts (`panic.rs`); after a reset the record has tries = 0 and the loader boots good. §6.3 |
 | Trial boots but never says `good` (userland broken) | same: the next reset boots good |
 | Good slot does not verify (bit rot, a bug in `bootctl`) | the other slot as FALLBACK, then the ESP's rescue files |
+| Good slot does not verify, and the other slot is a **failed trial** (trial set, tries 0) | the ESP's rescue files; the failed trial is never started again by the loader (the consultant's A2) |
 | Both slots bad, no rescue files | the loader stops with FERRIX-PANIC loader and says which check failed on each slot |
 | Record uninitialised or both copies corrupt | A, then B, no write; `bootctl init` repairs |
 | The disk lies about flush | outside the design: the read-back catches a write the device did not keep; a device that acknowledges, returns the new bytes and then loses them on power-off is not survived |
@@ -257,20 +273,29 @@ What the item's documents gain:
   resets a machine whose trial boot stopped.
 * **ITEM.md's reference-configuration table**: a row saying the loader
   boots either the ESP's files or a slot the control record selects, and
-  that the loader still has **no Cargo feature** (the controls of §9 are a
-  `--cfg` only the gate's xtask passes, as `--mitigations off` is).
-* The new crate: classified **load** in `certification-item.json` `crates`
-  if the consultant wants it classified (no item or core crate depends on
-  it), and its files under the unsafe/panic audits' roots (`src/lib` is).
+  that the loader still has **no Cargo feature and no `cfg`** (the controls
+  of §9 are source sabotages run by `fleet/gate.sh control`).
+* A.FIRMWARE and V-12 also say **who writes a slot**: root, through the raw
+  device, who can already overwrite the ESP; the image is verified only
+  against its own header, with no authenticity claim. A.FIRMWARE names the
+  ESP rescue path.
+* The new crate stays **unclassified** in `certification-item.json` (the
+  consultant's ruling); its files are under the unsafe/panic audits' roots
+  (`src/lib` is).
 
-**Requirements.** The loader has no requirement ids today. The proposal is
-none in the kernel's model, and a short set for the loader if the consultant
-asks for one, e.g.: (1) a trial slot is started only after a confirmed
-decrement; (2) no try left -> the good slot; (3) a slot is started only if
-it verifies; (4) the loader writes only the control partition's record
-blocks; (5) a slot boot's command line begins with the loader's slot words.
-If ids are wanted they are reserved on `main` first (`CONVENTIONS.md`), via
-the coordinator.
+**The loader's specified behaviour, P1-P5** (no requirement ids, the
+consultant's ruling; they are the SAFETY-MANUAL assumption of use's
+statement, and §9 names the gate case or control for each):
+
+* **P1** a trial slot is started only after the record with one try fewer
+  was written, flushed and read back;
+* **P2** with no try left, the good slot (and never the failed trial before
+  the ESP's rescue files);
+* **P3** a slot is started only if it verifies (§2);
+* **P4** the loader writes only the control partition's two record blocks,
+  inside a range that overlaps no other GPT entry;
+* **P5** a slot boot's command line begins with the loader's slot words and
+  is never truncated.
 
 ## 9. Self-checks and negative controls
 
@@ -288,20 +313,36 @@ the same disk file (a power cycle).
 | 3 | as 1, newest record copy corrupted | the older copy is used, and the loader writes over the corrupt one |
 | 4 | as 2, one byte of B's initramfs flipped | B does not verify; A boots; no write (sequence unchanged) |
 | 5 | record zeroed | A boots, no write |
+| 6 | good A with A's kernel blob corrupted; trial B failed (tries 0); ESP holds the rescue files | the loader boots `esp`, never B |
 | all | | p1's pattern hashes the same after every boot |
 
-**Negative controls** (each a build of the loader with one check removed,
-by a `--cfg ferrix_ab_control="…"` that only the gate's xtask passes, as
-`--mitigations off` is passed; the gate must fail in the stated way):
+**Negative controls**: source sabotages run by `fleet/gate.sh control
+<ref> <tag> <file> <old> <new> --expect-line <text> -- test-ab-boot`, each
+FIRED on the gate's failure line, recorded by the log's hash (the
+consultant's A1, A7); no `cfg`, no feature:
 
-* `no_decrement`: case 1 boots B on boot 2 again -- the loop the decrement
-  prevents;
-* `no_verify`: case 4 starts B's corrupted initramfs;
-* `no_readback`: a host test, since a dropped write cannot be made in QEMU:
-  the loader-side decision with a disk double that drops writes starts the
-  trial without the read-back and does not with it.
-* the gate also runs case 1 with p1 written by the loader's write path
-  pointed at it (a control on the range check): the range check refuses.
+* `no_decrement` (the decrement-before-start removed): case 1 boots B on
+  boot 2 again -- the loop the decrement prevents;
+* `no_verify` (the blob hash comparison removed): case 4 starts B's
+  corrupted initramfs;
+* the range check removed, with the record's copy offset sabotaged to fall
+  in p1: p1's hash changes;
+* the failed-trial ordering removed (`plan` falls back to the failed trial):
+  case 6 starts B;
+* `no_readback`: a host test of `ferrix_slots::write_record`, since a
+  dropped write cannot be made in QEMU: a disk double that drops writes is
+  refused with the read-back and, with the read-back sabotaged, accepted.
+
+| Property | Shown by |
+|---|---|
+| P1 | case 1, control `no_decrement`; host test + control `no_readback` |
+| P2 | case 1 boot 2, case 6, control on the failed-trial ordering |
+| P3 | case 4, control `no_verify` |
+| P4 | p1's hash after every boot, control on the range check; host tests of the GPT refusals |
+| P5 | case 1/2's `/proc/cmdline` check; host test of the words and the fit |
+
+The `test-boot` rows for x86-64 and AArch64 are unchanged: their images have
+no HardDrive node, and the loader takes today's path.
 
 Host tests of `ferrix-slots` as §3 lists, in `check`.
 
@@ -316,5 +357,10 @@ Host tests of `ferrix-slots` as §3 lists, in `check`.
 
 ## 11. Where it stands
 
-2026-10-11: this design, sent to the certification consultant for a design
-verdict before any loader code.
+2026-10-11: this design; the consultant's design verdict **OK IF A1-A10**
+(ledger `~/.local/share/ferrix/cert-consultant/reviews.md` line 727), its
+conditions folded in above. A10: nothing writes the SN720 (the p3-p5
+retype, `bootctl init`, the first slot) without the customer's OK for that
+write phase, through the PO, with the address list first. AB2's loader code
+goes back to the consultant for code review before landing, with the
+A.FIRMWARE, V-12, SAFETY-MANUAL and ITEM.md edits.
