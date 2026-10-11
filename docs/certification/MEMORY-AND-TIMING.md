@@ -1030,6 +1030,28 @@ taken under `RENDERS` and never the other way. A dmabuf's install and
 resolve each count as a copy of their request, so a program's call does
 not return while one runs (N4).
 
+**The fences (N3b sync, ledgers 647 and 725).** A control's `syncs` table
+holds one entry per unsignalled fence it made, at most `MAX_SYNC_FILES`,
+4096 (`LIMIT_REACHED` past it; stage 10 makes 4096 through the product's
+`make` and requires the refusal). The `syncfiles` thread's `WATCHED` list
+holds each fence until it is signalled or dropped, at most `MAX_WATCHED`,
+16384, across all controls: an install that would pass it first prunes the
+list of signalled and dropped fences, then is refused `LIMIT_REACHED`.
+Under `WATCHED`'s spin lock: `watch`'s prune and push (at most 16384, one
+push into room reserved under the same lock), and a look of the thread
+(`pass`), which walks the list once, at most 16384 entries, keeping the
+unsignalled ones, moving at most 32 fences past their deadline into a
+fixed array, and allocates nothing; their signals run after the lock is
+let go, and a full array has the thread look again at once. A fence whose
+last holder went during the walk drops under `WATCHED`, taking its
+control's `syncs` lock: `syncs` is never held while `WATCHED` is taken.
+Under `syncs`: `make`'s scan (at most 4096) and push into reserved room,
+the gone test, a signal's or the thread's take (at most 4096), a drop's
+`retain` (at most 4096). `control_gone` takes the table out under the lock
+and signals each fence after it, with no allocation. A fence's own lock
+guards a status word. A program waits on a fence through `poll` with the
+deadline the fence carries, at most `SYNC_DEADLINE_MAX_MS`.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

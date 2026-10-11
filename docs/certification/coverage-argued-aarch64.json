@@ -1282,56 +1282,56 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "210",
+      "lines": "213",
       "category": "defensive",
       "match": ".map(|served| served.call)",
       "why": "The call a boot finds the load ring left unanswered: register_load requires unserved() to be None before the boot goes on (LOAD_REGISTRATION), so the closure naming the call runs only on a kernel whose load forgot a handler."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "301",
+      "lines": "304",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "514",
+      "lines": "520",
       "category": "credited-elsewhere",
       "match": "TableError::AccessDenied => status::ACCESS_DENIED,",
       "why": "Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1308-1309",
+      "lines": "1314-1315",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1980",
+      "lines": "1986",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2059",
+      "lines": "2065",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2065-2066",
+      "lines": "2071-2072",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2546",
+      "lines": "2552",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."

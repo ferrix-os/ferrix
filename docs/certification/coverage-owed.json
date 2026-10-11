@@ -326,6 +326,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
       "what": "user/vmo.rs Vmo::is_anonymous (L.user.126), reached by stage 10's chardev self-check (the memfd refusal and every install of a vmo_create VMO); syscall/native.rs's two SERVED rows and the two arms to served() for ChardevDmabufInstall and ChardevDmabufResolve: measure them on the next coverage run of each architecture."
+    },
+    {
+      "landing": "land-dmabuf, N3b entry 8: the chardev sync_file fences (calls 0x1062-0x1064; the consultant's code review, ledger 725)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
+      "what": "syscall/native.rs's three SERVED rows and the three arms to served() for ChardevSyncInstall, ChardevSyncSignal and ChardevSyncResolve, reached by stage 10's chardev self-check: measure them on the next coverage run of each architecture."
     }
   ]
 }

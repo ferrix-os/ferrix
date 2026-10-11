@@ -56,6 +56,21 @@
 //!   after the last of two descriptors, and one after a `dup`'s close and
 //!   its holder's exit (V1); and one kept past the driver's
 //!   death still says its size, still maps nothing and closes unheard;
+//! * a fence (N3b sync; ledger 647's S9 and its code review, ledger 725):
+//!   unknown flags, a stray register, a positive or out-of-range status and
+//!   a signal of no fence are refused with nothing held; a live cookie is
+//!   `ALREADY_BOUND`; install for an answered, an abandoned and an unknown
+//!   request is refused; `MAX_SYNC_FILES` fences through the product's
+//!   `make` and the next `LIMIT_REACHED`; resolve gives the cookie and
+//!   whether it is signalled, and refuses no descriptor, a dmabuf, another
+//!   driver's resolve and the next driver's; another driver's signal is
+//!   refused; one fence is signalled once with 0 and wakes its queue, one
+//!   past a short deadline reads `ETIMEDOUT` and refuses the late signal;
+//!   `SYNC_IOC_FILE_INFO` answers as Linux and `MERGE` is `ENOTTY`; `read`
+//!   `EINVAL`, `write` `EBADF`, `mmap` `ENODEV` and exec refused through
+//!   the program's own calls; and a program blocked in `poll` on the kept
+//!   fence wakes readable within a second of the driver's death, which
+//!   reads `ENODEV`;
 //! * when the driver goes, a waiting program wakes with `ENODEV` and the
 //!   node is unpublished (N9).
 //!
@@ -139,6 +154,11 @@ pub(crate) struct Report {
     pub(crate) dmabuf_refusals: u32,
     /// name-only dmabuf calls and mappings refused as specified (N6).
     pub(crate) name_refusals: u32,
+    /// `sync_file` installs, signals and resolves refused as specified (S9).
+    pub(crate) sync_refusals: u32,
+    /// How long after its driver's death a program blocked in `poll` on a
+    /// fence woke, in milliseconds (S9; at most [`DEATH_WAKE_MS`]).
+    pub(crate) fence_death_wake_ms: u64,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -218,8 +238,22 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         .zip(other_core.as_ref())
         .map(|((side, handle), core)| (side, *handle, core));
     let kept_name = names(&driver, control, &core, &program, foreign, &mut report)?;
+    let fence = fences(&driver, control, &core, &program, &mut report)?;
+    fence_refusals(
+        &driver,
+        control,
+        &core,
+        &program,
+        foreign,
+        [fence, kept.fd],
+        &mut report,
+    )?;
+    let since = start_poll(&program, fence)?;
     death(&driver, control, &core, &program, &mut report)?;
+    report.fence_death_wake_ms = poll_woke(since)?;
     after_death(&driver, first, &core, &program, &kept, &mut report)?;
+    stale_fence_refused(&driver, first, &core, &program, fence, &mut report)?;
+    fence_outlived(&program, fence)?;
     outlived(&program, &kept)?;
     name_outlived(&program, kept_name, &mut report)?;
     if let Some((side, other)) = other {
@@ -437,6 +471,8 @@ fn bounded(
 
 /// The cookie the check names its dmabuf by.
 const COOKIE: u64 = 0x00D3_AB0F;
+/// The cookie the fences are named by.
+const FENCE: u64 = 0x000F_E0C3;
 /// Its buffer: two pages.
 const DMABUF_BYTES: u64 = 2 * 4096;
 /// What the driver writes in it, and the program reads through a mapping.
@@ -946,6 +982,534 @@ fn after_death(
         sched::sleep_for(1_000_000);
     }
     Ok(())
+}
+
+/// The status of the fence `fd` of `process` names now.
+fn fence_status(process: &Process, fd: i32) -> Result<Option<i32>, &'static str> {
+    let file = crate::syscall::fd::file(process, fd).map_err(|_| "a fence's descriptor went")?;
+    let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    Ok(fence.status(timer::now_nanos()).map(|(code, _)| code))
+}
+
+/// Fences (N3b sync, the consultant's S9): each refusal refused with
+/// nothing held, one signalled once, one past a short deadline read as
+/// `ETIMEDOUT` and signalled by the thread, the deadlines clamped, and one
+/// kept unsignalled for the driver's death.
+fn fences(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<i32, &'static str> {
+    use ferrix_native_abi::types::{SYNC_DEADLINE_DEFAULT_MS, SYNC_DEADLINE_MAX_MS};
+    if super::sync::deadline_ms(0) != SYNC_DEADLINE_DEFAULT_MS
+        || super::sync::deadline_ms(u64::MAX) != SYNC_DEADLINE_MAX_MS
+        || super::sync::deadline_ms(3) != 3
+    {
+        return Err("a fence's deadline was not clamped as specified");
+    }
+    drain_channel(side, control);
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let install = |cookie: u64, ms: u64, flags: u64, unused: u64| {
+        side.call(
+            nr::CHARDEV_SYNC_INSTALL,
+            &[reg(control), wire.id, cookie, ms, flags, unused],
+        )
+    };
+    let signal = |cookie: u64, code: i64| {
+        side.call(
+            nr::CHARDEV_SYNC_SIGNAL,
+            &[reg(control), cookie, code as u64],
+        )
+    };
+    let before = super::sync::alive(core);
+    for (refused, wanted, what) in [
+        (
+            install(FENCE, 0, 1 << 5, 0),
+            status::INVALID_ARGS,
+            "a fence with an unknown flag was installed",
+        ),
+        (
+            install(FENCE, 0, 0, 1),
+            status::INVALID_ARGS,
+            "a fence with a stray register was installed",
+        ),
+        (
+            signal(FENCE, 1),
+            status::INVALID_ARGS,
+            "a fence was signalled with a positive status",
+        ),
+        (
+            signal(FENCE, -4096),
+            status::INVALID_ARGS,
+            "a fence was signalled past the errno range",
+        ),
+        (
+            signal(FENCE, 0),
+            status::BAD_STATE,
+            "a cookie with no fence was signalled",
+        ),
+    ] {
+        if refused != Err(wanted) {
+            return Err(what);
+        }
+        report.sync_refusals += 1;
+    }
+    if super::sync::alive(core) != before {
+        return Err("a refused fence call left a fence behind");
+    }
+    let once = install(FENCE, 0, 0, 0).map_err(|_| "a fence was refused")? as i32;
+    if install(FENCE, 0, 0, 0) != Err(status::ALREADY_BOUND) {
+        return Err("a live fence's cookie was installed again");
+    }
+    report.sync_refusals += 1;
+    let resolve = |fd: i32| {
+        side.call(
+            nr::CHARDEV_SYNC_RESOLVE,
+            &[reg(control), wire.id, fd as u64, BUFFER],
+        )
+    };
+    if resolve(once) != Ok(0) || side.get(BUFFER, 8)? != FENCE.to_ne_bytes() {
+        return Err("an unsignalled fence did not resolve to its cookie");
+    }
+    if resolve(i32::MAX - 1) != Err(status::BAD_HANDLE) {
+        return Err("a descriptor that is no fence resolved");
+    }
+    report.sync_refusals += 1;
+    signalled_once(program, once, &signal, &resolve, report)?;
+    // A short deadline: ETIMEDOUT, and the thread's signal takes the cookie
+    // out of the table.
+    let late =
+        install(FENCE + 1, 1, 0, 0).map_err(|_| "a fence with a deadline was refused")? as i32;
+    sched::sleep_for(STILL_NANOS);
+    if fence_status(&program.process, late)? != Some(-(Errno::ETIMEDOUT.0 as i32)) {
+        return Err("a fence past its deadline did not read as ETIMEDOUT");
+    }
+    if signal(FENCE + 1, 0) != Err(status::BAD_STATE) {
+        return Err("a fence past its deadline took the driver's signal");
+    }
+    report.sync_refusals += 1;
+    let kept = install(FENCE + 2, u64::MAX, 0, 0).map_err(|_| "a third fence was refused")? as i32;
+    reply(side, control, wire.id, VALUE)?;
+    if finish()? != Ok(VALUE as usize) {
+        return Err("the program's ioctl did not return after its fences");
+    }
+    report.answered += 1;
+    if install(FENCE + 3, 0, 0, 0) != Err(status::BAD_STATE) {
+        return Err("a fence for an answered request was installed");
+    }
+    report.sync_refusals += 1;
+    close_fd(&program.process, once)?;
+    close_fd(&program.process, late)?;
+    if super::sync::alive(core) != 1 {
+        return Err("a control counted other than one unsignalled fence");
+    }
+    Ok(kept)
+}
+
+/// One fence signalled once with 0: unsignalled before, its queue woken,
+/// `SYNC_IOC_FILE_INFO` as Linux answers it, a second signal refused by the
+/// call and by the object, and resolve saying it is signalled (S2, S6).
+fn signalled_once(
+    program: &Side,
+    once: i32,
+    signal: &dyn Fn(u64, i64) -> Result<usize, Errno>,
+    resolve: &dyn Fn(i32) -> Result<usize, Errno>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    if fence_status(&program.process, once)?.is_some() {
+        return Err("a fence read as signalled before it was");
+    }
+    let woken = fence_wakes(&program.process, once)?;
+    if signal(FENCE, 0).is_err() || fence_status(&program.process, once)? != Some(0) {
+        return Err("a fence was not signalled once with 0");
+    }
+    if fence_wakes(&program.process, once)? == woken {
+        return Err("a fence's signal did not wake its queue");
+    }
+    file_info(program, once, report)?;
+    // Twice through the driver's call, whose cookie is out of the table
+    // now, and twice on the object itself, as a racing deadline or death
+    // would: refused both ways, the status unchanged (S2).
+    let file = crate::syscall::fd::file(&program.process, once)
+        .map_err(|_| "a fence's descriptor went")?;
+    let object = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    if signal(FENCE, -5) != Err(status::BAD_STATE)
+        || object.signal(-5)
+        || fence_status(&program.process, once)? != Some(0)
+    {
+        return Err("a fence was signalled twice");
+    }
+    report.sync_refusals += 1;
+    if resolve(once) != Ok(1) {
+        return Err("a signalled fence did not resolve as signalled");
+    }
+    Ok(())
+}
+
+/// How often the fence `fd` of `process` names has woken its queue.
+fn fence_wakes(process: &Process, fd: i32) -> Result<Option<u64>, &'static str> {
+    use ferrix_vfs::Inode;
+    let file = crate::syscall::fd::file(process, fd).map_err(|_| "a fence's descriptor went")?;
+    let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    Ok(fence.poll_changes())
+}
+
+/// `SYNC_IOC_FILE_INFO` through the program's memory, as Linux answers it
+/// for one signalled fence, and its refusals (S6).
+fn file_info(program: &Side, fd: i32, report: &mut Report) -> Result<(), &'static str> {
+    const FILE_INFO: u32 = 0xC038_3E04;
+    const MERGE: u32 = 0xC030_3E03;
+    let file =
+        crate::syscall::fd::file(&program.process, fd).map_err(|_| "a fence's descriptor went")?;
+    let fence = super::sync::of(file.io()).ok_or("a fence's descriptor is no sync_file")?;
+    let ask = |info: &[u8; 56]| -> Result<Result<usize, Errno>, &'static str> {
+        program.put(BUFFER, info)?;
+        Ok(super::sync::ioctl(
+            &program.process,
+            &fence,
+            FILE_INFO,
+            BUFFER,
+        ))
+    };
+    let word = |bytes: &[u8], at: usize| -> u32 {
+        let mut word = [0u8; 4];
+        word.copy_from_slice(bytes.get(at..at + 4).unwrap_or(&[0; 4]));
+        u32::from_ne_bytes(word)
+    };
+    // num_fences 0: the count, no array.
+    if ask(&[0u8; 56])? != Ok(0) {
+        return Err("SYNC_IOC_FILE_INFO with no array was refused");
+    }
+    let got = program.get(BUFFER, 56)?;
+    if word(&got, 32) != 1 || word(&got, 40) != 1 || !got.starts_with(b"nvidia-drm") {
+        return Err("SYNC_IOC_FILE_INFO did not say one signalled fence");
+    }
+    // num_fences 1: one entry, at an array in the program's memory.
+    let mut info = [0u8; 56];
+    info[40..44].copy_from_slice(&1u32.to_ne_bytes());
+    info[48..56].copy_from_slice(&(BUFFER + 0x100).to_ne_bytes());
+    if ask(&info)? != Ok(0) || word(&program.get(BUFFER + 0x100, 80)?, 64) != 1 {
+        return Err("SYNC_IOC_FILE_INFO did not write its fence's entry");
+    }
+    let mut flagged = [0u8; 56];
+    flagged[36] = 1;
+    let mut stray = info;
+    stray[48..56].copy_from_slice(&u64::MAX.to_ne_bytes());
+    for (refused, wanted, what) in [
+        (
+            ask(&flagged)?,
+            Errno::EINVAL,
+            "SYNC_IOC_FILE_INFO with flags set was answered",
+        ),
+        (
+            ask(&stray)?,
+            Errno::EFAULT,
+            "SYNC_IOC_FILE_INFO wrote through a bad pointer",
+        ),
+        (
+            super::sync::ioctl(&program.process, &fence, MERGE, BUFFER),
+            Errno::ENOTTY,
+            "SYNC_IOC_MERGE was answered",
+        ),
+    ] {
+        if refused != Err(wanted) {
+            return Err(what);
+        }
+        report.sync_refusals += 1;
+    }
+    let mut byte = [0u8; 1];
+    if ferrix_vfs::Inode::read_at(&*fence, 0, &mut byte) != Err(Errno::EINVAL)
+        || ferrix_vfs::Inode::mapping_at(&*fence, 0).is_some()
+    {
+        return Err("a fence was read or mapped");
+    }
+    report.sync_refusals += 1;
+    Ok(())
+}
+
+/// The longest a program blocked in `poll` on a fence may take to wake
+/// after the fence's driver dies (S9).
+pub(crate) const DEATH_WAKE_MS: u64 = 1000;
+
+/// The rest of S9 (647's code review, B4): install for an abandoned
+/// request and for a request id this control does not have, refused;
+/// [`super::sync::MAX_SYNC_FILES`] fences through the product's `make` and
+/// the next `LIMIT_REACHED`; resolve of a dmabuf descriptor `BAD_HANDLE`;
+/// with a second driver, its signal and its resolve of this control's
+/// fence refused and the fence left unsignalled; and through the
+/// program's own calls, `read` and `write` `EINVAL`, `mmap` `ENODEV` and
+/// exec refused. `fds` are the kept fence and a dmabuf.
+fn fence_refusals(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    foreign: Option<(&Side, Handle, &Arc<Control>)>,
+    [fence, dmabuf]: [i32; 2],
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    drain_channel(side, control);
+    // An abandoned request, and one this control never had.
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    abandon(core, &request);
+    for id in [request.wire.id, request.wire.id.wrapping_add(1 << 40)] {
+        let installed = side.call(
+            nr::CHARDEV_SYNC_INSTALL,
+            &[reg(control), id, FENCE + 7, 0, 0, 0],
+        );
+        if installed != Err(status::BAD_STATE) {
+            return Err("a fence was installed for a request that was not outstanding");
+        }
+        report.sync_refusals += 1;
+    }
+    drain_channel(side, control);
+    fence_cap(core)?;
+    report.sync_refusals += 1;
+    // The dmabuf, resolved as a fence, for a request of its own.
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        request,
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let resolved = side.call(
+        nr::CHARDEV_SYNC_RESOLVE,
+        &[reg(control), wire.id, dmabuf as u64, BUFFER],
+    );
+    reply(side, control, wire.id, VALUE)?;
+    let _ = finish()?;
+    if resolved != Err(status::BAD_HANDLE) {
+        return Err("a dmabuf's descriptor resolved as a fence");
+    }
+    report.sync_refusals += 1;
+    if let Some(foreign) = foreign {
+        foreign_fence_refused(program, foreign, fence, report)?;
+    }
+    fence_syscalls(&program.process, fence)?;
+    report.sync_refusals += 3;
+    Ok(())
+}
+
+/// [`super::sync::MAX_SYNC_FILES`] fences alive on one control through the
+/// product's `make`, the next `LIMIT_REACHED`, all gone again after.
+fn fence_cap(core: &Arc<Control>) -> Result<(), &'static str> {
+    use super::sync::{MAX_SYNC_FILES, alive, make};
+    let base = alive(core);
+    let mut held = Vec::new();
+    held.try_reserve_exact(MAX_SYNC_FILES)
+        .map_err(|_| "no memory for the check's fences")?;
+    let mut cookie = FENCE << 16;
+    while base + held.len() < MAX_SYNC_FILES {
+        held.push(make(core, cookie, 1000).map_err(|_| "a fence under the cap was refused")?);
+        cookie += 1;
+    }
+    let over = make(core, cookie, 1000).map(|_| ());
+    drop(held);
+    if over != Err(status::LIMIT_REACHED) {
+        return Err("a fence over the cap was made");
+    }
+    if alive(core) != base {
+        return Err("fences under the cap stayed in the table after their last holder went");
+    }
+    Ok(())
+}
+
+/// A second driver's signal of this control's fence `fd` names nothing,
+/// and its resolve is `BAD_HANDLE`; the fence stays unsignalled.
+fn foreign_fence_refused(
+    program: &Side,
+    (other_side, other_control, other_core): (&Side, Handle, &Arc<Control>),
+    fd: i32,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    drain_channel(other_side, other_control);
+    let signalled = other_side.call(nr::CHARDEV_SYNC_SIGNAL, &[reg(other_control), FENCE + 2, 0]);
+    if signalled != Err(status::BAD_STATE) || fence_status(&program.process, fd)?.is_some() {
+        return Err("another driver signalled a fence it did not make");
+    }
+    report.sync_refusals += 1;
+    let request = admit(other_core, &program.process, IOCTL)
+        .map_err(|_| "an ioctl was not taken in by the second driver")?;
+    start(Job::Await(
+        Arc::clone(other_core),
+        request,
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(other_side, other_control)? else {
+        return Err("an ioctl did not reach the second driver as a REQUEST");
+    };
+    let resolved = other_side.call(
+        nr::CHARDEV_SYNC_RESOLVE,
+        &[reg(other_control), wire.id, fd as u64, BUFFER],
+    );
+    reply(other_side, other_control, wire.id, VALUE)?;
+    let _ = finish()?;
+    if resolved != Err(status::BAD_HANDLE) {
+        return Err("another driver resolved a fence it did not make");
+    }
+    report.sync_refusals += 1;
+    Ok(())
+}
+
+/// A fence through the program's own calls: `read` `EINVAL`, `write` `EBADF`,
+/// `mmap` `ENODEV`, exec refused with nothing mapped (632's N5).
+fn fence_syscalls(process: &Process, fd: i32) -> Result<(), &'static str> {
+    if crate::syscall::file::sys_read(process, fd, BUFFER, 8) != Err(Errno::EINVAL) {
+        return Err("a fence was read");
+    }
+    // Opened for reading only, as Linux opens one: `EBADF`.
+    if crate::syscall::file::sys_write(process, fd, BUFFER, 8) != Err(Errno::EBADF) {
+        return Err("a fence was written");
+    }
+    if mmap_errno(process, fd, ferrix_linux_abi::types::MAP_SHARED) != Err(Errno::ENODEV) {
+        return Err("a fence was mapped");
+    }
+    not_executable(process, fd).map_err(|_| "a fence was executed")
+}
+
+/// The poll helper's outcome and when it came.
+static POLLED: SpinLock<Option<(Result<usize, Errno>, u64)>> = SpinLock::new(None);
+/// What the poll helper polls: the program and its fence.
+static POLL_ON: SpinLock<Option<(Arc<Process>, i32)>> = SpinLock::new(None);
+/// Where the poll helper's `struct pollfd` sits in the program's memory.
+const POLLFD: u64 = BUFFER + 0x300;
+
+/// Start a task blocked in the program's `poll` on its fence `fd`, and
+/// require it still blocked a while later: the time to measure its wake
+/// from.
+fn start_poll(program: &Side, fd: i32) -> Result<u64, &'static str> {
+    let mut pollfd = [0u8; 8];
+    pollfd[..4].copy_from_slice(&fd.to_ne_bytes());
+    pollfd[4..6].copy_from_slice(&1_i16.to_ne_bytes()); // POLLIN
+    program.put(POLLFD, &pollfd)?;
+    *POLLED.lock() = None;
+    *POLL_ON.lock() = Some((Arc::clone(&program.process), fd));
+    let _ = sched::spawn("chardev-poll", poll_helper, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    sched::sleep_for(STILL_NANOS);
+    if POLLED.lock().is_some() {
+        return Err("a poll on an unsignalled fence returned before its driver died");
+    }
+    Ok(timer::now_nanos())
+}
+
+/// The poll helper: the program's `poll` on its fence, with a limit well
+/// past the bound, and when it returned.
+fn poll_helper(_: usize) {
+    let on = POLL_ON.lock().take();
+    let outcome = match on {
+        Some((process, _)) => crate::syscall::poll::sys_poll(&process, POLLFD, 1, 10_000),
+        None => Err(Errno::EINVAL),
+    };
+    *POLLED.lock() = Some((outcome, timer::now_nanos()));
+}
+
+/// The poll helper woke with its fence readable within [`DEATH_WAKE_MS`] of
+/// `since`: how many milliseconds it took.
+fn poll_woke(since: u64) -> Result<u64, &'static str> {
+    let deadline = since.saturating_add(PATIENCE_NANOS);
+    loop {
+        let polled = POLLED.lock().take();
+        if let Some((outcome, at)) = polled {
+            let took = at.saturating_sub(since) / 1_000_000;
+            if outcome != Ok(1) || took > DEATH_WAKE_MS {
+                return Err(
+                    "a poll on a fence did not wake readable within a second of its driver's death",
+                );
+            }
+            return Ok(took);
+        }
+        if timer::now_nanos() > deadline {
+            return Err("a poll on a fence never woke after its driver's death");
+        }
+        sched::sleep_for(1_000_000);
+    }
+}
+
+/// Nothing is made for the dead control `old`, and the next driver's
+/// control resolves its dead predecessor's fence `fd`
+/// `BAD_HANDLE`, for a request of its own.
+fn stale_fence_refused(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    old: &Arc<Control>,
+    program: &Side,
+    fd: i32,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    // No fence is made for the dead control (725's B1).
+    let before = super::sync::alive(old);
+    if super::sync::make(old, FENCE + 8, 0).map(|_| ()) != Err(status::BAD_STATE)
+        || super::sync::alive(old) != before
+    {
+        return Err("a fence was made for a control whose driver was gone");
+    }
+    report.sync_refusals += 1;
+    let control = accepted(side, node, &[0])?;
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let core = loop {
+        let found = CONTROLS
+            .lock()
+            .iter()
+            .find(|held| Arc::ptr_eq(&held.device, node) && !Arc::ptr_eq(held, old))
+            .cloned();
+        if let Some(found) = found {
+            break found;
+        }
+        if timer::now_nanos() > deadline {
+            return Err("a second driver's accepted control is not among the live ones");
+        }
+        sched::sleep_for(1_000_000);
+    };
+    let request = admit(&core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(&core),
+        request,
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let resolved = side.call(
+        nr::CHARDEV_SYNC_RESOLVE,
+        &[reg(control), wire.id, fd as u64, BUFFER],
+    );
+    reply(side, control, wire.id, VALUE)?;
+    let _ = finish()?;
+    if resolved != Err(status::BAD_HANDLE) {
+        return Err("a new driver's control resolved its dead predecessor's fence");
+    }
+    report.sync_refusals += 1;
+    close(side, control)?;
+    drop(core);
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while published(0).is_some() {
+        if timer::now_nanos() > deadline {
+            return Err("a node stayed published after its driver went");
+        }
+        sched::sleep_for(1_000_000);
+    }
+    Ok(())
+}
+
+/// After its driver went, the fence it never signalled reads `ENODEV`.
+fn fence_outlived(program: &Side, fd: i32) -> Result<(), &'static str> {
+    if fence_status(&program.process, fd)? != Some(-(Errno::ENODEV.0 as i32)) {
+        return Err("a fence its driver never signalled did not read ENODEV after it went");
+    }
+    close_fd(&program.process, fd)
 }
 
 /// After its driver went, a dmabuf's mapping still shows its bytes, a new

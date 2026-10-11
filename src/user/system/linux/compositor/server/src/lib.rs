@@ -50,7 +50,7 @@ pub use client::{
     Client, Configuration, Constraint, DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, Dragging,
     Event, Export, Fatal, Flavour, ForeignRequest, ForeignToplevel, Frame, GAMMA_SIZE, Hotkey,
     Injected, Listener, MOD_INVALID, MOD_LINEAR, Manager, Outgoing, Plane, Shortcut, Source, Typed,
-    Wanted, Workspace, WorkspaceRequest, format_of,
+    Wanted, Workspace, WorkspaceRequest, format_of, offer_linear_only,
 };
 pub use globals::{Global, Globals};
 pub use layer::{Anchors, Layer, LayerSurface, Margin};

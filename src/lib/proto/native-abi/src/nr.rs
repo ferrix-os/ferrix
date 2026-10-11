@@ -175,6 +175,12 @@ pub const CHARDEV_FILE: usize = 0x105E;
 pub const CHARDEV_DMABUF_INSTALL: usize = 0x1060;
 /// [`NativeCall::ChardevDmabufResolve`].
 pub const CHARDEV_DMABUF_RESOLVE: usize = 0x1061;
+/// [`NativeCall::ChardevSyncInstall`].
+pub const CHARDEV_SYNC_INSTALL: usize = 0x1062;
+/// [`NativeCall::ChardevSyncSignal`].
+pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
+/// [`NativeCall::ChardevSyncResolve`].
+pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -575,10 +581,33 @@ pub enum NativeCall {
     /// any other descriptor, a dmabuf of another control included. Only
     /// while the request is outstanding. Answered by the load ring.
     ChardevDmabufResolve,
+    /// `(control, request, cookie, deadline_ms, flags)` → descriptor. A
+    /// `sync_file` -- one fence, unsignalled -- installed as a new
+    /// descriptor in the program waiting in the request: what nvidia-drm's
+    /// `SEMSURF_FENCE_CREATE` answers (`docs/NVIDIA.md` §4.6, N3b sync).
+    /// It reads as signalled with `ETIMEDOUT` once `deadline_ms` has passed,
+    /// capped at [`crate::types::SYNC_DEADLINE_MAX_MS`] and
+    /// [`crate::types::SYNC_DEADLINE_DEFAULT_MS`] for 0, and with `ENODEV`
+    /// once the control is gone. `flags` is [`crate::types::SYNC_CLOEXEC`].
+    /// `ALREADY_BOUND` for a cookie with a live unsignalled fence;
+    /// `LIMIT_REACHED` past the control's fences. Only while the request is
+    /// outstanding. Answered by the load ring.
+    ChardevSyncInstall,
+    /// `(control, cookie, status)`. Signal the control's fence `cookie` with
+    /// `status`, 0 or a negative errno no lower than -4095, once. Not tied
+    /// to a request. `BAD_STATE` for a cookie with no unsignalled fence.
+    /// Answered by the load ring.
+    ChardevSyncSignal,
+    /// `(control, request, descriptor, cookie: *u64)` → signalled. The
+    /// cookie of the fence the waiting program's `descriptor` names, if this
+    /// same control made it, and 1 if it is signalled, 0 if not.
+    /// `BAD_HANDLE` for any other descriptor. Only while the request is
+    /// outstanding. Answered by the load ring.
+    ChardevSyncResolve,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 61] = [
+pub const ALL: [NativeCall; 64] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -640,6 +669,9 @@ pub const ALL: [NativeCall; 61] = [
     NativeCall::ChardevFile,
     NativeCall::ChardevDmabufInstall,
     NativeCall::ChardevDmabufResolve,
+    NativeCall::ChardevSyncInstall,
+    NativeCall::ChardevSyncSignal,
+    NativeCall::ChardevSyncResolve,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -716,6 +748,9 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_FILE => NativeCall::ChardevFile,
         CHARDEV_DMABUF_INSTALL => NativeCall::ChardevDmabufInstall,
         CHARDEV_DMABUF_RESOLVE => NativeCall::ChardevDmabufResolve,
+        CHARDEV_SYNC_INSTALL => NativeCall::ChardevSyncInstall,
+        CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
+        CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         _ => return None,
     };
     Some(call)
@@ -786,5 +821,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevFile => CHARDEV_FILE,
         NativeCall::ChardevDmabufInstall => CHARDEV_DMABUF_INSTALL,
         NativeCall::ChardevDmabufResolve => CHARDEV_DMABUF_RESOLVE,
+        NativeCall::ChardevSyncInstall => CHARDEV_SYNC_INSTALL,
+        NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
+        NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
     }
 }

@@ -46,6 +46,7 @@ pub use capture::{Frame, Source};
 pub use control::{Flavour, Manager};
 pub use dmabuf::{
     DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Dmabuf, MOD_INVALID, MOD_LINEAR, Plane, format_of,
+    offer_linear_only,
 };
 pub use drag::Dragging;
 pub use event::Event;

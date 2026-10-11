@@ -165,3 +165,72 @@ pub fn dmabuf_resolve<S: Syscall>(
         .make(control.syscall());
     decode_unit(value).map(|()| u64::from_ne_bytes(cookie))
 }
+
+/// `chardev_sync_install`: a fence named `cookie` as a new descriptor in
+/// the program `request` is for (N3b sync, `docs/NVIDIA.md` §4.6), read as
+/// signalled with `ETIMEDOUT` once `deadline_ms` pass (0 for the default,
+/// capped by the kernel). `flags` are `ferrix_native_abi::types::SYNC_CLOEXEC`.
+///
+/// # Errors
+///
+/// As [`reply`]; [`Error::AlreadyBound`] for a cookie with a live fence,
+/// [`Error::LimitReached`] past the control's or the kernel's fences or the
+/// program's descriptors.
+pub fn sync_install<S: Syscall>(
+    control: &Channel<S>,
+    request: u64,
+    cookie: u64,
+    deadline_ms: u64,
+    flags: u64,
+) -> Result<i32, Error> {
+    let value = Call::new(nr::CHARDEV_SYNC_INSTALL)
+        .value(register(control.handle()))
+        .value(request as usize)
+        .value(cookie as usize)
+        .value(deadline_ms as usize)
+        .value(flags as usize)
+        .make(control.syscall());
+    decode(value).map(|fd| fd as i32)
+}
+
+/// `chardev_sync_signal`: signal this control's fence `cookie` with
+/// `status`, 0 or a negative errno, once.
+///
+/// # Errors
+///
+/// [`Error::BadState`] for a cookie with no unsignalled fence or one past
+/// its deadline, [`Error::InvalidArgs`] for a status out of range.
+pub fn sync_signal<S: Syscall>(
+    control: &Channel<S>,
+    cookie: u64,
+    status: i32,
+) -> Result<(), Error> {
+    let value = Call::new(nr::CHARDEV_SYNC_SIGNAL)
+        .value(register(control.handle()))
+        .value(cookie as usize)
+        .value(i64::from(status) as usize)
+        .make(control.syscall());
+    decode_unit(value)
+}
+
+/// `chardev_sync_resolve`: the cookie of the fence the waiting program's
+/// descriptor `fd` names, if this control made it, and whether it is
+/// signalled.
+///
+/// # Errors
+///
+/// As [`reply`], and [`Error::BadHandle`] for any other descriptor.
+pub fn sync_resolve<S: Syscall>(
+    control: &Channel<S>,
+    request: u64,
+    fd: i32,
+) -> Result<(u64, bool), Error> {
+    let mut cookie = [0u8; 8];
+    let value = Call::new(nr::CHARDEV_SYNC_RESOLVE)
+        .value(register(control.handle()))
+        .value(request as usize)
+        .value(fd as isize as usize)
+        .output(&mut cookie)
+        .make(control.syscall());
+    decode(value).map(|signalled| (u64::from_ne_bytes(cookie), signalled != 0))
+}

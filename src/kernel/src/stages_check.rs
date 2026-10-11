@@ -1313,13 +1313,19 @@ pub(super) fn check_chardev() {
         "  chardev  {} HELLOs, copies and requests refused as specified, {} requests answered, \
          {} abandoned with the queue to a driver that reads nothing at most {} requests, \
          {} dmabuf calls refused as specified and one release after the last mapping, \
-         {} name-only dmabuf calls and mappings refused as specified{}",
+         {} name-only dmabuf calls and mappings refused as specified, \
+         {} sync_file calls refused as specified, fences signalled once, by deadline \
+         (ETIMEDOUT) and at the driver's death (ENODEV), a poll on one woken {} ms after \
+         its driver's death (at most {} ms){}",
         report.refusals,
         report.answered,
         report.abandoned,
         report.most_queued,
         report.dmabuf_refusals,
         report.name_refusals,
+        report.sync_refusals,
+        report.fence_death_wake_ms,
+        chardev::check::DEATH_WAKE_MS,
         if report.one_device {
             "; one PCI function, so no second driver"
         } else {

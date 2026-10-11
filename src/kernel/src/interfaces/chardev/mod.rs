@@ -83,6 +83,7 @@ use crate::user::vmo::Vmo;
 pub(crate) mod check;
 pub(crate) mod dmabuf;
 pub(crate) mod file;
+pub(crate) mod sync;
 
 /// The most requests one control has outstanding; the next is `EBUSY`.
 pub(crate) const MAX_OUTSTANDING: usize = 256;
@@ -149,6 +150,8 @@ pub(crate) struct Control {
     apertures: SpinLock<Apertures>,
     /// Its live dmabufs, by cookie (N3b, [`dmabuf`]).
     dmabufs: SpinLock<dmabuf::Table>,
+    /// Its unsignalled fences, by cookie (N3b sync, [`sync`]).
+    syncs: SpinLock<sync::Table>,
 }
 
 /// [`Control::apertures`].
@@ -258,6 +261,9 @@ pub(crate) fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevFile, file_of)?;
     native::serve(NativeCall::ChardevDmabufInstall, dmabuf::install)?;
     native::serve(NativeCall::ChardevDmabufResolve, dmabuf::resolve)?;
+    native::serve(NativeCall::ChardevSyncInstall, sync::install)?;
+    native::serve(NativeCall::ChardevSyncSignal, sync::signal)?;
+    native::serve(NativeCall::ChardevSyncResolve, sync::resolve)?;
     native::register_server(&SERVER)
 }
 
@@ -347,6 +353,7 @@ fn make_control(
         gone: AtomicBool::new(false),
         apertures: SpinLock::new(Apertures::default()),
         dmabufs: SpinLock::new(Vec::new()),
+        syncs: SpinLock::new(Vec::new()),
     })
     .ok()
 }
@@ -644,6 +651,9 @@ fn finish(control: &Arc<Control>) {
     }
     drop(outgoing);
     drop(requests);
+    // Every fence it made, signalled ENODEV: no waiter hangs on a dead
+    // driver (S4).
+    sync::control_gone(control);
 }
 
 /// Answer `request`, once, and wake its program.
