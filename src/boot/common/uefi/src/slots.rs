@@ -90,6 +90,7 @@ pub(crate) fn choose(services: &Services, cmdline: &mut [u8]) -> Result<Choice> 
             slot: attempt.slot,
             kind: attempt.kind,
             sequence,
+            disk: layout.disk,
         };
         let loaded = match load_slot(services, &disk, &part, &words, cmdline) {
             Ok(loaded) => loaded,

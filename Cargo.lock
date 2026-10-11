@@ -571,6 +571,7 @@ version = "0.1.0"
 name = "ferrix-slots"
 version = "0.1.0"
 dependencies = [
+ "ferrix-bootinfo",
  "ferrix-partition",
 ]
 

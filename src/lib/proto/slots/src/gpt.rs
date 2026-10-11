@@ -59,8 +59,12 @@ pub struct Header {
     pub entry_size: u32,
     /// The array's CRC-32.
     pub entries_crc: u32,
+    /// The first block a partition may use.
+    pub first_usable: u64,
     /// The last block a partition may use.
     pub last_usable: u64,
+    /// The disk's GUID.
+    pub disk: Guid,
 }
 
 impl Header {
@@ -101,6 +105,8 @@ pub struct Layout {
     pub a: Part,
     /// Slot B.
     pub b: Part,
+    /// The disk's GUID, which the loader names on the command line.
+    pub disk: Guid,
 }
 
 impl Layout {
@@ -160,7 +166,12 @@ pub fn parse_header(sector: &[u8], blocks: u64, block_size: u32) -> Result<Heade
         entries: le32(sector, 80).ok_or(GptError::Header)?,
         entry_size: le32(sector, 84).ok_or(GptError::Header)?,
         entries_crc: le32(sector, 88).ok_or(GptError::Header)?,
+        first_usable: le64(sector, 40).ok_or(GptError::Header)?,
         last_usable: le64(sector, 48).ok_or(GptError::Header)?,
+        disk: sector
+            .get(56..72)
+            .and_then(|raw| raw.try_into().ok())
+            .ok_or(GptError::Header)?,
     };
     if header.entry_size < 128
         || header.entry_size > MAX_ENTRY_SIZE
@@ -172,6 +183,8 @@ pub fn parse_header(sector: &[u8], blocks: u64, block_size: u32) -> Result<Heade
         || header.entries_lba < 2
         || header.entries_lba >= blocks
         || header.last_usable >= blocks
+        || header.first_usable < 2
+        || header.first_usable > header.last_usable
     {
         return Err(GptError::Header);
     }
@@ -210,6 +223,12 @@ pub fn find(
         if kind != SLOT_TYPE && kind != CONTROL_TYPE {
             continue;
         }
+        // A Ferrix partition only inside the usable blocks: a control
+        // partition over the GPT's own sectors would put the loader's one
+        // write on the table (the consultant's G1).
+        if part.first_lba < header.first_usable || part.last_lba > header.last_usable {
+            return Err(GptError::Range);
+        }
         // Hostile input: a Ferrix partition overlapping any other entry
         // would let a write to it land in someone else's.
         for (other_index, other) in entries() {
@@ -244,7 +263,12 @@ pub fn find(
     {
         return Err(GptError::TooSmall);
     }
-    Ok(Layout { control, a, b })
+    Ok(Layout {
+        control,
+        a,
+        b,
+        disk: header.disk,
+    })
 }
 
 /// An entry's type and partition, or `None` for an unused entry (type zero).
@@ -266,4 +290,23 @@ fn entry_part(index: usize, entry: &[u8]) -> Result<Option<(Guid, Part)>, GptErr
         last_lba: le64(entry, 40).ok_or(GptError::Entries)?,
     };
     Ok(Some((kind, part)))
+}
+
+/// A GUID in its usual text form, `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
+/// lowercase, from the table's byte order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuidText(pub Guid);
+
+impl core::fmt::Display for GuidText {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let g = &self.0;
+        let order = [3usize, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+        for (at, &index) in order.iter().enumerate() {
+            if matches!(at, 4 | 6 | 8 | 10) {
+                f.write_str("-")?;
+            }
+            write!(f, "{:02x}", g.get(index).copied().unwrap_or(0))?;
+        }
+        Ok(())
+    }
 }

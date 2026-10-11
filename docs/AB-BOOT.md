@@ -125,7 +125,8 @@ the record's states.
    bare FAT image, `run`, the DK1 card) -> step 7, exactly as today.
 2. Read the GPT through that BlockIo: primary header at LBA 1 (signature,
    header CRC-32, MyLBA = 1, sizes), entry array (CRC-32). Find exactly one
-   control partition and exactly two slots, each inside the disk. The GPT
+   control partition and exactly two slots, each inside the header's usable
+   blocks (so the record can never sit on the table itself). The GPT
    is hostile input: a header or entry size or count out of bounds, an
    entry whose first LBA is past its last, and a control or slot partition
    overlapping any other entry are each refused. Anything else -> say
@@ -167,8 +168,15 @@ words first -- the kernel takes the first word with a key, so a slot's own
 command line cannot forge them -- then the slot's:
 
 ```
-ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> <the slot's command line>
+ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> ferrix.slot.disk=<disk GUID> <the slot's command line>
 ```
+
+`ferrix.slot.disk` is the boot disk's GPT disk GUID, lowercase in its usual
+text form, so that `bootctl` writes only the disk the loader booted from
+(the consultant's G4, for ab-sys's S1). The longest words -- `fallback`, a
+sequence of 2^64 - 1, the GUID -- and the longest slot command line (2048
+bytes) fit the boot info's command-line area with room to spare; a host
+test holds that against `ferrix-bootinfo`'s `BootInfo`.
 
 `ferrix.slot.seq` is the sequence of the record the loader acted on (the one
 it wrote, for a trial). The ESP's `CMDLINE.TXT` and `DEFAULTS.TXT` are not
@@ -210,7 +218,8 @@ well under a second at hundreds of MB/s).
 | Power lost during `bootctl try`, step 2 | the record is disarmed (step 1) or never armed, so the half-written idle slot is not tried; were it tried, it would not verify |
 | Trial kernel panics at boot | the kernel halts (`panic.rs`); after a reset the record has tries = 0 and the loader boots good. §6.3 |
 | Trial boots but never says `good` (userland broken) | same: the next reset boots good |
-| Good slot does not verify (bit rot, a bug in `bootctl`) | the other slot as FALLBACK, then the ESP's rescue files |
+| Good slot does not verify (bit rot, a bug in `bootctl`), **no trial armed** | the other slot as FALLBACK, then the ESP's rescue files |
+| Good slot does not verify, a trial armed or its tries spent | the trial, if armed and verified, after its recorded try; otherwise the ESP's rescue files next -- never the trial slot as a FALLBACK |
 | Good slot does not verify, and the other slot is a **failed trial** (trial set, tries 0) | the ESP's rescue files; the failed trial is never started again by the loader (the consultant's A2) |
 | Both slots bad, no rescue files | the loader stops with FERRIX-PANIC loader and says which check failed on each slot |
 | Record uninitialised or both copies corrupt | A, then B, no write; `bootctl init` repairs |
@@ -359,7 +368,11 @@ Host tests of `ferrix-slots` as §3 lists, in `check`.
 
 2026-10-11: this design; the consultant's design verdict **OK IF A1-A10**
 (ledger `~/.local/share/ferrix/cert-consultant/reviews.md` line 727), its
-conditions folded in above. A10: nothing writes the SN720 (the p3-p5
+conditions folded in above; no requirement ids (line 727 (a)). AB1-AB3
+built on branch `ab-boot`; the code review's verdict **OK IF G1-G6** (line
+733): G1 Ferrix partitions only inside the usable blocks, G4
+`ferrix.slot.disk`, G5 §6's qualified rows, G3 AoU-28 also taken by
+softgl-clock -- whichever lands second renumbers. A10: nothing writes the SN720 (the p3-p5
 retype, `bootctl init`, the first slot) without the customer's OK for that
 write phase, through the PO, with the address list first. AB2's loader code
 goes back to the consultant for code review before landing, with the
