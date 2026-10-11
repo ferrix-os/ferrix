@@ -416,6 +416,7 @@ A certificate attaches to a configuration, not to a repository.
 | Toolchain | rustc 1.97.1, pinned exactly in `rust-toolchain.toml` |
 | Unstable features | none in `src/kernel/` or `src/boot/common/uefi/` |
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
+| Where the loader boots from | the ESP's `FERRIX/` files, or on a disk with A/B system slots the slot its boot control record selects, verified, with the ESP's files as the rescue path (`docs/AB-BOOT.md`; SECURITY-TARGET A.FIRMWARE, SAFETY-MANUAL AoU-28). The loader has **no Cargo feature and no `cfg`** of its own; the A/B gate's negative controls are source sabotages run by `fleet/gate.sh control` |
 | Build settings | **one**, `cargo xtask --mitigations on\|off`; the reference is `on`, the default |
 | Boot options that change the item's work | **one**, `ferrix.devmgr=kernel\|init`; the reference is `kernel`, the default |
 | Driver updates at run time | **absent**: no reference image carries `drvupdated` (`docs/DEVMGR.md` §4.1); only `cargo xtask test-restart --update`'s images do, xtask refuses it in any other, and no claim is made of them (SAFETY-MANUAL AoU-26) |

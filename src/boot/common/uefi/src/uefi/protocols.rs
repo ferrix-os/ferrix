@@ -1,4 +1,4 @@
-//! The five UEFI protocols the loader uses.
+//! The seven UEFI protocols the loader uses.
 //!
 //! As in `tables.rs`, every function pointer of every protocol is declared in
 //! specification order whether or not it is called.
@@ -208,4 +208,66 @@ pub(crate) struct GraphicsOutput {
     set_mode: usize,
     blt: usize,
     pub(crate) mode: *mut GraphicsMode,
+}
+
+// ---------------------------------------------------------------------------
+// Device path -- which disk the loader's own partition is on (A/B slots)
+// ---------------------------------------------------------------------------
+
+/// Identifies a handle's device path, a byte string of nodes.
+pub(crate) const DEVICE_PATH_GUID: Guid = Guid::new(
+    0x0957_6e91,
+    0x6d3f,
+    0x11d2,
+    [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+);
+
+// ---------------------------------------------------------------------------
+// Block I/O -- the boot disk's GPT, the control record and the slots
+// ---------------------------------------------------------------------------
+
+/// Identifies [`BlockIo`].
+pub(crate) const BLOCK_IO_GUID: Guid = Guid::new(
+    0x964e_5b21,
+    0x6459,
+    0x11d2,
+    [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+);
+
+/// `EFI_BLOCK_IO_MEDIA`, the fields of revision 1 the loader reads.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BlockIoMedia {
+    pub(crate) media_id: u32,
+    pub(crate) removable_media: u8,
+    pub(crate) media_present: u8,
+    pub(crate) logical_partition: u8,
+    pub(crate) read_only: u8,
+    pub(crate) write_caching: u8,
+    pub(crate) block_size: u32,
+    pub(crate) io_align: u32,
+    pub(crate) last_block: u64,
+}
+
+/// `EFI_BLOCK_IO_PROTOCOL`.
+#[repr(C)]
+pub(crate) struct BlockIo {
+    pub(crate) revision: u64,
+    pub(crate) media: *const BlockIoMedia,
+    reset: usize,
+    pub(crate) read_blocks: unsafe extern "efiapi" fn(
+        this: *mut BlockIo,
+        media_id: u32,
+        lba: u64,
+        buffer_size: usize,
+        buffer: *mut u8,
+    ) -> Status,
+    pub(crate) write_blocks: unsafe extern "efiapi" fn(
+        this: *mut BlockIo,
+        media_id: u32,
+        lba: u64,
+        buffer_size: usize,
+        buffer: *const u8,
+    ) -> Status,
+    pub(crate) flush_blocks: unsafe extern "efiapi" fn(this: *mut BlockIo) -> Status,
 }

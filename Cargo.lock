@@ -85,6 +85,7 @@ dependencies = [
  "ferrix-bootinfo",
  "ferrix-elf",
  "ferrix-paging",
+ "ferrix-slots",
 ]
 
 [[package]]

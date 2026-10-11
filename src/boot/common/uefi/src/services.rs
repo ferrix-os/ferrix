@@ -12,8 +12,9 @@ use core::ptr;
 use ferrix_bootinfo::PAGE_SIZE;
 
 use crate::uefi::protocols::{
-    FILE_MODE_READ, FILE_POSITION_END, FileProtocol, GRAPHICS_OUTPUT_GUID, GraphicsOutput,
-    LOADED_IMAGE_GUID, LoadedImage, RNG_GUID, Rng, SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
+    BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_READ, FILE_POSITION_END, FileProtocol,
+    GRAPHICS_OUTPUT_GUID, GraphicsOutput, LOADED_IMAGE_GUID, LoadedImage, RNG_GUID, Rng,
+    SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
 };
 use crate::uefi::tables::{
     AllocateType, BootServices, MemoryDescriptor, MemoryType, SystemTable, Time,
@@ -505,6 +506,77 @@ impl Services {
         Ok(size)
     }
 
+    // -- the boot disk -----------------------------------------------------
+
+    /// The whole disk the loader's own partition is on, when firmware
+    /// loaded it from a partition (a `HardDrive` node ends its volume's
+    /// device path); `None` for a volume that is a whole disk -- today's
+    /// bare FAT image -- which has no slots.
+    pub(crate) fn boot_disk(&self) -> Result<Option<Disk>> {
+        let image: *mut LoadedImage =
+            self.protocol(self.image, &LOADED_IMAGE_GUID, "loaded image")?;
+        // SAFETY: firmware returned a live `LoadedImage` for our own handle.
+        let device = unsafe { &*image }.device_handle;
+        let Ok(path) = self.protocol::<u8>(device, &DEVICE_PATH_GUID, "device path") else {
+            return Ok(None);
+        };
+        let Some(prefix) = disk_prefix(path) else {
+            return Ok(None);
+        };
+        // The disk's path: the volume's up to its HardDrive node, then an
+        // end node, in a copy of our own.
+        let mut copy = [0u8; MAX_DEVICE_PATH + 4];
+        let Some(head) = copy.get_mut(..prefix) else {
+            return Ok(None);
+        };
+        // SAFETY: `disk_prefix` walked these `prefix` bytes of firmware's
+        // device path node by node, so they are readable.
+        head.copy_from_slice(unsafe { core::slice::from_raw_parts(path.cast_const(), prefix) });
+        if let Some(end) = copy.get_mut(prefix..prefix + 4) {
+            end.copy_from_slice(&END_NODE);
+        }
+        let mut cursor: *const u8 = copy.as_ptr();
+        let mut handle: Handle = ptr::null_mut();
+        // SAFETY: `copy` is a terminated device path that outlives the call,
+        // and `cursor` and `handle` are live locals firmware writes.
+        let status = unsafe {
+            (self.boot().locate_device_path)(&BLOCK_IO_GUID, &raw mut cursor, &raw mut handle)
+        };
+        if !status.is_success() || handle.is_null() {
+            return Ok(None);
+        }
+        // Only the whole disk itself: the handle's path must be all of the
+        // prefix, so that what remains is the end node.
+        // SAFETY: firmware advanced `cursor` within `copy`.
+        let rest = unsafe { core::slice::from_raw_parts(cursor, 4) };
+        if rest != END_NODE {
+            return Ok(None);
+        }
+        let block_io: *mut BlockIo = self.protocol(handle, &BLOCK_IO_GUID, "block I/O")?;
+        // SAFETY: firmware returned a live `BlockIo`.
+        let media = unsafe { (*block_io).media };
+        if media.is_null() {
+            return Ok(None);
+        }
+        // SAFETY: checked non-null; firmware owns it for the life of the handle.
+        let media = unsafe { *media };
+        if media.logical_partition != 0 || media.media_present == 0 {
+            return Ok(None);
+        }
+        let buffer = self.allocate(
+            "allocating the boot disk's block buffer",
+            PAGE_SIZE.max(u64::from(media.block_size)),
+            MemoryType::LOADER_DATA,
+        )?;
+        Ok(Some(Disk {
+            block_io,
+            media_id: media.media_id,
+            block_size: media.block_size,
+            last_block: media.last_block,
+            buffer,
+        }))
+    }
+
     // -- protocols and tables ---------------------------------------------
 
     /// Fetch a protocol from a handle.
@@ -684,6 +756,146 @@ impl Services {
         // SAFETY: `key` came from the memory map fetched immediately before.
         let status = unsafe { (self.boot().exit_boot_services)(self.image, key) };
         check("exit_boot_services", status)
+    }
+}
+
+/// The longest device path the loader walks.
+const MAX_DEVICE_PATH: usize = 1024;
+
+/// A device path's end node.
+const END_NODE: [u8; 4] = [0x7F, 0xFF, 4, 0];
+
+/// The bytes of a device path before its `HardDrive` node (media type 4,
+/// subtype 1), when that node is the last before the end; `None` otherwise,
+/// or for a path longer than [`MAX_DEVICE_PATH`] or with a malformed node.
+fn disk_prefix(path: *mut u8) -> Option<usize> {
+    let mut at = 0usize;
+    let mut hard_drive = None;
+    while at + 4 <= MAX_DEVICE_PATH {
+        // SAFETY: firmware's device path is a sequence of nodes ending in an
+        // end node, each at least four bytes and saying its own length; `at`
+        // is the start of a node this walk reached by those lengths.
+        let node = unsafe { core::slice::from_raw_parts(path.wrapping_add(at).cast_const(), 4) };
+        let [kind, subtype, low, high] = *<&[u8; 4]>::try_from(node).ok()?;
+        let length = usize::from(u16::from_le_bytes([low, high]));
+        if kind == 0x7F && subtype == 0xFF {
+            return hard_drive.filter(|&start: &usize| start > 0);
+        }
+        if length < 4 {
+            return None;
+        }
+        hard_drive = (kind == 4 && subtype == 1).then_some(at);
+        at += length;
+    }
+    None
+}
+
+/// The whole disk the loader was started from, through Block I/O.
+#[derive(Debug)]
+pub(crate) struct Disk {
+    block_io: *mut BlockIo,
+    media_id: u32,
+    pub(crate) block_size: u32,
+    pub(crate) last_block: u64,
+    /// A page-aligned buffer of at least one block, which satisfies any
+    /// alignment firmware asks of Block I/O buffers up to a page.
+    buffer: Allocation,
+}
+
+impl Disk {
+    /// Blocks on the disk.
+    pub(crate) const fn blocks(&self) -> u64 {
+        self.last_block.saturating_add(1)
+    }
+
+    /// Read `into.len()` bytes, a whole number of blocks, from `lba` into
+    /// `into`, which must be page aligned when longer than one block.
+    pub(crate) fn read(&self, lba: u64, into: &mut [u8]) -> Result<()> {
+        // SAFETY: firmware's live protocol for this disk, and `into` is a
+        // live buffer of the length passed.
+        let status = unsafe {
+            (self.io().read_blocks)(
+                self.block_io,
+                self.media_id,
+                lba,
+                into.len(),
+                into.as_mut_ptr(),
+            )
+        };
+        check("reading the boot disk", status)
+    }
+
+    /// Firmware's protocol.
+    fn io(&self) -> &BlockIo {
+        // SAFETY: `boot_disk` checked the protocol pointer firmware returned,
+        // and it lives until boot services end, after which no disk is used.
+        unsafe { &*self.block_io }
+    }
+
+    /// The aligned one-block buffer, if `len` is one block.
+    fn bounce(
+        &self,
+        len: usize,
+    ) -> core::result::Result<*mut u8, ferrix_slots::record::DeviceError> {
+        if len == self.block_size as usize {
+            Ok(self.buffer.address as *mut u8)
+        } else {
+            Err(ferrix_slots::record::DeviceError)
+        }
+    }
+}
+
+impl ferrix_slots::record::ControlDisk for Disk {
+    fn block_size(&self) -> u32 {
+        self.block_size
+    }
+
+    fn write_block(
+        &mut self,
+        lba: u64,
+        bytes: &[u8],
+    ) -> core::result::Result<(), ferrix_slots::record::DeviceError> {
+        let bounce = self.bounce(bytes.len())?;
+        // SAFETY: the bounce buffer is the loader's own allocation of at
+        // least one block, and `bytes` is one block that cannot overlap it.
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), bounce, bytes.len()) };
+        // SAFETY: firmware's live protocol for this disk, and the bounce
+        // buffer is one block, page aligned.
+        let status = unsafe {
+            (self.io().write_blocks)(self.block_io, self.media_id, lba, bytes.len(), bounce)
+        };
+        status
+            .is_success()
+            .then_some(())
+            .ok_or(ferrix_slots::record::DeviceError)
+    }
+
+    fn flush(&mut self) -> core::result::Result<(), ferrix_slots::record::DeviceError> {
+        // SAFETY: `block_io` is firmware's live protocol for this disk.
+        let status = unsafe { (self.io().flush_blocks)(self.block_io) };
+        status
+            .is_success()
+            .then_some(())
+            .ok_or(ferrix_slots::record::DeviceError)
+    }
+
+    fn read_block(
+        &mut self,
+        lba: u64,
+        bytes: &mut [u8],
+    ) -> core::result::Result<(), ferrix_slots::record::DeviceError> {
+        let bounce = self.bounce(bytes.len())?;
+        // SAFETY: as `write_block`.
+        let status = unsafe {
+            (self.io().read_blocks)(self.block_io, self.media_id, lba, bytes.len(), bounce)
+        };
+        if !status.is_success() {
+            return Err(ferrix_slots::record::DeviceError);
+        }
+        // SAFETY: firmware filled one block of the bounce buffer, and `bytes`
+        // is one block that cannot overlap it.
+        unsafe { ptr::copy_nonoverlapping(bounce.cast_const(), bytes.as_mut_ptr(), bytes.len()) };
+        Ok(())
     }
 }
 

@@ -141,6 +141,17 @@ pub(crate) fn files(arch: Arch) -> Result<Option<Vec<ports::File>>> {
 
 /// `live`: write `build/<arch>/ferrix-live.img`, the live medium, for each
 /// architecture asked (x86-64 and AArch64, §3.2).
+/// `live`, `test-install` and `test-ab-boot` (`crate::ab_boot`), the
+/// commands that make or boot installed-disk layouts.
+pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
+    match command {
+        "live" => live(args),
+        "test-ab-boot" => crate::ab_boot::test_ab_boot(args),
+        _ => test_install(args),
+    }
+}
+
+/// `cargo xtask live`: the live medium for each architecture asked for.
 pub(crate) fn live(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         if arch == Arch::Armv7a {
@@ -245,7 +256,7 @@ fn lay_out<R: Read, W: Write + Seek>(volume: &mut R, bytes: u64, medium: &mut W)
 /// Tell a FAT32 volume's boot sector, and its backup, where the volume
 /// starts on its disk: the BPB's hidden sectors, which `xtask` writes as 0
 /// for an image that is a volume alone.
-fn hide(volume: &mut [u8], first: u64) -> Result<()> {
+pub(crate) fn hide(volume: &mut [u8], first: u64) -> Result<()> {
     let hidden = u32::try_from(first)
         .map_err(|_| Error::new("a partition past FAT32's hidden-sector field"))?
         .to_le_bytes();
