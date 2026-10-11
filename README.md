@@ -92,7 +92,8 @@ this tree at the commits [`components.toml`](components.toml) names.
 
 - **Linux programs:** Chrome, `rustc`, `git`, `curl`, Valve's `steamcmd` and
   other tested binaries run without patches, 32-bit x86 programs included.
-  Valve's Steam client starts and shows its sign-in window. Ferrix implements
+  Valve's Steam client signs in, downloads a native Linux game (Teeworlds)
+  and starts it. Claude Code runs a full session on the desktop. Ferrix implements
   the Linux system calls they need. It also has its own C library, ferrousli,
   for native userland programs.
 - **A desktop:** The hyprix Wayland compositor tiles windows and starts with a
@@ -111,6 +112,23 @@ this tree at the commits [`components.toml`](components.toml) names.
 - **Persistent storage and networking:** The root filesystem is btrfs, and an
   installer can put Ferrix on a virtual machine's own disk. Inside Ferrix,
   `git` can clone a repository and `curl` can fetch over HTTPS.
+- **Developing Ferrix on Ferrix:** The toolchain volume carries `cargo`,
+  `rustfmt`, `clippy`, `rust-analyzer` and the helix editor. Ferrix builds its
+  own image, and `pkg install --replace` swaps an app in one step
+  ([docs/DEV-ON-FERRIX.md](docs/DEV-ON-FERRIX.md)).
+- **Updates with a way back:** A disk can carry two system slots. `bootctl try`
+  writes a new system into the idle slot, the loader boots it once, and a
+  system that does not come up falls back to the good slot
+  ([docs/AB-BOOT.md](docs/AB-BOOT.md)).
+- **Real hardware drivers, in progress:** NVMe and xHCI (USB keyboard, mouse
+  and storage) drivers are built and tested under QEMU. The NVMe driver has
+  driven a real WD SN720 through VFIO and installed Ferrix onto it. On a bare
+  Ryzen PC the loader boots, then the kernel stops before its first message
+  ([docs/POSTMORTEM.md](docs/POSTMORTEM.md) for the post-mortem tools).
+- **NVIDIA:** NVIDIA's own driver runs as a process on an RTX 3060 passed to
+  a virtual machine, and the desktop shows on the card's monitor. GPU buffer
+  sharing (dmabufs and sync files) is in; GPU rendering for every program is
+  still being built.
 - **Three architectures:** Boot tests cover x86-64, AArch64 and ARMv7-A.
   Ferrix has also booted on an STM32MP157D-DK1 board and a Pixel 7.
 
