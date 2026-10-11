@@ -20,6 +20,17 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The kind `ferrix.slot.boot=` names.
+    #[must_use]
+    pub fn from_word(word: &str) -> Option<Kind> {
+        match word {
+            "trial" => Some(Kind::Trial),
+            "good" => Some(Kind::Good),
+            "fallback" => Some(Kind::Fallback),
+            _ => None,
+        }
+    }
+
     /// The word `ferrix.slot.boot=` says.
     #[must_use]
     pub const fn word(self) -> &'static str {
@@ -139,6 +150,27 @@ impl fmt::Display for LoaderWords {
             crate::gpt::GuidText(self.disk)
         )
     }
+}
+
+/// The loader's words read back from a kernel command line, as `bootctl`
+/// reads `/proc/cmdline`: the inverse of [`LoaderWords`]' `Display`. For
+/// each key the first word with it counts, as the kernel takes it, so a
+/// slot's own command line after the loader's words cannot override them.
+/// `None` unless all four are there and each is well formed: a boot that
+/// did not come from a slot, or one whose words cannot be trusted.
+#[must_use]
+pub fn parse_words(cmdline: &str) -> Option<LoaderWords> {
+    let first = |key: &str| {
+        cmdline
+            .split_ascii_whitespace()
+            .find_map(|word| word.strip_prefix(key))
+    };
+    Some(LoaderWords {
+        slot: Slot::from_letter(first("ferrix.slot=")?)?,
+        kind: Kind::from_word(first("ferrix.slot.boot=")?)?,
+        sequence: first("ferrix.slot.seq=")?.parse().ok()?,
+        disk: crate::gpt::parse_guid(first("ferrix.slot.disk=")?)?,
+    })
 }
 
 /// [`LoaderWords`] written into `out`; the number of bytes, or `None` when

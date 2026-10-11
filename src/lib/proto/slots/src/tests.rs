@@ -9,7 +9,7 @@ use std::vec::Vec;
 use crate::Slot;
 use crate::crc::{crc32, crc32c};
 use crate::gpt::{self, CONTROL_TYPE, GptError, SLOT_TYPE};
-use crate::plan::{Attempt, Kind, LoaderWords, plan, record_block, write_words};
+use crate::plan::{Attempt, Kind, LoaderWords, parse_words, plan, record_block, write_words};
 use crate::record::{
     COPY_OFFSETS, Current, MAX_TRIES, RECORD_LEN, Record, RecordError, select, write_copy,
 };
@@ -267,6 +267,49 @@ fn loader_words_are_written_or_refused() {
           ferrix.slot.disk=12345678-9abc-def0-1122-334455667788"
     );
     assert_eq!(write_words(&words, &mut [0u8; 20]), None);
+}
+
+#[test]
+fn loader_words_read_back_first_match_and_whole() {
+    for (slot, kind, sequence) in [
+        (Slot::A, Kind::Good, 1),
+        (Slot::B, Kind::Trial, u64::MAX),
+        (Slot::A, Kind::Fallback, 7),
+    ] {
+        let words = LoaderWords {
+            slot,
+            kind,
+            sequence,
+            disk: DISK,
+        };
+        let line = words.to_string();
+        assert_eq!(parse_words(&line), Some(words));
+        // A slot's own line after the loader's cannot override them.
+        let forged = std::format!(
+            "{line} ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=99 \
+             ferrix.slot.disk=00000000-0000-0000-0000-000000000000 ferrix.root=btrfs"
+        );
+        assert_eq!(parse_words(&forged), Some(words));
+        assert_eq!(
+            parse_words(&line.replace("12345678-9abc-def0", "12345678-9ABC-DEF0")),
+            Some(words)
+        );
+    }
+    // Any of the four missing or malformed: not a slot boot.
+    let whole = "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 \
+                 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788";
+    assert!(parse_words(whole).is_some());
+    for broken in [
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1",
+        "ferrix.slot=c ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788",
+        "ferrix.slot=a ferrix.slot.boot=best ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788",
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=x ferrix.slot.disk=12345678-9abc-def0-1122-334455667788",
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=123456789abcdef011223344556677",
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=12345678+9abc-def0-1122-334455667788",
+        "ferrix.root=btrfs",
+    ] {
+        assert_eq!(parse_words(broken), None, "{broken}");
+    }
 }
 
 fn slot_image(kernel: &[u8], initrd: &[u8], cmdline: &[u8]) -> (SlotHeader, Vec<u8>) {

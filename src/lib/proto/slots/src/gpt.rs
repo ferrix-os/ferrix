@@ -297,6 +297,30 @@ fn entry_part(index: usize, entry: &[u8]) -> Result<Option<(Guid, Part)>, GptErr
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuidText(pub Guid);
 
+/// A GUID as [`GuidText`] prints it, `8-4-4-4-12` hex digits, either case.
+#[must_use]
+pub fn parse_guid(text: &str) -> Option<Guid> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 36 {
+        return None;
+    }
+    let order = [3usize, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15];
+    let mut guid = [0u8; 16];
+    let mut at = 0;
+    for (place, &index) in order.iter().enumerate() {
+        if matches!(place, 4 | 6 | 8 | 10) {
+            if bytes.get(at) != Some(&b'-') {
+                return None;
+            }
+            at += 1;
+        }
+        let pair = text.get(at..at + 2)?;
+        *guid.get_mut(index)? = u8::from_str_radix(pair, 16).ok()?;
+        at += 2;
+    }
+    Some(guid)
+}
+
 impl core::fmt::Display for GuidText {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let g = &self.0;
