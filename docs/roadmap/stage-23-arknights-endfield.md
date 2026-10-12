@@ -324,6 +324,31 @@ step 0's guest.
   has run. 13, a guess.
 * **E3.8** The record. 2.
 
+**Where step 3 stands (2026-10-13, branch `endfield-s3`; `docs/WINE.md`
+§9).** A real Unity game runs on Ferrix with no card: Unity's *Spaceship
+Demo* (Unity 2021.2.3f1, the High Definition Render Pipeline, Mono,
+64-bit, Direct3D 11, no anti-cheat, downloaded with no account and pinned
+by hash) starts in Wine 10.0, makes a feature level 11.1 device through
+DXVK 3.1.1 on lavapipe, loads its benchmark's scene and draws its
+walkthrough of the ship in a window of hyprix's through yserver, under
+KVM: `cargo xtask test-unity`, about 1.3 frames a second at 1024 by 768 on
+8 processors.
+
+* *Done:* E3.1's first half, the game picked for a gate (the page asked for
+  it to be chosen with the customer and run on step 0's guest first; it was
+  run on the Linux host instead, the guest holding the card): it stands in
+  for Endfield's engine, API and renderer weight, not for IL2CPP, which no
+  freely fetchable Direct3D 11 title was found with. A fetch script, the
+  gate, two negative controls. Of E3.6, nothing so far: Ferrix answered
+  nothing wrongly between `wineboot` and the walkthrough.
+* *Still to do:* the customer's word on the game (E3.1), and its figures
+  on step 0's guest. An IL2CPP title. Input into the game, which the
+  benchmark needs none of (E3.3), full screen (E3.4), sound (E3.2: Wine
+  finds no audio driver and Unity runs on FMOD's silent output). The rest
+  of E3.6 is found by playing it, which the walkthrough is not. `wineboot`
+  waits 300 s on a Wine tree with a 32-bit side, where a 32-bit
+  `rundll32` hangs (E1.6's).
+
 **Proved by** an hour of play, recorded: sound, the mouse without lag, full
 screen, and no failed allocation or mapping in `nvrm`'s log.
 

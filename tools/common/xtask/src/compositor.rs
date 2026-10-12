@@ -78,6 +78,7 @@ mod run;
 mod settings;
 mod steam_store;
 pub(crate) mod steam_window;
+pub(crate) mod unity;
 mod user_desktop;
 pub(crate) mod wine;
 
