@@ -1422,6 +1422,67 @@ fn fullscreen_covers_the_monitor_without_gaps_or_border() {
     );
 }
 
+/// What `hyprctl clients` lists: every window, the ones the screen does
+/// not draw included -- behind a fullscreen window at the place it tiles
+/// at, and on a workspace no monitor shows -- as Hyprland does
+/// (docs/BACKLOG.md, P1: a maximized Chrome listed alone while Steam's
+/// window and a terminal were still mapped).
+#[test]
+fn the_listing_names_windows_the_screen_does_not_draw() {
+    let mut state = setup("");
+    open(&mut state, &[1, 2, 3]);
+    let _changes = dispatch(&mut state, "movetoworkspacesilent", "2");
+    let _changes = dispatch(&mut state, "fullscreen", "");
+    assert_eq!(state.layout()[0].windows.len(), 1, "one window is drawn");
+
+    let listed: Vec<(u64, i64, bool, bool)> = state
+        .listing()
+        .iter()
+        .map(|it| {
+            (
+                it.placed.window.0,
+                it.workspace.0,
+                it.covered,
+                it.placed.fullscreen,
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (1, 1, true, false),
+            (2, 1, false, true),
+            (3, 2, false, false)
+        ],
+        "every window, the fullscreen one on top of its workspace's"
+    );
+    // The covered window keeps the place it tiles at, which is where
+    // ending the fullscreen puts it back.
+    let behind = state.listing()[0].placed.rect;
+    let _changes = dispatch(&mut state, "fullscreen", "");
+    assert_eq!(rects(&state)[0], (1, behind));
+}
+
+/// The monocle layout's windows behind its shown one are listed too, each
+/// at the whole area and covered.
+#[test]
+fn the_listing_names_the_monocles_windows_behind() {
+    let mut state = setup("general:layout = monocle\n");
+    open(&mut state, &[1, 2]);
+    let listed: Vec<(u64, Rect, bool)> = state
+        .listing()
+        .iter()
+        .map(|it| (it.placed.window.0, it.placed.rect, it.covered))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (1, r(21, 21, 1878, 1038), true),
+            (2, r(21, 21, 1878, 1038), false)
+        ]
+    );
+}
+
 #[test]
 fn maximize_keeps_gaps_and_border() {
     let mut state = setup("");

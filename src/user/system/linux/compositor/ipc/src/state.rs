@@ -15,10 +15,17 @@ pub struct Window {
     /// Whether it is showing a buffer.
     pub mapped: bool,
     /// Whether something hides it: a group draws only its active member,
-    /// and Hyprland lists the rest as hidden rather than not at all.
+    /// and Hyprland lists the rest as hidden rather than not at all. A
+    /// window behind a fullscreen one is not hidden: Hyprland blocks its
+    /// input instead, which is `accepts_input`.
     pub hidden: bool,
-    /// Whether it is on the workspace its monitor shows.
+    /// Hyprland's `CWindow::visible`: mapped and not hidden, whether or not
+    /// a monitor shows its workspace or a fullscreen window covers it.
     pub visible: bool,
+    /// Whether input may reach it: not hidden, and not covered by a
+    /// fullscreen window or the monocle layout's shown one
+    /// (`CWindow::acceptsInput`).
+    pub accepts_input: bool,
     /// Its client area's top-left, in the space all monitors share.
     pub at: (i32, i32),
     /// Its client area's size.
@@ -31,6 +38,9 @@ pub struct Window {
     pub floating: bool,
     /// Whether it is fullscreen.
     pub fullscreen: bool,
+    /// Hyprland's fullscreen mode, which `hyprctl clients` prints as a
+    /// number: 0 none, 1 maximized, 2 fullscreen (`eFullscreenMode`).
+    pub fullscreen_mode: u8,
     /// Which monitor it is on.
     pub monitor: i32,
     /// `xdg_toplevel.set_app_id`, which Hyprland calls the class and which

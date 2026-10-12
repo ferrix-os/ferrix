@@ -258,6 +258,23 @@ impl Scrolling {
         settings: &Settings,
         shown: Option<WindowId>,
     ) -> Vec<(WindowId, Area)> {
+        self.slots_culled(area, settings, shown, true)
+    }
+
+    /// Every window's box, the columns scrolled off the screen included,
+    /// at the places the tape has them: what a listing such as `hyprctl
+    /// clients` reports, which names a window the screen does not show.
+    pub(crate) fn every_slot(&self, area: Area, settings: &Settings) -> Vec<(WindowId, Area)> {
+        self.slots_culled(area, settings, None, false)
+    }
+
+    fn slots_culled(
+        &self,
+        area: Area,
+        settings: &Settings,
+        shown: Option<WindowId>,
+        cull: bool,
+    ) -> Vec<(WindowId, Area)> {
         let camera = self.camera(area.w, settings);
         let mut out = Vec::with_capacity(self.windows().len());
         for (at, column) in self.columns.iter().enumerate() {
@@ -265,7 +282,7 @@ impl Scrolling {
             let x = area.x + self.start_of(at, area.w, settings) - camera;
             // Wholly off the screen: nothing to draw, and a rectangle
             // outside the monitor would confuse every direction search.
-            if x + width <= area.x || x >= area.x + area.w {
+            if cull && (x + width <= area.x || x >= area.x + area.w) {
                 continue;
             }
             let mut y = area.y;

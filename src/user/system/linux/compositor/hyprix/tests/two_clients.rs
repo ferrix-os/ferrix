@@ -744,6 +744,109 @@ fn an_unknown_request_is_answered_rather_than_hanging_hyprctl() {
     );
 }
 
+/// Run the compositor with the two clients and send `requests` through the
+/// control socket, one after another, once both windows are up; give back
+/// each answer.
+fn answers_after(name: &str, requests: &[&str]) -> Vec<String> {
+    let work = workspace(name);
+    let socket = work.join("wayland");
+    let runtime = work.join("runtime");
+    let instance = runtime.join("hypr").join("ferrix-test");
+    std::fs::create_dir_all(&instance).expect("an instance directory");
+    let control = instance.join(compositor_ipc::REQUEST_SOCKET);
+    let options = Options {
+        display: socket.to_string_lossy().into_owned(),
+        headless: Some((WIDTH, HEIGHT)),
+        instance: Some(instance.to_string_lossy().into_owned()),
+        config: Some(undithered(&work)),
+        deadline: Some(4000),
+        ..Options::default()
+    };
+    let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
+    let socket_for_clients = socket.clone();
+    let clients = std::thread::spawn(move || {
+        for _ in 0..400 {
+            if socket_for_clients.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut handles = Vec::new();
+        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
+            let path = socket_for_clients.clone();
+            handles.push(std::thread::spawn(move || {
+                connect(&path, pattern, title, Shape::Window)
+            }));
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        std::thread::sleep(Duration::from_millis(900));
+        let answers: Vec<String> = requests
+            .iter()
+            .map(|request| {
+                compositor_ctl::ask(&control, request).unwrap_or_else(|error| error.clone())
+            })
+            .collect();
+        for handle in handles {
+            let _ = handle.join();
+        }
+        answers
+    });
+    let _ = hyprix::run(&options).expect("the compositor ran");
+    clients.join().expect("the clients finished")
+}
+
+/// A window behind a fullscreen one is still a window: `hyprctl clients`
+/// lists it, not hidden and not taking input, at the place it tiles at, as
+/// Hyprland does. With a maximized Chrome only Chrome was listed while
+/// Steam's login window and a terminal were still mapped, and a script
+/// that looks for a window by listing saw it gone (docs/BACKLOG.md, P1).
+#[test]
+fn a_window_behind_a_fullscreen_one_is_still_listed() {
+    let answers = answers_after(
+        "behind-fullscreen",
+        &["dispatch fullscreen", "clients", "j/clients"],
+    );
+    let [dispatched, readable, json] = answers.as_slice() else {
+        panic!("three answers: {answers:?}");
+    };
+    assert_eq!(dispatched.trim(), "ok", "{answers:?}");
+
+    // Both windows, the fullscreen one being the focused `two`.
+    let windows: Vec<&str> = readable
+        .split("\n\n")
+        .filter(|window| window.starts_with("Window "))
+        .collect();
+    assert_eq!(windows.len(), 2, "both windows are listed:\n{readable}");
+    let one = windows
+        .iter()
+        .find(|window| window.contains("\ttitle: one\n"))
+        .unwrap_or_else(|| panic!("`one` is not listed:\n{readable}"));
+    let two = windows
+        .iter()
+        .find(|window| window.contains("\ttitle: two\n"))
+        .unwrap_or_else(|| panic!("`two` is not listed:\n{readable}"));
+    for wanted in [
+        "\tmapped: 1\n",
+        "\thidden: 0\n",
+        "\tvisible: 1\n",
+        "\tacceptsInput: 0\n",
+        "\tfullscreen: 0\n",
+    ] {
+        assert!(one.contains(wanted), "`one` lacks {wanted:?}:\n{one}");
+    }
+    for wanted in ["\tacceptsInput: 1\n", "\tfullscreen: 2\n", "\tat: 0,0\n"] {
+        assert!(two.contains(wanted), "`two` lacks {wanted:?}:\n{two}");
+    }
+    // `one` keeps its tiled place on the left, not the screen's.
+    assert!(!one.contains("\tat: 0,0\n"), "{one}");
+
+    // And the JSON says the same of both.
+    assert_eq!(json.matches("\"address\"").count(), 2, "{json}");
+    assert_eq!(json.matches("\"hidden\": true").count(), 0, "{json}");
+    assert_eq!(json.matches("\"acceptsInput\": false").count(), 1, "{json}");
+    assert_eq!(json.matches("\"fullscreen\": 2").count(), 1, "{json}");
+}
+
 /// A request that arrives well after its connection is still heard.
 ///
 /// A client connects and then writes, and a guest that did not run

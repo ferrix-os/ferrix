@@ -1323,7 +1323,7 @@ fn write_window(out: &mut Json, window: &Window) {
     out.boolean("mapped", window.mapped);
     out.boolean("hidden", window.hidden);
     out.boolean("visible", window.visible);
-    out.boolean("acceptsInput", true);
+    out.boolean("acceptsInput", window.accepts_input);
     out.pair("at", i64::from(window.at.0), i64::from(window.at.1));
     out.pair("size", i64::from(window.size.0), i64::from(window.size.1));
     out.object_field("workspace");
@@ -1339,8 +1339,12 @@ fn write_window(out: &mut Json, window: &Window) {
     out.number("pid", i64::from(window.pid));
     out.boolean("xwayland", false);
     out.boolean("pinned", false);
-    out.boolean("fullscreen", window.fullscreen);
-    out.number("fullscreenClient", 0);
+    out.boolean("pinFullscreened", false);
+    // Numbers, not booleans: Hyprland's internal and client modes.
+    out.number("fullscreen", i64::from(window.fullscreen_mode));
+    out.number("fullscreenClient", i64::from(window.fullscreen_mode));
+    out.string("fullscreenHandler", "default");
+    out.boolean("allowedOverFullscreen", false);
     if window.grouped.is_empty() {
         out.empty_array("grouped");
     } else {
@@ -1354,14 +1358,26 @@ fn write_window(out: &mut Json, window: &Window) {
     out.string("swallowing", "0x0");
     out.number("focusHistoryID", i64::from(window.focus_history));
     out.boolean("inhibitingIdle", false);
+    out.string("xdgTag", "");
+    out.string("xdgDescription", "");
+    out.string("contentType", "none");
+    out.boolean("tearingHint", false);
+    // Hyprland's per-window counter, printed bare; the address is this
+    // compositor's, and as stable.
+    out.string("stableId", &format!("{:x}", window.address));
 }
 
-/// The readable form, which `hyprctl clients` prints without `-j`.
+/// The readable form, which `hyprctl clients` prints without `-j`: the
+/// same fields as the JSON, in the same order, booleans as `0` and `1`
+/// (`CHyprCtl::getWindowData`).
 fn readable_window(window: &Window) -> String {
+    let flag = |value: bool| i32::from(value);
     let mut text = String::new();
     let _ = writeln!(text, "Window {:x} -> {}:", window.address, window.title);
-    let _ = writeln!(text, "\tmapped: {}", window.mapped);
-    let _ = writeln!(text, "\thidden: {}", i32::from(window.hidden));
+    let _ = writeln!(text, "\tmapped: {}", flag(window.mapped));
+    let _ = writeln!(text, "\thidden: {}", flag(window.hidden));
+    let _ = writeln!(text, "\tvisible: {}", flag(window.visible));
+    let _ = writeln!(text, "\tacceptsInput: {}", flag(window.accepts_input));
     let _ = writeln!(text, "\tat: {},{}", window.at.0, window.at.1);
     let _ = writeln!(text, "\tsize: {},{}", window.size.0, window.size.1);
     let _ = writeln!(
@@ -1369,17 +1385,32 @@ fn readable_window(window: &Window) -> String {
         "\tworkspace: {} ({})",
         window.workspace, window.workspace_name
     );
-    let _ = writeln!(text, "\tfloating: {}", i32::from(window.floating));
+    let _ = writeln!(text, "\tfloating: {}", flag(window.floating));
     let _ = writeln!(text, "\tmonitor: {}", window.monitor);
     let _ = writeln!(text, "\tclass: {}", window.class);
     let _ = writeln!(text, "\ttitle: {}", window.title);
+    let _ = writeln!(text, "\tinitialClass: {}", window.class);
+    let _ = writeln!(text, "\tinitialTitle: {}", window.title);
     let _ = writeln!(text, "\tpid: {}", window.pid);
     let _ = writeln!(text, "\txwayland: 0");
-    let _ = writeln!(text, "\tfullscreen: {}", i32::from(window.fullscreen));
+    let _ = writeln!(text, "\tpinned: 0");
+    let _ = writeln!(text, "\tpinFullscreened: 0");
+    let _ = writeln!(text, "\tfullscreen: {}", window.fullscreen_mode);
+    let _ = writeln!(text, "\tfullscreenClient: {}", window.fullscreen_mode);
+    let _ = writeln!(text, "\tfullscreenHandler: default");
+    let _ = writeln!(text, "\tallowedOverFullscreen: 0");
     // Hyprland prints a lone `0` for a window in no group, and the members'
     // addresses without `0x` for one in a group.
     let _ = writeln!(text, "\tgrouped: {}", grouped(&window.grouped));
-    let _ = writeln!(text, "\tfocusHistoryID: {}\n", window.focus_history);
+    let _ = writeln!(text, "\ttags: ");
+    let _ = writeln!(text, "\tswallowing: 0");
+    let _ = writeln!(text, "\tfocusHistoryID: {}", window.focus_history);
+    let _ = writeln!(text, "\tinhibitingIdle: 0");
+    let _ = writeln!(text, "\txdgTag: ");
+    let _ = writeln!(text, "\txdgDescription: ");
+    let _ = writeln!(text, "\tcontentType: none");
+    let _ = writeln!(text, "\ttearingHint: 0");
+    let _ = writeln!(text, "\tstableID: {:x}\n", window.address);
     text
 }
 

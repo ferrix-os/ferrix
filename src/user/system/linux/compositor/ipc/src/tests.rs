@@ -285,12 +285,14 @@ fn snapshot() -> Snapshot {
                 address: 1,
                 mapped: true,
                 visible: true,
+                accepts_input: true,
                 at: (10, 10),
                 size: (485, 726),
                 workspace: 1,
                 workspace_name: "1".to_owned(),
                 floating: false,
                 fullscreen: false,
+                fullscreen_mode: 0,
                 monitor: 0,
                 class: "rocks.magical.pattern".to_owned(),
                 title: "one".to_owned(),
@@ -304,12 +306,14 @@ fn snapshot() -> Snapshot {
                 address: 2,
                 mapped: false,
                 visible: true,
+                accepts_input: true,
                 at: (515, 10),
                 size: (485, 726),
                 workspace: 1,
                 workspace_name: "1".to_owned(),
                 floating: true,
                 fullscreen: false,
+                fullscreen_mode: 0,
                 monitor: 0,
                 class: "rocks.magical.pattern".to_owned(),
                 // Everything an unescaped answer would break on, because a
@@ -476,13 +480,21 @@ fn clients_names_every_field_hyprland_names_in_the_order_it_names_them() {
             "pid",
             "xwayland",
             "pinned",
+            "pinFullscreened",
             "fullscreen",
             "fullscreenClient",
+            "fullscreenHandler",
+            "allowedOverFullscreen",
             "grouped",
             "tags",
             "swallowing",
             "focusHistoryID",
             "inhibitingIdle",
+            "xdgTag",
+            "xdgDescription",
+            "contentType",
+            "tearingHint",
+            "stableId",
         ]
     );
     assert_eq!(
@@ -1394,6 +1406,35 @@ fn a_grouped_window_names_its_group() {
     };
     assert!(readable.contains("\tgrouped: 1,2\n"), "{readable}");
     assert!(readable.contains("\thidden: 1\n"), "{readable}");
+}
+
+/// The readable form prints what `-j` does, field for field and in the same
+/// order, as `CHyprCtl::getWindowData`'s two formats do -- with Hyprland's
+/// one difference of spelling, `stableID` against `stableId` -- and its
+/// flags as `0` and `1`, not `true` and `false`.
+#[test]
+fn the_readable_window_has_the_json_fields_in_order() {
+    let readable = text("clients");
+    let first = readable.split("\n\n").next().unwrap_or("");
+    // The address is the header's, `Window 1 -> one:`.
+    let names: Vec<String> = std::iter::once("address".to_owned())
+        .chain(
+            first
+                .lines()
+                .skip(1)
+                .filter_map(|line| line.trim_start_matches('\t').split_once(':'))
+                .map(|(name, _)| name.to_ascii_lowercase()),
+        )
+        .collect();
+    assert!(first.starts_with("Window 1 -> one:\n"), "{readable}");
+    let keys: Vec<String> = json("j/clients").items()[0]
+        .keys()
+        .iter()
+        .map(|key| key.to_ascii_lowercase())
+        .collect();
+    assert_eq!(names, keys, "{readable}");
+    assert!(first.contains("\n\tmapped: 1\n"), "{readable}");
+    assert!(first.contains("\n\tacceptsInput: 1\n"), "{readable}");
 }
 
 /// A window in no group prints Hyprland's empty array, and its `0` in the

@@ -86,4 +86,10 @@ impl Monocle {
             .map(|window| vec![(window, area)])
             .unwrap_or_default()
     }
+
+    /// Every window's box, the ones behind the shown one included: each
+    /// is the whole area, which is where Hyprland keeps them too.
+    pub(crate) fn every_slot(&self, area: Area) -> Vec<(WindowId, Area)> {
+        self.order.iter().map(|&window| (window, area)).collect()
+    }
 }

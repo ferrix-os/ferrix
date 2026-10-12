@@ -142,6 +142,23 @@ pub struct MonitorLayout {
     pub windows: Vec<Placed>,
 }
 
+/// One window of [`State::listing`]: on its workspace, at its place,
+/// whether or not the screen shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Listed {
+    /// The workspace it is on, shown or not.
+    pub workspace: WorkspaceId,
+    /// Where the layout keeps it. A window behind a fullscreen one keeps
+    /// the place it tiles or floats at, as in Hyprland.
+    pub placed: Placed,
+    /// Whether another window on its workspace covers it: a fullscreen one,
+    /// or the monocle layout's shown one -- or it is in a scrolling column
+    /// off the screen. Hyprland blocks such a window's input
+    /// (`INPUT_BLOCK_BELOW_FULLSCREEN`, `INPUT_BLOCK_MONOCLE_INACTIVE`) and
+    /// does not call it hidden.
+    pub covered: bool,
+}
+
 /// A workspace's tiled windows, in the layout it was made with.
 #[derive(Debug, Clone, PartialEq)]
 enum Tiling {
@@ -293,6 +310,18 @@ impl Tiling {
             Self::Master(master) => master.windows(),
             Self::Monocle(monocle) => monocle.windows(),
             Self::Scrolling(scrolling) => scrolling.windows(),
+        }
+    }
+
+    /// Every window's box, the ones the screen does not show included: the
+    /// monocle layout's windows behind its shown one, and the scrolling
+    /// layout's columns off the screen.
+    fn every_slot(&self, area: Area, settings: &Settings) -> Vec<(WindowId, Area)> {
+        match self {
+            Self::Dwindle(dwindle) => dwindle.slots(area, settings),
+            Self::Master(master) => master.slots(area, settings),
+            Self::Monocle(monocle) => monocle.every_slot(area),
+            Self::Scrolling(scrolling) => scrolling.every_slot(area, settings),
         }
     }
 
@@ -798,6 +827,48 @@ impl State {
                 windows: self.with_special(output, focus),
             })
             .collect()
+    }
+
+    /// Every window on every workspace, in workspace order, and where the
+    /// layout keeps it: what `hyprctl clients` lists.
+    ///
+    /// [`State::layout`] is what the screen draws, which leaves out a window
+    /// behind a fullscreen one, behind the monocle layout's shown one, in a
+    /// scrolling column off the screen and on a workspace no monitor shows.
+    /// Hyprland lists all of those (`clientsRequest` walks every mapped
+    /// window), at the place its layout keeps them, and a script that looks
+    /// for a window by listing must find it there. A workspace whose
+    /// monitor was unplugged has no place for its windows until one is
+    /// added, and lists none.
+    #[must_use]
+    pub fn listing(&self) -> Vec<Listed> {
+        let focus = self.focused_window();
+        let mut listed = Vec::new();
+        for (&id, ws) in &self.workspaces {
+            let Some(output) = self.output(ws.monitor) else {
+                continue;
+            };
+            let over = Output {
+                monitor: output.monitor.clone(),
+                active: id,
+                previous: None,
+                special: None,
+            };
+            let drawn = self.placements_of(&over, focus, false);
+            let scale = self.settings_at(id).special_scale_factor;
+            for mut placed in self.placements_of(&over, focus, true) {
+                // Where `with_special` draws a scratchpad's window.
+                if Self::is_special(id) && !placed.fullscreen && scale < 1.0 {
+                    placed.rect = shrunk(placed.rect, scale);
+                }
+                listed.push(Listed {
+                    workspace: id,
+                    placed,
+                    covered: !drawn.iter().any(|shown| shown.window == placed.window),
+                });
+            }
+        }
+        listed
     }
 
     /// A monitor's windows: its workspace's, with its special workspace's
@@ -3999,6 +4070,14 @@ impl State {
 
     /// The visible windows of what `output` shows.
     fn placements(&self, output: &Output, focus: Option<WindowId>) -> Vec<Placed> {
+        self.placements_of(output, focus, false)
+    }
+
+    /// `output.active`'s windows' places: those the screen draws, or with
+    /// `every` every window's, those a fullscreen window or the monocle's
+    /// shown one covers and the scrolling layout's off the screen as well,
+    /// the fullscreen window last, since it is on top.
+    fn placements_of(&self, output: &Output, focus: Option<WindowId>, every: bool) -> Vec<Placed> {
         let Some(ws) = self.workspaces.get(&output.active) else {
             return Vec::new();
         };
@@ -4016,9 +4095,9 @@ impl State {
                 floating,
                 fullscreen,
             };
-        if let Some((window, mode)) = ws.fullscreen {
+        let full = ws.fullscreen.map(|(window, mode)| {
             let floating = ws.floating.contains(&window);
-            return vec![match mode {
+            match mode {
                 FullscreenMode::Fullscreen => place(window, output.monitor.rect, 0, floating, true),
                 FullscreenMode::Maximized => place(
                     window,
@@ -4027,15 +4106,23 @@ impl State {
                     floating,
                     true,
                 ),
-            }];
+            }
+        });
+        if let Some(full) = full
+            && !every
+        {
+            return vec![full];
         }
         // The monocle layout draws the workspace's focused window, so the
         // focus is part of what the slots are: `recalculate` reads the
         // index `focusTargetUpdate` keeps, and the focus is that index.
         let shown = self.recent_tiled(output.active);
-        let mut windows: Vec<Placed> = ws
-            .tiling
-            .slots(Area::of(area), settings, shown)
+        let slots = if every {
+            ws.tiling.every_slot(Area::of(area), settings)
+        } else {
+            ws.tiling.slots(Area::of(area), settings, shown)
+        };
+        let mut windows: Vec<Placed> = slots
             .into_iter()
             .map(|(window, slot)| {
                 let rect = geometry::client(slot.round(), area, settings);
@@ -4050,6 +4137,10 @@ impl State {
                 .get(&window)
                 .map(|rect| place(window, rect.translate(x, y), border, true, false))
         }));
+        if let Some(full) = full {
+            windows.retain(|placed| placed.window != full.window);
+            windows.push(full);
+        }
         windows
     }
 }

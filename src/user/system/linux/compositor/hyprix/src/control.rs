@@ -621,54 +621,62 @@ pub fn describe_all(
     // Hyprland's focus history id: 0 is the focused window, and the rest
     // count back from it. Only the focused one is known here, so the others
     // are -1, which Hyprland uses for a window that is not in the history.
-    for output in state.layout() {
-        let mut windows = 0;
-        let mut has_fullscreen = false;
-        for placed in &output.windows {
-            has_fullscreen |= placed.fullscreen;
-            // A group's slot draws one member; Hyprland lists the rest as
-            // hidden windows with the same box, so a bar can draw the tabs.
-            let grouped: Vec<u64> = state
-                .group(placed.window)
-                .map(|group| group.members.iter().map(|member| member.0).collect())
-                .unwrap_or_default();
-            let shown = placed.window;
-            let members = if grouped.is_empty() {
-                vec![shown]
-            } else {
-                grouped.iter().copied().map(WindowId).collect()
+    //
+    // Every window on every workspace, not only the ones drawn: Hyprland's
+    // `clients` walks every mapped window, so a window behind a fullscreen
+    // one, or on a workspace no monitor shows, is listed at the place its
+    // layout keeps it.
+    for listed in state.listing() {
+        let placed = &listed.placed;
+        // A group's slot draws one member; Hyprland lists the rest as
+        // hidden windows with the same box, so a bar can draw the tabs.
+        let grouped: Vec<u64> = state
+            .group(placed.window)
+            .map(|group| group.members.iter().map(|member| member.0).collect())
+            .unwrap_or_default();
+        let shown = placed.window;
+        let members = if grouped.is_empty() {
+            vec![shown]
+        } else {
+            grouped.iter().copied().map(WindowId).collect()
+        };
+        for member in members {
+            let described = Described {
+                window: member,
+                placed,
+                workspace: listed.workspace,
+                hidden: member != shown,
+                covered: listed.covered,
+                grouped: &grouped,
             };
-            for member in members {
-                windows += 1;
-                let described = Described {
-                    window: member,
-                    placed,
-                    workspace: output.workspace,
-                    hidden: member != shown,
-                    grouped: &grouped,
-                };
-                if let Some(window) = describe(state, clients, sources, styles, focused, &described)
-                {
-                    snapshot.windows.push(window);
-                }
+            if let Some(window) = describe(state, clients, sources, styles, focused, &described) {
+                snapshot.windows.push(window);
             }
         }
+    }
+    for output in state.layout() {
+        let workspace = i32::try_from(output.workspace.0).unwrap_or(0);
+        let windows = snapshot
+            .windows
+            .iter()
+            .filter(|window| window.workspace == workspace)
+            .count();
         snapshot.workspaces.push(Workspace {
-            id: i32::try_from(output.workspace.0).unwrap_or(0),
+            id: workspace,
             name: state.workspace_name(output.workspace),
             monitor: state
                 .monitors()
                 .find(|monitor| monitor.id == output.monitor)
                 .map(|monitor| monitor.name.clone())
                 .unwrap_or_default(),
-            windows,
-            has_fullscreen,
+            windows: u32::try_from(windows).unwrap_or(u32::MAX),
+            has_fullscreen: output.windows.iter().any(|placed| placed.fullscreen),
         });
         // The active workspace is the focused monitor's, not the last
         // monitor's: `hyprctl activeworkspace` answers about where the
         // person is.
         if Some(output.monitor) == state.focused_monitor() {
-            snapshot.active_workspace = i32::try_from(output.workspace.0).unwrap_or(0);
+            snapshot.active_workspace = workspace;
         }
     }
     snapshot.active_window = focused.map(|window| window.0);
@@ -719,6 +727,9 @@ struct Described<'a> {
     workspace: compositor_layout::WorkspaceId,
     /// Whether a group draws another member in its place.
     hidden: bool,
+    /// Whether a fullscreen window or the monocle layout's shown one covers
+    /// it, which blocks its input and does not hide it.
+    covered: bool,
     /// Its group's members, empty if it is in none.
     grouped: &'a [u64],
 }
@@ -737,14 +748,24 @@ fn describe(
     let slot = clients.get(source.client)?;
     let named = toplevel_of(slot.client(), source.surface);
     let placed = it.placed;
+    let mapped = slot
+        .client()
+        .surface(source.surface)
+        .is_some_and(compositor_server::Surface::is_mapped);
+    // `eFullscreenMode`: 1 maximized, 2 fullscreen.
+    let fullscreen_mode = match state.fullscreen(it.workspace) {
+        Some((window, mode)) if window == it.window => match mode {
+            compositor_layout::FullscreenMode::Maximized => 1,
+            compositor_layout::FullscreenMode::Fullscreen => 2,
+        },
+        _ => 0,
+    };
     Some(Window {
         address: it.window.0,
-        mapped: slot
-            .client()
-            .surface(source.surface)
-            .is_some_and(compositor_server::Surface::is_mapped),
+        mapped,
         hidden: it.hidden,
-        visible: !it.hidden,
+        visible: mapped && !it.hidden,
+        accepts_input: !it.hidden && !it.covered,
         at: (
             i32::try_from(placed.rect.x).unwrap_or(0),
             i32::try_from(placed.rect.y).unwrap_or(0),
@@ -757,7 +778,10 @@ fn describe(
         workspace_name: state.workspace_name(it.workspace),
         floating: placed.floating,
         fullscreen: placed.fullscreen,
-        monitor: 0,
+        fullscreen_mode,
+        // The monitor its workspace is on, which since every workspace's
+        // windows are listed is not always the first.
+        monitor: state.workspace_monitor(it.workspace).map_or(0, monitor_id),
         class: named.as_ref().map(|top| top.1.clone()).unwrap_or_default(),
         title: named.map(|top| top.0).unwrap_or_default(),
         pid: slot.pid(),

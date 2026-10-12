@@ -1372,6 +1372,20 @@ on a monitor whose line says `preferred`, the GPU path included, and
 `run-compositor` writes `preferred` unless given `--size`
 (`docs/DISPLAY.md` §2.3).
 
+**Done -- `hyprctl clients` lists every window (2026-10-12).** It listed
+what the screen drew, so a window behind a fullscreen one, behind the
+monocle layout's shown one, in a scrolling column off the screen or on a
+workspace no monitor showed was missing, and the event socket said
+`closewindow` for each of them on a fullscreen or a workspace switch. Every
+mapped window is now listed at the place its layout keeps it
+(`compositor_layout::State::listing`), as Hyprland 0.56's `clientsRequest`
+does. As there, a covered window is not `hidden` (only a group's undrawn
+members are) but has `acceptsInput: 0`; `fullscreen` is Hyprland's mode
+number (1 maximized, 2 fullscreen), `monitor` the workspace's monitor, and
+the readable form prints the JSON's fields in its order with `0` and `1`
+for flags. Held by `a_window_behind_a_fullscreen_one_is_still_listed` in
+hyprix's host tests and the layout's and IPC's unit tests.
+
 The protocols and keywords this paragraph used to list as left --
 `layerrule`, `zwp_virtual_keyboard`, `zwp_pointer_constraints` and
 `relative-pointer` (a game that grabs the pointer), `presentation-time`,
