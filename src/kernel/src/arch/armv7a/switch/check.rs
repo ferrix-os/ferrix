@@ -491,8 +491,22 @@ fn run_pinned<const N: usize>(
         );
     }
     let statuses = programs.map(|program| program.wait_for_exit(deadline));
+    for (program, task) in programs.iter().zip(&tasks) {
+        gone(program, task)?;
+    }
     drop(tasks);
     Ok(statuses)
+}
+
+/// Once `process` has ended, wait until `task` is gone too, so that its
+/// stack and address space are not freed inside a later check's frame
+/// window. Nothing to wait for while it has not ended: the caller's own
+/// verdict says why.
+fn gone(process: &Process, task: &Task) -> Result<(), &'static str> {
+    if !process.is_released() {
+        return Ok(());
+    }
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 /// Write `bytes` at `at` in `code`.
@@ -1021,6 +1035,8 @@ fn run_vector_case(wake: Wake) -> Result<(), &'static str> {
     process::kill(&other, KILLED_STATUS);
     let _ = other.wait_for_exit(deadline);
     drop(theirs);
+    gone(&victim, &victim_task)?;
+    gone(&other, &other_task)?;
     if wake == Wake::Preempted && victim_task.preemptions() == 0 {
         return Err("the vector program was never preempted while it spun beside another");
     }
@@ -2150,6 +2166,8 @@ fn check_a_vfp_user_moves_between_processors() -> Result<bool, &'static str> {
     let status = victim.wait_for_exit(deadline);
     process::kill(&hog, KILLED_STATUS);
     let _ = hog.wait_for_exit(deadline);
+    gone(&hog, &hog_task)?;
+    gone(&victim, &task)?;
     drop(hog_task);
     match status {
         Some(0) => {}
@@ -2222,6 +2240,9 @@ fn check_programs_without_vfp_move_nothing() -> Result<u32, &'static str> {
             );
             return Err("moved VFP state for programs that never used VFP");
         }
+    }
+    for task in &tasks {
+        crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)?;
     }
     record_matches()?;
     Ok(LAZY_TRIPS)
@@ -2301,6 +2322,8 @@ fn beside_a_vfp_user(program: &Arc<Process>) -> Result<Option<i32>, &'static str
     let status = program.wait_for_exit(deadline);
     process::kill(&other, KILLED_STATUS);
     let _ = other.wait_for_exit(deadline);
+    gone(program, &task)?;
+    gone(&other, &other_task)?;
     drop(task);
     Ok(status)
 }
@@ -2331,6 +2354,7 @@ fn check_a_handover_scrubs() -> Result<(), &'static str> {
         "the program that fills the VFP registers never died",
         || other_task.is_dead(),
     )?;
+    crate::sched::wait_until_gone(&other_task, crate::sched::REAPER_PATIENCE_NANOS)?;
     let quiet = lazy_a(b'q', 50)?;
     let quiet_task = process::start_on(&quiet, Some(cpu))
         .map_err(|_| "the program without VFP could not be started")?;
@@ -2340,6 +2364,7 @@ fn check_a_handover_scrubs() -> Result<(), &'static str> {
     let behind = behind_en(cpu)?;
     process::kill(&quiet, KILLED_STATUS);
     let _ = quiet.wait_for_exit(deadline);
+    gone(&quiet, &quiet_task)?;
     match behind {
         Behind::Zero => Ok(()),
         Behind::Values => Err(
@@ -2388,6 +2413,7 @@ fn check_execve_starts_without_vfp() -> Result<(), &'static str> {
     })?;
     let behind = behind_en(cpu)?;
     let status = execer.wait_for_exit(deadline);
+    gone(&execer, &task)?;
     match behind {
         Behind::Zero => {}
         Behind::Values => {

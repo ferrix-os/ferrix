@@ -225,6 +225,7 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     let throttled = outcome?;
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let killed = killed_throttled(harness)?;
@@ -253,6 +254,7 @@ fn quota_comes_late(harness: &mut Harness) -> Checked<u64> {
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
@@ -263,6 +265,7 @@ fn quota_comes_late(harness: &mut Harness) -> Checked<u64> {
     let moved = late_move(harness, &program);
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
@@ -340,6 +343,7 @@ fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = asked.saturating_add(10_000_000_000);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     let took = crate::timer::now_nanos().saturating_sub(asked);
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
@@ -417,6 +421,7 @@ fn beneath(harness: &mut Harness) -> Checked<u64> {
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let emptied = freeze_check::wait_empty(harness, b"/check-c/k");
@@ -475,6 +480,7 @@ fn walks_only_under_a_quota(harness: &mut Harness) -> Checked<u64> {
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
     let _ = program.process.wait_for_exit(deadline);
+    program.gone()?;
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let emptied = freeze_check::wait_empty(harness, b"/check-c");

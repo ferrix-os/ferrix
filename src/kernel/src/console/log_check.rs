@@ -184,6 +184,8 @@ fn two_writers() -> Result<(u64, usize), &'static str> {
             return Err("the log check's racing writers never finished");
         }
     }
+    crate::sched::wait_until_gone(&a, crate::sched::REAPER_PATIENCE_NANOS)?;
+    crate::sched::wait_until_gone(&b, crate::sched::REAPER_PATIENCE_NANOS)?;
     if RACE_RING.written() != RACE_BYTES * 2 {
         return Err("two writers racing lost a byte of the count");
     }

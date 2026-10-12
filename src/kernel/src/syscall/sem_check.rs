@@ -805,12 +805,14 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
     let undo = UndoList::new();
     let _ = op(id, &[SemBuf::new(0, 1, 0)], &undo);
     ended(report, &job, waiter_answer()?, Ok(0), "a semop's increment")?;
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     // Waiting for zero, woken by SETVAL.
     let _ = ctl(id, 0, cmd::SETVAL, 1);
     let task = start_waiter(id, vec![SemBuf::new(0, 0, 0)], None, &job, cmd::GETZCNT)?;
     let _ = ctl(id, 0, cmd::SETVAL, 0);
     ended(report, &job, waiter_answer()?, Ok(0), "SETVAL to zero")?;
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     // Interrupted.
     let task = start_waiter(id, vec![SemBuf::new(0, -1, 0)], None, &job, cmd::GETNCNT)?;
@@ -823,6 +825,7 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
         Err(Errno::EINTR),
         "an interruption",
     )?;
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     if ctl(id, 0, cmd::GETNCNT, 0) != Ok(0) {
         return Err("sem: an interrupted waiter was still counted");
@@ -846,6 +849,7 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
     if crate::timer::now_nanos() < deadline {
         return Err("sem: a semtimedop timed out before its deadline");
     }
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     // Its set removed.
     let task = start_waiter(id, vec![SemBuf::new(0, -1, 0)], None, &job, cmd::GETNCNT)?;
@@ -857,6 +861,7 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
         Err(Errno::EIDRM),
         "IPC_RMID",
     )?;
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     Ok(())
 }

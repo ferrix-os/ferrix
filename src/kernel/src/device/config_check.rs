@@ -596,6 +596,8 @@ fn race(
     if late {
         return Err("the configuration race's tasks never finished");
     }
+    crate::sched::wait_until_gone(&switcher, crate::sched::REAPER_PATIENCE_NANOS)?;
+    crate::sched::wait_until_gone(&writer, crate::sched::REAPER_PATIENCE_NANOS)?;
     if WRONG.load(Ordering::SeqCst) != 0 {
         return Err(BUS_MASTER_RACED);
     }

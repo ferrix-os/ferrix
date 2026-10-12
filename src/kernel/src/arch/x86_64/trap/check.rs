@@ -1011,8 +1011,12 @@ fn check_thread_areas() -> Result<u32, &'static str> {
             .map_err(|_| "an i386 thread-area program could not be started")?;
         started.push((process, task));
     }
-    for (process, _task) in &started {
-        match process.wait_for_exit(deadline) {
+    for (process, task) in &started {
+        let status = process.wait_for_exit(deadline);
+        if status.is_some() {
+            crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)?;
+        }
+        match status {
             Some(HELLO_I386_STATUS) => {}
             Some(46) => {
                 return Err("an i386 program read another's thread-local segment through %gs");

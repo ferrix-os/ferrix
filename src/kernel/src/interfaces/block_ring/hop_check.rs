@@ -223,19 +223,18 @@ fn depth_many(disk: &Arc<dyn BlockDevice>, sectors: u64) -> Result<Run, &'static
     DONE.store(0, Ordering::Relaxed);
     FAILED.store(0, Ordering::Relaxed);
     let before = device_now();
-    let mut started = 0;
+    let mut readers = Vec::new();
     for reader in 0..DEPTH {
-        if sched::spawn(
+        if let Ok(task) = sched::spawn(
             "seam reader",
             reader_task,
             reader,
             ferrix_sched::NICE_0_WEIGHT,
-        )
-        .is_ok()
-        {
-            started += 1;
+        ) {
+            readers.push(task);
         }
     }
+    let started = readers.len();
     let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while DONE.load(Ordering::Acquire) < started {
         if timer::now_nanos() > deadline {
@@ -244,6 +243,9 @@ fn depth_many(disk: &Arc<dyn BlockDevice>, sectors: u64) -> Result<Run, &'static
         sched::sleep_for(1_000_000);
     }
     let after = device_now();
+    for reader in &readers {
+        sched::wait_until_gone(reader, sched::REAPER_PATIENCE_NANOS)?;
+    }
     *DISK.lock() = None;
     if FAILED.load(Ordering::Relaxed) != 0 || started == 0 {
         return Err("a read from the seam's deeper run failed");

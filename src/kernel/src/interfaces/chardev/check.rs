@@ -177,6 +177,11 @@ enum Job {
 static JOB: SpinLock<Option<Job>> = SpinLock::new(None);
 /// The helper's outcome, once it has one.
 static OUTCOME: SpinLock<Option<Result<usize, Errno>>> = SpinLock::new(None);
+/// Every helper and poll helper started and not yet waited out, for
+/// [`settle`] to see gone: a helper that has answered has still to leave,
+/// and its stack would otherwise be freed inside a later check's frame
+/// window.
+static HELPERS: SpinLock<Vec<Arc<sched::Task>>> = SpinLock::new(Vec::new());
 
 /// Run the check. `Err` names the first thing that was not true.
 ///
@@ -1417,7 +1422,8 @@ fn start_poll(program: &Side, fd: i32) -> Result<u64, &'static str> {
     program.put(POLLFD, &pollfd)?;
     *POLLED.lock() = None;
     *POLL_ON.lock() = Some((Arc::clone(&program.process), fd));
-    let _ = sched::spawn("chardev-poll", poll_helper, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = sched::spawn("chardev-poll", poll_helper, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    HELPERS.lock().push(task);
     sched::sleep_for(STILL_NANOS);
     if POLLED.lock().is_some() {
         return Err("a poll on an unsignalled fence returned before its driver died");
@@ -2190,7 +2196,8 @@ fn in_flight(request: &Request) {
 fn start(job: Job) -> Result<(), &'static str> {
     *OUTCOME.lock() = None;
     *JOB.lock() = Some(job);
-    let _ = sched::spawn("chardev-check", helper, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = sched::spawn("chardev-check", helper, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    HELPERS.lock().push(task);
     Ok(())
 }
 
@@ -2247,6 +2254,11 @@ fn settle() -> Result<(), &'static str> {
             return Err("a chardev control's task did not end after its driver went");
         }
         sched::sleep_for(1_000_000);
+    }
+    // Taken under the lock and waited for after it.
+    let helpers = core::mem::take(&mut *HELPERS.lock());
+    for helper in &helpers {
+        sched::wait_until_gone(helper, sched::REAPER_PATIENCE_NANOS)?;
     }
     Ok(())
 }

@@ -960,6 +960,7 @@ fn late_round(held: usize, wait: LateWait) -> Result<super::Late, &'static str> 
         || LATE_HELD_DONE.load(Ordering::SeqCst),
         "the task that kept a processor from answering never finished",
     )?;
+    crate::sched::wait_until_gone(&holder, crate::sched::REAPER_PATIENCE_NANOS)?;
     drop(holder);
     if LATE_GUARD_FIRED.load(Ordering::SeqCst) {
         return Err(

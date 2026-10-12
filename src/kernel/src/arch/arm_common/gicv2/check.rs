@@ -104,8 +104,9 @@ pub(crate) fn concurrent_enables() -> Result<DistributorCheck, &'static str> {
     // Pinned one to each of the first two cores, so that the two changes are
     // made on two processors at once. The check itself sleeps while they
     // run, so it never holds either core from them.
+    let mut racers = alloc::vec::Vec::new();
     for (index, cpu) in [0_usize, 1].into_iter().enumerate() {
-        let _racer = crate::sched::spawn_on(
+        let racer = crate::sched::spawn_on(
             "gic-racer",
             racer,
             index,
@@ -113,6 +114,7 @@ pub(crate) fn concurrent_enables() -> Result<DistributorCheck, &'static str> {
             cpu,
             CpuSet::of(cpu),
         )?;
+        racers.push(racer);
     }
 
     let mut lost = 0;
@@ -162,6 +164,9 @@ pub(crate) fn concurrent_enables() -> Result<DistributorCheck, &'static str> {
     gicd.write32(target_at, saved.1);
     gicd.write32(config_at, saved.2);
     raced?;
+    for racer in &racers {
+        crate::sched::wait_until_gone(racer, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     if (
         gicd.read32(priority_at),
         gicd.read32(target_at),

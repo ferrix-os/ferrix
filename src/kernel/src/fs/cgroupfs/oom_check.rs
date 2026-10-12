@@ -261,10 +261,10 @@ fn run_watched(job: &Arc<Job>, set: &Arc<OpenFile>, program: &Arc<Process>) -> C
     {
         crate::sched::sleep_for(LISTED_LOOK_NANOS);
     }
-    let started = process::start(program);
-    let status = started.ok().and_then(|_task| {
-        program.wait_for_exit(crate::timer::now_nanos().saturating_add(RUN_NANOS))
-    });
+    let started = process::start(program).ok();
+    let status = started
+        .as_ref()
+        .and_then(|_| program.wait_for_exit(crate::timer::now_nanos().saturating_add(RUN_NANOS)));
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let _ = WAITER_DONE.wait_until_deadline(|| WAITER_ANSWER.lock().is_some(), deadline);
     // No answer is judged after the program's status, which says why.
@@ -272,6 +272,9 @@ fn run_watched(job: &Arc<Job>, set: &Arc<OpenFile>, program: &Arc<Process>) -> C
     *WAITER_SET.lock() = None;
     crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     let status = status.ok_or("the program past memory.max did not end, or did not start")?;
+    if let Some(started) = started {
+        crate::sched::wait_until_gone(&started, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     Ok(Watched {
         status,
         event: answer.flatten(),

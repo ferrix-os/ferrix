@@ -101,6 +101,8 @@ pub(crate) fn check_an_unmap_waits_for_a_copy_holding_its_page() -> Result<bool,
         }
         crate::sched::sleep_for(1_000_000);
     }
+    crate::sched::wait_until_gone(&holder, crate::sched::REAPER_PATIENCE_NANOS)?;
+    crate::sched::wait_until_gone(&unmapper, crate::sched::REAPER_PATIENCE_NANOS)?;
     let _ = SUBJECT.lock().take();
 
     if READ.load(Ordering::SeqCst) != PATTERN {

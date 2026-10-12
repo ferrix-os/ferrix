@@ -511,6 +511,7 @@ fn check_a_window_settles_while_frames_move() -> Result<(), &'static str> {
         }
         crate::sched::sleep_for(1_000_000);
     }
+    crate::sched::wait_until_gone(&churner, crate::sched::REAPER_PATIENCE_NANOS)?;
     if started {
         Ok(())
     } else {

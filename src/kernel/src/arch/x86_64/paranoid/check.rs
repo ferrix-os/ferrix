@@ -234,11 +234,8 @@ fn check_system_call_window(high_gs: bool) -> Result<(u64, u64, i32), &'static s
         }
         crate::sched::sleep_for(1_000_000);
     };
-    while !task.is_dead() && crate::timer::now_nanos() < deadline {
-        crate::sched::sleep_for(1_000_000);
-    }
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
-    let _ = crate::sched::reap();
 
     let status = outcome?;
     let entries = hits(0).wrapping_sub(entries);
@@ -311,13 +308,15 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
     // SAFETY: (PROBE) arms the two slots just written, and nothing else.
     unsafe { cpu::write_dr7(dr7_local(0) | dr7_local(1)) };
 
-    let status = crate::syscall::process::start_on(&process, Some(cpu))
-        .ok()
-        .and_then(|_task| process.wait_for_exit(u64::MAX));
+    let task = crate::syscall::process::start_on(&process, Some(cpu)).ok();
+    let status = task.as_ref().and_then(|_| process.wait_for_exit(u64::MAX));
 
     // SAFETY: (PROBE) disarming changes nothing but that they stop firing. This task
     // is pinned, so this is the processor they were armed on.
     unsafe { cpu::write_dr7(0) };
+    if let Some(task) = task {
+        crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
 
     // The GS base the program ran with, parked on the kernel's side. If it were
     // a per-CPU record, both halves of `swapgs` would hold the same address,
@@ -395,6 +394,9 @@ fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
         }
     }
     let status = process.wait_for_exit(deadline);
+    if status.is_some() {
+        crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     drop(task);
     sent?;
     if FOREIGN_GS.load(Ordering::Relaxed) != foreign {

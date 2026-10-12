@@ -823,6 +823,8 @@ fn run_vector_case_beside(wake: Wake, other_x87: bool) -> Result<(), &'static st
     process::kill(&other, KILLED_STATUS);
     let _ = other.wait_for_exit(deadline);
     drop(theirs);
+    gone(&victim, &victim_task)?;
+    gone(&other, &other_task)?;
     if wake == Wake::Preempted && victim_task.preemptions() == 0 {
         return Err("the vector program was never preempted while it spun beside another");
     }
@@ -1084,7 +1086,20 @@ fn run_probe(busy: bool) -> Result<i32, &'static str> {
     process::kill(&other, KILLED_STATUS);
     let _ = other.wait_for_exit(deadline);
     drop(theirs);
+    gone(&probe, &probe_task)?;
+    gone(&other, &other_task)?;
     status.ok_or("the probe never ended")
+}
+
+/// Once `process` has ended, wait until `task` is gone too, so that its
+/// stack and address space are not freed inside a later check's frame
+/// window. Nothing to wait for while it has not ended: the caller's own
+/// verdict says why.
+fn gone(process: &Process, task: &Task) -> Result<(), &'static str> {
+    if !process.is_released() {
+        return Ok(());
+    }
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 /// Write `bytes` at `at` in `code`.
@@ -1217,6 +1232,8 @@ fn run_fs_pair(
         first.wait_for_exit(deadline),
         second.wait_for_exit(deadline),
     ];
+    gone(first, &tasks[0])?;
+    gone(second, &tasks[1])?;
     drop(tasks);
     Ok(statuses)
 }
@@ -1307,6 +1324,7 @@ fn check_no_program_writes_a_base() -> Result<(usize, bool, usize), &'static str
         let task = process::start_on(&program, Some(cpu))
             .map_err(|_| "the WRGSBASE program could not be started")?;
         let status = program.wait_for_exit(deadline);
+        gone(&program, &task)?;
         drop(task);
         if status != Some(KILLED_BY_SIGILL) {
             return Err("a program's WRGSBASE did not end it with SIGILL");
@@ -1443,7 +1461,7 @@ fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
         .with_handles(|table| table.insert(Object::Channel(Arc::clone(&theirs)), Rights::CHANNEL))
         .map_err(|_| "no room for case 15's reader")?;
     *FAST_READER.lock() = Some(handle);
-    let _reader_task =
+    let reader_task =
         crate::syscall::check::spawn_in(&reader, "case 15 reader", read_twice, Some(cpu))?;
     wait_until(deadline, "case 15: the reader never waited", || {
         theirs.reader_waiting()
@@ -1479,6 +1497,9 @@ fn send_then_wake(wake: Wake) -> Result<(), &'static str> {
     process::kill(&reader, KILLED_STATUS);
     let _ = reader.wait_for_exit(deadline);
     drop(theirs);
+    gone(&victim, &victim_task)?;
+    gone(&other, &other_task)?;
+    gone(&reader, &reader_task)?;
     vector_verdict(status)
 }
 
@@ -1837,6 +1858,8 @@ fn run_selector_pair(
         first.wait_for_exit(deadline),
         second.wait_for_exit(deadline),
     ];
+    gone(first, &tasks[0])?;
+    gone(second, &tasks[1])?;
     drop(tasks);
     Ok(statuses)
 }
@@ -2284,6 +2307,7 @@ fn check_null_fs_gs_fault_on_an_application_processor() -> Result<Option<usize>,
         let task = process::start_on(&reader, Some(last))
             .map_err(|_| "an FS/GS program could not be started")?;
         let status = reader.wait_for_exit(deadline);
+        gone(&reader, &task)?;
         drop(task);
         let _decided = compat_verdict(
             status,
@@ -2393,6 +2417,8 @@ fn run_fs_gs_pair(
         first.wait_for_exit(deadline),
         second.wait_for_exit(deadline),
     ];
+    gone(first, &tasks[0])?;
+    gone(second, &tasks[1])?;
     drop(tasks);
     Ok(statuses)
 }

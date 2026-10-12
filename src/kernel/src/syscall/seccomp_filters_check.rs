@@ -599,11 +599,12 @@ fn scenario(ending: Ending, native: bool) -> Result<(Seen, i32), &'static str> {
         .lock()
         .take()
         .ok_or("the seccomp scenario task ended without a result")?;
-    // Leave no stack behind for a later check's frame count to find.
+    // Leave no stack behind for a later check's frame count to find: its
+    // task gone, and with the process released any member it started has
+    // begun to leave, so the reaper going quiet has seen those gone too.
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     drop(process);
-    sched::sleep_for(SETTLE_NANOS);
-    let _ = sched::reap();
     Ok((found?, status))
 }
 

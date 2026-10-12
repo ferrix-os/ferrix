@@ -93,10 +93,6 @@ const IMAGE: u64 = 0x40_0000;
 /// Generous, for the reason `syscall::check`'s patience is: TCG under load.
 const PATIENCE_NANOS: u64 = 120_000_000_000;
 
-/// How long the boot task gives the check task to finish switching away once
-/// its process has ended, before reaping its stack.
-const SETTLE_NANOS: u64 = 20_000_000;
-
 /// The status the check task ends its process with. It only says the task got
 /// as far as reporting; what it found is in [`OUTCOME`].
 const REPORTED: i32 = 0;
@@ -177,11 +173,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 
     // Leave no stack behind for a later check's frame count to find: the
     // stage 7 and stage 9 checks measure frames around their own work, and a
-    // stack reaped inside that window moves the count.
+    // stack reaped inside that window moves the count. A wait for it to be
+    // gone, not a settling delay, which only makes the race rarer.
+    sched::wait_until_gone(&task, sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     drop(process);
-    sched::sleep_for(SETTLE_NANOS);
-    let _ = sched::reap();
 
     let (listed, maps_lines, named, sysctl_values) = found??;
     Ok(Report {
@@ -682,8 +678,12 @@ fn check_thread_times() -> Result<(), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let ended = process.wait_for_exit(deadline);
     drop(process);
-    sched::sleep_for(SETTLE_NANOS);
-    let _ = sched::reap();
+    // Released, so both threads have begun to leave, and a reaper gone quiet
+    // has seen them dead and freed their stacks: no settling delay, which
+    // only makes the race rarer.
+    if ended.is_some() {
+        sched::wait_until_reaper_quiet(sched::REAPER_PATIENCE_NANOS)?;
+    }
     outcome?;
     if ended != Some(REPORTED) {
         return Err("the /proc times check's process never ended");

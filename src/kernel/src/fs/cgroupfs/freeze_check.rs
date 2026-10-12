@@ -57,7 +57,20 @@ pub(super) struct Running {
     /// The process.
     pub(super) process: Arc<Process>,
     /// Its task, kept so that it is not reaped under the check.
-    _task: Arc<crate::sched::Task>,
+    task: Arc<crate::sched::Task>,
+}
+
+impl Running {
+    /// Once its process has ended, wait until its task is gone too, so that
+    /// its stack and address space are not freed inside a later check's
+    /// frame window. Nothing to wait for while the process has not ended:
+    /// the caller's own failure says why.
+    pub(super) fn gone(&self) -> Checked<()> {
+        if !self.process.is_released() {
+            return Ok(());
+        }
+        crate::sched::wait_until_gone(&self.task, crate::sched::REAPER_PATIENCE_NANOS)
+    }
 }
 
 /// The ELF class this build runs.
@@ -92,10 +105,7 @@ pub(super) fn start(harness: &Harness, tail: &[u8]) -> Checked<Running> {
         .map_err(|_| "freeze check: the program could not be moved in")?;
     let task =
         process::start(&process).map_err(|_| "freeze check: the program could not be started")?;
-    Ok(Running {
-        process,
-        _task: task,
-    })
+    Ok(Running { process, task })
 }
 
 /// A word of the program's page, if it has mapped it yet.
@@ -350,7 +360,9 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
         "SIGCONT changed what a frozen cgroup's cgroup.events says",
     )?;
 
-    thaw_and_kill(harness, process, still)
+    let killed = thaw_and_kill(harness, process, still)?;
+    program.gone()?;
+    Ok(killed)
 }
 
 /// Thaw the frozen program, see it run, freeze it again and `cgroup.kill` it.
@@ -427,6 +439,7 @@ fn kill_a_frozen_program(harness: &mut Harness) -> Checked<u32> {
     if process.wait_for_exit(deadline) != Some(KILLED) {
         return Err("a frozen process sent SIGKILL did not die of it");
     }
+    program.gone()?;
     let _ = harness
         .write(b"/check-fz/cgroup.freeze", b"0\n")
         .map_err(|_| "cgroup.freeze refused a 0")?;
@@ -451,6 +464,8 @@ fn born_and_moved(harness: &mut Harness) -> Checked<u32> {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let ended = born.process.wait_for_exit(deadline) == Some(KILLED)
         && outside.process.wait_for_exit(deadline) == Some(KILLED);
+    born.gone()?;
+    outside.gone()?;
     let passed = outcome?;
     if !ended {
         return Err("freeze check: a program started or moved into a frozen cgroup did not die");
