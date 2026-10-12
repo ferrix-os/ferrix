@@ -221,6 +221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-efifb"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-displayctl",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-elf"
 version = "0.1.0"
 
