@@ -8,12 +8,19 @@
 //! `test-xwindow` does for xev: a click into notepad's page, the keys of
 //! [`LINE`], `Ctrl+A` and `Ctrl+C`, then a double click on the line's first
 //! word and `Ctrl+C`, while the script prints what X's clipboard holds.
+//! Then the way a person at a VNC viewer types on a focus-follows-mouse
+//! desktop: the script puts xev's window beside notepad, the pointer alone
+//! moves the keyboard onto it, Caps Lock goes on there, the pointer alone
+//! brings the keyboard back, and the keys of [`VNC_KEYS`], `Ctrl+A` and
+//! `Ctrl+C` follow, with no click.
 //!
 //! It passes when hyprix lists a window with notepad's title, its white page
 //! fills the tile hyprix gave it, the typed line is on the screen, and the
-//! clipboard held the line and then its first word: the keys reached
-//! notepad as the characters they are, and the double click reached the
-//! word where it is drawn.
+//! clipboard held the line, then its first word, then the line with
+//! [`VNC_TEXT`] at its end: the keys reached notepad as the characters
+//! they are, the double click reached the word where it is drawn, and a
+//! window the keyboard reached without a click took the keys with the
+//! locks the compositor has (docs/WINE.md, section 5).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -61,6 +68,21 @@ const LINE_KEYS: &[&str] = &["h", "e", "l", "l", "o", "spc", "f", "e", "r", "r",
 /// The first word of [`LINE`], which the double click selects.
 const WORD: &str = "hello";
 
+/// What the script prints once a second X window, xev's, is beside
+/// notepad and hyprix has listed both after `wine: beside:`.
+const ANOTHER: &str = "wine: another window";
+
+/// The window beside notepad: xev's title.
+const OTHER_TITLE: &str = "Event Tester";
+
+/// The keys typed into notepad the way a person at a VNC viewer types
+/// into a window of a focus-follows-mouse desktop: the pointer moved onto
+/// it, no click, with Caps Lock turned on while xev had the keyboard. They
+/// arrive as [`VNC_TEXT`] at the end of [`LINE`].
+const VNC_KEYS: &[&str] = &["v", "n", "c"];
+/// See [`VNC_KEYS`]: what they must make with Caps Lock on.
+const VNC_TEXT: &str = "VNC";
+
 /// Dark pixels a typed line of [`LINE`]'s twelve characters puts on the
 /// page at the least: about 300 were drawn on 2026-10-12.
 const LINE_PIXELS: usize = 60;
@@ -107,16 +129,29 @@ echo "wine: window"
 last=""
 changes=0
 waited=0
-while [ $changes -lt 2 ] && [ $waited -lt 120 ]; do
-    now=$(xclip -o -selection clipboard 2>/dev/null)
-    if [ -n "$now" ] && [ "$now" != "$last" ]; then
-        echo "wine: clipboard: $now"
-        last=$now
-        changes=$((changes + 1))
-    fi
+copied() {
+    while [ $changes -lt $1 ] && [ $waited -lt 120 ]; do
+        now=$(xclip -o -selection clipboard 2>/dev/null)
+        if [ -n "$now" ] && [ "$now" != "$last" ]; then
+            echo "wine: clipboard: $now"
+            last=$now
+            changes=$((changes + 1))
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+copied 2
+xev > /dev/null 2>&1 &
+shown=0
+until xwininfo -name "Event Tester" 2>/dev/null | grep -q IsViewable || [ $shown -ge 30 ]; do
     sleep 1
-    waited=$((waited + 1))
+    shown=$((shown + 1))
 done
+sleep 3
+/bin/hyprctl clients | sed 's/^/wine: beside: /'
+echo "wine: another window"
+copied 3
 echo "wine: the clipboard changed $changes times in ${waited}s"
 sed 's/^/wine: notepad said: /' /tmp/wine/notepad.log
 tail -n 20 /tmp/yserver.log | sed 's/^/wine: yserver: /'
@@ -248,14 +283,20 @@ struct Rect {
 /// Where hyprix put notepad's window, from its `at:` and `size:` in the
 /// list the script printed.
 fn tile(lines: &[String]) -> Option<Rect> {
+    tile_in(lines, "wine: clients:", TITLE)
+}
+
+/// Where hyprix put the window titled `title`, from the list the script
+/// printed with each line after `prefix`.
+fn tile_in(lines: &[String], prefix: &str, title: &str) -> Option<Rect> {
     let mut entries = lines
         .iter()
-        .filter_map(|line| line.split_once("wine: clients:"))
+        .filter_map(|line| line.split_once(prefix))
         .map(|(_, rest)| rest.trim())
         .skip_while(|entry| {
             entry
                 .split_once(" -> ")
-                .is_none_or(|(_, title)| title.trim_end_matches(':') != TITLE)
+                .is_none_or(|(_, listed)| listed.trim_end_matches(':') != title)
         })
         .skip(1)
         .take_while(|entry| !entry.contains(" -> "));
@@ -408,6 +449,46 @@ fn type_into(
         pause(500);
         press(qmp, &["ctrl", "c"])?;
         let _ = watching.read_more(Instant::now() + Duration::from_secs(60), copied(2))?;
+
+        // The VNC way. The caret to the line's end while notepad has the
+        // keyboard; then xev's window beside it takes the keyboard by the
+        // pointer alone, Caps Lock goes on there, and the pointer alone
+        // brings the keyboard back to notepad for the keys. Wine takes the
+        // focus only when offered WM_TAKE_FOCUS, and the X server sees no
+        // Caps Lock pressed while xev had the keyboard.
+        press(qmp, &["end"])?;
+        let beside = |lines: &[String]| {
+            lines
+                .iter()
+                .any(|line| line.contains(ANOTHER) || line.contains(END))
+        };
+        let _ = watching.read_more(Instant::now() + Duration::from_secs(60), beside)?;
+        let (Some(other), Some(notepad)) = (
+            tile_in(watching.after(), "wine: beside:", OTHER_TITLE),
+            tile_in(watching.after(), "wine: beside:", TITLE),
+        ) else {
+            return Ok(Some(typed));
+        };
+        point(qmp, other.x + other.width / 2, other.y + other.height / 2)?;
+        pause(800);
+        press(qmp, &["caps_lock"])?;
+        pause(300);
+        point(
+            qmp,
+            notepad.x + notepad.width / 2,
+            notepad.y + notepad.height / 2,
+        )?;
+        pause(800);
+        for key in VNC_KEYS {
+            press(qmp, &[key])?;
+            pause(80);
+        }
+        pause(300);
+        press(qmp, &["ctrl", "a"])?;
+        pause(300);
+        press(qmp, &["ctrl", "c"])?;
+        let _ = watching.read_more(Instant::now() + Duration::from_secs(60), copied(3))?;
+        press(qmp, &["caps_lock"])?;
     }
     Ok(line.map(|_| typed))
 }
@@ -569,7 +650,7 @@ fn judge_typing(
     };
     let held = clipboard(said);
     let wanted = [LINE, WORD];
-    let matches = held.len() == 2
+    let matches = held.len() >= 2
         && held
             .iter()
             .zip(wanted)
@@ -582,14 +663,50 @@ fn judge_typing(
     }
     println!(
         "  {arch}: the keys of {LINE:?} are a line on notepad's page ({count} pixels, {}x{} at \
-         ({}, {})), and the clipboard held {held:?}, the line and the word double-clicked: {}",
+         ({}, {})), and the clipboard held {:?}, the line and the word double-clicked: {}",
         line.width,
         line.height,
         line.x,
         line.y,
+        held.get(..2).unwrap_or_default(),
         typed_dump.display()
     );
-    Ok(())
+    judge_hover(arch, said, &held)
+}
+
+/// Whether the keys typed after the pointer alone brought the keyboard
+/// back from xev's window, with Caps Lock turned on there, reached notepad
+/// as [`VNC_TEXT`] at the end of the line: X's third clipboard.
+fn judge_hover(arch: Arch, said: &[String], held: &[String]) -> Result<()> {
+    let wanted = format!("{LINE}{VNC_TEXT}");
+    if !said.iter().any(|line| line.contains(ANOTHER)) {
+        return Err(Error::new(format!(
+            "{arch}: the script never said `{ANOTHER}`: xev's window did not come up beside \
+             notepad"
+        )));
+    }
+    match held.get(2).map(|text| text.trim()) {
+        Some(text) if text == wanted => {
+            println!(
+                "  {arch}: with the keyboard brought back by the pointer alone and Caps Lock \
+                 turned on beside it, notepad's line is {text:?}, the way a VNC viewer types"
+            );
+            Ok(())
+        }
+        Some(text) if text.eq_ignore_ascii_case(&wanted) => Err(Error::new(format!(
+            "{arch}: notepad's line is {text:?}, not {wanted:?}: Caps Lock, turned on while \
+             xev had the keyboard, did not reach the X server (wl_keyboard.modifiers)"
+        ))),
+        Some(text) => Err(Error::new(format!(
+            "{arch}: X's clipboard held {text:?} after the keys typed with the keyboard brought \
+             back by the pointer alone, not {wanted:?}"
+        ))),
+        None => Err(Error::new(format!(
+            "{arch}: the keys typed after the pointer alone brought the keyboard back to \
+             notepad were lost, and Ctrl+A and Ctrl+C with them: X's clipboard held {held:?} \
+             (Wine takes the focus on WM_TAKE_FOCUS only)"
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -754,5 +871,60 @@ mod tests {
             .collect();
         assert_eq!(spelt, LINE);
         assert!(LINE.starts_with(WORD));
+    }
+
+    /// The script brings xev's window up beside notepad and lists both,
+    /// and the keys typed by the pointer's focus spell the text in lower
+    /// case, which Caps Lock alone makes upper.
+    #[test]
+    fn the_vnc_phase_has_a_window_beside_and_lower_case_keys() {
+        assert!(SCRIPT.contains(&format!("echo \"{ANOTHER}\"")));
+        assert!(SCRIPT.contains(&format!("xwininfo -name \"{OTHER_TITLE}\"")));
+        assert!(SCRIPT.contains("sed 's/^/wine: beside: /'"));
+        assert_eq!(VNC_KEYS.concat().to_uppercase(), VNC_TEXT);
+        assert_ne!(VNC_KEYS.concat(), VNC_TEXT, "Caps Lock must change them");
+        let lines: Vec<String> = [
+            "Window 1 -> Untitled - Notepad:",
+            "\tat: 21,21",
+            "\tsize: 489,726",
+            "Window 2 -> Event Tester:",
+            "\tat: 520,21",
+            "\tsize: 483,726",
+        ]
+        .iter()
+        .map(|entry| format!("  80.00 | wine: beside: {entry}"))
+        .collect();
+        assert_eq!(
+            tile_in(&lines, "wine: beside:", OTHER_TITLE),
+            Some(Rect {
+                x: 520,
+                y: 21,
+                width: 483,
+                height: 726
+            })
+        );
+        assert_eq!(tile(&lines), None, "the first list is not the second");
+    }
+
+    /// The third clipboard is judged: the text, the text in the wrong case
+    /// (the lock), or nothing at all (the focus).
+    #[test]
+    fn the_hover_phase_names_what_went_wrong() {
+        let said = vec![format!("  80.0 | {ANOTHER}")];
+        let held = |third: Option<&str>| -> Vec<String> {
+            [Some(LINE), Some(WORD), third]
+                .into_iter()
+                .flatten()
+                .map(str::to_owned)
+                .collect()
+        };
+        let good = format!("{LINE}{VNC_TEXT}");
+        assert!(judge_hover(Arch::X86_64, &said, &held(Some(&good))).is_ok());
+        let lower = good.to_lowercase();
+        let error = judge_hover(Arch::X86_64, &said, &held(Some(&lower))).unwrap_err();
+        assert!(error.to_string().contains("Caps Lock"), "{error}");
+        let error = judge_hover(Arch::X86_64, &said, &held(None)).unwrap_err();
+        assert!(error.to_string().contains("WM_TAKE_FOCUS"), "{error}");
+        assert!(judge_hover(Arch::X86_64, &[], &held(Some(&good))).is_err());
     }
 }
