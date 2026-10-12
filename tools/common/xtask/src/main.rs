@@ -16,6 +16,7 @@
 //! cargo xtask test-nvrm [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
 //! cargo xtask test-nvrm-link [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
 //! cargo xtask run-nvidia [--timeout SECONDS]
+//! cargo xtask run-nazuna [--release] [--memory M] [--smp N] [--kernel-option WORD] [--timeout SECONDS]
 //! cargo xtask test-rustc [--accel kvm] [--memory M] [--timeout SECONDS]
 //! cargo xtask test-selfhost [--accel kvm] [--release] [--smp N] [--memory M] [--timeout SECONDS] [--plan DIR]
 //! cargo xtask test-selfhost --arch x86_64|aarch64 --volume IMG [--release]
@@ -306,6 +307,11 @@ COMMANDS:
     run-nvidia    Boot Ferrix on the RTX 3060 in libvirt's ferrix-3060 domain (the patched QEMU as root, the sharing
                   domains shut off), nvrm as its driver with its core and the GSP firmware on the NVIDIA volume;
                   print the serial port until nvrm is up or stops, then destroy the domain (x86_64)
+    run-nazuna    Install Ferrix with ferrix-install --slots onto a copy of nazuna's SN720 (its real size and
+                  layout, sparse) and boot it from NVMe on a machine shaped like nazuna: its processor under KVM,
+                  12 cores of two threads, an AMD IOMMU, its three NVMe drives, xHCI; none of the test devices.
+                  Watched here, or headless for --timeout seconds with the serial log kept (Linux host;
+                  docs/NAZUNA-VM.md)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
     test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it
     test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
@@ -718,6 +724,7 @@ fn run() -> Result<()> {
         "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
         "test-dxvk" => dxvk::test_dxvk(&args),
         "run-nvidia" => nvidia::run_nvidia(&args),
+        "run-nazuna" => installer::nazuna::run(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
         "test-steam-store" | "test-steam-game" => compositor::test_steam_store(command, &args),

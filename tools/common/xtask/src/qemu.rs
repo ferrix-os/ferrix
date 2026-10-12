@@ -1072,6 +1072,26 @@ pub(crate) fn boot_until(
     }
 }
 
+/// Boot headless and only watch: echo and save the serial port until the
+/// kernel powers off or panics, or for the timeout. How it ended, the
+/// lines, and the serial log's path; for a machine whose boot nobody has
+/// seen succeed yet (`run-nazuna --timeout`), so neither a panic nor the
+/// timeout is an error. QEMU gone with neither is.
+pub(crate) fn observe(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<(&'static str, Vec<String>, PathBuf)> {
+    let watched = watch(arch, image, kernel, args, POWER_OFF_MARKER)?;
+    let ending = match watched.verdict {
+        Verdict::Reached => "powered off",
+        Verdict::Panicked => "panicked",
+        Verdict::Silent => "was still running",
+    };
+    Ok((ending, watched.lines, watched.log))
+}
+
 /// [`watch`], calling `at_marker` once `until` has been printed, while QEMU
 /// is still running, and returning the lines. The hook sees the lines so far
 /// and may read the ones that follow ([`Watching`]). A boot that panicked or
@@ -2241,6 +2261,37 @@ fn pinned(binary: &Path, pin: Option<&str>) -> Command {
     }
 }
 
+/// The QEMU a boot runs: `run-nazuna`'s own build, or the one
+/// `window::qemu_for` chooses -- one with the 3D card for a boot that wants
+/// it, where this machine has one, said when that is not the first on
+/// `PATH`.
+fn qemu_binary(arch: Arch, args: &Args) -> Result<PathBuf> {
+    if args.nazuna {
+        return crate::installer::nazuna::qemu();
+    }
+    crate::window::qemu_for(arch.qemu_binary(), args.gl).ok_or_else(|| {
+        Error::new(format!(
+            "{} is not on PATH.\n  Install QEMU (Debian/Ubuntu: `qemu-system-x86` and \
+             `qemu-system-arm`; Windows: `winget install SoftwareFreedomConservancy.QEMU`).",
+            arch.qemu_binary()
+        ))
+    })
+}
+
+/// `-m` and `-smp`, said with the accelerator: every boot names its
+/// accelerator, so a log read later says whether the guest was emulated
+/// without anybody having to guess.
+fn machine_size(arch: Arch, accelerator: &str, binary: &Path, args: &Args) -> (String, String) {
+    if args.nazuna {
+        let (memory, smp) = crate::installer::nazuna::memory_and_processors(args);
+        println!("  qemu: {arch} under {accelerator}, -smp {smp}");
+        return (memory, smp);
+    }
+    let processors = processors(accelerator, binary, args);
+    println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    (args.memory.to_string(), processors.to_string())
+}
+
 fn qemu_command(
     arch: Arch,
     image: &Path,
@@ -2248,16 +2299,7 @@ fn qemu_command(
     args: &Args,
     console: &Console,
 ) -> Result<(Command, Network)> {
-    // A boot that wants the 3D card runs a QEMU that has it, where this
-    // machine has one; `window::qemu_for` says so when that is not the
-    // first on `PATH`.
-    let binary = crate::window::qemu_for(arch.qemu_binary(), args.gl).ok_or_else(|| {
-        Error::new(format!(
-            "{} is not on PATH.\n  Install QEMU (Debian/Ubuntu: `qemu-system-x86` and \
-             `qemu-system-arm`; Windows: `winget install SoftwareFreedomConservancy.QEMU`).",
-            arch.qemu_binary()
-        ))
-    })?;
+    let binary = qemu_binary(arch, args)?;
 
     // Linux hosts only for now: the Windows build (fetch-qemu-windows.sh)
     // does not carry the patch yet (docs/BACKLOG.md).
@@ -2265,25 +2307,19 @@ fn qemu_command(
         require_compatibility_block(&binary)?;
     }
 
-    let firmware = paths::find_firmware(arch)?;
+    let firmware = if args.nazuna {
+        crate::installer::nazuna::firmware()?
+    } else {
+        paths::find_firmware(arch)?
+    };
     let accelerator = accelerator(arch, &binary, args.accel.as_deref())?;
-    let processors = processors(&accelerator, &binary, args);
-    // Every boot names its accelerator, so a log read later says whether
-    // the guest was emulated without anybody having to guess.
-    println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    let (memory, smp) = machine_size(arch, &accelerator, &binary, args);
 
     let mut command = pinned(&binary, args.pin.as_deref());
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);
-    let _ = command.args([
-        "-m",
-        &args.memory.to_string(),
-        "-smp",
-        &processors.to_string(),
-        "-monitor",
-        "none",
-    ]);
+    let _ = command.args(["-m", &memory, "-smp", &smp, "-monitor", "none"]);
     // Where the screen goes: nowhere for a test, which reads it with a
     // screendump; a window or a VNC server for a boot somebody watches.
     // `window` chooses by asking this QEMU what it was built with, because
@@ -2315,6 +2351,9 @@ fn qemu_command(
     }
 
     match arch {
+        Arch::X86_64 if args.nazuna => {
+            crate::installer::nazuna::machine(&mut command, &binary, &accelerator, image, args);
+        }
         Arch::X86_64 => {
             let _ = command.args([
                 "-machine",
@@ -2403,11 +2442,17 @@ fn qemu_command(
         }
     }
 
-    attach_rng(&mut command, arch);
+    // The PC has none of the test machine's own devices: no virtio random
+    // number generator, `edu`, `pci-testdev` or fixture disks.
+    if !args.nazuna {
+        attach_rng(&mut command, arch);
+    }
     attach_display(&mut command, arch, args, &binary);
     attach_asked_for(&mut command, arch, args, &binary);
-    attach_test_disk(&mut command, arch)?;
-    attach_btrfs_disk(&mut command, arch)?;
+    if !args.nazuna {
+        attach_test_disk(&mut command, arch)?;
+        attach_btrfs_disk(&mut command, arch)?;
+    }
     attach_install_disks(&mut command, arch, image, args);
     attach_root_disk(&mut command, arch, args)?;
     attach_nvme_scratch(&mut command, arch, args);

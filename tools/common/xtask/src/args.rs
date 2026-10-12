@@ -77,6 +77,10 @@ pub(crate) struct Args {
     /// Boot the image as a virtio disk after the others, as an installed
     /// disk is, rather than on x86-64's AHCI port.
     pub(crate) boot_virtio: bool,
+    /// `run-nazuna`'s machine: the customer's PC as far as QEMU can be it
+    /// (`docs/NAZUNA-VM.md`), the image booted as its SN720. Set by the
+    /// command, not a switch.
+    pub(crate) nazuna: bool,
     /// `--i686`: `test-threads` on x86-64 builds its program for 32-bit x86,
     /// which runs in compatibility mode (`docs/I386.md`, I4).
     pub(crate) i686: bool,
