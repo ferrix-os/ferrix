@@ -607,7 +607,9 @@ fn main() -> ExitCode {
 
 /// `build`: an image for each architecture asked for.
 fn build(args: &Args) -> Result<()> {
-    for arch in args.arches()? {
+    let arches = args.arches()?;
+    cargo::build_ahead(&arches, args.release)?;
+    for arch in arches {
         let (image, _) = build_image(arch, args)?;
         println!("built {}", image.display());
     }

@@ -239,6 +239,90 @@ pub(crate) fn build_kernel(arch: Arch, release: bool) -> Result<Kernel> {
     Ok(Kernel::plain(artifact(made)?))
 }
 
+/// Compile, before images for several architectures are made one after
+/// another, what each of them builds: every architecture's kernel in one
+/// cargo call, then the loaders in one, then each native program in one.
+///
+/// cargo takes a lock on the target directory, so the per-architecture
+/// calls that follow can never overlap; but one call that names several
+/// `--target`s compiles them side by side. A release kernel is one rustc
+/// that links with fat LTO over one codegen unit, about two minutes on one
+/// thread, and three of them one after another were 360 s of a cold
+/// `build --arch all --release`'s 443 s (`docs/TEST-TIME.md`, B1). Each
+/// call names one package, so no feature is unified across packages that
+/// are built apart below (the drivers enable different features of
+/// `ferrix-driver`), and what each target gets is what its own call would
+/// have built: the calls that follow find it fresh and make the images from
+/// the same files.
+///
+/// Skipped while `FERRIX_BUILDS` records or replays, whose plan is the
+/// per-architecture builds alone.
+///
+/// # Errors
+///
+/// A cargo call that fails.
+pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
+    if arches.len() < 2 || crate::builds::active() {
+        return Ok(());
+    }
+    refuse_inherited_rustflags()?;
+    let kernels: Vec<&str> = arches.iter().map(|arch| arch.kernel_target()).collect();
+    let loaders: Vec<&str> = arches.iter().map(|arch| arch.loader_target()).collect();
+
+    let mut kernel = ahead("ferrix-kernel", &kernels);
+    match kernel_profile(release) {
+        "iterate" => {
+            let _ = kernel.args(["--profile", "iterate"]);
+        }
+        "release" => {
+            let _ = kernel.arg("--release");
+        }
+        _ => {}
+    }
+    if MITIGATIONS_OFF.load(Ordering::Relaxed) {
+        for target in &kernels {
+            let _ = kernel.args(["--config", &mitigations_off_config(target)]);
+        }
+        let _ = kernel.arg("--target-dir").arg(mitigations_off_target_dir());
+    }
+    run(
+        kernel,
+        "cargo build -p ferrix-kernel, every architecture at once",
+    )?;
+
+    let packages = std::iter::once("ferrix-boot")
+        .map(|package| (package, &loaders))
+        .chain(
+            crate::native::PROGRAMS
+                .iter()
+                .map(|program| (program.package, &kernels)),
+        );
+    for (package, targets) in packages {
+        let mut command = ahead(package, targets);
+        if release {
+            let _ = command.arg("--release");
+        }
+        run(
+            command,
+            &format!("cargo build -p {package}, every architecture at once"),
+        )?;
+    }
+    Ok(())
+}
+
+/// `cargo build -p <package>` for each of `targets`, in one call.
+fn ahead(package: &str, targets: &[&str]) -> Command {
+    println!("  building {package} for {}, at once", targets.join(", "));
+    let mut command = Command::new(cargo());
+    let _ = command
+        .current_dir(paths::workspace_root())
+        .args(["build", "--package", package]);
+    for target in targets {
+        let _ = command.args(["--target", target]);
+    }
+    command
+}
+
 /// Build `binary`, a native program in `package`, for `arch` into
 /// `target_dir`, and return the ELF.
 ///
