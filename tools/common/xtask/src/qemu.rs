@@ -2261,6 +2261,23 @@ fn pinned(binary: &Path, pin: Option<&str>) -> Command {
     }
 }
 
+/// The QEMU a boot runs: `run-nazuna`'s own build, or the one
+/// `window::qemu_for` chooses -- one with the 3D card for a boot that wants
+/// it, where this machine has one, said when that is not the first on
+/// `PATH`.
+fn qemu_binary(arch: Arch, args: &Args) -> Result<PathBuf> {
+    if args.nazuna {
+        return crate::installer::nazuna::qemu();
+    }
+    crate::window::qemu_for(arch.qemu_binary(), args.gl).ok_or_else(|| {
+        Error::new(format!(
+            "{} is not on PATH.\n  Install QEMU (Debian/Ubuntu: `qemu-system-x86` and \
+             `qemu-system-arm`; Windows: `winget install SoftwareFreedomConservancy.QEMU`).",
+            arch.qemu_binary()
+        ))
+    })
+}
+
 /// `-m` and `-smp`, said with the accelerator: every boot names its
 /// accelerator, so a log read later says whether the guest was emulated
 /// without anybody having to guess.
@@ -2282,16 +2299,7 @@ fn qemu_command(
     args: &Args,
     console: &Console,
 ) -> Result<(Command, Network)> {
-    // A boot that wants the 3D card runs a QEMU that has it, where this
-    // machine has one; `window::qemu_for` says so when that is not the
-    // first on `PATH`.
-    let binary = crate::window::qemu_for(arch.qemu_binary(), args.gl).ok_or_else(|| {
-        Error::new(format!(
-            "{} is not on PATH.\n  Install QEMU (Debian/Ubuntu: `qemu-system-x86` and \
-             `qemu-system-arm`; Windows: `winget install SoftwareFreedomConservancy.QEMU`).",
-            arch.qemu_binary()
-        ))
-    })?;
+    let binary = qemu_binary(arch, args)?;
 
     // Linux hosts only for now: the Windows build (fetch-qemu-windows.sh)
     // does not carry the patch yet (docs/BACKLOG.md).
@@ -2299,7 +2307,11 @@ fn qemu_command(
         require_compatibility_block(&binary)?;
     }
 
-    let firmware = paths::find_firmware(arch)?;
+    let firmware = if args.nazuna {
+        crate::installer::nazuna::firmware()?
+    } else {
+        paths::find_firmware(arch)?
+    };
     let accelerator = accelerator(arch, &binary, args.accel.as_deref())?;
     let (memory, smp) = machine_size(arch, &accelerator, &binary, args);
 

@@ -161,10 +161,10 @@ index 9446a9f..f772ac4 100644
  
      /* IVHD definition - type 10h */
 diff --git a/hw/i386/acpi-common.c b/hw/i386/acpi-common.c
-index 7bd0806..6585c36 100644
+index 7bd0806..1117527 100644
 --- a/hw/i386/acpi-common.c
 +++ b/hw/i386/acpi-common.c
-@@ -88,6 +88,59 @@ build_xrupt_override(GArray *entry, uint8_t src, uint32_t gsi, uint16_t flags)
+@@ -88,6 +88,58 @@ build_xrupt_override(GArray *entry, uint8_t src, uint32_t gsi, uint16_t flags)
      build_append_int_noprefix(entry, flags, 2);  /* Flags */
  }
  
@@ -183,7 +183,6 @@ index 7bd0806..6585c36 100644
 +{
 +    int thread, i;
 +
-+    table->rev = 6;
 +    acpi_table_begin(table, table_data);
 +    build_append_int_noprefix(table_data, APIC_DEFAULT_ADDRESS, 4);
 +    build_append_int_noprefix(table_data,
@@ -224,9 +223,14 @@ index 7bd0806..6585c36 100644
  /*
   * ACPI spec, Revision 1.0b
   * 5.2.8 Multiple APIC Description Table
-@@ -104,6 +157,10 @@ void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
-     AcpiTable table = { .sig = "APIC", .rev = 3, .oem_id = oem_id,
-                         .oem_table_id = oem_table_id };
+@@ -101,9 +153,13 @@ void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
+     MachineClass *mc = MACHINE_GET_CLASS(x86ms);
+     X86MachineClass *x86mc = X86_MACHINE_GET_CLASS(x86ms);
+     const CPUArchIdList *apic_ids = mc->possible_cpu_arch_ids(MACHINE(x86ms));
+-    AcpiTable table = { .sig = "APIC", .rev = 3, .oem_id = oem_id,
+-                        .oem_table_id = oem_table_id };
++    AcpiTable table = { .sig = "APIC", .rev = x86ms->nazuna ? 6 : 3,
++                        .oem_id = oem_id, .oem_table_id = oem_table_id };
  
 +    if (x86ms->nazuna) {
 +        acpi_build_madt_nazuna(table_data, linker, x86ms, apic_ids, &table);
