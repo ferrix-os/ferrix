@@ -1252,12 +1252,18 @@ const ROOT_IDS: &str = "Uid:\t0\t0\t0\t0";
 /// ferrix's password the shell `su` starts is root's in every id; a wrong
 /// one is refused; ferrix may not become another user; with no
 /// controlling terminal `su` asks nothing (U5); and `plain`, not in wheel,
-/// is refused before any prompt.
+/// is refused before any prompt. Each is judged by its status as well as
+/// by what `su` says, since a script's `su -c x && y` reads only the
+/// status; and a plain `false` first shows the status is read at all.
 fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     at.redact(PLAIN_PASSWORD);
     if !enter(at, failures, "ferrix", &[FIRST_PASSWORD])? {
         return Ok(());
     }
+    // `s=$?` before `m=su`, since an assignment sets `$?` itself.
+    let before = at.after().len();
+    let _ = ask(at, "false; s=$?; m=su; echo \"$m-false $s\"\n", "su-false ")?;
+    status_is(since(at, before), "su-false", "1", "`false`", failures);
     match ask(
         at,
         "m=su; echo \"$m-mode $(stat -c '%a %u' /bin/su)\"\n",
@@ -1273,12 +1279,20 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let before = at.after().len();
     let _ = ask(
         at,
-        "m=su; echo \"$m-starts\"; su -c 'cat /proc/self/status; m=su; echo \"$m-root\"'\n",
+        "m=su; echo \"$m-starts\"; su -c 'cat /proc/self/status; m=su; echo \"$m-root\"'; \
+         s=$?; m=su; echo \"$m-became $s\"\n",
         "su-starts",
     )?;
     let _ = answer_prompts(at, before, &[FIRST_PASSWORD])?;
-    let _ = wait_for(at, before, "su-root")?;
+    let _ = wait_for(at, before, "su-became ")?;
     let said = at.after().get(before..).unwrap_or_default().to_vec();
+    status_is(
+        &said,
+        "su-became",
+        "0",
+        "su with the right password",
+        failures,
+    );
     if has(&said, ROOT_IDS) && has(&said, "su-root") {
         println!("  su: ferrix, in wheel, became root with ferrix's own password");
     } else {
@@ -1290,12 +1304,14 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let before = at.after().len();
     let _ = ask(
         at,
-        "m=su; echo \"$m-starts\"; su -c 'm=su; echo \"$m-wrong-root\"'; m=su; echo \"$m-wrong\"\n",
+        "m=su; echo \"$m-starts\"; su -c 'm=su; echo \"$m-wrong-root\"'; s=$?; m=su; \
+         echo \"$m-wrong $s\"\n",
         "su-starts",
     )?;
     let _ = answer_prompts(at, before, &["not the password"])?;
-    let _ = wait_for(at, before, "su-wrong")?;
+    let _ = wait_for(at, before, "su-wrong ")?;
     let said = at.after().get(before..).unwrap_or_default().to_vec();
+    status_is(&said, "su-wrong", "1", "su with a wrong password", failures);
     if has(&said, "su: Authentication failure") && !has(&said, "su-wrong-root") {
         println!("  su: a wrong password was refused");
     } else {
@@ -1303,14 +1319,20 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
             .push("su took a wrong password, or did not say `su: Authentication failure`".into());
     }
     // Another user, not root: refused before any prompt.
-    // Statuses are not looked at, only what `su` says: the shell's `$?`
-    // after it is not to be relied on here.
     let before = at.after().len();
-    match ask(
+    let asked = ask(
         at,
-        "su plain -c 'm=su; echo \"$m-other-plain\"'; m=su; echo \"$m-other\"\n",
+        "su plain -c 'm=su; echo \"$m-other-plain\"'; s=$?; m=su; echo \"$m-other $s\"\n",
+        "su-other ",
+    )?;
+    status_is(
+        since(at, before),
         "su-other",
-    )? {
+        "1",
+        "su to another user",
+        failures,
+    );
+    match asked {
         Some(_)
             if has(since(at, before), "only root may become another user")
                 && !has(since(at, before), "su-other-plain") =>
@@ -1330,16 +1352,23 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         failures.push("su with no controlling terminal was not refused before asking".into());
     }
     let _ = ask(at, "exit\nm=su; echo \"$m-back\"\n", "su-back")?;
-    // `plain`, not in wheel: its first password at the console, then `su`.
+    su_by_plain(at, failures)
+}
+
+/// The `su` stage's end: `plain`, not in wheel, gives its first password at
+/// the console, then is refused by `su` before any prompt, with status 1.
+fn su_by_plain(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     if !enter(at, failures, "plain", &[PLAIN_PASSWORD, PLAIN_PASSWORD])? {
         return Ok(());
     }
     let before = at.after().len();
-    match ask(
+    let asked = ask(
         at,
-        "su -c 'm=su; echo \"$m-plain-root\"'; m=su; echo \"$m-plain\"\n",
-        "su-plain",
-    )? {
+        "su -c 'm=su; echo \"$m-plain-root\"'; s=$?; m=su; echo \"$m-plain $s\"\n",
+        "su-plain ",
+    )?;
+    status_is(since(at, before), "su-plain", "1", "su by plain", failures);
+    match asked {
         Some(_)
             if has(since(at, before), "su: plain is not in wheel")
                 && !has(since(at, before), "su-plain-root") =>
@@ -1352,6 +1381,25 @@ fn su(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     }
     let _ = ask(at, "exit\nm=su; echo \"$m-back\"\n", "su-back")?;
     Ok(())
+}
+
+/// Hold the status a probe printed as `<marker> <status>` to `wanted`.
+fn status_is(lines: &[String], marker: &str, wanted: &str, what: &str, failures: &mut Vec<String>) {
+    let prefix = format!("{marker} ");
+    let status = lines.iter().find_map(|line| {
+        line.trim_start()
+            .strip_prefix(&prefix)
+            .map(|rest| rest.trim().to_owned())
+    });
+    match status {
+        Some(status) if status == wanted => {
+            println!("  su: {what} gave the shell status {status}");
+        }
+        Some(status) => failures.push(format!(
+            "{what} gave the shell status {status}, not {wanted}"
+        )),
+        None => failures.push(format!("{what}: its status was never printed")),
+    }
 }
 
 /// The `/dev/tty` stage (`docs/AUTH.md` §1; the certification consultant's
