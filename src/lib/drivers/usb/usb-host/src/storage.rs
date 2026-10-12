@@ -1,7 +1,16 @@
 //! A USB mass-storage disk: the bulk-only transport (USB Mass Storage Class
 //! Bulk-Only Transport, revision 1.0) carrying the SCSI commands a disk
 //! needs -- `INQUIRY`, `TEST UNIT READY`, `REQUEST SENSE`, `READ CAPACITY
-//! (10)`, `READ (10)`, `WRITE (10)` and `SYNCHRONIZE CACHE (10)`.
+//! (10)` and `(16)`, `READ (10)` and `(16)`, `WRITE (10)` and `(16)`, and
+//! `SYNCHRONIZE CACHE (10)`. The 16-byte commands are used, as Linux's `sd`
+//! uses them, for a disk of more than 2^32 blocks, whose last block `READ
+//! CAPACITY (10)` cannot name.
+//!
+//! Every constant was read from the specifications and checked against
+//! Linux 7.0's headers: the opcodes and sense keys from
+//! `include/scsi/scsi_proto.h`, the transport's from
+//! `include/linux/usb/storage.h` (`US_BULK_*`, `USB_SC_SCSI`,
+//! `USB_PR_BULK`), the class from `include/uapi/linux/usb/ch9.h`.
 //!
 //! # The transport
 //!
@@ -11,15 +20,18 @@
 //! back, and the status wrapper says how much of the data did not move and
 //! whether the command passed, failed, or left the two sides out of step. A
 //! failed command is asked for its sense, so the next one starts clean; a
-//! phase error, a wrapper that makes no sense, or a transfer that failed
-//! outright is answered with the transport's reset: the class request, and
-//! the halt cleared on both endpoints.
+//! phase error, a wrapper that is not valid and meaningful (section 6.3: 13
+//! bytes, the signature, the tag that was sent, a residue no larger than
+//! the data asked for), or a transfer that failed outright is answered with
+//! the transport's reset: the class request, and the halt cleared on both
+//! endpoints. A read or write that moved less than it asked for is an error
+//! upward, never a success with a hole in it.
 //!
 //! # What is not here
 //!
-//! Logical units past the first, disks of more than 2^32 blocks (`READ
-//! CAPACITY (16)`), removable media that is not there, and the UAS
-//! transport.
+//! Logical units past the first, removable media that is not there, the
+//! write-protect bit (`MODE SENSE`: a protected stick fails its writes with
+//! `DATA PROTECT` instead), and the UAS transport.
 
 use crate::host::{self, Data, Endpoint, Host, Target};
 use crate::usb::{Interface, Setup};
@@ -43,6 +55,8 @@ const FLAG_IN: u8 = 0x80;
 /// `bCSWStatus`.
 const STATUS_PASSED: u8 = 0;
 const STATUS_FAILED: u8 = 1;
+/// `US_BULK_STAT_PHASE`.
+const STATUS_PHASE: u8 = 2;
 
 const TEST_UNIT_READY: u8 = 0x00;
 const REQUEST_SENSE: u8 = 0x03;
@@ -51,6 +65,28 @@ const READ_CAPACITY_10: u8 = 0x25;
 const READ_10: u8 = 0x28;
 const WRITE_10: u8 = 0x2A;
 const SYNCHRONIZE_CACHE_10: u8 = 0x35;
+const READ_16: u8 = 0x88;
+const WRITE_16: u8 = 0x8A;
+/// `SERVICE ACTION IN (16)`, and its action that reads the capacity.
+const SERVICE_ACTION_IN_16: u8 = 0x9E;
+const SAI_READ_CAPACITY_16: u8 = 0x10;
+/// The bytes of `READ CAPACITY (16)`'s answer asked for: the 32 SBC-3
+/// defines.
+const CAPACITY_16_BYTES: usize = 32;
+
+/// The sense key of a medium that is not ready (SPC-4, table 49).
+pub const SENSE_NOT_READY: u8 = 0x02;
+/// The medium could not be read or written.
+pub const SENSE_MEDIUM_ERROR: u8 = 0x03;
+/// The command or its fields were refused.
+pub const SENSE_ILLEGAL_REQUEST: u8 = 0x05;
+/// The medium changed, or the device was reset.
+pub const SENSE_UNIT_ATTENTION: u8 = 0x06;
+/// The medium is write-protected.
+pub const SENSE_DATA_PROTECT: u8 = 0x07;
+
+/// The bytes of a disk's serial, as the block ring's HELLO carries it.
+pub const SERIAL_BYTES: usize = 20;
 
 /// The class request that resets the transport.
 const MASS_STORAGE_RESET: u8 = 0xFF;
@@ -79,6 +115,9 @@ pub enum Error {
     Unsupported,
     /// The request reaches past the disk's end, or is not whole blocks.
     Range,
+    /// A read or write moved less data than it asked for, with a status
+    /// that passed: the disk's answer is not taken.
+    Short,
 }
 
 impl From<host::Error> for Error {
@@ -105,6 +144,14 @@ pub struct Disk {
     pub vendor: [u8; 8],
     /// The product.
     pub product: [u8; 16],
+    /// The device's `iSerialNumber` string in ASCII, NUL-padded and cut at
+    /// [`SERIAL_BYTES`]; all zero when it has none. Set by the bus, which
+    /// reads the device's strings: what tells one stick from another of
+    /// the same size when a driver started again finds a disk.
+    pub serial: [u8; SERIAL_BYTES],
+    /// The 16-byte reads and writes are used: the disk has more than 2^32
+    /// blocks.
+    wide: bool,
 }
 
 /// Whether `interface` is one [`Disk::open`] drives.
@@ -156,6 +203,8 @@ impl Disk {
             block_bytes: 0,
             vendor: [b' '; 8],
             product: [b' '; 16],
+            serial: [0; SERIAL_BYTES],
+            wide: false,
         };
         let found = disk.identify(hc);
         if found.is_err() {
@@ -194,18 +243,48 @@ impl Disk {
             Data::In(&mut capacity),
         )?;
         let [l0, l1, l2, l3, b0, b1, b2, b3] = capacity;
+        if got < 8 {
+            return Err(Error::Unsupported);
+        }
         let last = u32::from_be_bytes([l0, l1, l2, l3]);
-        let block_bytes = u32::from_be_bytes([b0, b1, b2, b3]);
-        // All ones means "ask with READ CAPACITY (16)", which is not here.
+        let (last, block_bytes) = if last == u32::MAX {
+            // All ones: the last block is past what ten bytes can name.
+            self.capacity_16(hc)?
+        } else {
+            (u64::from(last), u32::from_be_bytes([b0, b1, b2, b3]))
+        };
         let whole = block_bytes as usize <= TRANSFER_BYTES
             && block_bytes >= 512
             && block_bytes.is_power_of_two();
-        if got < 8 || last == u32::MAX || !whole {
+        if !whole || last == u64::MAX {
             return Err(Error::Unsupported);
         }
-        self.blocks = u64::from(last) + 1;
+        self.blocks = last + 1;
         self.block_bytes = block_bytes;
+        self.wide = self.blocks > 1 << 32;
         Ok(())
+    }
+
+    /// `READ CAPACITY (16)`: the last block and the block's bytes.
+    fn capacity_16<H: Host>(&mut self, hc: &mut H) -> Result<(u64, u32), Error> {
+        let mut answer = [0_u8; CAPACITY_16_BYTES];
+        let mut command = [0_u8; 16];
+        put(
+            &mut command,
+            0,
+            &[SERVICE_ACTION_IN_16, SAI_READ_CAPACITY_16],
+        );
+        put(&mut command, 10, &(CAPACITY_16_BYTES as u32).to_be_bytes());
+        let got = self.command(hc, &command, Data::In(&mut answer))?;
+        if got < 12 {
+            return Err(Error::Unsupported);
+        }
+        let mut last = [0_u8; 8];
+        let mut bytes = [0_u8; 4];
+        for (slot, byte) in last.iter_mut().chain(bytes.iter_mut()).zip(answer) {
+            *slot = byte;
+        }
+        Ok((u64::from_be_bytes(last), u32::from_be_bytes(bytes)))
     }
 
     /// Close the disk's bulk pair.
@@ -230,10 +309,10 @@ impl Disk {
         let mut lba = lba;
         for chunk in buffer.chunks_mut(self.command_bytes()) {
             let count = chunk.len() / self.block_bytes as usize;
-            let command = Self::transfer_command(READ_10, lba, count);
+            let command = self.transfer_command(false, lba, count);
             let wanted = chunk.len();
-            if self.command(hc, &command, Data::In(chunk))? != wanted {
-                return Err(Error::Phase);
+            if self.command(hc, command.as_slice(), Data::In(chunk))? != wanted {
+                return Err(Error::Short);
             }
             lba += count as u64;
         }
@@ -250,9 +329,9 @@ impl Disk {
         let mut lba = lba;
         for chunk in buffer.chunks(self.command_bytes()) {
             let count = chunk.len() / self.block_bytes as usize;
-            let command = Self::transfer_command(WRITE_10, lba, count);
-            if self.command(hc, &command, Data::Out(chunk))? != chunk.len() {
-                return Err(Error::Phase);
+            let command = self.transfer_command(true, lba, count);
+            if self.command(hc, command.as_slice(), Data::Out(chunk))? != chunk.len() {
+                return Err(Error::Short);
             }
             lba += count as u64;
         }
@@ -294,11 +373,29 @@ impl Disk {
         COMMAND_DATA / block * block
     }
 
-    /// A `READ (10)` or `WRITE (10)` of `count` blocks at `lba`.
-    fn transfer_command(operation: u8, lba: u64, count: usize) -> [u8; 10] {
-        let [l0, l1, l2, l3] = (lba as u32).to_be_bytes();
-        let [c0, c1] = (count as u16).to_be_bytes();
-        [operation, 0, l0, l1, l2, l3, 0, c0, c1, 0]
+    /// A read or write of `count` blocks at `lba`: `READ (10)` or `WRITE
+    /// (10)`, or their 16-byte forms on a disk of more than 2^32 blocks.
+    /// `count` is at most [`COMMAND_DATA`] over 512, so it fits both, and
+    /// on a disk of at most 2^32 blocks every block's number fits 32 bits.
+    fn transfer_command(&self, write: bool, lba: u64, count: usize) -> Cdb {
+        let mut bytes = [0_u8; 16];
+        if self.wide {
+            put(&mut bytes, 0, &[if write { WRITE_16 } else { READ_16 }]);
+            put(&mut bytes, 2, &lba.to_be_bytes());
+            put(&mut bytes, 10, &(count as u32).to_be_bytes());
+            Cdb { bytes, len: 16 }
+        } else {
+            put(&mut bytes, 0, &[if write { WRITE_10 } else { READ_10 }]);
+            put(&mut bytes, 2, &(lba as u32).to_be_bytes());
+            put(&mut bytes, 7, &(count as u16).to_be_bytes());
+            Cdb { bytes, len: 10 }
+        }
+    }
+
+    /// Whether the disk is read and written with the 16-byte commands.
+    #[must_use]
+    pub const fn is_wide(&self) -> bool {
+        self.wide
     }
 
     /// Run one SCSI command: how many bytes of data moved.
@@ -383,10 +480,16 @@ impl Disk {
         {
             return Err(Error::Phase);
         }
+        // Meaningful (section 6.3.2): a residue no larger than what was
+        // asked, and a status the transport defines.
         let residue = u32::from_le_bytes([r0, r1, r2, r3]) as usize;
+        if residue > length {
+            return Err(Error::Phase);
+        }
         match verdict {
-            STATUS_PASSED => Ok(moved.min(length.saturating_sub(residue))),
+            STATUS_PASSED => Ok(moved.min(length - residue)),
             STATUS_FAILED => Err(Error::Failed(0)),
+            STATUS_PHASE => Err(Error::Phase),
             _ => Err(Error::Phase),
         }
     }
@@ -440,5 +543,65 @@ impl Disk {
                 Data::None,
             );
         }
+    }
+}
+
+/// A disk's serial as the block ring carries it, from the device's
+/// `iSerialNumber` string in ASCII:
+///
+/// * up to [`SERIAL_BYTES`] bytes: the string, NUL-padded;
+/// * longer: its first four bytes, `~`, and fifteen hexadecimal digits of
+///   the FNV-1a sum of the whole string, so two serials that share a
+///   20-byte prefix still differ (a cut would make them one disk);
+/// * empty: all zero, which says "no serial". A driver must not take a
+///   disk without one for a disk it served before.
+#[must_use]
+pub fn serial_of(ascii: &[u8]) -> [u8; SERIAL_BYTES] {
+    let mut serial = [0_u8; SERIAL_BYTES];
+    if ascii.len() <= SERIAL_BYTES {
+        put(&mut serial, 0, ascii);
+        return serial;
+    }
+    let sum = ascii.iter().fold(0xCBF2_9CE4_8422_2325_u64, |sum, &byte| {
+        (sum ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01B3)
+    });
+    put(&mut serial, 0, ascii.get(..4).unwrap_or(&[]));
+    put(&mut serial, 4, b"~");
+    for (at, slot) in serial.iter_mut().enumerate().skip(5) {
+        let shift = (SERIAL_BYTES - 1 - at) * 4;
+        let nibble = ((sum >> shift) & 0xF) as u8;
+        *slot = if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + nibble - 10
+        };
+    }
+    serial
+}
+
+/// Whether `serial` says the disk has none ([`serial_of`]).
+#[must_use]
+pub fn has_no_serial(serial: &[u8; SERIAL_BYTES]) -> bool {
+    serial.iter().all(|&byte| byte == 0)
+}
+
+/// A command block of at most 16 bytes, and how many of them it is.
+#[derive(Clone, Copy, Debug)]
+struct Cdb {
+    bytes: [u8; 16],
+    len: usize,
+}
+
+impl Cdb {
+    fn as_slice(&self) -> &[u8] {
+        self.bytes.get(..self.len).unwrap_or(&self.bytes)
+    }
+}
+
+/// Write `bytes` into `block` from `at` on; what would fall past its end is
+/// dropped, which no caller here reaches.
+fn put(block: &mut [u8], at: usize, bytes: &[u8]) {
+    for (slot, &byte) in block.iter_mut().skip(at).zip(bytes) {
+        *slot = byte;
     }
 }

@@ -167,9 +167,19 @@ tried it on the board.
 ## 6. Disks
 
 `storage.rs` is the bulk-only transport and the SCSI a disk needs
-(`INQUIRY`, `TEST UNIT READY`, `REQUEST SENSE`, `READ CAPACITY (10)`,
-`READ (10)`, `WRITE (10)`, `SYNCHRONIZE CACHE (10)`), with the transport's
-reset when the two sides fall out of step. The bus opens a disk for every
+(`INQUIRY`, `TEST UNIT READY`, `REQUEST SENSE`, `READ CAPACITY (10)` and
+`(16)`, `READ (10)` and `(16)`, `WRITE (10)` and `(16)`, `SYNCHRONIZE CACHE
+(10)`; the 16-byte forms for a disk of more than 2^32 blocks, as Linux's
+`sd` does), with the transport's reset when the two sides fall out of step:
+a status wrapper that is not valid and meaningful (its tag, signature,
+length, a residue no larger than asked) is refused and the transport reset,
+and a read or write that moved less than it asked for fails upward
+(`Short`). Every opcode, sense key and transport constant was checked
+against Linux 7.0's `include/scsi/scsi_proto.h` and
+`include/linux/usb/storage.h`. A disk carries the device's
+`iSerialNumber` as a 20-byte serial (`storage::serial_of`: padded, or for a
+longer one its first four bytes and an FNV-1a digest of the whole; all zero
+for none). The bus opens a disk for every
 such interface, and `usbhid` says each one with its size and a sum of its
 first block.
 

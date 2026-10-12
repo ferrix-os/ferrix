@@ -333,3 +333,19 @@ fn a_port_status_says_speed_and_changes() {
         Speed::Full
     );
 }
+
+#[test]
+fn a_disk_serial_is_padded_digested_or_absent() {
+    use crate::storage::{has_no_serial, serial_of};
+    assert_eq!(&serial_of(b"1"), b"1                   ");
+    assert_eq!(&serial_of(b"ABCDEFGHIJKLMNOPQRST"), b"ABCDEFGHIJKLMNOPQRST");
+    // Longer than twenty: two serials sharing their first twenty bytes
+    // stay two.
+    let one = serial_of(b"0123456789ABCDEFGHIJ-ONE");
+    let two = serial_of(b"0123456789ABCDEFGHIJ-TWO");
+    assert_ne!(one, two);
+    assert_eq!(&one[..5], b"0123~");
+    assert!(one[5..].iter().all(u8::is_ascii_hexdigit));
+    assert!(!has_no_serial(&one));
+    assert!(has_no_serial(&serial_of(b"")));
+}

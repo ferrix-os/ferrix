@@ -259,6 +259,9 @@ pub struct DeviceDescriptor {
     pub manufacturer: u8,
     /// `iProduct`.
     pub product_name: u8,
+    /// `iSerialNumber`: zero for none. The bulk-only transport requires a
+    /// mass-storage device to have one (its section 4.1.1).
+    pub serial: u8,
 }
 
 impl DeviceDescriptor {
@@ -277,6 +280,7 @@ impl DeviceDescriptor {
             release: word(12)?,
             manufacturer: *bytes.get(14)?,
             product_name: *bytes.get(15)?,
+            serial: *bytes.get(16)?,
         })
     }
 }

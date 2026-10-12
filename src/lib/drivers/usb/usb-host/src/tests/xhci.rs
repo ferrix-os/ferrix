@@ -531,11 +531,18 @@ fn the_model_notices_a_port_write_that_would_disable_the_port() {
 // ---------------------------------------------------------------------------
 
 fn disk_board(speed: Speed, port: usize) -> (Shared, TestBus, usize) {
+    disk_board_from(speed, port, 0)
+}
+
+/// A stick whose 300 blocks held start at block `base`: its capacity is
+/// `base + 300`.
+fn disk_board_from(speed: Speed, port: usize, base: usize) -> (Shared, TestBus, usize) {
     let model = Xhci::new();
     let device = {
         let mut m = model.borrow_mut();
         let device = m.add(stick(speed));
         m.add_disk(device, 300);
+        m.disks[0].base = base;
         m.plug_root(port, device);
         device
     };
@@ -608,6 +615,112 @@ fn a_stalled_bulk_endpoint_is_reset_on_both_sides() {
     assert!(first.is_err(), "{first:?}");
     assert!(model.borrow().cleared_halts.contains(&(device, 0x81)));
     no_violations(&model);
+}
+
+#[test]
+fn a_status_with_another_tag_is_refused_and_the_transport_reset() {
+    let (model, mut bus, device) = disk_board(Speed::High, 0);
+    let _ = outputs(&mut bus);
+    let resets = model.borrow().transport_resets.len();
+    model.borrow_mut().disks[0].wrong_tag = true;
+    let mut block = [0_u8; 512];
+    // The data came, the status wrapper did not answer this command: the
+    // read is not taken, and the transport is reset on both endpoints.
+    assert_eq!(bus.disk_read(0, 3, &mut block), Err(storage::Error::Phase));
+    assert_eq!(model.borrow().transport_resets.len(), resets + 1);
+    assert_eq!(model.borrow().transport_resets.last(), Some(&device));
+    let halts = model.borrow().cleared_halts.clone();
+    assert!(
+        halts.ends_with(&[(device, 0x81), (device, 0x02)]),
+        "{halts:?}"
+    );
+    // In step again: the next read is right.
+    bus.disk_read(0, 3, &mut block)
+        .expect("the read after the reset");
+    assert_eq!(block[..], model.borrow().disks[0].blocks[3 * 512..4 * 512]);
+    no_violations(&model);
+}
+
+#[test]
+fn a_short_read_is_an_error_and_not_a_block_with_a_hole() {
+    let (model, mut bus, _) = disk_board(Speed::Super, 1);
+    let _ = outputs(&mut bus);
+    model.borrow_mut().disks[0].short_read = true;
+    let mut blocks = vec![0_u8; 16 * 512];
+    assert_eq!(
+        bus.disk_read(0, 10, &mut blocks),
+        Err(storage::Error::Short)
+    );
+    bus.disk_read(0, 10, &mut blocks).expect("the next read");
+    assert_eq!(blocks, model.borrow().disks[0].blocks[10 * 512..26 * 512]);
+    no_violations(&model);
+}
+
+#[test]
+fn a_stick_says_its_serial_number() {
+    let (_, mut bus, _) = disk_board(Speed::High, 0);
+    let _ = outputs(&mut bus);
+    let disk = *bus.disk(0).expect("the disk");
+    assert_eq!(&disk.serial[..12], b"FX0001 STICK");
+    assert!(disk.serial[12..].iter().all(|&byte| byte == 0));
+}
+
+#[test]
+fn a_disk_past_two_to_the_32_blocks_is_read_and_written_with_16_byte_commands() {
+    let base = (1_usize << 32) - 100;
+    let (model, mut bus, _) = disk_board_from(Speed::Super, 0, base);
+    assert_eq!(outputs(&mut bus), vec![Got::Disk(0)]);
+    let disk = *bus.disk(0).expect("the disk");
+    assert_eq!(disk.blocks, (base + 300) as u64);
+    assert!(disk.is_wide());
+
+    // Across block 2^32, which READ (10) cannot name.
+    let lba = (1_u64 << 32) - 4;
+    let mut read = vec![0_u8; 8 * 512];
+    bus.disk_read(0, lba, &mut read).expect("the read");
+    let at = (lba as usize - base) * 512;
+    assert_eq!(read, model.borrow().disks[0].blocks[at..at + 8 * 512]);
+    let written: Vec<u8> = (0..8 * 512).map(|i| (i % 7) as u8).collect();
+    bus.disk_write(0, lba, &written).expect("the write");
+    assert_eq!(
+        model.borrow().disks[0].blocks[at..at + 8 * 512],
+        written[..]
+    );
+    bus.disk_read(0, (base + 299) as u64, &mut [0; 512])
+        .expect("the last block");
+    assert_eq!(
+        bus.disk_read(0, (base + 299) as u64, &mut [0; 1024]),
+        Err(storage::Error::Range)
+    );
+
+    let opcodes: Vec<u8> = model.borrow().disks[0]
+        .commands
+        .iter()
+        .map(|command| command[0])
+        .collect();
+    assert!(opcodes.contains(&0x9E), "{opcodes:x?}");
+    assert!(opcodes.contains(&0x88) && opcodes.contains(&0x8A));
+    assert!(!opcodes.contains(&0x28) && !opcodes.contains(&0x2A));
+    no_violations(&model);
+}
+
+#[test]
+fn a_disk_of_exactly_two_to_the_32_blocks_keeps_the_10_byte_commands() {
+    // READ CAPACITY (10) answers all ones for its last block, so the size
+    // is asked again with (16); every block still has a 32-bit number.
+    let base = (1_usize << 32) - 300;
+    let (model, mut bus, _) = disk_board_from(Speed::High, 0, base);
+    assert_eq!(outputs(&mut bus), vec![Got::Disk(0)]);
+    let disk = *bus.disk(0).expect("the disk");
+    assert_eq!(disk.blocks, 1 << 32);
+    assert!(!disk.is_wide());
+    let mut last = [0_u8; 512];
+    bus.disk_read(0, (1 << 32) - 1, &mut last)
+        .expect("the last block");
+    assert_eq!(last[..], model.borrow().disks[0].blocks[299 * 512..]);
+    let commands = &model.borrow().disks[0].commands;
+    assert!(commands.iter().any(|command| command[0] == 0x9E));
+    assert_eq!(commands.last().map(|command| command[0]), Some(0x28));
 }
 
 #[test]

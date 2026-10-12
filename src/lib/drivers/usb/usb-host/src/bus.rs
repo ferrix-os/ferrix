@@ -855,7 +855,7 @@ impl<H: Host> Bus<H> {
         let (hub_ports, functions) = if is_hub {
             (Some(self.set_up_hub(slot, &target)?), 0)
         } else {
-            self.set_up_disks(slot, &target, &configuration);
+            self.set_up_disks(slot, &target, &descriptor, &configuration);
             (
                 None,
                 self.set_up_functions(slot, &target, &descriptor, &configuration),
@@ -922,7 +922,14 @@ impl<H: Host> Bus<H> {
 
     /// Open every bulk-only mass-storage interface of the device in `slot`
     /// as a disk, behind a controller that moves bulk data.
-    fn set_up_disks(&mut self, slot: usize, target: &Target, configuration: &Configuration) {
+    fn set_up_disks(
+        &mut self,
+        slot: usize,
+        target: &Target,
+        descriptor: &DeviceDescriptor,
+        configuration: &Configuration,
+    ) {
+        let mut serial = None;
         for interface in configuration.interfaces() {
             if !storage::is_disk(interface) {
                 continue;
@@ -931,7 +938,9 @@ impl<H: Host> Bus<H> {
                 break;
             };
             match Disk::open(&mut self.hc, target, interface) {
-                Ok(disk) => {
+                Ok(mut disk) => {
+                    disk.serial =
+                        *serial.get_or_insert_with(|| self.serial(target, descriptor.serial));
                     if let Some(entry) = self.disks.get_mut(index) {
                         *entry = Some(Held {
                             device: slot,
@@ -1067,6 +1076,39 @@ impl<H: Host> Bus<H> {
         let descriptor = Descriptor::parse(bytes.get(..got)?).ok()?;
         let reader = Interpreter::new(descriptor);
         reader.maps_anything().then_some(reader)
+    }
+
+    /// String `index` of the device in its first language, as a disk's
+    /// serial ([`storage::serial_of`]): all zero where the device has none
+    /// or will not say.
+    fn serial(&mut self, target: &Target, index: u8) -> [u8; storage::SERIAL_BYTES] {
+        let mut serial = [0_u8; storage::SERIAL_BYTES];
+        if index == 0 {
+            return serial;
+        }
+        let mut bytes = [0_u8; STRING_BYTES];
+        let language = self
+            .hc
+            .control(
+                target,
+                &Setup::get_descriptor(STRING, 0, 0, STRING_BYTES as u16),
+                Data::In(&mut bytes),
+            )
+            .ok()
+            .and_then(|got| first_language(bytes.get(..got).unwrap_or(&[])))
+            .unwrap_or(LANGUAGE_US);
+        let mut raw = [0_u8; STRING_BYTES];
+        if let Ok(got) = self.hc.control(
+            target,
+            &Setup::get_descriptor(STRING, index, language, STRING_BYTES as u16),
+            Data::In(&mut raw),
+        ) {
+            // A string descriptor holds at most 126 UTF-16 units.
+            let mut ascii = [0_u8; STRING_BYTES / 2];
+            let len = string_ascii(raw.get(..got).unwrap_or(&[]), &mut ascii);
+            serial = storage::serial_of(ascii.get(..len).unwrap_or(&[]));
+        }
+        serial
     }
 
     /// The manufacturer's and product's strings, empty where the device has

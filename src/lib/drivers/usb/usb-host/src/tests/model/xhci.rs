@@ -101,6 +101,16 @@ pub(in crate::tests) struct Disk {
     pub(in crate::tests) failing: bool,
     /// Cache flushes asked for.
     pub(in crate::tests) flushes: u32,
+    /// The block `blocks` starts at: a disk whose blocks below it are not
+    /// held, so one of more than 2^32 blocks fits a test. Its capacity is
+    /// `base` plus what `blocks` holds.
+    pub(in crate::tests) base: usize,
+    /// Answer the next command with a status wrapper whose tag is not the
+    /// one sent, once.
+    pub(in crate::tests) wrong_tag: bool,
+    /// Answer the next read with less than half its data and a status that
+    /// passed, the residue saying what is missing, once.
+    pub(in crate::tests) short_read: bool,
 }
 
 /// The controller and its bus.
@@ -144,6 +154,8 @@ pub(in crate::tests) struct Xhci {
     /// Every `CLEAR_FEATURE(ENDPOINT_HALT)` a device received: the device
     /// and the endpoint address.
     pub(in crate::tests) cleared_halts: Vec<(usize, u8)>,
+    /// The devices sent the transport's reset, in order.
+    pub(in crate::tests) transport_resets: Vec<usize>,
     /// Answer no command: a controller that has stopped.
     pub(in crate::tests) mute: bool,
     /// Refuse to halt, for the wedged case.
@@ -207,6 +219,7 @@ impl Xhci {
             violations: Vec::new(),
             commands: Vec::new(),
             cleared_halts: Vec::new(),
+            transport_resets: Vec::new(),
             mute: false,
             wedged: false,
             events: 0,
@@ -232,6 +245,9 @@ impl Xhci {
             stall_in: false,
             failing: false,
             flushes: 0,
+            base: 0,
+            wrong_tag: false,
+            short_read: false,
         });
     }
 
@@ -1119,6 +1135,15 @@ impl Xhci {
             self.cleared_halts.push((device, setup[4]));
             self.world.devices[device].control_in = Vec::new();
             Ok(())
+        } else if setup[0] == 0x21 && setup[1] == 0xFF {
+            // Bulk-Only Mass Storage Reset: the disk forgets the command it
+            // was in and waits for the next wrapper.
+            self.transport_resets.push(device);
+            for disk in self.disks.iter_mut().filter(|disk| disk.device == device) {
+                disk.to_host.clear();
+                disk.writing = None;
+            }
+            Ok(())
         } else {
             self.world.setup(device, setup)
         };
@@ -1277,49 +1302,14 @@ impl Xhci {
                 .push_back(status_wrapper(tag, length as u32, 1));
             return;
         }
-        let block_count = disk.blocks.len() / disk.block_bytes;
-        let reply: Option<Vec<u8>> = match command[0] {
-            // TEST UNIT READY.
-            0x00 => None,
-            // REQUEST SENSE.
-            0x03 => Some(vec![
-                0x70, 0, 0x06, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0x29, 0, 0, 0, 0, 0,
-            ]),
-            // INQUIRY.
-            0x12 => {
-                let mut data = vec![0, 0x80, 4, 2, 31, 0, 0, 0];
-                data.extend_from_slice(b"FERRIX  MODEL DISK      0001");
-                Some(data)
-            }
-            // READ CAPACITY (10).
-            0x25 => {
-                let mut data = ((block_count - 1) as u32).to_be_bytes().to_vec();
-                data.extend_from_slice(&(disk.block_bytes as u32).to_be_bytes());
-                Some(data)
-            }
-            // READ (10).
-            0x28 => {
-                let lba = u32::from_be_bytes(command[2..6].try_into().expect("four")) as usize;
-                let count = usize::from(u16::from_be_bytes([command[7], command[8]]));
-                let at = lba * disk.block_bytes;
-                Some(disk.blocks[at..at + count * disk.block_bytes].to_vec())
-            }
-            // WRITE (10).
-            0x2A => {
-                let lba = u32::from_be_bytes(command[2..6].try_into().expect("four")) as usize;
-                disk.writing = Some((tag, lba, length));
-                return;
-            }
-            // SYNCHRONIZE CACHE (10).
-            0x35 => {
-                disk.flushes += 1;
-                None
-            }
-            _ => {
-                disk.to_host
-                    .push_back(status_wrapper(tag, length as u32, 1));
-                return;
-            }
+        // A tag that is not the one sent, once, on whatever answers next.
+        let tag = if std::mem::take(&mut disk.wrong_tag) {
+            tag ^ 0x5A5A_0000
+        } else {
+            tag
+        };
+        let Some(reply) = disk.reply(tag, length, &command) else {
+            return;
         };
         let mut residue = length;
         if let Some(mut data) = reply {
@@ -1373,6 +1363,106 @@ impl Xhci {
     fn write8(&mut self, address: u64, value: u8) {
         let at = self.offset(address);
         self.memory[at] = value;
+    }
+}
+
+impl Disk {
+    /// What the disk answers `command` with: its data, or none; or `None`
+    /// when it has answered already (a failed status, or a write that
+    /// waits for its data).
+    fn reply(&mut self, tag: u32, length: usize, command: &[u8]) -> Option<Option<Vec<u8>>> {
+        let held = self.blocks.len() / self.block_bytes;
+        let block_count = self.base + held;
+        // The stored blocks' byte range of `count` blocks at `lba`, or
+        // `None` outside them.
+        let base = self.base;
+        let span = |lba: usize, count: usize, block_bytes: usize| {
+            let first = lba.checked_sub(base)?;
+            (first + count <= held).then_some(first * block_bytes..(first + count) * block_bytes)
+        };
+        let reply: Option<Vec<u8>> = match command[0] {
+            // TEST UNIT READY.
+            0x00 => None,
+            // REQUEST SENSE.
+            0x03 => Some(vec![
+                0x70, 0, 0x06, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0x29, 0, 0, 0, 0, 0,
+            ]),
+            // INQUIRY.
+            0x12 => {
+                let mut data = vec![0, 0x80, 4, 2, 31, 0, 0, 0];
+                data.extend_from_slice(b"FERRIX  MODEL DISK      0001");
+                Some(data)
+            }
+            // READ CAPACITY (10): all ones past what 32 bits name.
+            0x25 => {
+                let last = u32::try_from(block_count - 1).unwrap_or(u32::MAX);
+                let mut data = last.to_be_bytes().to_vec();
+                data.extend_from_slice(&(self.block_bytes as u32).to_be_bytes());
+                Some(data)
+            }
+            // SERVICE ACTION IN (16), READ CAPACITY (16).
+            0x9E if command[1] == 0x10 && command.len() == 16 => {
+                let mut data = ((block_count - 1) as u64).to_be_bytes().to_vec();
+                data.extend_from_slice(&(self.block_bytes as u32).to_be_bytes());
+                data.resize(32, 0);
+                Some(data)
+            }
+            // READ (10) and READ (16).
+            0x28 | 0x88 => {
+                let (lba, count) = transfer_fields(command);
+                if command[0] == 0x28 && lba + count > 1 << 32 {
+                    panic!("READ (10) cannot name block {lba}");
+                }
+                let Some(range) = span(lba, count, self.block_bytes) else {
+                    self.to_host
+                        .push_back(status_wrapper(tag, length as u32, 1));
+                    return None;
+                };
+                let mut data = self.blocks[range].to_vec();
+                // Short of a packet boundary, so the transfer it ends in is
+                // short, as the transport has a device end its data early.
+                if std::mem::take(&mut self.short_read) {
+                    data.truncate(data.len() / 2 - 100);
+                }
+                Some(data)
+            }
+            // WRITE (10) and WRITE (16).
+            0x2A | 0x8A => {
+                let (lba, count) = transfer_fields(command);
+                let Some(range) = span(lba, count, self.block_bytes) else {
+                    self.to_host
+                        .push_back(status_wrapper(tag, length as u32, 1));
+                    return None;
+                };
+                self.writing = Some((tag, range.start / self.block_bytes, length));
+                return None;
+            }
+            // SYNCHRONIZE CACHE (10).
+            0x35 => {
+                self.flushes += 1;
+                None
+            }
+            _ => {
+                self.to_host
+                    .push_back(status_wrapper(tag, length as u32, 1));
+                return None;
+            }
+        };
+        Some(reply)
+    }
+}
+
+/// A read's or write's first block and block count, from its 10- or
+/// 16-byte command block.
+fn transfer_fields(command: &[u8]) -> (usize, usize) {
+    if command.len() == 16 {
+        let lba = u64::from_be_bytes(command[2..10].try_into().expect("eight"));
+        let count = u32::from_be_bytes(command[10..14].try_into().expect("four"));
+        (lba as usize, count as usize)
+    } else {
+        let lba = u32::from_be_bytes(command[2..6].try_into().expect("four"));
+        let count = u16::from_be_bytes([command[7], command[8]]);
+        (lba as usize, usize::from(count))
     }
 }
 
@@ -1471,10 +1561,17 @@ pub(in crate::tests) fn stick(speed: Speed) -> Device {
     ];
     super::device(
         speed,
-        super::device_descriptor(0, control, 0x0951, 0x1666, 0x0100),
+        stick_descriptor(control),
         configuration,
-        &[(1, "Ferrix"), (2, "Model Stick")],
+        &[(1, "Ferrix"), (2, "Model Stick"), (3, "FX0001 STICK")],
     )
+}
+
+/// The stick's device descriptor, with its serial number as string 3.
+fn stick_descriptor(control: u8) -> Vec<u8> {
+    let mut descriptor = super::device_descriptor(0, control, 0x0951, 0x1666, 0x0100);
+    descriptor[16] = 3;
+    descriptor
 }
 
 /// The gaming mouse as a `SuperSpeed` device would present it: a control
