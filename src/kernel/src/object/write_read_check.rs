@@ -542,7 +542,9 @@ fn wait_dead(task: &Task, deadline: u64, what: &'static str) -> Result<(), &'sta
         }
         crate::sched::sleep_for(POLL_NANOS);
     }
-    Ok(())
+    // Dead is not gone: its stack is freed by the reaper, and inside the next
+    // check's frame window unless waited for here.
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 /// A thread blocked in `channel_write_read` is woken by `ending`, within the

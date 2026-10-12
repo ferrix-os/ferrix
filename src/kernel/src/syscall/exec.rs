@@ -590,7 +590,13 @@ pub(crate) fn give_bootstrap(process: &Process, bootstrap: Option<Transfer>) {
     }
 }
 
-/// Load `program` with [`load_as`], run it, and wait for it to end.
+/// Load `program` with [`load_as`], run it, and wait for it to be gone.
+///
+/// Gone, not only ended: `wait_for_exit` returns at the release, while the
+/// program's task still holds its process, and through it the address space,
+/// until it has left and been reaped. Every caller is a boot check, and a
+/// check that returned there had that space freed inside whichever frame
+/// window opened next ([`crate::sched::wait_until_gone`]).
 fn run_as(
     make: fn(Arc<AddressSpace>) -> Result<Process, AllocError>,
     program: Executable<'_>,
@@ -599,10 +605,13 @@ fn run_as(
     random: [u8; ferrix_ustack::RANDOM_BYTES],
 ) -> Result<i32, ExecError> {
     let process = load_as(make, program, args, env, random)?;
-    let _task = process::start(&process).map_err(ExecError::Start)?;
-    process
+    let task = process::start(&process).map_err(ExecError::Start)?;
+    let status = process
         .wait_for_exit(u64::MAX)
-        .ok_or(ExecError::Start("the program never reported how it ended"))
+        .ok_or(ExecError::Start("the program never reported how it ended"))?;
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)
+        .map_err(ExecError::Start)?;
+    Ok(status)
 }
 
 /// How `execve` failed.

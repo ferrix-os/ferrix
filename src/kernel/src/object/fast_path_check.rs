@@ -337,7 +337,10 @@ fn start_echo_in(
 
 /// Wait until `task` has ended, by `deadline`.
 fn wait_dead(task: &Task, deadline: u64, what: &'static str) -> Result<(), &'static str> {
-    wait_until(deadline, what, || task.is_dead())
+    wait_until(deadline, what, || task.is_dead())?;
+    // Dead is not gone: its stack is freed by the reaper, and inside the next
+    // check's frame window unless waited for here.
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 // ---------------------------------------------------------------------------
@@ -1113,7 +1116,7 @@ fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
     let (sender, sender_handle) = holding(&theirs)?;
     *SENT.lock() = None;
     *SENDER.lock() = Some(sender_handle);
-    let _sending = spawn_in(&sender, "fast path sender", send_in_the_process, Some(cpu))?;
+    let sending = spawn_in(&sender, "fast path sender", send_in_the_process, Some(cpu))?;
     let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
     wait_dead(
         &task,
@@ -1121,6 +1124,12 @@ fn check_a_queued_write_takes_the_park() -> Result<(), &'static str> {
         "A2's case: the reader was not answered twice within the bound",
     )?;
     process::kill(&sender, KILLED_STATUS);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    wait_dead(
+        &sending,
+        deadline,
+        "A2's case: the killed sender never ended",
+    )?;
     drop(sender);
     drop(reader);
     drop(theirs);

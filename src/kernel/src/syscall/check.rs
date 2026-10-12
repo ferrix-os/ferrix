@@ -2797,7 +2797,6 @@ fn hangup_revokes_reading() -> Result<(), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(REVOKE_PATIENCE_NANOS);
     let _ = REVOKE_ANSWERED.wait_until_deadline(|| REVOKE_ANSWER.lock().is_some(), deadline);
     let answer = REVOKE_ANSWER.lock().take();
-    drop(reader);
     match answer {
         Some(Err(Errno::EIO)) => {}
         Some(_) => {
@@ -2805,6 +2804,8 @@ fn hangup_revokes_reading() -> Result<(), &'static str> {
         }
         None => return Err("a reader waiting on the console was not woken by the hangup"),
     }
+    crate::sched::wait_until_gone(&reader, crate::sched::REAPER_PATIENCE_NANOS)?;
+    drop(reader);
 
     let mut buf = [0_u8; 4];
     if before.read_stream(&mut buf, true) != Err(Errno::EIO) {
@@ -4827,6 +4828,8 @@ fn one_pair_takes_turns(here: usize) -> Result<Turns, &'static str> {
     if statuses.1 != Some(43) {
         return Err("the second of two programs did not exit with its own status");
     }
+    crate::sched::wait_until_gone(&first_task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    crate::sched::wait_until_gone(&second_task, crate::sched::REAPER_PATIENCE_NANOS)?;
     Ok(Turns {
         switched: (first_task.switches(), second_task.switches()),
         preempted: (first_task.preemptions(), second_task.preemptions()),
@@ -4878,6 +4881,7 @@ fn check_a_program_is_killed_from_outside() -> Result<Option<i32>, &'static str>
         }
         crate::sched::sleep_for(1_000_000);
     }
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     Ok(Some(KILL_STATUS))
 }
 
@@ -6168,6 +6172,7 @@ fn kill_a_reader_blocked_in_syslog() -> Result<(), &'static str> {
             "a program killed with no signal while blocked in syslog's read was never released",
         );
     }
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     Ok(())
 }
 
@@ -6233,12 +6238,13 @@ fn run_a_thread_that_execs(image: &[u8]) -> Result<Option<i32>, &'static str> {
     )
     .map_err(|_| "a program that execs from a thread could not be loaded")?;
     let pid = execing.pid();
-    let _task = process::start(&execing)
+    let task = process::start(&execing)
         .map_err(|_| "a program that execs from a thread could not be started")?;
     let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
     let status = execing
         .wait_for_exit(deadline)
         .ok_or("a process whose thread called execve while its first thread waited never ended")?;
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     match status {
         96 => return Err("a program that execs from a thread could not make its thread"),
         97 => return Err("execve from a thread other than the first returned to the program"),
@@ -6308,7 +6314,7 @@ fn check_a_stop_stops_every_thread_and_a_continue_restarts_their_calls()
         [0x5a; ferrix_ustack::RANDOM_BYTES],
     )
     .map_err(|_| "a program of three threads could not be loaded")?;
-    let _task =
+    let task =
         process::start(&stopped).map_err(|_| "a program of three threads could not be started")?;
     // Stopped once by SIGSTOP, which posts every thread `SIGNAL` as well, and
     // once by the stop alone, which only `STOP` announces (`sched::work`).
@@ -6321,6 +6327,9 @@ fn check_a_stop_stops_every_thread_and_a_continue_restarts_their_calls()
         return Err("a program of three threads could not map its page or make its threads");
     }
     outcome?;
+    if status.is_some() {
+        crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     match status {
         Some(STOPPED_KILL_STATUS) => Ok(Some(STOPPED_KILL_STATUS)),
         Some(_) => Err("a program of three threads killed with SIGKILL ended with another status"),
@@ -6368,7 +6377,7 @@ fn check_a_signal_reaches_the_thread_that_can_take_it() -> Result<Option<i32>, &
         [0x5a; ferrix_ustack::RANDOM_BYTES],
     )
     .map_err(|_| "a program of two threads with handlers could not be loaded")?;
-    let _task = process::start(&handing)
+    let task = process::start(&handing)
         .map_err(|_| "a program of two threads with handlers could not be started")?;
     let outcome = hand_a_signal_on(&handing);
     crate::syscall::kill::send(&handing, SIGKILL, Origin::Kernel);
@@ -6381,6 +6390,9 @@ fn check_a_signal_reaches_the_thread_that_can_take_it() -> Result<Option<i32>, &
         );
     }
     outcome?;
+    if status.is_some() {
+        crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     match status {
         Some(STOPPED_KILL_STATUS) => Ok(Some(STOPPED_KILL_STATUS)),
         Some(_) => {
@@ -6558,7 +6570,7 @@ fn check_a_replacing_thread_ends_spinning_ones() -> Result<(), &'static str> {
         [0x5a; ferrix_ustack::RANDOM_BYTES],
     )
     .map_err(|_| "a program of three threads could not be loaded")?;
-    let _task =
+    let task =
         process::start(&replaced).map_err(|_| "a program of three threads could not be started")?;
     let outcome = replace_while_two_spin(&replaced);
     crate::syscall::kill::send(&replaced, SIGKILL, Origin::Kernel);
@@ -6568,6 +6580,7 @@ fn check_a_replacing_thread_ends_spinning_ones() -> Result<(), &'static str> {
     if status.is_none() {
         return Err("a program of three threads was never released after SIGKILL");
     }
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     Ok(())
 }
 
@@ -6626,6 +6639,7 @@ fn replace_while_two_spin(replaced: &Arc<Process>) -> Result<(), &'static str> {
         }
         crate::sched::sleep_for(STOP_POLL_NANOS);
     }
+    crate::sched::wait_until_gone(&replacer, crate::sched::REAPER_PATIENCE_NANOS)?;
     drop(replacer);
     Ok(())
 }
@@ -7673,10 +7687,14 @@ fn check_a_write_after_mprotect_read_only_faults() -> Result<Option<i32>, &'stat
         [0x5a; ferrix_ustack::RANDOM_BYTES],
     )
     .map_err(|_| "a program that narrows its own mapping could not be loaded")?;
-    let _task = process::start_on(&program, Some(elsewhere))
+    let task = process::start_on(&program, Some(elsewhere))
         .map_err(|_| "a program that narrows its own mapping could not be started")?;
     let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
-    match program.wait_for_exit(deadline) {
+    let status = program.wait_for_exit(deadline);
+    if status.is_some() {
+        crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
+    match status {
         Some(MPROTECT_STATUS) => Ok(Some(MPROTECT_STATUS)),
         Some(1) => Err(
             "a program wrote a page it had just made read-only with mprotect: a writable \
@@ -7796,6 +7814,7 @@ fn check_execve_replaces_the_program() -> Result<Option<(i32, i32)>, &'static st
     let found = execing
         .wait_for_exit(u64::MAX)
         .ok_or("a program that calls execve never reported how it ended")?;
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     drop(task);
     let recorded = execing.exe();
     drop(execing);
@@ -8301,6 +8320,9 @@ fn wait_then_wake_from(
     let deadline = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     let _ = FUTEX_ANSWERED.wait_until_deadline(|| FUTEX_ANSWER.lock().is_some(), deadline);
     let answer = FUTEX_ANSWER.lock().take();
+    if answer.is_some() {
+        crate::sched::wait_until_gone(&waiter, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     drop(waiter);
     match (count, answer) {
         (_, None) => Err("a futex waiter never came back"),
@@ -8441,6 +8463,7 @@ fn call_past_the_heap_lock(
         }
         crate::sched::sleep_for(1_000_000);
     }
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     if early {
         return Err(match call {
             HeapCall::Shrink => BRK_IGNORED_HEAP_LOCK,
@@ -11261,7 +11284,7 @@ fn check_a_program_is_handed_its_start_argument() -> Result<Option<i32>, &'stati
     check_a_dropped_prepared_start_gives_everything_back(&program)?;
     let claim = process::claim_start(&program)
         .map_err(|_| "a released claim on a process could not be taken again")?;
-    let _task = claim
+    let task = claim
         .start(None, START_ARGUMENT)
         .map_err(|_| "a program handed a start argument could not be started")?;
     if process::start(&program).is_ok() {
@@ -11282,6 +11305,7 @@ fn check_a_program_is_handed_its_start_argument() -> Result<Option<i32>, &'stati
     let status = program
         .wait_for_exit(u64::MAX)
         .ok_or("a program handed a start argument never reported how it ended")?;
+    crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
     if status != START_STATUS {
         return Err("a program did not find its start argument in its first argument register");
     }
@@ -11564,11 +11588,12 @@ pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
     let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
     SEAM_DONE.store(0, Ordering::Release);
     let before = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT);
+    let mut callers = Vec::new();
     for cpu in 0..online {
         let mut only = ferrix_sched::CpuSet::empty();
         only.insert(cpu)
             .map_err(|_| "no such processor for a seam caller")?;
-        let _ = crate::sched::spawn_on(
+        let caller = crate::sched::spawn_on(
             "seam-count",
             seam_caller,
             number,
@@ -11576,6 +11601,7 @@ pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
             cpu,
             only,
         )?;
+        callers.push(caller);
     }
     let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
     while SEAM_DONE.load(Ordering::Acquire) < online {
@@ -11585,6 +11611,9 @@ pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
         crate::sched::sleep_for(1_000_000);
     }
     let counted = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT).wrapping_sub(before);
+    for caller in &callers {
+        crate::sched::wait_until_gone(caller, crate::sched::REAPER_PATIENCE_NANOS)?;
+    }
     let made = SEAM_CALLS * online as u64;
     if counted != made {
         println!("  seamcnt  {made} calls made on {online} processors, {counted} counted");

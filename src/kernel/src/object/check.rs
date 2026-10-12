@@ -1891,7 +1891,7 @@ fn check_a_wait_is_woken_by_what_it_waits_for(counter: &mut Counter) -> Result<(
 
     WRITTEN_AT.store(0, Ordering::Release);
     *WAKER.lock() = Some((Arc::clone(&side.process), near));
-    let _waker = crate::sched::spawn(
+    let waker = crate::sched::spawn(
         "native waker",
         write_after_a_delay,
         0,
@@ -1911,6 +1911,7 @@ fn check_a_wait_is_woken_by_what_it_waits_for(counter: &mut Counter) -> Result<(
     if !Signals(side.get_u32(OBSERVED)?).intersects(Signals::READABLE) {
         return Err("a woken wait did not report the channel readable");
     }
+    crate::sched::wait_until_gone(&waker, crate::sched::REAPER_PATIENCE_NANOS)?;
     counter.woken += 1;
 
     let _ = side
@@ -1972,7 +1973,7 @@ fn ended_by_the_kill(process: &Process, task: &Task) -> Result<(), &'static str>
         }
         crate::sched::sleep_for(1_000_000);
     }
-    Ok(())
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 /// Killing a job ends every process in it and beneath it, and nothing above
@@ -2043,7 +2044,7 @@ fn check_a_job_kill_takes_down_a_process_tree(counter: &mut Counter) -> Result<(
     // and then.
     let spinning = spinner(b's', u32::MAX, 6)?;
     let spinning_task = run_in(&side, middle, &spinning)?;
-    let _bystander_task =
+    let bystander_task =
         process::start(&bystander).map_err(|_| "the bystander could not be started")?;
     crate::sched::sleep_for(KILL_AFTER_NANOS);
 
@@ -2110,6 +2111,7 @@ fn check_a_job_kill_takes_down_a_process_tree(counter: &mut Counter) -> Result<(
     if bystander.wait_for_exit(deadline) != Some(44) {
         return Err("a process outside the killed jobs did not finish with its own status");
     }
+    crate::sched::wait_until_gone(&bystander_task, crate::sched::REAPER_PATIENCE_NANOS)?;
     side.close_everything();
     Ok(())
 }
@@ -2875,7 +2877,7 @@ fn task_stops(task: &Task, deadline: u64) -> Result<(), &'static str> {
         }
         crate::sched::sleep_for(1_000_000);
     }
-    Ok(())
+    crate::sched::wait_until_gone(task, crate::sched::REAPER_PATIENCE_NANOS)
 }
 
 /// Stage 9's exit criterion: two user processes exchange messages and a
@@ -3581,7 +3583,7 @@ fn check_a_port_wait_is_woken_by_a_message(counter: &mut Counter) -> Result<(), 
 
     WRITTEN_AT.store(0, Ordering::Release);
     *WAKER.lock() = Some((Arc::clone(&side.process), near));
-    let _waker = crate::sched::spawn(
+    let waker = crate::sched::spawn(
         "port waker",
         write_after_a_delay,
         0,
@@ -3601,6 +3603,7 @@ fn check_a_port_wait_is_woken_by_a_message(counter: &mut Counter) -> Result<(), 
     if read_packet(&side)?.0 != 21 {
         return Err("a woken port wait took the wrong packet");
     }
+    crate::sched::wait_until_gone(&waker, crate::sched::REAPER_PATIENCE_NANOS)?;
     counter.woken += 1;
     counter.packets += 1;
     side.close_everything();
@@ -3687,7 +3690,7 @@ fn check_an_interrupt_wakes_its_waiter(
         for round in 0..WAKE_ROUNDS {
             let ended_by_a_wake = watched.waiters().waits_ended_by_a_wake();
             let extra = u64::from(round).saturating_mul(WAKE_STAGGER_NANOS);
-            let _firer = crate::sched::spawn(
+            let firer = crate::sched::spawn(
                 "interrupt firer",
                 fire_after_a_delay,
                 usize::try_from(extra).unwrap_or(0),
@@ -3716,6 +3719,7 @@ fn check_an_interrupt_wakes_its_waiter(
             let _ = side
                 .call(nr::INTERRUPT_ACK, &[reg(interrupt)])
                 .map_err(|_| "acknowledging a timed delivery failed")?;
+            crate::sched::wait_until_gone(&firer, crate::sched::REAPER_PATIENCE_NANOS)?;
         }
         // Let go of here: a reference to the interrupt is a claim on its line.
         object::dispose([watched]);
