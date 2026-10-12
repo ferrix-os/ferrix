@@ -52,10 +52,12 @@ const KINDS: [&str; 7] = ["mnt", "user", "pid", "net", "ipc", "uts", "cgroup"];
 /// The btrfs test disk every QEMU machine carries as `vdb`, read-only
 /// (`tools/common/xtask/src/btrfs_disk.rs`).
 const DISK: &str = "/dev/vdb";
-/// Where init mounts it.
-const MOUNT: &str = "/mnt/ro";
+/// Where init mounts it: a mount of its own, so the page cache is new and
+/// what pid 1 reads is charged to pid 1's cgroup. The boot's btrfs check
+/// leaves its own mount of the disk on `/mnt`, whose pages it read itself.
+const MOUNT: &str = "/tmp/ro";
 /// A file of 140,000 bytes on it (`tools/common/gen/gen-btrfs-fixtures.py`).
-const FILE: &str = "/mnt/ro/big.txt";
+const FILE: &str = "/tmp/ro/big.txt";
 
 /// Print a progress line.
 fn step(what: &str) {
@@ -174,7 +176,9 @@ fn main() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let _ = fs::create_dir_all(MOUNT);
+    if let Err(error) = fs::create_dir_all(MOUNT) {
+        fail(&format!("{MOUNT} could not be made ({error})"));
+    }
     mount(DISK, MOUNT, "btrfs", libc::MS_RDONLY, "the btrfs test disk could not be mounted read-only");
     let _ = fs::create_dir_all(CGROUP);
     mount("none", CGROUP, "cgroup2", 0, "cgroup2 could not be mounted");
