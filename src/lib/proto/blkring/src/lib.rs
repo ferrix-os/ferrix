@@ -201,7 +201,7 @@ pub use bell::{BELL_COMPLETE, BELL_SUBMIT, Doorbell, Rung, Wait};
 pub use control::{Accepted, Block, Hello, Message, MessageError, Refusal, Start, StartError};
 pub use driver::{CompleteError, Consumed, DriverSide};
 pub use geometry::{Device, DeviceError, DeviceFlags, InvalidSubmission};
-pub use identity::{DiskName, Identity, Location, disk_index};
+pub use identity::{DiskName, Identity, Location, disk_index, nvme_controller};
 pub use kernel::{AttachError, Completed, Drain, KernelSide, Slot, SubmitError};
 pub use layout::{HeaderError, Op, RingLayout, Status, Submission};
 

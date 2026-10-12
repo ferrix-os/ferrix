@@ -22,6 +22,16 @@
 //! largest, `vdzzz`'s, is 292432, so a minor must be at least 19 bits wide; the
 //! kernel's are 20, as Linux's are.
 //!
+//! An NVMe namespace is named as Linux names it, `nvme<C>n1`: `C` the
+//! controller's number among the NVMe controllers devmgr drives, from 0 to
+//! [`MAX_NVME_CONTROLLER`], counted apart from the virtio disks so that a
+//! drive added to a machine moves no `vd` letter. Linux numbers NVMe disks
+//! from its extended major, 259, with minors it hands out as disks appear;
+//! here the major is [`NVME_MAJOR`] and the whole disk's minor `C × 16`,
+//! as a virtio disk's, so that its partitions take the 15 minors after it.
+//! Only namespace 1 is named: a ring serves one namespace per controller
+//! (`docs/NVME.md` §3).
+//!
 //! Whether a name is *already published*, or a location *already served*, is
 //! a question about every ring the kernel holds, so it belongs to the kernel
 //! glue; this module only decides whether a name is well formed.
@@ -41,6 +51,18 @@ pub const MINORS_PER_DISK: u32 = 16;
 
 /// The index of `vdzzz`, the last name that fits: 26 + 26² + 26³ − 1.
 pub const MAX_DISK_INDEX: u32 = 18277;
+
+/// The largest NVMe controller number a name may carry: `nvme99n1` fills
+/// HELLO's eight bytes.
+pub const MAX_NVME_CONTROLLER: u32 = 99;
+
+/// The block major of every NVMe namespace: Linux's `BLOCK_EXT_MAJOR`,
+/// which its NVMe disks are numbered from.
+pub const NVME_MAJOR: u32 = 259;
+
+/// The block major of every virtio disk. Linux allocates virtio-blk's major
+/// dynamically, usually 253 or 254; nothing keys on it.
+pub const VIRTIO_BLK_MAJOR: u32 = 254;
 
 /// A PCI address as HELLO carries it: segment in bits 31:16, bus in 15:8,
 /// device and function in 7:0.
@@ -112,8 +134,8 @@ impl fmt::Display for Location {
 /// `vdzzz` 18277.
 ///
 /// `None` unless the name is `vd`, then one to three lowercase ASCII letters,
-/// then only NUL bytes — which is also the check the kernel refuses a
-/// malformed name by.
+/// then only NUL bytes. With [`nvme_controller`] it is the check the
+/// kernel refuses a malformed name by ([`DiskName::new`]).
 #[must_use]
 pub fn disk_index(name: &[u8; NAME_BYTES]) -> Option<u32> {
     let [b'v', b'd', first, second, third, 0, 0, 0] = *name else {
@@ -137,6 +159,30 @@ pub fn disk_index(name: &[u8; NAME_BYTES]) -> Option<u32> {
     Some(index - 1)
 }
 
+/// The controller number an NVMe namespace's HELLO `name` denotes:
+/// `nvme0n1` is 0, `nvme99n1` 99.
+///
+/// `None` unless the name is `nvme`, then the number in decimal with no
+/// leading zero, then `n1`, then only NUL bytes.
+#[must_use]
+pub fn nvme_controller(name: &[u8; NAME_BYTES]) -> Option<u32> {
+    let rest = name.strip_prefix(b"nvme")?;
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+    let (number, tail) = rest.split_at(digits);
+    if number.is_empty() || number.len() > 2 || (number.len() > 1 && number.first() == Some(&b'0'))
+    {
+        return None;
+    }
+    let (namespace, padding) = tail.split_at_checked(2)?;
+    if namespace != b"n1" || padding.iter().any(|&byte| byte != 0) {
+        return None;
+    }
+    let controller = number
+        .iter()
+        .fold(0_u32, |value, digit| value * 10 + u32::from(digit - b'0'));
+    (controller <= MAX_NVME_CONTROLLER).then_some(controller)
+}
+
 /// The minor of the whole disk `index` denotes: `index × 16`.
 ///
 /// `None` past [`MAX_DISK_INDEX`], which no name can denote.
@@ -149,7 +195,8 @@ pub const fn whole_disk_minor(index: u32) -> Option<u32> {
     }
 }
 
-/// A well-formed disk name: `vd` and one to three lowercase letters.
+/// A well-formed disk name: `vd` and one to three lowercase letters, or an
+/// NVMe namespace's `nvme<C>n1`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct DiskName([u8; NAME_BYTES]);
 
@@ -157,7 +204,45 @@ impl DiskName {
     /// Check HELLO's name bytes.
     #[must_use]
     pub fn new(bytes: [u8; NAME_BYTES]) -> Option<Self> {
-        disk_index(&bytes).map(|_| DiskName(bytes))
+        disk_index(&bytes)
+            .or_else(|| nvme_controller(&bytes))
+            .map(|_| DiskName(bytes))
+    }
+
+    /// The name of namespace 1 of NVMe controller `controller`: `nvme0n1`
+    /// for 0. `None` past [`MAX_NVME_CONTROLLER`].
+    #[must_use]
+    pub fn nvme(controller: u32) -> Option<Self> {
+        if controller > MAX_NVME_CONTROLLER {
+            return None;
+        }
+        let mut bytes = [0_u8; NAME_BYTES];
+        let tens = (controller / 10) as u8;
+        let ones = (controller % 10) as u8;
+        let name: &[u8] = if tens == 0 {
+            &[b'n', b'v', b'm', b'e', b'0' + ones, b'n', b'1']
+        } else {
+            &[b'n', b'v', b'm', b'e', b'0' + tens, b'0' + ones, b'n', b'1']
+        };
+        bytes.get_mut(..name.len())?.copy_from_slice(name);
+        Some(DiskName(bytes))
+    }
+
+    /// Whether this is an NVMe namespace's name.
+    #[must_use]
+    pub fn is_nvme(&self) -> bool {
+        nvme_controller(&self.0).is_some()
+    }
+
+    /// The block major the disk is numbered under: [`NVME_MAJOR`] for an
+    /// NVMe namespace, [`VIRTIO_BLK_MAJOR`] for the rest.
+    #[must_use]
+    pub fn major(&self) -> u32 {
+        if self.is_nvme() {
+            NVME_MAJOR
+        } else {
+            VIRTIO_BLK_MAJOR
+        }
     }
 
     /// The name of disk `index`, as Linux's `virtblk_name_format` writes it:
@@ -210,15 +295,19 @@ impl DiskName {
             .unwrap_or("")
     }
 
-    /// The disk index: `vda` is 0.
+    /// The disk index: `vda` is 0, and `nvme3n1` is 3, its controller's
+    /// number.
     #[must_use]
     pub fn index(&self) -> u32 {
-        // A `DiskName` was checked when it was made, so this always has a
-        // value; zero is never reached.
-        disk_index(&self.0).unwrap_or(0)
+        // A `DiskName` was checked when it was made, so one of the two
+        // always has a value; zero is never reached.
+        disk_index(&self.0)
+            .or_else(|| nvme_controller(&self.0))
+            .unwrap_or(0)
     }
 
-    /// The whole disk's minor: [`DiskName::index`] × 16.
+    /// The whole disk's minor under its [`DiskName::major`]:
+    /// [`DiskName::index`] × 16.
     #[must_use]
     pub fn minor(&self) -> u32 {
         self.index() * MINORS_PER_DISK

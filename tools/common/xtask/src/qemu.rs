@@ -3117,6 +3117,8 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
 pub(crate) const NVME_ROOT_SERIAL: &str = "ferrix-nvme-root";
 /// The serial number of `test-nvme`'s scratch drive.
 pub(crate) const NVME_SCRATCH_SERIAL: &str = "ferrix-nvme-4k";
+/// The serial number of `test-nvme --boot parts`' partitioned drive.
+pub(crate) const NVME_GPT_SERIAL: &str = "ferrix-nvme-gpt";
 
 /// Attach the drive `btrfsroot` as an NVMe drive below a PCIe switch: a
 /// root port, the switch's upstream port, one downstream port, and the
@@ -3165,6 +3167,7 @@ fn attach_nvme_scratch(command: &mut Command, arch: Arch, args: &Args) {
         // in the file.
         crate::noise::keep("pci_nvme_", trace);
     }
+    attach_nvme_gpt(command, arch, args);
     let Some(scratch) = &args.nvme_scratch else {
         return;
     };
@@ -3208,6 +3211,39 @@ fn attach_nvme_scratch(command: &mut Command, arch: Arch, args: &Args) {
             "nvme,drive=nvmescratch,serial={NVME_SCRATCH_SERIAL}{bus},\
              logical_block_size=4096,physical_block_size=4096"
         ),
+    ]);
+}
+
+/// Attach `test-nvme --boot parts`' partitioned image as an NVMe drive of
+/// 512-byte logical blocks, the size `bootctl` writes, on a root port of
+/// its own (the root bus on AArch64, as the scratch drive's).
+fn attach_nvme_gpt(command: &mut Command, arch: Arch, args: &Args) {
+    let Some(image) = &args.nvme_gpt else {
+        return;
+    };
+    println!(
+        "  {arch}: partitioned NVMe drive {} ({NVME_GPT_SERIAL}), 512-byte blocks",
+        display(image)
+    );
+    let _ = command.args([
+        "-drive",
+        &format!(
+            "file={},if=none,format=raw,id=nvmegpt,cache=writeback",
+            display(image)
+        ),
+    ]);
+    let bus = if std::env::var_os("FERRIX_NVME_BELOW_PORT").is_some() || arch == Arch::X86_64 {
+        let _ = command.args([
+            "-device",
+            "pcie-root-port,id=ferrix.nvme.gptport,chassis=6,slot=6",
+        ]);
+        ",bus=ferrix.nvme.gptport"
+    } else {
+        ""
+    };
+    let _ = command.args([
+        "-device",
+        &format!("nvme,drive=nvmegpt,serial={NVME_GPT_SERIAL}{bus}"),
     ]);
 }
 

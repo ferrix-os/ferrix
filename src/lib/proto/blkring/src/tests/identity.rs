@@ -4,7 +4,8 @@ use std::string::String;
 use std::vec::Vec;
 
 use crate::identity::{
-    DiskName, Location, MAX_DISK_INDEX, NAME_BYTES, disk_index, whole_disk_minor,
+    DiskName, Location, MAX_DISK_INDEX, MAX_NVME_CONTROLLER, NAME_BYTES, NVME_MAJOR,
+    VIRTIO_BLK_MAJOR, disk_index, nvme_controller, whole_disk_minor,
 };
 
 /// Linux's `virtblk_name_format` for the `vd` prefix, transcribed: letters
@@ -125,4 +126,51 @@ fn a_location_packs_segment_bus_and_devfn() {
     );
     assert_eq!((location.device(), location.function()), (0x1F, 5), "devfn");
     assert_eq!(std::format!("{location}"), "1234:56:1f.5", "display");
+}
+
+#[test]
+fn an_nvme_namespace_is_named_as_linux_names_it() {
+    for (name, controller) in [
+        ("nvme0n1", 0),
+        ("nvme1n1", 1),
+        ("nvme9n1", 9),
+        ("nvme10n1", 10),
+        ("nvme99n1", 99),
+    ] {
+        let bytes = padded(name).expect("fits");
+        assert_eq!(nvme_controller(&bytes), Some(controller), "{name}");
+        assert_eq!(disk_index(&bytes), None, "{name} is no virtio name");
+        let disk = DiskName::new(bytes).expect("valid");
+        assert_eq!(DiskName::nvme(controller), Some(disk), "nvme({controller})");
+        assert_eq!(disk.as_str(), name, "{name}");
+        assert!(disk.is_nvme(), "{name}");
+        assert_eq!(disk.index(), controller, "{name} index");
+        assert_eq!(disk.minor(), controller * 16, "{name} minor");
+        assert_eq!(disk.major(), NVME_MAJOR, "{name} major");
+    }
+    assert_eq!(
+        DiskName::nvme(MAX_NVME_CONTROLLER + 1),
+        None,
+        "nvme100n1 does not fit"
+    );
+    let virtio = DiskName::for_index(3).expect("vdd");
+    assert!(!virtio.is_nvme(), "vdd");
+    assert_eq!(virtio.major(), VIRTIO_BLK_MAJOR, "vdd major");
+}
+
+#[test]
+fn a_malformed_nvme_name_is_refused() {
+    for name in [
+        "nvme", "nvmen1", "nvme01n1", "nvme0n2", "nvme0n", "nvme0", "nvme0n10", "nvme0p1",
+        "nvmeAn1", "Nvme0n1", "nvme0n1p", "vme0n1",
+    ] {
+        let bytes = padded(name).expect("fits");
+        assert_eq!(nvme_controller(&bytes), None, "{name}");
+        assert!(DiskName::new(bytes).is_none(), "{name}");
+    }
+    assert!(
+        DiskName::new(*b"nvme0n1\x01").is_none(),
+        "a byte after the padding"
+    );
+    assert!(DiskName::new(*b"nvme100n").is_none(), "three digits");
 }

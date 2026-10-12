@@ -136,6 +136,10 @@ pub(crate) struct Args {
     /// `test-nvme`'s witness: where QEMU writes its trace of the NVMe
     /// model's flushes, shutdown notifications and stops.
     pub(crate) nvme_trace: Option<std::path::PathBuf>,
+    /// `test-nvme --boot parts`' drive: an image with a GUID partition
+    /// table, attached as an NVMe drive with 512-byte logical blocks on a
+    /// root port of its own, written through.
+    pub(crate) nvme_gpt: Option<std::path::PathBuf>,
     /// `--net`: give the guest a virtio-net device, with `xtask`'s own gateway
     /// behind it. Off by default for a boot that is judged, because every boot
     /// that does not need a network is a boot with one fewer device on the bus

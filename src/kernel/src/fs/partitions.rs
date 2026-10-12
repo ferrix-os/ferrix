@@ -1,5 +1,6 @@
 //! A disk's GUID partitions, published as disks of their own: `vda1`,
-//! `vda2`, numbered as Linux numbers them, one minor above the disk's.
+//! `vda2`, and `nvme0n1p1` for a disk whose name ends in a digit, named and
+//! numbered as Linux names and numbers them, one minor above the disk's.
 //!
 //! The installer (`docs/INSTALLER.md` §5.2) writes an EFI system partition
 //! and a root partition, and the next boot has to find the root on the
@@ -14,6 +15,8 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use ferrix_blkring::DiskName;
+use ferrix_blkring::identity::NAME_BYTES;
 use ferrix_partition::{parse_entries, parse_header};
 use ferrix_vfs::Errno;
 
@@ -23,7 +26,8 @@ use crate::fs::devfs::{self, BlockRegistration};
 use crate::sync::SpinLock;
 
 /// Partitions a disk may have published: Linux gives a virtio disk sixteen
-/// minors, the disk's and fifteen more.
+/// minors, the disk's and fifteen more, and a ring's NVMe namespace is
+/// numbered the same way (`ferrix_blkring::identity`).
 const MOST: u32 = 15;
 
 /// The registrations, kept for as long as the machine runs.
@@ -84,9 +88,10 @@ pub(crate) fn scan() {
         return;
     }
     for disk in devfs::disks() {
-        // A whole disk's minor is a multiple of sixteen, and its name ends
-        // in a letter.
-        if disk.minor % (MOST + 1) != 0 || disk.name.last().is_none_or(u8::is_ascii_digit) {
+        // A whole disk's minor is a multiple of sixteen, and its name is a
+        // ring disk's: `vd` and letters, or `nvme<C>n1`. A partition's name
+        // is neither.
+        if disk.minor % (MOST + 1) != 0 || !is_whole_disk_name(&disk.name) {
             continue;
         }
         let Ok(found) = partitions(disk.device.as_ref()) else {
@@ -94,8 +99,7 @@ pub(crate) fn scan() {
         };
         for (index, start, sectors) in found {
             let number = index + 1;
-            let mut name = disk.name.clone();
-            name.extend_from_slice(alloc::format!("{number}").as_bytes());
+            let name = partition_name(&disk.name, number);
             let partition = Arc::new(Partition {
                 disk: Arc::clone(&disk.device),
                 start,
@@ -117,6 +121,27 @@ pub(crate) fn scan() {
             }
         }
     }
+}
+
+/// Whether `name` is a whole disk's, as a ring's HELLO may give it.
+fn is_whole_disk_name(name: &[u8]) -> bool {
+    let mut padded = [0_u8; NAME_BYTES];
+    match padded.get_mut(..name.len()) {
+        Some(slot) => slot.copy_from_slice(name),
+        None => return false,
+    }
+    DiskName::new(padded).is_some()
+}
+
+/// Partition `number`'s name on the disk `disk`: `vda2`, and `nvme0n1p2`
+/// when the disk's name ends in a digit, as Linux's `disk_name` writes it.
+fn partition_name(disk: &[u8], number: u32) -> Vec<u8> {
+    let mut name = disk.to_vec();
+    if disk.last().is_some_and(u8::is_ascii_digit) {
+        name.push(b'p');
+    }
+    name.extend_from_slice(alloc::format!("{number}").as_bytes());
+    name
 }
 
 /// A disk's partitions: each one's index in the table, first sector and

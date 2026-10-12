@@ -276,7 +276,8 @@ COMMANDS:
     test-nvme     Boot a shell with / on an NVMe drive below a PCIe switch and a second drive of 4096-byte blocks:
                   read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);
                   a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
-                  virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
+                  virtio-blk's (--boot bench); a GPT drive's partitions as nvme<C>n1pN, read, and found by
+                  bootctl (--boot parts) (x86_64; docs/NVME.md)
     test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)
     test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);
                   --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals

@@ -29,6 +29,15 @@
 //!   host has, which is printed. A measurement: it requires only that the
 //!   reads work.
 //!
+//! * `parts`: a third NVMe drive of 512-byte blocks with a GUID partition
+//!   table laid out as the customer's SN720 was (a swap stand-in, the ESP,
+//!   the boot control record, two system slots, the root), every sector
+//!   outside the table and the record its pattern. The kernel must publish
+//!   `nvme<C>n1p1` to `p6` with their sizes, the first and last sector of
+//!   each must read back as written, the control partition's first block
+//!   must be the record, and `bootctl status` must find the layout by its
+//!   partition types and name each node as Linux does.
+//!
 //! * `up`: the ordinary `test-boot` image and its whole boot, self-checks
 //!   and all, with the scratch drive on the bus, and the driver's line for
 //!   it required. No shell, so it runs on AArch64 too, where the machine's
@@ -84,6 +93,7 @@ enum Mode {
     Io,
     Fault,
     Bench,
+    Parts,
     Up,
 }
 
@@ -93,9 +103,10 @@ impl Mode {
             None | Some("io") => Ok(Mode::Io),
             Some("fault") => Ok(Mode::Fault),
             Some("bench") => Ok(Mode::Bench),
+            Some("parts") => Ok(Mode::Parts),
             Some("up") => Ok(Mode::Up),
             Some(other) => Err(Error::new(format!(
-                "test-nvme --boot takes io, fault, bench or up, not `{other}`"
+                "test-nvme --boot takes io, fault, bench, parts or up, not `{other}`"
             ))),
         }
     }
@@ -124,27 +135,12 @@ pub(crate) fn test_nvme(args: &Args) -> Result<()> {
              the driver on AArch64",
         ));
     }
-    let (image, kernel) = shell_image(arch, args)?;
+    let (image, kernel) = shell_image(arch, args, mode == Mode::Parts)?;
 
-    let directory = paths::build_dir(arch);
-    std::fs::create_dir_all(&directory)?;
-    let scratch = directory.join("nvme-scratch.img");
-    std::fs::write(&scratch, scratch_bytes(0, SCRATCH_BLOCKS))
-        .map_err(|error| Error::new(format!("writing {}: {error}", scratch.display())))?;
-    let trace = directory.join("nvme-trace.log");
-    let _ = std::fs::remove_file(&trace);
-
-    let mut booted = args.clone();
-    booted.btrfs_root = true;
-    booted.nvme = true;
-    booted.nvme_scratch = Some(scratch.clone());
-    booted.nvme_trace = Some(trace.clone());
-    if mode == Mode::Fault {
-        booted.nvme_fault = Some(fault_rules(&directory)?);
-    }
+    let (booted, scratch, trace) = drives(arch, args, mode)?;
     let checker = match mode {
         Mode::Io => Some(btrfs_check::Checker::required()?),
-        Mode::Fault | Mode::Bench | Mode::Up => None,
+        Mode::Fault | Mode::Bench | Mode::Parts | Mode::Up => None,
     };
     println!(
         "  {arch}: test-nvme --boot {} (timeout {}s)",
@@ -152,6 +148,7 @@ pub(crate) fn test_nvme(args: &Args) -> Result<()> {
             Mode::Io => "io",
             Mode::Fault => "fault",
             Mode::Bench => "bench",
+            Mode::Parts => "parts",
             Mode::Up => "up",
         },
         args.timeout
@@ -169,6 +166,7 @@ pub(crate) fn test_nvme(args: &Args) -> Result<()> {
             let outcome = match mode {
                 Mode::Io => io(watching),
                 Mode::Fault => fault(watching),
+                Mode::Parts => parts(watching),
                 Mode::Bench | Mode::Up => bench(watching),
             };
             match outcome {
@@ -185,6 +183,7 @@ pub(crate) fn test_nvme(args: &Args) -> Result<()> {
         let after = match mode {
             Mode::Io => after_io(&lines, &scratch, &trace),
             Mode::Fault => after_fault(&lines),
+            Mode::Parts => after_parts(&lines),
             Mode::Bench | Mode::Up => Ok(()),
         };
         if let Err(failure) = after {
@@ -211,6 +210,34 @@ pub(crate) fn test_nvme(args: &Args) -> Result<()> {
         println!("  {arch}: {line}");
     }
     Ok(())
+}
+
+/// The boot's arguments with the drives `mode` needs written and
+/// attached, the scratch drive's image and QEMU's trace file.
+fn drives(arch: Arch, args: &Args, mode: Mode) -> Result<(Args, PathBuf, PathBuf)> {
+    let directory = paths::build_dir(arch);
+    std::fs::create_dir_all(&directory)?;
+    let scratch = directory.join("nvme-scratch.img");
+    std::fs::write(&scratch, scratch_bytes(0, SCRATCH_BLOCKS))
+        .map_err(|error| Error::new(format!("writing {}: {error}", scratch.display())))?;
+    let trace = directory.join("nvme-trace.log");
+    let _ = std::fs::remove_file(&trace);
+
+    let mut booted = args.clone();
+    booted.btrfs_root = true;
+    booted.nvme = true;
+    booted.nvme_scratch = Some(scratch.clone());
+    booted.nvme_trace = Some(trace.clone());
+    if mode == Mode::Fault {
+        booted.nvme_fault = Some(fault_rules(&directory)?);
+    }
+    if mode == Mode::Parts {
+        let gpt = directory.join("nvme-gpt.img");
+        std::fs::write(&gpt, gpt_bytes()?)
+            .map_err(|error| Error::new(format!("writing {}: {error}", gpt.display())))?;
+        booted.nvme_gpt = Some(gpt);
+    }
+    Ok((booted, scratch, trace))
 }
 
 /// `--boot up`: each architecture's `test-boot`, with the scratch drive.
@@ -247,8 +274,9 @@ fn up(args: &Args) -> Result<()> {
 }
 
 /// An image whose init is zinc as an interactive shell, with the utilities
-/// the gate types and every driver; the image and its kernel.
-fn shell_image(arch: Arch, args: &Args) -> Result<(PathBuf, cargo::Kernel)> {
+/// the gate types and every driver, and with `bootctl` and the installer
+/// when `installer` says; the image and its kernel.
+fn shell_image(arch: Arch, args: &Args, installer: bool) -> Result<(PathBuf, cargo::Kernel)> {
     let shell =
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
     println!("  {arch}: building an image whose init is an interactive shell");
@@ -264,8 +292,15 @@ fn shell_image(arch: Arch, args: &Args) -> Result<(PathBuf, cargo::Kernel)> {
     }
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
+    let extra = if installer {
+        crate::installer::files(arch)?.ok_or_else(|| {
+            Error::new("test-nvme --boot parts needs bootctl, which is not built for this arch")
+        })?
+    } else {
+        Vec::new()
+    };
     let archive =
-        initramfs::build_with_utilities(Some(&shell), &natives, Some(&bytes), &utilities, &[])?;
+        initramfs::build_with_utilities(Some(&shell), &natives, Some(&bytes), &utilities, &extra)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
     Ok((image, kernel))
 }
@@ -355,31 +390,235 @@ fn ready(watching: &mut qemu::Watching<'_>) -> std::result::Result<String, Strin
              of 4096: it said {up:?}"
         ));
     }
-    if !watching
+    root_on_nvme(watching)?;
+    disk_of(&list_nvme(watching)?, SCRATCH_SECTORS, "the scratch drive")
+}
+
+/// Require the kernel's line saying `/` is on an NVMe namespace, named as
+/// Linux names it.
+fn root_on_nvme(watching: &qemu::Watching<'_>) -> std::result::Result<(), String> {
+    if watching
         .lines()
         .iter()
-        .any(|line| line.contains("/ is btrfs on vd"))
+        .any(|line| line.contains("/ is btrfs on nvme") && line.contains("n1"))
     {
-        return Err("the kernel never said `/ is btrfs on` a disk".to_owned());
+        Ok(())
+    } else {
+        Err("the kernel never said `/ is btrfs on nvme<C>n1`".to_owned())
     }
+}
+
+/// Every NVMe disk and partition in `/sys/class/block`, as `name:sectors`.
+fn list_nvme(watching: &mut qemu::Watching<'_>) -> std::result::Result<Vec<String>, String> {
     let listed = ask(
         watching,
-        "for d in /sys/class/block/vd*; do read s < $d/size; \
+        "for d in /sys/class/block/nvme*; do read s < $d/size; \
          echo nvme-gate-'disk='${d##*/}:$s; done; echo nvme-gate-'end'\n",
     )?;
-    let want = format!(":{SCRATCH_SECTORS}");
-    listed
+    Ok(listed
         .iter()
         .filter_map(|line| line.split_once(DISK_TAG))
-        .map(|(_, rest)| rest.trim())
-        .find_map(|entry| entry.strip_suffix(&want))
+        .map(|(_, rest)| rest.trim().to_owned())
+        .collect())
+}
+
+/// The whole NVMe disk of `sectors` 512-byte sectors in `listed`.
+fn disk_of(listed: &[String], sectors: u64, what: &str) -> std::result::Result<String, String> {
+    let want = format!(":{sectors}");
+    listed
+        .iter()
+        .filter_map(|entry| entry.strip_suffix(&want))
+        .find(|name| name.ends_with("n1"))
         .map(str::to_owned)
         .ok_or_else(|| {
             format!(
-                "no disk of {SCRATCH_SECTORS} sectors in /sys/class/block: the scratch drive \
-                 was not published"
+                "no NVMe disk of {sectors} sectors in /sys/class/block ({listed:?}): {what} \
+                 was not published as nvme<C>n1"
             )
         })
+}
+
+/// The partitioned drive's size in 512-byte sectors: 64 MiB, a size no
+/// other disk of the machine has.
+const GPT_SECTORS: u64 = 131_072;
+/// Sectors in a MiB.
+const MIB_SECTORS: u64 = 2048;
+/// The partitioned drive's disk GUID.
+const GPT_DISK_GUID: ferrix_partition::Guid =
+    ferrix_partition::Guid::from_fields(0x6e76_6d65, 0x6770, 0x7400, 0x8000, 0x6665_7272_6978);
+
+/// The partitioned drive's layout, as the customer's SN720 was given it on
+/// 2026-10-11 and scaled down: each partition's type, name, first and last
+/// sector (inclusive), in the order of the table, so partition N is entry
+/// N - 1.
+fn gpt_layout() -> [(ferrix_partition::Guid, &'static str, u64, u64); 6] {
+    use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM};
+    let swap = Guid::from_fields(0x0657_fd6d, 0xa4ab, 0x43c4, 0x84e5, 0x0933_c84b_4f4f);
+    let control = Guid(ferrix_slots::gpt::CONTROL_TYPE);
+    let slot = Guid(ferrix_slots::gpt::SLOT_TYPE);
+    let mut at = MIB_SECTORS;
+    let mut next = |mib: u64| {
+        let range = (at, at + mib * MIB_SECTORS - 1);
+        at += mib * MIB_SECTORS;
+        range
+    };
+    let (p1, p2, p3, p4, p5) = (next(4), next(8), next(1), next(8), next(8));
+    // The root takes the rest, up to the backup table's 33 sectors.
+    let p6 = (at, GPT_SECTORS - 34);
+    [
+        (swap, "nazuna-swap", p1.0, p1.1),
+        (ESP, "ferrix-esp", p2.0, p2.1),
+        (control, "ferrix-bootctl", p3.0, p3.1),
+        (slot, "ferrix-slot-a", p4.0, p4.1),
+        (slot, "ferrix-slot-b", p5.0, p5.1),
+        (LINUX_FILESYSTEM, "ferrix-root", p6.0, p6.1),
+    ]
+}
+
+/// The control record the partitioned drive's first copy holds: slot A
+/// good, no trial.
+fn gpt_record() -> [u8; ferrix_slots::record::RECORD_LEN] {
+    ferrix_slots::record::Record::initial(ferrix_slots::Slot::A).encode()
+}
+
+/// The partitioned drive's bytes: every sector its pattern
+/// (`test_disk::sector` of its number), then the table, both copies, and
+/// the record's first copy at the start of the control partition.
+fn gpt_bytes() -> Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity((GPT_SECTORS * 512) as usize);
+    for number in 0..GPT_SECTORS {
+        bytes.extend_from_slice(&test_disk::sector(number));
+    }
+    let partitions: Vec<ferrix_partition::Partition> = gpt_layout()
+        .iter()
+        .enumerate()
+        .map(|(index, &(kind, name, first, last))| {
+            let seed = u8::try_from(index + 1).unwrap_or(0);
+            ferrix_partition::Partition::new(
+                kind,
+                ferrix_partition::Guid::random([seed; 16]),
+                first,
+                last,
+                name,
+            )
+        })
+        .collect();
+    let table = ferrix_partition::write_table(GPT_SECTORS, 512, GPT_DISK_GUID, &partitions)
+        .map_err(|error| Error::new(format!("test-nvme's partition table: {error}")))?;
+    let mut put = |at: u64, data: &[u8]| -> Result<()> {
+        let start = usize::try_from(at).unwrap_or(usize::MAX);
+        bytes
+            .get_mut(start..start.saturating_add(data.len()))
+            .ok_or_else(|| Error::new("test-nvme's partition table does not fit its disk"))?
+            .copy_from_slice(data);
+        Ok(())
+    };
+    for (lba, block) in table {
+        put(lba * 512, &block)?;
+    }
+    let control = gpt_layout()[2].2;
+    put(control * 512, &gpt_record())?;
+    Ok(bytes)
+}
+
+/// `--boot parts`.
+fn parts(watching: &mut qemu::Watching<'_>) -> std::result::Result<Vec<String>, String> {
+    let deadline = Instant::now() + PATIENCE;
+    if !watching
+        .wait_for_shell(deadline)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("the shell never answered at the console".to_owned());
+    }
+    root_on_nvme(watching)?;
+    let listed = list_nvme(watching)?;
+    let disk = disk_of(&listed, GPT_SECTORS, "the partitioned drive")?;
+    let layout = gpt_layout();
+    // Every partition, by its Linux name and its size.
+    for (index, &(_, label, first, last)) in layout.iter().enumerate() {
+        let node = format!("{disk}p{}", index + 1);
+        let entry = format!("{node}:{}", last - first + 1);
+        if !listed.contains(&entry) {
+            return Err(format!(
+                "/sys/class/block has no {entry} ({label}): it lists {listed:?}"
+            ));
+        }
+    }
+    // The first and last sector of each, read through its own node.
+    for (index, &(_, label, first, last)) in layout.iter().enumerate() {
+        let node = format!("{disk}p{}", index + 1);
+        let first_bytes = if index == 2 {
+            gpt_record().to_vec()
+        } else {
+            test_disk::sector(first).to_vec()
+        };
+        require_read(
+            watching,
+            &node,
+            (512, 0, 1),
+            &first_bytes,
+            &format!("the first sector of {label}"),
+        )?;
+        require_read(
+            watching,
+            &node,
+            (512, last - first, 1),
+            &test_disk::sector(last),
+            &format!("the last sector of {label}"),
+        )?;
+    }
+    // bootctl finds the layout by its types and names its nodes.
+    let said = ask(
+        watching,
+        "/sbin/bootctl status; echo nvme-gate-'status='$?; echo nvme-gate-'end'\n",
+    )?;
+    if status(&said) != Some(0) {
+        return Err(format!("bootctl status did not exit 0: {said:?}"));
+    }
+    let named = format!("(control /dev/{disk}p3, slot a /dev/{disk}p4, slot b /dev/{disk}p5)");
+    for wanted in [
+        format!("disk:    /dev/{disk} "),
+        named.clone(),
+        "record:  sequence ".to_owned(),
+        "good:    a".to_owned(),
+        format!("slot a:  /dev/{disk}p4 (8 MiB)"),
+        format!("slot b:  /dev/{disk}p5 (8 MiB)"),
+    ] {
+        if !said.iter().any(|line| line.contains(&wanted)) {
+            return Err(format!(
+                "bootctl status did not say `{wanted}`: it said {said:?}"
+            ));
+        }
+    }
+    Ok(vec![
+        format!(
+            "/dev/{disk}: partitions {disk}p1 to {disk}p6 published with their sizes; the \
+             first and last sector of each read back as written, the control partition's \
+             first the record"
+        ),
+        format!("bootctl status found the layout on /dev/{disk}: {named}"),
+    ])
+}
+
+/// What `--boot parts` requires of the serial log: the kernel's line for
+/// each partition it published, with its size.
+fn after_parts(lines: &[String]) -> std::result::Result<(), String> {
+    for (index, &(_, label, first, last)) in gpt_layout().iter().enumerate() {
+        let wanted = format!(
+            "p{} is a partition of {} sectors",
+            index + 1,
+            last - first + 1
+        );
+        if !lines
+            .iter()
+            .any(|line| line.contains("disks    nvme") && line.contains(&wanted))
+        {
+            return Err(format!(
+                "the kernel never said `disks    nvme<C>n1{wanted}` for {label}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The SHA-256 the guest prints for `count` blocks of `bytes` bytes from
@@ -779,6 +1018,35 @@ mod tests {
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|line| (*line).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_partitioned_drive_reads_back_as_its_layout_and_record() {
+        let bytes = gpt_bytes().expect("written");
+        assert_eq!(bytes.len() as u64, GPT_SECTORS * 512);
+        let header = ferrix_partition::parse_header(&bytes[512..1024], GPT_SECTORS)
+            .expect("a primary header");
+        let at = usize::try_from(header.entries_at * 512).expect("fits");
+        let entries = ferrix_partition::parse_entries(&header, &bytes[at..]).expect("entries");
+        let layout = gpt_layout();
+        assert_eq!(entries.len(), layout.len());
+        for ((_, entry), (kind, _, first, last)) in entries.iter().zip(layout) {
+            assert_eq!(
+                (entry.type_guid, entry.first, entry.last),
+                (kind, first, last)
+            );
+        }
+        let control = usize::try_from(layout[2].2 * 512).expect("fits");
+        assert_eq!(&bytes[control..control + 512], &gpt_record()[..]);
+        // Every partition's last sector, and the first of all but the
+        // control partition, is its pattern: what the guest compares.
+        for (index, &(_, _, first, last)) in layout.iter().enumerate() {
+            let sector = |n: u64| &bytes[(n * 512) as usize..(n * 512 + 512) as usize];
+            assert_eq!(sector(last), test_disk::sector(last).as_slice());
+            if index != 2 {
+                assert_eq!(sector(first), test_disk::sector(first).as_slice());
+            }
+        }
     }
 
     #[test]

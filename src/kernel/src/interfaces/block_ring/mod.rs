@@ -98,9 +98,11 @@ pub(crate) mod reread_check;
 pub(crate) mod tree_check;
 pub(crate) mod trip_check;
 
-/// The block major every ring's disk is published under. Linux allocates
+/// The block major a ring's `vd` disk is published under. Linux allocates
 /// virtio-blk's major dynamically, usually 253 or 254; nothing keys on it.
-pub(crate) const VIRTIO_BLK_MAJOR: u32 = 254;
+/// An NVMe namespace's `nvme<C>n1` is published under
+/// [`ferrix_blkring::identity::NVME_MAJOR`] instead ([`DiskName::major`]).
+pub(crate) const VIRTIO_BLK_MAJOR: u32 = ferrix_blkring::identity::VIRTIO_BLK_MAJOR;
 
 /// The rights the driver's end of the control channel carries: it sends and
 /// receives on it, waits on it and is handed it, and nobody copies it. The
@@ -718,11 +720,11 @@ fn publish_disk(
         .map(|claim| claim.device.index());
     register_block_from(
         name.as_str().as_bytes(),
-        VIRTIO_BLK_MAJOR,
+        name.major(),
         name.minor(),
         crate::fs::blkio::account_disk(
             Arc::clone(disk) as Arc<dyn BlockDevice>,
-            VIRTIO_BLK_MAJOR,
+            name.major(),
             name.minor(),
         ),
         Origin { node, serial },

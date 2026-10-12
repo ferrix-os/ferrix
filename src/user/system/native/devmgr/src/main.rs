@@ -462,7 +462,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut started: [Option<Started>; MAX_DEVICES] = [const { None }; MAX_DEVICES];
     let mut count = 0_u32;
     let mut failed = 0_u32;
-    let mut disks = 0_u32;
+    let mut disks = Disks::default();
     for (index, pair) in given.devices.into_iter().take(given.count).enumerate() {
         let Some((device, keep)) = pair else {
             continue;
@@ -631,16 +631,34 @@ fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> 
     started
 }
 
+/// The disks named so far: virtio's and the other block devices' letters,
+/// and NVMe controllers' numbers, counted apart.
+#[derive(Default)]
+struct Disks {
+    /// `vd` disks named: the next one's index.
+    lettered: u32,
+    /// NVMe controllers named: the next one's number.
+    nvme: u32,
+}
+
 /// How a driver of `kind` is started on the device `info` describes, or
 /// `None` when there are no more disk names.
 ///
 /// Only a disk is named here, and only disks are counted, so a net driver
-/// between two disks does not shift the second one's letter.
-fn plan_for(kind: Kind, info: &DeviceInfo, disks: &mut u32) -> Option<Plan> {
+/// between two disks does not shift the second one's letter. An NVMe
+/// controller's namespace is `nvme<C>n1`, as Linux names it, numbered among
+/// the NVMe controllers alone, so a drive added to a machine moves no `vd`
+/// letter (`docs/NVME.md` §3).
+fn plan_for(kind: Kind, info: &DeviceInfo, disks: &mut Disks) -> Option<Plan> {
     Some(match kind {
+        Kind::Block if is_nvme(info) => {
+            let name = DiskName::nvme(disks.nvme)?;
+            disks.nvme += 1;
+            Plan::Block(name)
+        }
         Kind::Block => {
-            let name = DiskName::for_index(*disks)?;
-            *disks += 1;
+            let name = DiskName::for_index(disks.lettered)?;
+            disks.lettered += 1;
             Plan::Block(name)
         }
         Kind::Net => Plan::Net,
@@ -1602,6 +1620,15 @@ fn start(
 }
 
 /// Whether a PCI function that is not virtio is the one `matched` names.
+/// Whether `info` is an NVMe controller: a PCI function that is not a
+/// virtio transport, with NVMe's class code.
+fn is_nvme(info: &DeviceInfo) -> bool {
+    info.virtio != DEVICE_VIRTIO_PCI
+        && info.virtio != DEVICE_TREE_BLOCKS
+        && info.location != DEVICE_NOT_PCI
+        && pci_matches(NVME_INTERFACE, info)
+}
+
 fn pci_matches(matched: PciMatch, info: &DeviceInfo) -> bool {
     match matched {
         PciMatch::Class(base) => (info.class >> 16) as u8 == base,
