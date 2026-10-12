@@ -28,7 +28,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM};
@@ -243,9 +243,59 @@ pub(crate) fn memory_and_processors(args: &Args) -> (String, String) {
     let smp = if args.smp_given {
         args.smp.to_string()
     } else {
-        "24,sockets=1,cores=12,threads=2".to_owned()
+        // Two dies of six cores: the 9900X's two chiplets, whose APIC IDs
+        // are 0-11 and 16-27 on nazuna, as QEMU numbers them from these.
+        "24,sockets=1,dies=2,cores=6,threads=2".to_owned()
     };
     (memory, smp)
+}
+
+/// `~/.local/share/ferrix/<name>`, where the fetch scripts install.
+fn installed(name: &str) -> Result<PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| Error::new("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".local/share/ferrix").join(name))
+}
+
+/// The QEMU with `x-nazuna` (`tools/common/data/qemu/0006-*`), installed
+/// beside the one every other boot runs, never over it.
+pub(crate) fn qemu() -> Result<PathBuf> {
+    let binary = installed("qemu-nazuna")?.join("bin/qemu-system-x86_64");
+    if binary.is_file() {
+        return Ok(binary);
+    }
+    Err(Error::new(format!(
+        "run-nazuna: no {}; build it with\n  FERRIX_QEMU_DIR=~/.local/share/ferrix/qemu-nazuna \
+         FERRIX_QEMU_WORK=~/.local/share/ferrix/qemu-nazuna-build \
+         tools/common/fetch/fetch-qemu-linux.sh",
+        binary.display()
+    )))
+}
+
+/// OVMF with the board's ACPI PM base, 0x800
+/// (`tools/common/fetch/fetch-ovmf-nazuna.sh`).
+pub(crate) fn firmware() -> Result<paths::Firmware> {
+    let dir = installed("ovmf-nazuna")?;
+    let (code, vars) = (dir.join("OVMF_CODE.fd"), dir.join("OVMF_VARS.fd"));
+    if code.is_file() && vars.is_file() {
+        return Ok(paths::Firmware::Pflash {
+            code,
+            vars: Some(vars),
+        });
+    }
+    Err(Error::new(format!(
+        "run-nazuna: no OVMF in {}; build it with tools/common/fetch/fetch-ovmf-nazuna.sh",
+        dir.display()
+    )))
+}
+
+/// `-machine`: q35 described as the board's firmware describes it
+/// (QEMU's `x-nazuna`), without the 8042 the board has not, and with its
+/// firmware's OEM ids in every table.
+fn board(accelerator: &str) -> String {
+    format!(
+        "{},x-nazuna=on,i8042=off,x-oem-id=ALASKA,x-oem-table-id=A M I ",
+        qemu::x86_machine(accelerator)
+    )
 }
 
 /// The processor: nazuna's own under KVM (which is nazuna, since nothing
@@ -271,7 +321,7 @@ pub(crate) fn machine(
 ) {
     let _ = command.args([
         "-machine",
-        &qemu::x86_machine(accelerator),
+        &board(accelerator),
         "-cpu",
         &cpu(binary, accelerator),
         "-device",
@@ -374,6 +424,6 @@ mod tests {
     fn nazunas_processors_unless_asked() {
         let (memory, smp) = memory_and_processors(&Args::default());
         assert_eq!(memory, "16384");
-        assert_eq!(smp, "24,sockets=1,cores=12,threads=2");
+        assert_eq!(smp, "24,sockets=1,dies=2,cores=6,threads=2");
     }
 }
