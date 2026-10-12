@@ -548,12 +548,16 @@ and on the `--everything` desktop, its 64-bit side on ferrousli, it signs
 in and shows its store (2026-09-30, gated by `test-steam-store`), with
 launch-side workarounds listed in `docs/STEAM.md`. Stage 23 is the Windows
 game *Arknights: Endfield* through Wine with DXVK on NVIDIA's Vulkan, on the
-roadmap since 2026-10-10 at the customer's word and not started: a
-feasibility study is written, and its eight steps are sized at about 205
-points as a first guess. Step 0, the game on plain Linux in the same VM
-shape, comes first and can end it, because whether the game's anti-cheat
-accepts a virtual machine is not known; it waits on the customer for an
-account and about 110 GB of disk. On Ferrix, `arch_prctl` answers
+roadmap since 2026-10-10 at the customer's word: a feasibility study is
+written, and its eight steps are sized at about 205 points as a first
+guess. Step 0, the game on plain Linux in the same VM shape, answered on
+2026-10-13: the game downloaded on the Linux guest, and its anti-cheat
+(ACE) refused to run in a virtual machine (13-65544-2). By the stage's own
+rule, steps 4 to 6 wait for Ferrix on the machine rather than in it, the
+way the customer chose; whether ACE accepts Wine on bare-metal Linux is not
+known. Before that, Endfield's own launcher, a 64-bit Qt program with
+QtWebEngine, drew its first screen on Ferrix in Wine, fetching its news
+over the network (branch `endfield-s4`, not landed). On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without
 (`docs/WINE.md`); its notepad is a window of hyprix's at its tile's size
 that takes typed text and the pointer since 2026-10-12, through yserver

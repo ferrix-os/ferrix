@@ -57,9 +57,11 @@ this page.
 
 Inferred by the study, not confirmed: DirectX 11 means the translation layer
 is DXVK and not VKD3D-Proton, and the RTX 3060 with 12 GB is above the
-recommended card. Not known: the launcher's UI technology, whether the
-installer or the launcher is a 32-bit program, how the login is shown, and
-patch sizes.
+recommended card. Not known when the study was written: the launcher's UI
+technology, whether the installer or the launcher is a 32-bit program, how
+the login is shown, and patch sizes. The first two are answered under step
+4 (2026-10-13): a 32-bit NSIS installer, and a 64-bit launcher built on Qt
+5.15 with QtWebEngine.
 
 ## The route
 
@@ -164,6 +166,22 @@ after step 3**: steps 1 to 3 still serve stage 22, and steps 4 to 6 wait
 until Ferrix runs on the machine rather than in it, which is stage 21's own
 exit (an inference: nobody has reported this game under Wine in a VM either
 way).
+
+**Where step 0 stands (2026-10-13): ACE refuses the virtual machine.** On
+the Linux guest `linux-3060` (Debian 13, DW-Proton `dwproton-11.0-14`, the
+RTX 3060 passed through), GRYPHLINK's downloader 1.6.0.1607 ran and the game
+downloaded. At the game's start, ACE Center said: "The application can not
+run under a virtual machine. Please do not run game in virtual environment
+or system made from virtual environment image. (13-65544-2)". By this
+step's own rule, steps 4 to 6 wait for Ferrix on the machine rather than in
+it, and the customer chose that way the same day. The game's data has
+since been deleted from the guest on the customer's word.
+
+* *Done:* E0.1, E0.2, and of E0.3 the answer the step exists for.
+* *Not known, and worth stating:* whether ACE accepts Wine or Proton on
+  Linux on bare metal. The reports above are of that, not of a VM, and
+  none was checked here; ACE has broken under Wine more than once in 2026.
+* *Not done:* E0.4 and E0.5, which need the game past ACE.
 
 ### Step 1: plain Wine starts on Ferrix  ·  42 points
 
@@ -326,6 +344,34 @@ screen, and no failed allocation or mapping in `nvrm`'s log.
 * **E4.6** The login: the account, the page it is typed into, TLS. 3.
 
 **Proved by** the launcher showing its start button with the files verified.
+
+**Where step 4 stands (2026-10-13; `docs/WINE.md` §8; branch `endfield-s4`,
+not landed).** It stopped when step 0 found that ACE refuses a VM. Before
+that, GRYPHLINK's launcher drew its first screen on Ferrix under KVM, in
+Debian's Wine 10.0, in software, on hyprix through yserver, with its news
+and pictures fetched from the network through xtask's gateway. Nothing was
+logged into and nothing of the game was downloaded.
+
+* *Found:* the installer, from the download endfield.gryphline.com links,
+  is a 32-bit NSIS program; what it installs is 64-bit: `Launcher.exe`,
+  which starts `Games.exe`, a Qt 5.15.8 program whose interface is a local
+  web page in QtWebEngine (Chromium 87), with the VC++ runtime, OpenSSL
+  1.1, libcurl and ANGLE beside it. No WebView2, no .NET, no system VC++
+  runtime. The installer needs E1.6 (landed since); the launcher does not,
+  and the branch lays the payload out as the installer does, unpacked on
+  the host with 7-Zip.
+* *Found, not fixed:* two things stand between the launcher and its
+  server on Ferrix. yserver refuses `XF86VidModeSetGamma` with
+  `ClientNotLocal` while it gives local clients the write permission, and
+  Wine's X driver makes that call with no error handler, so the X error
+  ended `Games.exe`; the branch turns Wine's XVidMode off in the prefix
+  (`UseXVidMode=N`), a workaround. And the launcher's own queries to
+  Gryphline (`launcher.gryphline.com`, `game-config.gryphline.com`) never
+  connect: their name lookups fail on Ferrix and succeed in the same Wine
+  on nazuna's Linux, while the web view's and libcurl's lookups succeed on
+  both.
+* *Still to do, when Ferrix runs on the machine:* E4.1, the installer
+  itself (E4.2), the two defects above, then E4.4 to E4.6.
 
 ### Step 5: past the anti-cheat  ·  29 points as a guess; unknown
 

@@ -428,3 +428,77 @@ code. The stack pointer needs no such refusal: it is held to the user half
 by the same test as every return, `iretq` into compatibility mode does not
 check it against the stack segment's limit, and 32-bit code uses only ESP,
 its low half.
+
+## 8. Endfield's launcher (stage 23, step 4; stopped 2026-10-13)
+
+Step 4 of stage 23 started on 2026-10-12 and stopped the next day, when
+step 0 found that the game's anti-cheat refuses to run in a virtual
+machine (the stage's page). What was learnt is kept here; the fetch
+script and the gate are on the branch `endfield-s4` and are not landed.
+Nothing was logged into, no terms were accepted, and nothing of the game
+was downloaded.
+
+**The download.** endfield.gryphline.com's PC download is
+`launcher.gryphline.com/launcher/get_latest_launcher?appcode=TiaytKBUIEdoEwRT&ta=endfield&channel=6&sub_channel=6`,
+which redirects to Hypergryph's CDN: `GRYPHLINK_v1.6.0.1607_6_6_endfield.exe`,
+174 MB, SHA-256 `b4b06cdb45c88c43fc3952f9810332f2709c3d7250a93016e9a4dc2c5ebaca73`
+on 2026-10-12. Read on nazuna's host:
+
+| What | Finding |
+|---|---|
+| Installer | 32-bit (`PE32`, i386) Nullsoft (NSIS 3, Unicode); 7-Zip unpacks its payload, `$0/1.6.0/`, 284 MB. It installs `Launcher.exe` beside the versioned directory, which `Launcher.exe` looks for (`C:/GRYPHLINK/1.6.0/Games.exe`); `Uninstall.exe` is 32-bit NSIS too |
+| Launcher | Every program in the payload is 64-bit (`PE32+`): `Launcher.exe` (4 MB, a starter), `Games.exe` (18 MB, the window), `QtWebEngineProcess.exe`, `Patch.exe`, `Updater.exe`, `7zg.exe` |
+| Technology | Qt 5.15.8 with QtWebEngine (Chromium 87.0.4280.144); the interface is a local web page (`res/web/`, version 0.2.15) shown in it. ANGLE (`libEGL`, `libGLESv2`, `d3dcompiler_47`) for Qt's GL |
+| Dependencies | All in the payload: the VC++ 2015-2022 runtime and the UCRT's `api-ms-win-*` forwarders, OpenSSL 1.1 (`libssl-1_1-x64`, `libcrypto-1_1-x64`), libcurl with nghttp2, sqlite, zlib, rlottie, Tencent's CrashSight, Hypergryph's `hgdownloadsdk` and `hgeventlogsdk`. No WebView2, no .NET |
+| Network | Its own queries go to `launcher.gryphline.com` and `game-config.gryphline.com`; the web view's to `gl-utils-public.hg-cdn.com` and Hypergryph's CDN; telemetry to `event-log-api-*.gryphline.com` and `pc.crashsight.wetest.net` |
+| Logs | `C:\users\<user>\AppData\LocalLow\Gryphline\<id>\logs\games.log`, which says how each query was answered |
+
+**On nazuna's Linux (linux-host), the reference.** The payload laid out as
+the installer lays it out, in a fresh 64-bit prefix of the same Debian
+Wine 10.0 under bubblewrap and Xvfb: the launcher shows its first screen
+(the game's picture, "Log In", the news, a yellow "Download" button) and
+`games.log` says Gryphline's server answered its version query with 200.
+No Wine setting was needed.
+
+**On Ferrix, under KVM.** hyprix with yserver, the network through xtask's
+gateway (a lease from `udhcpc` first), the payload on a btrfs volume, the
+prefix on tmpfs, 8 GiB. The launcher draws its first screen there too,
+with the news and pictures fetched over TLS by its web view; its window is
+titled `GRYPHLINK` and floats at 1312 by 754, wider than the 1024 by 768
+screen. Two things are wrong on the way, neither in the kernel as far as
+is known:
+
+* **`XF86VidModeSetGamma` ends the launcher.** yserver serves XVidMode's
+  reads and refuses every write with `ClientNotLocal`, and still gives a
+  local client (all of its clients are on a Unix socket) the write
+  permission in `GetPermissions`. Wine's X driver sets the gamma through
+  `XF86VidModeSetGamma` with no error handler when the gamma ramp is
+  smaller than 256 entries (`X11DRV_XF86VM_SetGammaRamp`,
+  `dlls/winex11.drv/xvidmode.c`), so the X error went to Xlib's default
+  handler and `Games.exe` ended. With `UseXVidMode=N` in the prefix's
+  `X11 Driver` key it starts; that is a workaround. The fix is yserver's:
+  either answer the write as Xwayland is understood to (success, not
+  applied; to be checked in `xwayland-vidmode.c`) or stop offering a local
+  client the write permission and a ramp Wine takes the unguarded way for.
+* **The launcher's own queries never connect.** Its Qt side resolves
+  `launcher.gryphline.com` and `game-config.gryphline.com` again and again
+  in one thread and never opens a socket; `games.log` says `qehr OnError
+  error:3` (Qt's `HostNotFoundError`) and `nCode=-2`, so it never learns
+  the game's version. The web view's lookups (Chromium's own resolver) and
+  libcurl's (with a service of `"443"`) succeed in the same boot, and
+  busybox's `nslookup` answers through `10.0.2.3`. On linux-host the same
+  Qt lookups succeed. Not found yet; the first place to look is the
+  `getaddrinfo` flags Qt passes (`AI_ADDRCONFIG`, which glibc answers by
+  asking netlink for the configured addresses), against what Ferrix's
+  `NETLINK_ROUTE` answers. `WINEDEBUG=+winsock` shows the lookups.
+
+**The gate on the branch.** `tools/common/fetch/fetch-endfield-launcher.sh`
+pins the installer and 7-Zip 25.01's Linux build by SHA-256, checks the
+three programs are 64-bit, and makes a volume of its own Wine tree (made by
+`fetch-wine.sh` under its own directory; the shared tree is a root other
+sessions bind for bubblewrap, and held an older yserver than its stamp on
+2026-10-12) with `/GRYPHLINK` added. `cargo xtask test-endfield-launcher`
+requires hyprix to list the window by its title, the yellow button on the
+screen, and `games.log` saying the server answered with 200. The first two
+held on Ferrix on 2026-10-13; the third is the second defect above. It has
+no negative control yet.
