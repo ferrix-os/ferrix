@@ -247,10 +247,122 @@ a snapshot before a trial is the later answer (`DEV-ON-FERRIX.md` §9, 4).
 `ExitBootServices`. So "comes back by itself" means: **on the next reset**
 (a person, or a power cycle), with no other action and no rescue medium. The
 gate (§9) models that reset as a power cycle of the guest. An automatic
-reset after a trial boot's panic -- `ferrix.panic=reset`, which the loader
-would add only on a TRIAL boot -- is a change to the core's `panic.rs` and is
-**proposed as a separate review, not part of this design**; so is a
-hardware watchdog for a trial that hangs rather than panics.
+reset after a trial boot's panic is §6.4, a design of its own reviewed
+apart from this one (the consultant's A9, ledger line 727); a hardware
+watchdog for a trial that hangs rather than panics is not designed yet.
+
+### 6.4 `ferrix.panic=reset`: a trial that panics resets by itself (design, for review)
+
+Written 2026-10-13 by bm-nvme for the native boot of the customer's PC
+(stage 21, `docs/INSTALLER.md` §6): a trial kernel that panics on a PC with
+no serial console and nobody at it must come back on the good slot without
+a hand on the reset button. SAFETY-MANUAL AoU-29 asks the integrator for
+that reset today; this is the kernel's offer of it, off unless asked for.
+
+**The option.** `ferrix.panic=halt|reset`. `halt`, the default and the
+reference configuration's setting, is today's behaviour and the only one
+H.FAIL.1 claims. Any other value is said on the console and taken as
+`halt`: a misspelt option never turns into a reset nobody asked for. The
+kernel reads it first-match like every `ferrix.` key, so the loader's
+words, which come first, decide it on a slot boot.
+
+**When it is read.** At stage 1, right after the hand-off is verified, from
+the loader's command line (`BootView::option`, a parse of the boot info's
+bytes with no allocation, no lock and no device). A machine described by a
+device tree also has it read from `/chosen/bootargs` at the point
+`ferrix.onexit` is read (`power::init`, after stage 3), so a board booted by
+U-Boot can ask for it too; a panic on such a board before that point
+halts. A panic before stage 1's check halts, whatever the command line.
+
+**What a reset report does.** Everything a report does today, in the same
+order: the opening lines, the processor, stopping the others, the trace,
+the explanation, `console::drain`, the screen. Then, only in the first
+report (`conclude`), and only when the option said `reset`:
+
+1. one more line, on the port and the screen,
+   `  reset     in 10 s, as ferrix.panic=reset asks`, drained;
+2. a wait of 10 seconds on the free-running counter
+   (`arch::counter_now` / `counter_hz`, as `timer::now_nanos` reads it), with
+   interrupts masked, taking no lock, allocating nothing and calling no
+   device but the counter; if the counter's rate is not known yet (before
+   stage 3 has measured it on x86-64), no wait;
+3. `arch::reset()`, the path `ferrix.onexit=reset` already takes: on x86-64
+   the FADT's reset register, then the 8042's pulse, then a triple fault;
+   on Arm PSCI `SYSTEM_RESET`, and a firmware without it powers the machine
+   off and says so.
+
+The 10 seconds are one fixed value, not a parameter: long enough for a
+person at the screen to read the code or photograph the QR code, short
+against a trial's boot, and one value keeps the configuration space at two
+settings. An abridged report (a second panic, on another processor or from
+inside the first report) still halts its own processor; the first report
+alone resets the machine. A fault *inside* the first report after its
+opening lines (the screen is the likely one) becomes an abridged report and
+halts: the reset is **best effort, and a hang is not covered** -- that is
+the watchdog's job, which this design does not give.
+
+**What a reset does to the disks.** Nothing a halt followed by a person's
+reset does not. A panic commits nothing; the btrfs root is at its last
+commit either way. A warm reset does not cut a drive's power, and the
+block ring's STOP (`docs/NVME.md` §2) is not sent from a panic: nothing
+after a panic may wait on a ring-3 driver.
+
+**The loader adds it on a trial boot only.** The loader's words (§4) gain
+`ferrix.panic=reset` after `ferrix.slot.disk=`, on a TRIAL attempt and on
+no other: a good, fallback or ESP boot carries no `ferrix.panic` word of
+the loader's, so a good system that panics halts as today, and the record's
+decrement (P1) is what stops a trial that resets from being started again.
+The longest words still fit the boot info's command-line area (the host
+test of P5 is extended by the 18 bytes). A slot's own command line may say
+`ferrix.panic=reset` for a good slot; that is the integrator's choice and
+outside the reference configuration.
+
+**What it changes, and where.**
+
+| Where | Ring | Change |
+|---|---|---|
+| `src/kernel/src/panic.rs` | core | `read_option(view)`; one atomic set once; in `conclude`, after the screen, steps 1-3 |
+| `src/kernel/src/main.rs` | item | `panic::read_option(view)` after stage 1's check |
+| `src/kernel/src/power.rs` | item | reads `/chosen/bootargs`' `ferrix.panic` on a device-tree machine, next to `ferrix.onexit`, and hands it to `panic` |
+| `src/lib/proto/slots` (`plan.rs`) | unclassified | `LoaderWords` writes `ferrix.panic=reset` for `Kind::Trial` |
+| `docs/sysml`, `TRACEABILITY.md` | | H.FAIL.1 amended to say *halt, unless booted with `ferrix.panic=reset`*; low-level requirements for the two settings (ids reserved in `requirement-reservations.json` before they are written, as the consultant rules) |
+| `docs/certification/ITEM.md` | | the reference configuration's boot options: `ferrix.panic=halt`, the default; `reset` exists and no claim is made of it beyond §6.4's |
+| `SAFETY-MANUAL.md` AoU-29 | | the integrator's reset is no longer needed for a trial that **panics** after stage 1 on a UEFI boot through this loader; still needed for a hang, and for a panic before stage 1 |
+| `tools/common/data/certification-item.json` | | `reference_configuration` gains `panic: halt`, settings `halt, reset`, with the why, as `devmgr` has |
+
+**The gate.** `cargo xtask test-ab-boot` gains a case 7 (x86-64, OVMF, KVM):
+good A, trial B that panics, 1 try, booted in **one** QEMU process without
+`-no-reboot`: boot 1 starts B as the trial (the loader's command line
+carries `ferrix.panic=reset`), panics, prints the reset line, and the
+machine resets by itself; the loader's banner is seen a second time in the
+same process (memory `qemu-reset-detection`), and it boots A as good. Case
+1 stays as it is (a fresh process per boot, `-no-reboot` kept, so a reset
+there ends QEMU and the case reads it). A boot of AArch64 and of ARMv7-A
+with `ferrix.panic=reset` and `ferrix.onexit=panic` (the existing FX-1501
+end, H.FAIL.1's criterion) shows the reset line and a PSCI reset (QEMU
+without `-no-reboot` starts the image again: the boot banner twice); the
+same boots without the option show the halt and no reset line, which is the
+default's evidence.
+
+**Negative controls** (`fleet/gate.sh control`, source sabotages, no `cfg`):
+
+* the reset call in `conclude` removed: case 7 fails on "the machine did
+  not reset after the panic", and the Arm boots on the banner count;
+* the loader's word removed from `LoaderWords` for a trial: case 7 fails the
+  same way;
+* the default turned to reset: the boots without the option fail on "a
+  panic without ferrix.panic=reset reset the machine";
+* the first-report test removed (an abridged report resets): a host-side
+  control is not possible in QEMU; argued, and the line is a single branch
+  the review reads.
+
+**Coverage.** The new core lines in `panic.rs` (the wait and the reset
+branch) are reached on case 7 and the Arm boots only, not on the four
+`test-boot` rows the coverage harness counts; they get entries in the
+coverage-owed list with the gate tags that reach them.
+
+**Points.** 3: the option and the reset path (1), the loader word and the
+host test (0.5), case 7 and the Arm boots with their controls (1.5).
 
 ## 7. What it changes, and where
 
