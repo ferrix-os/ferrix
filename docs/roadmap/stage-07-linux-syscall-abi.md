@@ -433,7 +433,11 @@ that took what it looked at, a record read that found the last record's tail:
   `cargo xtask test-threads` boots a static musl Rust program of five threads
   using `std::thread`, `Mutex` and `mpsc` as init on all three architectures,
   which counts its threads through `/proc/self`, with a build that expects
-  one thread too many failing on that count. It is linked as rustc links a
+  one thread too many failing on that count. Since 2026-10-12 its last step
+  shows the per-process credentials are safe under musl's `set*id`
+  broadcast (`docs/POSIX-2024.md`): with a second thread alive, root's
+  `setuid(1000)` survives musl repeating it on that thread, both read uid
+  1000, and `setuid(0)` is then `EPERM`. It is linked as rustc links a
   musl program by default, which on x86-64 is a static PIE: the loader places
   an `ET_DYN` image without an interpreter at two thirds of the user half,
   with its entry and `AT_PHDR` moved, and the program relocates itself; a

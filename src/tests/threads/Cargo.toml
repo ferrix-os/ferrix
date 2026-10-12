@@ -17,6 +17,9 @@ publish = false
 name = "threads-test"
 path = "src/main.rs"
 
+[dependencies]
+libc = "0.2"
+
 [features]
 # Expect one thread more under /proc/self than the program has, so the test
 # can show its thread count fails on exactly that line.
@@ -26,10 +29,12 @@ negative-control = []
 # Lints
 #
 # The Ferrix discipline, as zinc and the compositor keep it: every failure is
-# a line on the console and a status, never a panic.
+# a line on the console and a status, never a panic. `unsafe` is denied
+# everywhere but the setuid step's module, which says why it needs it: the
+# calls it tests are libc's.
 # ---------------------------------------------------------------------------
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "deny"
 missing_debug_implementations = "deny"
 unused_results = "deny"

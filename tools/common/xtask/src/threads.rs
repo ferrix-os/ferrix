@@ -6,6 +6,13 @@
 //! as init. It prints a line per step and `threads: all ok`, and exits 0; this
 //! requires every one of those lines, in order, and the status.
 //!
+//! Its last step is the one stage 7 owed after its exit: credentials are kept
+//! per process, a written deviation from Linux, and musl's `set*id` repeats
+//! the call on every thread after the first has already changed the ids. The
+//! program calls `setuid(1000)` as root with a second thread alive, and that
+//! survives only while setting an id to a current one is permitted; a refused
+//! repeat makes musl kill the process, which the program names.
+//!
 //! Then the negative control: the same program built to expect one thread more
 //! under `/proc/self` than it has must fail, on the `/proc` step and for that
 //! reason, and still end with the status it chose. A check of the thread count
@@ -42,6 +49,7 @@ const STEPS: &[&str] = &[
     "threads: join ok",
     "threads: mutex ok",
     "threads: copy ok",
+    "threads: setuid ok",
     "threads: all ok",
 ];
 
@@ -145,7 +153,8 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
             )));
         }
         println!(
-            "  {arch}: std::thread, Mutex and mpsc ran, /proc/self counted every thread, exit 0"
+            "  {arch}: std::thread, Mutex and mpsc ran, /proc/self counted every thread, \
+             two threads survived musl's setuid(1000) broadcast, exit 0"
         );
 
         let lines = boot(arch, &negative, args)?;

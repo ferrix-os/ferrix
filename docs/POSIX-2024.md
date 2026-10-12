@@ -104,6 +104,11 @@ change. What follows from it:
 * `ferrousli` on a Linux host does not conform until its `set*id` functions
   broadcast to every thread as NPTL's do. That broadcast is harmless on Ferrix,
   where each repeat sets ids the process already has.
+* musl's broadcast is proven safe on Ferrix by `cargo xtask test-threads`
+  since 2026-10-12: two threads survive root's `setuid(1000)`, whose repeat
+  on the second thread asks for the 1000 the process already has. musl kills
+  the process when a repeat fails, so the step holds only while setting an id
+  to a current one stays permitted without privilege.
 
 ## Headers
 

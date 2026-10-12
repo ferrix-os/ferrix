@@ -24,11 +24,17 @@
 //!   that may have the old translation cached. A page fault that waits for
 //!   other processors with interrupts masked stops the machine here, which
 //!   is how a compositor drawing on several threads found it.
+//! * **setuid**: in a forked child with a second thread blocked on a
+//!   channel, root's `setuid(1000)` goes through musl's broadcast to both
+//!   threads, leaves both uid and euid 1000, and `setuid(0)` is then `EPERM`
+//!   (see [`setuid`] for why per-process credentials make this the check).
 
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
+
+mod setuid;
 
 /// Threads the program spawns besides its main one.
 const THREADS: u64 = 4;
@@ -215,6 +221,10 @@ fn main() {
     println!("threads: copy");
     check_copies();
     println!("threads: copy ok");
+
+    println!("threads: setuid");
+    setuid::check_setuid(fail);
+    println!("threads: setuid ok");
 
     println!("threads: all ok");
     std::process::exit(0)
