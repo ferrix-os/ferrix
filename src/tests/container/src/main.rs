@@ -29,9 +29,9 @@
 //!   are alive to say so.
 //!
 //! Every step prints `container: <step> ok`; the program ends with
-//! `container: all ok` and status 0, or `container: FAILED <what>` and status
-//! 1. `cargo xtask test-container` judges the lines; `docs/CGROUPS.md` §15
-//! lists the negative controls that break each clause.
+//! `container: all ok` and exits 0, or prints `container: FAILED <what>` and
+//! exits 1. `cargo xtask test-container` judges the lines; `docs/CGROUPS.md`
+//! §15 lists the negative controls that break each clause.
 
 use std::ffi::CString;
 use std::fs;
