@@ -26,31 +26,17 @@
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "145",
+      "lines": "646",
       "category": "defensive",
       "match": "if spins > 1_000_000 {",
       "why": "The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later."
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "156",
-      "category": "absent-hardware",
-      "match": "&& let Some(tsc_hz) = calibrate_tsc_against_hpet(",
-      "why": "The TSC is measured against the HPET only on a processor whose CPUID says the TSC is invariant (`invariant_tsc`). QEMU's TCG refuses the bit (`TCG doesn't support requested feature: CPUID.80000007H:EDX.invtsc`); `x86_cpu` asks for it under KVM, where gate 6 prints `clock TSC, calibrated against the HPET at ... MHz`."
-    },
-    {
-      "file": "arch/x86_64/clock.rs",
-      "lines": "172",
-      "category": "absent-hardware",
-      "match": "let tsc_hz = calibrate_tsc_against_hpet(",
-      "why": "A 32-bit HPET, capability bit 13 clear, on a processor without an invariant TSC. QEMU's HPET always reports a 64-bit main counter and has no property that narrows it; the AMD chipsets the module comment names are the hardware that takes this line."
-    },
-    {
-      "file": "arch/x86_64/clock.rs",
-      "lines": "199-200, 206-207, 212, 216, 218-219",
+      "lines": "674-675, 681-682, 687, 691, 693-694",
       "category": "absent-hardware",
       "match": "fn calibrate_tsc_against_hpet(",
-      "why": "The whole of the measurement against the HPET, which only an invariant TSC (line 149) or a 32-bit HPET (line 165) calls; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
+      "why": "The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
     },
     {
       "file": "arch/x86_64/console.rs",
@@ -82,21 +68,21 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "256",
+      "lines": "269",
       "category": "failure-path",
       "match": "}",
       "why": "The closing brace of `check_exception_entry` is only the early return of a `?`, when the NMI, breakpoint or saved-register check has failed; the passing path leaves by the tail jump to `trap::check::run` (objdump of the measured image: `pop %rbp; ret` under line 140, `pop %rbp; jmp trap::check::run` under 139). A failed check stops the boot with `STAGE3_TRAPS`."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1684, 1686",
+      "lines": "1697, 1699",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1747",
+      "lines": "1760",
       "category": "failure-path",
       "match": "cpu::hlt();",
       "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
@@ -1521,118 +1507,6 @@
       "category": "failure-path",
       "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
       "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."
-    },
-    {
-      "file": "arch/x86_64/clock.rs",
-      "lines": "646",
-      "category": "defensive",
-      "match": "if spins > 1_000_000 {",
-      "why": "The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later."
-    },
-    {
-      "file": "arch/x86_64/clock.rs",
-      "lines": "674-675, 681-682, 687, 691, 693-694",
-      "category": "absent-hardware",
-      "match": "fn calibrate_tsc_against_hpet(",
-      "why": "The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
-    },
-    {
-      "file": "arch/x86_64/mod.rs",
-      "lines": "269",
-      "category": "failure-path",
-      "match": "}",
-      "why": "The closing brace of `check_exception_entry` is only the early return of a `?`, when the NMI, breakpoint or saved-register check has failed; the passing path leaves by the tail jump to `trap::check::run` (objdump of the measured image: `pop %rbp; ret` under line 140, `pop %rbp; jmp trap::check::run` under 139). A failed check stops the boot with `STAGE3_TRAPS`."
-    },
-    {
-      "file": "arch/x86_64/mod.rs",
-      "lines": "1692, 1694",
-      "category": "defensive",
-      "match": "for _ in 0..1000 {",
-      "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
-    },
-    {
-      "file": "arch/x86_64/mod.rs",
-      "lines": "1755",
-      "category": "failure-path",
-      "match": "cpu::hlt();",
-      "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "208",
-      "category": "defensive",
-      "match": ".map(|served| served.call)",
-      "why": "The call a boot finds the load ring left unanswered: register_load requires unserved() to be None before the boot goes on (LOAD_REGISTRATION), so the closure naming the call runs only on a kernel whose load forgot a handler."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "299",
-      "category": "defensive",
-      "match": "None => caller.core().is_terminated(),",
-      "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "511-512",
-      "category": "credited-elsewhere",
-      "match": "TableError::Full => status::NO_HANDLES,",
-      "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "1304-1305",
-      "category": "defensive",
-      "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
-      "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "1976",
-      "category": "defensive",
-      "match": "}",
-      "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2042",
-      "category": "defensive",
-      "match": "return Err(status::BAD_STATE);",
-      "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2045",
-      "category": "defensive",
-      "match": "return Err(status::NO_HANDLES);",
-      "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2055",
-      "category": "defensive",
-      "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
-      "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2061-2062",
-      "category": "defensive",
-      "match": "Err(Err(object)) => {",
-      "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2542",
-      "category": "absent-hardware",
-      "match": "return Err(status::INVALID_ARGS);",
-      "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
-    },
-    {
-      "file": "user/vmo.rs",
-      "lines": "1702",
-      "category": "defensive",
-      "match": "return Err(VmoError::OutOfMemory);",
-      "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."
     }
   ]
 }
