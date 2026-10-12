@@ -100,10 +100,11 @@ echo "endfield: reg exited $?"
 ln -s /data/GRYPHLINK /tmp/wine/prefix/drive_c/GRYPHLINK
 cd /tmp/wine/prefix/drive_c/GRYPHLINK
 sed 's/^/endfield: resolv.conf: /' /etc/resolv.conf
-QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.network*=true}" WINEDEBUG="$WINEDEBUG,+debugstr" \
-    /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
+/usr/lib/wine/wine64 cmd /c ping -n 1 launcher.gryphline.com 2>&1 | head -n 3 | sed 's/^/endfield: ping: /'
+WINEDEBUG="$WINEDEBUG,trace+winsock" /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' 2>&1 \
+    | grep -E 'getaddrinfo|connect|err:|ret' > /tmp/wine/launcher.log &
 waited=0
-until xwininfo -name "GRYPHLINK" 2>/dev/null | grep -q IsViewable || [ $waited -ge 300 ]; do
+until /bin/hyprctl clients 2>/dev/null | grep -q "title: GRYPHLINK" || [ $waited -ge 300 ]; do
     sleep 1
     waited=$((waited + 1))
 done
@@ -114,8 +115,8 @@ echo "endfield: window"
 sleep 240
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 grep -E "error|warning|OnQuery_ProtocolVer|OnGetNvGPUConfigResult" "$logs/games.log" | cut -c1-300 | sed 's/^/endfield: games.log: /'
-grep -v ':fixme:' /tmp/wine/launcher.log | grep -v 'debugstr' | tail -n 40 | sed 's/^/endfield: wine: /'
-grep 'debugstr' /tmp/wine/launcher.log | grep -iE 'ssl|network|socket|host|error|fail' | sort | uniq -c | sort -rn | head -n 60 | cut -c1-300 | sed 's/^/endfield: debug: /'
+grep -v ':fixme:' /tmp/wine/launcher.log | grep -E 'err:|getaddrinfo' | sort | uniq -c | sort -rn | head -n 40 | cut -c1-300 | sed 's/^/endfield: wine: /'
+grep 'connect' /tmp/wine/launcher.log | head -n 40 | cut -c1-300 | sed 's/^/endfield: connect: /'
 ps | grep -c '[Q]tWebEngineProcess' | sed 's/^/endfield: render processes: /'
 /usr/lib/wine/wineserver64 -k
 echo "endfield: end"
