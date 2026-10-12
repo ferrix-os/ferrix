@@ -73,8 +73,9 @@ const WORD: &str = "hello";
 /// `wine: beside:`.
 const ANOTHER: &str = "wine: another window";
 
-/// The window beside notepad: the terminal's title, the program it runs.
-const OTHER_TITLE: &str = "/bin/zinc";
+/// The window beside notepad: the terminal's title, the program it runs
+/// (`sleep`, which sets no title of its own, as a shell's prompt may).
+const OTHER_TITLE: &str = "/bin/busybox";
 
 /// The keys typed into notepad the way a person at a VNC viewer types
 /// into a window of a focus-follows-mouse desktop: the pointer moved onto
@@ -144,9 +145,9 @@ copied() {
     done
 }
 copied 2
-/bin/term /bin/zinc > /dev/null 2>&1 &
+/bin/term /bin/busybox sleep 600 > /dev/null 2>&1 &
 shown=0
-until /bin/hyprctl clients | grep -q -- "-> /bin/zinc:" || [ $shown -ge 30 ]; do
+until /bin/hyprctl clients | grep -q -- "-> /bin/busybox:" || [ $shown -ge 30 ]; do
     sleep 1
     shown=$((shown + 1))
 done
@@ -913,7 +914,7 @@ mod tests {
             "Window 1 -> Untitled - Notepad:",
             "\tat: 21,21",
             "\tsize: 489,726",
-            "Window 2 -> /bin/zinc:",
+            "Window 2 -> /bin/busybox:",
             "\tat: 520,21",
             "\tsize: 483,726",
         ]
