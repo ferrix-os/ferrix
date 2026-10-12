@@ -197,24 +197,32 @@ thread block at `%gs`, and `arch_prctl` answered `ARCH_SET_FS` alone, with
   the installer or the launcher is a 32-bit program, which is not known.
   `modify_ldt` is needed only by old-style 32-bit Wine and stays out. 8.
 
-**Where step 1 stands (2026-10-10, branch `wine-m1`; `docs/WINE.md`).**
+**Where step 1 stands (2026-10-12; `docs/WINE.md`).**
 Debian 13's 64-bit Wine 10.0 makes a prefix, its `cmd /c ver` answers
 `Microsoft Windows 10.0.19043`, and its notepad draws a window on hyprix
-through yserver, under KVM: `cargo xtask test-wine`.
+through yserver at the size of its tile and takes a typed line, under KVM:
+`cargo xtask test-wine`. `cargo xtask run-compositor --wine` shows it on a
+desktop to type into.
 
 * *Done:* E1.1, with `CR4.FSGSBASE` now cleared at bring-up, which nothing
   did before. E1.2. Of E1.3, the one thing `wineboot` tripped over in the
   kernel: a 64-bit signal frame's `sigcontext` left `trapno`, `err` and
   `cr2` zero, which Wine's `SIGSEGV` handler reads. None of the calls E1.3
   names (`mlock`, `membarrier`, the reservations' charging) was met by
-  `wineboot`, `cmd` or notepad. E1.4's first half: wineserver alone. E1.5's
-  drawing.
-* *Still to do:* E1.5 runs with one workaround, `UseXRandR=N`: on
-  yserver's RandR Wine's X driver finds no monitor and wineserver ends on a
-  divide by a DPI of zero. Notepad draws at the size it asked for and not
-  at its tile's; keys and the pointer are untried. E1.4's esync. E1.6:
-  `wineboot` says a 32-bit `rundll32.exe` did not start. A prefix on the
-  btrfs volume ran out of space with 680 MB free.
+  `wineboot`, `cmd` or notepad. E1.4's first half: wineserver alone.
+  E1.5 (2026-10-12), with no workaround left: yserver lists no RandR
+  provider, as Xwayland does, so Wine finds `WAYLAND-1` at 96 DPI and drops
+  `UseXRandR=N`; yserver sets `WM_STATE` on a mapped top-level, as a window
+  manager does, so notepad takes its tile's size; and the gate types
+  `hello ferrix` into it, finds the line on the screen and reads it and a
+  double-clicked word back through X's clipboard. Nothing in the kernel was
+  needed for it. A prefix on the btrfs volume ran out of space because the
+  volume was too small (683 MB free for a prefix that takes 1.1 GB there),
+  not because of btrfs's allocation; `fetch-wine.sh` gives it 2 GiB of room.
+* *Still to do:* E1.4's esync. E1.6: `wineboot` says a 32-bit
+  `rundll32.exe` did not start. Whether btrfs's write path leaves more of a
+  full volume unallocated than Linux would (135 MB of 2 GB on the full Wine
+  volume), filed in `docs/BACKLOG.md`.
 
 **Proved by** `cargo xtask test-wine`: a prefix is made, `cmd /c ver`
 prints, and `notepad`'s window is found on the screen with a typed line in

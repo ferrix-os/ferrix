@@ -555,7 +555,10 @@ shape, comes first and can end it, because whether the game's anti-cheat
 accepts a virtual machine is not known; it waits on the customer for an
 account and about 110 GB of disk. On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without
-(`docs/WINE.md`); Direct3D 11 draws through DXVK on lavapipe in it with no
+(`docs/WINE.md`); its notepad is a window of hyprix's at its tile's size
+that takes typed text and the pointer since 2026-10-12, through yserver
+with no workaround (`test-wine`; `run-compositor --wine` to watch it);
+Direct3D 11 draws through DXVK on lavapipe in it with no
 card since 2026-10-12 (`test-dxvk`, offscreen), and a window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a

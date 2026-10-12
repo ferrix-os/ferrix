@@ -376,6 +376,18 @@ Still open:
 
 ## 9. Where it stands
 
+2026-10-12: **what Wine's X driver needed** (stage 23, E1.5;
+`docs/WINE.md` §5). `fetch-yserver.sh` pins the fork at 662c61f3. The
+Wayland backend lists no RandR provider, as Xwayland does: its Vulkan
+renderer, listed with no CRTC and no output, made Wine find no monitor and
+wineserver divide by a DPI of zero; Wine now reads `WAYLAND-1` from the
+screen's resources. And the server sets `WM_STATE` (`NormalState` at a
+client's `MapWindow` of a top-level, `WithdrawnState` at its `UnmapWindow`)
+while it names itself the window manager, as an ICCCM window manager does:
+Wine took no size the compositor gave its window until that came.
+`test-xwindow`, `test-yserver`, `test-wine` and `test-dxvk` pass on volumes
+made from the pin.
+
 2026-09-29, later: **a window of a fixed size floats at that size**, as in
 Hyprland. yserver passes `WM_NORMAL_HINTS` on as `xdg_toplevel`'s least and
 greatest size (fork `c5b5935`, which `fetch-yserver.sh` pins), and hyprix

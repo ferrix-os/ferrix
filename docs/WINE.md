@@ -17,8 +17,29 @@ twice. The first boot is a shell: it makes a prefix in `/tmp` with
 `wineboot -i` and requires `cmd /c ver` to print `Microsoft Windows 10.0`.
 The second is hyprix with yserver on `:0`, as `test-xwindow` boots it: the
 same two steps, then `notepad`, which must become a window of hyprix's
-titled "Untitled - Notepad" with its white page on the screen
-(`build/x86_64/wine-notepad.ppm`). It needs no network.
+titled "Untitled - Notepad" whose white page fills the tile hyprix gave it
+(70% of the screen white; `build/x86_64/wine-notepad.ppm`). Then the gate
+types into it through QEMU's tablet and keyboard, as `test-xwindow` does
+into xev: a click into the page, the keys of `hello ferrix`, `Ctrl+A`,
+`Ctrl+C`, a double click on `hello` and `Ctrl+C`. The line must be on the
+screen (`build/x86_64/wine-notepad-typed.ppm`), and X's clipboard must hold
+`hello ferrix` and then `hello`: the keys arrived as the characters they
+are, and the double click reached the word where it is drawn. It needs no
+network.
+
+**To watch it.** On x86-64, with the volume made:
+
+```
+cargo xtask run-compositor --wine
+```
+
+The desktop starts with a terminal, and after about a minute (yserver's
+start, `wineboot` making a prefix in `/tmp`) notepad tiles beside it.
+Click into its page and type; `Ctrl+A` and `Ctrl+C` copy through X's
+clipboard; the File, Edit and Help menus open. `SUPER+N` starts another
+notepad, `SUPER+Q` closes the focused window. What Wine says is in
+`/tmp/wine/*.log`, readable from the terminal. `--wine` takes the place of
+`--chrome` and `--everything`, whose volume is the one data disk otherwise.
 
 **Where it runs.** On demand, as `test-yserver` and `test-xwindow` do: it
 is not in `cargo xtask check`, not in CI, and not in the batch's `full`
@@ -30,13 +51,20 @@ changes what Wine uses of the kernel, yserver or hyprix adds it with
 names the fetch script. On nazuna the volume is there since 2026-10-10,
 with the packages it was made from in `pool/` beside it, so making it
 again downloads nothing. It needs yserver's tree
-(`~/.local/share/ferrix/yserver/tree`), which `fetch-yserver.sh` makes.
+(`~/.local/share/ferrix/yserver/tree`), which `fetch-yserver.sh` makes;
+`fetch-wine.sh` makes it again when it holds another commit than the one
+`fetch-yserver.sh` pins. The volume records the yserver it carries
+(`yserver.commit` beside `wine.img`), and `test-wine`, `test-dxvk` and
+`run-compositor --wine` refuse one that is not the pin's, so **a pin move
+means running `fetch-wine.sh` again** after `fetch-yserver.sh`.
 
-The guest has 6 GiB: the prefix is about 800 MB of files, on tmpfs.
+The guest has 6 GiB: the prefix is 768 MB of files, on tmpfs. On the
+volume it takes about 1.1 GB, which is why the volume has 2 GiB more than
+its tree (§5).
 
 What shows: notepad's menu bar, its page with the caret, the scroll bar and
-"Ln 1, Col 1", drawn by Wine's X driver in software, top left in a tile
-that fills the screen.
+"Ln 1, Col 1", drawn by Wine's X driver in software, in the tile hyprix
+gives it.
 
 ## 2. The pieces
 
@@ -44,7 +72,8 @@ that fills the screen.
 |---|---|---|
 | The volume | `tools/common/fetch/fetch-wine.sh` | Debian's `wine64`, `libwine` and `wine`, pinned by SHA-256, unpacked over yserver's tree, with glibc, libunwind, FreeType, fontconfig, Xlib and the X extension libraries, `libz-mingw-w64`'s zlib marked as a Wine builtin (what `libwine`'s postinst does), Wine's and Liberation's fonts, and `strace` |
 | The shell boot | `tools/common/xtask/src/wine.rs` | zinc as init, busybox, the links Debian's paths need, and the script |
-| The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, and the script |
+| The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, the script, and the input the gate types; also `run-compositor --wine`'s scripts |
+| yserver | the fork `ferrix-os/yserver`, pinned in `tools/common/fetch/fetch-yserver.sh` | the X server; §5 says what Wine needed of it |
 
 Wine is fetched, never vendored. The loader is started directly
 (`/usr/lib/wine/wine64`) with `WINESERVER=/usr/lib/wine/wineserver64`:
@@ -149,29 +178,45 @@ tree). 100 different system calls; two have no number in
 
 ## 5. Where it stands
 
-`wineboot`, `cmd /c ver` and notepad's window pass (`test-wine`, KVM,
-2026-10-10). What a session picking Wine up needs first:
+`wineboot`, `cmd /c ver`, notepad's window at its tile's size, and a line
+typed into it and copied out of it pass (`test-wine`, KVM, 2026-10-12).
+There is no workaround left. What a session picking Wine up needs first:
 
-**One workaround.**
+**What yserver had to answer as Xorg and Xwayland do (fixed 2026-10-12).**
+Both are in the fork at 662c61f3, which `fetch-yserver.sh` pins:
 
-| Workaround | Why | Real fix | Owner |
-|---|---|---|---|
-| The prefix is made with no `DISPLAY`, and `UseXRandR` is `N` in `HKCU\Software\Wine\X11 Driver` before a program gets one | yserver's Wayland backend lists its Vulkan renderer as the one RandR provider (`vulkan-unverified`, Source Output) with no CRTC and no output (`xrandr --listproviders` on Ferrix: `crtcs: 0 outputs: 0`). Wine's X driver takes a provider's own outputs when there is a provider (`xrandr14_get_adapters`, `dlls/winex11.drv/xrandr.c`), finds none, and registers no monitor: `Failed to read display config`, over and over. A window's monitor DPI is then 0, wineserver divides by it (`map_dpi_point`, `server/window.c`) and ends with `SIGFPE`, and every Wine program waits on it for ever. Xwayland lists no provider (`Providers: number : 0` on the host's Xwayland 24.1), and Wine then reads the screen's resources | yserver's Wayland backend lists no provider: one commit, `wayland: the rootless server lists no RandR provider, as Xwayland does`, on the fork clone `~/.local/share/ferrix/yserver-wine/src` (`wine-randr` 612130ba on the fork's `nv-next`, `wine-randr-pin` 6d66bff9 on the commit `fetch-yserver.sh` pins). With it, on 2026-10-10, `wineboot` ran with `DISPLAY` set, notepad's window was viewable after 1 s, and `explorer.exe` did not assert. The workaround goes when the pin moves to a commit that has it | stage 23; the pin's move is the product owner's |
+| What | Why it mattered | The fix |
+|---|---|---|
+| RandR's providers | yserver's Wayland backend listed its Vulkan renderer as the one RandR provider (`vulkan-unverified`, Source Output) with no CRTC and no output. Wine's X driver takes a provider's own outputs when there is a provider (`xrandr14_get_adapters`, `dlls/winex11.drv/xrandr.c`), found none and registered no monitor (`Failed to read display config`, over and over). A window's monitor DPI was then 0, wineserver divided by it (`map_dpi_point`, `server/window.c`) and ended with `SIGFPE`. Until then the prefix was made with no `DISPLAY` and `UseXRandR=N`, and with XRandR off `explorer.exe` asserted in `xvidmode.c:164` | The backend lists no provider, as Xwayland does (`Providers: number : 0` on Xwayland 24.1). Wine then reads the screen's resources: `WAYLAND-1`, its CRTC and its mode, at 96 DPI (`xdpyinfo`: 1024x768, 271x203 mm). Fork commit 6d66bff9 |
+| `WM_STATE` | yserver announces itself as the window manager (`_NET_SUPPORTING_WM_CHECK`, for Steam), but set no `WM_STATE` when a client mapped a top-level. Wine's X driver waits for that `PropertyNotify`, with a serial no older than its `MapWindow`'s, before it takes any size its window is given (`window_update_client_config`, `dlls/winex11.drv/window.c`): notepad drew at the 721 by 512 it asked for in a 982 by 726 tile, the rest black | The server sets `WM_STATE` `NormalState` within a client's `MapWindow` of a root child that is not override-redirect, and `WithdrawnState` within its `UnmapWindow`, while the window manager it names is its own. Fork commit 662c61f3, with a unit test |
+
+Controls, each with volumes made from the older commit: at 6d66bff9 (no
+`WM_STATE`) notepad drew at its own size and the gate said "43% of the
+screen is white, less than the 70%"; at 54aa541b with the workaround gone,
+wineserver ended on a divide error and the script never ended.
+
+Keys and the pointer needed nothing: yserver's input from hyprix's seat
+(docs/YSERVER.md, Y4) reached Wine as it reaches xev, and Wine's clipboard
+reached X's `CLIPBOARD`.
+
+**The prefix on the btrfs volume (2026-10-12).** A prefix made on `/data`
+ran out of space "with 680 MB free". It was the volume's size, not btrfs's
+allocation: made with 1024 MiB more than its tree, the volume had 683 MB
+available before `wineboot` started, and the prefix, 768 MB of files, takes
+about 1.1 GB there (small files; metadata kept twice). `wineboot` ran out
+at 684 MB of prefix with `df` at 100%. `fetch-wine.sh` now gives 2048 MiB
+more, and on such a volume `wineboot` made the prefix on `/data`, `cmd`
+answered and 627 MB were left. Read with `btrfs inspect-internal` on the
+host, the full volume had every data block group full, its metadata chunk
+9 MB used of 107 MB (two copies), and 135 MB of the device never allocated
+to a chunk: whether Ferrix's write path holds back more than Linux's would
+is a separate question, in `docs/BACKLOG.md`.
 
 **Leads, none of them in the kernel as far as is known.**
 
-* With XRandR off, `explorer.exe` (Wine's desktop process) ends on an
-  assertion in `dlls/winex11.drv/xvidmode.c:164`, `xf86vm_free_modes`.
-  It is the workaround's own: with yserver's provider fix and XRandR on,
-  it did not happen. Notepad draws without it.
-* Notepad draws at the size it asked for, about 720 by 510, and not at the
-  982 by 726 of the tile hyprix gave its window, which X reports as the
-  window's size. The rest of the tile is black.
 * `wineboot` says `failed to open C:\windows\syswow64\rundll32.exe:
   c0000135`, which it does not say on Linux: a 32-bit Windows program does
-  not start yet. Not looked into.
-* A prefix on the btrfs volume ran out of space (`ENOSPC`) with 680 MB
-  free; the gate uses tmpfs.
+  not start yet (E1.6).
 * `df` says tmpfs has used 0 of 3.0G with an 800 MB prefix on it.
 * `wineboot` takes 27 s of guest time; on Linux, on the same host, a few.
 
