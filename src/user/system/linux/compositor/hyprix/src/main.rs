@@ -51,3 +51,5 @@ fn report(line: &str) {
     let _ = writeln!(out, "{line}");
     let _ = out.flush();
 }
+
+const BUILD_SPEED_CONTROL :u8=0 ;
