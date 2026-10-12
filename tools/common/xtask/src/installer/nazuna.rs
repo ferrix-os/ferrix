@@ -1,5 +1,5 @@
 //! `run-nazuna`: Ferrix on a virtual machine shaped like the customer's PC,
-//! nazuna (`docs/NAZUNA-VM.md`): an ASUS ProArt B650-CREATOR with a Ryzen 9
+//! nazuna (`docs/NAZUNA-VM.md`): an ASUS `ProArt B650-CREATOR` with a Ryzen 9
 //! 9900X, whose WD PC SN720 Ferrix was installed on and has not booted from
 //! (2026-10-11).
 //!
@@ -41,7 +41,7 @@ use crate::{Error, Result, cargo, fat, initramfs, native, qemu, zinc};
 
 /// nazuna's IOMMU: AMD-Vi, remapping interrupts. xAPIC, as the kernel runs,
 /// so no x2APIC support (`xtsup`) is offered.
-pub(crate) const AMD_IOMMU: &str = "amd-iommu,intremap=on";
+const AMD_IOMMU: &str = "amd-iommu,intremap=on";
 
 /// The live medium's command line: `/` in memory, and the kernel's lines on
 /// the screen as well, as the customer's install carried.
@@ -194,10 +194,9 @@ pub(crate) fn run(args: &Args) -> Result<()> {
     if !args.timeout_given {
         return qemu::run(arch, &sn720, &machine);
     }
-    let (panicked, _, log) = qemu::observe(arch, &sn720, &kernel, &machine)?;
+    let (ending, _, log) = qemu::observe(arch, &sn720, &kernel, &machine)?;
     println!(
-        "  {arch}: nazuna {} after {}s; serial log {}",
-        if panicked { "panicked" } else { "still running" },
+        "  {arch}: nazuna {ending} (watched for up to {}s); serial log {}",
         args.timeout,
         log.display()
     );
@@ -251,16 +250,43 @@ pub(crate) fn memory_and_processors(args: &Args) -> (String, String) {
 
 /// The processor: nazuna's own under KVM (which is nazuna, since nothing
 /// else runs this), the model every boot has otherwise.
-pub(crate) fn cpu(binary: &Path, accelerator: &str) -> String {
+fn cpu(binary: &Path, accelerator: &str) -> String {
     if accelerator == "kvm" {
-        "host,migratable=off,+invtsc".to_owned()
+        // `topoext`, or QEMU says an AMD family has no threads and the
+        // guest is not told the cores' siblings.
+        "host,migratable=off,+invtsc,+topoext".to_owned()
     } else {
         qemu::x86_cpu_for(binary, accelerator)
     }
 }
 
+/// The machine's own arguments: the board, processor and IOMMU, the drives
+/// and USB, booted from `sn720`.
+pub(crate) fn machine(
+    command: &mut Command,
+    binary: &Path,
+    accelerator: &str,
+    sn720: &Path,
+    args: &Args,
+) {
+    let _ = command.args([
+        "-machine",
+        &qemu::x86_machine(accelerator),
+        "-cpu",
+        &cpu(binary, accelerator),
+        "-device",
+        "isa-debug-exit,iobase=0xf4,iosize=0x04",
+        "-device",
+        AMD_IOMMU,
+    ]);
+    if crate::window::sole_screen(args) {
+        let _ = command.args(["-vga", "none"]);
+    }
+    attach(command, sn720);
+}
+
 /// The drives and USB. `sn720` is the image booted from.
-pub(crate) fn attach(command: &mut Command, sn720: &Path) {
+fn attach(command: &mut Command, sn720: &Path) {
     let build = paths::build_dir(Arch::X86_64);
     let drive = |command: &mut Command, drive: &Drive, path: &Path, bus: &str, boot: bool| {
         let _ = command.args([

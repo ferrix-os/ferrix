@@ -1072,24 +1072,24 @@ pub(crate) fn boot_until(
     }
 }
 
-/// Boot headless and only watch: echo and save the serial port until a
-/// panic, until QEMU ends, or for the timeout. Whether it panicked, the
+/// Boot headless and only watch: echo and save the serial port until the
+/// kernel powers off or panics, or for the timeout. How it ended, the
 /// lines, and the serial log's path; for a machine whose boot nobody has
-/// seen succeed yet (`run-nazuna --timeout`), so no ending is an error.
+/// seen succeed yet (`run-nazuna --timeout`), so neither a panic nor the
+/// timeout is an error. QEMU gone with neither is.
 pub(crate) fn observe(
     arch: Arch,
     image: &Path,
     kernel: &Path,
     args: &Args,
-) -> Result<(bool, Vec<String>, PathBuf)> {
-    // No line holds a NUL, so nothing ends the watch but a panic, QEMU or
-    // the clock.
-    let watched = watch(arch, image, kernel, args, "\0")?;
-    Ok((
-        matches!(watched.verdict, Verdict::Panicked),
-        watched.lines,
-        watched.log,
-    ))
+) -> Result<(&'static str, Vec<String>, PathBuf)> {
+    let watched = watch(arch, image, kernel, args, POWER_OFF_MARKER)?;
+    let ending = match watched.verdict {
+        Verdict::Reached => "powered off",
+        Verdict::Panicked => "panicked",
+        Verdict::Silent => "was still running",
+    };
+    Ok((ending, watched.lines, watched.log))
 }
 
 /// [`watch`], calling `at_marker` once `until` has been printed, while QEMU
@@ -2261,6 +2261,20 @@ fn pinned(binary: &Path, pin: Option<&str>) -> Command {
     }
 }
 
+/// `-m` and `-smp`, said with the accelerator: every boot names its
+/// accelerator, so a log read later says whether the guest was emulated
+/// without anybody having to guess.
+fn machine_size(arch: Arch, accelerator: &str, binary: &Path, args: &Args) -> (String, String) {
+    if args.nazuna {
+        let (memory, smp) = crate::installer::nazuna::memory_and_processors(args);
+        println!("  qemu: {arch} under {accelerator}, -smp {smp}");
+        return (memory, smp);
+    }
+    let processors = processors(accelerator, binary, args);
+    println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    (args.memory.to_string(), processors.to_string())
+}
+
 fn qemu_command(
     arch: Arch,
     image: &Path,
@@ -2287,20 +2301,12 @@ fn qemu_command(
 
     let firmware = paths::find_firmware(arch)?;
     let accelerator = accelerator(arch, &binary, args.accel.as_deref())?;
-    let processors = processors(&accelerator, &binary, args);
-    // Every boot names its accelerator, so a log read later says whether
-    // the guest was emulated without anybody having to guess.
-    println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    let (memory, smp) = machine_size(arch, &accelerator, &binary, args);
 
     let mut command = pinned(&binary, args.pin.as_deref());
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);
-    let (memory, smp) = if args.nazuna {
-        crate::installer::nazuna::memory_and_processors(args)
-    } else {
-        (args.memory.to_string(), processors.to_string())
-    };
     let _ = command.args(["-m", &memory, "-smp", &smp, "-monitor", "none"]);
     // Where the screen goes: nowhere for a test, which reads it with a
     // screendump; a window or a VNC server for a boot somebody watches.
@@ -2334,20 +2340,7 @@ fn qemu_command(
 
     match arch {
         Arch::X86_64 if args.nazuna => {
-            let _ = command.args([
-                "-machine",
-                &x86_machine(&accelerator),
-                "-cpu",
-                &crate::installer::nazuna::cpu(&binary, &accelerator),
-                "-device",
-                "isa-debug-exit,iobase=0xf4,iosize=0x04",
-                "-device",
-                crate::installer::nazuna::AMD_IOMMU,
-            ]);
-            if crate::window::sole_screen(args) {
-                let _ = command.args(["-vga", "none"]);
-            }
-            crate::installer::nazuna::attach(&mut command, image);
+            crate::installer::nazuna::machine(&mut command, &binary, &accelerator, image, args);
         }
         Arch::X86_64 => {
             let _ = command.args([
