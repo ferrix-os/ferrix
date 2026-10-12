@@ -101,7 +101,7 @@ ln -s /data/GRYPHLINK /tmp/wine/prefix/drive_c/GRYPHLINK
 cd /tmp/wine/prefix/drive_c/GRYPHLINK
 sed 's/^/endfield: resolv.conf: /' /etc/resolv.conf
 /usr/lib/wine/wine64 cmd /c ping -n 1 launcher.gryphline.com 2>&1 | head -n 3 | sed 's/^/endfield: ping: /'
-WINEDEBUG="$WINEDEBUG,trace+winsock" /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' 2>&1 \
+WINEDEBUG="$WINEDEBUG,+winsock" /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' 2>&1 \
     | grep -E 'winsock|err:' > /tmp/wine/launcher.log &
 waited=0
 until /bin/hyprctl clients 2>/dev/null | grep -q "title: GRYPHLINK" || [ $waited -ge 300 ]; do
@@ -116,9 +116,11 @@ sleep 240
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 grep -E "error|warning|OnQuery_ProtocolVer|OnGetNvGPUConfigResult" "$logs/games.log" | cut -c1-300 | sed 's/^/endfield: games.log: /'
 grep -v ':fixme:' /tmp/wine/launcher.log | grep -E 'err:|getaddrinfo' | sort | uniq -c | sort -rn | head -n 40 | cut -c1-300 | sed 's/^/endfield: wine: /'
-thread=$(grep -m1 -E 'WSAAsyncSelect socket' /tmp/wine/launcher.log | cut -d: -f1)
-echo "endfield: the first thread to use WSAAsyncSelect: $thread"
-grep "^$thread:" /tmp/wine/launcher.log | grep -vE 'getaddrinfo|sock_ioctl' | head -n 200 | cut -c1-240 | sed 's/^/endfield: thread: /'
+grep -iE 'getaddrinfo|resolve' /tmp/wine/launcher.log | grep -v '=> ' | head -n 80 | cut -c1-200 | sed 's/^/endfield: dns: /'
+grep -c '=> ' /tmp/wine/launcher.log | sed 's/^/endfield: dns answers: /'
+thread=$(grep -m1 -E 'WSASocketW family 2, type 1, protocol 0, .*flags 0x81' /tmp/wine/launcher.log | cut -d: -f1)
+echo "endfield: the first thread to make a 0x81 socket: $thread"
+grep "^$thread:" /tmp/wine/launcher.log | grep -vE 'sock_ioctl' | head -n 200 | cut -c1-240 | sed 's/^/endfield: thread: /'
 /bin/hyprctl clients | sed 's/^/endfield: clients: /'
 ps | grep -c '[Q]tWebEngineProcess' | sed 's/^/endfield: render processes: /'
 /usr/lib/wine/wineserver64 -k
