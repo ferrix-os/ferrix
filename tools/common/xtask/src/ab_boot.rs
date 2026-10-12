@@ -14,7 +14,7 @@
 //! Each boot is a fresh QEMU process on the same disk file: a power cycle,
 //! which is what "comes back at the next reset" means (§6.3). The record is
 //! written from the host with `ferrix-slots`, as `bootctl` will write it
-//! from inside Ferrix; `bootctl good` is the host's [`mark_good`] until
+//! from inside Ferrix; `bootctl good` is the host's [`Bench::mark_good`] until
 //! ab-sys's `bootctl` lands.
 //!
 //! | case | setup | required |
