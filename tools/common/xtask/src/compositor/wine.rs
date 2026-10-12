@@ -9,7 +9,7 @@
 //! [`LINE`], `Ctrl+A` and `Ctrl+C`, then a double click on the line's first
 //! word and `Ctrl+C`, while the script prints what X's clipboard holds.
 //! Then the way a person at a VNC viewer types on a focus-follows-mouse
-//! desktop: the script puts xev's window beside notepad, the pointer alone
+//! desktop: the script puts a terminal beside notepad, the pointer alone
 //! moves the keyboard onto it, Caps Lock goes on there, the pointer alone
 //! brings the keyboard back, and the keys of [`VNC_KEYS`], `Ctrl+A` and
 //! `Ctrl+C` follow, with no click.
@@ -68,16 +68,18 @@ const LINE_KEYS: &[&str] = &["h", "e", "l", "l", "o", "spc", "f", "e", "r", "r",
 /// The first word of [`LINE`], which the double click selects.
 const WORD: &str = "hello";
 
-/// What the script prints once a second X window, xev's, is beside
-/// notepad and hyprix has listed both after `wine: beside:`.
+/// What the script prints once a terminal, a Wayland window of hyprix's
+/// and no X window, is beside notepad and hyprix has listed both after
+/// `wine: beside:`.
 const ANOTHER: &str = "wine: another window";
 
-/// The window beside notepad: xev's title.
-const OTHER_TITLE: &str = "Event Tester";
+/// The window beside notepad: the terminal's title, the program it runs.
+const OTHER_TITLE: &str = "/bin/zinc";
 
 /// The keys typed into notepad the way a person at a VNC viewer types
 /// into a window of a focus-follows-mouse desktop: the pointer moved onto
-/// it, no click, with Caps Lock turned on while xev had the keyboard. They
+/// it, no click, with Caps Lock turned on while the terminal beside it
+/// had the keyboard, as a person types into foot beside notepad. They
 /// arrive as [`VNC_TEXT`] at the end of [`LINE`].
 const VNC_KEYS: &[&str] = &["v", "n", "c"];
 /// See [`VNC_KEYS`]: what they must make with Caps Lock on.
@@ -142,9 +144,9 @@ copied() {
     done
 }
 copied 2
-xev > /dev/null 2>&1 &
+/bin/term /bin/zinc > /dev/null 2>&1 &
 shown=0
-until xwininfo -name "Event Tester" 2>/dev/null | grep -q IsViewable || [ $shown -ge 30 ]; do
+until /bin/hyprctl clients | grep -q -- "-> /bin/zinc:" || [ $shown -ge 30 ]; do
     sleep 1
     shown=$((shown + 1))
 done
@@ -450,13 +452,14 @@ fn type_into(
         press(qmp, &["ctrl", "c"])?;
         let _ = watching.read_more(Instant::now() + Duration::from_secs(60), copied(2))?;
 
-        // The VNC way. xev's window beside notepad takes the keyboard
+        // The VNC way. The terminal beside notepad takes the keyboard
         // (hyprix gives it to a new window, and the pointer moves onto it),
         // Caps Lock goes on there, and the pointer alone brings the
         // keyboard back to notepad for `End`, which ends the double click's
         // selection, and the keys. Wine takes the focus only when offered
-        // WM_TAKE_FOCUS, and the X server sees no Caps Lock pressed while
-        // xev had the keyboard.
+        // WM_TAKE_FOCUS, and the X server sees no key pressed while a
+        // Wayland window has the keyboard: the lock is the compositor's
+        // word alone.
         let beside = |lines: &[String]| {
             lines
                 .iter()
@@ -677,13 +680,13 @@ fn judge_typing(
 }
 
 /// Whether the keys typed after the pointer alone brought the keyboard
-/// back from xev's window, with Caps Lock turned on there, reached notepad
+/// back from the terminal, with Caps Lock turned on there, reached notepad
 /// as [`VNC_TEXT`] at the end of the line: X's third clipboard.
 fn judge_hover(arch: Arch, said: &[String], held: &[String]) -> Result<()> {
     let wanted = format!("{LINE}{VNC_TEXT}");
     if !said.iter().any(|line| line.contains(ANOTHER)) {
         return Err(Error::new(format!(
-            "{arch}: the script never said `{ANOTHER}`: xev's window did not come up beside \
+            "{arch}: the script never said `{ANOTHER}`: the terminal did not come up beside \
              notepad"
         )));
     }
@@ -697,7 +700,7 @@ fn judge_hover(arch: Arch, said: &[String], held: &[String]) -> Result<()> {
         }
         Some(text) if text.eq_ignore_ascii_case(&wanted) => Err(Error::new(format!(
             "{arch}: notepad's line is {text:?}, not {wanted:?}: Caps Lock, turned on while \
-             xev had the keyboard, did not reach the X server (wl_keyboard.modifiers)"
+             the terminal had the keyboard, did not reach the X server (wl_keyboard.modifiers)"
         ))),
         Some(text) => Err(Error::new(format!(
             "{arch}: X's clipboard held {text:?} after the keys typed with the keyboard brought \
@@ -875,13 +878,14 @@ mod tests {
         assert!(LINE.starts_with(WORD));
     }
 
-    /// The script brings xev's window up beside notepad and lists both,
+    /// The script brings a terminal up beside notepad and lists both,
     /// and the keys typed by the pointer's focus spell the text in lower
     /// case, which Caps Lock alone makes upper.
     #[test]
     fn the_vnc_phase_has_a_window_beside_and_lower_case_keys() {
         assert!(SCRIPT.contains(&format!("echo \"{ANOTHER}\"")));
-        assert!(SCRIPT.contains(&format!("xwininfo -name \"{OTHER_TITLE}\"")));
+        assert!(SCRIPT.contains(&format!("/bin/term {OTHER_TITLE} ")));
+        assert!(SCRIPT.contains(&format!("\"-> {OTHER_TITLE}:\"")));
         assert!(SCRIPT.contains("sed 's/^/wine: beside: /'"));
         assert_eq!(VNC_KEYS.concat().to_uppercase(), VNC_TEXT);
         assert_ne!(VNC_KEYS.concat(), VNC_TEXT, "Caps Lock must change them");
@@ -889,7 +893,7 @@ mod tests {
             "Window 1 -> Untitled - Notepad:",
             "\tat: 21,21",
             "\tsize: 489,726",
-            "Window 2 -> Event Tester:",
+            "Window 2 -> /bin/zinc:",
             "\tat: 520,21",
             "\tsize: 483,726",
         ]
