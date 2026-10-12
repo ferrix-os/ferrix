@@ -4,8 +4,8 @@
 # "steam-window: login window" once hyprix lists Steam's sign-in window.
 export PATH=/usr/local/bin:/bin:/data/usr/bin HOME=/data/home USER=root LANG=C.UTF-8
 echo "steam-window: start"
-YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1 RUST_LOG=${YRUST_LOG:-info} \
-    /data/yserver/yserver :0 -nolisten tcp > /tmp/yserver.log 2>&1 &
+YSERVER_WM_NAME=hyprix YSERVER_ALLOW_SOFTWARE_VULKAN=1 RUST_LOG=${YRUST_LOG:-info} \
+    /data/yserver/ywayland :0 -nolisten tcp > /tmp/yserver.log 2>&1 &
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do sleep 1; waited=$((waited + 1)); done
 echo "steam-window: yserver's socket after ${waited}s"

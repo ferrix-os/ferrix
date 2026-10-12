@@ -14,10 +14,11 @@
 # selections.
 #
 # The source is the customer's fork of yserver (docs/YSERVER.md §8), pinned
-# by commit: upstream's master as of 2026-10-02 (3875be0b, past 1.6.0) and
-# Ferrix's commits on top. It is built with its
-# `wayland` feature, the rootless backend, which takes Ferrix's own Wayland
-# client runtime from this repository on GitHub at the commit the fork pins. glslc, which compiles
+# by commit: upstream's master and Ferrix's commits on top, the rootless
+# backend among them as its own binary, `ywayland`, built with the fork's
+# `wayland` feature, which takes Ferrix's own Wayland client runtime from
+# this repository on GitHub at the commit the fork pins. `yserver`, the
+# card-less KMS server `test-yserver` starts, is built beside it. glslc, which compiles
 # yserver's shaders during the build, is Debian's too, unpacked into a
 # second tree with its own loader so the host's glibc does not matter.
 #
@@ -44,7 +45,7 @@ out=${FERRIX_YSERVER_VOLUME:-$HOME/.local/share/ferrix/yserver}
 # The fork, and the commit of it that is built. YSERVER_REPO may name a local
 # clone, for a commit not yet pushed.
 repo=${YSERVER_REPO:-https://github.com/ferrix-os/yserver.git}
-YSERVER_COMMIT=662c61f386e2fda9f1f2b0eeaa43af651e182a61
+YSERVER_COMMIT=8772cd65a87f4e271fb514d07c294135189c5538
 # The toolchain Ferrix pins in rust-toolchain.toml.
 toolchain=${YSERVER_TOOLCHAIN:-1.97.1}
 
@@ -301,7 +302,7 @@ fi
     export CARGO_TARGET_DIR="$out/target"
     export GLSLC="$out/glslc"
     cargo "+$toolchain" build --locked --release --target x86_64-unknown-linux-gnu \
-        --features wayland --bin yserver
+        --features wayland --bin yserver --bin ywayland
 )
 binary="$out/target/x86_64-unknown-linux-gnu/release/yserver"
 
@@ -322,6 +323,7 @@ done
 rm -f "$tree"/usr/share/vulkan/icd.d/{radeon,intel,intel_hasvk,nouveau,gfxstream_vk}_icd.json
 mkdir -p "$tree/yserver"
 strip -o "$tree/yserver/yserver" "$binary"
+strip -o "$tree/yserver/ywayland" "${binary%/*}/ywayland"
 
 test -e "$tree/usr/lib64/ld-linux-x86-64.so.2" \
     || { echo "fetch-yserver: no linker at usr/lib64" >&2; exit 1; }

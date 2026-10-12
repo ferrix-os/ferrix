@@ -54,11 +54,11 @@ const DESKTOP_PATH: &str = "etc/yserver.sh";
 /// (the device calls it write-combining): Steam's maximized window took
 /// 22 ms a frame to read back and its uploads half the server's time. On
 /// lavapipe both are copies in RAM. Venus pays once hyprix takes dmabufs.
-const DESKTOP_SCRIPT: &str = r#"export YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1
+const DESKTOP_SCRIPT: &str = r#"export YSERVER_WM_NAME=hyprix YSERVER_ALLOW_SOFTWARE_VULKAN=1
 export RUST_LOG="${RUST_LOG:-info}" VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json
 unset LD_LIBRARY_PATH
 exec /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
-    /data/yserver/yserver :0 -nolisten tcp > /tmp/yserver.log 2>&1
+    /data/yserver/ywayland :0 -nolisten tcp > /tmp/yserver.log 2>&1
 "#;
 
 /// What the `--everything` desktop's configuration gains for yserver: the
