@@ -375,6 +375,7 @@ COMMANDS:
     ports         Build the libraries ported onto ferrousli that apps build against (x86_64: libcxx, zlib; Arm: zlib); the ported programs are apps
     apps          List the apps in src/user/apps, each checked against its app.toml (docs/APPS.md)
     check-apps    check's steps for the apps alone: each app's formatting, clippy, tests and folder
+    check-side    check's steps for the workspaces of their own (loom, compositor, Linux programs, adbd, nvos, apps), which check runs beside its main workspace
     build-apps    Build every app's package, or --app's, for --arch: scripts too, which run and
                   run-compositor never start, and take the last of
     new-app       Write a new app's folder: --app NAME, --abi native (the default) or linux
