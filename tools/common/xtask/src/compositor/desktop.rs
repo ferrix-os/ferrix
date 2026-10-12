@@ -204,6 +204,8 @@ pub(super) fn desktop(
         if args.everything {
             carry_everything(arch, args, &mut carried);
         }
+    } else if args.wine {
+        carried.ports.extend(super::wine::desktop_files());
     } else {
         carried.ports.extend(crate::rustc::default_links(args));
     }

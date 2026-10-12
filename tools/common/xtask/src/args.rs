@@ -167,6 +167,10 @@ pub(crate) struct Args {
     /// library `fetch-steam-preinstall.sh` installed on the host
     /// (`crate::everything`).
     pub(crate) steam_preinstall: bool,
+    /// `--wine`: `run-compositor` with Wine's volume at `/data`, yserver on
+    /// `:0` beside the compositor, and Wine's notepad started on it
+    /// (`crate::compositor::wine::with_wine`, docs/WINE.md).
+    pub(crate) wine: bool,
     /// `--login`: `run`'s getty asks who is there with `/bin/login`
     /// instead of starting root's shell (`docs/AUTH.md` §6.2), and the image
     /// carries `authd` for it. A person's account with no password chooses
@@ -749,6 +753,7 @@ impl Args {
             "--i686" => self.i686 = true,
             "--slots" => self.slots = true,
             "--steam-preinstall" => self.steam_preinstall = true,
+            "--wine" => self.wine = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -787,7 +792,7 @@ impl Args {
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
                 "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" | "--i686"
-                | "--slots" | "--steam-preinstall" => args.switch(&item),
+                | "--slots" | "--steam-preinstall" | "--wine" => args.switch(&item),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;

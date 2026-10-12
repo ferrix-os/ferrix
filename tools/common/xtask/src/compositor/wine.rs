@@ -124,6 +124,72 @@ tail -n 20 /tmp/yserver.log | sed 's/^/wine: yserver: /'
 echo "wine: end"
 "#;
 
+/// Where `run-compositor --wine` carries [`DESKTOP_SCRIPT`].
+const DESKTOP_SCRIPT_PATH: &str = "etc/wine-desktop.sh";
+
+/// Where `run-compositor --wine` carries [`NOTEPAD_SCRIPT`].
+const NOTEPAD_SCRIPT_PATH: &str = "etc/wine-notepad.sh";
+
+/// What `run-compositor --wine` starts beside yserver: once the X socket is
+/// there, a prefix in `/tmp` (about 40 s under KVM), then notepad. What
+/// Wine says goes to `/tmp/wine/*.log`.
+const DESKTOP_SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp/wine XDG_RUNTIME_DIR=/tmp
+export WINEPREFIX=/tmp/wine/prefix WINESERVER=/usr/lib/wine/wineserver64
+export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+waited=0
+while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
+    sleep 1
+    waited=$((waited + 1))
+done
+mkdir -p /tmp/wine
+/usr/lib/wine/wine64 wineboot -i > /tmp/wine/wineboot.log 2>&1
+/usr/lib/wine/wineserver64 -w
+/usr/lib/wine/wine64 notepad > /tmp/wine/notepad.log 2>&1
+"#;
+
+/// What `SUPER+N` runs on `run-compositor --wine`'s desktop: another
+/// notepad in the prefix [`DESKTOP_SCRIPT`] made.
+const NOTEPAD_SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp/wine XDG_RUNTIME_DIR=/tmp
+export WINEPREFIX=/tmp/wine/prefix WINESERVER=/usr/lib/wine/wineserver64
+export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+exec /usr/lib/wine/wine64 notepad >> /tmp/wine/notepad.log 2>&1
+"#;
+
+/// What `run-compositor --wine` adds to the archive: yserver's desktop
+/// files and links, Wine's links, and the two scripts.
+pub(crate) fn desktop_files() -> Vec<File> {
+    let mut files = crate::yserver::desktop_files(&[]);
+    files.extend(crate::rustc::files(crate::wine::LINKS));
+    for (path, script) in [
+        (DESKTOP_SCRIPT_PATH, DESKTOP_SCRIPT),
+        (NOTEPAD_SCRIPT_PATH, NOTEPAD_SCRIPT),
+    ] {
+        files.push(File {
+            path: path.to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(script.as_bytes().to_vec()),
+        });
+    }
+    files
+}
+
+/// What `run-compositor --wine` adds to the desktop's configuration:
+/// yserver on `:0`, [`DESKTOP_SCRIPT`] as the desktop starts, and `SUPER+N`
+/// for another notepad.
+pub(crate) fn with_wine(config: String, args: &Args) -> String {
+    if !args.wine {
+        return config;
+    }
+    println!("  x86_64: yserver on :0 and Wine's notepad, from the Wine volume");
+    format!(
+        "{config}\n{}# Added by `cargo xtask run-compositor --wine`.\n\
+         env = XDG_RUNTIME_DIR,/tmp\n\
+         exec-once = /bin/busybox sh /{DESKTOP_SCRIPT_PATH}\n\
+         bind = SUPER, N, exec, /bin/busybox sh /{NOTEPAD_SCRIPT_PATH}\n",
+        crate::yserver::desktop_config()
+    )
+}
+
 /// The part of `screen`, in percent, that is pure white.
 fn white_percent(screen: &Image) -> usize {
     let (pixels, _) = screen.pixels.as_chunks::<3>();

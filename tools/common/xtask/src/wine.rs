@@ -69,7 +69,7 @@ const STATUS: i32 = 17;
 
 /// Megabytes of guest RAM: Wine's own programs are small, but a prefix is
 /// about 800 MB of files written through the page cache.
-const MEMORY: u32 = 6144;
+pub(crate) const MEMORY: u32 = 6144;
 
 /// The volume `tools/common/fetch/fetch-wine.sh` makes.
 ///

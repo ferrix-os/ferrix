@@ -190,6 +190,53 @@ pub(super) fn with_layout(config: String, args: &Args) -> String {
     config
 }
 
+/// The one data disk a watched desktop has, and the memory it needs:
+/// Wine's volume under `--wine`, the browser's under `--chrome` (the
+/// merged one under `--everything`), the compiler's otherwise.
+fn data_disk(arch: Arch, args: &mut Args) -> Result<()> {
+    if args.wine && (args.chrome || arch != Arch::X86_64) {
+        return Err(Error::new(
+            "--wine is x86-64's, without --chrome or --everything: Wine's volume is the one \
+             data disk",
+        ));
+    }
+    if args.wine {
+        // Wine's volume, which carries yserver, as `test-wine` attaches it,
+        // and the memory a prefix in /tmp needs.
+        args.data_image = Some(crate::wine::volume()?);
+        if !args.memory_given {
+            args.memory = crate::wine::MEMORY;
+        }
+    } else if args.chrome {
+        // One data disk: the browser's, in the rustc volume's place --
+        // Chrome for Testing's on x86-64, Debian's Chromium on AArch64.
+        // `--everything` has both downloads on the one disk the kernel
+        // mounts, and is x86-64's.
+        args.data_image = Some(if args.everything && arch == Arch::X86_64 {
+            crate::everything::volume()?
+        } else {
+            crate::chrome::volume_for(arch)?
+        });
+        if !args.memory_given {
+            args.memory = if with_steam_volume(args, arch) {
+                steam_window::MEMORY
+            } else {
+                crate::chrome::MEMORY
+            };
+        }
+        // Chrome, and with `--everything` the compiler, run on ferrousli.
+        chrome_libc(args);
+    } else if crate::chrome::on_ferrousli(args) {
+        return Err(Error::new(
+            "--interpreter and --library need --chrome here: they put Chrome, and with \
+             --everything rustc, on ferrousli",
+        ));
+    } else {
+        crate::rustc::prepare_default(arch, args)?;
+    }
+    Ok(())
+}
+
 /// `cargo xtask run-compositor`: the compositor on a screen a person watches.
 ///
 /// The same image `test-compositor` boots -- the compositor as init, its
@@ -231,33 +278,7 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
         args.variant = variant;
     }
     everything_venus(arch, &mut args);
-    if args.chrome {
-        // One data disk: the browser's, in the rustc volume's place --
-        // Chrome for Testing's on x86-64, Debian's Chromium on AArch64.
-        // `--everything` has both downloads on the one disk the kernel
-        // mounts, and is x86-64's.
-        args.data_image = Some(if args.everything && arch == Arch::X86_64 {
-            crate::everything::volume()?
-        } else {
-            crate::chrome::volume_for(arch)?
-        });
-        if !args.memory_given {
-            args.memory = if with_steam_volume(&args, arch) {
-                steam_window::MEMORY
-            } else {
-                crate::chrome::MEMORY
-            };
-        }
-        // Chrome, and with `--everything` the compiler, run on ferrousli.
-        chrome_libc(&mut args);
-    } else if crate::chrome::on_ferrousli(&args) {
-        return Err(Error::new(
-            "--interpreter and --library need --chrome here: they put Chrome, and with \
-             --everything rustc, on ferrousli",
-        ));
-    } else {
-        crate::rustc::prepare_default(arch, &mut args)?;
-    }
+    data_disk(arch, &mut args)?;
     let config = match everything_config(&mut args)? {
         // A terminal as the desktop starts, beside Chrome and Steam, as
         // `RUN_CONFIG`'s desktop has one; the host's own config names a
@@ -274,10 +295,13 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
             None => RUN_CONFIG.to_owned(),
         },
     };
-    let config = with_steam(
-        with_yserver(with_chrome(config, &args, arch), &args, arch),
+    let config = super::wine::with_wine(
+        with_steam(
+            with_yserver(with_chrome(config, &args, arch), &args, arch),
+            &args,
+            arch,
+        ),
         &args,
-        arch,
     );
     // A watched boot has a network unless it was told not to: a person at a
     // screen expects a machine that can fetch something, and finding out
