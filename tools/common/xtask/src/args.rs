@@ -746,6 +746,9 @@ impl Args {
             "--login" => self.login = true,
             "--update" => self.update = true,
             "--nvme" => self.nvme = true,
+            "--i686" => self.i686 = true,
+            "--slots" => self.slots = true,
+            "--steam-preinstall" => self.steam_preinstall = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -775,8 +778,6 @@ impl Args {
                 "--ferrousli" => args.ferrousli = true,
                 "--zinc" => args.zinc = true,
                 "--statd" | "--installer" => args.carry(&item),
-                "--i686" => args.i686 = true,
-                "--slots" => args.slots = true,
                 "--adbd" | "--app" | "--no-apps" | "--abi" => args.carry_more(&item, &mut items)?,
                 "--miri" => args.miri = true,
                 "--reset" => args.reset = true,
@@ -785,11 +786,9 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" => {
-                    args.switch(&item);
-                }
+                "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" | "--i686"
+                | "--slots" | "--steam-preinstall" => args.switch(&item),
                 "--everything" => args.everything(),
-                "--steam-preinstall" => args.steam_preinstall = true,
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;
                     args.forwards.push(crate::gateway::Forward::parse(&raw)?);
