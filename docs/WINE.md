@@ -1,20 +1,22 @@
 # Wine on Ferrix
 
 Debian 13's 64-bit Wine (10.0), unchanged, on Ferrix under KVM. This is
-stage 23's first step: a prefix made by `wineboot`, `cmd /c ver` answering,
-and `notepad` drawing a window through yserver in software. No GPU is
-involved.
+stage 23's first step: a prefix made by `wineboot`, `cmd /c ver` answering
+from the 64-bit `cmd` and from the 32-bit one, and `notepad` drawing a
+window through yserver in software. No GPU is involved.
 
 ## 1. Running it
 
 ```
-tools/common/fetch/fetch-wine.sh        # once: the volume, about 2 GB
+tools/common/fetch/fetch-wine.sh        # once: the volume, about 2.6 GB
 cargo xtask test-wine --accel kvm       # the gate
 ```
 
 `test-wine` attaches the volume at `/data` under `snapshot=on` and boots
 twice. The first boot is a shell: it makes a prefix in `/tmp` with
-`wineboot -i` and requires `cmd /c ver` to print `Microsoft Windows 10.0`.
+`wineboot -i` and requires `cmd /c ver` to print `Microsoft Windows 10.0`,
+from `C:\windows\system32\cmd.exe` and again from the 32-bit
+`C:\windows\syswow64\cmd.exe` (§7).
 The second is hyprix with yserver on `:0`, as `test-xwindow` boots it: the
 same two steps, then `notepad`, which must become a window of hyprix's
 titled "Untitled - Notepad" whose white page fills the tile hyprix gave it
@@ -70,7 +72,7 @@ gives it.
 
 | Piece | Where | What |
 |---|---|---|
-| The volume | `tools/common/fetch/fetch-wine.sh` | Debian's `wine64`, `libwine` and `wine`, pinned by SHA-256, unpacked over yserver's tree, with glibc, libunwind, FreeType, fontconfig, Xlib and the X extension libraries, `libz-mingw-w64`'s zlib marked as a Wine builtin (what `libwine`'s postinst does), Wine's and Liberation's fonts, and `strace` |
+| The volume | `tools/common/fetch/fetch-wine.sh` | Debian's `wine64`, `libwine` and `wine`, pinned by SHA-256, unpacked over yserver's tree, the 32-bit Windows DLLs from the i386 `libwine` (§7), with glibc, libunwind, FreeType, fontconfig, Xlib and the X extension libraries, `libz-mingw-w64`'s zlib marked as a Wine builtin (what `libwine`'s postinst does), Wine's and Liberation's fonts, and `strace` |
 | The shell boot | `tools/common/xtask/src/wine.rs` | zinc as init, busybox, the links Debian's paths need, and the script |
 | The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, the script, and the input the gate types; also `run-compositor --wine`'s scripts |
 | yserver | the fork `ferrix-os/yserver`, pinned in `tools/common/fetch/fetch-yserver.sh` | the X server; §5 says what Wine needed of it |
@@ -79,8 +81,8 @@ Wine is fetched, never vendored. The loader is started directly
 (`/usr/lib/wine/wine64`) with `WINESERVER=/usr/lib/wine/wineserver64`:
 Debian's `wine` and `wineserver` are shell scripts that choose between a
 32-bit and a 64-bit build, and only the second is on the volume. 32-bit
-Windows programs run in the 64-bit process (Wine's new WoW64 mode); there is
-no 32-bit Wine.
+Windows programs run in the 64-bit process (Wine's new WoW64 mode, §7);
+there is no 32-bit Wine.
 
 ## 3. The `GS` base
 
@@ -214,9 +216,6 @@ is a separate question, in `docs/BACKLOG.md`.
 
 **Leads, none of them in the kernel as far as is known.**
 
-* `wineboot` says `failed to open C:\windows\syswow64\rundll32.exe:
-  c0000135`, which it does not say on Linux: a 32-bit Windows program does
-  not start yet (E1.6).
 * `df` says tmpfs has used 0 of 3.0G with an 800 MB prefix on it.
 * `wineboot` takes 27 s of guest time; on Linux, on the same host, a few.
 
@@ -229,7 +228,11 @@ is a separate question, in `docs/BACKLOG.md`.
   logged `err:seh:segv_handler Got unexpected trap 0`, and `wineboot` took
   88 s of guest time.
 
-Nothing else was needed for these three programs. In particular not
+* 32-bit Windows programs in the 64-bit process (§7): the frame a
+  handler is entered on, the code selector a frame gives back,
+  `ARCH_SET_FS`'s null selector, and `SS` after `SYSRET` on AMD.
+
+Nothing else was needed for these programs. In particular not
 `futex_waitv`, `FUTEX_WAKE_OP`, `mlock`, `membarrier`, `ptrace`,
 `process_vm_readv`, `modify_ldt` or `preadv`: none is in the trace of §4.
 
@@ -314,3 +317,97 @@ The fix is E1.5's (stage 23), with notepad's.
 
 **Where it runs.** On demand, as `test-wine` does, and for the same
 reasons: it attaches a volume, and it never downloads.
+
+## 7. 32-bit Windows programs (WoW64)
+
+Wine 10.0 runs a 32-bit Windows program inside its 64-bit process: its
+`ntdll.so` starts it "in experimental wow64 mode" when no 32-bit Wine is
+installed, and Wine's `wow64cpu.dll` switches between the 64-bit code and
+the program's 32-bit code with far transfers to the 32-bit code selector,
+`0x23` on Linux and on Ferrix (`docs/I386.md` §3.1). No Linux system call is
+made from 32-bit code: a Windows system call goes back to 64-bit code first.
+
+**The DLLs.** Debian builds the 32-bit Windows DLLs only into its i386
+`libwine`. Without them `wineboot` says `failed to open
+C:\windows\syswow64\rundll32.exe: c0000135` (a DLL not found), on Linux
+as on Ferrix: this page said before that Linux did not, which the trace in
+`~/.local/share/ferrix/wine/trace` on nazuna does not bear out.
+`fetch-wine.sh` copies that package's `i386-windows` beside the 64-bit
+`x86_64-windows`, about 600 MB, and nothing else of it. With them, on Linux
+7.0 in the same tree (2026-10-12), `wineboot` fills `syswow64` and the
+32-bit `cmd /c ver` answers `Microsoft Windows 10.0.19043`.
+
+**What Wine does, and what the kernel had to answer** (Wine 10.0's
+`dlls/ntdll/unix/signal_x86_64.c` and `dlls/wow64cpu/cpu.c`, Linux 6.12's
+`arch/x86/kernel/signal.c`, `signal_64.c` and `process_64.c`):
+
+1. *A thread-local selector for the 32-bit thread block.* Wine's
+   `alloc_fs_sel` calls i386 `set_thread_area` through `int $0x80` from
+   64-bit code, base the 32-bit TEB, limit `~0`, flags `0x41`, and the
+   32-bit code addresses its TEB through `FS` with that selector. Both
+   already worked (I1, I2a).
+2. *`ARCH_SET_FS` loads a null `FS` selector first.* Each time Wine comes
+   back to its Unix side it sets its own thread pointer with `ARCH_SET_FS`
+   while `FS` still holds the 32-bit selector. Linux loads a null selector
+   before it writes the base; Ferrix did not, so the next switch reloaded the
+   selector, whose base is the 32-bit TEB, and glibc's thread pointer was
+   gone. It now does as Linux does, and as its `ARCH_SET_GS` already did.
+3. *A handler is entered on the frame its installer's mode chose.* A fault
+   in the 32-bit code -- a guard page, a breakpoint, a stack probe -- is
+   handled by Wine's 64-bit `SIGSEGV` handler. Linux enters it on a 64-bit
+   frame in 64-bit mode whatever mode the interrupted code was in, because it
+   decides by the handler (`SA_IA32_ABI`, set when an i386 call installed
+   it), and records the interrupted `cs`, `0x23`, in the `sigcontext`. Ferrix
+   decided by the interrupted code's selector, and would have entered Wine's
+   64-bit handler on an i386 frame in 32-bit mode. A disposition now records
+   the ABI of the `rt_sigaction` that installed it, and the 64-bit frame
+   records the interrupted code selector, which Wine reads to tell 32-bit
+   code from 64-bit.
+4. *A 64-bit `rt_sigreturn` gives back `0x23`.* Wine resumes the 32-bit
+   code from its handler through the frame, which says `0x23`. Ferrix
+   resumed every 64-bit frame in 64-bit code. It now gives back 32-bit user
+   code where the frame holds it, and 64-bit user code for anything else, as
+   before; Linux loads whatever the frame holds and lets `IRET` refuse a bad
+   one. A frame that gives back `0x23` with a `RIP` at or above 4 GiB is
+   refused with `SIGSEGV`: `IRETQ` checks the 32-bit segment's limit and
+   would fault in ring 0, where Linux has a fixup and Ferrix has none.
+5. *`SS` after `SYSRET`, on AMD.* Wine leaves its 64-bit side for the 32-bit
+   code with a far jump, which loads `CS` and nothing else, so the 32-bit
+   code runs on whatever `SS` the last return from the kernel left. AMD's
+   `SYSRET` writes `SS`'s selector and not its hidden part
+   (`X86_BUG_SYSRET_SS_ATTRS`). The first 32-bit stack access after a
+   system call then took a stack fault (vector 12), which Wine reports as
+   `Unhandled stack overflow`, in `rundll32` during `wineboot`. Two things
+   were wrong. An interrupt from ring 3 leaves `SS` null, and a switch from
+   there to a task that leaves a system call by `SYSRET` handed that null
+   `SS` on; Linux reloads `SS` at every switch for that reason, and
+   `restore_user_state` now does too (`cpu::settle_kernel_ss`). And the
+   descriptor it loads, kernel data, was present-and-writable with limit 0,
+   which 64-bit mode never looked at; it is now Linux's `__KERNEL_DS`, flat 4
+   GiB with a 32-bit stack pointer. Intel's `SYSRET` loads all of `SS`, so
+   neither was seen there.
+
+`modify_ldt` was not needed: Wine uses the LDT on Linux only for 32-bit
+Wine, and in WoW64 mode only `set_thread_area`'s GDT entries.
+
+**Checks** (boot self-checks; the negative controls are in the landing's
+record):
+
+| Line | Requirement | What |
+|---|---|---|
+| `wow64` | L.x86_64.42, L.x86_64.43, L.x86_64.61 | a 64-bit program takes an i386 `set_thread_area` selector through `int $0x80`, loads it into `FS`, calls `ARCH_SET_FS` and reads `FS` 0 and its new base; in 32-bit code on a stack below 4 GiB it reads its block through the selector, and its `ud2` reaches its 64-bit `SIGILL` handler in 64-bit mode on a frame saying `cs` `0x23` and trap 6; `rt_sigreturn` resumes the 32-bit code in compatibility mode |
+| `signal`, 64-bit forgeries | L.x86_64.43 | `rt_sigreturn` ends a program whose 64-bit frame holds a kernel-half `RIP` or `RSP`, or `CS` `0x23` with a `RIP` of 4 GiB, with `SIGSEGV`, resumes `IOPL` 3, `TF` and `IF` clear as `IOPL` 0 with `IF` set and `CS` and `SS` `0x10` and `0x18` as `0x33` and `0x2b`, and takes an honest change: the rest of the requirement the `0x23` case changed, unchecked until now |
+| `sysret` | L.x86_64.58 | a 64-bit program pinned beside a spinning one sleeps 50 times, each time pushing a word in 32-bit code after `nanosleep` returns through `SYSRET`, and reads each back; some switch found `SS` null and loaded it |
+| `inherit` | L.x86_64.11, L.x86_64.12 | a new program reads a `GS` base of 0; a `fork` child reads its parent's `GS` and `FS` bases, thread-local slot, `DS`, `MXCSR`, x87 control word and `XMM0`, a `clone` thread both bases; after `execve` all of them are back at a new program's |
+
+**Where it stands (2026-10-12).** `test-wine` runs the 32-bit `cmd` to
+completion: `Microsoft Windows 10.0.19043`. `wineboot` runs the 32-bit
+`rundll32` and `iexplore` without an exception. Not tried yet: a 32-bit
+program that draws a window, and a 32-bit installer. An i386 handler in a
+64-bit program, delivered on a `SYSCALL`'s way back, runs in 64-bit mode,
+unlike Linux; Wine installs none, and the row is in `docs/BACKLOG.md`.
+
+**Review.** The landing's certification review is in the consultant's
+ledger on nazuna (`~/.local/share/ferrix/cert-consultant/reviews.md`):
+the first verdict, OK IF W1 to W7, at line 762; W1 is the 4 GiB refusal
+above, W2 the `SYSCALL` row, W3 the `inherit` check.

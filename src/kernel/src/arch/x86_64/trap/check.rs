@@ -695,7 +695,9 @@ pub(crate) fn run() -> Result<(), &'static str> {
     );
 
     check_bases_and_fault_context()?;
-    check_compat()
+    check_compat()?;
+    check_forged_64_bit_frames()?;
+    check_wow64()
 }
 
 /// `arch_prctl`'s refusals and readers, and a `SIGSEGV` handler's view of
@@ -1037,4 +1039,337 @@ fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     );
     crate::syscall::exec::run(&file, &[name], &[], [0x7e; ferrix_ustack::RANDOM_BYTES])
         .map_err(|_| "a program that faults on purpose could not be started")
+}
+
+/// 32-bit code inside a 64-bit program, the way Wine runs a 32-bit Windows
+/// program in its 64-bit process (`docs/WINE.md` §7). The program installs a
+/// 64-bit `SA_SIGINFO` handler for `SIGILL`; takes a thread-local descriptor
+/// with an i386 `set_thread_area` through `int $0x80`, the shape Wine's
+/// `alloc_fs_sel` asks for (base the program's block, limit `~0`, flags
+/// `0x41`); loads its selector into `FS` and sets its thread pointer with
+/// `ARCH_SET_FS`, after which `FS` must read 0 and `%fs:0` the new base;
+/// then far-returns to the 32-bit code selector on a stack below 4 GiB. There
+/// it reads its block through the descriptor, and its `ud2` raises `SIGILL`.
+/// The handler must run in 64-bit mode on a 64-bit frame whose `sigcontext`
+/// says code selector `0x23` and trap 6; it steps the saved instruction
+/// pointer past the `ud2`, and `rt_sigreturn` must resume the 32-bit code in
+/// compatibility mode, which far-returns to 64-bit code and exits 0. Its
+/// test of `CS` after the `ud2` reads the same in either mode, so a resume in
+/// 64-bit code reaches `bad64` and exits by its status, not by a fault.
+///
+/// The exits: 9 a failed `rt_sigaction`, 10 a failed `set_thread_area`, 11 a
+/// failed `ARCH_SET_FS`, 12 `FS` not null after it, 13 `%fs:0` not the new
+/// base; 20 the handler never ran, 21 it ran in 32-bit mode, 22 its
+/// `sigcontext` did not say `0x23`, 23 not trap 6; 24 the 32-bit code did
+/// not read its block through the descriptor, 25 it was not resumed in
+/// compatibility mode. Its data lives in the image's writable page.
+///
+/// ```text
+///   subq $32, %rsp
+///   leaq handler(%rip), %rax ; movq %rax, (%rsp)
+///   movq $0x04000004, 8(%rsp)
+///   leaq restorer(%rip), %rax ; movq %rax, 16(%rsp)
+///   movq $0, 24(%rsp)
+///   movl $13, %eax ; movl $4, %edi ; movq %rsp, %rsi ; xorl %edx, %edx
+///   movl $8, %r10d ; syscall
+///   movl $9, %edi ; testq %rax, %rax ; jnz exit
+///   movl $0x410f00, %ebx
+///   movl $-1, (%rbx) ; movl $0x410000, 4(%rbx) ; movl $-1, 8(%rbx)
+///   movl $0x41, 12(%rbx)
+///   movl $243, %eax ; int $0x80
+///   movl $10, %edi ; testl %eax, %eax ; jnz exit
+///   movl (%rbx), %eax ; shll $3, %eax ; orl $3, %eax ; movl %eax, 0x410f10
+///   movl $0x57303634, 0x410000
+///   movl %eax, %fs
+///   movl $0x13579bdf, 0x410100
+///   movl $158, %eax ; movl $0x1002, %edi ; movl $0x410100, %esi ; syscall
+///   movl $11, %edi ; testq %rax, %rax ; jnz exit
+///   movl %fs, %eax ; movl $12, %edi ; testw %ax, %ax ; jnz exit
+///   movl %fs:0, %eax ; movl $13, %edi ; cmpl $0x13579bdf, %eax ; jne exit
+///   movl $0x2b, %eax ; movl %eax, %ds ; movl %eax, %es
+///   movq %rsp, 0x410f80 ; movl $0x410e00, %esp
+///   pushq $0x23 ; leaq code32(%rip), %rax ; pushq %rax ; lretq
+/// back64:
+///   movq 0x410f80, %rsp ; movl 0x410f20, %eax
+///   movl $20, %edi ; testl %eax, %eax ; jz exit
+///   movl $21, %edi ; cmpl $2, %eax ; je exit
+///   movl $22, %edi ; cmpl $3, %eax ; je exit
+///   movl $23, %edi ; cmpl $4, %eax ; je exit
+///   movl $24, %edi ; cmpl $0, 0x410f24 ; jne exit
+///   movl $25, %edi ; cmpl $0, 0x410f28 ; jne exit
+///   xorl %edi, %edi
+/// exit:
+///   movl $231, %eax ; syscall
+/// handler:
+///   movl $2, %ecx ; movl %cs, %eax ; cmpl $0x33, %eax ; jne 1f
+///   movl $3, %ecx ; movzwl 184(%rdx), %eax ; cmpl $0x23, %eax ; jne 1f
+///   movl $4, %ecx ; cmpq $6, 200(%rdx) ; jne 1f
+///   movl $1, %ecx
+/// 1:
+///   movl %ecx, 0x410f20 ; addq $2, 168(%rdx) ; ret
+/// restorer:
+///   movl $15, %eax ; syscall
+///   .code32
+/// code32:
+///   movl 0x410f10, %eax ; movl %eax, %fs ; movl %fs:0, %eax
+///   cmpl $0x57303634, %eax ; je 2f ; movl $1, 0x410f24
+/// 2:
+///   ud2
+///   movl %cs, %eax ; cmpl $0x23, %eax ; jne bad64
+///   pushl $0x33 ; call 4f
+/// 4:
+///   addl $(back64 - 4b), (%esp) ; lretl
+///   .code64
+/// bad64:
+///   movl $1, 0x410f28 ; jmp back64
+/// ```
+///
+/// Assembled by GNU `as --64`, linked at the image's entry, and read back
+/// with `objcopy -O binary -j .text`.
+const WOW64: &[u8] = &[
+    0x48, 0x83, 0xec, 0x20, 0x48, 0x8d, 0x05, 0x64, 0x01, 0x00, 0x00, 0x48, 0x89, 0x04, 0x24, 0x48,
+    0xc7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x04, 0x48, 0x8d, 0x05, 0x91, 0x01, 0x00, 0x00, 0x48,
+    0x89, 0x44, 0x24, 0x10, 0x48, 0xc7, 0x44, 0x24, 0x18, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x0d, 0x00,
+    0x00, 0x00, 0xbf, 0x04, 0x00, 0x00, 0x00, 0x48, 0x89, 0xe6, 0x31, 0xd2, 0x41, 0xba, 0x08, 0x00,
+    0x00, 0x00, 0x0f, 0x05, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x0f, 0x85, 0x16, 0x01,
+    0x00, 0x00, 0xbb, 0x00, 0x0f, 0x41, 0x00, 0xc7, 0x03, 0xff, 0xff, 0xff, 0xff, 0xc7, 0x43, 0x04,
+    0x00, 0x00, 0x41, 0x00, 0xc7, 0x43, 0x08, 0xff, 0xff, 0xff, 0xff, 0xc7, 0x43, 0x0c, 0x41, 0x00,
+    0x00, 0x00, 0xb8, 0xf3, 0x00, 0x00, 0x00, 0xcd, 0x80, 0xbf, 0x0a, 0x00, 0x00, 0x00, 0x85, 0xc0,
+    0x0f, 0x85, 0xe2, 0x00, 0x00, 0x00, 0x8b, 0x03, 0xc1, 0xe0, 0x03, 0x83, 0xc8, 0x03, 0x89, 0x04,
+    0x25, 0x10, 0x0f, 0x41, 0x00, 0xc7, 0x04, 0x25, 0x00, 0x00, 0x41, 0x00, 0x34, 0x36, 0x30, 0x57,
+    0x8e, 0xe0, 0xc7, 0x04, 0x25, 0x00, 0x01, 0x41, 0x00, 0xdf, 0x9b, 0x57, 0x13, 0xb8, 0x9e, 0x00,
+    0x00, 0x00, 0xbf, 0x02, 0x10, 0x00, 0x00, 0xbe, 0x00, 0x01, 0x41, 0x00, 0x0f, 0x05, 0xbf, 0x0b,
+    0x00, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x0f, 0x85, 0x9c, 0x00, 0x00, 0x00, 0x8c, 0xe0, 0xbf, 0x0c,
+    0x00, 0x00, 0x00, 0x66, 0x85, 0xc0, 0x0f, 0x85, 0x8c, 0x00, 0x00, 0x00, 0x64, 0x8b, 0x04, 0x25,
+    0x00, 0x00, 0x00, 0x00, 0xbf, 0x0d, 0x00, 0x00, 0x00, 0x3d, 0xdf, 0x9b, 0x57, 0x13, 0x75, 0x78,
+    0xb8, 0x2b, 0x00, 0x00, 0x00, 0x8e, 0xd8, 0x8e, 0xc0, 0x48, 0x89, 0x24, 0x25, 0x80, 0x0f, 0x41,
+    0x00, 0xbc, 0x00, 0x0e, 0x41, 0x00, 0x6a, 0x23, 0x48, 0x8d, 0x05, 0xa8, 0x00, 0x00, 0x00, 0x50,
+    0x48, 0xcb, 0x48, 0x8b, 0x24, 0x25, 0x80, 0x0f, 0x41, 0x00, 0x8b, 0x04, 0x25, 0x20, 0x0f, 0x41,
+    0x00, 0xbf, 0x14, 0x00, 0x00, 0x00, 0x85, 0xc0, 0x74, 0x3e, 0xbf, 0x15, 0x00, 0x00, 0x00, 0x83,
+    0xf8, 0x02, 0x74, 0x34, 0xbf, 0x16, 0x00, 0x00, 0x00, 0x83, 0xf8, 0x03, 0x74, 0x2a, 0xbf, 0x17,
+    0x00, 0x00, 0x00, 0x83, 0xf8, 0x04, 0x74, 0x20, 0xbf, 0x18, 0x00, 0x00, 0x00, 0x83, 0x3c, 0x25,
+    0x24, 0x0f, 0x41, 0x00, 0x00, 0x75, 0x11, 0xbf, 0x19, 0x00, 0x00, 0x00, 0x83, 0x3c, 0x25, 0x28,
+    0x0f, 0x41, 0x00, 0x00, 0x75, 0x02, 0x31, 0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb9,
+    0x02, 0x00, 0x00, 0x00, 0x8c, 0xc8, 0x83, 0xf8, 0x33, 0x75, 0x25, 0xb9, 0x03, 0x00, 0x00, 0x00,
+    0x0f, 0xb7, 0x82, 0xb8, 0x00, 0x00, 0x00, 0x83, 0xf8, 0x23, 0x75, 0x14, 0xb9, 0x04, 0x00, 0x00,
+    0x00, 0x48, 0x83, 0xba, 0xc8, 0x00, 0x00, 0x00, 0x06, 0x75, 0x05, 0xb9, 0x01, 0x00, 0x00, 0x00,
+    0x89, 0x0c, 0x25, 0x20, 0x0f, 0x41, 0x00, 0x48, 0x83, 0x82, 0xa8, 0x00, 0x00, 0x00, 0x02, 0xc3,
+    0xb8, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xa1, 0x10, 0x0f, 0x41, 0x00, 0x8e, 0xe0, 0x64, 0xa1,
+    0x00, 0x00, 0x00, 0x00, 0x3d, 0x34, 0x36, 0x30, 0x57, 0x74, 0x0a, 0xc7, 0x05, 0x24, 0x0f, 0x41,
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x0b, 0x8c, 0xc8, 0x83, 0xf8, 0x23, 0x75, 0x0f, 0x6a, 0x33,
+    0xe8, 0x00, 0x00, 0x00, 0x00, 0x81, 0x04, 0x24, 0x2d, 0xff, 0xff, 0xff, 0xcb, 0xc7, 0x04, 0x25,
+    0x28, 0x0f, 0x41, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe9, 0x15, 0xff, 0xff, 0xff,
+];
+
+/// [`WOW64`], and what its status says.
+///
+/// Verifies: `L.x86_64.42`, `L.x86_64.43`, `L.x86_64.61`
+fn check_wow64() -> Result<(), &'static str> {
+    match run_program(b"/wow64", WOW64)? {
+        0 => {}
+        9 => return Err("the WoW64 program's rt_sigaction failed"),
+        10 => return Err("a 64-bit program's i386 set_thread_area through int $0x80 failed"),
+        11 => return Err("the WoW64 program's ARCH_SET_FS failed"),
+        12 => return Err("ARCH_SET_FS left a thread-local selector in FS"),
+        13 => return Err("%fs:0 after ARCH_SET_FS did not read the base it set"),
+        20 => return Err("a 64-bit handler for a fault in 32-bit code never ran"),
+        21 => return Err("a 64-bit handler for a fault in 32-bit code ran in 32-bit mode"),
+        22 => {
+            return Err(
+                "a 64-bit handler's sigcontext for a fault in 32-bit code did not say code \
+                 selector 0x23",
+            );
+        }
+        23 => {
+            return Err(
+                "a 64-bit handler's sigcontext for a ud2 in 32-bit code did not say trap 6",
+            );
+        }
+        24 => {
+            return Err(
+                "32-bit code did not read its block through the selector set_thread_area gave",
+            );
+        }
+        25 => {
+            return Err(
+                "rt_sigreturn through a 64-bit frame saying 0x23 did not resume compatibility mode",
+            );
+        }
+        _ => {
+            return Err(
+                "a fault in a 64-bit program's 32-bit code did not reach its 64-bit handler on a \
+                 64-bit frame",
+            );
+        }
+    }
+    println!(
+        "  wow64    a 64-bit program's 32-bit code read its block through an int $0x80 \
+         set_thread_area selector, its ud2 reached the 64-bit SIGILL handler on a 64-bit frame \
+         saying cs 0x23 and trap 6, and rt_sigreturn resumed it in compatibility mode; \
+         ARCH_SET_FS left FS null and its base read back"
+    );
+    Ok(())
+}
+
+/// A 64-bit program whose `SA_SIGINFO` handler for `SIGUSR1` forges two
+/// eight-byte fields of its own `ucontext` before returning through
+/// `rt_sigreturn`: the 64-bit twin of [`FORGE_I386`]. The handler's two
+/// `movq $VALUE, FIELD(%rdx)` are patched per case at [`FORGE_64_VALUE_AT`]
+/// and [`FORGE_64_FIELD_AT`], and at [`FORGE_64_VALUE2_AT`] and
+/// [`FORGE_64_FIELD2_AT`]; a case that forges one field writes it twice. After the return the program exits 3 if
+/// `IOPL` is set, 4 if `IF` is clear, 5 if `CS` is not `0x33`, 6 if `SS` is
+/// not `0x2b`, and 0 otherwise; 9 is a failed `rt_sigaction`.
+///
+/// ```text
+///   subq $32, %rsp
+///   leaq handler(%rip), %rax ; movq %rax, (%rsp)
+///   movq $0x04000004, 8(%rsp)
+///   leaq restorer(%rip), %rax ; movq %rax, 16(%rsp)
+///   movq $0, 24(%rsp)
+///   movl $13, %eax ; movl $10, %edi ; movq %rsp, %rsi ; xorl %edx, %edx
+///   movl $8, %r10d ; syscall
+///   movl $9, %edi ; testq %rax, %rax ; jnz exit
+///   movl $39, %eax ; syscall
+///   movl %eax, %edi ; movl $10, %esi ; movl $62, %eax ; syscall
+///   pushfq ; popq %rax
+///   movl $3, %edi ; testl $0x3000, %eax ; jnz exit
+///   movl $4, %edi ; testl $0x200, %eax ; jz exit
+///   movl %cs, %eax ; movl $5, %edi ; cmpl $0x33, %eax ; jne exit
+///   movl %ss, %eax ; movl $6, %edi ; cmpl $0x2b, %eax ; jne exit
+///   xorl %edi, %edi
+/// exit:
+///   movl $231, %eax ; syscall
+/// handler:
+///   movabsq $0x1122334455667788, %rax ; movq %rax, 0x7eadbeef(%rdx)
+///   movabsq $0x99aabbccddeeff00, %rax ; movq %rax, 0x7ecafe01(%rdx) ; ret
+/// restorer:
+///   movl $15, %eax ; syscall
+/// ```
+///
+/// Assembled by GNU `as --64` with those placeholders, linked at the image's
+/// entry, and read back with `objcopy -O binary -j .text`.
+const FORGE_64: &[u8] = &[
+    0x48, 0x83, 0xec, 0x20, 0x48, 0x8d, 0x05, 0x93, 0x00, 0x00, 0x00, 0x48, 0x89, 0x04, 0x24, 0x48,
+    0xc7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x04, 0x48, 0x8d, 0x05, 0xa2, 0x00, 0x00, 0x00, 0x48,
+    0x89, 0x44, 0x24, 0x10, 0x48, 0xc7, 0x44, 0x24, 0x18, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x0d, 0x00,
+    0x00, 0x00, 0xbf, 0x0a, 0x00, 0x00, 0x00, 0x48, 0x89, 0xe6, 0x31, 0xd2, 0x41, 0xba, 0x08, 0x00,
+    0x00, 0x00, 0x0f, 0x05, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x75, 0x49, 0xb8, 0x27,
+    0x00, 0x00, 0x00, 0x0f, 0x05, 0x89, 0xc7, 0xbe, 0x0a, 0x00, 0x00, 0x00, 0xb8, 0x3e, 0x00, 0x00,
+    0x00, 0x0f, 0x05, 0x9c, 0x58, 0xbf, 0x03, 0x00, 0x00, 0x00, 0xa9, 0x00, 0x30, 0x00, 0x00, 0x75,
+    0x26, 0xbf, 0x04, 0x00, 0x00, 0x00, 0xa9, 0x00, 0x02, 0x00, 0x00, 0x74, 0x1a, 0x8c, 0xc8, 0xbf,
+    0x05, 0x00, 0x00, 0x00, 0x83, 0xf8, 0x33, 0x75, 0x0e, 0x8c, 0xd0, 0xbf, 0x06, 0x00, 0x00, 0x00,
+    0x83, 0xf8, 0x2b, 0x75, 0x02, 0x31, 0xff, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x48, 0xb8,
+    0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x48, 0x89, 0x82, 0xef, 0xbe, 0xad, 0x7e, 0x48,
+    0xb8, 0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x48, 0x89, 0x82, 0x01, 0xfe, 0xca, 0x7e,
+    0xc3, 0xb8, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x05,
+];
+
+/// Where [`FORGE_64`]'s handler keeps the value it writes, the
+/// `0x1122334455667788` placeholder.
+const FORGE_64_VALUE_AT: usize = 160;
+
+/// Where it keeps the field's offset in the `ucontext`, the `0x7eadbeef`
+/// placeholder.
+const FORGE_64_FIELD_AT: usize = 171;
+
+/// The second write's value, the `0x99aabbccddeeff00` placeholder.
+const FORGE_64_VALUE2_AT: usize = 177;
+
+/// The second write's field, the `0x7ecafe01` placeholder.
+const FORGE_64_FIELD2_AT: usize = 188;
+
+/// [`FORGE_64`] once for each case: a kernel-half `RIP` and a kernel-half
+/// `RSP` must end the program with `SIGSEGV`, and so must 32-bit user code
+/// with a `RIP` of 4 GiB, past the 32-bit code segment's limit, which the
+/// kernel's `IRETQ` would fault on in ring 0; flags asking `IOPL` 3 and the
+/// trap flag with `IF` clear, and `CS` and `SS` `0x10` and `0x18`, must
+/// resume it in ring 3 with `IOPL` 0, `IF` set and its own selectors; and a
+/// frame changed only in `RAX` must return as it was.
+///
+/// Verifies: `L.x86_64.43`
+fn check_forged_64_bit_frames() -> Result<(), &'static str> {
+    /// `uc_mcontext` in the `ucontext`, and the fields in it.
+    const MCONTEXT: u32 = 40;
+    const KERNEL_HALF: u64 = 0xffff_8000_0000_0000;
+    /// `RIP` and the selectors' eight bytes in `uc_mcontext`.
+    const RIP: u32 = MCONTEXT + 128;
+    const SELECTORS: u32 = MCONTEXT + 144;
+    let cases: [(u32, u64, u32, u64, i32, &'static str); 6] = [
+        (
+            RIP,
+            KERNEL_HALF,
+            RIP,
+            KERNEL_HALF,
+            killed_by(SIGSEGV),
+            "a 64-bit frame with a kernel-half RIP did not end the program with SIGSEGV",
+        ),
+        (
+            MCONTEXT + 120,
+            KERNEL_HALF,
+            MCONTEXT + 120,
+            KERNEL_HALF,
+            killed_by(SIGSEGV),
+            "a 64-bit frame with a kernel-half RSP did not end the program with SIGSEGV",
+        ),
+        (
+            MCONTEXT + 136,
+            0x3100,
+            MCONTEXT + 136,
+            0x3100,
+            0,
+            "a 64-bit frame asking IOPL 3, TF and IF clear did not resume with IOPL 0 and IF set",
+        ),
+        (
+            SELECTORS,
+            0x0018_0000_0000_0010,
+            SELECTORS,
+            0x0018_0000_0000_0010,
+            0,
+            "a 64-bit frame asking CS 0x10 and SS 0x18 did not resume with ring 3's selectors",
+        ),
+        (
+            MCONTEXT + 104,
+            0,
+            MCONTEXT + 104,
+            0,
+            0,
+            "a 64-bit frame changed only in RAX did not return",
+        ),
+        (
+            RIP,
+            0x1_0000_0000,
+            SELECTORS,
+            0x002b_0000_0000_0023,
+            killed_by(SIGSEGV),
+            "a 64-bit frame with CS 0x23 and a RIP of 4 GiB did not end the program with SIGSEGV",
+        ),
+    ];
+    for (field, value, field2, value2, expected, problem) in cases {
+        /// What a placeholder outside the program says.
+        const SHORT: &str = "the 64-bit forging program is shorter than its placeholders' places";
+        let mut code = FORGE_64.to_vec();
+        code.get_mut(FORGE_64_VALUE_AT..FORGE_64_VALUE_AT + 8)
+            .ok_or(SHORT)?
+            .copy_from_slice(&value.to_le_bytes());
+        code.get_mut(FORGE_64_FIELD_AT..FORGE_64_FIELD_AT + 4)
+            .ok_or(SHORT)?
+            .copy_from_slice(&field.to_le_bytes());
+        code.get_mut(FORGE_64_VALUE2_AT..FORGE_64_VALUE2_AT + 8)
+            .ok_or(SHORT)?
+            .copy_from_slice(&value2.to_le_bytes());
+        code.get_mut(FORGE_64_FIELD2_AT..FORGE_64_FIELD2_AT + 4)
+            .ok_or(SHORT)?
+            .copy_from_slice(&field2.to_le_bytes());
+        let status = run_program(b"/forge64", &code)?;
+        if status != expected {
+            println!("  signal   the 64-bit forging program ended with {status}, not {expected}");
+            return Err(problem);
+        }
+    }
+    println!(
+        "  signal   rt_sigreturn ended programs whose 64-bit frames held a kernel-half RIP or RSP, \
+         or CS 0x23 with a RIP of 4 GiB, with SIGSEGV, resumed IOPL 3, TF and IF clear as IOPL 0 with IF set and CS and SS 0x10 \
+         and 0x18 as 0x33 and 0x2b, and took an honest change"
+    );
+    Ok(())
 }

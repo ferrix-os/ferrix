@@ -130,6 +130,20 @@ const FLAT_USER: u64 = USER_SEGMENT | PRESENT | dpl(3) | ACCESSED | GRANULARITY_
 const USER_CODE32_DESCRIPTOR: u64 = FLAT_USER | EXECUTABLE | READABLE | DEFAULT_32;
 /// The user data segment's: Linux's `0x00cff3000000ffff`.
 const USER_DATA_DESCRIPTOR: u64 = FLAT_USER | WRITABLE | DEFAULT_32;
+/// The kernel data segment's: flat 4 GiB with a 32-bit stack pointer, ring
+/// 0, Linux's `__KERNEL_DS`, `0x00cf93000000ffff`.
+///
+/// 64-bit mode ignores all of it but presence, and `SYSCALL` loads `SS`
+/// without reading it. It matters after a load of `SS` from the table
+/// (`cpu::settle_kernel_ss`, at every switch): AMD's `SYSRET` writes `SS`'s
+/// selector and leaves its hidden part as that load left it, so the task
+/// leaves its system call with this descriptor's limit and `B` bit under
+/// user data's selector. A 64-bit program that then enters 32-bit code, as
+/// Wine runs 32-bit Windows programs, addresses its stack through them:
+/// with the bare present-and-writable descriptor this used to be, limit 0,
+/// its first push was a stack fault.
+const KERNEL_DATA_DESCRIPTOR: u64 =
+    USER_SEGMENT | PRESENT | WRITABLE | ACCESSED | GRANULARITY_4K | FLAT_LIMIT | DEFAULT_32;
 /// Descriptor field: the privilege level, two bits.
 const DPL_MASK: u64 = dpl(3);
 /// Descriptor bit, for code: conforming, which runs at the caller's level.
@@ -139,6 +153,10 @@ const _: () = assert!(
     USER_CODE32_DESCRIPTOR == 0x00cf_fb00_0000_ffff
         && USER_DATA_DESCRIPTOR == 0x00cf_f300_0000_ffff,
     "the 32-bit user segments are Linux's"
+);
+const _: () = assert!(
+    KERNEL_DATA_DESCRIPTOR == 0x00cf_9300_0000_ffff,
+    "kernel data is Linux's __KERNEL_DS"
 );
 
 /// System descriptor type 9: an available 64-bit task state segment.
@@ -635,7 +653,7 @@ unsafe fn load(tables: &'static mut Tables, ist_tops: [u64; IST_STACKS]) {
         0,
         0,
         USER_SEGMENT | PRESENT | EXECUTABLE | LONG_MODE,
-        USER_SEGMENT | PRESENT | WRITABLE,
+        KERNEL_DATA_DESCRIPTOR,
         USER_CODE32_DESCRIPTOR,
         USER_DATA_DESCRIPTOR,
         USER_SEGMENT | PRESENT | EXECUTABLE | LONG_MODE | dpl(3),

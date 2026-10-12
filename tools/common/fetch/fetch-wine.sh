@@ -16,11 +16,19 @@
 # with Wine's unpacked over it, so one disk at `/data` has the X server, its
 # clients and Wine, all on the same Debian's libraries.
 #
+# 32-bit Windows programs run inside the 64-bit Wine (its new WoW64 mode),
+# which loads their DLLs from `i386-windows` beside its own `x86_64-windows`.
+# Debian builds those PE files only for its i386 `libwine`, so that
+# package's `i386-windows` is copied in and nothing else of it: its Unix
+# half is a 32-bit Wine's, which this volume has no use for.
+#
 # Every package is pinned by its SHA-256, taken from trixie's,
-# trixie-updates' and trixie-security's Packages files on 2026-10-10.
+# trixie-updates' and trixie-security's Packages files on 2026-10-10 (the
+# i386 `libwine` on 2026-10-12).
 #
 # Writes $FERRIX_WINE_VOLUME/wine.img (default
-# ~/.local/share/ferrix/wine/wine.img), about 1.4 GB, and yserver.commit
+# ~/.local/share/ferrix/wine/wine.img), about 3.7 GB with 2 GiB of room for
+# a prefix, and yserver.commit
 # beside it, the commit of the yserver it carries. Needs curl,
 # sha256sum, dpkg-deb, readelf and mkfs.btrfs; no root.
 #
@@ -69,6 +77,9 @@ debs=(
     "pool/main/w/wine/wine64_10.0~repack-6_amd64.deb 4cdf8319d873c13210815c1aac18859a56ea21b0b2d35a3388dab881464ed488"
     "pool/main/z/zlib/zlib1g_1.3.dfsg+really1.3.1-1+b1_amd64.deb 015be740d6236ad114582dea500c1d907f29e16d6db00566ca32fb68d71ac90d"
 )
+
+# The i386 `libwine`, whose `i386-windows` alone is used.
+wow64_deb="pool/main/w/wine/libwine_10.0~repack-6_i386.deb fef4802a6553a17eaa40003333a86fc697440d1d21c5824f2dbd1c444f01527b"
 
 # The same, from trixie-security.
 security_debs=(
@@ -124,6 +135,17 @@ for entry in "${security_debs[@]}"; do
 done
 rm -rf "$root/usr/share/doc" "$root/usr/share/man" "$root/usr/share/locale" \
     "$root/usr/share/lintian"
+
+read -r path sum <<< "$wow64_deb"
+wow64="$out/wow64"
+rm -rf "$wow64"
+mkdir -p "$wow64"
+dpkg-deb -x "$(fetch "$path" "$debian" "$sum")" "$wow64"
+cp -a "$wow64/usr/lib/i386-linux-gnu/wine/i386-windows/." \
+    "$root/usr/lib/x86_64-linux-gnu/wine/i386-windows/"
+rm -rf "$wow64"
+test -f "$root/usr/lib/x86_64-linux-gnu/wine/i386-windows/ntdll.dll" \
+    || { echo "fetch-wine: no 32-bit ntdll.dll in the i386 libwine" >&2; exit 1; }
 
 # What libwine's postinst does, which unpacking does not: zlib's DLLs from
 # libz-mingw-w64, each marked as one of Wine's builtins (the marker is at

@@ -265,7 +265,7 @@ pub(crate) fn check_switch_state() -> Result<(), &'static str> {
     );
     // The `FS`/`GS` skip's cases print their own `fsgs` line (3c).
     switch::check::run_fs_gs()?;
-    Ok(())
+    switch::check::run_sysret_ss().and_then(|()| switch::check::run_inherit())
 }
 
 /// Install the descriptor tables and the trap handlers.

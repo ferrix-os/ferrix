@@ -55,6 +55,14 @@ pub(crate) struct FrameRequest {
     pub(crate) stack: u64,
     /// The alternate stack, as `uc_stack` records it.
     pub(crate) altstack: StackRecord,
+    /// The ABI of the call that installed the handler: on x86-64 an i386
+    /// handler is entered on an i386 frame and any other on a 64-bit one,
+    /// whatever mode the interrupted code was in (Linux's `SA_IA32_ABI`).
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(dead_code, reason = "only x86-64 has a second frame to choose")
+    )]
+    pub(crate) abi: crate::trap::Abi,
     /// Where the process's signal return page is, on an architecture that
     /// has one (ARMv7-A's, `syscall::sigpage`): what a handler without a
     /// restorer returns through (F-48).

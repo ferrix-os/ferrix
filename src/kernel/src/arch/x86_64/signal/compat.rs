@@ -159,7 +159,10 @@ fn enter_handler(context: &mut UserContext, request: &FrameRequest, at: u64, rt:
 /// 8): see [`Saved::check`]. A forged frame ends the program with `SIGSEGV`
 /// with nothing of it loaded. `EIP` and `ESP` are 32-bit fields, so they are
 /// canonical, and user addresses, whatever they hold: the classic `IRETQ`
-/// `#GP` on a non-canonical return address cannot arise from here.
+/// `#GP` on a non-canonical return address cannot arise from here, nor the
+/// one on an `EIP` past the 32-bit code segment's limit. A 64-bit frame
+/// that gives back 32-bit code has a 64-bit `RIP`, which
+/// `restore_signal_frame` refuses at or above 4 GiB.
 pub(super) fn restore(
     space: &AddressSpace,
     context: &mut UserContext,

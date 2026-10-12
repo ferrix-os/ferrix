@@ -904,6 +904,41 @@ pub(crate) unsafe fn reload_segments(code: u16, data: u16) {
     }
 }
 
+/// Give `SS` the kernel's data selector `data` where it holds anything else,
+/// and answer whether it had to be loaded.
+///
+/// An interrupt or exception from ring 3 loads `SS` with a null selector. On
+/// AMD, `SYSRET` then writes `SS`'s selector and not its hidden part, so a
+/// task leaving a system call through `SYSRET` after one would run with an
+/// `SS` that reads as user data and cannot be used: harmless in 64-bit mode,
+/// which ignores it, and a stack fault at the first push once the program
+/// enters 32-bit code, as Wine's 32-bit Windows programs do. Linux's
+/// `__switch_to` reloads it at every switch for that reason
+/// (`X86_BUG_SYSRET_SS_ATTRS`): a switch comes between every entry from ring 3
+/// by an interrupt and any other task's `SYSRET`. What the task then leaves
+/// with is `data`'s descriptor, which is why kernel data is a flat 4 GiB
+/// segment with a 32-bit stack pointer, as Linux's `__KERNEL_DS` is
+/// (`gdt::KERNEL_DATA_DESCRIPTOR`).
+///
+/// # Safety
+///
+/// (CONTEXT) `data` must name a writable ring 0 data segment in the live GDT.
+pub(crate) unsafe fn settle_kernel_ss(data: u16) -> bool {
+    let held: u16;
+    // SAFETY: (SYSREG) reading a segment register has no side effect.
+    unsafe {
+        asm!("mov {0:x}, ss", out(reg) held, options(nomem, nostack, preserves_flags));
+    }
+    if held == data {
+        return false;
+    }
+    // SAFETY: (CONTEXT) the caller guarantees the selector loads.
+    unsafe {
+        asm!("mov ss, {0:e}", in(reg) u32::from(data), options(nostack, preserves_flags));
+    }
+    true
+}
+
 /// The four data segment selectors this processor holds: `DS`, `ES`, `FS`
 /// and `GS`, in that order.
 ///

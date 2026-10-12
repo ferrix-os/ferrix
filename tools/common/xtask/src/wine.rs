@@ -6,8 +6,11 @@
 //! volume of it. The gate attaches it at `/data` under QEMU's `snapshot=on`,
 //! as `test-yserver` attaches yserver's, and [`RUN`], carried in the image,
 //! makes a prefix with `wineboot`, then runs `cmd /c ver`, which must print
-//! the Windows version Wine reports. A second boot, of hyprix with yserver,
-//! must show Wine's notepad in a window (`crate::compositor::wine`).
+//! the Windows version Wine reports, and the same from the 32-bit `cmd` in
+//! `syswow64`, which runs in compatibility mode inside the 64-bit process
+//! (Wine's new `WoW64`; docs/WINE.md, section 7). A second boot, of hyprix
+//! with yserver, must show Wine's notepad in a window
+//! (`crate::compositor::wine`).
 //!
 //! The gate needs no network. It attaches a volume, so it runs on demand as
 //! `test-yserver` does and is not in the image row.
@@ -30,8 +33,10 @@ const RUN_PATH: &str = "bin/wine-test";
 /// What `cmd /c ver` prints under Wine 10.0, which reports Windows 10.
 pub(crate) const VERSION: &str = "Microsoft Windows 10.0";
 
-/// A prefix made with `wineboot`, then `cmd /c ver`. Run by busybox's `sh`;
-/// its status is 0 only when `cmd` printed [`VERSION`].
+/// A prefix made with `wineboot`, then `cmd /c ver` from the 64-bit `cmd` and
+/// from the 32-bit one. Run by busybox's `sh`; its status is 0 only when
+/// both printed [`VERSION`], and the line [`NO_CMD32`] says the 32-bit one
+/// was the one that did not.
 ///
 /// The server is named directly: Debian's `/usr/lib/wine/wineserver` is a
 /// shell script that picks the 64-bit or the 32-bit one, and there is only
@@ -53,9 +58,22 @@ echo "wine-gate: cmd"
 echo "wine-gate: cmd exited $?"
 cat /tmp/ver.err
 cat /tmp/ver.txt
+echo "wine-gate: cmd32"
+/usr/lib/wine/wine64 'C:\windows\syswow64\cmd.exe' /c ver > /tmp/ver32.txt 2> /tmp/ver32.err
+echo "wine-gate: cmd32 exited $?"
+cat /tmp/ver32.err
+sed 's/^/wine-gate: cmd32: /' /tmp/ver32.txt
 /usr/lib/wine/wineserver64 -k
-grep -q "Microsoft Windows 10.0" /tmp/ver.txt
+grep -q "Microsoft Windows 10.0" /tmp/ver.txt || exit 1
+grep -q "Microsoft Windows 10.0" /tmp/ver32.txt || { echo "wine-gate: no 32-bit cmd"; exit 2; }
 "#;
+
+/// What [`RUN`] prints when the 64-bit `cmd` answered and the 32-bit one did
+/// not.
+const NO_CMD32: &str = "wine-gate: no 32-bit cmd";
+
+/// What [`RUN`] puts before each line the 32-bit `cmd` printed.
+const CMD32: &str = "wine-gate: cmd32: ";
 
 /// The script: [`RUN`], whose status says whether `cmd` answered.
 const SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
@@ -164,11 +182,23 @@ pub(crate) fn test_wine(args: &Args) -> Result<()> {
                 .iter()
                 .find(|line| line.contains(VERSION))
                 .map_or(VERSION, |line| line.trim());
-            println!("  {arch}: Wine made a prefix on Ferrix and cmd answered `{version}`");
+            let version32 = lines
+                .iter()
+                .filter_map(|line| line.trim().strip_prefix(CMD32))
+                .find(|line| line.contains(VERSION))
+                .unwrap_or(VERSION);
+            println!(
+                "  {arch}: Wine made a prefix on Ferrix, its cmd answered `{version}` and its \
+                 32-bit cmd `{version32}`"
+            );
             crate::compositor::wine::test_wine_window(&args, volume()?)
         }
         Some("3") => Err(Error::new(format!(
             "{arch}: /data/usr/lib/wine/wine64 is not there: is the volume attached?"
+        ))),
+        Some("4") if lines.iter().any(|line| line.contains(NO_CMD32)) => Err(Error::new(format!(
+            "{arch}: Wine's 64-bit cmd answered and its 32-bit cmd in syswow64 did not \
+                 print `{VERSION}`; the lines after `wine-gate: cmd32` say how far it came"
         ))),
         Some("4") => Err(Error::new(format!(
             "{arch}: Wine's cmd did not print `{VERSION}`; the lines after `wine-gate:` say \

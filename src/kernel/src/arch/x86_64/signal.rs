@@ -493,8 +493,16 @@ pub(crate) fn setup_signal_frame(
     request: &FrameRequest,
 ) -> Result<(), BadFrame> {
     frame_is_buildable(request)?;
-    // A 32-bit program's handler is entered on an i386 frame, in its mode.
-    if context.is_compat() {
+    // A handler an i386 call installed is entered on an i386 frame, in
+    // compatibility mode -- except when a 64-bit program is delivered it on
+    // its way back from a 64-bit `SYSCALL`, whose `SYSRET` drops the 32-bit
+    // code selector and leaves `DS` and `ES` as they were (`docs/BACKLOG.md`;
+    // Linux leaves through `IRET` for it and loads both). Any other is entered
+    // on a 64-bit frame in 64-bit mode, even from 32-bit code: Wine's 32-bit Windows programs run in its
+    // 64-bit process, whose handlers are 64-bit code (`docs/WINE.md` §7).
+    // Linux decides the same way, by the handler and never by the mode
+    // (`is_ia32_frame`).
+    if request.abi == crate::trap::Abi::Compat {
         return compat::setup(space, context, request);
     }
     let (fpstate, frame_at) = place(request.stack)?;
@@ -508,7 +516,10 @@ pub(crate) fn setup_signal_frame(
         frame.put_u64(MCONTEXT + index * 8, *value)?;
     }
     frame.put_u64(MCONTEXT + EFLAGS, context.0.rflags)?;
-    frame.put(MCONTEXT + CS, &(gdt::USER_CODE | 3).to_le_bytes())?;
+    // The code selector the interrupted code ran in, 64-bit or 32-bit user
+    // code, which a handler reads to know which mode it interrupted; `fs`
+    // and `gs` stay zero, as Linux writes them.
+    frame.put(MCONTEXT + CS, &(context.0.cs as u16).to_le_bytes())?;
     frame.put(MCONTEXT + SS, &(gdt::USER_DATA | 3).to_le_bytes())?;
     frame.put_u64(MCONTEXT + OLDMASK, request.mask)?;
     frame.put_u64(MCONTEXT + FPSTATE, fpstate)?;
@@ -533,9 +544,14 @@ pub(crate) fn setup_signal_frame(
 /// stack pointer just past `pretcode` -- and load `context` from it.
 ///
 /// Refused: an instruction pointer or stack pointer outside the user half,
-/// which `IRETQ` would fault on in ring 0. The flags are masked to what a
-/// program may set, the selectors are ring 3's whatever the frame says, and
-/// `MXCSR` is masked to the bits the processor has before `FXRSTOR64` sees it.
+/// and a frame giving back 32-bit user code with an instruction pointer at or
+/// above 4 GiB, past that segment's limit: `IRETQ` would fault on either in
+/// ring 0, where Linux has a fixup that turns the fault into `SIGSEGV` and
+/// Ferrix has none ([`restored_code_selector`]). The flags are masked to what
+/// a program may set, the code selector is ring 3's 64-bit or 32-bit user
+/// code and the stack selector user data whatever the
+/// frame says, and `MXCSR` is masked to the bits the processor has before
+/// `FXRSTOR64` sees it.
 pub(crate) fn restore_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
@@ -553,10 +569,8 @@ pub(crate) fn restore_signal_frame(
         *slot = frame.u64_at(MCONTEXT + index * 8)?;
     }
     let [.., rsp, rip] = registers;
-    if !is_user_address(rip) || !is_user_address(rsp) {
-        return Err(BadFrame);
-    }
     let flags = frame.u64_at(MCONTEXT + EFLAGS)?;
+    let cs = restored_code_selector(frame.u32_at(MCONTEXT + CS)? as u16, rip, rsp)?;
     let fpstate = frame.u64_at(MCONTEXT + FPSTATE)?;
     let restored = Restored {
         mask: frame.u64_at(UC_SIGMASK)?,
@@ -567,9 +581,38 @@ pub(crate) fn restore_signal_frame(
     }
     context.set_registers(registers);
     context.0.rflags = flags & FLAGS_RESTORABLE | FLAGS_ALWAYS;
-    context.0.cs = USER_CS;
+    context.0.cs = cs;
     context.0.ss = USER_SS;
     Ok(restored)
+}
+
+/// The code selector a 64-bit frame's `cs` gives back: 32-bit user code
+/// where the frame holds it, with its requested privilege level put in as
+/// Linux's `restore_sigcontext` puts it in (`sc.cs | 3`), and 64-bit user
+/// code for anything else.
+///
+/// The 32-bit one is how Wine resumes a 32-bit Windows program after its
+/// 64-bit handler has run (`docs/WINE.md` §7): the frame it was handed says
+/// `0x23`, and it gives that back. Linux loads any selector a frame holds
+/// and lets `IRET` refuse one that is not a code segment a program may run
+/// in; here no other value is ever loaded, as before, so a frame naming a
+/// kernel selector resumes in 64-bit user code.
+///
+/// Refused, with `rip` and `rsp` the frame's: either outside the user half,
+/// and 32-bit user code with `rip` at or above 4 GiB, past that segment's
+/// limit, which `IRETQ` checks and faults on in ring 0.
+fn restored_code_selector(saved: u16, rip: u64, rsp: u64) -> Result<u64, BadFrame> {
+    if !is_user_address(rip) || !is_user_address(rsp) {
+        return Err(BadFrame);
+    }
+    let cs = (saved | 3) as u64;
+    if cs != USER_CS32 {
+        return Ok(USER_CS);
+    }
+    if rip > u64::from(u32::MAX) {
+        return Err(BadFrame);
+    }
+    Ok(USER_CS32)
 }
 
 /// The AVX state an area at `at` carries, if it is a whole `XSAVE` area as

@@ -564,6 +564,15 @@ pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
 /// (CONTEXT) The task `state` belongs to must be the one this processor is switching to,
 /// and `entry_stack` the top of its kernel stack.
 pub(crate) unsafe fn restore_user_state(state: &mut UserState, entry_stack: u64) {
+    // A null `SS` left by an entry from ring 3 is replaced before the task
+    // can leave a system call through `SYSRET`, which on AMD would hand it on
+    // unusable (`cpu::settle_kernel_ss`): every task with user state comes
+    // through here before it runs.
+    // SAFETY: (CONTEXT) kernel data is a writable ring 0 data segment in every GDT this
+    // kernel builds.
+    if unsafe { cpu::settle_kernel_ss(gdt::KERNEL_DATA) } {
+        count(&SS_RELOADS);
+    }
     // SAFETY: (CONTEXT) the caller switches with interrupts masked; the descriptors are
     // ones `set_thread_area` built, or zero.
     unsafe { gdt::write_tls(&state.tls) };
@@ -608,6 +617,19 @@ static SELECTOR_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX
 static FS_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 /// Loads of `GS` that left it unloaded, 0 over 0: as [`FS_SKIPS`].
 static GS_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+
+/// Switches that found `SS` other than kernel data -- left null by an entry
+/// from ring 3 -- and loaded it: per processor, kept as [`X87_RESETS`] is,
+/// for the check, which must see the reload taken.
+static SS_RELOADS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+
+/// Every processor's switches so far that loaded `SS` with kernel data.
+pub(crate) fn ss_reloads() -> u64 {
+    SS_RELOADS
+        .iter()
+        .map(|counter| counter.load(Ordering::Relaxed))
+        .fold(0, u64::wrapping_add)
+}
 
 /// This processor's logical number, zero before it has a record.
 fn this_logical() -> usize {

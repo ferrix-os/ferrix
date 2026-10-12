@@ -201,10 +201,12 @@ pub(crate) struct SyscallArgs {
 /// Decided by the way in, never by asking the process: on x86-64 a
 /// `SYSCALL` from 64-bit code is an x86-64 call and `int $0x80` is an i386
 /// call, whatever image the process was started from (`docs/I386.md` §3.2).
-/// Every other entry on every architecture is [`Abi::Native`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Every other entry on every architecture is [`Abi::Native`], which is
+/// also what a record that was never given one holds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Abi {
     /// The architecture's own: x86-64's, AArch64's, or ARMv7-A's EABI.
+    #[default]
     Native,
     /// A 32-bit program's on a 64-bit kernel: i386's, on x86-64. The kernel's
     /// words are wider than the program's here, so every width the program

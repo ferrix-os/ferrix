@@ -115,6 +115,12 @@ pub(crate) struct Disposition {
     /// Signals blocked while the handler runs, never including the two that
     /// cannot be blocked.
     pub(crate) mask: u64,
+    /// The ABI of the `rt_sigaction` that installed the handler, which
+    /// decides the frame it is entered on: an i386 one for a handler an i386
+    /// call installed, the architecture's own for any other, whatever mode
+    /// the interrupted code was in. Linux keeps the same as `SA_IA32_ABI` in
+    /// the action's flags (`sigaction_compat_abi`), never shown to a reader.
+    pub(crate) abi: Abi,
 }
 
 /// What happens to a signal nobody installed a handler for.
@@ -565,6 +571,7 @@ impl Signals {
                 flags,
                 restorer: 0,
                 mask: mask & !UNBLOCKABLE,
+                abi: Abi::Native,
             };
         }
     }
@@ -1262,7 +1269,7 @@ pub(crate) fn sys_rt_sigaction(
     } else if signal == SIGKILL || signal == SIGSTOP {
         return Err(Errno::EINVAL);
     } else {
-        Some(read_sigaction(process, act, word_of(abi))?)
+        Some(read_sigaction(process, act, abi)?)
     };
 
     let (previous, ignored) = process.with_signals(|signals| {
@@ -1408,9 +1415,11 @@ fn index_of(signal: u32) -> Result<usize, Errno> {
     usize::try_from(signal - 1).map_err(|_| Errno::EINVAL)
 }
 
-/// Read a `struct sigaction` from the program, whose words are `word` bytes:
-/// handler, flags, restorer, then the 64-bit mask.
-fn read_sigaction(process: &Process, at: u64, word: usize) -> Result<Disposition, Errno> {
+/// Read a `struct sigaction` from a program calling in `abi`, whose words are
+/// that ABI's: handler, flags, restorer, then the 64-bit mask. The handler is
+/// recorded as that ABI's.
+fn read_sigaction(process: &Process, at: u64, abi: Abi) -> Result<Disposition, Errno> {
+    let word = word_of(abi);
     let mut buffer = [0_u8; 32];
     let bytes = buffer.get_mut(..word * 3 + 8).ok_or(Errno::EINVAL)?;
     uaccess::copy_from_user(process.space(), at, bytes).map_err(|_| Errno::EFAULT)?;
@@ -1421,6 +1430,7 @@ fn read_sigaction(process: &Process, at: u64, word: usize) -> Result<Disposition
         flags: word_at(bytes, word, word)?,
         restorer: word_at(bytes, word * 2, word)?,
         mask: u64::from_le_bytes(mask),
+        abi,
     })
 }
 

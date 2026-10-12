@@ -237,9 +237,12 @@ package FerrixX8664Requirements {
             attribute :>> statement = "UserState::capture shall copy the calling
                 task's FS and GS bases, thread-local slots, data selectors and x87
                 and SSE state for a fork child.";
-            attribute :>> criterion = "A fork child reads its parent's %fs word,
-                MXCSR and an XMM value set before the fork, and an i386 child its
-                parent's %gs word.";
+            attribute :>> criterion = "A fork child reads back the GS and FS bases
+                its parent set with arch_prctl, the thread-local slot 12 it took
+                with set_thread_area, user data in DS, MXCSR 0x3F80, x87 control
+                word 0x027F and an XMM0 pattern; a clone thread reads both bases
+                (the `inherit` line). With capture's GS base made 0 the check fails
+                by name.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = "arch::x86_64::switch::UserState::capture";
         }
@@ -248,10 +251,12 @@ package FerrixX8664Requirements {
                 thread-local slots, load null data selectors with zero FS and GS
                 bases, and load UserState::new's x87 control word 0x037F and MXCSR
                 0x1F80.";
-            attribute :>> criterion = "A program that set a thread pointer, a
-                thread-local entry and an unmasked MXCSR and then execve's finds in
-                the new image FS base 0, get_thread_area(12) empty, MXCSR 0x1F80 and
-                x87 control word 0x037F.";
+            attribute :>> criterion = "A program the kernel started reads a GS base
+                of 0; after it set both bases, slot 12, DS, MXCSR 0x3F80 and control
+                word 0x027F and execve'd itself, the new image finds GS and FS bases
+                0, get_thread_area(12) empty, DS 0, MXCSR 0x1F80 and x87 control
+                word 0x037F (the `inherit` line). With the reset's GS base left as
+                it was the check fails by name.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::switch::reset_user_state",
                 "arch::x86_64::switch::UserState::new");
@@ -978,18 +983,24 @@ package FerrixX8664Requirements {
              * return, and the context resumed from it. */
 
         requirement <'L.x86_64.42'> nativeSignalRoundTrip : ItemLowLevel {
-            attribute :>> statement = "setup_signal_frame shall, for a 64-bit
-                program whose handler names a restorer, write Linux's rt_sigframe
-                below the stack -- pretcode the restorer, a ucontext holding the
-                interrupted registers and mask, the siginfo -- and enter the handler
-                with RDI the signal, RSI the siginfo and RDX the ucontext;
-                restore_signal_frame shall load the registers and mask that frame
-                holds, a register the handler changed through the ucontext included.";
+            attribute :>> statement = "setup_signal_frame shall, for a handler a
+                64-bit call installed that names a restorer, whatever mode the
+                interrupted code ran in, write Linux's rt_sigframe below the stack
+                -- pretcode the restorer, a ucontext holding the interrupted
+                registers, code selector and mask, the siginfo -- and enter the
+                handler in 64-bit mode with RDI the signal, RSI the siginfo and RDX
+                the ucontext; restore_signal_frame shall load the registers and mask
+                that frame holds, a register the handler changed through the
+                ucontext included.";
             attribute :>> criterion = "The 64-bit signal program exits 77: its
                 SA_SIGINFO handler for SIGUSR1 saw EDI 10, si_signo 10 at RSI and
                 SIGUSR1 blocked, the 70 it added to the ucontext's saved RBX came
                 back through rt_sigreturn, and the mask after the return is empty
-                (the `signals` line).";
+                (the `signals` line). The WoW64 program's 64-bit SIGILL handler for
+                a ud2 in its 32-bit code runs with CS 0x33 and reads cs 0x23 in its
+                sigcontext (the `wow64` line); with the frame chosen by the
+                interrupted code's mode it is entered on an i386 frame and the check
+                fails by name.";
             attribute :>> parent = "H.TRAP.9";
             attribute :>> unit = ("arch::x86_64::signal::setup_signal_frame",
                 "arch::x86_64::signal::frame_is_buildable",
@@ -1023,15 +1034,23 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.43'> nativeForgedFrameRefused : ItemLowLevel {
             attribute :>> statement = "restore_signal_frame shall refuse a 64-bit
-                frame whose RIP or RSP lies outside the user half, and resume a
+                frame whose RIP or RSP lies outside the user half, or that gives
+                back ring 3's 32-bit code with a RIP at or above 4 GiB, and resume a
                 frame's program with RFLAGS limited to the restorable flags and IF,
-                and CS and SS ring 3's, whatever the frame holds.";
+                SS ring 3's data, and CS ring 3's 32-bit code where the frame holds
+                it and ring 3's 64-bit code for anything else.";
             attribute :>> criterion = "64-bit frames with a kernel-half RIP and with
-                a kernel-half RSP end with SIGSEGV; frames asking IOPL 3, IF clear,
+                a kernel-half RSP, and one with CS 0x23 and a RIP of 4 GiB, end with
+                SIGSEGV; frames asking IOPL 3, IF clear,
                 TF, and CS and SS 0x10 and 0x18 resume in ring 3 with IOPL 0 and IF
-                set, read by pushfq and by moving CS and SS.";
+                set, read by pushfq and by moving CS and SS. The WoW64 program's
+                handler returns through a frame saying cs 0x23 and its 32-bit code
+                reads CS 0x23 after it (the `wow64` line); with CS forced to 64-bit
+                code the program exits 25 and the check fails by name; with the 4 GiB
+                refusal removed the boot stops on the kernel's IRETQ.";
             attribute :>> parent = "H.TRAP.5";
-            attribute :>> unit = "arch::x86_64::signal::restore_signal_frame";
+            attribute :>> unit = ("arch::x86_64::signal::restore_signal_frame",
+                "arch::x86_64::signal::restored_code_selector");
         }
         requirement <'L.x86_64.44'> sanitisedContext : ItemLowLevel {
             attribute :>> statement = "UserContext::sanitised shall leave CS 64- or
@@ -1071,9 +1090,11 @@ package FerrixX8664Requirements {
              * frames and their returns. */
 
         requirement <'L.x86_64.47'> compatSignalRoundTrip : ItemLowLevel {
-            attribute :>> statement = "setup_signal_frame shall, for a 32-bit
-                program, write rt_sigframe_ia32 for an SA_SIGINFO handler and
-                sigframe_ia32 for a plain one and enter the handler on it;
+            attribute :>> statement = "setup_signal_frame shall, for a handler an
+                i386 call installed, write rt_sigframe_ia32 for an SA_SIGINFO
+                handler and sigframe_ia32 for a plain one and enter the handler on
+                it, in compatibility mode where the program is a 32-bit one (a
+                64-bit program's, on its way back from SYSCALL, is not claimed);
                 rt_sigreturn and sigreturn shall load back the saved general
                 registers, a saved EAX the handler changed included.";
             attribute :>> criterion = "The i386 signal program exits 42: its
@@ -1214,11 +1235,23 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.58'> starUserBaseRpl3 : ItemLowLevel {
             attribute :>> statement = "syscall::init shall program STAR so that
-                SYSRET leaves SS the user data selector at RPL 3.";
+                SYSRET leaves SS the user data selector at RPL 3, and
+                restore_user_state shall load SS with kernel data, a flat 4 GiB
+                segment with a 32-bit stack pointer, at every switch to a task with
+                user state where SS holds anything else, so that a task leaving a
+                system call through SYSRET, which on AMD keeps SS's hidden part, has
+                a stack its 32-bit code can use.";
             attribute :>> criterion = "A program reads SS after a system call and
-                finds user data at RPL 3.";
+                finds user data at RPL 3. A 64-bit program pinned beside a spinning
+                one sleeps 50 times, reads SS 0x2b after each sleep, pushes a word
+                in 32-bit code after the sleep returns through SYSRET, and reads
+                every word back, and some switch found SS null and loaded it (the
+                `sysret` line); on AMD, with the load removed or with kernel data's
+                descriptor limit 0, the push is a stack fault and the check fails by
+                name.";
             attribute :>> parent = ("H.TRAP.6", "H.TRAP.7");
-            attribute :>> unit = "arch::x86_64::syscall::init";
+            attribute :>> unit = ("arch::x86_64::syscall::init",
+                "arch::x86_64::cpu::settle_kernel_ss");
         }
         requirement <'L.x86_64.59'> entryStackPerTask : ItemLowLevel {
             attribute :>> statement = "set_entry_stack and restore_user_state shall
@@ -1296,16 +1329,20 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.61'> threadPointerPerTask : ItemLowLevel {
             attribute :>> statement = "arch_prctl(ARCH_SET_FS) with a user address
-                shall set this processor's FS base and the running task's recorded
-                one, with interrupts masked, and restore_user_state shall load each
-                task's recorded FS base where its FS selector is null; a base a null
+                shall load a null FS selector where FS holds another, and set this
+                processor's FS base and the running task's recorded one, with
+                interrupts masked, and restore_user_state shall load each task's
+                recorded FS base where its FS selector is null; a base a null
                 selector cleared comes back as recorded.";
             attribute :>> criterion = "Two 64-bit programs pinned to one processor
                 each set a distinct FS base and read their own words through %fs
                 10,000 times across sched_yield, and one that clears its base with
                 USER_DS and a null selector reads its own word again after a
                 nanosleep (the `fsbase` line); with the save reading FS_BASE again,
-                that read faults and the check fails by name.";
+                that read faults and the check fails by name. The WoW64 program
+                loads a thread-local selector into FS, calls ARCH_SET_FS, and reads
+                FS 0 and its new base through %fs:0 (the `wow64` line); without the
+                null load it exits 12.";
             attribute :>> parent = "H.SCHED.8";
             attribute :>> unit = ("arch::x86_64::syscall::arch_prctl",
                 "arch::x86_64::syscall::set_thread_pointer",

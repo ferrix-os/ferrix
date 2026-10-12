@@ -806,6 +806,18 @@ fn arch_prctl(code: u64, value: u64) -> Option<isize> {
             if !ferrix_bootinfo::is_user_address(value) {
                 return Some(Errno::EPERM.as_return_value());
             }
+            // A null selector first, as Linux's `ARCH_SET_FS` loads one and as
+            // `ARCH_SET_GS` below does: an `FS` naming a thread-local
+            // descriptor would bring that descriptor's base back at the next
+            // switch, over the one asked for here. Wine's 64-bit process runs
+            // its 32-bit Windows code with such an `FS` and sets its own
+            // thread pointer this way each time it comes back to its Unix
+            // side (`docs/WINE.md` §7). Skipped where the register reads 0.
+            let [_, _, held_fs, _] = cpu::read_data_selectors();
+            if held_fs != 0 {
+                // SAFETY: (CONTEXT) the null selector always loads.
+                unsafe { cpu::load_fs(0) };
+            }
             // SAFETY: (CONTEXT) a canonical user address, written to this processor's
             // `FS_BASE`; it changes only how user accesses resolve.
             unsafe { set_thread_pointer(value) };

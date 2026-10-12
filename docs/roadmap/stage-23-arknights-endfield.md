@@ -199,7 +199,8 @@ thread block at `%gs`, and `arch_prctl` answered `ARCH_SET_FS` alone, with
 
 **Where step 1 stands (2026-10-12; `docs/WINE.md`).**
 Debian 13's 64-bit Wine 10.0 makes a prefix, its `cmd /c ver` answers
-`Microsoft Windows 10.0.19043`, and its notepad draws a window on hyprix
+`Microsoft Windows 10.0.19043`, from the 64-bit `cmd` and from the
+32-bit one in `syswow64`, and its notepad draws a window on hyprix
 through yserver at the size of its tile and takes a typed line, under KVM:
 `cargo xtask test-wine`. `cargo xtask run-compositor --wine` shows it on a
 desktop to type into.
@@ -219,8 +220,16 @@ desktop to type into.
   needed for it. A prefix on the btrfs volume ran out of space because the
   volume was too small (683 MB free for a prefix that takes 1.1 GB there),
   not because of btrfs's allocation; `fetch-wine.sh` gives it 2 GiB of room.
-* *Still to do:* E1.4's esync. E1.6: `wineboot` says a 32-bit
-  `rundll32.exe` did not start. Whether btrfs's write path leaves more of a
+  E1.6 (2026-10-12, branch `endfield-wow64`): the 32-bit Windows
+  DLLs from Debian's i386 `libwine` on the volume, and four things the
+  kernel answered otherwise than Linux once 32-bit code ran inside the
+  64-bit process -- the frame a handler is entered on, the code selector a
+  64-bit frame records and gives back, `ARCH_SET_FS`'s null selector, and
+  `SS` after `SYSRET` on AMD (`docs/WINE.md` §7). `modify_ldt` was not
+  needed; `wineboot` starts the 32-bit `rundll32.exe`. Reviewed by the
+  consultant (ledger line 762, OK IF W1 to W7, met in the landing).
+* *Still to do:* E1.4's esync. A 32-bit program that draws a window.
+  Whether btrfs's write path leaves more of a
   full volume unallocated than Linux would (135 MB of 2 GB on the full Wine
   volume), filed in `docs/BACKLOG.md`.
 
