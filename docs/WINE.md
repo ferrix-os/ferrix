@@ -410,4 +410,21 @@ unlike Linux; Wine installs none, and the row is in `docs/BACKLOG.md`.
 **Review.** The landing's certification review is in the consultant's
 ledger on nazuna (`~/.local/share/ferrix/cert-consultant/reviews.md`):
 the first verdict, OK IF W1 to W7, at line 762; W1 is the 4 GiB refusal
-above, W2 the `SYSCALL` row, W3 the `inherit` check.
+above, W2 the `SYSCALL` row, W3 the `inherit` check. The verdict on the
+landed commit fb3f9f093, W1 to W7 met, is at line 768.
+
+The negative controls behind it, by gate.sh tag: on fb3f9f093 itself,
+`endfield-wow64-i-ctl-w1` (the refusal of a 32-bit return above 4 GiB
+taken out: the kernel's `iretq` takes a general protection fault in ring 0
+on nazuna's AMD processor and the boot stops, FX-9004), `-ctl-inh11` and
+`-ctl-inh12` (the `inherit` check's two requirements), `-ctl-cs`,
+`-ctl-restore`, `-ctl-frame` and `-ctl-setfs`, each FIRED by its own line;
+on 886e15119, whose SS code is unchanged since, `endfield-wow64-ctl-ssload`,
+`-ctl-ssdesc` and `-ctl-flags`. (`endfield-wow64-f-ctl-w1`, which the
+commit message names, ran on an earlier hash and is not the evidence.)
+
+Only the instruction pointer is refused above 4 GiB on a return to 32-bit
+code. The stack pointer needs no such refusal: it is held to the user half
+by the same test as every return, `iretq` into compatibility mode does not
+check it against the stack segment's limit, and 32-bit code uses only ESP,
+its low half.
