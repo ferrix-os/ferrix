@@ -102,7 +102,7 @@ cd /tmp/wine/prefix/drive_c/GRYPHLINK
 sed 's/^/endfield: resolv.conf: /' /etc/resolv.conf
 /usr/lib/wine/wine64 cmd /c ping -n 1 launcher.gryphline.com 2>&1 | head -n 3 | sed 's/^/endfield: ping: /'
 WINEDEBUG="$WINEDEBUG,trace+winsock" /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' 2>&1 \
-    | grep -E 'getaddrinfo|connect|err:|ret' > /tmp/wine/launcher.log &
+    | grep -E 'winsock|err:' > /tmp/wine/launcher.log &
 waited=0
 until /bin/hyprctl clients 2>/dev/null | grep -q "title: GRYPHLINK" || [ $waited -ge 300 ]; do
     sleep 1
@@ -116,7 +116,10 @@ sleep 240
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 grep -E "error|warning|OnQuery_ProtocolVer|OnGetNvGPUConfigResult" "$logs/games.log" | cut -c1-300 | sed 's/^/endfield: games.log: /'
 grep -v ':fixme:' /tmp/wine/launcher.log | grep -E 'err:|getaddrinfo' | sort | uniq -c | sort -rn | head -n 40 | cut -c1-300 | sed 's/^/endfield: wine: /'
-grep 'connect' /tmp/wine/launcher.log | head -n 40 | cut -c1-300 | sed 's/^/endfield: connect: /'
+thread=$(grep -m1 -E 'connect socket .*port 443 ' /tmp/wine/launcher.log | cut -d: -f1)
+echo "endfield: the first thread to connect to port 443: $thread"
+grep "^$thread:" /tmp/wine/launcher.log | grep -v getaddrinfo | head -n 150 | cut -c1-240 | sed 's/^/endfield: thread: /'
+/bin/hyprctl clients | sed 's/^/endfield: clients: /'
 ps | grep -c '[Q]tWebEngineProcess' | sed 's/^/endfield: render processes: /'
 /usr/lib/wine/wineserver64 -k
 echo "endfield: end"
