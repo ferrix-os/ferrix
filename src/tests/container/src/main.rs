@@ -306,7 +306,7 @@ fn container(outside: &[String], host: &str) -> ! {
         let mut byte = [0_u8; 1];
         // SAFETY: `byte` is valid for one byte; the descriptors are this process's.
         let got = unsafe {
-            libc::close(go_end);
+            let _ = libc::close(go_end);
             libc::read(wait_end, byte.as_mut_ptr().cast(), 1)
         };
         if got != 1 {
@@ -328,7 +328,7 @@ fn container(outside: &[String], host: &str) -> ! {
     }
     // SAFETY: `go_end` is valid for one byte from a valid buffer.
     let told = unsafe {
-        libc::close(wait_end);
+        let _ = libc::close(wait_end);
         libc::write(go_end, [1_u8].as_ptr().cast(), 1)
     };
     if told != 1 {
