@@ -36,9 +36,8 @@ const FETCH: &str = include_str!("../../../fetch/fetch-endfield-launcher.sh");
 /// Where [`SCRIPT`] is in the image.
 const SCRIPT_PATH: &str = "etc/endfield.sh";
 
-/// The title the launcher's main window has under Wine's X driver: Qt
-/// gives it none of its own, and Wine names it after the program.
-const TITLE: &str = "Games.exe";
+/// The title of the launcher's main window, as hyprix lists it.
+const TITLE: &str = "GRYPHLINK";
 
 /// What the script prints once the launcher's window is viewable.
 const WINDOW: &str = "endfield: window";
@@ -100,20 +99,22 @@ echo "endfield: reg exited $?"
 /usr/lib/wine/wineserver64 -w
 ln -s /data/GRYPHLINK /tmp/wine/prefix/drive_c/GRYPHLINK
 cd /tmp/wine/prefix/drive_c/GRYPHLINK
-/usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
+sed 's/^/endfield: resolv.conf: /' /etc/resolv.conf
+QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.network*=true}" WINEDEBUG="$WINEDEBUG,+debugstr" \n    /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
 waited=0
-until xwininfo -name "Games.exe" 2>/dev/null | grep -q IsViewable || [ $waited -ge 300 ]; do
+until xwininfo -name "GRYPHLINK" 2>/dev/null | grep -q IsViewable || [ $waited -ge 300 ]; do
     sleep 1
     waited=$((waited + 1))
 done
 echo "endfield: the launcher's window was viewable after ${waited}s"
-xwininfo -name "Games.exe" 2>&1 | grep -E "Width|Height|Map State" | sed 's/^/endfield: launcher: /'
+xwininfo -name "GRYPHLINK" 2>&1 | grep -E "Width|Height|Map State" | sed 's/^/endfield: launcher: /'
 /bin/hyprctl clients | sed 's/^/endfield: clients: /'
 echo "endfield: window"
 sleep 240
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 grep -E "error|warning|OnQuery_ProtocolVer|OnGetNvGPUConfigResult" "$logs/games.log" | cut -c1-300 | sed 's/^/endfield: games.log: /'
-grep -v ':fixme:' /tmp/wine/launcher.log | tail -n 60 | sed 's/^/endfield: wine: /'
+grep -v ':fixme:' /tmp/wine/launcher.log | grep -v 'debugstr' | tail -n 40 | sed 's/^/endfield: wine: /'
+grep 'debugstr' /tmp/wine/launcher.log | grep -iE 'ssl|network|socket|host|error|fail' | sort | uniq -c | sort -rn | head -n 60 | cut -c1-300 | sed 's/^/endfield: debug: /'
 ps | grep -c '[Q]tWebEngineProcess' | sed 's/^/endfield: render processes: /'
 /usr/lib/wine/wineserver64 -k
 echo "endfield: end"
