@@ -66,6 +66,7 @@ mod drawing;
 mod drawn_here;
 pub(crate) mod dxvk;
 mod effects;
+pub(crate) mod endfield;
 mod hyprlock;
 mod idle;
 mod layout;

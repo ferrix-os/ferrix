@@ -332,6 +332,9 @@ COMMANDS:
     test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the
                   program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws, then its
                   frames presented through a swap chain in a window on hyprix through yserver (docs/WINE.md §6)
+    test-endfield-launcher  Attach the volume tools/common/fetch/fetch-endfield-launcher.sh makes, and require
+                  Arknights: Endfield's Windows launcher in Wine on hyprix through yserver, on the network: its window,
+                  its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §7)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
@@ -714,6 +717,7 @@ fn run() -> Result<()> {
         "test-bwrap" => bwrap::test_bwrap(&args),
         "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
         "test-dxvk" => dxvk::test_dxvk(&args),
+        "test-endfield-launcher" => compositor::endfield::test_endfield_launcher(&args),
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
