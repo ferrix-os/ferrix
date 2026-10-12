@@ -12,6 +12,7 @@
 //! cargo xtask test-sem --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-shm --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-procfs --arch all [--i686] [--timeout SECONDS]
+//! cargo xtask test-sigdeliver --arch all [--timeout SECONDS]
 //! cargo xtask test-uvm  [--arch x86_64] [--timeout SECONDS]
 //! cargo xtask test-nvrm [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
 //! cargo xtask test-nvrm-link [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
@@ -146,6 +147,7 @@ mod session;
 mod sha256;
 mod shell;
 mod shm;
+mod sigdeliver;
 mod slot_image;
 mod ssh;
 mod start_page;
@@ -287,6 +289,9 @@ COMMANDS:
                   EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)
     test-pipewait Boot pipewait-test as init and require a read blocked on a pipe to be ended by a caught signal
                   (EINTR, and a restart under SA_RESTART), SIGKILL, a stop and continue, and a freeze and thaw
+    test-sigdeliver Boot sigdeliver-test as init and require a SIGSEGV caught on the alternate stack (a fault recovered
+                  from, and a stack overflow), and a pipe read interrupted by SIGALRM and by another thread's signal,
+                  restarted under SA_RESTART and EINTR without it (the sigpaths boot check's decisions, end to end)
     test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
                   attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
                   ipc(117) and 395-398)
@@ -703,6 +708,7 @@ fn run() -> Result<()> {
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" => sem::run(command, &args),
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
+        "test-sigdeliver" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" | "install-app" => pkg::run(command, &args),
         "coverage" => coverage::run(&args),

@@ -408,9 +408,12 @@ that took what it looked at, a record read that found the last record's tail:
   `ITIMER_VIRTUAL` or `ITIMER_PROF`. `SA_RESTART`, `SIGCHLD` to a handler with
   `wait4` still reaping, job-control stop and continue, `alarm`/`ITIMER_REAL`,
   the alternate stack and the fault-to-signal path are now driven by the
-  `sigpaths` boot check; the fault-to-signal catch and an `SA_RESTART`
-  interrupted read are proven at the kernel's decision, not yet end-to-end by a
-  hand-assembled faulting or interrupted-read user program.
+  `sigpaths` boot check, and since 2026-10-12 end to end by `cargo xtask
+  test-sigdeliver` on all three architectures (`src/tests/sigdeliver`, a
+  static musl program booted as init): a `SIGSEGV` from a `PROT_NONE` page
+  caught on the alternate stack and recovered from, a stack overflow caught
+  there, and a pipe read interrupted by `SIGALRM` and by another thread's
+  `SIGUSR2`, restarted under `SA_RESTART` and `EINTR` without it.
 * **Threads.** `clone(CLONE_THREAD)` makes a thread of the calling process:
   every program's task runs a `Thread`, whose id comes from the pid space and
   finds its process; signal state is split as Linux splits it, the thread
