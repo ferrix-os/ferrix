@@ -180,7 +180,22 @@ pub(super) fn write_medium(
     initramfs: &[u8],
     path: &Path,
 ) -> Result<()> {
-    let volume_path = fat::write_image_with(arch, loader, kernel, initramfs, Some(LIVE_CMDLINE))?;
+    write_medium_with(arch, loader, kernel, initramfs, path, LIVE_CMDLINE)
+}
+
+/// [`write_medium`] with another live command line, which `ferrix-install`
+/// carries to the disk it installs with `ferrix.root=tmpfs` made
+/// `ferrix.root=btrfs` (`run-nazuna`'s `ferrix.fbcon`, as the customer's
+/// install had).
+pub(super) fn write_medium_with(
+    arch: Arch,
+    loader: &Path,
+    kernel: &cargo::Kernel,
+    initramfs: &[u8],
+    path: &Path,
+    cmdline: &str,
+) -> Result<()> {
+    let volume_path = fat::write_image_with(arch, loader, kernel, initramfs, Some(cmdline))?;
     let on = |error: std::io::Error| Error::new(format!("{}: {error}", path.display()));
     let mut volume = File::open(&volume_path)
         .map_err(|error| Error::new(format!("{}: {error}", volume_path.display())))?;
@@ -199,7 +214,7 @@ pub(super) fn write_medium(
     medium.sync_all().map_err(on)?;
     println!(
         "  live medium {} ({} MiB: a GUID partition table, and the EFI system partition \
-         {LIVE_NAME} at sector {LIVE_FIRST} holding the image with `{LIVE_CMDLINE}`)",
+         {LIVE_NAME} at sector {LIVE_FIRST} holding the image with `{cmdline}`)",
         path.display(),
         (sectors * SECTOR) >> 20
     );
@@ -368,6 +383,7 @@ fn blank(path: &PathBuf) -> Result<()> {
         .map_err(|error| Error::new(format!("{}: {error}", path.display())))
 }
 
+pub(crate) mod nazuna;
 mod slots;
 
 #[cfg(test)]

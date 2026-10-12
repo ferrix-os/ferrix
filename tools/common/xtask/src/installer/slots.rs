@@ -59,9 +59,9 @@ use crate::{Error, Result, cargo, fat, initramfs, native, qemu, sha256, zinc};
 
 use super::{SECTOR, files, write_medium};
 
-const SLOT_TYPE: Guid = Guid::from_fields(0x5475_b681, 0x82f5, 0x47da, 0xa5a1, 0x55db_0e7e_2bd3);
-const CONTROL_TYPE: Guid = Guid::from_fields(0xc29a_a8c5, 0xc19c, 0x4147, 0x838f, 0x01ac_cca2_8be4);
-const LINUX_SWAP: Guid = Guid::from_fields(0x0657_fd6d, 0xa4ab, 0x43c4, 0x84e5, 0x0933_c84b_4f4f);
+pub(super) const SLOT_TYPE: Guid = Guid::from_fields(0x5475_b681, 0x82f5, 0x47da, 0xa5a1, 0x55db_0e7e_2bd3);
+pub(super) const CONTROL_TYPE: Guid = Guid::from_fields(0xc29a_a8c5, 0xc19c, 0x4147, 0x838f, 0x01ac_cca2_8be4);
+pub(super) const LINUX_SWAP: Guid = Guid::from_fields(0x0657_fd6d, 0xa4ab, 0x43c4, 0x84e5, 0x0933_c84b_4f4f);
 const MIB: u64 = 1 << 20;
 const MIB_SECTORS: u64 = MIB / SECTOR;
 const DISK_BYTES: u64 = 3 << 30;
@@ -593,7 +593,7 @@ fn file_len(path: &Path) -> Result<u64> {
 
 /// Write a disk of `bytes` with these partitions, each `(type, MiB, name)`
 /// from 1 MiB on, the last taking the rest; returns their byte ranges.
-fn lay(path: &Path, bytes: u64, parts: &[(Guid, u64, &str)]) -> Result<Vec<(u64, u64)>> {
+pub(super) fn lay(path: &Path, bytes: u64, parts: &[(Guid, u64, &str)]) -> Result<Vec<(u64, u64)>> {
     let mut file = fresh(path, bytes)?;
     let sectors = bytes / SECTOR;
     let (_, last_usable) =

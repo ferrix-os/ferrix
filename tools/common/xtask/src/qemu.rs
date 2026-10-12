@@ -1072,6 +1072,26 @@ pub(crate) fn boot_until(
     }
 }
 
+/// Boot headless and only watch: echo and save the serial port until a
+/// panic, until QEMU ends, or for the timeout. Whether it panicked, the
+/// lines, and the serial log's path; for a machine whose boot nobody has
+/// seen succeed yet (`run-nazuna --timeout`), so no ending is an error.
+pub(crate) fn observe(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<(bool, Vec<String>, PathBuf)> {
+    // No line holds a NUL, so nothing ends the watch but a panic, QEMU or
+    // the clock.
+    let watched = watch(arch, image, kernel, args, "\0")?;
+    Ok((
+        matches!(watched.verdict, Verdict::Panicked),
+        watched.lines,
+        watched.log,
+    ))
+}
+
 /// [`watch`], calling `at_marker` once `until` has been printed, while QEMU
 /// is still running, and returning the lines. The hook sees the lines so far
 /// and may read the ones that follow ([`Watching`]). A boot that panicked or
@@ -2276,14 +2296,12 @@ fn qemu_command(
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);
-    let _ = command.args([
-        "-m",
-        &args.memory.to_string(),
-        "-smp",
-        &processors.to_string(),
-        "-monitor",
-        "none",
-    ]);
+    let (memory, smp) = if args.nazuna {
+        crate::installer::nazuna::memory_and_processors(args)
+    } else {
+        (args.memory.to_string(), processors.to_string())
+    };
+    let _ = command.args(["-m", &memory, "-smp", &smp, "-monitor", "none"]);
     // Where the screen goes: nowhere for a test, which reads it with a
     // screendump; a window or a VNC server for a boot somebody watches.
     // `window` chooses by asking this QEMU what it was built with, because
@@ -2315,6 +2333,22 @@ fn qemu_command(
     }
 
     match arch {
+        Arch::X86_64 if args.nazuna => {
+            let _ = command.args([
+                "-machine",
+                &x86_machine(&accelerator),
+                "-cpu",
+                &crate::installer::nazuna::cpu(&binary, &accelerator),
+                "-device",
+                "isa-debug-exit,iobase=0xf4,iosize=0x04",
+                "-device",
+                crate::installer::nazuna::AMD_IOMMU,
+            ]);
+            if crate::window::sole_screen(args) {
+                let _ = command.args(["-vga", "none"]);
+            }
+            crate::installer::nazuna::attach(&mut command, image);
+        }
         Arch::X86_64 => {
             let _ = command.args([
                 "-machine",
@@ -2403,11 +2437,17 @@ fn qemu_command(
         }
     }
 
-    attach_rng(&mut command, arch);
+    // The PC has none of the test machine's own devices: no virtio random
+    // number generator, `edu`, `pci-testdev` or fixture disks.
+    if !args.nazuna {
+        attach_rng(&mut command, arch);
+    }
     attach_display(&mut command, arch, args, &binary);
     attach_asked_for(&mut command, arch, args, &binary);
-    attach_test_disk(&mut command, arch)?;
-    attach_btrfs_disk(&mut command, arch)?;
+    if !args.nazuna {
+        attach_test_disk(&mut command, arch)?;
+        attach_btrfs_disk(&mut command, arch)?;
+    }
     attach_install_disks(&mut command, arch, image, args);
     attach_root_disk(&mut command, arch, args)?;
     attach_nvme_scratch(&mut command, arch, args);
