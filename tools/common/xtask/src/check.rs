@@ -511,7 +511,10 @@ pub(crate) fn loom(root: &std::path::Path) -> Result<()> {
     let dir = root.join("src/tests/loom");
     let native = |arguments: &[&str]| {
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir("loom"));
         command
     };
     step("loom: formatting", || {
@@ -660,7 +663,10 @@ fn compositor(root: &std::path::Path) -> Result<()> {
             return crate::wsl::cargo(&dir, arguments);
         }
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir("compositor"));
         command
     };
     if cfg!(windows) {
@@ -747,7 +753,10 @@ fn linux_workspace(root: &std::path::Path, name: &str, relative: &str) -> Result
             return crate::wsl::cargo(&dir, arguments);
         }
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir(name));
         command
     };
     if cfg!(windows) {
@@ -783,7 +792,10 @@ fn adbd(root: &std::path::Path) -> Result<()> {
             return crate::wsl::cargo(&dir, arguments);
         }
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir("adbd"));
         command
     };
     if cfg!(windows) {
@@ -814,7 +826,10 @@ fn nvos(root: &std::path::Path) -> Result<()> {
             return crate::wsl::cargo(&dir, arguments);
         }
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir("nvos"));
         command
     };
     if cfg!(windows) {
@@ -846,7 +861,10 @@ fn media(root: &std::path::Path) -> Result<()> {
             return crate::wsl::cargo(&dir, arguments);
         }
         let mut command = Command::new(cargo_binary());
-        let _ = command.current_dir(&dir).args(arguments);
+        let _ = command
+            .current_dir(&dir)
+            .args(arguments)
+            .env("CARGO_TARGET_DIR", own_target_dir("media"));
         command
     };
     if cfg!(windows) {
@@ -881,6 +899,23 @@ pub(crate) fn model_doc() -> Result<()> {
 // `workspace::members`.
 
 /// The workspace's members, sorted.
+/// The target directory `check` builds the workspace `name` in -- one
+/// beside the main workspace's, never the main workspace's own.
+///
+/// Each workspace has its own lock file and profiles, and builds the same
+/// crates from crates.io (`proc-macro2`, `syn`, `thiserror`) at the same
+/// versions. In one shared directory cargo gives such a crate the same file
+/// names in every workspace but a different fingerprint, so each workspace's
+/// build threw away the one before it: in a warm `check` in a gate slot,
+/// whose `CARGO_TARGET_DIR` every workspace inherited, the main clippy
+/// compiled the proc macros again after the media workspace, the tests
+/// compiled what uses them again after the clippy, and the compositor's and
+/// media's steps did the same (`docs/TEST-TIME.md`, B3). A directory each
+/// keeps each one's builds.
+fn own_target_dir(name: &str) -> std::path::PathBuf {
+    paths::target_dir().join(format!("check-{name}"))
+}
+
 fn sorted_members() -> Result<workspace::Members> {
     workspace::members(&paths::workspace_root())
 }
