@@ -39,9 +39,15 @@ use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, zinc};
 
-/// nazuna's IOMMU: AMD-Vi, remapping interrupts. xAPIC, as the kernel runs,
-/// so no x2APIC support (`xtsup`) is offered.
-const AMD_IOMMU: &str = "amd-iommu,intremap=on";
+/// nazuna's IOMMU: AMD-Vi, its PCI function at 00:00.2 as on the board,
+/// remapping interrupts. xAPIC, as the kernel runs, so no x2APIC support
+/// (`xtsup`) is offered.
+const AMD_IOMMU: [&str; 4] = [
+    "-device",
+    "AMDVI-PCI,id=nazuna.iommu,addr=0.2",
+    "-device",
+    "amd-iommu,intremap=on,pci-id=nazuna.iommu",
+];
 
 /// The live medium's command line: `/` in memory, and the kernel's lines on
 /// the screen as well, as the customer's install carried.
@@ -326,9 +332,8 @@ pub(crate) fn machine(
         &cpu(binary, accelerator),
         "-device",
         "isa-debug-exit,iobase=0xf4,iosize=0x04",
-        "-device",
-        AMD_IOMMU,
     ]);
+    let _ = command.args(AMD_IOMMU);
     if crate::window::sole_screen(args) {
         let _ = command.args(["-vga", "none"]);
     }

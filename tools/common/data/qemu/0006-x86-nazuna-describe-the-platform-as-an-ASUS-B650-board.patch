@@ -10,17 +10,21 @@ firmware (BIOS 3206) says, and the devices they name are where they say:
   (GSI 0) and a second, 33, at 0xfec01000 (GSI 24); IRQ 0 on GSI 2, IRQ 9
   level and active low; LINT1 NMI edge and active high. The I/O APICs'
   ID registers reset to 32 and 33.
-* FADT: a 32-bit PM timer (TMR_VAL_EXT, and the timer counts 32 bits),
-  reset by 0xBE to the APM port 0xB2 (which then resets), LEGACY_DEVICES.
+* FADT: the board's flags (0x3c5a5: a 32-bit PM timer, TMR_VAL_EXT, which
+  then counts 32 bits; no forced APIC cluster model), reset by 0xBE to the
+  APM port 0xB2 (which then resets), LEGACY_DEVICES.
 * HPET: AMD's vendor id, a 32-bit main counter (no COUNT_SIZE_CAP; every
-  timer 32-bit), 14.31818 MHz; the HPET table follows the device.
+  timer 32-bit), 14.31818 MHz; the HPET table follows the device, minimum
+  tick 14318.
 * IVRS: the HPET and both I/O APICs as special devices; the AMD IOMMU's
-  registers at 0xf7500000.
+  registers at 0xf7500000, and the root complex multifunction so that the
+  IOMMU's function can be 00:00.2 (-device AMDVI-PCI,addr=0.2).
 
 Each piece is a property (hpet x-vendor-id, x-count-32bit, x-period-fs;
-ich9 x-pm-tmr-32bit, x-apm-reset) that x-nazuna sets; defaults change
-nothing. The ECAM base (0xe0000000) and PM base (0x800) are the firmware's
-to program: OVMF built by tools/common/fetch/fetch-ovmf-nazuna.sh.
+ich9 x-pm-tmr-32bit, x-apm-reset) or a branch on x-nazuna; with x-nazuna
+off nothing changes. The ECAM base (0xe0000000, OVMF's default) and the PM
+base (0x800) are the firmware's to program: OVMF built by
+tools/common/fetch/fetch-ovmf-nazuna.sh.
 ---
 diff --git a/hw/acpi/core.c b/hw/acpi/core.c
 index ff16582..c915ece 100644
@@ -47,7 +51,7 @@ index ff16582..c915ece 100644
  
  static void acpi_pm_tmr_timer(void *opaque)
 diff --git a/hw/i386/acpi-build.c b/hw/i386/acpi-build.c
-index 9446a9f..f772ac4 100644
+index 9446a9f..758a095 100644
 --- a/hw/i386/acpi-build.c
 +++ b/hw/i386/acpi-build.c
 @@ -32,6 +32,7 @@
@@ -58,18 +62,26 @@ index 9446a9f..f772ac4 100644
  #include "hw/acpi/acpi-defs.h"
  #include "hw/acpi/acpi.h"
  #include "hw/acpi/cpu.h"
-@@ -188,6 +189,10 @@ static void init_common_fadt_data(MachineState *ms, Object *o,
+@@ -188,6 +189,18 @@ static void init_common_fadt_data(MachineState *ms, Object *o,
       * Flags, bit offset 1 - 8042.
       */
      fadt.iapc_boot_arch = iapc_boot_arch_8042();
 +    if (X86_MACHINE(ms)->nazuna) {
 +        /* LEGACY_DEVICES, as the board's firmware says. */
 +        fadt.iapc_boot_arch |= 0x1;
++        /*
++         * Its flags: no forced cluster model whatever the processor count,
++         * and PCI Express wake, S4 RTC status and remote power-on.
++         */
++        fadt.flags &= ~(1 << ACPI_FADT_F_FORCE_APIC_CLUSTER_MODEL);
++        fadt.flags |= (1 << ACPI_FADT_F_PCI_EXP_WAK) |
++                      (1 << ACPI_FADT_F_S4_RTC_STS_VALID) |
++                      (1 << ACPI_FADT_F_REMOTE_POWER_ON_CAPABLE);
 +    }
  
      *data = fadt;
  }
-@@ -216,9 +221,18 @@ static void acpi_get_pm_info(MachineState *machine, AcpiPmInfo *pm)
+@@ -216,9 +229,18 @@ static void acpi_get_pm_info(MachineState *machine, AcpiPmInfo *pm)
              ICH9_LPC_SMI_NEGOTIATED_FEAT_PROP, NULL);
          struct AcpiGenericAddress r = { .space_id = AML_AS_SYSTEM_IO,
              .bit_width = 8, .address = ICH9_RST_CNT_IOPORT };
@@ -88,7 +100,7 @@ index 9446a9f..f772ac4 100644
          pm->cpu_hp_io_base = ICH9_CPU_HOTPLUG_IO_BASE;
          pm->smi_on_cpuhp =
              !!(smi_features & BIT_ULL(ICH9_LPC_SMI_F_CPU_HOTPLUG_BIT));
-@@ -1286,6 +1300,22 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
+@@ -1286,6 +1308,22 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
   * IA-PC HPET (High Precision Event Timers) Specification (Revision: 1.0a)
   * 3.2.4The ACPI 2.0 HPET Description Table (HPET)
   */
@@ -111,7 +123,7 @@ index 9446a9f..f772ac4 100644
  static void
  build_hpet(GArray *table_data, BIOSLinker *linker, const char *oem_id,
             const char *oem_table_id)
-@@ -1297,8 +1327,8 @@ build_hpet(GArray *table_data, BIOSLinker *linker, const char *oem_id,
+@@ -1297,14 +1335,15 @@ build_hpet(GArray *table_data, BIOSLinker *linker, const char *oem_id,
      /* Note timer_block_id value must be kept in sync with value advertised by
       * emulated hpet
       */
@@ -122,7 +134,16 @@ index 9446a9f..f772ac4 100644
      /* BASE_ADDRESS */
      build_append_gas(table_data, AML_AS_SYSTEM_MEMORY, 0, 0, 0, HPET_BASE);
      /* HPET Number */
-@@ -1796,11 +1826,32 @@ build_amd_iommu(GArray *table_data, BIOSLinker *linker, const char *oem_id,
+     build_append_int_noprefix(table_data, 0, 1);
+-    /* Main Counter Minimum Clock_tick in Periodic Mode */
+-    build_append_int_noprefix(table_data, 0, 2);
++    /* Main Counter Minimum Clock_tick in Periodic Mode: the board's 14318 */
++    build_append_int_noprefix(table_data,
++        X86_MACHINE(qdev_get_machine())->nazuna ? 14318 : 0, 2);
+     /* Page Protection And OEM Attribute */
+     build_append_int_noprefix(table_data, 0, 1);
+     acpi_table_end(linker, &table);
+@@ -1796,11 +1835,32 @@ build_amd_iommu(GArray *table_data, BIOSLinker *linker, const char *oem_id,
       * See Linux kernel commit 'c2ff5cf5294bcbd7fa50f7d860e90a66db7e5059'
       */
      if (x86_iommu_ir_supported(x86_iommu_get_default())) {
@@ -300,7 +321,7 @@ index f8b919c..6dcfecc 100644
              qdev_prop_set_uint32(hpet, HPET_INTCAP, hpet_irqs);
          }
 diff --git a/hw/i386/pc_q35.c b/hw/i386/pc_q35.c
-index 6015e63..0f42c8a 100644
+index 6015e63..ebe74be 100644
 --- a/hw/i386/pc_q35.c
 +++ b/hw/i386/pc_q35.c
 @@ -51,6 +51,7 @@
@@ -311,7 +332,19 @@ index 6015e63..0f42c8a 100644
  #include "hw/southbridge/ich9.h"
  #include "hw/usb.h"
  #include "hw/usb/hcd-uhci.h"
-@@ -239,6 +240,10 @@ static void pc_q35_init(MachineState *machine)
+@@ -225,6 +226,11 @@ static void pc_q35_init(MachineState *machine)
+                              pcms->default_bus_bypass_iommu, NULL);
+     object_property_set_bool(phb, PCI_HOST_PROP_SMM_RANGES,
+                              x86_machine_is_smm_enabled(x86ms), NULL);
++    if (x86ms->nazuna) {
++        /* The IOMMU is function 2 of the root complex, 00:00.2. */
++        qdev_prop_set_bit(DEVICE(object_resolve_path_component(phb, "mch")),
++                          "multifunction", true);
++    }
+     sysbus_realize_and_unref(SYS_BUS_DEVICE(phb), &error_fatal);
+ 
+     /* pci */
+@@ -239,6 +245,10 @@ static void pc_q35_init(MachineState *machine)
      lpc_dev = DEVICE(lpc);
      qdev_prop_set_bit(lpc_dev, "smm-enabled",
                        x86_machine_is_smm_enabled(x86ms));
@@ -322,7 +355,7 @@ index 6015e63..0f42c8a 100644
      for (i = 0; i < IOAPIC_NUM_PINS; i++) {
          qdev_connect_gpio_out_named(lpc_dev, ICH9_GPIO_GSI, i, x86ms->gsi[i]);
      }
-@@ -275,6 +280,14 @@ static void pc_q35_init(MachineState *machine)
+@@ -275,6 +285,14 @@ static void pc_q35_init(MachineState *machine)
      }
  
      ioapic_init_gsi(gsi_state, OBJECT(phb));
