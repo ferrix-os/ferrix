@@ -116,7 +116,104 @@ is killed: nothing runs in a killed process. Sending STOP to every block
 ring from `power::finish` and `reboot`, and waiting for STOPPED, is a kernel
 change that waits on the customer's word (`docs/roadmap/stage-10-userspace-drivers.md`,
 *Still to do*: no driver's stop path is reachable today); the driver's half
-is built and tested against the model.
+is built and tested against the model. The customer's word came on
+2026-10-13 with the native boot of the PC (stage 21); §2.1 is the design.
+
+### 2.1 STOP at power-off and reset (design, for review)
+
+Written 2026-10-13 by bm-nvme. A drive must be told before its power goes:
+a real SN720 counts every untold power-off in its SMART log
+(`unsafe_shutdowns`) and may take longer to come ready, and a drive that
+is mid-way through folding its cache is the case the notification exists
+for.
+
+**The order at the end, with this change.** `power::finish` (init exited:
+power-off or `ferrix.onexit=reset`) and `reboot(2)`'s `POWER_OFF`, `HALT`,
+`RESTART` and `RESTART2`:
+
+1. `sync_disks()`: every registered flush committed, as today. Each commit
+   ends in the ring's flush, which the NVMe driver makes a Flush command.
+2. **new:** `stop_devices()`: every registered *stop* hook, in registration
+   order, each given the same deadline, now + 35 s.
+3. the audit record, the console line, `arch::shutdown()` or `arch::reset()`,
+   as today.
+
+`ferrix.onexit=panic` sends no STOP: its panic halts (or, under
+`docs/AB-BOOT.md` §6.4, resets), and nothing after a panic waits on ring 3.
+
+**The hook.** `power` names nothing above the item, as with flushes. It
+gains a second list, `Hooks<Stop, 4>`: `Stop { what: &'static str, stop:
+fn(deadline_nanos: u64) -> Stopped }`, `Stopped { asked, stopped }`,
+registered at bring-up from `main.rs`'s `register_load` next to the
+flushes. The block ring registers the only one. `power` prints one line per
+hook: `  power    disks: 2 told to stop, 2 stopped` or `... 1 did not answer
+within 35 s`, and powers off either way: a driver that does not answer
+never keeps the machine running.
+
+**What the block ring does** (`interfaces/block_ring`, load ring):
+
+1. sets `STOPPING`, after which `BLOCK_RING_CREATE` answers `BAD_STATE`, so a
+   driver `devmgr` starts again (block drivers are `Restart=always`) gets no
+   ring and touches no device;
+2. marks every live ring's task *asked to stop* and nudges it, through the
+   same port packet a queued read nudges it with;
+3. each task, at the top of its loop, sends STOP (type 4) once on its
+   control channel, then keeps serving: the driver completes or fails what
+   it holds (BLOCK-RING.md §6.3), resets the device -- for `nvme`, host memory
+   back, `CC.SHN` = 01b, `CSTS.SHST` = 10b waited for, `CC.EN` cleared -- and
+   answers STOPPED; the ring ends `Ending::Stopped` as it does today, its
+   node is unpublished and anything still outstanding fails `EIO`;
+4. `stop` waits on the ring's existing `SERVED` queue until every ring that
+   was asked has ended (STOPPED counts as stopped; a driver that died
+   instead does not, since no reset is promised) or the deadline passes,
+   and returns the counts.
+
+A parked disk (its driver died earlier) has no driver to tell and is not
+counted. Nothing in the item waits without the deadline.
+
+**The deadline: 35 s.** The driver waits for `CSTS.SHST` for `RTD3E`,
+clamped to 5..30 s (Linux clamps its `shutdown_timeout` to at most 60 s,
+default 5 s, `drivers/nvme/host/core.c`), then for `CSTS.RDY` to fall; the
+kernel gives the slowest drive the driver allows its whole shutdown wait
+plus 5 s. QEMU's controller completes the shutdown at once; a virtio disk's
+driver resets its device in microseconds.
+
+**The constants**, checked on 2026-10-13 against Linux's
+`include/linux/nvme.h` on the gate host
+(`/usr/src/linux-headers-7.0.0-29`, lines 230-234 and 253-260) and the
+NVMe Base Specification: `CC.SHN` bits 15:14, `NVME_CC_SHN_NORMAL` =
+1 << 14 (`ferrix-nvme`'s `regs::CC_SHN_NORMAL`, the same); `CSTS.SHST` bits
+3:2, `NVME_CSTS_SHST_CMPLT` = 2 << 2 (`regs::CSTS_SHST_COMPLETE`, the
+same); `RTD3E` at Identify Controller bytes 88..92, in microseconds
+(`identify.rs`, the same). They are outside the item; the kernel uses
+none of them.
+
+**What it changes, and where.**
+
+| Where | Ring | Change |
+|---|---|---|
+| `src/kernel/src/power.rs` | item | `Stop`, `register_stop`, `stop_devices`, called from `finish` (off, reset) |
+| `src/kernel/src/syscall/system.rs` | load | `stop_devices()` after `sync_disks()` in `reboot(2)` |
+| `src/kernel/src/main.rs` | item | registers the block ring's stop with the flushes |
+| `src/kernel/src/interfaces/block_ring/mod.rs` | load | `STOPPING`, the asked-to-stop flag, STOP sent from the task, `stop_all(deadline)` |
+| `docs/BLOCK-RING.md` §6.3 | | the kernel sends STOP at power-off and reset |
+| `docs/sysml`, `TRACEABILITY.md` | | a requirement for the power side's order and bound (flushes, then stops, then off; never past the deadline), ids reserved first, as the consultant rules |
+
+**The gate.** `cargo xtask test-nvme` (KVM, x86-64) at its end powers off
+as it does today and now also requires: the kernel's `power    disks: N
+told to stop, N stopped` with N counting both NVMe drives and the virtio
+disks; each `nvme` driver's `the controller said its shutdown is complete`;
+and QEMU's own trace showing the shutdown notification set
+(`pci_nvme_mmio_shutdown_set`) for each controller. `test-boot` on all four
+rows and `test-restart --boot nvme` stay green (their disks are stopped
+too; the boot lines gain the one `power` line).
+
+**Negative controls:** `stop_devices()` removed from `finish`: test-nvme
+fails on the missing `power    disks:` line and the missing QEMU trace
+event; the STOP send removed from the ring's task: it fails on `0 stopped`;
+the driver's `CC.SHN` write removed (`ferrix-nvme`): it fails on the
+missing trace event while the kernel still counts the ring stopped, which
+shows the trace check is what proves the drive was told.
 
 ## 3. Decisions, and where they depart from `docs/INSTALLER.md`
 
