@@ -100,7 +100,8 @@ echo "endfield: reg exited $?"
 ln -s /data/GRYPHLINK /tmp/wine/prefix/drive_c/GRYPHLINK
 cd /tmp/wine/prefix/drive_c/GRYPHLINK
 sed 's/^/endfield: resolv.conf: /' /etc/resolv.conf
-QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.network*=true}" WINEDEBUG="$WINEDEBUG,+debugstr" \n    /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
+QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.network*=true}" WINEDEBUG="$WINEDEBUG,+debugstr" \
+    /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
 waited=0
 until xwininfo -name "GRYPHLINK" 2>/dev/null | grep -q IsViewable || [ $waited -ge 300 ]; do
     sleep 1
