@@ -216,6 +216,20 @@ host, the full volume had every data block group full, its metadata chunk
 to a chunk: whether Ferrix's write path holds back more than Linux's would
 is a separate question, in `docs/BACKLOG.md`.
 
+**esync is not in this Wine.** Debian's Wine 10.0 is upstream Wine, and
+upstream Wine 10.0 has neither esync nor fsync -- both are wine-staging's
+and Proton's patches -- nor ntsync, which upstream took later: its source
+tarball holds no file and `server/thread.c` and `dlls/ntdll/unix/sync.c`
+no line naming any of the three, and neither `wineserver64` nor
+`ntdll.so` on the volume carries the string `WINEESYNC` (2026-10-12).
+`WINEESYNC=1` is therefore ignored, and every wait goes through wineserver,
+which is what `test-wine` already runs. What esync asks of the kernel
+(`eventfd` with `EFD_SEMAPHORE`, non-blocking reads, `poll` and `ppoll`
+over many descriptors, a high `RLIMIT_NOFILE`, shared memory for its
+objects) stays untried by Wine until a Wine that has it is on a volume:
+the route's patched Proton builds (DW-Proton, then GE-Proton) carry esync
+and fsync, and GE-Proton's newer releases ntsync.
+
 **Leads, none of them in the kernel as far as is known.**
 
 * `df` says tmpfs has used 0 of 3.0G with an 800 MB prefix on it.

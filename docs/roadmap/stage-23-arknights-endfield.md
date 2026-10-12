@@ -249,7 +249,9 @@ desktop to type into.
   `SS` after `SYSRET` on AMD (`docs/WINE.md` §7). `modify_ldt` was not
   needed; `wineboot` starts the 32-bit `rundll32.exe`. Reviewed by the
   consultant (ledger line 762, OK IF W1 to W7, met in the landing).
-* *Still to do:* E1.4's esync. A 32-bit program that draws a window.
+* *Still to do:* E1.4's esync, which Debian's Wine 10.0 does not have (nor
+  fsync or ntsync; `docs/WINE.md` §5): it waits on a Wine that does, the
+  route's patched Proton, and E1.4's 3 points move with it. A 32-bit program that draws a window.
   Whether btrfs's write path leaves more of a
   full volume unallocated than Linux would (135 MB of 2 GB on the full Wine
   volume), filed in `docs/BACKLOG.md`.
