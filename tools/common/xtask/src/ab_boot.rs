@@ -31,8 +31,7 @@
 //! is what `fleet/gate.sh control --expect-line` matches.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM, Partition, write_table};
@@ -112,6 +111,28 @@ impl Layout {
             first_lba: range.0,
             last_lba: range.1,
         }
+    }
+}
+
+/// Reads and writes at a byte offset of the disk file. Unix's `FileExt` and
+/// Windows's `FileExt` disagree on the signatures and on whether the cursor
+/// moves, so this seeks and then reads or writes, on every host; the disk is
+/// touched by one thread at a time.
+trait At {
+    fn write_all_at(&self, bytes: &[u8], offset: u64) -> std::io::Result<()>;
+    fn read_exact_at(&self, bytes: &mut [u8], offset: u64) -> std::io::Result<()>;
+}
+
+impl At for File {
+    fn write_all_at(&self, bytes: &[u8], offset: u64) -> std::io::Result<()> {
+        let mut file = self;
+        let _ = file.seek(SeekFrom::Start(offset))?;
+        file.write_all(bytes)
+    }
+    fn read_exact_at(&self, bytes: &mut [u8], offset: u64) -> std::io::Result<()> {
+        let mut file = self;
+        let _ = file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(bytes)
     }
 }
 
