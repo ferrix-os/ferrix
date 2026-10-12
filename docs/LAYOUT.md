@@ -165,6 +165,7 @@ app: `cargo xtask apps` lists them. `docs/APPS.md` is the design.
 | `src/tests/loom/` | `loom` models of the orderings the kernel's lock-free looks rest on (`docs/OPAQUE-KERNEL.md` §9.8), each with a control that must fail; `cargo xtask loom`, and a step of `check`. loom is a dev-dependency here only (the customer's decision, 2026-10-03). |
 | `src/tests/threads/` | Stage 7's threads exit test: a static musl program using `std::thread`. |
 | `src/tests/sem/`, `src/tests/shm/`, `src/tests/procfs/` | Static programs `test-sem`, `test-shm` and `test-procfs` run inside Ferrix. |
+| `src/tests/pipewait/`, `src/tests/sigdeliver/` | Static programs `test-pipewait` and `test-sigdeliver` run inside Ferrix: a blocked pipe read and what ends it, and the `sigpaths` boot check's signal paths end to end. |
 
 A crate's own tests and test data stay beside it (`src/lib/fs/btrfs/testdata/`,
 `src/user/system/linux/compositor/render/tests/data/`). `src/tests/` is for programs
