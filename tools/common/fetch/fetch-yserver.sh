@@ -14,8 +14,9 @@
 # selections.
 #
 # The source is the customer's fork of yserver (docs/YSERVER.md §8), pinned
-# by commit: upstream's master as of 2026-10-02 (3875be0b, past 1.6.0) and
-# Ferrix's commits on top. It is built with its
+# by commit: upstream's master as of 2026-10-12 (85160184, past 1.7.1) and
+# Ferrix's commits rebased on top (the fork's branch
+# ferrix-rebase-2026-10-12). It is built with its
 # `wayland` feature, the rootless backend, which takes Ferrix's own Wayland
 # client runtime from this repository on GitHub at the commit the fork pins. glslc, which compiles
 # yserver's shaders during the build, is Debian's too, unpacked into a
@@ -44,7 +45,7 @@ out=${FERRIX_YSERVER_VOLUME:-$HOME/.local/share/ferrix/yserver}
 # The fork, and the commit of it that is built. YSERVER_REPO may name a local
 # clone, for a commit not yet pushed.
 repo=${YSERVER_REPO:-https://github.com/ferrix-os/yserver.git}
-YSERVER_COMMIT=662c61f386e2fda9f1f2b0eeaa43af651e182a61
+YSERVER_COMMIT=ca63235bdedb7b69cd5e724bbcb723685b051e39
 # The toolchain Ferrix pins in rust-toolchain.toml.
 toolchain=${YSERVER_TOOLCHAIN:-1.97.1}
 

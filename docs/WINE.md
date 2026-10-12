@@ -185,7 +185,8 @@ typed into it and copied out of it pass (`test-wine`, KVM, 2026-10-12).
 There is no workaround left. What a session picking Wine up needs first:
 
 **What yserver had to answer as Xorg and Xwayland do (fixed 2026-10-12).**
-Both are in the fork at 662c61f3, which `fetch-yserver.sh` pins:
+Both are in the fork (662c61f3, and since the rebase of 2026-10-12 on the
+branch `fetch-yserver.sh` pins):
 
 | What | Why it mattered | The fix |
 |---|---|---|
