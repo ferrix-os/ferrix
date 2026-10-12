@@ -24,6 +24,7 @@ pub(crate) const COMMANDS: &[&str] = &[
     "host-doctest",
     "host-doc",
     "check-apps",
+    "check-side",
     "check-docs",
     "gate-rows",
     "components",
@@ -41,6 +42,7 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "host-doctest" => host_doctest(),
         "host-doc" => host_doc(),
         "check-apps" => apps(),
+        "check-side" => side_workspaces(&paths::workspace_root()),
         "check-docs" => docs(),
         "gate-rows" => crate::gate_rows::run(args),
         "components" | "pin-components" => crate::components::command(name),
@@ -233,14 +235,50 @@ fn run(args: &Args) -> Result<()> {
         cargo::run(command, "cargo fmt --check")
     })?;
 
-    steps_at_once(AUDITS)?;
+    // The audits read the tree and write nothing a build reads, and each side
+    // workspace builds in a target directory of its own (`own_target_dir`),
+    // so neither waits for the main workspace's cargo steps: both run beside
+    // them, and what they said is printed whole once those have ended
+    // (`docs/TEST-TIME.md`, B4). Every part runs to its end whichever fails,
+    // and the first failure in the order the steps used to run in is the
+    // error.
+    let beside = Beside::start()?;
+    let ((said, audits), main) = std::thread::scope(|scope| {
+        let audits = scope.spawn(|| at_once(AUDITS));
+        let main = main_workspace(&root, args);
+        let audits = audits.join().unwrap_or_else(|_| {
+            (
+                String::new(),
+                Err(Error::new("the audits' thread panicked")),
+            )
+        });
+        (audits, main)
+    });
+    println!("\n== the audits, run beside the steps above");
+    print!("{said}");
+    let side = beside.finish();
+    audits?;
+    let fast = main?;
+    side?;
+    if fast {
+        println!("\nchecked (--fast: cross-target clippy skipped)");
+    } else {
+        println!("\nchecked");
+    }
+    Ok(())
+}
+
+/// The main workspace's steps of `check`, one after another, then
+/// ferrousli's, zinc's and Miri's when asked for, then the cross-target
+/// clippies unless `--fast`; whether `--fast` skipped them.
+fn main_workspace(root: &std::path::Path, args: &Args) -> Result<bool> {
     step("terminal font", terminal_font)?;
     step("btrfs allocates fallibly", item_crates_allocate_fallibly)?;
 
     step("crate layering", || {
         let mut command = Command::new("bash");
         let _ = command
-            .current_dir(&root)
+            .current_dir(root)
             .arg("tools/common/check/check-crate-layering.sh");
         cargo::run(command, "tools/common/check/check-crate-layering.sh")
     })?;
@@ -253,20 +291,13 @@ fn run(args: &Args) -> Result<()> {
     step("tests", host_test)?;
     step("doc tests", host_doctest)?;
     step("documentation", host_doc)?;
-    loom(&root)?;
-
-    compositor(&root)?;
-    userland(&root)?;
-    adbd(&root)?;
-    nvos(&root)?;
-    apps()?;
 
     if args.ferrousli {
-        ferrousli(&root)?;
+        ferrousli(root)?;
     }
 
     if args.zinc {
-        zinc(&root)?;
+        zinc(root)?;
     }
 
     // Opt-in, because it is minutes rather than seconds and needs a nightly
@@ -278,14 +309,83 @@ fn run(args: &Args) -> Result<()> {
     }
 
     if args.fast {
-        println!("\nchecked (--fast: cross-target clippy skipped)");
-        return Ok(());
+        return Ok(true);
     }
 
     cross_target_clippy()?;
+    Ok(false)
+}
 
-    println!("\nchecked");
-    Ok(())
+/// The workspaces of their own that `check` reaches -- loom's, the
+/// compositor's, the Linux programs', adbd's, nvos's and every app's -- one
+/// after another: `cargo xtask check-side`, which `check` starts beside its
+/// main workspace's steps ([`Beside`]).
+fn side_workspaces(root: &std::path::Path) -> Result<()> {
+    loom(root)?;
+    compositor(root)?;
+    userland(root)?;
+    adbd(root)?;
+    nvos(root)?;
+    apps()
+}
+
+/// `cargo xtask check-side`, started by `check` as a process of its own,
+/// with what it says going to a log that is printed whole when it ends, so
+/// its output never interleaves with the main workspace's.
+#[derive(Debug)]
+struct Beside {
+    /// The process.
+    child: std::process::Child,
+    /// Where its output goes.
+    log: std::path::PathBuf,
+    /// When it was started.
+    began: Instant,
+}
+
+impl Beside {
+    /// Start it.
+    fn start() -> Result<Beside> {
+        let directory = paths::target_dir();
+        std::fs::create_dir_all(&directory)?;
+        let log = directory.join("check-side.log");
+        let file = std::fs::File::create(&log)
+            .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))?;
+        let child = Command::new(std::env::current_exe()?)
+            .arg("check-side")
+            .current_dir(paths::workspace_root())
+            .stdin(Stdio::null())
+            .stdout(file.try_clone()?)
+            .stderr(file)
+            .spawn()
+            .map_err(|error| Error::new(format!("could not start check-side: {error}")))?;
+        println!(
+            "\n   the workspaces of their own run beside the steps below; \
+             their output follows them ({})",
+            log.display()
+        );
+        Ok(Beside {
+            child,
+            log,
+            began: Instant::now(),
+        })
+    }
+
+    /// Wait for it, print what it said, and say whether it passed.
+    fn finish(mut self) -> Result<()> {
+        let status = self.child.wait();
+        println!("\n== the workspaces of their own, run beside the steps above");
+        match std::fs::read(&self.log) {
+            Ok(said) => print!("{}", String::from_utf8_lossy(&said)),
+            Err(error) => println!("reading {}: {error}", self.log.display()),
+        }
+        took("the workspaces of their own, beside", self.began);
+        let status =
+            status.map_err(|error| Error::new(format!("waiting for check-side: {error}")))?;
+        cargo::finished(
+            status,
+            "the workspaces of their own (cargo xtask check-side)",
+        )
+    }
 }
 
 /// The item crates that must make every allocation fallibly, by package.
@@ -1146,6 +1246,15 @@ fn took(name: &str, started: Instant) {
 /// runs even after one fails, and the first failure in that order is the
 /// error.
 fn steps_at_once(steps: &[(&str, &[&[&str]])]) -> Result<()> {
+    let (said, result) = at_once(steps);
+    print!("{said}");
+    result
+}
+
+/// [`steps_at_once`], with what it would print returned rather than
+/// printed, for a caller that runs other steps meanwhile.
+fn at_once(steps: &[(&str, &[&[&str]])]) -> (String, Result<()>) {
+    use std::fmt::Write as _;
     let started = Instant::now();
     let results: Vec<(Duration, Result<Vec<u8>>)> = std::thread::scope(|scope| {
         let running: Vec<_> = steps
@@ -1165,19 +1274,24 @@ fn steps_at_once(steps: &[(&str, &[&[&str]])]) -> Result<()> {
             .collect()
     });
     let mut first_failure = None;
+    let mut text = String::new();
     for ((name, _), (spent, result)) in steps.iter().zip(results) {
-        println!("\n== {name}");
+        let _ = writeln!(text, "\n== {name}");
         match result {
-            Ok(said) => print!("{}", String::from_utf8_lossy(&said)),
+            Ok(said) => text.push_str(&String::from_utf8_lossy(&said)),
             Err(error) => {
-                println!("{error}");
+                let _ = writeln!(text, "{error}");
                 let _ = first_failure.get_or_insert(error);
             }
         }
-        println!("-- {name}: {:.1} s", spent.as_secs_f64());
+        let _ = writeln!(text, "-- {name}: {:.1} s", spent.as_secs_f64());
     }
-    took("the steps above, at once", started);
-    first_failure.map_or(Ok(()), Err)
+    let _ = writeln!(
+        text,
+        "-- the steps above, at once: {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
+    (text, first_failure.map_or(Ok(()), Err))
 }
 
 /// One of [`steps_at_once`]'s steps: its scripts one after another, stopping
