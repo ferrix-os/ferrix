@@ -418,7 +418,10 @@ that took what it looked at, a record read that found the last record's tail:
   `exit_group` its process, which lets go of what it holds when its last
   thread has gone. Boot checks on all three architectures make threads in
   shared memory, clear `CLONE_CHILD_CLEARTID` as a thread ends, and end a
-  process whose last two threads exit together; ferrousli's static pthread
+  process whose last two threads exit together -- since 2026-10-12 held at
+  the kernel's live count between its read and its write until both have
+  read, so that the two race on every run, and the old decision taken from
+  the read alone fails that check by name; ferrousli's static pthread
   test runs to its end on x86-64. Signals work across threads: a signal sent
   to a process is judged across every live thread's mask and wakes one that
   can take it, `tkill`, `tgkill` and `SIGPIPE` reach one thread, a stop parks

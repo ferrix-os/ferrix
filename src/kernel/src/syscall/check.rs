@@ -6058,14 +6058,18 @@ const EXITS_STATUS: i32 = 7;
 /// its first thread's status and not the last thread's, every time.
 ///
 /// The two threads meet on a spin, each on its own processor, and exit with
-/// no other call between: the thread with 9, the main thread with 7. That the
-/// process ends at all, and with 7, is what this shows. It does not show the
-/// race the end of a thread was built against -- two last threads each seeing
-/// the other still there -- because that window is narrower than the two can
-/// be made to hit: a negative control with the old decision put back passed
-/// all sixteen runs. The fix rests on its review, not on this check. Skipped on
-/// one processor; each run waits with a deadline, so a process that never ends
-/// fails here by name rather than stopping the boot.
+/// no other call between: the thread with 9, the main thread with 7. The
+/// process is armed for the meet in `Process::thread_gone`, so each thread
+/// waits there, having read the live count as two and before writing it,
+/// until the other has read it too: the race the end of a thread was built
+/// against -- two last threads each seeing the other still there -- is met on
+/// every run, not hoped for. A decision taken from that read leaves the
+/// process running with no thread, and this fails with "never ended"; the
+/// count written back only if unmoved lets exactly one of them be last. A run
+/// whose two threads never met fails by that name, since it raced nothing.
+/// Skipped on one processor; each run waits with a deadline, so a process
+/// that never ends fails here by name rather than stopping the boot. Its load
+/// and that name are at the end of the file, so no tagged check below moves.
 fn check_two_last_threads_exiting_together_end_their_process() -> Result<Option<u32>, &'static str>
 {
     if arch::USER_EXITS_PROGRAM.is_empty() || crate::smp::count() < 2 {
@@ -6078,18 +6082,14 @@ fn check_two_last_threads_exiting_together_end_their_process() -> Result<Option<
         arch::USER_EXITS_PROGRAM,
     );
     for _ in 0..EXITS_RUNS {
-        let racer = process::load(
-            &file,
-            &[b"/exits"],
-            &[],
-            [0x5a; ferrix_ustack::RANDOM_BYTES],
-        )
-        .map_err(|_| "a program whose threads exit together could not be loaded")?;
+        let racer = load_exits_racer(&file)?;
+        racer.arm_exit_meet();
         let _task = process::start(&racer)
             .map_err(|_| "a program whose threads exit together could not be started")?;
-        let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
+        let deadline = crate::timer::now_nanos().saturating_add(EXITS_PATIENCE_NANOS);
         match racer.wait_for_exit(deadline) {
-            Some(EXITS_STATUS) => {}
+            Some(EXITS_STATUS) if racer.exit_meet_arrivals() == (2, true) => {}
+            Some(EXITS_STATUS) => return Err(EXITS_NEVER_MET),
             Some(_) => {
                 return Err(
                     "a process whose last two threads called exit together ended with another \
@@ -11594,3 +11594,21 @@ pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
     }
     Ok((online, counted))
 }
+
+/// What [`check_two_last_threads_exiting_together_end_their_process`] fails
+/// with when a run's two threads did not both reach the exit meet.
+const EXITS_NEVER_MET: &str =
+    "the two last threads of a process never met between reading and writing its live count";
+
+/// Load [`arch::USER_EXITS_PROGRAM`]'s image for one run of
+/// [`check_two_last_threads_exiting_together_end_their_process`].
+fn load_exits_racer(file: &[u8]) -> Result<Arc<Process>, &'static str> {
+    process::load(file, &[b"/exits"], &[], [0x5a; ferrix_ustack::RANDOM_BYTES])
+        .map_err(|_| "a program whose threads exit together could not be loaded")
+}
+
+/// How long one run of
+/// [`check_two_last_threads_exiting_together_end_their_process`] is given to
+/// end: two threads that exit at once end their process within milliseconds,
+/// and the boot's own two minutes must still hold a failure's name.
+const EXITS_PATIENCE_NANOS: u64 = 10_000_000_000;
