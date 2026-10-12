@@ -138,7 +138,7 @@ fn pinned() -> &'static str {
 ///
 /// A file is missing, or the directory holds another release or a program
 /// built from another source.
-fn directory() -> Result<std::path::PathBuf> {
+pub(crate) fn directory() -> Result<std::path::PathBuf> {
     let directory = match std::env::var_os("FERRIX_DXVK_DIR") {
         Some(directory) => std::path::PathBuf::from(directory),
         None => crate::paths::volume_directory("dxvk")?,

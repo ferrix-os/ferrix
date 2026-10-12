@@ -187,21 +187,8 @@ pub(super) fn desktop(
         carried.ports.extend(crate::chrome::window_files());
         carried.ports.push(crate::chrome::desktop_policy());
         if args.nvidia {
-            carried.ports.extend(crate::nvidia::data_links());
-            if args.everything && std::env::var_os("FERRIX_DRI3_PROBE").is_some() {
-                carried.ports.push(crate::ports::File {
-                    path: DRI3_PROBE_PATH.to_owned(),
-                    mode: 0o644,
-                    content: crate::ports::Content::Bytes(DRI3_PROBE.as_bytes().to_vec()),
-                });
-            }
-            if args.everything {
-                carried.ports.push(crate::ports::File {
-                    path: NVIDIA_WATCH_PATH.to_owned(),
-                    mode: 0o644,
-                    content: crate::ports::Content::Bytes(NVIDIA_WATCH.as_bytes().to_vec()),
-                });
-            }
+            let files = nvidia_files(args, &carried.ports)?;
+            carried.ports.extend(files);
         }
         carried.ports.push(crate::chrome::opener(
             arch,
@@ -503,6 +490,93 @@ pub(super) fn with_steam(config: String, args: &Args, arch: Arch) -> String {
     };
     format!("{config}\n{}{watch}", steam_window::desktop_config())
 }
+
+/// What the 3060's desktop (`--nvidia`) adds beside Chrome: the volume's
+/// links, and with `--everything` [`NVIDIA_WATCH`] and, when
+/// `FERRIX_DRI3_PROBE` says so, [`dri3_probe`]'s files.
+///
+/// # Errors
+///
+/// As [`dri3_probe`].
+fn nvidia_files(args: &Args, carried: &[crate::ports::File]) -> Result<Vec<crate::ports::File>> {
+    let mut files = crate::nvidia::data_links();
+    if args.everything && std::env::var_os("FERRIX_DRI3_PROBE").is_some() {
+        files.extend(dri3_probe(carried)?);
+    }
+    if args.everything {
+        files.push(crate::ports::File {
+            path: NVIDIA_WATCH_PATH.to_owned(),
+            mode: 0o644,
+            content: crate::ports::Content::Bytes(NVIDIA_WATCH.as_bytes().to_vec()),
+        });
+    }
+    Ok(files)
+}
+
+/// `FERRIX_DRI3_PROBE`'s files:[`DRI3_PROBE`], and with `FERRIX_DXVK_PROBE`
+/// [`DXVK_PROBE`] after it, DXVK's DLLs and the Direct3D 11 program at
+/// `/dxvk`, and Wine's links into the volume, which needs
+/// `FERRIX_NVIDIA_WINE` to have Wine on it.
+///
+/// # Errors
+///
+/// DXVK's files are missing or cannot be read.
+fn dri3_probe(carried: &[crate::ports::File]) -> Result<Vec<crate::ports::File>> {
+    let mut script = DRI3_PROBE.to_owned();
+    let mut files = Vec::new();
+    if std::env::var_os("FERRIX_DXVK_PROBE").is_some() {
+        script.push_str(DXVK_PROBE);
+        files.extend(crate::dxvk::files(&crate::dxvk::directory()?)?);
+        let links: Vec<(&str, &str)> = crate::wine::LINKS
+            .iter()
+            .filter(|(path, _)| !carried.iter().any(|file| file.path == *path))
+            .copied()
+            .collect();
+        files.extend(crate::rustc::files(&links));
+    }
+    files.push(crate::ports::File {
+        path: DRI3_PROBE_PATH.to_owned(),
+        mode: 0o644,
+        content: crate::ports::Content::Bytes(script.into_bytes()),
+    });
+    Ok(files)
+}
+
+/// `FERRIX_DXVK_PROBE`'s part of the probe, after [`DRI3_PROBE`]: a prefix
+/// made as `test-dxvk`'s window boot makes it, then `d3d11-triangle.exe`
+/// through DXVK on NVIDIA's Vulkan, once rendering offscreen and reading its
+/// frame back, once presenting for 30 s in a window on `:0`. Every line of
+/// its own starts `dxvk:`.
+const DXVK_PROBE: &str = r#"echo "dxvk: start, /lib64 is $(readlink /lib64)"
+export PATH=/bin:/data/usr/bin HOME=/tmp/wine XDG_RUNTIME_DIR=/tmp
+export WINEPREFIX=/tmp/wine/prefix WINESERVER=/usr/lib/wine/wineserver64
+export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+mkdir -p /tmp/wine
+display=$DISPLAY
+unset DISPLAY
+/usr/lib/wine/wine64 wineboot -i > /tmp/wine/wineboot.log 2>&1
+echo "dxvk: wineboot exited $?"
+tail -n 10 /tmp/wine/wineboot.log | sed 's/^/dxvk: wineboot: /'
+/usr/lib/wine/wineserver64 -w
+/usr/lib/wine/wine64 reg add 'HKCU\Software\Wine\X11 Driver' /v UseXRandR /d N /f > /tmp/wine/reg.log 2>&1
+echo "dxvk: reg exited $?"
+/usr/lib/wine/wineserver64 -w
+export DISPLAY=$display
+cd /dxvk
+WINEDLLOVERRIDES="d3d11,dxgi=n" DXVK_LOG_LEVEL=info DXVK_LOG_PATH=none     /usr/lib/wine/wine64 /dxvk/d3d11-triangle.exe ff8020 > /tmp/offscreen.txt 2>&1
+echo "dxvk: offscreen exited $?"
+sed 's/^/dxvk: offscreen: /' /tmp/offscreen.txt
+WINEDLLOVERRIDES="d3d11,dxgi=n" DXVK_LOG_LEVEL=info DXVK_LOG_PATH=none     /usr/lib/wine/wine64 /dxvk/d3d11-triangle.exe ff8020 30 > /tmp/present.txt 2>&1 &
+program=$!
+sleep 15
+/bin/hyprctl clients 2>/dev/null | grep -iE 'title|class' | sed 's/^/dxvk: window: /'
+echo "dxvk: window"
+wait $program
+echo "dxvk: present exited $?"
+grep -v '^info:    ' /tmp/present.txt | sed 's/^/dxvk: said: /'
+/usr/lib/wine/wineserver64 -k
+echo "dxvk: end"
+"#;
 
 /// Where [`DRI3_PROBE`] is in the image.
 const DRI3_PROBE_PATH: &str = "steam/dri3-probe.sh";

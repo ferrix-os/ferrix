@@ -502,7 +502,8 @@ fn merge_beside(tree: &Path, beside: Option<&Path>) -> Result<()> {
 /// binary in the volume's one's place (a dev build, as ydev.sh swaps one),
 /// and `FERRIX_NVIDIA_TEEWORLDS`, a directory (Teeworlds' bundle: `lib/`,
 /// `tw/`, `tw.sh`) at `/data/tw`, which the desktop copies to `/tmp/tw` and
-/// starts a match from.
+/// starts a match from; and `FERRIX_NVIDIA_WINE`, Wine's tree merged in
+/// without replacing anything.
 fn extras(tree: &Path) -> Result<()> {
     let copy = |from: &std::ffi::OsStr, to: &Path, recursive: bool| -> Result<()> {
         let mut cp = Command::new("cp");
@@ -532,6 +533,29 @@ fn extras(tree: &Path) -> Result<()> {
     };
     if let Some(yserver) = std::env::var_os("FERRIX_NVIDIA_YSERVER") {
         copy(&yserver, &tree.join("yserver/yserver"), false)?;
+    }
+    // Wine's tree (`fetch-wine.sh`'s), for DXVK on the card: what the
+    // volume has already stays, NVIDIA's libraries and the everything
+    // tree's among it, and Wine adds what is its own.
+    if let Some(wine) = std::env::var_os("FERRIX_NVIDIA_WINE") {
+        let merged = Command::new("cp")
+            .args(["-a", "--link", "--no-clobber"])
+            .arg(format!("{}/.", Path::new(&wine).display()))
+            .arg(tree)
+            .status()
+            .map_err(|error| Error::new(format!("running cp: {error}")))?;
+        // cp exits 1 for what it skipped alone, so Wine itself is looked for.
+        if !tree.join("usr/lib/wine/wine64").is_file() {
+            return Err(Error::new(format!(
+                "merging Wine's tree {} into {}: {merged}, and no usr/lib/wine/wine64",
+                Path::new(&wine).display(),
+                tree.display()
+            )));
+        }
+        println!(
+            "  volume: Wine's tree merged from {}",
+            Path::new(&wine).display()
+        );
     }
     if let Some(teeworlds) = std::env::var_os("FERRIX_NVIDIA_TEEWORLDS") {
         let to = tree.join("tw");
@@ -584,11 +608,12 @@ fn volume_stamp(core: &Path, everything: &Path) -> String {
     };
     let named = |name: &str| std::env::var(name).unwrap_or_default();
     format!(
-        "{}\n{}\n{}\n{}\n",
+        "{}\n{}\n{}\n{}\n{}\n",
         seen(core),
         seen(&everything.join("everything.img")),
         named("FERRIX_NVIDIA_YSERVER"),
-        named("FERRIX_NVIDIA_TEEWORLDS")
+        named("FERRIX_NVIDIA_TEEWORLDS"),
+        named("FERRIX_NVIDIA_WINE")
     )
 }
 
