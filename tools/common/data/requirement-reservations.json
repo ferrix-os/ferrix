@@ -59,6 +59,20 @@
       "branch": "gap-kill-reaped",
       "date": "2026-10-12",
       "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
+    },
+    {
+      "ids": ["H.BOOT.16", "L.power.1-3"],
+      "owner": "bm-nvme",
+      "branch": "bm-nvme-stop",
+      "date": "2026-10-13",
+      "purpose": "STOP to every block ring at power-off and reset, so an NVMe drive gets its shutdown notification: power's stop hooks after the flushes, finish's order, register_load refusing a boot with no stop hook (docs/NVME.md 2.1; consultant ledger 2026-10-13 line 792, N6)"
+    },
+    {
+      "ids": ["H.FAIL.5", "L.panic.1-4"],
+      "owner": "bm-nvme",
+      "branch": "bm-nvme-panic",
+      "date": "2026-10-13",
+      "purpose": "ferrix.panic=reset: the option's read, conclude's reset branch, the bounded wait, the device-tree read or the nested report's reset (docs/AB-BOOT.md 6.4; consultant ledger 2026-10-13 line 793, R2)"
     }
   ]
 }
