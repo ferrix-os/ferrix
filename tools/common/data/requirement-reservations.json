@@ -52,13 +52,6 @@
       "branch": "os07/asid",
       "date": "2026-10-08",
       "purpose": "ARMv7-A ASIDs for the DK1 IPC matrix (B6 step 4): the per-processor generation allocator, the rollover flush, the uninstall to ASID 0, broadcast shootdowns, the drop of a space, and F-67's break-before-make order on the remap paths (OPAQUE-KERNEL.md 9.13; consultant os07-asid-cert, ledger 2026-10-08 lines 590 and 594, A1 and B5)"
-    },
-    {
-      "ids": ["L.object.181"],
-      "owner": "fx1012-gap-kill-reaped",
-      "branch": "gap-kill-reaped",
-      "date": "2026-10-12",
-      "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
     }
   ]
 }

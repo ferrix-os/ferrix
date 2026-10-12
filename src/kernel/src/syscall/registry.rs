@@ -132,26 +132,36 @@ fn weak(process: &Arc<Process>) -> alloc::sync::Weak<dyn Host> {
     Arc::downgrade(process) as alloc::sync::Weak<dyn Host>
 }
 
-/// The live process with this pid.
+/// Make `process` unfindable by its pid and its threads' numbers: it has
+/// just been reaped. A `kill`, `/proc/<pid>`, `pidfd_open`, `getpgid` or any
+/// other lookup by number answers as for a free pid from here, as Linux's do
+/// once `wait4` returns, though the number is not handed out again until the
+/// reaper has dropped the ended process ([`table::unlist`]).
+pub(crate) fn unlist(process: &Process) {
+    table::unlist(process);
+}
+
+/// The live process with this pid, unless it has been reaped.
 pub(crate) fn find(pid: u32) -> Option<Arc<Process>> {
     table::downcast(table::find(pid)?)
 }
 
-/// Every live process, in ascending pid order.
+/// Every live process not yet reaped, in ascending pid order.
 ///
 /// Dropped, if it is dropped, with the table unlocked: see
-/// [`table::live`].
+/// [`table::listed`].
 ///
 /// # Errors
 ///
 /// `ENOMEM` when there was no memory for the list.
 pub(crate) fn live() -> Result<Vec<Arc<Process>>, Errno> {
-    let hosts = table::live().map_err(|_| Errno::ENOMEM)?;
+    let hosts = table::listed().map_err(|_| Errno::ENOMEM)?;
     Ok(hosts.into_iter().filter_map(table::downcast).collect())
 }
 
 /// The boot self-check's part: numbers are distinct, found, listed in order,
-/// given back when a process goes, and not handed straight out again.
+/// given back when a process goes, and not handed straight out again; a
+/// reaped process is found by none of them though it is still held.
 ///
 /// Returns how many processes it numbered.
 pub(crate) fn check() -> Result<u32, &'static str> {
@@ -208,5 +218,6 @@ pub(crate) fn check() -> Result<u32, &'static str> {
     if !is_free(INIT_PID) {
         return Err("init's pid was not given back");
     }
-    Ok(3)
+    crate::syscall::check::check_a_reaped_pid_finds_nothing()?;
+    Ok(4)
 }

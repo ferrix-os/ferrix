@@ -364,6 +364,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet.",
       "what": "syscall/memfd.rs sanitize_flags, noexec_scope, set_noexec and the exec branches of sys_memfd_create; syscall/pidns.rs memfd_noexec, memfd_noexec_floor, set_memfd_noexec; fs/procfs/render.rs memfd_noexec and set_memfd_noexec; fs/memfd_check.rs check_the_exec_seal and its helpers: measure them on each architecture's coverage run (stage 8's memfd line reaches every one). ferrix-vfs's tmpfs add_seals and set_attributes exec-seal branches are outside the kernel's coverage files."
+    },
+    {
+      "landing": "gap-kill-reaped, a reaped process found by no pid (BACKLOG P1 row, done 2026-10-12; L.object.181; consultant gkr-cert, ledger 2026-10-12 line 754)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "object/process.rs Entry::findable, unlist, listed and gather's listed branch, and find's unlisted answer: measure them on each architecture's coverage run (stage 7's pids line reaches every one through syscall/check.rs check_a_reaped_pid_finds_nothing, whose SIGCHLD-ignoring parent reaches unlist through disown)."
     }
   ]
 }

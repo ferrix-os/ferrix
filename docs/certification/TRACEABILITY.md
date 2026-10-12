@@ -15,13 +15,13 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 130 | 79 | 51 |
-| Low (`L.*`) | 884 | 616 | 268 |
+| Low (`L.*`) | 885 | 617 | 268 |
 
-1863 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1867 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1865 |
+| Named by a low-level requirement | 1869 |
 | Accessors, covered by the requirement they serve | 909 |
 | Check code in a product file | 80 |
 | Named by none | 897 |
@@ -536,6 +536,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.97` | Control::started shall let go of the reference that held a process nobody had started, so that once started the process is held by its task and not by the handles process_create made. | A process made by process_create and started, which then exits, is freed while its creator still holds its handle, and the handle reports its status. | H.OBJ.8 | `object::process::Control::started`, `object::process::ProcessRef::created` | *baselined* | — | — | — |
 | `L.object.98` | allocate shall hand out the number after the last one handed out, skipping every number in use and wrapping past 32767 to 300, and allocate_init shall hand out 1 only while no process holds it. | Allocating through the range wraps to 300 and passes over a number still held; 0 numbers handed out twice. | H.OBJ.13 | `object::process::allocate`, `object::process::allocate_init`, `object::process::name`, `object::process::release_naming` | `src/kernel/src/object/edge_check.rs::check_pids_wrap_past_one_still_held` | reached | reached | reached |
 | `L.object.99` | live shall list every live process once, under its pid and not its threads' numbers, and drop its references with the table unlocked. | A job kill, which finds its processes through live, reports exactly 1 process ended for a job with 1 member. | H.OBJ.13, H.OBJ.9 | `object::process::live` | `src/kernel/src/object/check.rs::check_the_two_kills` | reached | reached | reached |
+| `L.object.181` | Once unlist has been called for a process as it is reaped, find shall answer its pid with nothing and listed shall leave it out, while live still lists it and its pid stays taken until the process is dropped. | A child reaped by wait4 and still held is found by none of kill(pid, 0), getpgid, getsid, pidfd_open, find and the listed processes, all ESRCH or absent, where before the reap each found it; object::process::live still lists it; its pid is not free until the process is dropped, and free after. A child let go by a parent that ignores SIGCHLD is found by neither kill(pid, 0) nor find, where before its end both found it. | H.OBJ.13 | `object::process::unlist`, `object::process::find`, `object::process::listed`, `object::process::gather` | `src/kernel/src/syscall/check.rs::check_a_reaped_pid_finds_nothing`, `src/kernel/src/syscall/check.rs::check_an_automatic_reap_finds_nothing` | not reached | not reached | not reached |
 
 ### OomKill
 
@@ -1954,11 +1955,13 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/syscall/check.rs::check_a_poisoned_xsave_header_comes_back_safely` | kernel | L.x86_64.122 |
 | `src/kernel/src/syscall/check.rs::check_a_program_is_handed_its_start_argument` | kernel | L.x86_64.68 |
 | `src/kernel/src/syscall/check.rs::check_a_program_runs_in_user_mode` | kernel | L.trap.2 |
+| `src/kernel/src/syscall/check.rs::check_a_reaped_pid_finds_nothing` | kernel | L.object.181 |
 | `src/kernel/src/syscall/check.rs::check_a_replacing_thread_ends_spinning_ones` | kernel | L.syscall.21 |
 | `src/kernel/src/syscall/check.rs::check_a_shared_mapping_is_shared_across_fork` | kernel | H.MEM.16, L.user.62 |
 | `src/kernel/src/syscall/check.rs::check_a_signal_reaches_the_thread_that_can_take_it` | kernel | L.syscall.23 |
 | `src/kernel/src/syscall/check.rs::check_a_stop_stops_every_thread_and_a_continue_restarts_their_calls` | kernel | L.x86_64.66 |
 | `src/kernel/src/syscall/check.rs::check_a_write_after_mprotect_read_only_faults` | kernel | L.user.87 |
+| `src/kernel/src/syscall/check.rs::check_an_automatic_reap_finds_nothing` | kernel | L.object.181 |
 | `src/kernel/src/syscall/check.rs::check_an_unknown_number_is_enosys` | kernel | L.trap.4, H.TRAP.11 |
 | `src/kernel/src/syscall/check.rs::check_execve_replaces_the_program` | kernel | L.x86_64.69 |
 | `src/kernel/src/syscall/check.rs::check_mprotect_takes_write_away` | kernel | L.user.86 |

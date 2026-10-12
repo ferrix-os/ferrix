@@ -1052,6 +1052,19 @@ and signals each fence after it, with no allocation. A fence's own lock
 guards a status word. A program waits on a fence through `poll` with the
 deadline the fence carries, at most `SYNC_DEADLINE_MAX_MS`.
 
+### 2.2m The pid table's lock (`object::process::TABLE`)
+
+A spin lock over the map from number to process. `allocate`, `name`,
+`release`, `release_naming` and `find` are one lookup, insert or removal
+in the map. Three things walk it whole, each at most `PID_MAX` (32768)
+entries: `numbers_naming`; the gathering of `live` and `listed`, whose
+list of strong references is collected fallibly under the lock (an
+`AllocError` refuses the whole listing) and whose references are dropped
+after the lock is let go; and, since 2026-10-12, `unlist`, which a reap
+runs once for the reaped process, clearing the `listed` flag of every
+entry naming it and allocating nothing (`L.object.181`). Nothing is
+waited for or locked under it.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
