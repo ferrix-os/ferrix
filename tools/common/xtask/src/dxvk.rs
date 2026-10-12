@@ -124,7 +124,7 @@ const MEMORY: u32 = 6144;
 const TIMEOUT: u64 = 900;
 
 /// The DXVK release `fetch-dxvk.sh` pins.
-fn pinned() -> &'static str {
+pub(crate) fn pinned() -> &'static str {
     FETCH
         .lines()
         .find_map(|line| line.strip_prefix("DXVK_VERSION="))

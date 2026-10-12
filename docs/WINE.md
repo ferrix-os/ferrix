@@ -76,6 +76,8 @@ gives it.
 | The shell boot | `tools/common/xtask/src/wine.rs` | zinc as init, busybox, the links Debian's paths need, and the script |
 | The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, the script, and the input the gate types; also `run-compositor --wine`'s scripts |
 | yserver | the fork `ferrix-os/yserver`, pinned in `tools/common/fetch/fetch-yserver.sh` | the X server; §5 says what Wine needed of it |
+| DXVK | `tools/common/fetch/fetch-dxvk.sh`, `tools/common/xtask/src/dxvk.rs` | DXVK's release and `test-dxvk` (§6) |
+| The Unity game | `tools/common/fetch/fetch-unity.sh`, `tools/common/xtask/src/compositor/unity.rs` | Spaceship Demo on its own volume and `test-unity` (§9) |
 
 Wine is fetched, never vendored. The loader is started directly
 (`/usr/lib/wine/wine64`) with `WINESERVER=/usr/lib/wine/wineserver64`:
@@ -502,3 +504,93 @@ requires hyprix to list the window by its title, the yellow button on the
 screen, and `games.log` saying the server answered with 200. The first two
 held on Ferrix on 2026-10-13; the third is the second defect above. It has
 no negative control yet.
+
+## 9. A real Unity game, with no card (`test-unity`)
+
+Stage 23's step 3 begun: a 64-bit Unity game on Direct3D 11, with no
+anti-cheat, in the same Wine through the same DXVK on lavapipe, presented
+in a window of hyprix's through yserver, under KVM with no card.
+
+```
+tools/common/fetch/fetch-unity.sh       # once, after fetch-wine.sh and fetch-dxvk.sh
+cargo xtask test-unity --accel kvm      # the gate, about 13 minutes of guest time
+```
+
+**The game.** Unity Technologies' *Spaceship Demo*, release 2021.2.0
+(`github.com/Unity-Technologies/SpaceshipDemo`, the release's
+`SpaceshipDemo-Release-2021.2.0-Win64.zip`, 602 MB, SHA-256
+`13111680…c9fd4`, pinned in `fetch-unity.sh`). It is a first-person walk
+through a spaceship that Unity publishes, with its project, as an open
+repository; the build is downloaded with no account. Why it stands in for
+Endfield, and where it does not:
+
+| | Spaceship Demo | Endfield |
+|---|---|---|
+| Engine | Unity 2021.2.3f1 (its `UnityPlayer.dll`) | Unity, "heavily modified" (the study); version not known |
+| Graphics | Direct3D 11 at feature level 11.1 by default, the High Definition Render Pipeline and the VFX Graph: compute shaders, volumetric fog, many render targets | Direct3D 11 only, a modified render pipeline |
+| Code | Mono (`MonoBleedingEdge`, `mono-2.0-bdwgc.dll`, `Assembly-CSharp.dll`) | not known; Unity games of its kind are usually IL2CPP (`GameAssembly.dll`) |
+| Bits, anti-cheat | 64-bit, none | 64-bit, ACE |
+
+So it holds what any Unity game asks of Wine and of Ferrix beneath it --
+`UnityPlayer.dll`'s threads (its job workers and Enlighten's, a render
+thread), its memory and file mapping, its window, Direct3D 11 through
+DXVK -- and a renderer far heavier than a small game's. It does not hold
+IL2CPP: Mono's runtime and its garbage collector stand where IL2CPP's
+native code would. A free IL2CPP title on Direct3D 11 that can be fetched
+with no account was not found; the customer's choice is owed (E3.1).
+
+**The volume.** `fetch-unity.sh` copies the Wine volume's tree (§1), unpacks
+the game at `/unity`, puts DXVK's `d3d11.dll` and `dxgi.dll` from
+`fetch-dxvk.sh` beside `Spaceship.exe`, and makes `unity.img` (about
+3.3 GB) with 512 MiB of room. It records the yserver, DXVK and game it
+carries, and `test-unity` refuses a volume that holds others than the pins.
+
+**The boot** (`tools/common/xtask/src/compositor/unity.rs`) is
+`test-wine`'s desktop: hyprix with yserver on `:0`, 8 processors and
+8 GiB. Its script makes a prefix in `/tmp` and starts the game with
+`-screen-fullscreen 0 -force-d3d11 --benchmark`, DXVK chosen by
+`WINEDLLOVERRIDES=d3d11,dxgi=n`, lavapipe named by `VK_ICD_FILENAMES` for
+the game alone. `--benchmark` is the game's own option: it skips the menus
+and plays the walkthrough on a timeline, recording each frame's time. A
+float rule leaves the window at the size the game takes, which is the
+screen's, 1024 by 768: the game sets its resolution from its own options
+and does not keep Unity's `-screen-width`.
+
+**The judge.** Unity's log must name its engine version, Direct3D 11 at
+feature level 11.1 on llvmpipe, and `Started Recording benchmark`; Wine's
+output must hold `DXVK: v3.1.1`. Then two screendumps 30 s apart: inside
+the game's window, as hyprix places it, at least 30% of the pixels must
+not be near black and at least 20% must have changed. On 2026-10-12 the
+window was 96% lit and 98% changed, and the game's own counter said 1.3
+frames a second (778 ms a frame). Negative controls: the game stopped with
+`SIGSTOP` once the scene is there ("so the game is not drawing frames"),
+and Wine's own `d3d11` and `dxgi` chosen instead of DXVK's ("Wine's own
+d3d11 ran").
+
+**On Linux, for comparison** (linux-host: the same tree under bubblewrap on
+nazuna with Xvfb at 640 by 360, 24 processors, no Ferrix): the game's
+intro, its menu with the animated fog behind it, and the benchmark's
+walkthrough all drew; the walkthrough had not ended after 18 minutes.
+Screenshots, each with its banner: `~/.local/share/ferrix/unity/shots/` on
+nazuna (`linux-host-*` and `ferrix-*`).
+
+**What Ferrix answered wrongly on the way:** nothing yet. The game started,
+loaded its scene and drew it through DXVK on its first boot that got that
+far. Two things on the way were not the kernel's:
+
+* `wineboot` took 300 s on the volume made on 2026-10-12 at 23:20: it
+  ended with `run_wineboot boot event wait timed out`, because a 32-bit
+  `rundll32.exe` (`Wow64Install`, started "in experimental wow64 mode")
+  never ended. The shared Wine tree on nazuna had gained Debian's
+  `libwine:i386` from the WoW64 work (E1.6) that evening; on `main`'s
+  `fetch-wine.sh` there is no 32-bit side and `rundll32` is not found
+  (§5). That 32-bit programs hang is E1.6's; the gate bounds its wait for
+  the prefix's programs at 120 s and goes on.
+* A volume copied while that tree was being remade carried another
+  yserver than the pin's (its own hash differed), and wineserver ended on
+  the divide error of §5. `fetch-unity.sh` then made the volume again from
+  the finished tree. Both say the same: the gate's volume is built from a
+  directory other sessions write.
+
+**Where it runs.** On demand, as `test-wine` and `test-dxvk` do: it
+attaches a volume and never downloads.
