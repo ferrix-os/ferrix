@@ -95,6 +95,9 @@ mkdir -p /tmp/wine
 /usr/lib/wine/wine64 wineboot -i > /tmp/wine/wineboot.log 2>&1
 echo "endfield: wineboot exited $?"
 /usr/lib/wine/wineserver64 -w
+/usr/lib/wine/wine64 reg add 'HKCU\Software\Wine\X11 Driver' /v UseXVidMode /d N /f > /tmp/wine/reg.log 2>&1
+echo "endfield: reg exited $?"
+/usr/lib/wine/wineserver64 -w
 ln -s /data/GRYPHLINK /tmp/wine/prefix/drive_c/GRYPHLINK
 cd /tmp/wine/prefix/drive_c/GRYPHLINK
 /usr/lib/wine/wine64 'C:\GRYPHLINK\Launcher.exe' > /tmp/wine/launcher.log 2>&1 &
