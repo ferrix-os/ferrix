@@ -74,6 +74,8 @@ struct Drive {
     /// QEMU's id for its drive and controller.
     id: &'static str,
     serial: &'static str,
+    /// What the drive is. Only said: QEMU's NVMe controller has no property
+    /// for the model it reports, which stays `QEMU NVMe Ctrl`, `1b36:0010`.
     model: &'static str,
     /// Its size in sectors, as Linux reports it.
     sectors: u64,
@@ -270,9 +272,8 @@ pub(crate) fn attach(command: &mut Command, sn720: &Path) {
             ),
             "-device",
             &format!(
-                "nvme,drive={id},serial={},mn={},bus={bus}{}",
+                "nvme,drive={id},serial={},bus={bus}{}",
                 drive.serial,
-                drive.model,
                 if boot { ",bootindex=0" } else { "" },
                 id = drive.id,
             ),
