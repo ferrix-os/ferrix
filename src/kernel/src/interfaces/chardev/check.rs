@@ -280,6 +280,7 @@ fn refusals(side: &Side, node: &Arc<DeviceNode>, report: &mut Report) -> Result<
         hello(side, control, wrong, minors)?;
         expect_refused(side, control, wanted, report)?;
         settle()?;
+        unclaimed(node)?;
     }
     Ok(())
 }
@@ -937,6 +938,7 @@ fn after_death(
         return Err("a dmabuf was made for a control whose driver was gone");
     }
     report.dmabuf_refusals += 1;
+    unclaimed(node)?;
     let control = accepted(side, node, &[0])?;
     let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let core = loop {
@@ -1475,6 +1477,7 @@ fn stale_fence_refused(
         return Err("a fence was made for a control whose driver was gone");
     }
     report.sync_refusals += 1;
+    unclaimed(node)?;
     let control = accepted(side, node, &[0])?;
     let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
     let core = loop {
@@ -2014,6 +2017,16 @@ fn death(
 // ---------------------------------------------------------------------------
 // The driver's side
 // ---------------------------------------------------------------------------
+
+/// Wait until `node`'s claim has gone back. A control's task gives it back
+/// after unpublishing and tearing down (`run`), so a node no longer
+/// published can still be claimed for a while; devmgr's quiesce waits this
+/// out (`wait_until_unserved`), and a driver the check plays next must too.
+fn unclaimed(node: &Arc<DeviceNode>) -> Result<(), &'static str> {
+    super::CLAIMS
+        .wait_within(node, &|| false, PATIENCE_NANOS)
+        .map_err(|_| "a dead driver's claim on its device did not go back")
+}
 
 /// `chardev_control_create` on `device`.
 fn create(side: &Side, device: Handle) -> Result<Handle, &'static str> {
