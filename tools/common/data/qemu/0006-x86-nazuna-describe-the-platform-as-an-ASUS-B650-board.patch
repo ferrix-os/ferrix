@@ -1,0 +1,617 @@
+From: Sebastian Dauenhauer <info@magical.rocks>
+Subject: [PATCH] x86: x-nazuna, the platform as an ASUS ProArt B650-CREATOR describes it
+
+Ferrix's run-nazuna boots on a q35 machine shaped like the customer's PC,
+nazuna. With -machine x-nazuna=on the ACPI tables say what that board's AMI
+firmware (BIOS 3206) says, and the devices they name are where they say:
+
+* MADT revision 6: local APICs with each core's first thread before any
+  second thread, then disabled entries up to 32; I/O APIC 32 at 0xfec00000
+  (GSI 0) and a second, 33, at 0xfec01000 (GSI 24); IRQ 0 on GSI 2, IRQ 9
+  level and active low; LINT1 NMI edge and active high. The I/O APICs'
+  ID registers reset to 32 and 33.
+* FADT: a 32-bit PM timer (TMR_VAL_EXT, and the timer counts 32 bits),
+  reset by 0xBE to the APM port 0xB2 (which then resets), LEGACY_DEVICES.
+* HPET: AMD's vendor id, a 32-bit main counter (no COUNT_SIZE_CAP; every
+  timer 32-bit), 14.31818 MHz; the HPET table follows the device.
+* IVRS: the HPET and both I/O APICs as special devices; the AMD IOMMU's
+  registers at 0xf7500000.
+
+Each piece is a property (hpet x-vendor-id, x-count-32bit, x-period-fs;
+ich9 x-pm-tmr-32bit, x-apm-reset) that x-nazuna sets; defaults change
+nothing. The ECAM base (0xe0000000) and PM base (0x800) are the firmware's
+to program: OVMF built by tools/common/fetch/fetch-ovmf-nazuna.sh.
+---
+diff --git a/hw/acpi/core.c b/hw/acpi/core.c
+index ff16582..c915ece 100644
+--- a/hw/acpi/core.c
++++ b/hw/acpi/core.c
+@@ -503,13 +503,17 @@ static inline int64_t acpi_pm_tmr_get_clock(void)
+ void acpi_pm_tmr_calc_overflow_time(ACPIREGS *ar)
+ {
+     int64_t d = acpi_pm_tmr_get_clock();
+-    ar->tmr.overflow_time = (d + 0x800000LL) & ~0x7fffffLL;
++    if (ar->tmr.wide) {
++        ar->tmr.overflow_time = (d + 0x80000000LL) & ~0x7fffffffLL;
++    } else {
++        ar->tmr.overflow_time = (d + 0x800000LL) & ~0x7fffffLL;
++    }
+ }
+ 
+ static uint32_t acpi_pm_tmr_get(ACPIREGS *ar)
+ {
+     uint32_t d = acpi_pm_tmr_get_clock();
+-    return d & 0xffffff;
++    return ar->tmr.wide ? d : d & 0xffffff;
+ }
+ 
+ static void acpi_pm_tmr_timer(void *opaque)
+diff --git a/hw/i386/acpi-build.c b/hw/i386/acpi-build.c
+index 9446a9f..f772ac4 100644
+--- a/hw/i386/acpi-build.c
++++ b/hw/i386/acpi-build.c
+@@ -32,6 +32,7 @@
+ #include "hw/core/cpu.h"
+ #include "target/i386/cpu.h"
+ #include "hw/timer/hpet.h"
++#include "hw/isa/apm.h"
+ #include "hw/acpi/acpi-defs.h"
+ #include "hw/acpi/acpi.h"
+ #include "hw/acpi/cpu.h"
+@@ -188,6 +189,10 @@ static void init_common_fadt_data(MachineState *ms, Object *o,
+      * Flags, bit offset 1 - 8042.
+      */
+     fadt.iapc_boot_arch = iapc_boot_arch_8042();
++    if (X86_MACHINE(ms)->nazuna) {
++        /* LEGACY_DEVICES, as the board's firmware says. */
++        fadt.iapc_boot_arch |= 0x1;
++    }
+ 
+     *data = fadt;
+ }
+@@ -216,9 +221,18 @@ static void acpi_get_pm_info(MachineState *machine, AcpiPmInfo *pm)
+             ICH9_LPC_SMI_NEGOTIATED_FEAT_PROP, NULL);
+         struct AcpiGenericAddress r = { .space_id = AML_AS_SYSTEM_IO,
+             .bit_width = 8, .address = ICH9_RST_CNT_IOPORT };
++        uint8_t apm_reset = object_property_get_uint(lpc, "x-apm-reset",
++                                                     NULL);
+         pm->fadt.reset_reg = r;
+         pm->fadt.reset_val = 0xf;
++        if (apm_reset) {
++            pm->fadt.reset_reg.address = APM_CNT_IOPORT;
++            pm->fadt.reset_val = apm_reset;
++        }
+         pm->fadt.flags |= 1 << ACPI_FADT_F_RESET_REG_SUP;
++        if (object_property_get_bool(lpc, "x-pm-tmr-32bit", NULL)) {
++            pm->fadt.flags |= 1 << ACPI_FADT_F_TMR_VAL_EXT;
++        }
+         pm->cpu_hp_io_base = ICH9_CPU_HOTPLUG_IO_BASE;
+         pm->smi_on_cpuhp =
+             !!(smi_features & BIT_ULL(ICH9_LPC_SMI_F_CPU_HOTPLUG_BIT));
+@@ -1286,6 +1300,22 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
+  * IA-PC HPET (High Precision Event Timers) Specification (Revision: 1.0a)
+  * 3.2.4The ACPI 2.0 HPET Description Table (HPET)
+  */
++/* The low half of the HPET's capabilities register. */
++static uint32_t hpet_block_id(void)
++{
++    Object *hpet = object_resolve_type_unambiguous(TYPE_HPET, NULL);
++    uint32_t id = 0x8086a201;
++
++    if (hpet) {
++        id = object_property_get_uint(hpet, "x-vendor-id", NULL) << 16 |
++             0x8001 |
++             (object_property_get_bool(hpet, "x-count-32bit", NULL) ?
++              0 : 0x2000) |
++             (object_property_get_uint(hpet, "timers", NULL) - 1) << 8;
++    }
++    return id;
++}
++
+ static void
+ build_hpet(GArray *table_data, BIOSLinker *linker, const char *oem_id,
+            const char *oem_table_id)
+@@ -1297,8 +1327,8 @@ build_hpet(GArray *table_data, BIOSLinker *linker, const char *oem_id,
+     /* Note timer_block_id value must be kept in sync with value advertised by
+      * emulated hpet
+      */
+-    /* Event Timer Block ID */
+-    build_append_int_noprefix(table_data, 0x8086a201, 4);
++    /* Event Timer Block ID, as the HPET's capabilities say */
++    build_append_int_noprefix(table_data, hpet_block_id(), 4);
+     /* BASE_ADDRESS */
+     build_append_gas(table_data, AML_AS_SYSTEM_MEMORY, 0, 0, 0, HPET_BASE);
+     /* HPET Number */
+@@ -1796,11 +1826,32 @@ build_amd_iommu(GArray *table_data, BIOSLinker *linker, const char *oem_id,
+      * See Linux kernel commit 'c2ff5cf5294bcbd7fa50f7d860e90a66db7e5059'
+      */
+     if (x86_iommu_ir_supported(x86_iommu_get_default())) {
+-        build_append_int_noprefix(ivhd_blob,
+-                                 (0x1ull << 56) |           /* type IOAPIC */
+-                                 (IOAPIC_SB_DEVID << 40) |  /* IOAPIC devid */
+-                                 0x48,                      /* special device */
+-                                 8);
++        X86MachineState *x86ms = X86_MACHINE(qdev_get_machine());
++
++        if (x86ms->nazuna) {
++            /* The HPET and both I/O APICs, as the board's IVRS has them. */
++            build_append_int_noprefix(ivhd_blob,
++                                     (0x2ull << 56) |       /* type HPET */
++                                     (IOAPIC_SB_DEVID << 40) |
++                                     (0x0ull << 32) |       /* handle */
++                                     0x48, 8);
++            build_append_int_noprefix(ivhd_blob,
++                                     (0x1ull << 56) |
++                                     (IOAPIC_SB_DEVID << 40) |
++                                     ((uint64_t)NAZUNA_IOAPIC_ID << 32) |
++                                     0x48, 8);
++            build_append_int_noprefix(ivhd_blob,
++                                     (0x1ull << 56) |
++                                     ((uint64_t)NAZUNA_IOAPIC2_DEVID << 40) |
++                                     ((uint64_t)NAZUNA_IOAPIC2_ID << 32) |
++                                     0x48, 8);
++        } else {
++            build_append_int_noprefix(ivhd_blob,
++                                     (0x1ull << 56) |       /* type IOAPIC */
++                                     (IOAPIC_SB_DEVID << 40) |
++                                     0x48,                  /* special device */
++                                     8);
++        }
+     }
+ 
+     /* IVHD definition - type 10h */
+diff --git a/hw/i386/acpi-common.c b/hw/i386/acpi-common.c
+index 7bd0806..6585c36 100644
+--- a/hw/i386/acpi-common.c
++++ b/hw/i386/acpi-common.c
+@@ -88,6 +88,59 @@ build_xrupt_override(GArray *entry, uint8_t src, uint32_t gsi, uint16_t flags)
+     build_append_int_noprefix(entry, flags, 2);  /* Flags */
+ }
+ 
++/*
++ * x-nazuna's MADT, as the board's AMI firmware writes it (revision 6): the
++ * processors' local APICs with each core's first thread before any second
++ * thread, then disabled entries up to 32; I/O APIC 32 at 0xfec00000 from
++ * GSI 0 and 33 at 0xfec01000 from GSI 24; IRQ 0 on GSI 2 and the SCI, IRQ
++ * 9, level and active low; and LINT1 as the NMI of every processor, edge and
++ * active high.
++ */
++static void acpi_build_madt_nazuna(GArray *table_data, BIOSLinker *linker,
++                                   X86MachineState *x86ms,
++                                   const CPUArchIdList *apic_ids,
++                                   AcpiTable *table)
++{
++    int thread, i;
++
++    table->rev = 6;
++    acpi_table_begin(table, table_data);
++    build_append_int_noprefix(table_data, APIC_DEFAULT_ADDRESS, 4);
++    build_append_int_noprefix(table_data,
++                              x86ms->pic != ON_OFF_AUTO_OFF ? 1 : 0, 4);
++    for (thread = 0; thread < 2; thread++) {
++        for (i = 0; i < apic_ids->len; i++) {
++            const CpuInstanceProperties *props = &apic_ids->cpus[i].props;
++            int which = props->has_thread_id ? props->thread_id : 0;
++
++            if (which == thread || (thread == 1 && which > 1)) {
++                pc_madt_cpu_entry(i, apic_ids, table_data, false);
++            }
++        }
++    }
++    for (i = apic_ids->len; i < 32; i++) {
++        build_append_int_noprefix(table_data, 0, 1);  /* Type */
++        build_append_int_noprefix(table_data, 8, 1);  /* Length */
++        build_append_int_noprefix(table_data, i, 1);  /* ACPI Processor ID */
++        build_append_int_noprefix(table_data, 0, 1);  /* APIC ID */
++        build_append_int_noprefix(table_data, 0, 4);  /* Flags: disabled */
++    }
++    build_ioapic(table_data, NAZUNA_IOAPIC_ID, IO_APIC_DEFAULT_ADDRESS, 0);
++    if (x86ms->ioapic2) {
++        build_ioapic(table_data, NAZUNA_IOAPIC2_ID, NAZUNA_IOAPIC2_ADDRESS,
++                     IO_APIC_SECONDARY_IRQBASE);
++    }
++    build_xrupt_override(table_data, 0, 2, 0);
++    build_xrupt_override(table_data, 9, 9,
++        0xf /* Flags: Active low, Level Triggered */);
++    build_append_int_noprefix(table_data, 4, 1);    /* Type: Local APIC NMI */
++    build_append_int_noprefix(table_data, 6, 1);    /* Length */
++    build_append_int_noprefix(table_data, 0xFF, 1); /* all processors */
++    build_append_int_noprefix(table_data, 5, 2);    /* Edge, active high */
++    build_append_int_noprefix(table_data, 1, 1);    /* LINT1 */
++    acpi_table_end(linker, table);
++}
++
+ /*
+  * ACPI spec, Revision 1.0b
+  * 5.2.8 Multiple APIC Description Table
+@@ -104,6 +157,10 @@ void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
+     AcpiTable table = { .sig = "APIC", .rev = 3, .oem_id = oem_id,
+                         .oem_table_id = oem_table_id };
+ 
++    if (x86ms->nazuna) {
++        acpi_build_madt_nazuna(table_data, linker, x86ms, apic_ids, &table);
++        return;
++    }
+     acpi_table_begin(&table, table_data);
+     /* Local APIC Address */
+     build_append_int_noprefix(table_data, APIC_DEFAULT_ADDRESS, 4);
+diff --git a/hw/i386/amd_iommu.c b/hw/i386/amd_iommu.c
+index d689a06..a5d795c 100644
+--- a/hw/i386/amd_iommu.c
++++ b/hw/i386/amd_iommu.c
+@@ -285,6 +285,18 @@ static void amdvi_setevent_bits(uint64_t *buffer, uint64_t value, int start,
+  *    48:63  -> event type + miscellaneous info
+  *    64:127 -> related address
+  */
++/* Where the registers are: the board's address under x-nazuna. */
++static uint64_t amdvi_base_addr(void)
++{
++    Object *machine = qdev_get_machine();
++
++    if (object_dynamic_cast(machine, TYPE_X86_MACHINE) &&
++        X86_MACHINE(machine)->nazuna) {
++        return NAZUNA_AMDVI_BASE_ADDR;
++    }
++    return AMDVI_BASE_ADDR;
++}
++
+ static void amdvi_encode_event(uint64_t *evt, uint16_t devid, uint64_t addr,
+                                uint16_t info)
+ {
+@@ -2443,9 +2455,9 @@ static void amdvi_pci_realize(PCIDevice *pdev, Error **errp)
+     /* reset AMDVI specific capabilities, all r/o */
+     pci_set_long(pdev->config + s->capab_offset, AMDVI_CAPAB_FEATURES);
+     pci_set_long(pdev->config + s->capab_offset + AMDVI_CAPAB_BAR_LOW,
+-                 AMDVI_BASE_ADDR & MAKE_64BIT_MASK(14, 18));
++                 amdvi_base_addr() & MAKE_64BIT_MASK(14, 18));
+     pci_set_long(pdev->config + s->capab_offset + AMDVI_CAPAB_BAR_HIGH,
+-                AMDVI_BASE_ADDR >> 32);
++                amdvi_base_addr() >> 32);
+     pci_set_long(pdev->config + s->capab_offset + AMDVI_CAPAB_RANGE,
+                  0xff000000);
+     pci_set_long(pdev->config + s->capab_offset + AMDVI_CAPAB_MISC, 0);
+@@ -2554,7 +2566,7 @@ static void amdvi_sysbus_realize(DeviceState *dev, Error **errp)
+     /* set up MMIO */
+     memory_region_init_io(&s->mr_mmio, OBJECT(s), &mmio_mem_ops, s,
+                           "amdvi-mmio", AMDVI_MMIO_SIZE);
+-    memory_region_add_subregion(get_system_memory(), AMDVI_BASE_ADDR,
++    memory_region_add_subregion(get_system_memory(), amdvi_base_addr(),
+                                 &s->mr_mmio);
+ 
+     /* Create the share memory regions by all devices */
+diff --git a/hw/i386/pc.c b/hw/i386/pc.c
+index f8b919c..6dcfecc 100644
+--- a/hw/i386/pc.c
++++ b/hw/i386/pc.c
+@@ -1167,6 +1167,11 @@ void pc_basic_device_init(struct PCMachineState *pcms,
+          */
+         uint8_t compat = object_property_get_uint(OBJECT(hpet),
+                 HPET_INTCAP, NULL);
++        if (X86_MACHINE(pcms)->nazuna) {
++            qdev_prop_set_uint16(hpet, "x-vendor-id", NAZUNA_HPET_VENDOR);
++            qdev_prop_set_bit(hpet, "x-count-32bit", true);
++            qdev_prop_set_uint32(hpet, "x-period-fs", NAZUNA_HPET_PERIOD_FS);
++        }
+         if (!compat) {
+             qdev_prop_set_uint32(hpet, HPET_INTCAP, hpet_irqs);
+         }
+diff --git a/hw/i386/pc_q35.c b/hw/i386/pc_q35.c
+index 6015e63..0f42c8a 100644
+--- a/hw/i386/pc_q35.c
++++ b/hw/i386/pc_q35.c
+@@ -51,6 +51,7 @@
+ #include "hw/ide/pci.h"
+ #include "hw/ide/ahci-pci.h"
+ #include "hw/intc/ioapic.h"
++#include "hw/intc/ioapic_internal.h"
+ #include "hw/southbridge/ich9.h"
+ #include "hw/usb.h"
+ #include "hw/usb/hcd-uhci.h"
+@@ -239,6 +240,10 @@ static void pc_q35_init(MachineState *machine)
+     lpc_dev = DEVICE(lpc);
+     qdev_prop_set_bit(lpc_dev, "smm-enabled",
+                       x86_machine_is_smm_enabled(x86ms));
++    if (x86ms->nazuna) {
++        qdev_prop_set_bit(lpc_dev, "x-pm-tmr-32bit", true);
++        qdev_prop_set_uint8(lpc_dev, "x-apm-reset", NAZUNA_APM_RESET_VALUE);
++    }
+     for (i = 0; i < IOAPIC_NUM_PINS; i++) {
+         qdev_connect_gpio_out_named(lpc_dev, ICH9_GPIO_GSI, i, x86ms->gsi[i]);
+     }
+@@ -275,6 +280,14 @@ static void pc_q35_init(MachineState *machine)
+     }
+ 
+     ioapic_init_gsi(gsi_state, OBJECT(phb));
++    if (x86ms->nazuna) {
++        IOAPICCommonState *io = IOAPIC_COMMON(
++            object_resolve_path_component(OBJECT(phb), "ioapic"));
++        io->reset_id = NAZUNA_IOAPIC_ID;
++        x86ms->ioapic2 = ioapic_init_secondary_at(gsi_state,
++                                                  NAZUNA_IOAPIC2_ADDRESS);
++        IOAPIC_COMMON(x86ms->ioapic2)->reset_id = NAZUNA_IOAPIC2_ID;
++    }
+ 
+     if (tcg_enabled()) {
+         x86_register_ferr_irq(x86ms->gsi[13]);
+diff --git a/hw/i386/x86-common.c b/hw/i386/x86-common.c
+index f77e2e6..6b0d55c 100644
+--- a/hw/i386/x86-common.c
++++ b/hw/i386/x86-common.c
+@@ -521,6 +521,11 @@ void ioapic_init_gsi(GSIState *gsi_state, Object *parent)
+ }
+ 
+ DeviceState *ioapic_init_secondary(GSIState *gsi_state)
++{
++    return ioapic_init_secondary_at(gsi_state, IO_APIC_SECONDARY_ADDRESS);
++}
++
++DeviceState *ioapic_init_secondary_at(GSIState *gsi_state, hwaddr addr)
+ {
+     DeviceState *dev;
+     SysBusDevice *d;
+@@ -529,7 +534,7 @@ DeviceState *ioapic_init_secondary(GSIState *gsi_state)
+     dev = qdev_new(TYPE_IOAPIC);
+     d = SYS_BUS_DEVICE(dev);
+     sysbus_realize_and_unref(d, &error_fatal);
+-    sysbus_mmio_map(d, 0, IO_APIC_SECONDARY_ADDRESS);
++    sysbus_mmio_map(d, 0, addr);
+ 
+     for (i = 0; i < IOAPIC_NUM_PINS; i++) {
+         gsi_state->ioapic2_irq[i] = qdev_get_gpio_in(dev, i);
+diff --git a/hw/i386/x86.c b/hw/i386/x86.c
+index f80533d..50fa3cf 100644
+--- a/hw/i386/x86.c
++++ b/hw/i386/x86.c
+@@ -357,6 +357,16 @@ static int x86_kvm_type(MachineState *ms, const char *vm_type)
+     return kvm_enabled() ? kvm_get_vm_type(ms) : 0;
+ }
+ 
++static bool x86_machine_get_nazuna(Object *obj, Error **errp)
++{
++    return X86_MACHINE(obj)->nazuna;
++}
++
++static void x86_machine_set_nazuna(Object *obj, bool value, Error **errp)
++{
++    X86_MACHINE(obj)->nazuna = value;
++}
++
+ static void x86_machine_initfn(Object *obj)
+ {
+     X86MachineState *x86ms = X86_MACHINE(obj);
+@@ -428,6 +438,13 @@ static void x86_machine_class_init(ObjectClass *oc, const void *data)
+                                           "in ACPI table header."
+                                           "The string may be up to 8 bytes in size");
+ 
++    object_class_property_add_bool(oc, "x-nazuna",
++                                   x86_machine_get_nazuna,
++                                   x86_machine_set_nazuna);
++    object_class_property_set_description(oc, "x-nazuna",
++        "Describe the platform as an ASUS ProArt B650-CREATOR's firmware "
++        "does: I/O APIC ids and a second I/O APIC, MADT, FADT, HPET, IVRS");
++
+     object_class_property_add(oc, X86_MACHINE_BUS_LOCK_RATELIMIT, "uint64_t",
+                                 x86_machine_get_bus_lock_ratelimit,
+                                 x86_machine_set_bus_lock_ratelimit, NULL, NULL);
+diff --git a/hw/intc/ioapic_common.c b/hw/intc/ioapic_common.c
+index fce3486..21569f1 100644
+--- a/hw/intc/ioapic_common.c
++++ b/hw/intc/ioapic_common.c
+@@ -121,7 +121,7 @@ void ioapic_reset_common(DeviceState *dev)
+     IOAPICCommonState *s = IOAPIC_COMMON(dev);
+     int i;
+ 
+-    s->id = 0;
++    s->id = s->reset_id;
+     s->ioregsel = 0;
+     s->irr = 0;
+     for (i = 0; i < IOAPIC_NUM_PINS; i++) {
+diff --git a/hw/intc/ioapic_internal.h b/hw/intc/ioapic_internal.h
+index 5120576..75d754f 100644
+--- a/hw/intc/ioapic_internal.h
++++ b/hw/intc/ioapic_internal.h
+@@ -100,6 +100,8 @@ struct IOAPICCommonState {
+     SysBusDevice busdev;
+     MemoryRegion io_memory;
+     uint8_t id;
++    /* What a reset puts in the ID register: 0 unless the machine says. */
++    uint8_t reset_id;
+     uint8_t ioregsel;
+     uint32_t irr;
+     uint64_t ioredtbl[IOAPIC_NUM_PINS];
+diff --git a/hw/isa/lpc_ich9.c b/hw/isa/lpc_ich9.c
+index c9cb8f7..f1d4e18 100644
+--- a/hw/isa/lpc_ich9.c
++++ b/hw/isa/lpc_ich9.c
+@@ -464,6 +464,12 @@ static void ich9_apm_ctrl_changed(uint32_t val, void *arg)
+ {
+     ICH9LPCState *lpc = arg;
+ 
++    /* x-apm-reset: the value the FADT's reset register names resets. */
++    if (lpc->apm_reset && val == lpc->apm_reset) {
++        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
++        return;
++    }
++
+     /* ACPI specs 3.0, 4.7.2.5 */
+     acpi_pm1_cnt_update(&lpc->pm.acpi_regs,
+                         val == ICH9_APM_ACPI_ENABLE,
+@@ -834,6 +840,9 @@ static const Property ich9_lpc_properties[] = {
+     DEFINE_PROP_BOOL("noreboot", ICH9LPCState, pin_strap.spkr_hi, false),
+     DEFINE_PROP_BOOL("smm-compat", ICH9LPCState, pm.smm_compat, false),
+     DEFINE_PROP_BOOL("smm-enabled", ICH9LPCState, pm.smm_enabled, false),
++    DEFINE_PROP_BOOL("x-pm-tmr-32bit", ICH9LPCState, pm.acpi_regs.tmr.wide,
++                     false),
++    DEFINE_PROP_UINT8("x-apm-reset", ICH9LPCState, apm_reset, 0),
+     DEFINE_PROP_BIT64("x-smi-broadcast", ICH9LPCState, smi_host_features,
+                       ICH9_LPC_SMI_F_BROADCAST_BIT, true),
+     DEFINE_PROP_BIT64("x-smi-cpu-hotplug", ICH9LPCState, smi_host_features,
+diff --git a/hw/timer/hpet.c b/hw/timer/hpet.c
+index 1acba4f..6aa8314 100644
+--- a/hw/timer/hpet.c
++++ b/hw/timer/hpet.c
+@@ -25,6 +25,7 @@
+  */
+ 
+ #include "qemu/osdep.h"
++#include "qemu/host-utils.h"
+ #include "hw/irq.h"
+ #include "qapi/error.h"
+ #include "qemu/error-report.h"
+@@ -84,6 +85,9 @@ struct HPETState {
+     uint8_t num_timers;
+     uint8_t num_timers_save;
+     uint32_t intcap;
++    uint16_t vendor_id;     /* x-vendor-id */
++    bool count_32bit;       /* x-count-32bit: no COUNT_SIZE_CAP */
++    uint32_t period_fs;     /* x-period-fs */
+     HPETTimer timer[HPET_MAX_TIMERS];
+ 
+     /* Memory-mapped, software visible registers */
+@@ -129,14 +133,17 @@ static uint32_t hpet_time_after(uint64_t a, uint64_t b)
+     return ((int64_t)(b - a) < 0);
+ }
+ 
++/* The counter's period; one HPET per machine, set when it is realized. */
++static uint64_t hpet_period_fs = HPET_CLK_PERIOD * FS_PER_NS;
++
+ static uint64_t ticks_to_ns(uint64_t value)
+ {
+-    return value * HPET_CLK_PERIOD;
++    return muldiv64(value, hpet_period_fs, FS_PER_NS);
+ }
+ 
+ static uint64_t ns_to_ticks(uint64_t value)
+ {
+-    return value / HPET_CLK_PERIOD;
++    return muldiv64(value, FS_PER_NS, hpet_period_fs);
+ }
+ 
+ static uint64_t hpet_fixup_reg(uint64_t new, uint64_t old, uint64_t mask)
+@@ -450,6 +457,9 @@ static uint64_t hpet_ram_read(void *opaque, hwaddr addr,
+                 cur_tick = hpet_get_ticks(s);
+             }
+         } while (seqlock_read_retry(&s->state_version, version));
++        if (s->count_32bit) {
++            cur_tick = (uint32_t)cur_tick;
++        }
+         trace_hpet_ram_read_reading_counter(addr & 4, cur_tick);
+         return cur_tick >> shift;
+     }
+@@ -590,6 +600,9 @@ static void hpet_ram_write(void *opaque, hwaddr addr,
+                  */
+                 update_irq(timer, 0);
+             }
++            if (s->count_32bit) {
++                new_val |= HPET_TN_32BIT;
++            }
+             timer->config = new_val;
+             if (activating_bit(old_val, new_val, HPET_TN_ENABLE)
+                 && (s->isr & (1 << timer_id))) {
+@@ -662,7 +675,8 @@ static void hpet_reset(DeviceState *d)
+ 
+         hpet_del_timer(timer);
+         timer->cmp = ~0ULL;
+-        timer->config = HPET_TN_PERIODIC_CAP | HPET_TN_SIZE_CAP;
++        timer->config = HPET_TN_PERIODIC_CAP |
++                        (s->count_32bit ? HPET_TN_32BIT : HPET_TN_SIZE_CAP);
+         if (s->flags & (1 << HPET_MSI_SUPPORT)) {
+             timer->config |= HPET_TN_FSB_CAP;
+         }
+@@ -754,9 +768,17 @@ static void hpet_realize(DeviceState *dev, Error **errp)
+     }
+ 
+     /* 64-bit General Capabilities and ID Register; LegacyReplacementRoute. */
+-    s->capability = 0x8086a001ULL;
++    if (!s->period_fs || s->period_fs > 100000000) {
++        error_setg(errp, "hpet.x-period-fs must be between 1 and 100000000");
++        return;
++    }
++    hpet_period_fs = s->period_fs;
++    s->capability = ((uint64_t)s->vendor_id << 16) | 0x8001ULL;
++    if (!s->count_32bit) {
++        s->capability |= 0x2000;    /* COUNT_SIZE_CAP */
++    }
+     s->capability |= (s->num_timers - 1) << HPET_ID_NUM_TIM_SHIFT;
+-    s->capability |= ((uint64_t)(HPET_CLK_PERIOD * FS_PER_NS) << 32);
++    s->capability |= (uint64_t)s->period_fs << 32;
+ 
+     qdev_init_gpio_in(dev, hpet_handle_legacy_irq, 2);
+     qdev_init_gpio_out(dev, &s->pit_enabled, 1);
+@@ -767,6 +789,10 @@ static const Property hpet_device_properties[] = {
+     DEFINE_PROP_BIT("msi", HPETState, flags, HPET_MSI_SUPPORT, false),
+     DEFINE_PROP_UINT32(HPET_INTCAP, HPETState, intcap, 0),
+     DEFINE_PROP_BOOL("hpet-offset-saved", HPETState, hpet_offset_saved, true),
++    DEFINE_PROP_UINT16("x-vendor-id", HPETState, vendor_id, 0x8086),
++    DEFINE_PROP_BOOL("x-count-32bit", HPETState, count_32bit, false),
++    DEFINE_PROP_UINT32("x-period-fs", HPETState, period_fs,
++                       HPET_CLK_PERIOD * FS_PER_NS),
+ };
+ 
+ static void hpet_device_class_init(ObjectClass *klass, const void *data)
+diff --git a/include/hw/acpi/acpi.h b/include/hw/acpi/acpi.h
+index 4b8ee09..7ed6f81 100644
+--- a/include/hw/acpi/acpi.h
++++ b/include/hw/acpi/acpi.h
+@@ -115,6 +115,8 @@ struct ACPIPMTimer {
+     QEMUTimer *timer;
+     MemoryRegion io;
+     int64_t overflow_time;
++    /* A 32-bit counter (TMR_VAL_EXT) rather than 24 bits. */
++    bool wide;
+ 
+     acpi_update_sci_fn update_sci;
+ };
+diff --git a/include/hw/i386/x86.h b/include/hw/i386/x86.h
+index 8755cad..52bb8c5 100644
+--- a/include/hw/i386/x86.h
++++ b/include/hw/i386/x86.h
+@@ -81,6 +81,12 @@ struct X86MachineState {
+ 
+     char *oem_id;
+     char *oem_table_id;
++    /*
++     * x-nazuna: the platform as an ASUS ProArt B650-CREATOR's AMI firmware
++     * describes it (Ferrix's run-nazuna): I/O APIC ids and a second I/O
++     * APIC, and the MADT, FADT, HPET and IVRS as that firmware writes them.
++     */
++    bool nazuna;
+     /*
+      * Address space used by IOAPIC device. All IOAPIC interrupts
+      * will be translated to MSI messages in the address space.
+@@ -150,6 +156,21 @@ qemu_irq x86_allocate_cpu_irq(void);
+ void gsi_handler(void *opaque, int n, int level);
+ void ioapic_init_gsi(GSIState *gsi_state, Object *parent);
+ DeviceState *ioapic_init_secondary(GSIState *gsi_state);
++DeviceState *ioapic_init_secondary_at(GSIState *gsi_state, hwaddr addr);
++
++/* x-nazuna: the board's I/O APICs, as its MADT and IVRS name them. */
++#define NAZUNA_IOAPIC_ID        32
++#define NAZUNA_IOAPIC2_ID       33
++#define NAZUNA_IOAPIC2_ADDRESS  0xfec01000
++/* The second I/O APIC's requester id in the IVRS, 00:00.1. */
++#define NAZUNA_IOAPIC2_DEVID    0x0001
++/* Its IOMMU's registers. */
++#define NAZUNA_AMDVI_BASE_ADDR  0xf7500000ULL
++/* Its FADT's reset register: this value to the APM command port 0xB2. */
++#define NAZUNA_APM_RESET_VALUE  0xbe
++/* Its HPET: AMD's, a 32-bit counter at 14.31818 MHz. */
++#define NAZUNA_HPET_VENDOR      0x1022
++#define NAZUNA_HPET_PERIOD_FS   69841279
+ 
+ /* pc_sysfw.c */
+ void x86_firmware_configure(hwaddr gpa, void *ptr, int size);
+diff --git a/include/hw/southbridge/ich9.h b/include/hw/southbridge/ich9.h
+index 2c35dd0..056e5aa 100644
+--- a/include/hw/southbridge/ich9.h
++++ b/include/hw/southbridge/ich9.h
+@@ -54,6 +54,9 @@ struct ICH9LPCState {
+     uint8_t rst_cnt;
+     MemoryRegion rst_cnt_mem;
+ 
++    /* x-apm-reset: a write of this to the APM command port resets; 0: none */
++    uint8_t apm_reset;
++
+     /* SMI feature negotiation via fw_cfg */
+     uint64_t smi_host_features;       /* guest-invisible, host endian */
+     uint8_t smi_host_features_le[8];  /* guest-visible, read-only, little
