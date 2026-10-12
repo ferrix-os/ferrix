@@ -703,7 +703,9 @@ fn run() -> Result<()> {
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
-        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container" => sem::run(command, &args),
+        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container" => {
+            sem::run(command, &args)
+        }
         "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
         "test-pkg" | "install-app" => pkg::run(command, &args),

@@ -146,9 +146,11 @@ fn exited_ok(status: c_int) -> bool {
 
 /// `mount(2)` with no data, or fail naming `what`.
 fn mount(source: &str, target: &str, kind: &str, flags: c_ulong, what: &str) {
-    let (Ok(source), Ok(target), Ok(kind)) =
-        (CString::new(source), CString::new(target), CString::new(kind))
-    else {
+    let (Ok(source), Ok(target), Ok(kind)) = (
+        CString::new(source),
+        CString::new(target),
+        CString::new(kind),
+    ) else {
         fail(what);
     };
     // SAFETY: the strings are NUL-terminated and outlive the call.
@@ -180,7 +182,13 @@ fn main() {
     if let Err(error) = fs::create_dir_all(MOUNT) {
         fail(&format!("{MOUNT} could not be made ({error})"));
     }
-    mount(DISK, MOUNT, "btrfs", libc::MS_RDONLY, "the btrfs test disk could not be mounted read-only");
+    mount(
+        DISK,
+        MOUNT,
+        "btrfs",
+        libc::MS_RDONLY,
+        "the btrfs test disk could not be mounted read-only",
+    );
     let _ = fs::create_dir_all(CGROUP);
     mount("none", CGROUP, "cgroup2", 0, "cgroup2 could not be mounted");
     put(
@@ -189,10 +197,16 @@ fn main() {
         "the memory controller could not be enabled",
     );
     if let Err(error) = fs::create_dir(CTN) {
-        fail(&format!("the container's cgroup could not be made ({error})"));
+        fail(&format!(
+            "the container's cgroup could not be made ({error})"
+        ));
     }
     let limit = LIMIT.to_string();
-    put(&format!("{CTN}/memory.max"), &limit, "memory.max could not be set");
+    put(
+        &format!("{CTN}/memory.max"),
+        &limit,
+        "memory.max could not be set",
+    );
     for file in ["", "/cgroup.procs", "/cgroup.subtree_control"] {
         let path = CString::new(format!("{CTN}{file}")).unwrap_or_default();
         // SAFETY: `path` is NUL-terminated and outlives the call.
@@ -207,7 +221,11 @@ fn main() {
         // Into the cgroup while still root: a move from the root cgroup needs
         // write access to the root's `cgroup.procs`, which only root has, on
         // Linux as here (`docs/CGROUPS.md` §3.1).
-        put(&format!("{CTN}/cgroup.procs"), "0", "the owner could not be put in its cgroup");
+        put(
+            &format!("{CTN}/cgroup.procs"),
+            "0",
+            "the owner could not be put in its cgroup",
+        );
         container(&outside, &host);
     }
     let status = wait_for(owner);
@@ -274,11 +292,25 @@ fn container(outside: &[String], host: &str) -> ! {
             std::io::Error::last_os_error()
         ));
     }
-    say(&format!("uid {uid} euid {euid} CapEff {effective} made a user namespace"));
+    say(&format!(
+        "uid {uid} euid {euid} CapEff {effective} made a user namespace"
+    ));
     step("unprivileged");
-    put("/proc/self/uid_map", &format!("0 {OWNER} 1\n"), "uid_map could not be written");
-    put("/proc/self/setgroups", "deny\n", "setgroups could not be denied");
-    put("/proc/self/gid_map", &format!("0 {OWNER} 1\n"), "gid_map could not be written");
+    put(
+        "/proc/self/uid_map",
+        &format!("0 {OWNER} 1\n"),
+        "uid_map could not be written",
+    );
+    put(
+        "/proc/self/setgroups",
+        "deny\n",
+        "setgroups could not be denied",
+    );
+    put(
+        "/proc/self/gid_map",
+        &format!("0 {OWNER} 1\n"),
+        "gid_map could not be written",
+    );
     let flags = libc::CLONE_NEWNS
         | libc::CLONE_NEWUTS
         | libc::CLONE_NEWIPC
@@ -292,8 +324,6 @@ fn container(outside: &[String], host: &str) -> ! {
             std::io::Error::last_os_error()
         ));
     }
-    // What the owner holds itself; the scoped kill must pass it over.
-    let ballast: Vec<u8> = Vec::new();
     let mut gate: [c_int; 2] = [0; 2];
     // SAFETY: `gate` is a valid place for the kernel to write two descriptors.
     if unsafe { libc::pipe(gate.as_mut_ptr()) } != 0 {
@@ -314,17 +344,28 @@ fn container(outside: &[String], host: &str) -> ! {
         }
         pid_one(outside, host);
     }
+    // What the owner holds itself, after the fork so none of it is pid 1's
+    // too. Empty: the kill must choose pid 1, the cgroup's largest; the scope
+    // control makes it the largest itself, and the judge must fail.
+    let ballast: Vec<u8> = Vec::new();
     // From the owner's namespace pid 1 has two numbers, its own last: the
     // owner's `status` view is told in the reader's namespace (`docs/PIDNS.md`
     // §6), so this is read here and not by pid 1.
-    let status = get(&format!("/proc/{init}/status"), "pid 1's status could not be read");
+    let status = get(
+        &format!("/proc/{init}/status"),
+        "pid 1's status could not be read",
+    );
     let numbers: Vec<&str> = status
         .lines()
         .find_map(|line| line.strip_prefix("NSpid:"))
         .map(|line| line.split_whitespace().collect())
         .unwrap_or_default();
-    if numbers.len() != 2 || numbers.last() != Some(&"1") || numbers.first() != Some(&init.to_string().as_str()) {
-        fail(&format!("pid {init}'s status did not show it as 1 in a namespace below (NSpid {numbers:?})"));
+    let own = init.to_string();
+    if numbers.len() != 2 || numbers.last() != Some(&"1") || numbers.first() != Some(&own.as_str())
+    {
+        fail(&format!(
+            "pid {init}'s status did not show it as 1 in a namespace below (NSpid {numbers:?})"
+        ));
     }
     // SAFETY: `go_end` is valid for one byte from a valid buffer.
     let told = unsafe {
@@ -336,8 +377,14 @@ fn container(outside: &[String], host: &str) -> ! {
     }
     let status = wait_for(init);
     drop(ballast);
-    let stat = get(&format!("{CTN}/memory.stat"), "memory.stat could not be read");
-    let events = get(&format!("{CTN}/memory.events"), "memory.events could not be read");
+    let stat = get(
+        &format!("{CTN}/memory.stat"),
+        "memory.stat could not be read",
+    );
+    let events = get(
+        &format!("{CTN}/memory.events"),
+        "memory.events could not be read",
+    );
     let (scanned, stolen) = (field(&stat, "pgscan"), field(&stat, "pgsteal"));
     say(&format!(
         "memory.stat pgscan {scanned} pgsteal {stolen} file {}; memory.events max {} oom {} \
@@ -402,8 +449,14 @@ fn pid_one(outside: &[String], host: &str) -> ! {
         Err(error) => fail(&format!("{FILE} could not be read ({error})")),
     }
     drop(bytes);
-    let stat = get(&format!("{CTN}/memory.stat"), "memory.stat could not be read");
-    say(&format!("file {} charged to the cgroup after the read", field(&stat, "file")));
+    let stat = get(
+        &format!("{CTN}/memory.stat"),
+        "memory.stat could not be read",
+    );
+    say(&format!(
+        "file {} charged to the cgroup after the read",
+        field(&stat, "file")
+    ));
     // The memory limit last: four times it, touched, cannot all fit.
     let mut held: Vec<Vec<u8>> = Vec::new();
     loop {
@@ -424,7 +477,10 @@ fn seccomp() {
     let getsid = libc::SYS_getsid as c_uint;
     let installed = true;
     if installed {
-        install(&filter(getsid, libc::SECCOMP_RET_ERRNO | libc::EPERM as u32));
+        install(&filter(
+            getsid,
+            libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+        ));
     }
     // SAFETY: `syscall` with the call's number and its one argument.
     let got = unsafe { libc::syscall(libc::SYS_getsid, 0) };
