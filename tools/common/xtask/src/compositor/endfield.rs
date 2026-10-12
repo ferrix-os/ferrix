@@ -116,9 +116,9 @@ sleep 240
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 grep -E "error|warning|OnQuery_ProtocolVer|OnGetNvGPUConfigResult" "$logs/games.log" | cut -c1-300 | sed 's/^/endfield: games.log: /'
 grep -v ':fixme:' /tmp/wine/launcher.log | grep -E 'err:|getaddrinfo' | sort | uniq -c | sort -rn | head -n 40 | cut -c1-300 | sed 's/^/endfield: wine: /'
-thread=$(grep -m1 -E 'connect socket .*port 443 ' /tmp/wine/launcher.log | cut -d: -f1)
-echo "endfield: the first thread to connect to port 443: $thread"
-grep "^$thread:" /tmp/wine/launcher.log | grep -v getaddrinfo | head -n 150 | cut -c1-240 | sed 's/^/endfield: thread: /'
+thread=$(grep -m1 -E 'WSAAsyncSelect socket' /tmp/wine/launcher.log | cut -d: -f1)
+echo "endfield: the first thread to use WSAAsyncSelect: $thread"
+grep "^$thread:" /tmp/wine/launcher.log | grep -vE 'getaddrinfo|sock_ioctl' | head -n 200 | cut -c1-240 | sed 's/^/endfield: thread: /'
 /bin/hyprctl clients | sed 's/^/endfield: clients: /'
 ps | grep -c '[Q]tWebEngineProcess' | sed 's/^/endfield: render processes: /'
 /usr/lib/wine/wineserver64 -k
