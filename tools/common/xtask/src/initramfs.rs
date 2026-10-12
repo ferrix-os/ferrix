@@ -24,6 +24,7 @@
 //! Without a program it is the same bytes it was before programs could be
 //! added.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::{Error, Result};
@@ -60,6 +61,9 @@ const S_IFLNK: u32 = 0o120_000;
 struct Newc {
     bytes: Vec<u8>,
     next_ino: u32,
+    /// Each directory an entry so far lies beneath, with the first such
+    /// entry: what [`Newc::entry`] refuses to put a file or a link over.
+    filled: BTreeMap<String, String>,
 }
 
 impl Newc {
@@ -67,7 +71,34 @@ impl Newc {
         Newc {
             bytes: Vec::new(),
             next_ino: 1,
+            filled: BTreeMap::new(),
         }
+    }
+
+    /// Refuse a file or a link named as a directory that earlier entries
+    /// already put something in. The kernel's unpacker replaces an existing
+    /// name by removing it first, and a directory with entries in it cannot
+    /// be removed, so the boot would stop at the root filesystem with
+    /// `ENOTEMPTY` (FX-0801). Found 2026-10-12: `run-compositor --wine` linked
+    /// `etc/fonts` over foot's `etc/fonts/fonts.conf`.
+    fn refuse_over_filled(&mut self, name: &str, mode: u32) -> Result<()> {
+        if mode & 0o170_000 != S_IFDIR
+            && let Some(inside) = self.filled.get(name)
+        {
+            return Err(Error::new(format!(
+                "the archive puts a file or a link at {name}, where it already made a \
+                 directory with {inside} in it: the kernel cannot unpack that (ENOTEMPTY)"
+            )));
+        }
+        let mut at = name;
+        while let Some((parent, _)) = at.rsplit_once('/') {
+            let _ = self
+                .filled
+                .entry(parent.to_owned())
+                .or_insert_with(|| name.to_owned());
+            at = parent;
+        }
+        Ok(())
     }
 
     fn pad(&mut self) {
@@ -85,6 +116,9 @@ impl Newc {
         (uid, gid): (u32, u32),
         data: &[u8],
     ) -> Result<()> {
+        if name != "TRAILER!!!" {
+            self.refuse_over_filled(name, mode)?;
+        }
         let size = u32::try_from(data.len())
             .map_err(|_| Error::new(format!("{name} is too large for a newc entry")))?;
         let name_size = u32::try_from(name.len() + 1)
@@ -1213,5 +1247,45 @@ mod tests {
             .unwrap();
         assert_eq!(symlink.symlink_target(), Some("initramfs"));
         assert!(names.iter().all(|name| ferrix_cpio::is_safe_path(name)));
+    }
+
+    #[test]
+    fn a_link_over_a_filled_directory_is_refused_and_replacements_are_not() {
+        let mut archive = Newc::new();
+        archive.directory("etc", 0o755).unwrap();
+        archive.directory("etc/fonts", 0o755).unwrap();
+        archive
+            .file("etc/fonts/fonts.conf", 0o644, b"<fontconfig/>")
+            .unwrap();
+        let refused = archive.symlink("etc/fonts", "/data/etc/fonts").unwrap_err();
+        assert!(
+            refused.to_string().contains("etc/fonts/fonts.conf"),
+            "the refusal names what is in the directory: {refused}"
+        );
+
+        // What the kernel can unpack stays allowed: a directory named twice,
+        // a file written over a file, a link over an empty directory.
+        let mut archive = Newc::new();
+        archive.directory("etc", 0o755).unwrap();
+        archive.directory("etc", 0o755).unwrap();
+        archive
+            .file(
+                "etc/passwd",
+                0o644,
+                b"root:x:0:0::/root:/bin/sh
+",
+            )
+            .unwrap();
+        archive
+            .file(
+                "etc/passwd",
+                0o644,
+                b"root:x:0:0::/root:/bin/sh
+",
+            )
+            .unwrap();
+        archive.directory("usr", 0o755).unwrap();
+        archive.symlink("lib64", "/data/usr/lib64").unwrap();
+        assert!(archive.finish().is_ok());
     }
 }

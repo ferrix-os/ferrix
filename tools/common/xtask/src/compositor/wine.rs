@@ -157,9 +157,36 @@ exec /usr/lib/wine/wine64 notepad >> /tmp/wine/notepad.log 2>&1
 
 /// What `run-compositor --wine` adds to the archive: yserver's desktop
 /// files and links, Wine's links, and the two scripts.
-pub(crate) fn desktop_files() -> Vec<File> {
-    let mut files = crate::yserver::desktop_files(&[]);
-    files.extend(crate::rustc::files(crate::wine::LINKS));
+///
+/// `carried` is what the desktop's archive holds already. The desktop
+/// carries foot's port, whose fontconfig lives in `/etc/fonts` and whose one
+/// font is in `/usr/share/fonts`, so yserver's links for those two are left
+/// out and the volume's fonts are linked in beside foot's, as the Chrome
+/// desktop does (`desktop.rs`, `chrome_links`). Linking `/etc/fonts` over
+/// foot's directory stopped the boot (2026-10-12: FX-0801, ENOTEMPTY).
+pub(crate) fn desktop_files(carried: &[File]) -> Vec<File> {
+    let taken = |path: &str| {
+        carried.iter().any(|file| {
+            file.path == path
+                || file
+                    .path
+                    .strip_prefix(path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+    };
+    let mut files = crate::yserver::desktop_files(carried);
+    let mut links: Vec<(&str, &str)> = crate::wine::LINKS
+        .iter()
+        .copied()
+        .filter(|(path, _)| !taken(path))
+        .collect();
+    if taken("usr/share/fonts") && !taken("usr/share/fonts/truetype") {
+        links.push(("usr/share/fonts/truetype", "/data/usr/share/fonts/truetype"));
+    }
+    if taken("etc/fonts") && !taken("etc/fonts/conf.d") {
+        links.push(("etc/fonts/conf.d", "/data/etc/fonts/conf.d"));
+    }
+    files.extend(crate::rustc::files(&links));
     for (path, script) in [
         (DESKTOP_SCRIPT_PATH, DESKTOP_SCRIPT),
         (NOTEPAD_SCRIPT_PATH, NOTEPAD_SCRIPT),
@@ -568,6 +595,49 @@ fn judge_typing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On a desktop that carries foot's fontconfig, `--wine` links nothing
+    /// over `/etc/fonts` or `/usr/share/fonts` and links the volume's fonts in
+    /// beside them; on one that carries neither, it links both whole.
+    #[test]
+    fn the_wine_desktop_links_nothing_over_foots_fonts() {
+        let foot = [
+            File {
+                path: "etc/fonts/fonts.conf".to_owned(),
+                mode: 0o644,
+                content: Content::Bytes(b"<fontconfig/>".to_vec()),
+            },
+            File {
+                path: "usr/share/fonts/foot.ttf".to_owned(),
+                mode: 0o644,
+                content: Content::Bytes(Vec::new()),
+            },
+        ];
+        let links = |files: &[File]| -> Vec<String> {
+            files
+                .iter()
+                .filter(|file| matches!(file.content, Content::Link(_)))
+                .map(|file| file.path.clone())
+                .collect()
+        };
+        let beside = links(&desktop_files(&foot));
+        for over in ["etc/fonts", "usr/share/fonts"] {
+            assert!(
+                !beside.iter().any(|path| path == over),
+                "{over} linked over foot's"
+            );
+        }
+        for added in [
+            "etc/fonts/conf.d",
+            "usr/share/fonts/truetype",
+            "usr/lib/wine",
+        ] {
+            assert!(beside.iter().any(|path| path == added), "{added} missing");
+        }
+        let alone = links(&desktop_files(&[]));
+        assert!(alone.iter().any(|path| path == "etc/fonts"));
+        assert!(!alone.iter().any(|path| path == "etc/fonts/conf.d"));
+    }
 
     /// Notepad's window is found by its title in hyprix's list, and no other
     /// window's title stands in for it.
