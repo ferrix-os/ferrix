@@ -240,12 +240,20 @@ to read the seals, so a write seal and a writable shared mapping never both
 stand. Once a write seal stands, a shared writable mapping is `EPERM` and
 `mprotect` to writable is `EACCES`; a private mapping still maps and keeps its
 writes to itself. The same accounting closes a gap: a read-only shared mapping
-of a file opened read-only can no longer be made writable. `MFD_HUGETLB`,
-`MFD_NOEXEC_SEAL` and `MFD_EXEC` are `EINVAL`, as on a kernel before 6.3's exec
-seal. The boot check runs it all twice, from a process of its own:
+of a file opened read-only can no longer be made writable. `MFD_HUGETLB` is
+`EINVAL`, there being no hugetlbfs. The exec seal of Linux 6.3, as 6.18's
+`mm/memfd.c` has it, landed on 2026-10-12: `MFD_NOEXEC_SEAL` makes a file of
+mode 0666 carrying `F_SEAL_EXEC`, which no `execve` runs and no `chmod` gives
+an execute bit, and which may be sealed further; `MFD_EXEC` makes the 0777
+file every memfd was before; `F_SEAL_EXEC` added to a file that still has an
+execute bit brings the write seals with it. Neither flag named, the caller's
+pid namespace's `vm.memfd_noexec` (`/proc/sys/vm/memfd_noexec`) decides: 0
+`MFD_EXEC`, 1 `MFD_NOEXEC_SEAL`, 2 the same with `MFD_EXEC` refused `EACCES`;
+a namespace starts at, and cannot be set below, the scope of the one it was
+made in. The boot check runs it all twice, from a process of its own:
 
 ```
-  memfd    4 seals added and enforced, 14 calls refused as Linux refuses them, a write seal refused while a shared mapping could write, a fork's copy included; 0 frames leaked
+  memfd    6 seals added and enforced, 23 calls refused as Linux refuses them, a write seal refused while a shared mapping could write, a fork's copy included; an exec seal held and vm.memfd_noexec obeyed; 0 frames leaked
 ```
 
 **Done — packet pipes, `/dev`'s fd links, and `/proc` a 32-bit program can

@@ -2495,8 +2495,13 @@ pub(crate) static STAGE8_MEMFD: Explanation = Explanation {
               shared read-only mapping to writable is EACCES, and a private mapping still maps \
               and keeps its writes from the file. An unknown seal is EINVAL, and any seal after \
               F_SEAL_SEAL is EPERM. A shared read-only mapping of a file opened read-only must \
-              not become writable through mprotect. The whole run is done twice and must leave \
-              no frame behind.",
+              not become writable through mprotect. MFD_NOEXEC_SEAL must make a mode 0666 file \
+              carrying F_SEAL_EXEC alone, which execveat refuses with EACCES and no fchmod gives \
+              an execute bit; F_SEAL_EXEC on an MFD_EXEC file must bring the write seals with \
+              it; vm.memfd_noexec 1 must make a memfd naming neither exec flag MFD_NOEXEC_SEAL, \
+              2 must refuse MFD_EXEC with EACCES, a value outside 0 to 2 is EINVAL, and a pid \
+              namespace keeps the scope it was made under. The whole run is done twice and \
+              must leave no frame behind.",
     causes: &[
         "`map_file` does not raise the file object's may-write count for a shared mapping of a \
          writable file, or `give_back`, `Drop` or a fork child's attach does not balance it, so \
@@ -2506,10 +2511,13 @@ pub(crate) static STAGE8_MEMFD: Explanation = Explanation {
         "`AddressSpace::protect` does not look at a shared file region's may_write before it \
          makes the range writable.",
         "tmpfs's write_at, set_len or grow_to does not consult the node's seals under its lock.",
+        "`sys_memfd_create`'s `sanitize_flags` does not apply vm.memfd_noexec, or tmpfs's \
+         set_attributes or add_seals does not honour F_SEAL_EXEC.",
     ],
     see: "src/kernel/src/fs/memfd_check.rs; src/kernel/src/syscall/memfd.rs; src/kernel/src/syscall/fd.rs \
           sys_fcntl; src/kernel/src/syscall/memory.rs map_file; src/kernel/src/user/space.rs map_file, \
-          protect; src/lib/fs/vfs/src/tmpfs.rs add_seals",
+          protect; src/lib/fs/vfs/src/tmpfs.rs add_seals, set_attributes; \
+          src/kernel/src/syscall/pidns.rs memfd_noexec",
 };
 
 /// For `check_epoll` in `stages_check.rs`, when the epoll check fails.

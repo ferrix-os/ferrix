@@ -34,6 +34,7 @@ use crate::irq;
 use crate::mm;
 use crate::sched;
 use crate::smp;
+use crate::syscall::memfd;
 use crate::syscall::nsproxy;
 use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::{self, Process};
@@ -677,6 +678,20 @@ pub(super) fn overflowgid(_: &Kernel) -> Result<Vec<u8>> {
 /// `kernel/pid_max`: one past the highest pid the registry hands out.
 pub(super) fn pid_max(_: &Kernel) -> Result<Vec<u8>> {
     Ok(number(u64::from(PID_MAX)))
+}
+
+/// `vm/memfd_noexec`: the scope `memfd_create` obeys in the reader's pid
+/// namespace (`syscall::memfd`).
+pub(super) fn memfd_noexec(_: &Kernel) -> Result<Vec<u8>> {
+    let reader = userns::acting();
+    Ok(number(u64::from(memfd::noexec_scope(reader.as_deref()))))
+}
+
+/// A write to `vm/memfd_noexec`: the writer's pid namespace's scope, as
+/// `memfd::set_noexec` judges it. `EPERM` with no process to judge.
+pub(super) fn set_memfd_noexec(_: &Kernel, data: &[u8]) -> Result<usize> {
+    let writer = userns::acting().ok_or(Errno::EPERM)?;
+    memfd::set_noexec(&writer, data)
 }
 
 /// `vm/overcommit_memory`: 1, Linux's `OVERCOMMIT_ALWAYS`.

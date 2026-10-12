@@ -1502,6 +1502,8 @@ pub const F_SEAL_GROW: u32 = 0x0004;
 pub const F_SEAL_WRITE: u32 = 0x0008;
 /// Seal: no new write may start, while writable mappings made before stay.
 pub const F_SEAL_FUTURE_WRITE: u32 = 0x0010;
+/// Seal: `chmod` may not change the file's execute bits (Linux 6.3).
+pub const F_SEAL_EXEC: u32 = 0x0020;
 /// The only descriptor flag: close this descriptor on `execve`.
 pub const FD_CLOEXEC: u32 = 1;
 
@@ -1783,6 +1785,12 @@ pub const GRND_RANDOM: u32 = 0x0002;
 pub const MFD_CLOEXEC: u32 = 0x0001;
 /// Allow the memfd to be sealed against further change.
 pub const MFD_ALLOW_SEALING: u32 = 0x0002;
+/// Make the memfd unexecutable for good: no execute bits, `F_SEAL_EXEC`, and
+/// sealable (Linux 6.3).
+pub const MFD_NOEXEC_SEAL: u32 = 0x0008;
+/// Make the memfd executable, mode 0777, as before Linux 6.3; refused under
+/// `vm.memfd_noexec` 2.
+pub const MFD_EXEC: u32 = 0x0010;
 
 /// Set close-on-exec on the descriptor `eventfd2` returns.
 pub const EFD_CLOEXEC: u32 = O_CLOEXEC;

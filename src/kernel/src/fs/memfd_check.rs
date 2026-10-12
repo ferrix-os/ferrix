@@ -16,15 +16,23 @@
 //! shared mapping of a file opened read-only may not be made writable, the gap
 //! the may-write accounting closed. Like the other stage 8 checks it runs
 //! twice and counts frames across the second run, in a frame window.
+//!
+//! And the exec seal (Linux 6.3): `MFD_NOEXEC_SEAL` makes a file of mode 0666
+//! carrying `F_SEAL_EXEC` and no `F_SEAL_SEAL`, which `execveat` refuses and
+//! no `fchmod` gives an execute bit; `F_SEAL_EXEC` added to an executable one
+//! brings the write seals with it; `vm.memfd_noexec` decides for a memfd that
+//! names neither exec flag, refuses `MFD_EXEC` at 2, and cannot be set below a
+//! pid namespace's parent.
 
 use alloc::vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::types::{
-    AT_FDCWD, F_ADD_SEALS, F_GET_SEALS, F_SEAL_FUTURE_WRITE, F_SEAL_GROW, F_SEAL_SEAL,
-    F_SEAL_SHRINK, F_SEAL_WRITE, MAP_ANONYMOUS, MAP_PRIVATE, MAP_SHARED, MFD_ALLOW_SEALING,
-    MFD_CLOEXEC, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, PROT_READ, PROT_WRITE,
+    AT_EMPTY_PATH, AT_FDCWD, F_ADD_SEALS, F_GET_SEALS, F_SEAL_EXEC, F_SEAL_FUTURE_WRITE,
+    F_SEAL_GROW, F_SEAL_SEAL, F_SEAL_SHRINK, F_SEAL_WRITE, MAP_ANONYMOUS, MAP_PRIVATE, MAP_SHARED,
+    MFD_ALLOW_SEALING, MFD_CLOEXEC, MFD_EXEC, MFD_NOEXEC_SEAL, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC,
+    O_WRONLY, PROT_READ, PROT_WRITE,
 };
 use ferrix_vfs::Errno;
 
@@ -47,6 +55,14 @@ const NAME_MAX_LEN: usize = 249;
 const PATH: &[u8] = b"/tmp/ferrix-memfd-check\0";
 /// Where [`PATH`] is staged.
 const AT_PATH: u64 = 512;
+/// An empty path, for `execveat`'s `AT_EMPTY_PATH`: the page is zeroed.
+const AT_EMPTY: u64 = 1024;
+/// `vm.memfd_noexec`'s file, staged in the page.
+const NOEXEC_SYSCTL: &[u8] = b"/proc/sys/vm/memfd_noexec\0";
+/// Where [`NOEXEC_SYSCTL`] is staged.
+const AT_SYSCTL: u64 = 1536;
+/// A value written to it, staged in the page.
+const AT_VALUE: u64 = 1600;
 /// A seal bit no kernel defines.
 const UNKNOWN_SEAL: u32 = 0x100;
 /// `MFD_HUGETLB`, which has no hugetlbfs behind it here.
@@ -166,6 +182,7 @@ fn check_once(process: &Process) -> Result<(u32, u32), &'static str> {
             uaccess::copy_to_user(process.space(), page + AT_LONG + long.len() as u64, &[0])
         })
         .and_then(|()| uaccess::copy_to_user(process.space(), page + AT_PATH, PATH))
+        .and_then(|()| uaccess::copy_to_user(process.space(), page + AT_SYSCTL, NOEXEC_SYSCTL))
         .map_err(|_| "could not stage the memfd check")
         .and_then(|()| check_memfd(process, page));
 
@@ -245,7 +262,8 @@ fn check_memfd(process: &Process, page: u64) -> Result<(u32, u32), &'static str>
         &mut refusals,
     )?;
     check_a_read_only_mapping_stays_read_only(process, page, &mut refusals)?;
-    Ok((seals + 1, refusals))
+    let exec_seals = check_the_exec_seal(process, page, &mut refusals)?;
+    Ok((seals + 1 + exec_seals, refusals))
 }
 
 /// The shrink and grow seals, on a memfd of three pages.
@@ -415,4 +433,252 @@ fn check_a_read_only_mapping_stays_read_only(
     );
     let _ = memory::sys_munmap(process, at, PAGE_SIZE);
     outcome
+}
+
+/// The exec seal and `vm.memfd_noexec`, Linux 6.18's `mm/memfd.c` and
+/// `shmem_setattr`. Leaves the first namespace's scope at 0, as it found it,
+/// whatever the outcome.
+fn check_the_exec_seal(
+    process: &Process,
+    page: u64,
+    refusals: &mut u32,
+) -> Result<u32, &'static str> {
+    if crate::syscall::memfd::noexec_scope(Some(process)) != 0 {
+        return Err("vm.memfd_noexec was not 0 before the exec seal check");
+    }
+    let outcome = check_exec_flags(process, page, refusals)
+        .and_then(|seals| check_noexec_scopes(process, page, refusals).map(|()| seals));
+    crate::syscall::pidns::set_memfd_noexec(None, 0);
+    outcome
+}
+
+/// `memfd_create`, by number, with the staged name.
+fn create_named(process: &Process, page: u64, flags: u32) -> Result<usize, Errno> {
+    by_number(
+        process,
+        Syscall::MemfdCreate,
+        [page + AT_NAME, u64::from(flags), 0, 0, 0, 0],
+    )
+}
+
+/// The permission bits of the file `fd` names.
+fn mode_of(process: &Process, fd: u64) -> Result<u32, &'static str> {
+    fd::file(process, fd::arg(fd))
+        .map(|file| file.inode().metadata().permissions & 0o7777)
+        .map_err(|_| "a memfd's descriptor names nothing")
+}
+
+/// `fchmod(fd, mode)`.
+fn chmod(process: &Process, fd: u64, mode: u32) -> Result<usize, Errno> {
+    by_number(process, Syscall::Fchmod, [fd, u64::from(mode), 0, 0, 0, 0])
+}
+
+/// `MFD_NOEXEC_SEAL` and `MFD_EXEC` asked for by name. Returns the seals
+/// enforced.
+fn check_exec_flags(process: &Process, page: u64, refusals: &mut u32) -> Result<u32, &'static str> {
+    refused(
+        create_named(process, page, MFD_EXEC | MFD_NOEXEC_SEAL),
+        Errno::EINVAL,
+        "memfd_create with MFD_EXEC and MFD_NOEXEC_SEAL was not EINVAL",
+        refusals,
+    )?;
+
+    let noexec = descriptor(
+        create_named(process, page, MFD_NOEXEC_SEAL),
+        "memfd_create refused MFD_NOEXEC_SEAL",
+    )?;
+    if mode_of(process, noexec)? != 0o666 {
+        return Err("a memfd made with MFD_NOEXEC_SEAL is not mode 0666");
+    }
+    if get_seals(process, noexec) != Ok(F_SEAL_EXEC as usize) {
+        return Err("a memfd made with MFD_NOEXEC_SEAL does not carry F_SEAL_EXEC alone");
+    }
+    refused(
+        chmod(process, noexec, 0o766),
+        Errno::EPERM,
+        "fchmod gave an execute bit to a memfd under F_SEAL_EXEC",
+        refusals,
+    )?;
+    if mode_of(process, noexec)? != 0o666 {
+        return Err("a refused fchmod past F_SEAL_EXEC changed the mode");
+    }
+    if chmod(process, noexec, 0o600) != Ok(0) || mode_of(process, noexec)? != 0o600 {
+        return Err("fchmod that changes no execute bit was refused past F_SEAL_EXEC");
+    }
+    if run_descriptor(process, page, noexec) != Some(Errno::EACCES) {
+        return Err("execveat of a memfd made with MFD_NOEXEC_SEAL was not EACCES");
+    }
+    *refusals += 1;
+    if add_seals(process, noexec, F_SEAL_SHRINK) != Ok(0) {
+        return Err("a memfd made with MFD_NOEXEC_SEAL could not be sealed further");
+    }
+    if get_seals(process, noexec) != Ok((F_SEAL_EXEC | F_SEAL_SHRINK) as usize) {
+        return Err("F_SEAL_EXEC on a file with no execute bit brought other seals");
+    }
+
+    let exec = descriptor(
+        create_named(process, page, MFD_EXEC | MFD_ALLOW_SEALING),
+        "memfd_create refused MFD_EXEC",
+    )?;
+    if mode_of(process, exec)? != 0o777 || get_seals(process, exec) != Ok(0) {
+        return Err("a memfd made with MFD_EXEC is not mode 0777 with no seals");
+    }
+    // The control for the refusal above: the same call on a file with execute
+    // bits gets past the permission and fails only on the empty file.
+    if matches!(
+        run_descriptor(process, page, exec),
+        None | Some(Errno::EACCES)
+    ) {
+        return Err("execveat of an empty MFD_EXEC memfd was not refused as no program");
+    }
+    if add_seals(process, exec, F_SEAL_EXEC) != Ok(0) {
+        return Err("F_SEAL_EXEC was refused on an executable memfd");
+    }
+    let implied = F_SEAL_EXEC | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_FUTURE_WRITE;
+    if get_seals(process, exec) != Ok(implied as usize) {
+        return Err("F_SEAL_EXEC on an executable memfd did not bring the write seals");
+    }
+    let file =
+        fd::file(process, fd::arg(exec)).map_err(|_| "a memfd's descriptor names nothing")?;
+    if file.write_at(0, b"x") != Err(Errno::EPERM) {
+        return Err("a write to an executable memfd past F_SEAL_EXEC was not EPERM");
+    }
+    *refusals += 1;
+    refused(
+        chmod(process, exec, 0o666),
+        Errno::EPERM,
+        "fchmod took the execute bits off a memfd under F_SEAL_EXEC",
+        refusals,
+    )?;
+    Ok(2)
+}
+
+/// `execveat(fd, "", NULL, NULL, AT_EMPTY_PATH)`: the error it was refused
+/// with, or `None` if it ran -- which the check's empty files never can.
+fn run_descriptor(process: &Process, page: u64, fd: u64) -> Option<Errno> {
+    use crate::syscall::exec::{self, ExecveError};
+    let word = crate::syscall::signal::word_of(crate::trap::Abi::Native);
+    match exec::sys_execveat(
+        process,
+        fd::arg(fd),
+        page + AT_EMPTY,
+        0,
+        0,
+        AT_EMPTY_PATH,
+        word,
+    ) {
+        Err(ExecveError::Refused(error)) => Some(error),
+        Ok(_) | Err(ExecveError::Lost) => None,
+    }
+}
+
+/// `vm.memfd_noexec`: what a memfd naming neither exec flag becomes at each
+/// scope, `MFD_EXEC` refused at 2, the file's own refusals, and a pid
+/// namespace that cannot be set below its parent.
+fn check_noexec_scopes(
+    process: &Process,
+    page: u64,
+    refusals: &mut u32,
+) -> Result<(), &'static str> {
+    use crate::syscall::{memfd, pidns};
+
+    let plain = descriptor(
+        create_named(process, page, 0),
+        "memfd_create refused a plain memfd",
+    )?;
+    if mode_of(process, plain)? != 0o777 || get_seals(process, plain) != Ok(F_SEAL_SEAL as usize) {
+        return Err("at vm.memfd_noexec 0 a plain memfd is not mode 0777 and unsealable");
+    }
+
+    // Set through the file, as a program sets it, then read back.
+    let written = set_through_proc(process, page, b"1\n")?;
+    if written != Ok(2) || memfd::noexec_scope(Some(process)) != 1 {
+        return Err("a write of 1 to /proc/sys/vm/memfd_noexec did not set the scope");
+    }
+    let sealed = descriptor(
+        create_named(process, page, MFD_ALLOW_SEALING),
+        "memfd_create refused a memfd at vm.memfd_noexec 1",
+    )?;
+    if mode_of(process, sealed)? != 0o666 || get_seals(process, sealed) != Ok(F_SEAL_EXEC as usize)
+    {
+        return Err(
+            "at vm.memfd_noexec 1 a memfd naming no exec flag was not made MFD_NOEXEC_SEAL",
+        );
+    }
+    let exec = descriptor(
+        create_named(process, page, MFD_EXEC),
+        "memfd_create refused MFD_EXEC at vm.memfd_noexec 1",
+    )?;
+    if mode_of(process, exec)? != 0o777 {
+        return Err("at vm.memfd_noexec 1 MFD_EXEC did not make an executable memfd");
+    }
+
+    for refusal in [&b"3"[..], b"-1", b"one"] {
+        if set_through_proc(process, page, refusal)? != Err(Errno::EINVAL) {
+            return Err("vm.memfd_noexec took a value outside 0 to 2");
+        }
+        *refusals += 1;
+    }
+    if memfd::set_noexec(process, b"2") != Ok(1) {
+        return Err("vm.memfd_noexec would not be set to 2");
+    }
+    refused(
+        create_named(process, page, MFD_EXEC),
+        Errno::EACCES,
+        "memfd_create with MFD_EXEC at vm.memfd_noexec 2 was not EACCES",
+        refusals,
+    )?;
+    let enforced = descriptor(
+        create_named(process, page, 0),
+        "memfd_create refused a plain memfd at vm.memfd_noexec 2",
+    )?;
+    if mode_of(process, enforced)? != 0o666 {
+        return Err("at vm.memfd_noexec 2 a plain memfd was made executable");
+    }
+
+    // A namespace made at 2 keeps 2 when the first goes back to 0, and may
+    // not be set below the 2 its parent then had; one made at 0 may not be
+    // set below 0 either.
+    let strict =
+        pidns::create(None).map_err(|_| "no memory for the exec seal check's namespace")?;
+    pidns::set_memfd_noexec(None, 0);
+    if pidns::memfd_noexec(Some(&strict)) != 2 || pidns::memfd_noexec_floor(Some(&strict)) != 0 {
+        return Err("a pid namespace did not start at the vm.memfd_noexec it was made under");
+    }
+    let below = pidns::create(Some(&strict)).map_err(|_| "no memory for a nested namespace")?;
+    if pidns::memfd_noexec_floor(Some(&below)) != 2 || pidns::memfd_noexec(Some(&below)) != 2 {
+        return Err("a nested pid namespace's vm.memfd_noexec floor is not its parent's scope");
+    }
+    Ok(())
+}
+
+/// Write `value` to `/proc/sys/vm/memfd_noexec` through the file, acting as
+/// `process`. The inner result is the write's.
+fn set_through_proc(
+    process: &Process,
+    page: u64,
+    value: &[u8],
+) -> Result<Result<usize, Errno>, &'static str> {
+    let process = crate::syscall::registry::find(process.pid())
+        .ok_or("the memfd check's process is not registered")?;
+    uaccess::copy_to_user(process.space(), page + AT_VALUE, value)
+        .map_err(|_| "could not stage a vm.memfd_noexec value")?;
+    let cwd = AT_FDCWD as i64 as u64;
+    crate::syscall::userns::acting_as(&process, || {
+        let fd = descriptor(
+            by_number(
+                &process,
+                Syscall::Openat,
+                [cwd, page + AT_SYSCTL, u64::from(O_WRONLY), 0, 0, 0],
+            ),
+            "/proc/sys/vm/memfd_noexec would not open for writing",
+        )?;
+        let written = by_number(
+            &process,
+            Syscall::Write,
+            [fd, page + AT_VALUE, value.len() as u64, 0, 0, 0],
+        );
+        let _ = fd::sys_close(&process, fd as i32);
+        Ok(written)
+    })?
 }

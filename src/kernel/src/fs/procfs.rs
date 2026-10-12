@@ -411,8 +411,16 @@ static SYS: [Entry<Kernel>; 3] = [
     sysctl_directory(b"vm", &SYS_VM),
 ];
 
-/// `/proc/sys/vm`: the memory policy a program can ask about.
-static SYS_VM: [Entry<Kernel>; 1] = [file(b"overcommit_memory", render::overcommit_memory)];
+/// `/proc/sys/vm`: the memory policy a program can ask about, and whether
+/// `memfd_create` makes executable files.
+static SYS_VM: [Entry<Kernel>; 2] = [
+    sysctl_setting(
+        b"memfd_noexec",
+        render::memfd_noexec,
+        render::set_memfd_noexec,
+    ),
+    file(b"overcommit_memory", render::overcommit_memory),
+];
 
 /// `/proc/sys/fs`.
 static SYS_FS: [Entry<Kernel>; 3] = [

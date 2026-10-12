@@ -561,18 +561,28 @@ pub const SEAL_GROW: u32 = 0x0004;
 pub const SEAL_WRITE: u32 = 0x0008;
 /// `F_SEAL_FUTURE_WRITE`: no new write may start.
 pub const SEAL_FUTURE_WRITE: u32 = 0x0010;
+/// `F_SEAL_EXEC`: the mode's execute bits may not change (Linux 6.3).
+pub const SEAL_EXEC: u32 = 0x0020;
 /// Every seal tmpfs knows.
-const SEALS_KNOWN: u32 = SEAL_SEAL | SEAL_SHRINK | SEAL_GROW | SEAL_WRITE | SEAL_FUTURE_WRITE;
+const SEALS_KNOWN: u32 =
+    SEAL_SEAL | SEAL_SHRINK | SEAL_GROW | SEAL_WRITE | SEAL_FUTURE_WRITE | SEAL_EXEC;
+/// What [`SEAL_EXEC`] adds to a file that may still be executed:
+/// `memfd_add_seals`' "`SEAL_EXEC` implies `SEAL_WRITE`, making W^X from the
+/// start".
+const SEALS_EXEC_IMPLIES: u32 = SEAL_SHRINK | SEAL_GROW | SEAL_WRITE | SEAL_FUTURE_WRITE;
+/// The mode's execute bits, which [`SEAL_EXEC`] holds.
+const EXECUTE_BITS: u32 = 0o111;
 
 impl Tmpfs {
     /// A regular file on this tmpfs that no directory names: what
-    /// `memfd_create` makes. With `sealable`, it starts with no seals and may
-    /// be sealed; without, it carries [`SEAL_SEAL`], as every other file does.
+    /// `memfd_create` makes, starting with `seals`. [`SEAL_SEAL`] for one that
+    /// may not be sealed, as every other file is; none, or [`SEAL_EXEC`] for
+    /// `MFD_NOEXEC_SEAL`'s, for one that may.
     ///
     /// # Errors
     ///
     /// What the storage refuses when it allocates the file's pages.
-    pub fn new_unlinked_file(&self, permissions: u32, sealable: bool) -> Result<Arc<dyn Inode>> {
+    pub fn new_unlinked_file(&self, permissions: u32, seals: u32) -> Result<Arc<dyn Inode>> {
         let now = self.shared.clock.now();
         let pages = self.shared.storage.allocate()?;
         let node = Node::new(
@@ -585,9 +595,7 @@ impl Tmpfs {
         {
             let mut state = node.state.lock();
             state.nlink = 0;
-            if sealable {
-                state.seals = 0;
-            }
+            state.seals = seals & SEALS_KNOWN;
         }
         Ok(node as Arc<dyn Inode>)
     }
@@ -1334,6 +1342,14 @@ impl Inode for Node {
     fn set_attributes(&self, change: &SetAttributes) -> Result<()> {
         let now = self.now();
         let mut state = self.state.lock();
+        // `shmem_setattr`: past an exec seal, a mode that changes any execute
+        // bit is refused before anything of the change is made.
+        if let Some(permissions) = change.permissions
+            && state.seals & SEAL_EXEC != 0
+            && (state.permissions ^ permissions) & EXECUTE_BITS != 0
+        {
+            return Err(Errno::EPERM);
+        }
         if let Some(permissions) = change.permissions {
             state.permissions = permissions & 0o7777;
         }
@@ -1527,6 +1543,13 @@ impl Inode for Node {
         if state.seals & SEAL_SEAL != 0 {
             return Err(Errno::EPERM);
         }
+        // An exec seal on a file that may still be executed seals its
+        // contents too, so it is never both writable and executable.
+        let seals = if seals & SEAL_EXEC != 0 && state.permissions & EXECUTE_BITS != 0 {
+            seals | SEALS_EXEC_IMPLIES
+        } else {
+            seals
+        };
         let added = seals & !state.seals;
         state.seals |= seals;
         if added & SEAL_WRITE != 0 && writably_mapped() {

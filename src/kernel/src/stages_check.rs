@@ -188,8 +188,8 @@ pub(super) fn check_memfd() {
     };
     println!(
         "  memfd    {} seals added and enforced, {} calls refused as Linux refuses them, a \
-         write seal refused while a shared mapping could write, a fork's copy included; {} \
-         frames leaked",
+         write seal refused while a shared mapping could write, a fork's copy included; an \
+         exec seal held and vm.memfd_noexec obeyed; {} frames leaked",
         sealed.seals, sealed.refusals, sealed.leaked,
     );
 }

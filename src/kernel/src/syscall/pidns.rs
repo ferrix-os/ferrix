@@ -30,7 +30,7 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint};
 use ferrix_linux_abi::errno::Errno;
@@ -81,6 +81,9 @@ pub(crate) struct PidNamespace {
     init: SpinLock<Weak<Process>>,
     /// Set as its init goes: no task joins a namespace that is ending.
     dying: AtomicBool,
+    /// Its own `vm.memfd_noexec`, which counts only where it is above every
+    /// ancestor's ([`memfd_noexec`]).
+    memfd_noexec: AtomicU32,
     /// The kernel heap this is, charged to the job that made it (F-37).
     _charge: Option<Charge>,
 }
@@ -157,6 +160,37 @@ impl PidNamespace {
     }
 }
 
+/// The first namespace's `vm.memfd_noexec`: Linux's `init_pid_ns`'s, 0
+/// (`MEMFD_NOEXEC_SCOPE_EXEC`) at boot.
+static FIRST_MEMFD_NOEXEC: AtomicU32 = AtomicU32::new(0);
+
+/// The `vm.memfd_noexec` scope `memfd_create` obeys in `namespace` (`None`
+/// being the first): the highest of its own and every ancestor's, as Linux's
+/// `pidns_memfd_noexec_scope` takes it, so a namespace can never be laxer
+/// than the one it was made in.
+pub(crate) fn memfd_noexec(namespace: Option<&Arc<PidNamespace>>) -> u32 {
+    let mut scope = FIRST_MEMFD_NOEXEC.load(Ordering::Acquire);
+    let mut at = namespace;
+    while let Some(namespace) = at {
+        scope = scope.max(namespace.memfd_noexec.load(Ordering::Acquire));
+        at = namespace.parent.as_ref();
+    }
+    scope
+}
+
+/// The lowest `vm.memfd_noexec` `namespace` may be set to: its parent's
+/// scope, and 0 for the first, which has none.
+pub(crate) fn memfd_noexec_floor(namespace: Option<&Arc<PidNamespace>>) -> u32 {
+    namespace.map_or(0, |namespace| memfd_noexec(namespace.parent.as_ref()))
+}
+
+/// Set `namespace`'s own `vm.memfd_noexec`; the caller has checked it
+/// against [`memfd_noexec_floor`] and the highest scope.
+pub(crate) fn set_memfd_noexec(namespace: Option<&Arc<PidNamespace>>, scope: u32) {
+    let own = namespace.map_or(&FIRST_MEMFD_NOEXEC, |namespace| &namespace.memfd_noexec);
+    own.store(scope, Ordering::Release);
+}
+
 /// `/proc/<pid>/ns/pid`'s number for a namespace, `None` being the first.
 pub(crate) fn id_of(namespace: Option<&Arc<PidNamespace>>) -> u64 {
     namespace.map_or(FIRST_ID, |namespace| namespace.id)
@@ -191,6 +225,9 @@ pub(crate) fn create(parent: Option<&Arc<PidNamespace>>) -> Result<Arc<PidNamesp
         }),
         init: SpinLock::new(Weak::new()),
         dying: AtomicBool::new(false),
+        // `create_pid_namespace`: a new namespace starts at the scope it was
+        // made under.
+        memfd_noexec: AtomicU32::new(memfd_noexec(parent)),
         _charge: Some(charge),
     };
     fallible::try_arc(namespace).map_err(|_| Errno::ENOMEM)
