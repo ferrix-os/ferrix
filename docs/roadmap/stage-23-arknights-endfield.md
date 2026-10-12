@@ -251,17 +251,20 @@ it, the way `test-xwindow` finds xev's.
 §6).** Lavapipe satisfies DXVK: DXVK 3.1.1, the newest release, makes a
 feature level 11.1 device on Mesa 25.0.7's lavapipe, in Wine 10.0, on Linux
 and on Ferrix alike. `cargo xtask test-dxvk` runs a small Direct3D 11
-program through it under KVM with no card and compares the frame it reads
-back with one xtask draws.
+program through it under KVM with no card: offscreen, comparing the frame
+it reads back with one xtask draws, then presenting through a swap chain
+in a window of hyprix's, by way of Wine's Vulkan surface on yserver's X11,
+and finding the frame on the screen.
 
-* *Done:* E2.4's first half, and the card-free half of E2.2: DXVK in the
-  prefix (the release's DLLs beside the program, pinned by hash, from
-  `fetch-dxvk.sh`), a Direct3D 11 program rendering offscreen, the gate and
-  its negative control. Ferrix answered nothing wrongly on the way.
-* *Still to do:* E2.4's second half, presentation: a swap chain through
-  Wine's Vulkan surface on yserver's X11, which DXVK uses for a game's
-  frames and which the offscreen program does not reach. E2.1 to E2.3, on
-  the card.
+* *Done:* E2.4, and the card-free half of E2.2: DXVK in the prefix (the
+  release's DLLs beside the program, pinned by hash, from
+  `fetch-dxvk.sh`), a Direct3D 11 program offscreen and presenting, the
+  gate and its negative controls. Ferrix answered nothing wrongly on the
+  way.
+* *Still to do:* the presented window is drawn at the size the program
+  asked for and not at its tile's, as notepad's is (step 1's lead, in
+  Wine's X driver on yserver; fixed with E1.5, not here). E2.1 to E2.3,
+  on the card.
 
 **Proved by** `vkcube` at the screen's rate on the card, then the Direct3D
 11 program for ten minutes, recorded; and `test-dxvk` in the gate set.

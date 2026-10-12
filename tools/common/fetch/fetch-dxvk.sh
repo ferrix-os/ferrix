@@ -14,7 +14,9 @@
 # the Wine volume (`fetch-wine.sh`) is attached as it is.
 #
 # Writes $FERRIX_DXVK_DIR (default ~/.local/share/ferrix/dxvk): d3d11.dll,
-# dxgi.dll, d3d11-triangle.exe, and dxvk.version, the release they are from.
+# dxgi.dll, d3d11-triangle.exe, the d3d11-triangle.c it was built from
+# (xtask refuses a program built from another), and dxvk.version, the
+# release the DLLs are from.
 # Needs curl, sha256sum, tar and x86_64-w64-mingw32-gcc; no root.
 #
 # Usage: tools/common/fetch/fetch-dxvk.sh
@@ -63,5 +65,6 @@ rm -rf "$unpacked"
 
 x86_64-w64-mingw32-gcc -O2 -o "$out/d3d11-triangle.exe" "$source" \
     -ld3d11 -ldxgi -ld3dcompiler_47 -luuid
+cp "$source" "$out/d3d11-triangle.c"
 echo "$DXVK_VERSION" > "$out/dxvk.version"
 echo "dxvk: $out (DXVK $DXVK_VERSION, d3d11-triangle.exe from ${source##*/})"

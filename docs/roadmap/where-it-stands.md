@@ -559,7 +559,8 @@ account and about 110 GB of disk. On Ferrix, `arch_prctl` answers
 that takes typed text and the pointer since 2026-10-12, through yserver
 with no workaround (`test-wine`; `run-compositor --wine` to watch it);
 Direct3D 11 draws through DXVK on lavapipe in it with no
-card since 2026-10-12 (`test-dxvk`, offscreen), and a window of an X
+card since 2026-10-12, offscreen and presented in a window on hyprix
+(`test-dxvk`), and a window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is

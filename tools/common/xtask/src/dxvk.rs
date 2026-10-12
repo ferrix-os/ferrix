@@ -13,9 +13,11 @@
 //! prints a line describing the last one; [`judge`] compares that line
 //! with the frame [`expected`] draws on the host.
 //!
-//! Nothing is presented: no window and no swap chain. This holds DXVK,
-//! lavapipe and the threads and memory they ask of Ferrix, not Vulkan's
-//! presentation on X11.
+//! That first boot presents nothing: it holds DXVK, lavapipe and the
+//! threads and memory they ask of Ferrix. A second boot,
+//! `crate::compositor::dxvk`, has the program present through a swap chain
+//! in a window of hyprix's, by way of Wine's Vulkan surface on yserver's
+//! X11, as a game's frames go, and looks for them on the screen.
 //!
 //! The gate needs no network. It attaches a volume, so it runs on demand as
 //! `test-wine` does and is not in the image row.
@@ -33,12 +35,19 @@ const FILES: &[&str] = &["d3d11.dll", "dxgi.dll", "d3d11-triangle.exe"];
 /// The script that fetches DXVK, for the release it pins.
 const FETCH: &str = include_str!("../../fetch/fetch-dxvk.sh");
 
+/// The program's source, which `fetch-dxvk.sh` copies beside the program
+/// it built from it.
+const SOURCE: &str = include_str!("../../test/d3d11-triangle.c");
+
 /// The colour [`RUN`] asks the triangle to be drawn in, as `RRGGBB`. It is
 /// written out in [`RUN`] too, where a test holds the two together.
-const COLOUR: [u8; 3] = [0xff, 0x80, 0x20];
+pub(crate) const COLOUR: [u8; 3] = [0xff, 0x80, 0x20];
 
 /// The colour the program clears its target to: blue, opaque.
 const CLEAR: [u8; 4] = [0x00, 0x00, 0xff, 0xff];
+
+/// [`CLEAR`] as a screen shows it.
+pub(crate) const CLEAR_RGB: [u8; 3] = [CLEAR[0], CLEAR[1], CLEAR[2]];
 
 /// The side of the program's square target, in pixels.
 const SIZE: usize = 64;
@@ -122,11 +131,13 @@ fn pinned() -> &'static str {
         .unwrap_or_default()
 }
 
-/// The directory `fetch-dxvk.sh` writes, holding the release it pins.
+/// The directory `fetch-dxvk.sh` writes, holding the release it pins and
+/// the program built from this tree's source.
 ///
 /// # Errors
 ///
-/// A file is missing, or the directory holds another release.
+/// A file is missing, or the directory holds another release or a program
+/// built from another source.
 fn directory() -> Result<std::path::PathBuf> {
     let directory = match std::env::var_os("FERRIX_DXVK_DIR") {
         Some(directory) => std::path::PathBuf::from(directory),
@@ -142,16 +153,48 @@ fn directory() -> Result<std::path::PathBuf> {
     }
     let stamp = directory.join("dxvk.version");
     let held = std::fs::read_to_string(&stamp).unwrap_or_default();
-    if held.trim() == pinned() {
-        Ok(directory)
-    } else {
-        Err(Error::new(format!(
+    if held.trim() != pinned() {
+        return Err(Error::new(format!(
             "{} holds DXVK {:?}, not {}: tools/common/fetch/fetch-dxvk.sh fetches it again",
             directory.display(),
             held.trim(),
             pinned()
-        )))
+        )));
     }
+    let built = std::fs::read_to_string(directory.join("d3d11-triangle.c")).unwrap_or_default();
+    if built != SOURCE {
+        return Err(Error::new(format!(
+            "{}'s d3d11-triangle.exe was built from another tools/common/test/d3d11-triangle.c: \
+             tools/common/fetch/fetch-dxvk.sh builds it again",
+            directory.display()
+        )));
+    }
+    Ok(directory)
+}
+
+/// DXVK's DLLs and the program from `directory`, as the image carries them
+/// at [`DIRECTORY`].
+///
+/// # Errors
+///
+/// A file cannot be read.
+pub(crate) fn files(directory: &std::path::Path) -> Result<Vec<crate::ports::File>> {
+    let mut files = vec![crate::ports::File {
+        path: DIRECTORY.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Directory,
+    }];
+    for name in FILES {
+        let path = directory.join(name);
+        let content = std::fs::read(&path)
+            .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
+        files.push(crate::ports::File {
+            path: format!("{DIRECTORY}/{name}"),
+            mode: 0o755,
+            content: crate::ports::Content::Bytes(content),
+        });
+    }
+    Ok(files)
 }
 
 /// FNV-1a over `bytes`, as the program hashes its frame.
@@ -219,8 +262,9 @@ fn frame(lines: &[String]) -> Option<Frame> {
     })
 }
 
-/// The frame the program must have read back, in its line's terms.
-fn wanted() -> Frame {
+/// The frame the program must have read back after `frames` frames, in its
+/// line's terms.
+fn wanted(frames: u32) -> Frame {
     let pixels = expected();
     let rgba = |x: usize, y: usize| {
         pixels
@@ -229,7 +273,7 @@ fn wanted() -> Frame {
     };
     let triangle = pixels.iter().filter(|pixel| **pixel != CLEAR).count() as u32;
     Frame {
-        frames: FRAMES,
+        frames,
         clear: (SIZE * SIZE) as u32 - triangle,
         triangle,
         other: 0,
@@ -239,13 +283,13 @@ fn wanted() -> Frame {
     }
 }
 
-/// Whether the boot's `lines` show DXVK, on lavapipe, drawing the frame
-/// [`expected`] draws.
+/// Whether the program's `lines` show DXVK, on lavapipe, drawing the frame
+/// [`expected`] draws, as its line for `frames` frames.
 ///
 /// # Errors
 ///
 /// What is missing or different, in words.
-fn judge(lines: &[String]) -> Result<()> {
+pub(crate) fn judge(lines: &[String], frames: u32) -> Result<()> {
     let version = format!("DXVK: v{}", pinned());
     if !lines.iter().any(|line| line.contains(&version)) {
         return Err(Error::new(format!(
@@ -268,7 +312,7 @@ fn judge(lines: &[String]) -> Result<()> {
     let Some(got) = frame(lines) else {
         return Err(Error::new("the program printed no line for its frame"));
     };
-    let want = wanted();
+    let want = wanted(frames);
     if got == want {
         Ok(())
     } else {
@@ -323,21 +367,7 @@ pub(crate) fn test_dxvk(args: &Args) -> Result<()> {
         mode: 0o755,
         content: crate::ports::Content::Bytes(RUN.as_bytes().to_vec()),
     });
-    files.push(crate::ports::File {
-        path: DIRECTORY.to_owned(),
-        mode: 0o755,
-        content: crate::ports::Content::Directory,
-    });
-    for name in FILES {
-        let path = dxvk.join(name);
-        let content = std::fs::read(&path)
-            .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
-        files.push(crate::ports::File {
-            path: format!("{DIRECTORY}/{name}"),
-            mode: 0o755,
-            content: crate::ports::Content::Bytes(content),
-        });
-    }
+    files.extend(self::files(&dxvk)?);
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
 
@@ -376,13 +406,13 @@ pub(crate) fn test_dxvk(args: &Args) -> Result<()> {
             )));
         }
     }
-    judge(&lines).map_err(|error| Error::new(format!("{arch}: {error}")))?;
+    judge(&lines, FRAMES).map_err(|error| Error::new(format!("{arch}: offscreen: {error}")))?;
     println!(
-        "  {arch}: DXVK {} drew d3d11-triangle's frame on lavapipe in Wine on Ferrix, as the \
-         host draws it",
+        "  {arch}: DXVK {} drew d3d11-triangle's frame on lavapipe in Wine on Ferrix, as xtask \
+         draws it",
         pinned()
     );
-    Ok(())
+    crate::compositor::dxvk::test_dxvk_window(&args, crate::wine::volume()?, &dxvk)
 }
 
 #[cfg(test)]
@@ -407,7 +437,7 @@ mod tests {
     /// Linux with the same Wine, DXVK and lavapipe (2026-10-12).
     #[test]
     fn the_expected_frame_is_the_hosts() {
-        let want = wanted();
+        let want = wanted(FRAMES);
         assert_eq!(want.triangle, 512);
         assert_eq!(want.clear, 3584);
         assert_eq!(want.centre, 0xff80_20ff);
@@ -433,15 +463,16 @@ mod tests {
     fn the_judge_takes_only_the_hosts_frame() {
         let good = "d3d11-triangle: frames=30 clear=3584 triangle=512 other=0 centre=ff8020ff \
                     corner=0000ffff fnv=06a7a745";
-        assert!(judge(&lines(good)).is_ok());
+        assert!(judge(&lines(good), FRAMES).is_ok());
         let colour = "d3d11-triangle: frames=30 clear=3584 triangle=512 other=0 \
                       centre=20ff80ff corner=0000ffff fnv=12345678";
-        assert!(judge(&lines(colour)).is_err());
+        assert!(judge(&lines(colour), FRAMES).is_err());
         let short = "d3d11-triangle: frames=30 clear=3585 triangle=511 other=0 centre=ff8020ff \
                      corner=0000ffff fnv=06a7a745";
-        assert!(judge(&lines(short)).is_err());
+        assert!(judge(&lines(short), FRAMES).is_err());
+        assert!(judge(&lines(good), 1).is_err());
         let mut wined3d = lines(good);
         let _ = wined3d.remove(0);
-        assert!(judge(&wined3d).is_err());
+        assert!(judge(&wined3d, FRAMES).is_err());
     }
 }

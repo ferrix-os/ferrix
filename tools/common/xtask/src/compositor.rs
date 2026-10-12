@@ -64,6 +64,7 @@ mod browser;
 mod desktop;
 mod drawing;
 mod drawn_here;
+pub(crate) mod dxvk;
 mod effects;
 mod hyprlock;
 mod idle;

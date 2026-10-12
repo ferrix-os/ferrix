@@ -330,7 +330,8 @@ COMMANDS:
                   prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on
                   hyprix through yserver (docs/WINE.md)
     test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the
-                  program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws (docs/WINE.md §6)
+                  program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws, then its
+                  frames presented through a swap chain in a window on hyprix through yserver (docs/WINE.md §6)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window

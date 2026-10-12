@@ -251,17 +251,22 @@ the host needs. Lavapipe and the Vulkan loader are not fetched again: they
 are on the Wine volume already, from yserver's tree (Debian's
 `mesa-vulkan-drivers` and `libvulkan1`, pinned in `fetch-yserver.sh`), and
 the script stops if they are not. The three files go into the image under
-`/dxvk`, and the Wine volume is attached as `test-wine` attaches it.
+`/dxvk`, and the Wine volume is attached as `test-wine` attaches it. The
+script keeps a copy of the source it built from, and xtask refuses a
+program built from another, so a change to the program asks for the
+script to be run again rather than testing an old build.
 
-**The boot** (`tools/common/xtask/src/dxvk.rs`) is a shell, as `test-wine`'s
-first. It starts yserver headless on `:1`, makes a prefix, and runs the
+It boots twice, as `test-wine` does.
+
+**The first boot** (`tools/common/xtask/src/dxvk.rs`) is a shell, as
+`test-wine`'s first. It starts yserver headless on `:1`, makes a prefix, and runs the
 program beside DXVK's DLLs with `WINEDLLOVERRIDES=d3d11,dxgi=n` and
 `DISPLAY=:1`. An X server is needed although nothing is shown: DXVK's
 Vulkan instance asks for `VK_KHR_win32_surface`, which Wine offers only
 with a display driver loaded, and with none instance creation fails with
 `VK_ERROR_EXTENSION_NOT_PRESENT`.
 
-**The program** makes a device on the first adapter, renders 30 frames into
+**The program**, offscreen, makes a device on the first adapter, renders 30 frames into
 a 64 by 64 RGBA texture, each a clear to blue and a triangle in the colour
 the gate names on its command line, with shaders compiled at run time by
 Wine's `d3dcompiler_47`, reads the last frame back through a staging
@@ -278,13 +283,34 @@ on an edge, and 3,584 of blue. The same Wine, DXVK and lavapipe on Linux
 the judge expects, and the gate fails with "the frame is not the one drawn
 on the host".
 
-**What it does not hold.** Nothing is presented: no window, no swap chain,
-so not Vulkan's presentation through Wine's X11 surface, which DXVK uses
-for a game's frames. That is the rest of E2.4 (stage 23's page).
+**The second boot** (`tools/common/xtask/src/compositor/dxvk.rs`) is
+`test-wine`'s desktop: hyprix, with yserver on `:0` as its client. The
+program runs presenting: a window of 512 by 512, a flip-model swap chain of
+two 64 by 64 buffers on it, and the same frame drawn into the back buffer
+and presented for 30 s, which DXVK scales to the window. That is the way a
+game's frames go: DXVK's presentation through Wine's Vulkan surface on X11
+(Wine's X driver turns `VK_KHR_win32_surface` into an X surface of
+lavapipe's), yserver, and hyprix. Five seconds after the first present
+xtask takes the screen. The gate requires the first frame, read back
+before it is presented, to be the frame above (`frames=1`), 30 presents or
+more and the program's own word that it ended, and the screen to be at
+least 15% its blue and 2% its triangle's colour, which come there only
+through the swap chain. On 2026-10-12 the screen was 26.7% blue and 3.7%
+the triangle's (`build/x86_64/dxvk-window.ppm`), and the program presented
+about 3,200 frames in 30 s (`Present` waits for no refresh on yserver).
+Its negative control takes the screen before the program has a window, and
+the gate fails on the screen.
 
-**What Ferrix answered wrongly on the way:** nothing. It passed on its
-first boot under KVM (2026-10-12): `wineboot` about 38 s of guest time, the
-program 1.3 s, DXVK with 4 compiler threads.
+**What Ferrix answered wrongly on the way:** nothing. Both boots passed on
+their first run under KVM (2026-10-12): `wineboot` about 38 s of guest time,
+the offscreen program 1.3 s, DXVK with 4 compiler threads.
+
+**What is not right yet, and is Wine's on yserver, not DXVK's.** The window
+is drawn at the size the program asked for, about 500 by 480, in the top
+left of the tile hyprix gave it, and the rest of the tile is black: the
+lead in §5 that notepad shows, now also for a Vulkan surface. The judge's
+shares are set for that size and hold if the window comes to fill its tile.
+The fix is E1.5's (stage 23), with notepad's.
 
 **Where it runs.** On demand, as `test-wine` does, and for the same
 reasons: it attaches a volume, and it never downloads.
