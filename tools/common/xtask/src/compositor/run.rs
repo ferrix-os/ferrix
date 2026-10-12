@@ -347,6 +347,13 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     // the card offers, so it still follows its window (`docs/DISPLAY.md` §7).
     let defaults = match crate::edid::for_run(args.edid.as_deref())? {
         Some(edid) => {
+            if args.nvidia {
+                carried.ports.push(crate::ports::File {
+                    path: crate::edid::NVIDIA_EDID_PATH.to_owned(),
+                    mode: 0o644,
+                    content: crate::ports::Content::Bytes(edid.bytes.clone()),
+                });
+            }
             carried.ports.extend(edid.files);
             format!("{} {}\n", DESKTOP_DEFAULTS.trim_end(), edid.argument)
         }

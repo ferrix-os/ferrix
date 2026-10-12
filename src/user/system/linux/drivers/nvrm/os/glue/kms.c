@@ -36,6 +36,17 @@ NvU32 nvRmApiFree(NvU32 hClient, NvU32 hParent, NvU32 hObject);
 /* How many one-second looks at the connectors before giving up. */
 #define KMS_TRIES 8
 
+/*
+ * The EDID a connector with nothing on it is given, forced connected, when
+ * no display is connected at all: `run-compositor --nvidia --edid` carries
+ * it. A card with no monitor then still has a screen to scan out to, at the
+ * EDID's preferred mode, as Linux gives one with drm.edid_firmware= and
+ * video=<connector>:e. A display that is connected always wins.
+ */
+#define KMS_FORCED_EDID "/etc/ferrix/nvidia-edid.bin"
+
+int access(const char *, int);
+
 static struct NvKmsKapiFunctionsTable kapi = {
     .versionString = NV_VERSION_STRING,
 };
@@ -364,14 +375,74 @@ static NvBool kms_preferred_mode(struct NvKmsKapiDevice *device, NvKmsKapiDispla
     return found;
 }
 
+/* KMS_FORCED_EDID, read once: its size, 0 when there is none or it is unfit. */
+static NvU8 kms_forced_edid[NVKMS_KAPI_EDID_BUFFER_SIZE];
+static NvU16 kms_forced_size;
+
+static NvU16 kms_forced(void)
+{
+    static NvBool read;
+    NvU64 size = 0;
+    void *block;
+
+    if (read)
+        return kms_forced_size;
+    read = NV_TRUE;
+    if (access(KMS_FORCED_EDID, 0) != 0)
+        return 0;
+    block = nvos_read_whole_file(KMS_FORCED_EDID, &size);
+    /* Whole 128-byte blocks, as many as KAPI's buffer holds. */
+    if (block != NULL && size >= 128 && size % 128 == 0 && size <= sizeof(kms_forced_edid))
+    {
+        memcpy(kms_forced_edid, block, size);
+        kms_forced_size = (NvU16)size;
+    }
+    else
+        kms_say("%s: %llu bytes, not an EDID; nothing is forced\n", KMS_FORCED_EDID,
+                (unsigned long long)size);
+    free(block);
+    return kms_forced_size;
+}
+
+/*
+ * The display to force connected with KMS_FORCED_EDID: the first one on a
+ * TMDS connector (HDMI or DVI), which a mode can be set on with nothing
+ * attached, where DisplayPort would need a sink to train its link with;
+ * 0 when there is none or no EDID to give it.
+ */
+static NvKmsKapiDisplay kms_force_target(struct NvKmsKapiDevice *device,
+                                         const NvKmsKapiDisplay *displays, NvU32 count)
+{
+    NvU32 i;
+
+    if (kms_forced() == 0)
+        return 0;
+    for (i = 0; i < count; i++)
+    {
+        struct NvKmsKapiStaticDisplayInfo info;
+        struct NvKmsKapiConnectorInfo connector;
+
+        memset(&info, 0, sizeof(info));
+        memset(&connector, 0, sizeof(connector));
+        if (!kapi.getStaticDisplayInfo(device, displays[i], &info) || info.headMask == 0 ||
+            !kapi.getConnectorInfo(device, info.connectorHandle, &connector))
+            continue;
+        if (connector.signalFormat == NVKMS_CONNECTOR_SIGNAL_FORMAT_TMDS)
+            return displays[i];
+    }
+    return 0;
+}
+
 /*
  * One look at every display: light the first connected one. 0 once one is
  * lit, -ENODEV while none is connected, or why lighting failed. `verbose`
- * says what each display is, connected or not.
+ * says what each display is, connected or not. `forced`, when not 0, is
+ * the display given KMS_FORCED_EDID and forced connected.
  */
 static int kms_scan(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesInfo *res,
                     struct NvKmsKapiDynamicDisplayParams *dyn,
-                    const NvKmsKapiDisplay *displays, NvU32 count, NvBool verbose)
+                    const NvKmsKapiDisplay *displays, NvU32 count, NvBool verbose,
+                    NvKmsKapiDisplay forced)
 {
     NvU32 i;
 
@@ -385,12 +456,20 @@ static int kms_scan(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesI
             continue;
         memset(dyn, 0, sizeof(*dyn));
         dyn->handle = displays[i];
+        if (forced != 0 && displays[i] == forced)
+        {
+            dyn->forceConnected = NV_TRUE;
+            dyn->overrideEdid = NV_TRUE;
+            dyn->edid.bufferSize = kms_forced_size;
+            memcpy(dyn->edid.buffer, kms_forced_edid, kms_forced_size);
+        }
         if (!kapi.getDynamicDisplayInfo(lit->device, dyn))
             continue;
         kms_edid_name(dyn->edid.buffer, dyn->edid.bufferSize, name, sizeof(name));
         if (dyn->connected || verbose)
-            kms_say("display %x on connector %u: %s%s%s, heads %x\n", displays[i],
+            kms_say("display %x on connector %u: %s%s%s%s, heads %x\n", displays[i],
                     info.connectorHandle, dyn->connected ? "connected" : "not connected",
+                    displays[i] == forced ? " (forced, " KMS_FORCED_EDID ")" : "",
                     name[0] ? ", " : "", name, info.headMask);
         if (!dyn->connected || info.headMask == 0)
             continue;
@@ -485,7 +564,17 @@ static int kms_show_gpu(NvU32 index)
         if (try > 0)
             nvkms_usleep(1000000);
         status = kms_scan(lit, res, dyn, displays, count,
-                          try == 0 || try == KMS_TRIES - 1);
+                          try == 0 || try == KMS_TRIES - 1, 0);
+    }
+    if (status == -ENODEV)
+    {
+        NvKmsKapiDisplay forced = kms_force_target(lit->device, displays, count);
+        if (forced != 0)
+        {
+            kms_say("no display connected; forcing display %x with %s\n", forced,
+                    KMS_FORCED_EDID);
+            status = kms_scan(lit, res, dyn, displays, count, NV_FALSE, forced);
+        }
     }
     if (status == -ENODEV)
     {
@@ -731,7 +820,7 @@ static void kms_watch(void *argument)
     for (NvU32 looks = 1; status == -ENODEV; looks++)
     {
         nvkms_usleep(2000000);
-        status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
+        status = kms_scan(lit, res, dyn, displays, count, NV_FALSE, 0);
         /* A line a minute, so a wait is told from a hang. */
         if (status == -ENODEV && looks % 30 == 0)
             kms_say("still no display connected after %u s\n", looks * 2);

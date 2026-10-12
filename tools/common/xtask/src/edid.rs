@@ -67,13 +67,33 @@ pub(crate) struct Carried {
     pub(crate) argument: String,
     /// The monitor's description, as the compositor will give it.
     pub(crate) description: String,
+    /// The EDID itself, which `--nvidia` also gives `nvrm` at
+    /// [`NVIDIA_EDID_PATH`].
+    pub(crate) bytes: Vec<u8>,
 }
+
+/// Where `run-compositor --nvidia` puts the screen's EDID for `nvrm`, which
+/// forces a connector with nothing on it connected with it when no display
+/// is connected (`os/glue/kms.c`, `KMS_FORCED_EDID`): the RTX 3060 has no
+/// monitor (the customer, 2026-10-13).
+pub(crate) const NVIDIA_EDID_PATH: &str = "etc/ferrix/nvidia-edid.bin";
+
+/// What `--edid` takes for [`virtual_1080p`].
+pub(crate) const VIRTUAL_1080P: &str = "1080p";
 
 /// The EDID `run-compositor` carries, as `--edid` asks: the default monitor
 /// or the one named, or none for `none`, saying what it found either way.
 pub(crate) fn for_run(asked: Option<&str>) -> Result<Option<Carried>> {
     let wanted = match asked {
         Some("none") => return Ok(None),
+        Some(VIRTUAL_1080P) => {
+            let monitor = virtual_1080p();
+            println!(
+                "  edid: the screen is {}, a monitor no machine has, 1920x1080 at 60 Hz",
+                monitor.description
+            );
+            return Ok(Some(carry(&monitor, None)));
+        }
         Some(wanted) => wanted,
         None => DEFAULT_MONITOR,
     };
@@ -282,6 +302,7 @@ pub(crate) fn carry(monitor: &Monitor, registry: Option<String>) -> Carried {
         files,
         argument: format!("{}={name}", edid::PARAMETER),
         description: monitor.description.clone(),
+        bytes: monitor.bytes.clone(),
     }
 }
 
@@ -317,6 +338,31 @@ fn sanitized(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// A 1920x1080 monitor at 60 Hz that no machine has, for a card with no
+/// monitor (`--edid 1080p`): `FRX`, "Ferrix 1080p", one EDID 1.3 base block
+/// with a digital input, CEA-861's 148.5 MHz timing as its preferred mode,
+/// and range limits of 56 to 75 Hz. The same bytes as the Linux guest's on
+/// the same card in stage 23's step 0 (`drm.edid_firmware=DP-1:edid/1080p.bin`),
+/// so the two screens are alike.
+pub(crate) fn virtual_1080p() -> Monitor {
+    const BLOCK: [u8; edid::BLOCK_BYTES] = [
+        0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x1a, 0x58, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x01, 0x24, 0x01, 0x03, 0x80, 0x35, 0x1e, 0x78, 0x0a, 0xee, 0x91, 0xa3, 0x54, 0x4c,
+        0x99, 0x26, 0x0f, 0x50, 0x54, 0x21, 0x08, 0x00, 0xd1, 0xc0, 0x01, 0x01, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x3a, 0x80, 0x18, 0x71, 0x38,
+        0x2d, 0x40, 0x58, 0x2c, 0x45, 0x00, 0x13, 0x2b, 0x21, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x00,
+        0xfd, 0x00, 0x38, 0x4b, 0x1e, 0x53, 0x0f, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+        0x00, 0x00, 0x00, 0xfc, 0x00, 0x46, 0x65, 0x72, 0x72, 0x69, 0x78, 0x20, 0x31, 0x30, 0x38,
+        0x30, 0x70, 0x0a, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
+    ];
+    Monitor {
+        connector: "none".to_owned(),
+        description: describe(&BLOCK, None).unwrap_or_default(),
+        bytes: BLOCK.to_vec(),
+    }
 }
 
 /// A monitor no machine has, for a gate on a machine without the one asked
@@ -369,6 +415,22 @@ mod tests {
     use super::*;
 
     const REGISTRY_LINES: &str = "FRX\tNot really\nLEN\tLenovo Group Limited\nDEL\tDell Inc.\n";
+
+    /// The 1080p monitor sums to zero, as the kernel checks a block, and
+    /// describes itself by its name.
+    #[test]
+    fn the_virtual_1080p_monitor_is_a_whole_block() {
+        let monitor = virtual_1080p();
+        assert_eq!(
+            monitor
+                .bytes
+                .iter()
+                .fold(0u8, |sum, &byte| sum.wrapping_add(byte)),
+            0
+        );
+        assert!(monitor.description.contains("Ferrix 1080p"));
+        assert!(for_run(Some(VIRTUAL_1080P)).unwrap().is_some());
+    }
 
     #[test]
     fn a_monitor_is_described_as_the_compositor_describes_it() {
