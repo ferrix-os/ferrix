@@ -1471,14 +1471,14 @@
     },
     {
       "file": "trap.rs",
-      "lines": "752, 754, 757-760",
+      "lines": "769, 771, 774-777",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "774, 779, 789, 797-799, 801",
+      "lines": "791, 796, 806, 814-816, 818",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

@@ -734,8 +734,25 @@ fn handle_page_fault(frame: &mut arch::TrapFrame, fault: PageFault) {
         /// `SIGBUS`'s `si_code` for an address with nothing behind it, which
         /// is what Linux reports for a touch of a file mapping past its file.
         const BUS_ADRERR: i32 = 2;
+        /// `SIGSEGV`'s `si_code` for an address in no region.
+        const SEGV_MAPERR: i32 = 1;
+        /// `SIGSEGV`'s `si_code` for an address in a region that refuses the
+        /// access, whether or not a page is present there yet: Linux decides
+        /// by the VMA (`bad_area_access_error`), not by the hardware's present
+        /// bit, and a write to a `PROT_NONE` page never touched has none.
+        const SEGV_ACCERR: i32 = 2;
         let trap = Trap::PageFault(fault);
         match resolved {
+            Err(Some(crate::user::space::SpaceError::NotMapped(_))) => user_fault_as(
+                frame,
+                &trap,
+                (ferrix_linux_abi::types::SIGSEGV, SEGV_MAPERR, fault.address),
+            ),
+            Err(Some(crate::user::space::SpaceError::Refused(_))) => user_fault_as(
+                frame,
+                &trap,
+                (ferrix_linux_abi::types::SIGSEGV, SEGV_ACCERR, fault.address),
+            ),
             Err(Some(
                 crate::user::space::SpaceError::PastEnd(address)
                 | crate::user::space::SpaceError::Unreadable(address),
