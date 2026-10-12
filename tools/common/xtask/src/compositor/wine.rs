@@ -156,6 +156,7 @@ echo "wine: another window"
 copied 3
 echo "wine: the clipboard changed $changes times in ${waited}s"
 sed 's/^/wine: notepad said: /' /tmp/wine/notepad.log
+grep -E "wayland::input" /tmp/yserver.log | sed "s/^/wine: yserver input: /"
 tail -n 20 /tmp/yserver.log | sed 's/^/wine: yserver: /'
 /usr/lib/wine/wineserver64 -k
 echo "wine: end"
@@ -383,6 +384,22 @@ fn screen(qmp: &mut Qmp, dump: &Path) -> Result<Image> {
     parse_ppm(&bytes)
 }
 
+/// Say on the gate's output when a step of the input began, in UTC, to
+/// set beside the times in yserver's log the script prints.
+fn said_at(what: &str) {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let day = since.as_secs() % 86_400;
+    println!(
+        "  wine input at {:02}:{:02}:{:02}.{:03} UTC: {what}",
+        day / 3600,
+        day / 60 % 60,
+        day % 60,
+        since.subsec_millis()
+    );
+}
+
 /// Put the input in: a click into notepad's `tile` at its middle, the keys
 /// of [`LINE`], `Ctrl+A` and `Ctrl+C`; once the script says the clipboard
 /// changed and the line is drawn, a double click on its first word and
@@ -419,6 +436,7 @@ fn type_into(
         }
     };
 
+    said_at("the pointer onto notepad, a click and the line");
     point(qmp, tile.x + tile.width / 2, tile.y + tile.height / 2)?;
     pause(500);
     click(qmp)?;
@@ -443,6 +461,7 @@ fn type_into(
     let _ = watching.read_more(Instant::now() + Duration::from_secs(60), copied(1))?;
     if let Some(line) = line {
         // The first word: a few pixels into the line, at its middle.
+        said_at("the double click");
         point(qmp, line.x + 6, line.y + line.height / 2)?;
         pause(500);
         click(qmp)?;
@@ -472,6 +491,7 @@ fn type_into(
         ) else {
             return Ok(Some(typed));
         };
+        said_at("the pointer onto the terminal");
         point(qmp, other.x + other.width / 2, other.y + other.height / 2)?;
         pause(800);
         press(qmp, &["caps_lock"])?;
