@@ -73,7 +73,10 @@ for after Steam runs.
 * **The source** is a fork of yserver under the customer's GitHub account
   (decision 1, §8), branched from the 1.6.0 tag (`0d00e81`) and pinned by
   commit; upstream's `master` was merged into it on 2026-10-03 (`3875be0`,
-  86 commits past 1.6.0). Ferrix's changes are commits on the fork, starting with
+  86 commits past 1.6.0), and on 2026-10-12 Ferrix's commits were rebased
+  onto upstream's `master` of that day (`8516018`, past 1.7.1) as the
+  branch `ferrix-rebase-2026-10-12`; the old line stays tagged
+  `ferrix-pre-rebase-2026-10-12`. Ferrix's changes are commits on the fork, starting with
   `YSERVER_ALLOW_NO_INPUT`, and the Wayland backend is added there.
   `tools/common/fetch/fetch-yserver.sh` fetches the pinned commit and builds it,
   and writes the commit beside the volume's image. `cargo xtask` refuses an
@@ -375,6 +378,21 @@ Still open:
    comes back as a decision then.
 
 ## 9. Where it stands
+
+2026-10-12, later: **the fork is on par with upstream.** Ferrix's 25
+commits, the DRI3 ones for the card-less server and two new fixes are
+rebased onto upstream's `master` of 2026-10-12 (198 commits on, with
+`process_request`, the KMS backend and the render engine split into
+modules), and `fetch-yserver.sh` pins the tip, 7fe90419. The server's own
+requests are now in `process_request/for_server.rs`, the backend's Wayland
+side in `backend/wayland.rs`. The rebase found an upstream bug the
+gates showed: a resize's exposure painted a redirected window's background
+on its backing's pixmap, `border_width` up and left, which ate xev's
+subwindow border in `test-xwindow`; fixed in the fork, with the seed of a
+subwindow's border, both offered upstream with five other general fixes
+(branches `pr/*` on the fork, not opened). Upstream's checks pass on the
+tip; `test-yserver`, `test-xwindow`, `test-wine`, `test-dxvk`,
+`test-compositor` and `check` pass on volumes made from the pin.
 
 2026-10-12: **what Wine's X driver needed** (stage 23, E1.5;
 `docs/WINE.md` §5). `fetch-yserver.sh` pins the fork at 662c61f3. The
