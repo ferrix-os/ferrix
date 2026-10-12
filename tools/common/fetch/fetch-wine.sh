@@ -163,8 +163,12 @@ for file in "$tree/usr/lib/wine/wine64" "$tree/usr/lib/wine/wineserver64" \
 done
 [ "$missing" = 0 ] || exit 1
 
-# Room for a prefix (about 400 MB once wineboot has filled it) and logs.
-size=$(( $(du -sm "$tree" | cut -f1) + 1024 ))
+# Room for a prefix on the volume and logs. wineboot's prefix is 768 MB of
+# files (du), and took 1.1 GB of the volume on Ferrix: small files, two
+# copies of the metadata. With 1024 MiB more than the tree the volume had
+# 683 MB free and wineboot ran out at 684 MB of prefix (2026-10-12); with
+# 2048 it made the prefix and left 627 MB.
+size=$(( $(du -sm "$tree" | cut -f1) + 2048 ))
 image="$out/wine.img"
 rm -f "$out/yserver.commit" "$image"
 truncate -s "${size}M" "$image"
