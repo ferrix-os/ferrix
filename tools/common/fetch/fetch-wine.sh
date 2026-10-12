@@ -12,14 +12,16 @@
 # asks for it, and none is here yet. Debian's `strace` is on the volume too.
 #
 # The volume is yserver's tree (`fetch-yserver.sh`, which this runs when the
-# tree is missing) with Wine's unpacked over it, so one disk at `/data` has
-# the X server, its clients and Wine, all on the same Debian's libraries.
+# tree is missing or was built from another commit than the one it pins)
+# with Wine's unpacked over it, so one disk at `/data` has the X server, its
+# clients and Wine, all on the same Debian's libraries.
 #
 # Every package is pinned by its SHA-256, taken from trixie's,
 # trixie-updates' and trixie-security's Packages files on 2026-10-10.
 #
 # Writes $FERRIX_WINE_VOLUME/wine.img (default
-# ~/.local/share/ferrix/wine/wine.img), about 1.4 GB. Needs curl,
+# ~/.local/share/ferrix/wine/wine.img), about 1.4 GB, and yserver.commit
+# beside it, the commit of the yserver it carries. Needs curl,
 # sha256sum, dpkg-deb, readelf and mkfs.btrfs; no root.
 #
 # Usage: tools/common/fetch/fetch-wine.sh
@@ -93,7 +95,10 @@ fetch() {
     printf '%s\n' "$file"
 }
 
-if [ ! -d "$yserver/tree" ]; then
+# yserver's tree, made again when it is missing or holds another commit
+# than the one fetch-yserver.sh pins.
+pinned=$(sed -n 's/^YSERVER_COMMIT=//p' "$(dirname "$0")/fetch-yserver.sh")
+if [ ! -d "$yserver/tree" ] || [ "$(cat "$yserver/yserver.commit" 2> /dev/null)" != "$pinned" ]; then
     "$(dirname "$0")/fetch-yserver.sh"
 fi
 
@@ -161,7 +166,10 @@ done
 # Room for a prefix (about 400 MB once wineboot has filled it) and logs.
 size=$(( $(du -sm "$tree" | cut -f1) + 1024 ))
 image="$out/wine.img"
-rm -f "$image"
+rm -f "$out/yserver.commit" "$image"
 truncate -s "${size}M" "$image"
 mkfs.btrfs -q --rootdir "$tree" "$image"
+# The yserver the volume carries, which cargo xtask test-wine compares with
+# the pin, as test-yserver does with yserver's own volume.
+cp "$yserver/yserver.commit" "$out/yserver.commit"
 echo "wine volume: $image (${size} MiB), unpacked in $tree"

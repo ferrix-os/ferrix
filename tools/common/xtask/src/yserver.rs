@@ -148,7 +148,7 @@ const FETCH: &str = include_str!("../../fetch/fetch-yserver.sh");
 
 /// The commit of the fork `tools/common/fetch/fetch-yserver.sh` builds, which
 /// it also writes beside the image it made from it.
-fn pinned() -> &'static str {
+pub(crate) fn pinned() -> &'static str {
     FETCH
         .lines()
         .find_map(|line| line.strip_prefix("YSERVER_COMMIT="))

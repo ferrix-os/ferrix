@@ -35,23 +35,19 @@ const END: &str = "wine: end";
 /// lavapipe, `wineboot`, `cmd` and notepad's start.
 const PATIENCE: Duration = Duration::from_secs(420);
 
-/// The part of the screen notepad's white page must cover. Notepad draws at
-/// the size it asked for, about 720 by 510 of the 1024 by 768, and not yet
-/// at the size of the tile hyprix gives it (docs/WINE.md, section 5): 43%
-/// of the screen was white on 2026-10-10.
-const WHITE_PERCENT: usize = 30;
+/// The part of the screen notepad's white page must cover. Its window is
+/// the 982 by 726 tile hyprix gives it on the 1024 by 768 screen, and the
+/// page fills the tile but for the menu, scroll and status bars: 85% was
+/// white on 2026-10-12. Until yserver set `WM_STATE`, notepad drew at the
+/// 721 by 512 it asked for, and 43% was white (docs/WINE.md, section 5).
+const WHITE_PERCENT: usize = 70;
 
 /// The script hyprix's `exec-once` runs. Every line of its own starts
 /// `wine:`, and it ends with [`END`] whatever happened.
 ///
 /// Wine's output goes to files that are printed afterwards: `wineboot`
-/// leaves services running that keep a pipe open.
-///
-/// One workaround, for something yserver does not answer as Wine's X
-/// driver expects (docs/WINE.md, section 5): the prefix is made with no
-/// `DISPLAY`, and `UseXRandR` is turned off in it before any program gets
-/// one: on yserver's `RandR` Wine's driver finds no monitor, every window's
-/// DPI is 0, and wineserver ends with a divide error at the first window.
+/// leaves services running that keep a pipe open. Notepad's includes the X
+/// driver's warnings, which say how it took the sizes X gave its window.
 const SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp/wine XDG_RUNTIME_DIR=/tmp
 export WINEPREFIX=/tmp/wine/prefix WINESERVER=/usr/lib/wine/wineserver64
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
@@ -63,8 +59,6 @@ while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
 done
 echo "wine: the X socket was there after ${waited}s, DISPLAY is $DISPLAY"
 mkdir -p /tmp/wine
-display=$DISPLAY
-unset DISPLAY
 /usr/lib/wine/wine64 wineboot -i > /tmp/wine/wineboot.log 2>&1
 echo "wine: wineboot exited $?"
 /usr/lib/wine/wineserver64 -w
@@ -72,12 +66,8 @@ sed 's/^/wine: wineboot: /' /tmp/wine/wineboot.log
 /usr/lib/wine/wine64 cmd /c ver > /tmp/wine/ver.txt 2> /tmp/wine/ver.err
 echo "wine: cmd exited $?"
 sed 's/^/wine: cmd: /' /tmp/wine/ver.txt
-/usr/lib/wine/wine64 reg add 'HKCU\Software\Wine\X11 Driver' /v UseXRandR /d N /f > /tmp/wine/reg.log 2>&1
-echo "wine: reg exited $?"
-/usr/lib/wine/wineserver64 -w
-export DISPLAY=$display
 xdpyinfo | grep -E "dimensions|resolution" | sed 's/^/wine: x: /'
-/usr/lib/wine/wine64 notepad > /tmp/wine/notepad.log 2>&1 &
+WINEDEBUG="$WINEDEBUG,warn+x11drv" /usr/lib/wine/wine64 notepad > /tmp/wine/notepad.log 2>&1 &
 waited=0
 until xwininfo -name "Untitled - Notepad" 2>/dev/null | grep -q IsViewable || [ $waited -ge 60 ]; do
     sleep 1

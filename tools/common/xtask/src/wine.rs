@@ -73,22 +73,42 @@ const MEMORY: u32 = 6144;
 
 /// The volume `tools/common/fetch/fetch-wine.sh` makes.
 ///
+/// It carries yserver, and must carry the one `fetch-yserver.sh` pins, as
+/// yserver's own volume must ([`crate::yserver::volume`]): one made before
+/// the pin moved runs notepad, but without what later commits gave it --
+/// before `WM_STATE`, at the size notepad asked for and not at its tile's.
+///
 /// # Errors
 ///
-/// The volume has not been made.
+/// The volume has not been made, or was made with another yserver.
 pub(crate) fn volume() -> Result<std::path::PathBuf> {
     let directory = match std::env::var_os("FERRIX_WINE_VOLUME") {
         Some(directory) => std::path::PathBuf::from(directory),
         None => crate::paths::volume_directory("wine")?,
     };
     let image = directory.join("wine.img");
-    if image.is_file() {
-        Ok(image)
-    } else {
-        Err(Error::new(format!(
+    if !image.is_file() {
+        return Err(Error::new(format!(
             "{} is not there: tools/common/fetch/fetch-wine.sh makes it",
             image.display()
-        )))
+        )));
+    }
+    let stamp = directory.join("yserver.commit");
+    let carried = std::fs::read_to_string(&stamp).unwrap_or_default();
+    match carried.trim() {
+        commit if commit == crate::yserver::pinned() => Ok(image),
+        "" => Err(Error::new(format!(
+            "{} does not say which yserver it carries ({} is not there): \
+             tools/common/fetch/fetch-wine.sh makes it again",
+            image.display(),
+            stamp.display()
+        ))),
+        commit => Err(Error::new(format!(
+            "{} carries yserver {commit}: tools/common/fetch/fetch-wine.sh makes it again with \
+             {}, the commit tools/common/fetch/fetch-yserver.sh pins",
+            image.display(),
+            crate::yserver::pinned()
+        ))),
     }
 }
 
