@@ -71,7 +71,7 @@ use ferrix_paging::MapError;
 
 use console::{println, println_unlogged};
 use discovery::finder::Finder;
-use discovery::{board, devmgr, fdt, pci, tree};
+use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
 use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
@@ -772,8 +772,11 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
     let mut pci = pci::Enumeration::new(view);
     let mut tree = tree::VirtioMmio::new(view);
     let mut boards = board::Boards::new(view);
+    // Last, so that the framebuffer it lends never takes an aperture from a
+    // device: it adds a node only under `ferrix.efifb`.
+    let mut framebuffer = firmware::FirmwareFramebuffer::new(view);
     let reserved = device::Reserved::of(view, &[pci.reads(), tree.reads(), boards.reads()]);
-    let mut finders: [&mut dyn Finder; 3] = [&mut pci, &mut tree, &mut boards];
+    let mut finders: [&mut dyn Finder; 4] = [&mut pci, &mut tree, &mut boards, &mut framebuffer];
     let report = match device::publish(&mut finders, &reserved) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.

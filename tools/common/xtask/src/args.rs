@@ -334,6 +334,10 @@ pub(crate) struct Args {
     /// `--display`: a virtio-gpu device on the bus, and for `run` a window
     /// that shows it. `test-display` turns it on.
     pub(crate) display: bool,
+    /// No flag: set by `test-compositor --boot firmware-screen`, whose
+    /// machine has no virtio-gpu and a VGA of a known size, the head the
+    /// loader hands over and `efifb` draws on (`docs/DISPLAY.md` §8).
+    pub(crate) firmware_screen: bool,
     /// `--gl`: the virtio-gpu is the *3D* device, `virtio-gpu-gl-pci`, so
     /// the guest can negotiate `VIRTIO_GPU_F_VIRGL` and the host's own GPU
     /// driver is behind it through virglrenderer (`docs/GPU.md` Path A).

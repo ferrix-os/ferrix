@@ -22,6 +22,7 @@ use super::{
     Trigger, USB_INPUT_FUNCTIONS, Vector, VirtioBlocks,
 };
 use crate::mmio::Mmio;
+use ferrix_bootinfo::PAGE_SIZE;
 use crate::object::interrupt::Interrupt;
 use crate::{irq, timer, vmap};
 
@@ -769,4 +770,153 @@ impl Write for Fnv {
         }
         Ok(())
     }
+}
+
+/// The firmware framebuffer's node, when `ferrix.efifb` made one
+/// (`docs/DISPLAY.md` §8): it holds exactly one aperture, wholly inside the
+/// boot framebuffer [`Reserved`] holds and starting at its first byte; no
+/// vector; nothing that reaches memory, so `vmo_pin` refuses it; and it is the
+/// only node whose aperture overlaps the framebuffer -- which `check_node`'s
+/// reserved test already holds of every other. At most one such node.
+pub(super) fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
+    let mut seen = 0;
+    // Only the framebuffer's own node holds a lent aperture.
+    for node in nodes.iter().filter(|node| node.framebuffer_mode().is_none()) {
+        if node
+            .apertures
+            .iter()
+            .any(|aperture| aperture.source == super::Source::Framebuffer)
+        {
+            return Err(Failure {
+                location: node.location,
+                what: "a node other than the framebuffer's holds the framebuffer",
+            });
+        }
+    }
+    for node in nodes.iter().filter(|node| node.framebuffer_mode().is_some()) {
+        let fail = |what| Failure {
+            location: node.location,
+            what,
+        };
+        seen += 1;
+        if seen > 1 {
+            return Err(fail("a second firmware framebuffer node"));
+        }
+        let Some((start, end)) = reserved.framebuffer() else {
+            return Err(fail("a firmware framebuffer node with no boot framebuffer"));
+        };
+        let [aperture] = node.apertures.as_slice() else {
+            return Err(fail("the firmware framebuffer node does not hold exactly one aperture"));
+        };
+        let visible = mode_bytes(node);
+        if aperture.phys != start
+            || aperture.end() > end
+            || !aperture.whole_pages()
+            || aperture.len != visible.div_ceil(PAGE_SIZE) * PAGE_SIZE
+        {
+            return Err(fail("the firmware framebuffer node's aperture is not the framebuffer"));
+        }
+        if !node.vectors.is_empty() {
+            return Err(fail("the firmware framebuffer node has a vector"));
+        }
+        if node.reaches_memory()
+            || node.domain().is_ok()
+            || node.domain_made().is_some()
+            || node.dma_on.load(Ordering::Acquire)
+        {
+            return Err(fail("the firmware framebuffer node would take pins"));
+        }
+        // The kernel's type hold: a mapping of another type than its own is
+        // refused, one of its own is not.
+        use crate::discovery::firmware::{KERNEL_MAPPING, refuses};
+        use crate::user::memory_type::MemoryType;
+        let other = if KERNEL_MAPPING == MemoryType::Device {
+            MemoryType::Combining
+        } else {
+            MemoryType::Device
+        };
+        if !refuses(aperture.phys, aperture.len, other)
+            || refuses(aperture.phys, aperture.len, KERNEL_MAPPING)
+        {
+            return Err(fail("the framebuffer's memory type is not held as the kernel's"));
+        }
+        // The function that holds it is driven by nobody while it is lent.
+        if let Some(holder) = nodes.iter().find(|other| other.holds_framebuffer && !other.yielded) {
+            return Err(Failure {
+                location: holder.location,
+                what: "the function holding the lent framebuffer may still be driven",
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The firmware framebuffer's exemption from [`Reserved`], on every boot and
+/// whatever the command line says: against made-up ranges, a framebuffer of
+/// 1024 x 768 is lent exactly its visible lines as one aperture of its own
+/// source; not when another reserved range lies inside it, nor when it is
+/// memory the allocator owns, nor when its size is one page short of its
+/// lines; and an ordinary window at the same address is still withheld.
+/// Nothing here is published.
+pub(super) fn check_lending() -> Result<(), &'static str> {
+    use ferrix_bootinfo::{Framebuffer, PixelFormat};
+
+    const AT: u64 = 0x8000_0000;
+    const SIZE: u64 = 16 * 1024 * 1024;
+    const VISIBLE: u64 = 1024 * 768 * 4;
+    let screen = Framebuffer {
+        phys: AT,
+        size: SIZE,
+        width: 1024,
+        height: 768,
+        stride: 1024,
+        format: PixelFormat::Bgrx8888,
+        reclaimable: 0,
+        reserved: 0,
+    };
+    let memory = (0, AT);
+    let lone = Reserved::synthetic(Some((AT, SIZE)), &[memory]).map_err(|_| "no memory")?;
+    let node = DeviceNode::firmware_framebuffer(&screen, &lone)
+        .map_err(|_| "a framebuffer clear of everything else was not lent")?;
+    match node.apertures.as_slice() {
+        [aperture]
+            if aperture.phys == AT
+                && aperture.len == VISIBLE
+                && aperture.source == super::Source::Framebuffer
+                && !aperture.cacheable => {}
+        _ => return Err("the framebuffer was not lent exactly its visible lines"),
+    }
+    let crossed = Reserved::synthetic(Some((AT, SIZE)), &[memory, (AT + VISIBLE / 2, 4096)])
+        .map_err(|_| "no memory")?;
+    if DeviceNode::firmware_framebuffer(&screen, &crossed).is_ok() {
+        return Err("the exemption lent a range another reservation holds");
+    }
+    let owned = Framebuffer {
+        reclaimable: 1,
+        ..screen
+    };
+    if DeviceNode::firmware_framebuffer(&owned, &lone).is_ok() {
+        return Err("a framebuffer the allocator owns was lent");
+    }
+    let short = Framebuffer {
+        size: VISIBLE - 4096,
+        ..screen
+    };
+    if DeviceNode::firmware_framebuffer(&short, &lone).is_ok() {
+        return Err("a framebuffer one page shorter than its lines was lent");
+    }
+    let mut window = DeviceNode::empty(Location::Tree(AT));
+    window.mint(AT, VISIBLE, false, &lone);
+    if window.apertures_minted() != 0 {
+        return Err("an ordinary window over the framebuffer was minted");
+    }
+    Ok(())
+}
+
+/// The bytes of the firmware framebuffer node's visible lines, from the mode
+/// it reports.
+fn mode_bytes(node: &DeviceNode) -> u64 {
+    node.framebuffer_mode().map_or(0, |mode| {
+        u64::from(mode.stride) * u64::from(mode.height) * 4
+    })
 }

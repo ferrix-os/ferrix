@@ -64,6 +64,7 @@ mod browser;
 mod desktop;
 mod drawing;
 mod drawn_here;
+mod firmware_screen;
 pub(crate) mod dxvk;
 mod effects;
 mod hyprlock;
@@ -484,7 +485,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 42] = [
+const BOOTS: [(&str, Boot); 43] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -527,6 +528,7 @@ const BOOTS: [(&str, Boot); 42] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("firmware-screen", firmware_screen::test_firmware_screen),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the

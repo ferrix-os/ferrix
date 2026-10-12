@@ -32,7 +32,7 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
     CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceInfo,
     PROCESS_EXITED, PROCESS_KILLED, ProcessStatus, TREE_GS201_DWC3, TREE_STM32_GPU,
-    TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH,
+    TREE_FIRMWARE_FB, TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH,
 };
 use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
@@ -254,12 +254,16 @@ const DRIVERS: [(u16, &[u16], &[u8], Kind); 6] = [
 /// word `DEVICE_NOT_PCI`, as the HDMI card's do: [`await_published`] keys on
 /// that word alone, which is sound only because drivers are started one at
 /// a time, so no other tree device's PUBLISHED can be in flight meanwhile.
-const TREE_DRIVERS: [(u16, &[u8], Kind); 5] = [
+///
+/// The firmware's framebuffer, which the kernel publishes as a node only
+/// under `ferrix.efifb`, is a card, driven by `efifb` (`docs/DISPLAY.md` §8).
+const TREE_DRIVERS: [(u16, &[u8], Kind); 6] = [
     (TREE_STM32_HDMI, b"ltdc", Kind::Display),
     (TREE_STM32_USBH, b"usbhid", Kind::Host),
     (TREE_STM32_GPU, b"gc400", Kind::Engine),
     (TREE_GS201_DWC3, b"usbdev", Kind::Gadget),
     (TREE_STM32_SDMMC, b"sdmmc", Kind::Block),
+    (TREE_FIRMWARE_FB, b"efifb", Kind::Display),
 ];
 
 /// Where devmgr gave up, as the exit status.
@@ -1834,7 +1838,9 @@ fn start_display(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
-    let (program, program_name) = if info.virtio == DEVICE_TREE_BLOCKS {
+    let (program, program_name) = if info.virtio == DEVICE_TREE_BLOCKS && info.device_id == TREE_FIRMWARE_FB {
+        ("efifb", &[b'e', b'f', b'i', b'f', b'b', 0, 0, 0])
+    } else if info.virtio == DEVICE_TREE_BLOCKS {
         ("ltdc", &[b'l', b't', b'd', b'c', 0, 0, 0, 0])
     } else {
         ("gpu", &[b'g', b'p', b'u', 0, 0, 0, 0, 0])

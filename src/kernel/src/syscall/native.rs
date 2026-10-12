@@ -2199,7 +2199,9 @@ fn device_in(process: &Process, device: Handle, needed: Rights) -> Result<Arc<De
         }
         Ok(Arc::clone(node))
     })?;
-    if needed.contains(Rights::MANAGE) && node.is_refused() {
+    // A refused node, and the function holding a firmware framebuffer lent
+    // to its own node (`ferrix.efifb`), are driven by nobody.
+    if needed.contains(Rights::MANAGE) && (node.is_refused() || node.yielded()) {
         return Err(status::BAD_STATE);
     }
     Ok(node)
@@ -2538,6 +2540,12 @@ fn vmo_pin(
     }
     let read_only = options & PIN_READ_ONLY != 0;
     let node = device_isolated_in(process, device)?;
+    // A node nothing behind which reaches memory -- the firmware
+    // framebuffer's, whose driver copies -- has no pin to give, and so no
+    // physical address to tell.
+    if !node.reaches_memory() {
+        return Err(status::WRONG_TYPE);
+    }
     // The first pin is what gives the device DMA, so it is where bus
     // mastering goes on; a device whose switch cannot be reached gets no pin.
     node.enable_dma().map_err(|_| status::BAD_STATE)?;
@@ -2736,6 +2744,11 @@ fn set_limit_on(node: &DeviceNode, rights: Rights, which: u64, value: u64) -> Re
     }
     if which != types::DEVICE_LIMIT_PIN_PAGES {
         return Err(status::INVALID_ARGS);
+    }
+    // A node nothing behind which reaches memory has no budget to set, and
+    // gets no domain to keep one in.
+    if !node.reaches_memory() {
+        return Err(status::WRONG_TYPE);
     }
     // A budget no `usize` holds is past any ceiling.
     let pages = usize::try_from(value).map_err(|_| status::NO_MEMORY)?;
