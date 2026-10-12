@@ -1,6 +1,6 @@
 [package]
 name = "container-test"
-description = "Stage 13's exit: an unprivileged user runs a pid 1 in namespaces of all eight kinds, under a memory limit and a seccomp filter"
+description = "Stage 13's exit: an unprivileged user runs a pid 1 in seven new namespaces, under a memory limit that reclaims and OOM-kills, and a seccomp filter"
 version = "0.1.0"
 edition = "2024"
 # Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
@@ -19,11 +19,6 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
-
-[features]
-# Leave out the seccomp filter, so the test can show its step fails on exactly
-# that line: a filter that could not fail would pass this build too.
-negative-control = []
 
 # ---------------------------------------------------------------------------
 # Lints

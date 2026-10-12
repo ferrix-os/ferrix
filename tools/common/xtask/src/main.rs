@@ -291,8 +291,9 @@ COMMANDS:
     test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
                   attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
                   ipc(117) and 395-398)
-    test-container  Boot container-test as init and require stage 13's exit: an unprivileged user runs a pid 1 in eight new
-                  namespaces under a memory limit that ends it, with a seccomp filter that blocks a call
+    test-container  Boot container-test as init and require stage 13's exit: uid 1000 runs a pid 1 in a user namespace
+                  and six more, under a memory.max that reclaims and then OOM-kills it alone, with a seccomp filter
+                  that blocks a call
     test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
                   a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)
     test-uvm      Build NVIDIA's UVM against uvm-kpi and ferrousli from the tree tools/common/fetch/fetch-nvidia.sh fetches

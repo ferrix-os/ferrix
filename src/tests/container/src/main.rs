@@ -1,49 +1,71 @@
 //! Stage 13's exit criterion, run as init by `cargo xtask test-container`:
 //! *an unprivileged user namespace runs a process whose pid is 1 inside it,
-//! under a memory limit that triggers a scoped OOM kill, with a seccomp filter
-//! that blocks a syscall.*
+//! under a memory limit that triggers scoped reclaim and a scoped OOM kill,
+//! with a seccomp filter that blocks a syscall.*
 //!
-//! Init (root) delegates a cgroup to uid 1000 with `memory.max` of 8 MiB. A
-//! child becomes uid 1000, sets `no_new_privs`, joins the cgroup, makes a user
-//! namespace and maps itself to root in it, then makes the other seven kinds,
-//! and forks: the grandchild is pid 1 of its pid namespace. In it:
+//! Init (root) mounts the btrfs test disk read-only, makes a cgroup with
+//! `memory.max` of 8 MiB, hands it to uid 1000 and forks the container's
+//! owner into it. The owner becomes uid 1000, with no capability left, sets
+//! `no_new_privs`, makes a user namespace and maps itself to root in it, then
+//! makes six more kinds, and forks: the grandchild is pid 1 of its pid
+//! namespace. Each clause is a line of its own:
 //!
-//! * **namespaces**: each of the eight `/proc/self/ns/*` links differs from
-//!   the one init has;
+//! * **unprivileged**: the user namespace is made by a process whose real and
+//!   effective uid are 1000 and whose effective capability set is empty;
 //! * **pid**: `getpid` is 1, `getppid` is 0, `status` has two `NSpid`s;
-//! * **ids**: `getuid` is 0 inside, the kernel says 1000 outside, and
-//!   `sethostname` works in its own UTS namespace and does not reach init's;
-//! * **seccomp**: a filter that answers `getsid` with `EPERM` does, a second
-//!   process under a filter that kills for `getsid` dies of `SIGSYS`;
-//! * **memory**: touching four times `memory.max` ends it with `SIGKILL`, the
-//!   cgroup's `memory.events` counts `oom_kill`, and its parent, in the same
-//!   cgroup, and init, outside it, are alive to say so.
+//! * **namespaces**: each of the seven `/proc/self/ns/*` links differs from
+//!   the one init has;
+//! * **ids**: `getuid` is 0 inside, and `sethostname` works in its own UTS
+//!   namespace and does not reach init's;
+//! * **seccomp**: a filter that answers `getsid` with `EPERM` does, and a
+//!   second process under a filter that kills for `getsid` dies of `SIGSYS`;
+//! * **reclaim**: pid 1 reads a file of the read-only btrfs mount, so its
+//!   clean pages are charged to the cgroup, and then touches four times
+//!   `memory.max`; the cgroup's `memory.stat` counts pages reclaimed
+//!   (`pgsteal`) before anything is killed;
+//! * **oom**: pid 1 is ended with `SIGKILL`, `memory.events` counts one
+//!   `oom_kill`, and its parent, in the same cgroup, and init, outside it,
+//!   are alive to say so.
 //!
 //! Every step prints `container: <step> ok`; the program ends with
 //! `container: all ok` and status 0, or `container: FAILED <what>` and status
-//! 1. Built with `negative-control` the filter is never installed, and the
-//! seccomp step must fail.
+//! 1. `cargo xtask test-container` judges the lines; `docs/CGROUPS.md` §15
+//! lists the negative controls that break each clause.
 
 use std::ffi::CString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 
-use libc::{c_int, c_long, c_uint, c_ulong, pid_t};
+use libc::{c_int, c_uint, c_ulong, pid_t};
 
-/// The cgroup the container lives in, under the cgroup2 mount.
+/// The cgroup2 mount.
 const CGROUP: &str = "/sys/fs/cgroup";
+/// The container's cgroup.
+const CTN: &str = "/sys/fs/cgroup/ctn";
 /// Its memory limit, bytes.
 const LIMIT: usize = 8 * 1024 * 1024;
 /// The uid the container's owner has outside.
 const OWNER: u32 = 1000;
-/// Every namespace kind, as `/proc/<pid>/ns/` names it.
-const KINDS: [&str; 8] = ["mnt", "user", "pid", "net", "ipc", "uts", "cgroup", "time"];
-/// `CLONE_NEWTIME`, which `libc` may not name.
-const CLONE_NEWTIME: c_int = 0x80;
+/// Every namespace kind Ferrix gives, as `/proc/<pid>/ns/` names it.
+const KINDS: [&str; 7] = ["mnt", "user", "pid", "net", "ipc", "uts", "cgroup"];
+/// The btrfs test disk every QEMU machine carries as `vdb`, read-only
+/// (`tools/common/xtask/src/btrfs_disk.rs`).
+const DISK: &str = "/dev/vdb";
+/// Where init mounts it.
+const MOUNT: &str = "/mnt/ro";
+/// A file of 140,000 bytes on it (`tools/common/gen/gen-btrfs-fixtures.py`).
+const FILE: &str = "/mnt/ro/big.txt";
 
 /// Print a progress line.
 fn step(what: &str) {
     println!("container: {what} ok");
+    let _ = std::io::stdout().flush();
+}
+
+/// Print a line that is not judged.
+fn say(what: &str) {
+    println!("container: {what}");
     let _ = std::io::stdout().flush();
 }
 
@@ -57,14 +79,24 @@ fn fail(what: &str) -> ! {
 
 /// Write `text` to `path`, or fail naming `what`.
 fn put(path: &str, text: &str, what: &str) {
-    if fs::write(path, text).is_err() {
-        fail(what);
+    if let Err(error) = fs::write(path, text) {
+        fail(&format!("{what} ({error})"));
     }
 }
 
 /// The text of `path`, or fail naming `what`.
 fn get(path: &str, what: &str) -> String {
-    fs::read_to_string(path).unwrap_or_else(|_| fail(what))
+    fs::read_to_string(path).unwrap_or_else(|error| fail(&format!("{what} ({error})")))
+}
+
+/// The number after `key` in a `key value` file's text, or 0.
+fn field(text: &str, key: &str) -> u64 {
+    text.lines()
+        .find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some(key)).then(|| words.next()?.parse().ok())?
+        })
+        .unwrap_or(0)
 }
 
 /// What each `/proc/self/ns/*` link reads.
@@ -82,14 +114,18 @@ fn namespaces() -> Vec<String> {
 /// `fork`, answering the child's pid in the parent and `0` in the child.
 fn fork() -> pid_t {
     // SAFETY: a single-threaded program; the child continues with its own copy.
-    unsafe { libc::fork() }
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        fail("fork failed");
+    }
+    pid
 }
 
 /// Wait for `pid` and answer the raw status.
 fn wait_for(pid: pid_t) -> c_int {
     let mut status = 0;
     // SAFETY: `status` is a valid place for the kernel to write an `int`.
-    if unsafe { libc::waitpid(pid, &mut status, 0) } != pid {
+    if unsafe { libc::waitpid(pid, &raw mut status, 0) } != pid {
         fail("waitpid did not return the child");
     }
     status
@@ -105,35 +141,55 @@ fn exited_ok(status: c_int) -> bool {
     libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0
 }
 
+/// `mount(2)` with no data, or fail naming `what`.
+fn mount(source: &str, target: &str, kind: &str, flags: c_ulong, what: &str) {
+    let (Ok(source), Ok(target), Ok(kind)) =
+        (CString::new(source), CString::new(target), CString::new(kind))
+    else {
+        fail(what);
+    };
+    // SAFETY: the strings are NUL-terminated and outlive the call.
+    let done = unsafe {
+        libc::mount(
+            source.as_ptr(),
+            target.as_ptr(),
+            kind.as_ptr(),
+            flags,
+            std::ptr::null(),
+        )
+    };
+    if done != 0 {
+        fail(&format!("{what} ({})", std::io::Error::last_os_error()));
+    }
+}
+
 fn main() {
     let outside = namespaces();
     let host = hostname();
-    // init is root; it delegates a cgroup with a memory limit to the owner.
-    let _ = fs::create_dir_all(CGROUP);
-    // SAFETY: the strings are NUL-terminated and outlive the call.
-    let mounted = unsafe {
-        let (source, target, kind) = (c"none", c"/sys/fs/cgroup", c"cgroup2");
-        libc::mount(source.as_ptr(), target.as_ptr(), kind.as_ptr(), 0, std::ptr::null())
-    };
-    if mounted != 0 {
-        fail("cgroup2 could not be mounted");
+    // The disk's driver says hello on its own time; wait for its node.
+    let since = Instant::now();
+    while fs::metadata(DISK).is_err() {
+        if since.elapsed() > Duration::from_secs(30) {
+            fail("the btrfs test disk never appeared");
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    let _ = fs::create_dir_all(MOUNT);
+    mount(DISK, MOUNT, "btrfs", libc::MS_RDONLY, "the btrfs test disk could not be mounted read-only");
+    let _ = fs::create_dir_all(CGROUP);
+    mount("none", CGROUP, "cgroup2", 0, "cgroup2 could not be mounted");
     put(
         &format!("{CGROUP}/cgroup.subtree_control"),
         "+memory",
         "the memory controller could not be enabled",
     );
-    let ctn = format!("{CGROUP}/ctn");
-    if fs::create_dir(&ctn).is_err() {
-        fail("the container's cgroup could not be made");
+    if let Err(error) = fs::create_dir(CTN) {
+        fail(&format!("the container's cgroup could not be made ({error})"));
     }
-    put(
-        &format!("{ctn}/memory.max"),
-        &LIMIT.to_string(),
-        "memory.max could not be set",
-    );
-    for file in ["", "/cgroup.procs"] {
-        let path = CString::new(format!("{ctn}{file}")).unwrap_or_default();
+    let limit = LIMIT.to_string();
+    put(&format!("{CTN}/memory.max"), &limit, "memory.max could not be set");
+    for file in ["", "/cgroup.procs", "/cgroup.subtree_control"] {
+        let path = CString::new(format!("{CTN}{file}")).unwrap_or_default();
         // SAFETY: `path` is NUL-terminated and outlives the call.
         if unsafe { libc::chown(path.as_ptr(), OWNER, OWNER) } != 0 {
             fail("the cgroup could not be delegated to its owner");
@@ -143,6 +199,10 @@ fn main() {
 
     let owner = fork();
     if owner == 0 {
+        // Into the cgroup while still root: a move from the root cgroup needs
+        // write access to the root's `cgroup.procs`, which only root has, on
+        // Linux as here (`docs/CGROUPS.md` §3.1).
+        put(&format!("{CTN}/cgroup.procs"), "0", "the owner could not be put in its cgroup");
         container(&outside, &host);
     }
     let status = wait_for(owner);
@@ -153,13 +213,8 @@ fn main() {
     if hostname() != host {
         fail("the container's sethostname reached the host");
     }
-    let events = get(&format!("{ctn}/memory.events"), "memory.events could not be read");
-    if !events.lines().any(|line| line.trim() == "oom_kill 1") {
-        fail("memory.events did not count the OOM kill");
-    }
     step("isolation");
-    println!("container: all ok");
-    let _ = std::io::stdout().flush();
+    say("all ok");
     // SAFETY: `_exit` takes a status and never returns.
     unsafe { libc::_exit(0) }
 }
@@ -169,7 +224,7 @@ fn hostname() -> String {
     // SAFETY: an all-zero `utsname` is valid, and `uname` fills it.
     let mut name: libc::utsname = unsafe { std::mem::zeroed() };
     // SAFETY: `name` is a valid place for the kernel to write a `utsname`.
-    if unsafe { libc::uname(&mut name) } != 0 {
+    if unsafe { libc::uname(&raw mut name) } != 0 {
         fail("uname failed");
     }
     name.nodename
@@ -180,7 +235,7 @@ fn hostname() -> String {
 }
 
 /// The container's owner: uid 1000, which makes the namespaces and is the
-/// parent of pid 1.
+/// parent of pid 1, in the same cgroup.
 fn container(outside: &[String], host: &str) -> ! {
     // SAFETY: plain id changes; the group first, while it may still.
     let dropped = unsafe { libc::setgid(OWNER) == 0 && libc::setuid(OWNER) == 0 };
@@ -191,16 +246,31 @@ fn container(outside: &[String], host: &str) -> ! {
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         fail("no_new_privs could not be set");
     }
-    put(
-        &format!("{CGROUP}/ctn/cgroup.procs"),
-        "0",
-        "the owner could not join its cgroup",
-    );
-    // The user namespace first: it is what makes the rest unprivileged.
+    // Unprivileged: no root id and no capability, before the user namespace.
+    // SAFETY: the id calls take nothing.
+    let (uid, euid) = unsafe { (libc::getuid(), libc::geteuid()) };
+    let status = get("/proc/self/status", "status could not be read");
+    let effective = status
+        .lines()
+        .find_map(|line| line.strip_prefix("CapEff:"))
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_owned();
+    if uid == 0 || euid == 0 || effective.is_empty() || effective.bytes().any(|b| b != b'0') {
+        fail(&format!(
+            "the user namespace's maker was not an unprivileged user (uid {uid}, euid {euid}, \
+             CapEff {effective})"
+        ));
+    }
     // SAFETY: `unshare` with a flag and nothing else.
     if unsafe { libc::unshare(libc::CLONE_NEWUSER) } != 0 {
-        fail("an unprivileged user could not make a user namespace");
+        fail(&format!(
+            "an unprivileged user could not make a user namespace ({})",
+            std::io::Error::last_os_error()
+        ));
     }
+    say(&format!("uid {uid} euid {euid} CapEff {effective} made a user namespace"));
+    step("unprivileged");
     put("/proc/self/uid_map", &format!("0 {OWNER} 1\n"), "uid_map could not be written");
     put("/proc/self/setgroups", "deny\n", "setgroups could not be denied");
     put("/proc/self/gid_map", &format!("0 {OWNER} 1\n"), "gid_map could not be written");
@@ -209,22 +279,46 @@ fn container(outside: &[String], host: &str) -> ! {
         | libc::CLONE_NEWIPC
         | libc::CLONE_NEWCGROUP
         | libc::CLONE_NEWNET
-        | libc::CLONE_NEWPID
-        | CLONE_NEWTIME;
+        | libc::CLONE_NEWPID;
     // SAFETY: `unshare` with flags and nothing else.
     if unsafe { libc::unshare(flags) } != 0 {
-        fail("the other seven namespaces could not be made");
+        fail(&format!(
+            "the other six namespaces could not be made ({})",
+            std::io::Error::last_os_error()
+        ));
     }
+    // What the owner holds itself; the scoped kill must pass it over.
+    let ballast: Vec<u8> = Vec::new();
     let init = fork();
     if init == 0 {
         pid_one(outside, host);
     }
     let status = wait_for(init);
-    // The OOM kill ended pid 1 and not its parent, which is in the same cgroup.
+    drop(ballast);
+    let stat = get(&format!("{CTN}/memory.stat"), "memory.stat could not be read");
+    let events = get(&format!("{CTN}/memory.events"), "memory.events could not be read");
+    let (scanned, stolen) = (field(&stat, "pgscan"), field(&stat, "pgsteal"));
+    say(&format!(
+        "memory.stat pgscan {scanned} pgsteal {stolen} file {}; memory.events max {} oom {} \
+         oom_kill {}",
+        field(&stat, "file"),
+        field(&events, "max"),
+        field(&events, "oom"),
+        field(&events, "oom_kill"),
+    ));
+    if stolen == 0 {
+        fail("memory.stat counted no page reclaimed in the cgroup before the kill");
+    }
+    step("reclaim");
+    // The OOM kill ended pid 1 and not its parent, which is in the same cgroup
+    // and is saying this.
     if !killed_by(status, libc::SIGKILL) {
         fail("pid 1 was not ended by SIGKILL at the memory limit");
     }
-    step("memory");
+    if field(&events, "oom_kill") != 1 {
+        fail("memory.events did not count one OOM kill");
+    }
+    step("oom");
     // SAFETY: `_exit` takes a status and never returns.
     unsafe { libc::_exit(0) }
 }
@@ -234,7 +328,10 @@ fn pid_one(outside: &[String], host: &str) -> ! {
     // SAFETY: `getpid` and `getppid` take nothing.
     let (pid, parent) = unsafe { (libc::getpid(), libc::getppid()) };
     if pid != 1 || parent != 0 {
-        fail("the first process of a pid namespace was not pid 1 with no parent");
+        fail(&format!(
+            "the first process of a pid namespace was not pid 1 with no parent (pid {pid}, \
+             ppid {parent})"
+        ));
     }
     let status = get("/proc/self/status", "status could not be read");
     let pids = status
@@ -248,9 +345,7 @@ fn pid_one(outside: &[String], host: &str) -> ! {
     let inside = namespaces();
     for ((kind, before), after) in KINDS.iter().zip(outside).zip(&inside) {
         if before == after || after.is_empty() {
-            println!("container: FAILED the {kind} namespace is not a new one");
-            // SAFETY: `_exit` takes a status and never returns.
-            unsafe { libc::_exit(1) }
+            fail(&format!("the {kind} namespace is not a new one"));
         }
     }
     step("namespaces");
@@ -265,6 +360,17 @@ fn pid_one(outside: &[String], host: &str) -> ! {
     }
     step("ids");
     seccomp();
+    // The file's clean pages, read into the cache by a process of the
+    // cgroup, are charged to it: what reclaim may give back.
+    let mut bytes = Vec::new();
+    match fs::File::open(FILE).and_then(|mut file| file.read_to_end(&mut bytes)) {
+        Ok(140_000) => {}
+        Ok(other) => fail(&format!("{FILE} read {other} bytes, not 140000")),
+        Err(error) => fail(&format!("{FILE} could not be read ({error})")),
+    }
+    drop(bytes);
+    let stat = get(&format!("{CTN}/memory.stat"), "memory.stat could not be read");
+    say(&format!("file {} charged to the cgroup after the read", field(&stat, "file")));
     // The memory limit last: four times it, touched, cannot all fit.
     let mut held: Vec<Vec<u8>> = Vec::new();
     loop {
@@ -283,9 +389,9 @@ fn pid_one(outside: &[String], host: &str) -> ! {
 /// one that kills for it.
 fn seccomp() {
     let getsid = libc::SYS_getsid as c_uint;
-    let answering = filter(getsid, libc::SECCOMP_RET_ERRNO | libc::EPERM as u32);
-    if cfg!(not(feature = "negative-control")) {
-        install(&answering);
+    let installed = true;
+    if installed {
+        install(&filter(getsid, libc::SECCOMP_RET_ERRNO | libc::EPERM as u32));
     }
     // SAFETY: `syscall` with the call's number and its one argument.
     let got = unsafe { libc::syscall(libc::SYS_getsid, 0) };
@@ -309,9 +415,13 @@ fn seccomp() {
 fn filter(number: c_uint, action: u32) -> [libc::sock_filter; 4] {
     let insn = |code: u16, jt: u8, jf: u8, k: u32| libc::sock_filter { code, jt, jf, k };
     [
+        // ld [0]: seccomp_data.nr
         insn(0x20, 0, 0, 0),
+        // jeq #number, 0, 1
         insn(0x15, 0, 1, number),
+        // ret #action
         insn(0x06, 0, 0, action),
+        // ret #ALLOW
         insn(0x06, 0, 0, libc::SECCOMP_RET_ALLOW),
     ]
 }
@@ -326,12 +436,11 @@ fn install(program: &[libc::sock_filter; 4]) {
     let done = unsafe {
         libc::syscall(
             libc::SYS_seccomp,
-            1 as c_ulong,
+            libc::SECCOMP_SET_MODE_FILTER as c_ulong,
             0 as c_ulong,
             std::ptr::from_ref(&fprog),
         )
     };
-    let _: c_long = done;
     if done != 0 {
         fail("a seccomp filter could not be installed");
     }
