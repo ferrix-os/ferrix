@@ -74,7 +74,46 @@ taken; `--display` opens the screen.
 On the PC (`origin/baremetal-hang`, `docs/BAREMETAL.md` there): the loader
 prints everything up to the framebuffer and the breadcrumb before
 ExitBootServices, and the firmware never returns from that call (or the
-GetMemoryMap before it); the kernel never runs. The leading suspect is
-that the loader allocates with OS-defined memory types (`0x80000000` to
-`0x80000005`), which Linux's stub and GRUB never do. The board's firmware
-(BIOS 3206) is being read for what its ExitBootServices does with them.
+GetMemoryMap before it); the kernel never runs.
+
+**On this machine (2026-10-12)** the same install boots: OVMF starts the
+SN720's `BOOTX64.EFI`, the loader boots slot A, ExitBootServices returns,
+and the kernel runs every stage to `FERRIX-POWER-OFF` on 24 processors,
+driving the three NVMe drives and the xHCI keyboard and mouse. So the hang
+is in what the board's firmware does and OVMF does not. Seen on the way:
+the AMD IOMMU is not driven (`0 VT-d units and 0 SMMUv3s translating`), so
+no device's DMA is confined, which the certified item's claims rule out
+on that PC until an AMD-Vi driver exists (`docs/NVME.md` §11).
+
+**The board's firmware, read** (BIOS 3206 from ASUS, SHA-256 matching
+ASUS's; extracted with UEFIExtract, decompiled with Ghidra; nothing of it
+is kept in this tree). Its DXE core is EDK2's:
+
+* It accepts the OS-defined memory types (it refuses only `0x0E` to
+  `0x6FFFFFFF`) and never indexes a table by one: every per-type table
+  is behind a `type < 16` test in GetMemoryMap and ExitBootServices.
+  Ruled out as the core's fault.
+* ExitBootServices checks the map key by plain comparison and refuses a
+  stale one with `INVALID_PARAMETER`, which the loader's retries would
+  have shown as a red breadcrumb. Ruled out.
+* Before that check it signals the BeforeExitBootServices and
+  ExitBootServices events, with boot services still up and interrupts
+  on. 44 drivers register for them: AMD's PSP drivers (mailbox polls
+  in unbounded loops), the NBIO and IOMMU drivers, the FCH's, USB, USB4,
+  NVMe and the network stack. A handler that never returns there gives
+  exactly what the PC showed. Which one could not be settled without
+  running it.
+
+Every one of those handlers also runs when Ubuntu boots, and Ubuntu
+boots, so what makes one hang must be something the loader left behind.
+The one difference a handler can see is still the memory map's
+OS-defined types, which Linux's stub never uses; a handler that reads
+the map and assumes a type below 16 would go wrong on them. The smallest
+change that removes the difference: allocate with standard types
+(`EfiLoaderData`, `EfiLoaderCode` for the image) and carry Ferrix's kinds
+in the boot information, which already records the map. And disable the
+boot watchdog (`SetWatchdogTimer(0, ...)`), as GRUB does when it starts;
+not the hang's cause (GRUB had already disabled it on the chainloaded
+boots, and no reset came), but a firmware-started boot would otherwise be
+reset after five minutes. Neither can be shown to fix the hang except on the PC; this
+machine shows that they break nothing.
