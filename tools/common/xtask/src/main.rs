@@ -95,6 +95,7 @@ mod devloop;
 mod display;
 mod dma_faults;
 mod dotfiles;
+mod dxvk;
 mod edid;
 mod everything;
 mod fat;
@@ -328,6 +329,8 @@ COMMANDS:
     test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a
                   prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on
                   hyprix through yserver (docs/WINE.md)
+    test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the
+                  program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws (docs/WINE.md §6)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
@@ -709,6 +712,7 @@ fn run() -> Result<()> {
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
         "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
+        "test-dxvk" => dxvk::test_dxvk(&args),
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),

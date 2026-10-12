@@ -187,3 +187,59 @@ tree). 100 different system calls; two have no number in
 Nothing else was needed for these three programs. In particular not
 `futex_waitv`, `FUTEX_WAKE_OP`, `mlock`, `membarrier`, `ptrace`,
 `process_vm_readv`, `modify_ldt` or `preadv`: none is in the trace of §4.
+
+## 6. Direct3D 11 through DXVK, with no card (`test-dxvk`)
+
+Stage 23's E2.4: the gate that holds Wine with DXVK on a boot every session
+can run. DXVK 3.1.1, the release's own 64-bit `d3d11.dll` and `dxgi.dll`,
+on Mesa 25.0.7's lavapipe, in the same Wine, under QEMU with no GPU.
+
+```
+tools/common/fetch/fetch-dxvk.sh        # once, after fetch-wine.sh
+cargo xtask test-dxvk --accel kvm       # the gate
+```
+
+**The pieces.** `fetch-dxvk.sh` downloads DXVK's release tarball, pinned
+by its SHA-256 (GitHub's digest of the asset), keeps the two DLLs, and
+builds `tools/common/test/d3d11-triangle.c` with mingw-w64's gcc, which
+the host needs. Lavapipe and the Vulkan loader are not fetched again: they
+are on the Wine volume already, from yserver's tree (Debian's
+`mesa-vulkan-drivers` and `libvulkan1`, pinned in `fetch-yserver.sh`), and
+the script stops if they are not. The three files go into the image under
+`/dxvk`, and the Wine volume is attached as `test-wine` attaches it.
+
+**The boot** (`tools/common/xtask/src/dxvk.rs`) is a shell, as `test-wine`'s
+first. It starts yserver headless on `:1`, makes a prefix, and runs the
+program beside DXVK's DLLs with `WINEDLLOVERRIDES=d3d11,dxgi=n` and
+`DISPLAY=:1`. An X server is needed although nothing is shown: DXVK's
+Vulkan instance asks for `VK_KHR_win32_surface`, which Wine offers only
+with a display driver loaded, and with none instance creation fails with
+`VK_ERROR_EXTENSION_NOT_PRESENT`.
+
+**The program** makes a device on the first adapter, renders 30 frames into
+a 64 by 64 RGBA texture, each a clear to blue and a triangle in the colour
+the gate names on its command line, with shaders compiled at run time by
+Wine's `d3dcompiler_47`, reads the last frame back through a staging
+texture and prints one line: the counts of clear, triangle and other
+pixels, two pixels, and an FNV-1a hash of the whole frame.
+
+**The judge** requires DXVK's own `DXVK: v3.1.1` (so not Wine's `wined3d`),
+a device on llvmpipe at feature level 11.1, and the frame line equal to the
+one xtask computes from a frame it draws itself: 512 pixels of the
+triangle, whose corners fall on pixel corners so that no pixel centre lies
+on an edge, and 3,584 of blue. The same Wine, DXVK and lavapipe on Linux
+(under bubblewrap on nazuna, with Xvfb) printed the same line, hash
+`06a7a745`. Its negative control asks the program for another colour than
+the judge expects, and the gate fails with "the frame is not the one drawn
+on the host".
+
+**What it does not hold.** Nothing is presented: no window, no swap chain,
+so not Vulkan's presentation through Wine's X11 surface, which DXVK uses
+for a game's frames. That is the rest of E2.4 (stage 23's page).
+
+**What Ferrix answered wrongly on the way:** nothing. It passed on its
+first boot under KVM (2026-10-12): `wineboot` about 38 s of guest time, the
+program 1.3 s, DXVK with 4 compiler threads.
+
+**Where it runs.** On demand, as `test-wine` does, and for the same
+reasons: it attaches a volume, and it never downloads.

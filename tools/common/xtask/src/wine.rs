@@ -76,7 +76,7 @@ const MEMORY: u32 = 6144;
 /// # Errors
 ///
 /// The volume has not been made.
-fn volume() -> Result<std::path::PathBuf> {
+pub(crate) fn volume() -> Result<std::path::PathBuf> {
     let directory = match std::env::var_os("FERRIX_WINE_VOLUME") {
         Some(directory) => std::path::PathBuf::from(directory),
         None => crate::paths::volume_directory("wine")?,

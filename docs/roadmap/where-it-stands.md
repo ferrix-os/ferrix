@@ -555,7 +555,8 @@ shape, comes first and can end it, because whether the game's anti-cheat
 accepts a virtual machine is not known; it waits on the customer for an
 account and about 110 GB of disk. On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without
-(`docs/WINE.md`), and a window of an X
+(`docs/WINE.md`); Direct3D 11 draws through DXVK on lavapipe in it with no
+card since 2026-10-12 (`test-dxvk`, offscreen), and a window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is

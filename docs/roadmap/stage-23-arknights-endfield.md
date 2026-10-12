@@ -239,6 +239,22 @@ it, the way `test-xwindow` finds xev's.
   Wine with DXVK is held by a boot that every session can run. That lavapipe
   satisfies DXVK is assumed, not tried. 5.
 
+**Where step 2 stands (2026-10-12, branch `endfield-dxvk`; `docs/WINE.md`
+§6).** Lavapipe satisfies DXVK: DXVK 3.1.1, the newest release, makes a
+feature level 11.1 device on Mesa 25.0.7's lavapipe, in Wine 10.0, on Linux
+and on Ferrix alike. `cargo xtask test-dxvk` runs a small Direct3D 11
+program through it under KVM with no card and compares the frame it reads
+back with one xtask draws.
+
+* *Done:* E2.4's first half, and the card-free half of E2.2: DXVK in the
+  prefix (the release's DLLs beside the program, pinned by hash, from
+  `fetch-dxvk.sh`), a Direct3D 11 program rendering offscreen, the gate and
+  its negative control. Ferrix answered nothing wrongly on the way.
+* *Still to do:* E2.4's second half, presentation: a swap chain through
+  Wine's Vulkan surface on yserver's X11, which DXVK uses for a game's
+  frames and which the offscreen program does not reach. E2.1 to E2.3, on
+  the card.
+
 **Proved by** `vkcube` at the screen's rate on the card, then the Direct3D
 11 program for ten minutes, recorded; and `test-dxvk` in the gate set.
 
