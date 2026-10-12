@@ -517,14 +517,22 @@ echo "dri3: :0 there after ${waited}s"
 sleep 5
 grep -iE 'dri3|render node|VkContext|vulkan|glx' /tmp/yserver.log | head -n 30 | sed 's/^/dri3: yserver: /'
 export DISPLAY=:0 VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/nvidia_icd.json
-/data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu     /data/usr/bin/vkcube --wsi xcb --c 1200 > /tmp/vkcube.log 2>&1 &
+run() { /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu "$@"; }
+run /data/usr/bin/vulkaninfo > /tmp/vulkaninfo.txt 2>&1
+echo "dri3: vulkaninfo exited $? with $(wc -l < /tmp/vulkaninfo.txt) lines"
+sed 's/^/vkinfo: /' /tmp/vulkaninfo.txt
+uptime_cs() { read up _ < /proc/uptime; echo "${up%.*}${up#*.}"; }
+start=$(uptime_cs)
+run /data/usr/bin/vkcube --wsi xcb --c 1200 > /tmp/vkcube.log 2>&1 &
 cube=$!
 sleep 20
 echo "dri3: vkcube after 20 s: $(kill -0 $cube 2>/dev/null && echo running || echo exited)"
 sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | head -n 30
 /bin/hyprctl clients 2>/dev/null | grep -iE 'title|class' | sed 's/^/dri3: window: /'
 wait $cube
-echo "dri3: vkcube exited $?"
+status=$?
+took=$(( $(uptime_cs) - start ))
+echo "dri3: vkcube exited $status after 1200 frames in ${took}0 ms, $(( 120000 / (took > 0 ? took : 1) )) frames a second"
 sed 's/^/dri3: vkcube: /' /tmp/vkcube.log | tail -n 20
 grep -iE 'dri3|present|pixmap|syncobj|fence|import|error|warn' /tmp/yserver.log | tail -n 60 | sed 's/^/dri3: yserver: /'
 "#;
