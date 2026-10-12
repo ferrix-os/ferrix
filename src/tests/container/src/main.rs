@@ -12,7 +12,8 @@
 //!
 //! * **unprivileged**: the user namespace is made by a process whose real and
 //!   effective uid are 1000 and whose effective capability set is empty;
-//! * **pid**: `getpid` is 1, `getppid` is 0, `status` has two `NSpid`s;
+//! * **pid**: `getpid` is 1 and `getppid` 0, and the owner's
+//!   `/proc/<pid>/status` lists its `NSpid` as its own number and 1;
 //! * **namespaces**: each of the seven `/proc/self/ns/*` links differs from
 //!   the one init has;
 //! * **ids**: `getuid` is 0 inside, and `sethostname` works in its own UTS
@@ -293,9 +294,45 @@ fn container(outside: &[String], host: &str) -> ! {
     }
     // What the owner holds itself; the scoped kill must pass it over.
     let ballast: Vec<u8> = Vec::new();
+    let mut gate: [c_int; 2] = [0; 2];
+    // SAFETY: `gate` is a valid place for the kernel to write two descriptors.
+    if unsafe { libc::pipe(gate.as_mut_ptr()) } != 0 {
+        fail("a pipe could not be made");
+    }
+    let [wait_end, go_end] = gate;
     let init = fork();
     if init == 0 {
+        // Pid 1 waits until its parent has looked at it from outside.
+        let mut byte = [0_u8; 1];
+        // SAFETY: `byte` is valid for one byte; the descriptors are this process's.
+        let got = unsafe {
+            libc::close(go_end);
+            libc::read(wait_end, byte.as_mut_ptr().cast(), 1)
+        };
+        if got != 1 {
+            fail("pid 1 was never told to go on");
+        }
         pid_one(outside, host);
+    }
+    // From the owner's namespace pid 1 has two numbers, its own last: the
+    // owner's `status` view is told in the reader's namespace (`docs/PIDNS.md`
+    // §6), so this is read here and not by pid 1.
+    let status = get(&format!("/proc/{init}/status"), "pid 1's status could not be read");
+    let numbers: Vec<&str> = status
+        .lines()
+        .find_map(|line| line.strip_prefix("NSpid:"))
+        .map(|line| line.split_whitespace().collect())
+        .unwrap_or_default();
+    if numbers.len() != 2 || numbers.last() != Some(&"1") || numbers.first() != Some(&init.to_string().as_str()) {
+        fail(&format!("pid {init}'s status did not show it as 1 in a namespace below (NSpid {numbers:?})"));
+    }
+    // SAFETY: `go_end` is valid for one byte from a valid buffer.
+    let told = unsafe {
+        libc::close(wait_end);
+        libc::write(go_end, [1_u8].as_ptr().cast(), 1)
+    };
+    if told != 1 {
+        fail("pid 1 could not be told to go on");
     }
     let status = wait_for(init);
     drop(ballast);
@@ -336,14 +373,6 @@ fn pid_one(outside: &[String], host: &str) -> ! {
             "the first process of a pid namespace was not pid 1 with no parent (pid {pid}, \
              ppid {parent})"
         ));
-    }
-    let status = get("/proc/self/status", "status could not be read");
-    let pids = status
-        .lines()
-        .find(|line| line.starts_with("NSpid:"))
-        .map_or(0, |line| line.split_whitespace().count().saturating_sub(1));
-    if pids != 2 {
-        fail("status did not show the pid in two namespaces");
     }
     step("pid");
     let inside = namespaces();
