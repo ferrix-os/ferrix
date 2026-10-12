@@ -450,13 +450,13 @@ fn type_into(
         press(qmp, &["ctrl", "c"])?;
         let _ = watching.read_more(Instant::now() + Duration::from_secs(60), copied(2))?;
 
-        // The VNC way. The caret to the line's end while notepad has the
-        // keyboard; then xev's window beside it takes the keyboard by the
-        // pointer alone, Caps Lock goes on there, and the pointer alone
-        // brings the keyboard back to notepad for the keys. Wine takes the
-        // focus only when offered WM_TAKE_FOCUS, and the X server sees no
-        // Caps Lock pressed while xev had the keyboard.
-        press(qmp, &["end"])?;
+        // The VNC way. xev's window beside notepad takes the keyboard
+        // (hyprix gives it to a new window, and the pointer moves onto it),
+        // Caps Lock goes on there, and the pointer alone brings the
+        // keyboard back to notepad for `End`, which ends the double click's
+        // selection, and the keys. Wine takes the focus only when offered
+        // WM_TAKE_FOCUS, and the X server sees no Caps Lock pressed while
+        // xev had the keyboard.
         let beside = |lines: &[String]| {
             lines
                 .iter()
@@ -479,6 +479,8 @@ fn type_into(
             notepad.y + notepad.height / 2,
         )?;
         pause(800);
+        press(qmp, &["end"])?;
+        pause(300);
         for key in VNC_KEYS {
             press(qmp, &[key])?;
             pause(80);
