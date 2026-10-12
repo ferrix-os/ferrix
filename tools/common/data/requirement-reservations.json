@@ -59,6 +59,13 @@
       "branch": "gap-kill-reaped",
       "date": "2026-10-12",
       "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
+    },
+    {
+      "ids": ["L.quiesce.6"],
+      "owner": "fx1012-bm-h4-usb-storage",
+      "branch": "bm-h4-usb-storage",
+      "date": "2026-10-13",
+      "purpose": "H4, a USB stick served to the block core: a quiesce of a node two cores serve at once (input claims and a block ring) refuses under either live driver and waits out and lets go both (consultant ledger 2026-10-13, H3)"
     }
   ]
 }
