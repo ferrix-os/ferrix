@@ -85,6 +85,11 @@ while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
     waited=$((waited + 1))
 done
 echo "endfield: the X socket was there after ${waited}s, DISPLAY is $DISPLAY"
+if udhcpc -i eth0 -n -q -t 5 -T 2 > /dev/null 2>&1; then
+    echo "endfield: a lease for eth0"
+else
+    echo "endfield: no lease for eth0"
+fi
 nslookup launcher.gryphline.com 2>&1 | sed 's/^/endfield: dns: /'
 mkdir -p /tmp/wine
 /usr/lib/wine/wine64 wineboot -i > /tmp/wine/wineboot.log 2>&1

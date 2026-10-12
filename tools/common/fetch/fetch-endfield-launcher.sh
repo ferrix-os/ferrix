@@ -23,10 +23,15 @@
 #
 # Writes $FERRIX_ENDFIELD_VOLUME/endfield.img (default
 # ~/.local/share/ferrix/endfield-launcher/endfield.img): the Wine volume's
-# tree (fetch-wine.sh, which this runs when it is missing or carries
-# another yserver than the pin's) with `/GRYPHLINK` added, and room for a
-# prefix. yserver.commit and launcher.version beside it say what it
-# carries. Needs curl, sha256sum, tar, xz, od and mkfs.btrfs; no root.
+# tree with `/GRYPHLINK` added, and room for what the launcher writes. The
+# tree is this volume's own, made by fetch-wine.sh under `wine/` here when
+# it is missing or carries another yserver than the pin's; the packages
+# already in the shared Wine volume's pool are copied, not downloaded
+# again. (The shared tree is not used: other sessions bind it as a root
+# for bubblewrap, and one held an older yserver than its stamp said on
+# 2026-10-12.) yserver.commit and launcher.version beside it say what it
+# carries. Needs curl, sha256sum, tar, xz, od, cmp and fetch-wine.sh's tools;
+# no root.
 #
 # Usage: tools/common/fetch/fetch-endfield-launcher.sh
 
@@ -40,10 +45,10 @@ sevenzip_url=https://www.7-zip.org/a/7z2501-linux-x64.tar.xz
 sevenzip_sum=4ca3b7c6f2f67866b92622818b58233dc70367be2f36b498eb0bdeaaa44b53f4
 
 out=${FERRIX_ENDFIELD_VOLUME:-$HOME/.local/share/ferrix/endfield-launcher}
-wine=${FERRIX_WINE_VOLUME:-$HOME/.local/share/ferrix/wine}
+shared=$HOME/.local/share/ferrix/wine
 yserver=${FERRIX_YSERVER_VOLUME:-$HOME/.local/share/ferrix/yserver}
 
-for tool in curl sha256sum tar xz od mkfs.btrfs; do
+for tool in curl sha256sum tar xz od cmp mkfs.btrfs; do
     command -v "$tool" > /dev/null || { echo "fetch-endfield-launcher: $tool is not installed" >&2; exit 1; }
 done
 
@@ -66,11 +71,15 @@ machine() {
     od -An -tx2 -j$((pe + 4)) -N2 "$1" | tr -d ' '
 }
 
-# The Wine volume's tree, made again when it is missing or carries another
-# yserver than fetch-yserver.sh pins.
+# This volume's own Wine tree, made again when it is missing or carries
+# another yserver than fetch-yserver.sh pins, or than yserver's tree holds.
+wine="$out/wine"
 pinned=$(sed -n 's/^YSERVER_COMMIT=//p' "$(dirname "$0")/fetch-yserver.sh")
-if [ ! -d "$wine/tree" ] || [ "$(cat "$wine/yserver.commit" 2> /dev/null)" != "$pinned" ]; then
-    "$(dirname "$0")/fetch-wine.sh"
+if [ ! -d "$wine/tree" ] || [ "$(cat "$wine/yserver.commit" 2> /dev/null)" != "$pinned" ]     || ! cmp -s "$wine/tree/yserver/yserver" "$yserver/tree/yserver/yserver"; then
+    mkdir -p "$wine/pool"
+    [ ! -d "$shared/pool" ] || cp -n "$shared/pool/"*.deb "$wine/pool/" 2> /dev/null || true
+    FERRIX_WINE_VOLUME="$wine" "$(dirname "$0")/fetch-wine.sh"
+    rm -f "$wine/wine.img"
 fi
 
 mkdir -p "$out/pool"
