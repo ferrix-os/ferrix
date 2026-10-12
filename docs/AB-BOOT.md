@@ -205,7 +205,12 @@ well under a second at hundreds of MB/s).
   `ferrix.slot.boot=trial`, and the record's trial is that slot and its
   sequence is the `ferrix.slot.seq` booted (so a later re-arm is not marked
   by an older boot). Writes good = that slot, trial none, tries 0.
-* `bootctl status`: the record, both slots' verification, and what booted.
+* `bootctl rollback`: takes an armed trial back -- writes the record with
+  trial none, tries 0 and good unchanged -- and nothing else. It never makes
+  a slot good, whichever slot is running; with no trial armed it writes
+  nothing (the consultant's S4, ledger line 732).
+* `bootctl status`: the record, both slots' verification, and what booted;
+  a trial whose tries are spent is shown as exhausted.
 * `bootctl init`: writes a first record (good = the slot that verifies, A if
   both) when there is no valid copy; refuses otherwise.
 
@@ -372,7 +377,10 @@ conditions folded in above; no requirement ids (line 727 (a)). AB1-AB3
 built on branch `ab-boot`; the code review's verdict **OK IF G1-G6** (line
 733): G1 Ferrix partitions only inside the usable blocks, G4
 `ferrix.slot.disk`, G5 §6's qualified rows, G3 AoU-28 also taken by
-softgl-clock -- whichever lands second renumbers. A10: nothing writes the SN720 (the p3-p5
+softgl-clock -- whichever lands second renumbers. Both landed on
+2026-10-11 as AoU-28; on 2026-10-12 this design's became **AoU-29**
+(SAFETY-MANUAL §4, SECURITY-TARGET A.FIRMWARE, ITEM.md), and
+`check-safety-requirements.py` now refuses an id the manual heads twice. A10: nothing writes the SN720 (the p3-p5
 retype, `bootctl init`, the first slot) without the customer's OK for that
 write phase, through the PO, with the address list first. AB2's loader code
 goes back to the consultant for code review before landing, with the

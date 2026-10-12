@@ -54,10 +54,21 @@ ID = re.compile(r"\b(ASR-\d+|FM-\d+|AoU-\d+)\b")
 # A row of the manual's table of unsafe obligations: `| `(DEVICE)` | ...`.
 OBLIGATION_ROW = re.compile(r"^\|\s*`\(([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)\)`\s*\|", re.MULTILINE)
 OBLIGATION_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
+# The heading that defines an id: `### AoU-28 — ...`.
+DEFINITION = re.compile(r"^#+\s+(ASR-\d+|FM-\d+|AoU-\d+)\b", re.MULTILINE)
 
 
 def ids_in_manual() -> set[str]:
     return set(ID.findall(MANUAL.read_text(encoding="utf-8")))
+
+
+def ids_defined_twice() -> list[str]:
+    """Ids the manual heads twice. Two branches that each took the next
+    free number pass every other check here, since the id is in both the
+    manual and the register (2026-10-11: AoU-28, the x86-64 clock's and the
+    A/B slots')."""
+    headed = DEFINITION.findall(MANUAL.read_text(encoding="utf-8"))
+    return sorted({name for name in headed if headed.count(name) > 1})
 
 
 def obligations_in_manual() -> set[str]:
@@ -172,6 +183,14 @@ def main() -> int:
         )
         for name in missing_from_register:
             print(f"    {name}", file=sys.stderr)
+        status = 1
+
+    for name in ids_defined_twice():
+        print(
+            f"safety-requirements: the manual heads {name} twice; the one that "
+            "landed second takes the next free number",
+            file=sys.stderr,
+        )
         status = 1
 
     checked = 0

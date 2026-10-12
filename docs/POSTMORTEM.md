@@ -147,7 +147,7 @@ bound keep garbage out.
 * **Design verdict: OK IF P1-P10** (consultant ledger
   `~/.local/share/ferrix/cert-consultant/reviews.md` line 744). PM1 outside
   the item; PM2 outside the TOE (no code review, but P1's doc restatements:
-  A.FIRMWARE, the A/B AoU -- renumbered AoU-29 first, AoU-28 is taken -- and
+  A.FIRMWARE, the A/B AoU (AoU-29, renumbered from a second AoU-28 on 2026-10-12) and
   line 727's "writes nothing but one control block" must name the
   BOOTLOG/LASTKERNEL files and the NV variable, with PM2's commit;
   test-ab-boot's p1-hash rule must hold with logging on). PM3 is CORE:
