@@ -212,12 +212,30 @@ frames always took: clean cache reclaimed first, then the fault fails
   card); and every frame the kernel takes for itself, by `allocate_frames`.
 * `/proc/meminfo`'s `MemAvailable` still counts the watermark's frames as
   available, where Linux leaves out its reserve (`totalreserve_pages`).
+* **The kernel's own users of the program routes**, which the watermark
+  now refuses earlier than an empty allocator would, and why each is
+  handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
+  by whichever task reads the file, kernel tasks at boot included,
+  reclaims clean cache machine-wide and tries again before it fails, and
+  its failure is the read's error; a memory filesystem's write
+  (`fs/pages.rs`, `Vmo::commit`) answers `ENOSPC`, as Linux's tmpfs does
+  when it is full; `Vmo::commit_run` behind `PIN_CONTIGUOUS`
+  (`syscall/native.rs`) is a ring-3 driver's request and answers
+  `NO_MEMORY`. Faults, copy-on-write and a fork's copies (`user/space.rs`,
+  `user/vmo.rs`) are a program's own demand. `quota::charging_nobody`
+  changes whom a frame is charged to, not which route takes it, and its
+  one user, the console's descriptor table, takes heap, not frames. Every
+  one of these callers already answered an empty allocator with an error,
+  so refusing at the watermark adds no new failure path.
 
 Where it stands: the consultant's design review is OK IF W1 to W11 (ledger
 2026-10-13, line 797, `~/.local/share/ferrix/cert-consultant/reviews.md`);
-the stage-2 check and its four negative controls are in the landing. The
-BACKLOG row for the FX-0008 in `epoll_wait` stays open until the same Wine
-run at 8 GiB is shown to end without it.
+the stage-2 check and its four negative controls are in the landing
+(a7a32bf19), and the landing was accepted (ledger line 854). The same Wine
+run at 8 GiB that stopped the kernel ended without it on 2026-10-13
+(`endfield-oom-w2-unity-wined3d`: the game refused at 245 s, the kernel
+ran on), so the BACKLOG row now holds only the residual: heap-borne
+demand and the load's infallible allocations.
 
 **The load the item runs.** That line is clean for the Linux personality,
 which is load from its entry, and not clean for two native calls, which are
