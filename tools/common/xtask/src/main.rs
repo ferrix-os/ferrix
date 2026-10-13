@@ -480,8 +480,17 @@ fn build(args: &Args) -> Result<()> {
     let arches = args.arches()?;
     cargo::build_ahead(&arches, args.release)?;
     for arch in arches {
-        let (image, _) = build_image(arch, args)?;
+        let (image, kernel) = build_image(arch, args)?;
         println!("built {}", image.display());
+        let elf = std::fs::read(&kernel)
+            .map_err(|error| Error::new(format!("reading {}: {error}", kernel.display())))?;
+        // The kernel's own hash, so that two builds can be shown to make the
+        // same kernel byte for byte (docs/BUILD-FLAGS.md §6, item 3).
+        println!(
+            "  {arch} kernel sha256 {} ({})",
+            sha256::hex(&elf),
+            kernel.display()
+        );
     }
     Ok(())
 }
