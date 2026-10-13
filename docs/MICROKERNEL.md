@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Draft, revision 3, 2026-10-13.** The customer asked for a plan to switch
+**Draft, revision 4, 2026-10-13.** The customer asked for a plan to switch
 Ferrix to a microkernel whose ring 0 can be certified whole. This document is
 that plan. Nothing in it is decided until the customer answers §11 and the
 answers are written under *Decisions* in `docs/BACKLOG.md`. It reopens three
@@ -187,7 +187,9 @@ init does (`DEVMGR_START` under `ferrix.devmgr=init`, the audit handle,
   process's own handle table (K11 gives it one). The kernel tells the two
   ABIs apart by number, as `syscall/mod.rs` does today: 0x1000 to 0x1FFF is
   native. `linuxd` is not on the path, so it never acts with a program's
-  authority (no confused deputy) and never holds a program's handles.
+  authority (no confused deputy). It holds a program's handle only through
+  the two deliberate, rights-checked moves of K11: `PORT_FD`'s port (below)
+  and the audit-read handle it passes to init at start (§5, §6.1).
 * **`PORT_FD` (0x101B)** makes an fd, which is Linux state the kernel no
   longer holds. It exits to `linuxd` like a Linux call; the port moves from
   the program's private handle table to the shared one through K11's
@@ -211,7 +213,7 @@ before any code leaves ring 0.
 | # | Mechanism | Today | What is new, and what it must hold |
 |---|---|---|---|
 | K1 | **Restricted mode**: enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root |
-| K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13). **`fork`, `exec` and `ptrace` need three more operations**: a copy-on-write clone of a restricted space (or copy-on-write child VMOs); reads and writes of another process's space by handle, each with its own right (`ptrace`, `process_vm_readv`, core dumps); and a fresh restricted space for `exec`. A check, with a control, that a copy-on-write child never sees a write its parent makes after the clone (the F-41 lesson, ledger 29 and 31) |
+| K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only | ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13). **`fork`, `exec` and `ptrace` need three more operations**: a copy-on-write clone of a restricted space (or copy-on-write child VMOs); reads and writes of another process's space by handle, each with its own right (`ptrace`, `process_vm_readv`, core dumps); and a fresh restricted space for `exec`. A check, with a control, that a copy-on-write child never sees a write its parent makes after the clone (the F-41 lesson, ledger 29 and 31) |
 | K3 | **Pager-backed VMOs** | none (`fs/pages.rs` fills from the block ring in ring 0) | The pager protocol over a port; dirty tracking and write-back requests. The faulting job pays for the page, by K7's token. A fault waiting on a dead or slow pager returns `SIGBUS`/`EIO` to the faulting process after a bounded wait, never the safe state. **One fault-forwarding mechanism**: K3 and `NVIDIA.md` §11.4's fault windows (OK IF 2026-10-02, L.user.111-124 reserved) are reconciled into one design, not built twice. An AoU: a native safety partition maps no pager-backed VMO it did not choose |
 | K4 | **Exception channels**: faults of native processes delivered to a supervisor | panic or kill | needed for supervised servers and for `linuxd`'s own faults |
 | K5 | **Wait on a user address** | the Linux `futex(2)` in the load | a generic primitive; `linuxd` maps Linux's operations onto it |
@@ -311,7 +313,7 @@ any certified user-space item are started under K14.
 | To | Handles |
 |---|---|
 | devmgr | the device authority it holds today, as K8's handles (the right to bind a function to a domain, apertures, interrupts, I/O mappings, configuration reads and the mediated writes, quiesce, limits, isolation); the debug log's write handle |
-| `linuxd` | **init's image and script as read-only VMOs**, read by the kernel from `.ferrix/init/program` and `.ferrix/init/script` (`init.rs`), so L.init.2, choosing pid 1's inputs, stays the kernel's; the initramfs as a read-only VMO for the rest of the root; the Linux partition's job; the audit-read handle pid 1 holds today, which `linuxd` moves into init's private table (K11) and holds no use of itself; a channel to devmgr; the time page's VMO; the debug log's write handle |
+| `linuxd` | **init's three inputs as read-only VMOs**, read by the kernel from `.ferrix/init/program`, `.ferrix/init/script` and `.ferrix/init/commands` (`init.rs`), so L.init.2, choosing pid 1's inputs, stays the kernel's; the initramfs as a read-only VMO for the rest of the root; the Linux partition's job; the audit-read handle pid 1 holds today, which `linuxd` moves into init's private table (K11) and holds no use of itself; a channel to devmgr; the time page's VMO; the debug log's write handle |
 
 AoU-24 is about the initramfs unpacker in `ferrix-vfs`, which leaves ring 0
 with `linuxd`; it becomes an assumption on `linuxd`, outside the TSF, and
@@ -337,7 +339,12 @@ disk path, and §11 Q9 puts it to the customer.
   file-level event. The audit records change as follows: FAU_GEN.1 b) loses
   the `ferrix.devmgr` record with the option (§3, 0x1052); in c), the
   cgroup-kill and cgroup-file-limit records become job records whose subject
-  is the Linux process the job holds; the OOM-kill record stays the kernel's. FDP_ACC is unchanged: it claims capabilities only, and
+  is the Linux process the job holds; the OOM-kill record stays the kernel's.
+  **Who may read the audit log (FAU_SAR.2):** the audit-read handle reaches
+  init through `linuxd`'s shared table (§5), so the authorised reader is the
+  Linux partition, `linuxd` and init together, not pid 1 alone. That is
+  stated in the ST. It is no wider in practice than today, where the load in
+  ring 0 runs pid 1's calls and a compromised `linuxd` runs init's. FDP_ACC is unchanged: it claims capabilities only, and
   file permissions were never in it.
 * AoU-3 changes from "the Linux layer is excluded" to "no user-space
   component is part of the safety element unless it is certified as one
@@ -499,8 +506,8 @@ the refill, and a cheaper barrier; none of these is on nazuna. So Q3 (the
 target) and Q5 (the barrier) are in practice one decision, and the customer
 sees these figures before choosing either. A Linux program making 10,000
 calls a second (Chrome makes about 8,000) would spend 0.3 to 1.3% of a
-processor more than today; a cold `rustc` run (about 4,300 calls), under
-6 ms more.
+processor more than today; a warm `rustc` compile (4,345 calls, `OPAQUE-KERNEL.md` S0), under
+6 ms more. The cold run's call count is measured in M0.
 
 **The stop rule.** If the restricted-mode row cannot be met, the plan stops
 after M4, with every mechanism landed and nothing lost, and the customer
@@ -627,6 +634,15 @@ Draft on branch `microkernel-plan`.
   loader out (K15), `fork`/`exec`/`ptrace` on K2, what the kernel hands
   devmgr and `linuxd` (§5), the restricted row priced (§7), the corrections,
   and the orphan step's control and scope (§6.2).
+* Third round: **OK IF** S1 to S4 (text fixes, no further round), ledger
+  line 847. Revision 4 folds in S1 (the K2 row's columns), S2 (init's
+  `commands` input), S3 (the audit log's reader is the Linux partition;
+  `linuxd`'s two handle moves) and S4 (the warm compile's call count). The
+  consultant who reviews this document's landing on `main` checks S1 to S4
+  against the diff. A note for K1's own review: under Q5 (ii), the restricted
+  and shared roots of one partition must count as one domain in
+  `speculation::entered_space`, which is keyed on the root, or (ii) pays
+  (i)'s barrier.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
