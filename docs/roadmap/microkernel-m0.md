@@ -123,7 +123,9 @@ planted file is its control.
   DO-178C with DO-330 and DO-333, CC:2022 parts 2 and 3), each row's clause,
   table, grade and level confirmed or corrected. **No later stream (V1, V2,
   T1, F1, F2) is sized before it.**
-* **The research of 2026-10-13** checked against its sources
+* **Done 2026-10-13** (`docs/microkernel/RESEARCH-CHECK.md`: 56 claims, 42
+  confirmed, 9 corrected, 5 unverified; corrections folded into
+  `MICROKERNEL.md`). **The research of 2026-10-13** checked against its sources
   (`MICROKERNEL.md`, *Sources*): CC:2022's ADV_SPM.1 "entire TSF" reading,
   Arm's Lock-mode ratings and the A78AE manual's facts, seL4's AArch64
   proofs, Ferrocene's qualifications and targets, Verus's compiler pin.

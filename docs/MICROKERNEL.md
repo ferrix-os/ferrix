@@ -623,14 +623,14 @@ processor class for timing) named wherever the claim is given in full.
 **The toolchain falls short of SIL 4 today** (research, 2026-10-13, sources at
 the end of this document; F-17): Ferrocene 26.05 (Rust 1.95)
 is qualified for ISO 26262 ASIL D, IEC 61508 SIL 3 (it "supports" SIL 4) and
-IEC 62304 Class C, and offers no DO-178C qualification. Of the kernel's
+IEC 62304 Class C, and offers no DO-178C (DO-330) qualification; it "supports customer certification efforts toward" DO-178C DAL C, below the DAL A objectives the plan needs. Ferrocene's certified `core` subset is at IEC 61508 SIL 2 / ISO 26262 ASIL B only, and the signed qualification material comes with the Enterprise plan, not the €25-a-month Individual plan. Of the kernel's
 targets it qualifies `aarch64-unknown-none` only: `x86_64-unknown-none` and
 `armv7a-none-eabi` are not offered. A SIL 4 qualification of the compiler
 for the reference platform's target, and a route for the other two targets,
 are items for the vendor (F-17) before any SIL 4 claim. Consequences:
 
 * **The compiler that builds the certified kernel is Ferrocene's**, on the
-  reference platform's target. Today Ferrocene is at Rust 1.95, the tree
+  reference platform's target. Today Ferrocene is at Rust 1.95 (26.05; 26.08, with Rust 1.96 to 1.97, is in preparation), the tree
   pins 1.97.1 and Verus pins 1.98.1. From M0, CI builds `core` and `item`
   with Ferrocene's compiler, so no language feature newer than it creeps in.
 * **Whether a compiler qualified to SIL 3 suffices for SC 4** is a question
@@ -652,7 +652,7 @@ this table before any stream is sized on it.
 | No dynamic objects (K16) | Table 6, 1b: HR from ASIL B | Table B.1, items 2 and 3a: HR from SIL 2, so a justified deviation is needed at every SIL; that SIL 3 and 4 make the justification unrealistic is `CLAIM.md`'s judgement, not the text's | Annex A (as EN 50128's): to check | — | — |
 | MC/DC (V1) | Table 9, 1c: HR at ASIL D | Table B.2, item 7c: HR at SIL 4 | Annex A: HR at SIL 3/4, to check | Table A-7, objective 5: required at Level A, with independence | — |
 | Object code not traceable to source (V2) | — | — | — | 6.4.4.2b, Table A-7 objective 9: required at Level A | — |
-| Formal methods (F1, F2) | Table 2, 1d formal notations and Table 7 formal verification: R at ASIL D; semi-formal notations HR at C and D | Tables A.1, A.2, A.4: formal methods HR at SIL 4 | Annex A: HR at SIL 3/4 | DO-333, as an alternative means | **EAL6 requires** a formal security policy model (ADV_SPM.1); EAL7 adds formal functional specification and design (ADV_FSP.6, ADV_TDS.6) |
+| Formal methods (F1, F2) | Table 2, 1d formal notations and Table 7 formal verification: R at ASIL D; semi-formal notations HR at C and D | Tables A.1, A.2, A.4: formal methods HR at SIL 4 | Annex A: HR at SIL 3/4 | DO-333, as an alternative means | **EAL6 requires** a formal security policy model (ADV_SPM.1); EAL7 adds a formal functional specification (ADV_FSP.6) and a formal high-level design presentation (ADV_TDS.6) |
 | Timing analysis (T1) | Table 8 resource-usage analysis: HR at ASIL D | Table A.2/A.5 timing behaviour: HR at SIL 3/4 | Annex A: to check | 6.3.4f, worst-case timing: required; multicore interference: AMC 20-193 / CAST-32A | — |
 | Independence | Part 2 confirmation measures: I3 at ASIL D | Part 1 §8, assessment: independent organisation at SIL 3/4 | independent assessor | verification independence at Level A | ALC_DVS.2, ALC_CMC.5, ATE_DPT.3, AVA_VAN.5 at EAL6 |
 
@@ -694,8 +694,7 @@ this table before any stream is sized on it.
     seL4's integrity and confidentiality proofs (AArch64's completed in
     2026), PikeOS's formal API and its noninterference model, and AWS's
     Nitro Isolation Engine. Its LCF kernel is the easiest to defend to CC
-    and DO-333 assessors. Under CC:2022, ADV_SPM.1 requires a formal model
-    of the **entire TSF**, so F1 covers every kernel interface, not only
+    and DO-333 assessors. Under CC:2022, ADV_SPM.1 requires a formal model of the **entire TSF** (CC:2022 Part 3, ADV_SPM.1.3C: "The formal model shall cover the complete set of SFRs that define the TSF"; JIL's interim sub-TSF reading is limited to IC and Java Card protection profiles; the only other route is a multi-assurance ST with ADV_SPM.1 on named sub-TSFs), so F1 covers every kernel interface, not only
     `core`.
   * **F2 in Verus.** It is the only Rust verifier with an end-to-end verified
     microkernel close to Ferrix's shape (Atmosphere, SOSP 2025: capabilities,
@@ -713,16 +712,14 @@ this table before any stream is sized on it.
     has served as certification evidence, so F2 builds a TQL-5 case around a
     frozen Verus and Z3; Verus pins rustc 1.98.1 against Ferrocene's 1.95,
     so the plan argues that the two front ends agree on the verified source;
-    Verus's trusted base includes about 700 lines of axioms.
-  * **Who**: **Proofcraft** (the seL4 proof engineers; they did seL4's
-    AArch64 security proofs and work with Verus in DARPA INSPECTA) for F1,
+    Verus's trusted base includes its axioms (about 700 lines: *unverified*, no source found).
+  * **Who**: **Proofcraft** (the seL4 proof engineers; they did seL4's AArch64 security proofs (completed August 2026) and do the seL4 verification in DARPA INSPECTA, whose Verus contracts are Kansas State's) for F1,
     the proof architecture and certification-grade proof engineering; for
     F2, the Verus kernel groups (Utah's Atmosphere team, Kansas State with
     Collins Aerospace, who helped write DO-333), or **CertiK** as a
     commercial Verus contractor. None publishes prices; contacting them is
     the customer's.
-  * **Effort** (*guess*, from seL4's about 25 person-years for 8,700 lines
-    of C and Atmosphere's 1.5 person-years for 6,000 lines): F1 2 to 4
+  * **Effort** (*guess*, from seL4's about 25 person-years (design, implementation and proof) for 8,700 lines of C, 7,500 of them verified and Atmosphere's 1.5 person-years for 6,000 lines): F1 2 to 4
     person-years, F2 6 to 15, so **8 to 20 person-years** before the
     certification paperwork, the same order as seL4. The core's size after
     M6 decides it.
@@ -730,21 +727,15 @@ this table before any stream is sized on it.
   customer, 2026-10-13). **The named class: Arm Cortex-A78AE (Armv8.2-A, no
   SMT) in DSU-AE Lock-mode** (CEMODE 0b11, set at cluster cold reset; each
   core pair seen by the OS as one core), which Arm rates ASIL D / SIL 3 for
-  hardware metrics. Hybrid mode is outside the claim (Arm rates it ASIL B).
+  hardware metrics. Hybrid mode is outside the claim (Arm rates it ASIL B / SIL 2).
   Software facts from Arm's TRM that the kernel must honour: MPIDR_EL1.MT
   reads 1 although the core is not multithreaded, so SMT is never inferred
-  from it; there is no MPAM, so the shared L3 is partitioned only through
-  CLUSTERPARTCR_EL1; a lockstep mismatch is reported to the SoC, which owns
-  the fault reaction. Cortex-A720AE and Neoverse V3AE are a later extension.
+  from it; there is no MPAM, so the shared L3 is partitioned only by the DSU-AE's way partitioning (CLUSTERPARTCR_EL1 with the per-core scheme IDs of CLUSTERTHREADSID_EL1: groups of four ways, at most four private partitions), which restricts allocation (victim selection), not lookup; a lockstep mismatch is reported to the SoC, which owns the fault reaction; errors detected in Lock-mode "cannot be contained", and Arm says the fault reaction time cannot be quantified (TRM §2.11.1.6-7), both AoUs for the integrator. Cortex-A720AE and Neoverse V3AE are a later extension.
   **The board**: AMD's VEK385 (Versal AI Edge Gen 2: 8 Cortex-A78AE in four
-  two-core clusters with documented per-cluster lock-step, SMMUv3, GICv3
-  with ITS, upstream TF-A, U-Boot with UEFI, a public TRM and a QEMU model;
-  about $16,000, 10 to 16 weeks' lead). The runner-up, NVIDIA's Jetson AGX
+  two-core clusters with documented per-cluster lock-step (set per boot-image partition by Bootgen's `cluster=` and `lockstep` attributes and applied by the PLM; AMD's safety briefs say ASIL D "targeted" for the APU in lock-step, ASIL B in split mode), SMMUv3, a GIC-600 (GICv3; an ITS in QEMU's model, the silicon's to confirm in the TRM), upstream TF-A, U-Boot with UEFI, a public TRM and a QEMU model;
+  $15,995 list (EK-VEK385-G), in stock at DigiKey on 2026-10-13 at $17,658, otherwise 12 to 23 weeks' lead). The runner-up, NVIDIA's Jetson AGX
   Orin developer kit (12 Cortex-A78AE, EDK2 UEFI, about $3,500), has the same
-  core and is a cheap porting platform, but Lock-mode is unsupported by
-  NVIDIA's own software, its IOMMU is an SMMUv2 with quirks and the SoC is
-  rated ASIL B for random faults, so it is not the evidence platform. NXP's
-  S32G is excluded (no SMMU). Buying a board is the customer's decision
+  core and is a cheap porting platform, but booting the standard Jetson Linux in Lock-mode is unsupported (NVIDIA's adaptation guide), its IOMMU is an SMMUv2 with quirks and the SoC is rated ASIL B for random faults (both *unverified*), so it is not the evidence platform. NXP's S32G is excluded (no SMMU, *unverified*). Buying a board is the customer's decision
   (§11 Q18). x86-64 stays certified for isolation, with **no
   timing claim**; AoU-4 says so. A bound is a **measured high-water mark plus
   a stated margin**, on the named processors, with multicore interference
@@ -1162,11 +1153,10 @@ still to write.
     exists. The customer sends the messages; drafts are kept outside the
     repository (`~/.local/share/ferrix/microkernel/contacts/`).
   * **Q18, the board: neither yet.** The VEK385 is ordered by the end of M1 at
-    the latest, once M0's research check confirms AMD's per-cluster Lock-mode
-    configuration in its own boot software, the SoC's safety rating and
-    safety-manual access (under NDA if need be), the SMMUv3 and GICv3 ITS,
+    the latest, once M0's research check confirms AMD's per-cluster lock-step configuration (found: Bootgen's per-partition `lockstep` attribute, applied by the PLM; to confirm on the board that it is Arm's Lock-mode, CEMODE 0b11, not Hybrid), the SoC's safety rating and
+    safety-manual access (AMD's Functional Safety Lounge is a paid subscription; whether it holds a Versal Gen 2 safety manual is not public), the SMMUv3 and GICv3 ITS,
     and the price and lead time. No Orin: the Pixel 7 Ferrix already boots
-    has Cortex-A78 cores (Tensor G2; M0 confirms by reading MIDR_EL1), the
+    has Cortex-A78 cores (Tensor G2; M0 confirms by reading MIDR_EL1: expected implementer 0x41, part 0xD41 on the two middle-cluster cores; the A78AE is 0xD42), the
     A78AE's core without split-lock, for early barrier, CSV2 and timing
     measurements; the VEK385's QEMU model covers bring-up.
 
@@ -1398,7 +1388,7 @@ Read on 2026-10-13; each is the source of a figure or claim in §6.5 or §7.
 
 * **Ferrocene**: [ferrocene.dev](https://ferrocene.dev/) (qualifications),
   [26.05.0](https://ferrous-systems.com/blog/ferrocene-26-05-0/) (Rust 1.95),
-  [targets](https://public-docs.ferrocene.dev/main/user-manual/targets/index.html).
+  [targets of 26.05](https://github.com/ferrocene/ferrocene/blob/release/1.95/ferrocene/doc/user-manual/src/targets/index.rst), [pricing](https://ferrocene.dev/pricing/).
 * **Verus**: [repository](https://github.com/verus-lang/verus),
   [toolchain pin](https://raw.githubusercontent.com/verus-lang/verus/main/rust-toolchain.toml),
   [supported features](https://verus-lang.github.io/verus/guide/features.html);
@@ -1413,23 +1403,29 @@ Read on 2026-10-13; each is the source of a figure or claim in §6.5 or §7.
   [Amazon Science](https://www.amazon.science/blog/ec2s-formally-verified-isolation-engine-provides-mathematical-assurance-of-virtual-machine-isolation),
   [AutoCorrode](https://github.com/awslabs/AutoCorrode).
 * **CC:2022 ADV_SPM.1 covers the entire TSF**:
-  [JIL interpretation](https://www.ipa.go.jp/en/security/jisec/g6ovkg00000067p3-att/5_JIL-SPM-Interpretation-v1.0.pdf).
+  [JIL interpretation](https://www.ipa.go.jp/en/security/jisec/g6ovkg00000067p3-att/5_JIL-SPM-Interpretation-v1.0.pdf); the primary texts, [CC:2022 Part 3](https://www.commoncriteriaportal.org/files/ccfiles/CC2022PART3R1.pdf) and [Part 5](https://www.commoncriteriaportal.org/files/ccfiles/CC2022PART5R1.pdf).
 * **DO-330 Criterion 3, TQL-5**:
   [LDRA briefing](https://ldra.com/wp-content/uploads/ldra/DO-330-Test-Tool-Qualification-Technical-Briefing-v2.0.pdf).
 * **Cortex-A78AE Lock-mode** (CEMODE, MPIDR_EL1.MT, no MPAM): Arm's
   [TRM 101779_0002_07](https://documentation-service.arm.com/static/62502fb164e3265f7c90b120);
-  hybrid mode's rating: [Arm blog](https://developer.arm.com/community/arm-community-blogs/b/automotive-blog/posts/functional-safety-compute).
+  hybrid mode's rating: Arm's [Cortex-A78AE page](https://www.arm.com/products/silicon-ip-cpu/cortex-a/cortex-a78ae); L3 partitioning: the [DSU-AE TRM](https://documentation-service.arm.com/static/5f73673b1b758617cd959dbc).
 * **AMD Versal AI Edge Gen 2 / VEK385**:
   [UG1304](https://docs.amd.com/r/en-US/ug1304-versal-acap-ssdg/Key-Hardware-Components),
   [TRM AM026](https://docs.amd.com/r/en-US/am026-versal-ai-edge-prime-gen2-trm),
   [board](https://www.amd.com/en/products/adaptive-socs-and-fpgas/evaluation-boards/vek385.html),
-  [TF-A](https://trustedfirmware-a.readthedocs.io/en/latest/plat/amd-versal2.html).
+  [TF-A](https://trustedfirmware-a.readthedocs.io/en/latest/plat/amd-versal2.html); lock-step: Bootgen's partition attributes and the PLM's `xloader_plat.c` (embeddedsw `xlnx_rel_v2026.1`).
 * **NVIDIA Orin Lock-mode**:
   [Jetson adaptation guide](https://docs.nvidia.com/jetson/archives/r35.2.1/DeveloperGuide/_sources/text/HR/JetsonModuleAdaptationAndBringUp/JetsonAgxOrinSeries.rst.txt);
   **NXP S32G without an SMMU**: [NXP community](https://community.nxp.com/t5/S32G/S32G274A-SMMU-Support-and-Configuration/m-p/2230972).
 
-Not verified by the research and to be confirmed before relying on them: how
-lock-step is configured in AMD's boot tools; AMD's ASIL D status for the
-Versal APU (its briefs say "certified" in one place and "targeted" in
-another); whether Cortex-A720AE and Neoverse V3AE lack SMT; ProvenCore's
-EAL7 certificate.
+Not verified and to be confirmed before relying on them: that AMD's APU
+lock-step is Arm's Lock-mode rather than Hybrid; AMD's ASIL D status for the
+Versal Gen 2 APU (one ADAS brief says "certified", the Gen 2 briefs say
+"targeted" and cite pre-silicon targets; no certificate found); whether a
+Versal Gen 2 safety manual is in the Functional Safety Lounge; the silicon's
+GIC ITS; Verus's 700 lines of axioms; µRust's lack of traits and dynamic
+dispatch; Orin's SMMUv2 and ASIL B rating; the S32G's lack of an SMMU;
+whether Cortex-A720AE and Neoverse V3AE lack SMT; ProvenCore's EAL7
+certificate; Tensor G2's logical CPU numbering. The full check is
+`docs/microkernel/RESEARCH-CHECK.md` (M0, 2026-10-13: 56 claims, 42
+confirmed, 9 corrected, 5 unverified).
