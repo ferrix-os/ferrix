@@ -1061,25 +1061,32 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
 
 * **2026-10-13 (customer)** **Ferrix becomes a microkernel whose ring 0
   is the certified item whole** (`docs/MICROKERNEL.md`, route C with
-  restricted mode). Asked to "plan out the switch of ferrix to become fully
-  certifiable microkernels", reviewed by the certification consultant
-  (ledger lines 812, 837, 847), the customer answered: the Linux ABI served
-  from user space by `linuxd` ("Linux = user space => ok"), which replaces
-  the 2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving
-  of the opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md` §2; "maximum
-  performance", so every Linux-facing row in MICROKERNEL.md §7 aims at
-  today's in-kernel figure and fails above 1.10 times it; a certified
-  `btrfsd` split out at the lift ("btrfs server: ok"); "ASIL D etc, so max
-  certification", so the whole kernel is argued at the top level of each
-  standard (MICROKERNEL.md §6.5: no kernel heap, MC/DC, formal proofs, WCET);
-  a build switch for speculation inside a Linux partition, with the barrier
-  in the certified reference and none in a performance build; ARMv7-A a
-  native-only safety target; feature work in the load allowed during the
-  move with its growth reported; and the reference boot's disk path proven
-  by user-space checks. Still open (MICROKERNEL.md §11): further certified
-  user-space items, keeping the `core` ring, `CLAIM.md`'s two open decisions,
-  the formal work's approach and a PCID-capable measurement host. Each
-  kernel mechanism still gets its own design review before code; nothing is
+  restricted mode). The customer asked to "plan out the switch of ferrix to
+  become fully certifiable microkernels", and answered the plan's questions
+  in these words: "Linux =use space => ok"; "performance: maximum
+  performance"; "btrfs server: ok"; "cert level asil d etc so max
+  certification"; and, by choosing among offered answers: a build switch for
+  speculation inside a Linux partition; ARMv7-A a native-only safety target;
+  feature work in the load allowed during the move, its growth reported; the
+  reference boot's disk path proven by user-space checks; both builds gated;
+  the new targets for the new kernel from M7; IEC 61508 at SIL 4; timing
+  claims on AArch64 safety chips. **The plan reads these as** (MICROKERNEL.md
+  §11): the Linux ABI served from user space by `linuxd`, which replaces the
+  2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
+  opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
+  §2; the certified build (barrier on) gated at 2x today's in-kernel figures
+  and the performance build at 1x, failing above 1.1 times each; a certified
+  `btrfsd`; and **an amendment of the 2026-10-01 targets for the new kernel
+  from M7**: ISO 26262 ASIL D, IEC 61508 SIL 4, EN 50716 SIL 4, DO-178C DAL A
+  objectives, IEC 62304 Class C, Common Criteria EAL6+ (MICROKERNEL.md
+  §6.5). Until the flip, today's item keeps the 2026-10-01 targets (EAL5+,
+  DAL C, Class C, SIL 2); `README.md`, `CLAIM.md` and the manifest's ring
+  targets change in M7. The certification consultant's review is **still
+  open** (ledger lines 812, 837, 847, 858). Still open for the customer
+  (MICROKERNEL.md §11): further certified user-space items, keeping the
+  `core` ring, `CLAIM.md`'s two open decisions, the formal work's approach,
+  a PCID-capable measurement host and the AArch64 safety processor class.
+  Each kernel mechanism gets its own design review before code; nothing is
   built.
 * **2026-10-11 (customer)** **Game mode: a mark first, then the
   protections, behind administrator privilege** (`docs/SETTINGS.md` §8).

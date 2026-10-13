@@ -8,8 +8,8 @@ round-trip work, which continues.
 
 **Shelved (customer, 2026-09-27): off the table for now.** S0 measured the
 seam, and the customer read the numbers and set the plan aside. S1 and
-everything after it are not started. The 2026-09-16 decision stands:
-monolithic core, device drivers in ring 3. What would bring the plan back is
+everything after it are not started. The 2026-09-16 decision stood until
+2026-10-13: monolithic core, device drivers in ring 3. What would bring the plan back is
 a cheaper trip to ring 3 (*The verdict of S0*, below).
 
 **2026-09-30: the trip is being cut** (§ 8). The customer chose a direction
