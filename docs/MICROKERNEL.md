@@ -772,15 +772,20 @@ this table before any stream is sized on it.
     measurements and the timing method's development on the A78 core. Its
     IOMMU is Samsung's own, which Ferrix does not drive, so it carries no
     isolation evidence.
-  * **A Radxa Orion O6 (8 GB, about $200 at launch; to buy in M0 or M1)** for
-    AArch64 bring-up on real hardware **with device isolation**: the CIX P1
-    has Arm SMMUv3 instances described by ACPI's IORT, which Ferrix drives,
-    standard EDK2 UEFI (Arm SystemReady SR), and Cortex-A720 and A520 cores
-    (the A720 is the non-safety twin of the A720AE, this plan's later
-    extension class). It is where K1, K8, K9 and K11 meet a real SMMUv3 and
-    interrupt controller first. A known quirk to plan for: an interrupt storm
-    on one SMMUv3's event queue under Linux, the PCIe one. No Lock-mode, and
-    not the timing claim's class, so no timing evidence from it.
+  * **No board is bought now.** A board with the CIX P1 (Arm SMMUv3
+    instances described by ACPI's IORT, which Ferrix drives; EDK2 UEFI,
+    Arm SystemReady SR; Cortex-A720 and A520 cores, the A720 being the
+    non-safety twin of the A720AE, this plan's later extension class) is
+    the right kind for AArch64 bring-up on real hardware with device
+    isolation, but it is not needed before M3, and in Europe it costs more
+    than the customer's budget today (the customer, 2026-10-13: the Radxa
+    Orion O6 at "352,99€ - 657,69€"; the Orange Pi 6 Plus 16 GB kit was about
+    $224 on AliExpress at launch). Until M3, isolation bring-up runs on
+    QEMU's `virt` with SMMUv3; at M3, a CIX P1 board (the Orange Pi 6 Plus
+    16 GB, or a Radxa Orion O6 or O6N) is bought if one costs about €200 to
+    €230 then, else QEMU carries on. A known quirk to plan for on it: an
+    interrupt storm on the PCIe SMMUv3's event queue under Linux. No
+    Lock-mode, and not the timing class, so no timing evidence from it.
   * **Later, for the claim's evidence: a Lock-mode A78AE platform** (AMD's
     VEK385, an NXP S32N7 or a production SoC an integrator brings), bought
     only when an assessment or a customer project funds it, once its
@@ -808,7 +813,7 @@ this table before any stream is sized on it.
   covers the isolation argument on QEMU at most, and the claim then names no
   timing.
 * **The boards carry no evidence** (OB4, ledger 958). On the Pixel 7 and the
-  Orion O6 only ad-hoc or `desktop` builds run, so their boot lines say
+  CIX P1 board only ad-hoc or `desktop` builds run, so their boot lines say
   `profile=none level=none` (or `desktop`) and no certified profile's rule is
   exercised there; where Ferrix does not drive the board's IOMMU (the Pixel
   7's), the boot line says so (degraded trusted mode, V-03); and every log
@@ -1226,8 +1231,10 @@ still to write.
   * **Q18, the board** (revised by the customer, 2026-10-13: "i thought more
     of a board in the range of 200€ max. Ideally something used, not a 15k$
     board", then, of a used Orin Nano: "450€!"): **the Pixel 7 (owned)** for
-    A78-family measurements, and **a Radxa Orion O6 (about €200)** for
-    AArch64 bring-up with a real SMMUv3 (§6.5, *The boards*). The Lock-mode
+    A78-family measurements, and **no board bought now**: a CIX P1
+    board (Orange Pi 6 Plus 16 GB, or a Radxa Orion O6 or O6N) at M3 if one
+    costs about €200 to €230 then, for AArch64 bring-up with a real SMMUv3,
+    QEMU's SMMUv3 until then (the O6 was "352,99€ - 657,69€") (§6.5, *The boards*). The Lock-mode
     evidence platform is deferred until an assessment or a customer project
     funds it. The Pixel 7's expected MIDR_EL1: implementer 0x41, part 0xD41
     on the two middle-cluster cores (the A78AE is 0xD42).

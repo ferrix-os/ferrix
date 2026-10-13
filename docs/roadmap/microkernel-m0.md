@@ -135,11 +135,12 @@ planted file is its control.
   for early barrier, CSV2 and timing measurements.
 * **The boards** (the customer: about €200; a used Orin Nano was €450):
   **the Pixel 7**, already owned, for the A78 family's measurements, and
-  **a Radxa Orion O6 (8 GB, about €200)**, bought by the customer in M0 or
-  M1, for AArch64 bring-up with a real SMMUv3 and UEFI (`MICROKERNEL.md`
-  §6.5). The Lock-mode evidence platform (the VEK385 or another) is deferred
+  **no board bought in M0**: a CIX P1 board (Orange Pi 6 Plus 16 GB,
+  or a Radxa Orion O6 or O6N) at M3 if one costs about €200 to €230 then,
+  for AArch64 bring-up with a real SMMUv3 and UEFI, and QEMU's SMMUv3 until
+  then (`MICROKERNEL.md` §6.5; the O6 costs €353 and up in Europe). The Lock-mode evidence platform (the VEK385 or another) is deferred
   until funded; its open facts stay as RC4 left them (ledger 957). On the
-  boards only ad-hoc or `desktop` builds run, the boot line says, where Ferrix does not drive the board's IOMMU (the Pixel 7's; the O6's SMMUv3 is driven), that it is not driven, and says `profile=none level=none` (or `desktop`),
+  boards only ad-hoc or `desktop` builds run, the boot line says, where Ferrix does not drive the board's IOMMU (the Pixel 7's; a CIX P1 board's SMMUv3 is driven), that it is not driven, and says `profile=none level=none` (or `desktop`),
   and their logs are filed as measurements, never as gate rows or FIRED
   controls (OB4, ledger 958). Figures from the Pixel 7 are taken with Ferrix on the phone itself, not as a crosvm guest, and each log names its mode (ledger 959).
 
