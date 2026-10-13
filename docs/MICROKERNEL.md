@@ -1308,7 +1308,8 @@ Draft on branch `microkernel-plan`.
   `docs/BUILD-FLAGS.md`, sent for design review.
 * `BUILD-FLAGS.md`'s design review: **OK IF** BF1 to BF9, ledger line 914,
   folded in (BF9 here: `fast`'s row). The interim `present` profile keeps
-  today's item its claim until the flip.
+  today's item its claim until the flip. Diff check OK IF BF10 (ledger 925), folded in;
+  M0's code may start.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).

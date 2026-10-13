@@ -33,7 +33,9 @@ then, and `personality=kernel` alone would allow only `none`. So `present`
 is today's `reference_configuration` as a profile, at its own level
 (`present`, §4), with `personality=kernel` and `fs=kernel` allowed **by a
 dated exception that ends at M5's flip**. When the flip lands, `present` is
-deleted and `max` and `fast` carry the claims.
+deleted. **Between the flip and M7's evidence no profile carries a claim**,
+as the customer's "new kernel, from M7" implies; `max` and `fast` carry
+their claims from M7.
 
 ## 2. The rules
 
@@ -146,10 +148,14 @@ while the flag is off; and `ITEM.md` §5's count of boot options.
 
 ## 4. Levels
 
-The gate compares levels on an ordered scale, `none` < `present` < `sc2` <
-`sc4` for the purpose of "allows" (BF2). **Each level is defined once, in the
-flag file, as its full set of targets**, and the gate compares standard by
-standard, so nothing argued only to ASIL D is called `sc4`:
+**Each level is defined once, in the flag file, as its full set of targets**
+(BF2), and the level names are labels only. **"Allows" means per-standard
+dominance** (BF10, ledger 925): a value allows a level only if, for every
+standard in that level's set, the value's own set reaches at least that
+target. So `present` and `sc2` are incomparable (`present` has DAL C and
+EAL5+, which `sc2` lacks; `sc2` has ASIL B, which `present` lacks), and a
+value that allows `sc2` does not thereby allow `present`. The gate has a test
+for exactly that pair.
 
 | Level | IEC 61508-3 | ISO 26262 | EN 50716 | DO-178C | IEC 62304 | Common Criteria (the TOE) |
 |---|---|---|---|---|---|---|
@@ -158,10 +164,9 @@ standard, so nothing argued only to ASIL D is called `sc4`:
 | `sc2` (`fast`) | SC 2 | ASIL B | SIL 2 | — | Class C | as `fast`'s ST says |
 | `sc4` (`max`) | SC 4 | ASIL D | SIL 4 | DAL A objectives | Class C | EAL6+ |
 
-A value that allows a level allows every level below it. A profile's level
-is the lowest level any of its values allows, and must equal the level the
-profile claims; the gate fails a profile whose values allow less than its
-claim.
+A profile's claim must be allowed by every one of its values, standard by
+standard; the gate fails a profile with any value that does not reach the
+claim's target in some standard.
 
 ## 5. Files and commands
 
@@ -188,7 +193,8 @@ level = "sc2"
 claim_architectures = ["aarch64"]
 image = { driver_updates = "absent" }
 boot_options = { "ferrix.checks" = ["run"], "ferrix.root" = ["*"], "ferrix.onexit" = ["*"] }
-build = { cargo_profile = "release", toolchain = "1.97.1", link = "static-pie" }
+build = { cargo_profile = "release", toolchain = "1.97.1" }
+link = { x86_64 = "static PIE, PIC code model", aarch64 = "static PIE", armv7a = "fixed address with relocations" }
 
 [flags]
 personality = "user"
@@ -272,5 +278,9 @@ Design on branch `microkernel-plan`, 2026-10-13.
   settings (BF4); `ipc_fastpath` in `fast` per the customer's "Only max"
   (BF5); the fast-path move's design note (BF6); `checks=off` (BF7); `max`
   and `fast` before M5 (BF8). To be checked against the diff.
-* **M0's code may start once this text is confirmed** (the consultant: BF1
+* Diff check: **OK IF** BF10, ledger line 925, and **M0's code may start**.
+  BF10 is folded in: per-standard dominance with the scale as labels and a
+  test for the incomparable `present`/`sc2` pair (§4); no claim between the
+  flip and M7 (§1); the link mode per architecture (§5).
+* M0's code may start (the consultant: BF1 to BF4 written in) (the consultant: BF1
   to BF4 written in). The fast-path move gets its own item review (BF6).
