@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 9, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 10, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -216,6 +216,43 @@ init does (`DEVMGR_START` under `ferrix.devmgr=init`, the audit handle,
   a channel instead, and is re-planned for it (§10).
 * Every other Linux call exits to `linuxd`.
 
+### 2.5 One program, parts at different levels
+
+The customer asked (2026-10-13): "would it be possible to run different
+parts of programs with different security levels?" **Yes, as separate
+partitions, and not inside one address space.**
+
+* **The certifiable way: one application, several partitions.** An
+  application is split into parts, each a native process in its own
+  partition with its own level, its own K9 window or budget and its own K12
+  reservation: an ASIL D control loop, an ASIL B supervisor, a QM user
+  interface, and a Linux program (QM) beside them. The parts talk over
+  channels (the round trip's target is under 400 ns, §7) and share memory
+  through VMOs. The partition manager starts the group from its description,
+  which names each part's level, image digest (K14) and every channel and
+  shared VMO between parts. A Linux program reaches a native safety part the
+  same way, through a native call on a channel (§2.4).
+* **What the kernel enforces between levels (K17).** Each job carries a
+  **criticality level** set by the partition manager at creation and never
+  raised afterwards. The kernel refuses any handle transfer that would give a
+  lower-level job (a) a handle to a higher-level job's processes, threads,
+  jobs or address spaces, (b) a write right to a VMO a higher-level job maps
+  other than one the description declares as a channel buffer from lower to
+  higher, or (c) a right to change a higher-level job's budget or
+  reservation. Data a higher level reads from a declared buffer is validated
+  by the reader (ASR-7's rule, in the reader's own code). Freedom from
+  interference between levels then rests on the kernel's spatial (ASR-1,
+  K17), temporal (K9) and resource (K12, K16) isolation, which F1 models.
+* **Not inside one address space at high levels.** Compartments within one
+  process (x86's protection keys, Arm's MTE or POE, language-level
+  boundaries) cannot carry an ASIL D or SC 4 freedom-from-interference
+  argument: protection keys are switched by an unprivileged instruction the
+  low part can execute itself, MTE is probabilistic, and Rust's type safety
+  is not accepted alone as isolation at those levels. They may serve as
+  defence in depth inside one level. CHERI (Arm's Morello) is the one
+  hardware route to certifiable in-process compartments, and is research
+  today.
+
 ## 3. Kernel mechanisms the switch needs
 
 Each is a landing with its own design review before code (CONVENTIONS,
@@ -241,6 +278,7 @@ before any code leaves ring 0.
 | K11 | **Shared processes**: a process created with another's shared region mapped, and its own restricted space | none | **Two handle tables per process.** The *shared* table is the partition's (`linuxd`'s server channels, the cgroup jobs, the pager ports) and serves calls made in normal mode, from `linuxd`'s code; the *private* table is the Linux program's and serves calls made from restricted mode. The kernel picks the table from the mode the call came from, never from an argument. A handle moves between the two only through an explicit call that checks its rights (the way `PORT_FD`'s port reaches `linuxd`, §2.4). A check with a negative control shows that neither side can name the other's handles. The creating `linuxd` gets no handle into the new process's restricted space beyond K2's rights on it |
 | K12 | **Kernel-memory reservation**: a job's reserved frames and kernel heap, guaranteed, beside its limit | limits only (F-35, F-37); the frame watermark of the endfield-oom review (ledger 797) is the first step | a QM partition cannot take the kernel memory a certified partition was promised |
 | K16 | **No kernel heap after boot**: every kernel object made from memory its job has given the kernel (K12's reservation, retyped on creation), never from a shared heap | F-23 made every allocation fallible; F-37 charges them; the heap stays shared | `CLAIM.md` §2: dynamic memory "justified rather than forbidden" does not survive SIL 3 and above, and ISO 26262-6 highly recommends no dynamic objects from ASIL B (§6.5's table). seL4's untyped memory is the reference. The kernel's own boot-time structures are sized at boot and never grow. This retires AoU-5's dynamic-memory justification. **Evidence**: from M6 no global allocator is linked into the kernel (or the one linked refuses every request after boot), held by a check with a negative control (a planted allocation after boot fails it). The retype and revocation rules, and how F-35, F-37 and K12 map onto them, are for K16's own design review; M6's points are re-sized after it |
+| K17 | **Criticality levels on jobs** (§2.5) | jobs and quotas, no level | a level per job, set once by the partition manager and never raised; the three refusals of §2.5 on handle transfer and VMO mapping; each with a check and a negative control (a lower-level job offered a write mapping of a higher-level job's private VMO, then refused) |
 | K13 | **The rebind contract**: a server's restart without its clients' loss | T0's park and take-up, per kind, in ring 0 | `OPAQUE-KERNEL.md` §2 point 6, generalised to user space: a pager VMO handed to the next instance of its server, parked state charged to its clients' jobs (ledger 36). `linuxd` itself is not rebound: **a `linuxd` that dies takes its partition's programs with it** |
 | K14 | **Image integrity for certified user-space items, by kernel-held measurement** | `A.FIRMWARE` covers the kernel image | Whoever starts a certified user-space item (`btrfsd`, a safety partition), with which capabilities, and how its image is shown to be the certified one (ST §9.2; the AoU-26 precedent). Since K15 the creator maps the segments itself, so the kernel measures: **an image VMO is sealed** (immutable from then on) and the kernel computes its digest at sealing; **a process's executable mappings come only from sealed, measured VMOs**, through K2's EXECUTE right; **the process carries the digests of its images**, and a grant that needs a certified driver is checked against the certified list (`A.FIRMWARE` extended over that list and the initramfs). A check with a negative control: an unsealed or unlisted executable mapping, then the grant refused |
 | K15 | **The native ELF loader leaves the kernel** | `PROCESS_CREATE`/`PROCESS_START` run the load ring's loader (`syscall/exec.rs`, `syscall/launch.rs`) in ring 0, an untrusted-input parser | `PROCESS_START` takes an entry point, a stack and a bootstrap channel; the creator maps the image's segments itself through K2, with a user-space loader library (Zircon's process builder is the reference). The native ABI changes, and every native starter (devmgr, `linuxd`, the test programs) moves to the library. The kernel keeps one loader only: for the two first images of §5, read from the initramfs, which K14 vouches for, held to the item's rules with its own requirements |
@@ -538,15 +576,18 @@ first; until the flip `CLAIM.md`'s present sentence stands):
 > 26262 ASIL D. Everything that runs in the processor's privileged mode is
 > the element. It keeps native safety partitions apart from one another and
 > from a partition running unmodified Linux software (QM, carrying no safety
-> claim) in memory, devices and failure on x86-64 and AArch64, and in
-> processor time on Arm Cortex-A78AE processors in Lock-mode. ARMv7-A is
-> outside the first assessment. It has not been assessed.
+> claim) in memory, devices, failure and processor time on Arm Cortex-A78AE
+> processors in Lock-mode. x86-64 and ARMv7-A are outside the first
+> assessment. It has not been assessed.
 
 61508 gives SILs to safety functions; a software element is claimed with a
 systematic capability, hence SC 4. "Out of context" is ISO 26262's term
-(SEooC), used here only for that standard. **ARMv7-A is outside the first
-assessment** because no qualified compiler offers its target (below); when
-it enters, the claim names it as native partitions only, isolation without
+(SEooC), used here only for that standard. **x86-64 and ARMv7-A are outside
+the first assessment** because no qualified compiler offers their targets
+(below; Z1, ledger 902). When x86-64 enters, once the vendor offers
+`x86_64-unknown-none` (F-17, §11 Q17), the claim adds "and in memory,
+devices and failure on x86-64 with an IOMMU, without a timing claim". When
+ARMv7-A enters, it names it as native partitions only, isolation without
 timing, user-memory protection by software alone.
 
 Its rules: never "certified", "is compliant", "compliant with", "a SIL 4
@@ -572,9 +613,10 @@ are items for the vendor (F-17) before any SIL 4 claim. Consequences:
 * **Whether a compiler qualified to SIL 3 suffices for SC 4** is a question
   for the pre-assessment (`CLAIM.md` M2), with V2's object-code verification
   named as the compensating measure.
-* **ARMv7-A's safety role waits on a compiler route** for
-  `armv7a-none-eabi` (F-17); until then it is outside the first assessment
-  (§11 Q7).
+* **x86-64's and ARMv7-A's places in the claim wait on a compiler route**
+  for `x86_64-unknown-none` and `armv7a-none-eabi` (F-17, §11 Q17); until
+  then both are outside the first assessment (§11 Q7). Both stay built,
+  booted and gated as today; only the claim waits.
 
 **What the levels ask, and where.** The standards' texts are not in the
 tree. The clauses below are the plan's and the consultant's reading, marked
@@ -1026,9 +1068,103 @@ still to write.
 * **Q17, Approaching the proof providers** (Proofcraft; the Verus groups or
   CertiK), and the compiler vendor for a SIL 4 qualification of the
   reference target (F-17): the customer's, since both cost money.
+* **Q19, Which profiles carry a claim** (§12): `max` (SC 4 / ASIL D) and
+  `fast` (SC 2 / ASIL B), as proposed, or `max` only, with `fast` an
+  uncertified speed build.
+* **Q20, The in-kernel Linux layer for `desktop`** (§12): keep
+  `personality=kernel` permanently for the fastest uncertified kernel, at the
+  cost of building and gating both forms of the Linux layer, or delete it at
+  the flip as §4 planned.
 * **Q18, Buying the VEK385** (about $16,000, 10 to 16 weeks' lead), or the Jetson
   AGX Orin kit first as a cheaper porting platform (about $3,500).
 
+
+## 12. Build profiles: one source, several kernels
+
+The customer asked (2026-10-13): "can we make it so that some features are
+compile time flaggable similar to Kconfig, so that we can move certain parts
+in and out of the kernel by compile flags and enable or disable certain
+parts of security by flags, so that we have one high speed kernel with
+minimal certifications e.g. ASIL B and one with the highest possible SIL D".
+**Yes, with one rule: only named profiles carry a claim, and nothing below a
+profile's level runs in its ring 0.** (The plan reads "SIL D" as the top
+level the customer chose earlier: SC 4 / ASIL D.)
+
+### 12.1 The options
+
+Each option is a compile-time `--cfg` that xtask sets from one configuration
+file, never a Cargo feature (`kernel_cargo_features` stays 0) and never a
+boot option. Code a profile does not select is not in its image, so it is
+neither dead nor deactivated code in that profile, which is why compile time
+is the right place for this, as `ITEM.md` §5 already argues for
+`--mitigations`.
+
+| Option | Values | What it moves or relaxes | Highest level it allows |
+|---|---|---|---|
+| `personality` | `user`, `kernel` | `kernel` links `linuxd` (QM) into ring 0 for speed: the cached-file path loses the restricted-mode round trip | `user`: any; `kernel`: **no claim** |
+| `fs_in_kernel` | `off`, `btrfs` | `btrfs` links the certified btrfs crates into ring 0 instead of `btrfsd` | as the crates' own level |
+| `partition_speculation` | `barrier`, `domain` | §11 Q5's build switch | `barrier`: any; `domain`: as §11 Q16 decides |
+| `mitigations` | `on`, `off` | F-31's switch | `on`: any; `off`: no claim |
+| `kernel_memory` | `retyped`, `heap` | K16's no-heap model, or today's fallible, charged shared heap (F-23, F-37) | `retyped`: any; `heap`: up to SC 2 / ASIL B, with AoU-5's justification |
+| `schedule` | `static+edf`, `edf` | K9's static windows, or EDF with CBS admission only | `edf`: up to SC 2 / ASIL B |
+| `fastpath` | `off`, `on` | the 0x1013 fast path (off in the certified configuration, customer 2026-10-02) and K1's fastpath | per each fast path's own review |
+| `checks` | `on`, `off` | the in-kernel boot checks | `on` in every certified profile |
+
+Each option value declares the **highest level it allows** in the
+configuration file, and its dependencies and conflicts, as Kconfig's
+`depends on` does. A component may be linked into ring 0 only if it is
+certified at or above the profile's level: the item-boundary gate reads the
+profile and each component's level from `certification-item.json` and fails
+a profile that breaks the rule, with a planted QM component in a certified
+profile as its negative control.
+
+### 12.2 The profiles
+
+| Profile | Claim | Options |
+|---|---|---|
+| **`max`** | IEC 61508-3 SC 4 / ISO 26262 ASIL D, the first assessment (§6.5) | `personality=user`, `fs_in_kernel=off`, `partition_speculation` per Q16, `mitigations=on`, `kernel_memory=retyped`, `schedule=static+edf`, `fastpath` per its reviews, `checks=on` |
+| **`fast`** | IEC 61508-3 SC 2 / ISO 26262 ASIL B | `personality=user`, `fs_in_kernel=btrfs` (if the crates are certified at ASIL B or above), `partition_speculation=domain`, `mitigations=on`, `kernel_memory=heap`, `schedule=edf`, `fastpath=on`, `checks=on` |
+| **`desktop`** | **none** | `personality=kernel`, `fs_in_kernel=btrfs`, the rest as the customer's machines want, `mitigations` per F-31 and game mode |
+
+**Why `fast` keeps the Linux layer out of ring 0.** ASIL B still needs
+freedom from interference between the kernel and the QM Linux layer, and
+with `linuxd` in ring 0 that is `CLAIM.md` §3.1's unwritten argument again.
+So moving the Linux layer into the kernel is a `desktop` choice, with no
+claim; `fast` gets its speed from the relaxed options instead.
+
+### 12.3 What it costs
+
+* **Evidence per certified profile.** Coverage, rows, boot-line comparisons
+  and the safety manual's configuration section are produced per profile
+  and per architecture. Two certified profiles (`max`, `fast`) roughly
+  double M7's evidence work and the gates' run time for the kernel's rows;
+  MC/DC (V1), the proofs (F1, F2) and T1 apply to `max` only. *Guess*: 40 to
+  80 points for the configuration system and the second profile's evidence.
+* **Two memory models and two schedules** in one kernel (`retyped` and
+  `heap`, `static+edf` and `edf`) are code that F2 proves in one form only.
+  The plan proposes that F2 covers `max`, and `fast`'s other forms carry
+  ASIL B's evidence (requirements, statement and branch coverage).
+* **`personality=kernel` lives on.** §4 deleted the in-kernel Linux layer at
+  the flip; with `desktop` it stays, built from the same source through the
+  shim, and `xtask check` builds both forever. That keeps the shim a
+  permanent interface and doubles the Linux layer's build and boot rows.
+* **The configuration tool is a tool.** xtask turns the configuration into
+  `--cfg` flags that select code, so its output is verified independently:
+  the image carries its resolved option set in a read-only section, the
+  kernel prints it in a boot line, and the gate compares it with the
+  profile's expected set. That keeps xtask out of tool qualification beyond
+  T2 / TQL-5 for the comparison.
+* **Arbitrary combinations carry no claim.** Any option set that is not a
+  named profile builds and boots, and its boot line says "no claim".
+
+### 12.4 Where it lands in the stages
+
+M0 adds the configuration file, the resolver, the boot line and the
+profile rule in the item-boundary gate (with today's options:
+`mitigations`, `fastpath`, `checks`); each K-row that adds an option adds
+its line. M5 keeps `personality=kernel` for `desktop` instead of deleting
+it. M7 produces `max`'s and `fast`'s evidence. §11 Q19 and Q20 ask which
+profiles to certify and whether `desktop` keeps the in-kernel Linux layer.
 
 ## Where it stands
 
@@ -1097,6 +1233,12 @@ Draft on branch `microkernel-plan`.
   element stated, the generator's tool class (Y6); the toolchain's
   consequences (Y7); the research in M0's check (Y8). To be checked against
   the diff.
+* Eighth round (revision 9): **OK IF** Z1, ledger line 902; with Z1 the
+  design review of the plan itself is complete. Revision 10 (this text)
+  folds in Z1 (x86-64 outside the first assessment with ARMv7-A) and adds
+  the customer's two new requests of 2026-10-13: programs with parts at
+  different levels (§2.5, K17) and build profiles (§12, Q19, Q20). Sent to
+  the consultant for review of the additions.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
