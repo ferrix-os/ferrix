@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 14, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 15, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -901,33 +901,58 @@ both"):
 | Cold `test-rustc` and the self-host build | to measure in M0 | 1.00x |
 | Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | 1.00x |
 
-**The certified build's speculation rule** (proposed, for review). An IBPB
-on every restricted exit and entry protects `linuxd` from branch-target
-poisoning by the program it serves. The same protection, without the
-per-call IBPB:
+**The certified build's speculation rule** (ledger 941, HR1 to HR6). The
+first proposal, `hardened` (retpoline-style `linuxd` code, the return stack
+refilled, the IBPB kept only between programs), **was refused**: on nazuna,
+SRSO (Inception) still works from user to user (SRSO_NO is clear; only
+SRSO_USER_KERNEL_NO is set), so a program can train phantom CALL predictions
+that make `linuxd`'s own returns speculate to targets it chooses. Retpolines
+remove indirect branches, not returns or phantom predictions; the refill and
+ERAPS clear the return predictor at the switch, but the poisoned entries fire
+later inside `linuxd`. More generally, it left open whatever IBPB flushes and
+a retpoline does not touch (branch-type and phantom predictions without
+BTC_NO, SRSO without SRSO_NO, BHI, ITS), and whole-`linuxd` retpolines have
+no route on the stable toolchain. **The rule `max` uses instead:**
 
-* **`linuxd`'s call path has no poisonable indirect branch**: built with
-  retpoline-equivalent indirect calls (or none, by the direct dispatch of the
-  seL4 methods above), with a compiler-setting rule and a check over the
-  shipped binary that finds no unprotected indirect branch on the path, and a
-  planted one as its negative control.
-* **Returns are protected**: the return-stack refill, or ERAPS where
-  SPECULATION §3 allows it, on every restricted exit (about 20 ns).
-* **Spectre v1 in `linuxd`** is handled by clamped indices on every
-  program-controlled index, as in the kernel; an IBPB never stopped v1, so
-  this is needed in any case.
-* **The full IBPB stays at every switch between different programs**
-  (different restricted spaces), as SPECULATION §3 does today between
-  programs not in one marked domain, and at every switch between
-  partitions; `smt=off` and `ssbd=always` stay in `max`.
-* **On the AArch64 class**, the program and `linuxd` run under different
-  ASIDs and FEAT_CSV2 keeps branch-predictor targets from crossing them; the
-  board measures what, if any, barrier is still needed.
+* **An IBPB on every restricted exit** (program to `linuxd`), **none on
+  entry**, with IBPB_BRTYPE's semantics where the processor has them (SBPB is
+  not enough while SRSO_NO is clear). The full IBPB stays at every switch
+  between different programs and between partitions; the return-stack refill
+  or ERAPS stays on exit; `smt=off` and `ssbd=always` stay. **Why the entry
+  barrier adds nothing to FDP_IFC between Linux processes**: `linuxd`
+  already holds the whole partition's data, and any other program's training
+  is flushed at its own exit and again at the switch between programs.
+  `SPECULATION.md` §3 and the ST record that argument. A check counts one
+  IBPB per exit, with a negative control that removes it and fires.
+* **Skipping even the exit IBPB** is allowed only on a processor that reports
+  SRSO_NO, BTC_NO, not BHI-affected (or BHI_DIS_S set, with `linuxd`'s
+  indirect branches retpolined and checked over the binary), not
+  ITS-affected, and the return predictor cleared at the root switch; decided
+  at boot, printed on the boot line, failing closed to the IBPB if any bit is
+  missing, including when a hypervisor hides them; and only with a stable
+  toolchain route for whole-`linuxd` retpolines. **nazuna does not qualify.**
+* **AArch64**: CSV2 with distinct ASIDs covers branch targets, not branch
+  history, so every restricted exit runs Arm's Spectre-BHB clearing sequence
+  (CLRBHB, or the loop with Arm's published count for the core) unless the
+  core reports history isolation across contexts; SSBS provides SSBD.
+  Measured on the board in M3.
+* **A residual both rules share**: no barrier closes Spectre v1 gadgets in
+  `linuxd`, which is QM code outside the TSF. `SPECULATION.md` §3, the ST's
+  FDP_IFC and an assumption of use say so for Linux processes within one
+  partition; v1 clamps in `linuxd` are defence in depth, not claimed
+  evidence.
+* **The gate measures what the claim needs**: the gate's CPU model passes
+  through IBPB_BRTYPE, ERAPS, SRSO_NO, SRSO_USER_KERNEL_NO and BTC_NO, or the
+  kernel treats a missing bit as affected; `max`'s row is always measured
+  with its real barrier, never a lighter one.
 
-Expected cost on nazuna: seL4's 440 ns plus the refill (about 20 ns each way)
-and the retpoline-style calls on the path (a few tens of nanoseconds),
-**about 500 ns against the 660 ns limit**. If the review refuses the rule,
-the per-call IBPB stays and `max`'s limit returns to the customer.
+**Is 660 ns reachable on nazuna? Only just.** seL4's round trip without the
+refill is 400 to 410 ns (ERAPS clears the return predictor on the page-table
+switch); one IBPB costs about 230 ns under KVM; so this rule at seL4's level
+is about **630 to 640 ns, a 20 to 30 ns margin** under a limit with no
+tolerance. It holds only if `max`'s path matches seL4's own cost. **If it
+misses, the customer decides again on the limit; the barrier is not traded
+for speed.**
 
 **What the restricted-mode row is expected to cost** (x86-64 on nazuna; M3
 measures each). The first estimate, by parts, was 0.7 to 1.2 us for (ii) and
@@ -941,7 +966,8 @@ figure as the target to reach:
 |---|---|---|---|
 | (ii), the performance build | about 440 ns | 393 ns (1.10 times 357) | **reachable by beating seL4 by about 11%**, which is the customer's existing goal (under 400 ns) |
 | (i), the certified build (`max`), with the per-call IBPB | about 900 ns (seL4's 440 plus the barrier, about 460) | 660 ns (1.5 times seL4's 440) | fails |
-| (i), the certified build (`max`), under the rule above | about 500 ns | 660 ns | **within the limit**, if the rule is accepted |
+| (i), the certified build (`max`), the refused `hardened` rule | about 500 ns | 660 ns | refused (SRSO user to user, ledger 941) |
+| (i), the certified build (`max`), IBPB on exit only (the rule above) | about 630 to 640 ns | 660 ns | **within the limit by 20 to 30 ns**, only if the path matches seL4's cost |
 
 A Linux program making 10,000 calls a second (Chrome makes about 8,000)
 would spend under 0.1% of a processor more than today at (ii)'s target; a
@@ -1119,8 +1145,9 @@ still to write.
   * **Q16, the barrier**: `max` on every restricted exit and entry, no SMT on
     x86-64, the row at 900 ns failing above 990 ns (option (a)), **since
     replaced by the customer**: "can you optimze max as well with a 1.5x
-    seL4 difference max", so `max`'s row is 660 ns at most, reached by §7's
-    proposed speculation rule (under review); `fast` at
+    seL4 difference max", so `max`'s row is 660 ns at most, with an IBPB on
+    every restricted exit and none on entry (§7, ledger 941; expected 630 to
+    640 ns on nazuna); `fast` at
     partition switches with STIBP; `desktop` barriers only between login
     sessions' domains, SSBD on request, game mode's trades compiled in,
     `mitigations=off` by `--set`, and Zenbleed's and GDS's fixes on in every
@@ -1356,9 +1383,11 @@ Draft on branch `microkernel-plan`.
 * The customer delegated Q16 to Q18 to the consultant; its decisions,
   ledger 926, are in §11 and `BUILD-FLAGS.md` §3 (revision 13, this text).
   `max`'s restricted row is 900 ns, failing above 990 (§7).
-* Revision 14 (this text): the customer's 1.5x-seL4 limit for `max` (660
-  ns) and the speculation rule that reaches it without the per-call IBPB
-  (§7), sent for review.
+* Revision 14 (16aa1fd38): the customer's 1.5x-seL4 limit for `max` (660
+  ns) and a `hardened` rule without the per-call IBPB. Review, ledger 941:
+  **OK IF** HR1 to HR7, `hardened` refused (SRSO user to user on Zen 5).
+  Revision 15 (this text) takes the rule the consultant accepted: an IBPB
+  on every restricted exit, none on entry, about 630 to 640 ns on nazuna.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
