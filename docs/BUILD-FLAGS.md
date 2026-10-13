@@ -82,23 +82,77 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
 
 `cfg` names take the form `ferrix_<flag>="<value>"`. "Today" says where the
 flag's choice lives now; "Lands" is the `MICROKERNEL.md` stage that builds
-the second value.
+the second value. **"Allows" lists, for each value, the levels it allows**,
+explicitly (§4: levels compare standard by standard, so `sc4` covers
+`present` but `sc2` does not; DF1, ledger 931). "All" means `sc4`,
+`present`, `sc2` and `none`.
 
-| Flag | Values | What it selects | `max` | `fast` | `desktop` | Highest level per value | Today | Lands |
-|---|---|---|---|---|---|---|---|---|
-| `personality` | `user`, `kernel` | the Linux layer as `linuxd` in user space, or built into ring 0 | `user` | `user` | `kernel` | `user`: SC 4; `kernel`: none | in ring 0 only | M5 |
-| `fs` | `server`, `kernel` | btrfs as `btrfsd`, or the btrfs crates in ring 0 with today's glue. `kernel` requires `personality=kernel` | `server` | `server` | `kernel` | `server`: SC 4; `kernel`: none | in ring 0 only | M5 |
-| `mitigations` | `on`, `off` | F-31's speculation defences | `on` | `on` | `on` | `on`: SC 4; `off`: none | `--cfg ferrix_mitigations_off`, renamed | M0 |
-| `partition_speculation` | `exit`, `hardened`, `partition` | `exit`: an IBPB on every restricted exit and entry; `hardened`: `linuxd`'s call path free of poisonable indirect branches, the return stack refilled on every exit, the IBPB at every switch between programs and partitions (`MICROKERNEL.md` §7, proposed, under review); `partition`: barriers only at partition switches (§11 Q5, Q16). `partition` requires `personality=user` | `hardened` if the review accepts it, else `exit` (the customer, 2026-10-13: 1.5x seL4 for `max`) | `partition` | not applicable | `exit`: SC 4; `hardened`: SC 4 if accepted; `partition`: SC 2 | — | M3 |
-| `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the customer: the rule binds `max` only) | `on` | `off`: SC 4; `on`: SC 2, and SC 4 once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
-| `restricted_fastpath` | `off`, `on` | K1's fastpath for the restricted exit and re-entry. Requires `personality=user` | per K1's review | `on` | not applicable | per K1's review | — | M3 |
-| `kernel_memory` | `retyped`, `heap` | K16's memory from the job's own reservation, or today's fallible, charged shared heap | `retyped` | `heap` | `heap` | `retyped`: SC 4; `heap`: SC 2, under `fast`'s justification | `heap` only | M6 |
-| `schedule` | `windows`, `edf`, `fair` | K9's static windows with EDF inside them; stage 14's HardRt (partitioned EDF with CBS); or today's fair scheduler | `windows` | `edf` | `fair` | `windows`: SC 4; `edf`: SC 2; `fair`: none | `fair` only | M3 |
-| `checks` | `on`, `off` | the in-kernel boot checks compiled in. With `on`, the boot option `ferrix.checks` still chooses whether they run, as today; a certified profile permits it only with the checks running. `off` is for ad-hoc builds only, and `xtask check` builds an `off` variant on every architecture so it cannot rot, as it does `mitigations=off` today (BF7) | `on` | `on` | `on` | `on`: SC 4; `off`: none | always compiled in | M0 |
-| `program_barrier` | `switch`, `session` | `switch`: the barrier at every switch between programs not in one marked speculation domain (today's rule, SPECULATION §3). `session`: barriers only between domains, each login session's job marked by sessiond at creation under the 2026-10-01 rules (MANAGE holder, at creation, audited); set-id `execve`, a credential change and `PR_SET_DUMPABLE` still leave the domain, so `su`, `login` and other users' sessions keep the barrier | `switch` | `switch` | `session` | `switch`: SC 4; `session`: none | `switch` | M0 |
-| `ssbd` | `always`, `on_request` | Speculative Store Bypass Disable for every program (today), or only for programs that ask by `prctl` or `seccomp`, as Linux does by default | `always` | `always` | `on_request` | `always`: SC 4; `on_request`: none | `always` | M0 |
-| `smt` | `off`, `stibp` | `off`: one hardware thread per core is started (IBPB does not cover cross-thread channels; AoU-11 today); `stibp`: sibling threads run, with STIBP (or eIBRS/AutoIBRS's own cover) | `off` | `stibp` | `stibp` | `off`: SC 4; `stibp`: SC 2 | AoU-11 (SMT off assumed) | M0 |
-| `runtime_trades` | `none`, `game_mode` | whether the image contains game mode's privileged, per-application run-time trades of protections (the customer, 2026-10-11); with `none` their code is absent | `none` | `none` | `game_mode` | `none`: SC 4; `game_mode`: none | not built | with game mode's design |
+| Flag | Values | What it selects | `max` | `fast` | `desktop` | `present` | Allows | Today | Lands |
+|---|---|---|---|---|---|---|---|---|---|
+| `personality` | `user`, `kernel` | the Linux layer as `linuxd` in user space, or built into ring 0 | `user` | `user` | `kernel` | `kernel` (dated exception, ends at M5's flip) | `user`: all; `kernel`: `none` | in ring 0 only | M5 |
+| `fs` | `server`, `kernel` | btrfs as `btrfsd`, or the btrfs crates in ring 0 with today's glue. `kernel` requires `personality=kernel` | `server` | `server` | `kernel` | `kernel` (the same exception) | `server`: all; `kernel`: `none` | in ring 0 only | M5 |
+| `mitigations` | `on`, `off` | F-31's speculation defences (Zenbleed's and GDS's fixes are outside it, below) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | `--cfg ferrix_mitigations_off`, renamed | M0 |
+| `partition_speculation` | `exit`, `hardened`, `partition` | `exit`: an IBPB on every restricted exit and entry; `hardened`: `linuxd`'s call path free of poisonable indirect branches, the return stack refilled on every exit, the IBPB at every switch between programs and partitions (`MICROKERNEL.md` §7, proposed, under review); `partition`: barriers only at partition switches. Requires `personality=user` | `hardened` if the review accepts it, else `exit` (the customer: 1.5x seL4 for `max`) | `partition` | not applicable | not applicable | `exit`: all; `hardened`: all, if accepted; `partition`: `sc2`, `none` | — | M3 |
+| `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
+| `restricted_fastpath` | `off`, `on` | K1's fastpath for the restricted exit and re-entry. Requires `personality=user` | per K1's review | `on` | not applicable | not applicable | per K1's review | — | M3 |
+| `kernel_memory` | `retyped`, `heap` | K16's memory from the job's own reservation, or today's fallible, charged shared heap | `retyped` | `heap` | `heap` | `heap` | `retyped`: all; `heap`: `present` (AoU-5), `sc2` (under `fast`'s justification), `none` | `heap` only | M6 |
+| `schedule` | `windows`, `edf`, `fair` | K9's static windows with EDF inside them; stage 14's HardRt (partitioned EDF with CBS); or today's fair scheduler | `windows` | `edf` | `fair` | `fair` | `windows`: all; `edf`: `sc2`, `present`, `none`; `fair`: `present` (with AoU-4: no timing claim), `none` | `fair` only | M3 |
+| `checks` | `on`, `off` | the in-kernel boot checks compiled in. With `on`, the boot option `ferrix.checks` still chooses whether they run, as today; a certified profile permits it only with the checks running. `off` is for ad-hoc builds only, and `xtask check` builds an `off` variant on every architecture so it cannot rot (BF7) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | always compiled in | M0 |
+| `program_barrier` | `switch`, `session` | `switch`: the barrier at every switch between programs not in one marked speculation domain (today's rule, SPECULATION §3). `session`: §3.1 below | `switch` | `switch` | `session` | `switch` | `switch`: all; `session`: `none` | `switch` | M0 |
+| `ssbd` | `always`, `on_request` | Speculative Store Bypass Disable for every program (today), or per thread for programs that ask (§3.1) | `always` | `always` | `on_request` | `always` | `always`: all; `on_request`: `none` | `always` | M0 |
+| `smt` | `off`, `stibp` | `off`: the kernel runs one hardware thread per core (§3.1); `stibp`: sibling threads run, with STIBP or eIBRS/AutoIBRS's own cover | `off` | `stibp` | `stibp` | `stibp` | `off`: all; `stibp`: `sc2`, `present`, `none` | `stibp` (SMT runs today; AoU-11 asks the integrator to disable it only on MDS-affected parts) | M0 |
+| `runtime_trades` | `none`, `game_mode` | whether the image contains game mode's privileged, per-application run-time trades (§3.1); with `none` their code is absent | `none` | `none` | `game_mode` | `none` | `none`: all; `game_mode`: `none` | not built | with game mode's design |
+
+### 3.1 The speculation flags' mechanisms (ledger 931)
+
+* **`program_barrier=session`** (DF2) is a **desktop-only departure** from
+  the 2026-10-01 domain rules, at level `none`; those rules stay unchanged
+  for every certified value. (a) Under `session` a domain is a marked job
+  **and its whole subtree**, since a session's applications run in child
+  cgroup jobs; a move within the subtree stays in the domain, a move out
+  leaves it. (b) A program outside every domain keeps the barrier to and
+  from everything: "barriers only between domains" never means "none for
+  unmarked programs". (c) A program that asks by
+  `prctl(PR_SPEC_INDIRECT_BRANCH)`, or runs under a seccomp filter, leaves
+  the session's domain, so a browser's sandboxed renderer, running a
+  website's code, keeps the barrier against the rest of the session. (d)
+  **F-64 is fixed before `session`'s code lands**: `session` makes domain
+  leaves common (every `su`, `sudo`, `login`, `pkexec`, and (c)). (e)
+  `SPECULATION.md` gains a desktop section naming `session`'s exposure.
+* **`ssbd=on_request`** (DF3): SSBD is a per-thread setting, written at a
+  context switch only when the next thread's setting differs (`SPEC_CTRL`,
+  or `VIRT_SPEC_CTRL` under AMD's KVM). The kernel runs with the current
+  thread's setting, as Linux does, and that exposure is named in
+  `SPECULATION.md`. `PR_GET_SPECULATION_CTRL` answers truthfully in every
+  profile, and inheritance across `fork` and `exec` follows Linux.
+* **`smt=off`** (DF4) is done by the kernel, not left to firmware. (a)
+  x86-64: siblings are found from CPUID's topology leaves (0x1F, 0xB); only
+  each core's first thread is started for work, and the others are parked by
+  the kernel after the setup a parked thread needs (on Intel, `CR4.MCE` set:
+  a machine-check broadcast reaching a sibling left in wait-for-SIPI with
+  `CR4.MCE` clear shuts the machine down, which is why Linux brings siblings
+  up once under `nosmt`). Firmware with SMT off is accepted as equivalent and
+  named on the boot line. (b) AArch64: a check only, since the A78AE has no
+  SMT; `MPIDR_EL1.MT` reads 1 there, so topology comes from the firmware
+  tables' CPU map. (c) A boot check counts the threads running per core and
+  requires 1 under `smt=off`, with a negative control that starts one
+  sibling and fires it.
+* **Game mode's trades** (DF5), under `runtime_trades=game_mode`: per
+  application and audited, and only from the relaxable set around the game's
+  job: the program barrier, SSBD and STIBP. They never trade `desktop`'s
+  always-on list, since the kernel's entry defences protect the whole machine
+  from the game. Turning everything off is `mitigations=off`, a build, never
+  a run-time trade.
+* **Moving Zenbleed's and GDS's fixes out of the `mitigations` flag** (DF6)
+  is a core code change (`speculation::vector_leak` and the
+  `mitigations=off` build), and it changes `SPECULATION.md` §1's "off
+  compiles out every side-channel defence". It gets its own small review
+  with M0's flag work, and AoU-11's Zenbleed and GDS sentence is restated.
+* **The light values show on every desktop boot** (DF8): a check that
+  `desktop`'s boot line names `session`, `on_request` and `game_mode`,
+  besides the planted controls (`program_barrier=session` in `max`,
+  `runtime_trades=game_mode` in `fast`, both refused) and (c)'s sibling
+  count.
 
 Not flags, and why:
 
@@ -304,6 +358,10 @@ Design on branch `microkernel-plan`, 2026-10-13.
   settings (BF4); `ipc_fastpath` in `fast` per the customer's "Only max"
   (BF5); the fast-path move's design note (BF6); `checks=off` (BF7); `max`
   and `fast` before M5 (BF8). To be checked against the diff.
+* The four new flags' design review: **OK IF** DF1 to DF8, ledger line 931,
+  folded in (the `present` column and explicit levels; §3.1's mechanisms;
+  the contact drafts corrected outside the repository). The 1.5x-seL4 rule
+  for `max` (`partition_speculation=hardened`) is still under review.
 * Diff check: **OK IF** BF10, ledger line 925, and **M0's code may start**.
   BF10 is folded in: per-standard dominance with the scale as labels and a
   test for the incomparable `present`/`sc2` pair (§4); no claim between the
