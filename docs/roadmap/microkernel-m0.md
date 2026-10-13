@@ -133,15 +133,12 @@ planted file is its control.
   feature newer than Ferrocene's creeps into the code to be certified.
 * **The Pixel 7's cores**: read MIDR_EL1 on the device to confirm Cortex-A78,
   for early barrier, CSV2 and timing measurements.
-* **The VEK385's four facts**, so it can be ordered by the end of M1: AMD's
-  per-cluster Lock-mode configuration in its own boot software, the SoC's
-  safety rating and safety-manual access, the SMMUv3 and GICv3 ITS, the
-  price and lead time. **Still open after the research check** (RC4, ledger
-  957): AMD says ASIL D only "targeted"; the safety manual's availability is
-  unknown (the Functional Safety Lounge is a paid subscription); the
-  silicon's GIC ITS is unconfirmed; and which CEMODE the PLM writes (Arm's
-  Lock-mode, 0b11, or Hybrid) must be confirmed from `xloader_plat.c` or
-  AMD's documentation before buying. The price and lead time are confirmed.
+* **The boards** (the customer: about €200; a used Orin Nano was €450):
+  **the Pixel 7**, already owned, for the A78 family's measurements, and
+  **a Radxa Orion O6 (8 GB, about €200)**, bought by the customer in M0 or
+  M1, for AArch64 bring-up with a real SMMUv3 and UEFI (`MICROKERNEL.md`
+  §6.5). The Lock-mode evidence platform (the VEK385 or another) is deferred
+  until funded; its open facts stay as RC4 left them (ledger 957).
 
 ## What the customer does in M0
 

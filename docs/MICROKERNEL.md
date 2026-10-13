@@ -760,18 +760,33 @@ this table before any stream is sized on it.
   Software facts from Arm's TRM that the kernel must honour: MPIDR_EL1.MT
   reads 1 although the core is not multithreaded, so SMT is never inferred
   from it; there is no MPAM, so the shared L3 is partitioned only by the DSU-AE's way partitioning (CLUSTERPARTCR_EL1 with the per-core scheme IDs of CLUSTERTHREADSID_EL1: groups of four ways, at most four private partitions), which restricts allocation (victim selection), not lookup; a lockstep mismatch is reported to the SoC, which owns the fault reaction; errors detected in Lock-mode "cannot be contained", and Arm says the fault reaction time cannot be quantified (TRM §2.11.1.6-7), both AoUs for the integrator. Cortex-A720AE and Neoverse V3AE are a later extension.
-  **The board**: AMD's VEK385 (Versal AI Edge Gen 2: 8 Cortex-A78AE in four
-  two-core clusters with documented per-cluster lock-step (set per boot-image partition by Bootgen's `cluster=` and `lockstep` attributes and applied by the PLM; AMD's safety briefs say ASIL D "targeted" for the APU in lock-step, ASIL B in split mode), SMMUv3, a GIC-600 (GICv3; an ITS in QEMU's model, the silicon's to confirm in the TRM), upstream TF-A, U-Boot with UEFI, a public TRM and a QEMU model;
-  $15,995 list (EK-VEK385-G), in stock at DigiKey on 2026-10-13 at $17,658, otherwise 12 to 23 weeks' lead). The runner-up, NVIDIA's Jetson AGX
-  Orin developer kit (12 Cortex-A78AE, EDK2 UEFI, about $3,500), has the same
-  core and is a cheap porting platform, but booting the standard Jetson Linux in Lock-mode is unsupported (NVIDIA's adaptation guide), its IOMMU is an SMMUv2 with quirks and the SoC is rated ASIL B for random faults (both *unverified*), so it is not the evidence platform. NXP's S32G is excluded (no SMMU, *unverified*). Buying a board is the customer's decision
-  (§11 Q18). x86-64 stays certified for isolation, with **no
-  timing claim**; AoU-4 says so. A bound is a **measured high-water mark plus
-  a stated margin**, on the named processors, with multicore interference
-  channels identified and bounded per AMC 20-193 / CAST-32A (shared caches,
-  interconnect, memory controller), and static analysis where a qualified
-  tool exists for the core. F-24 changes from "no WCET claimed" to these
-  bounds on these processors.
+  **The boards** (the customer, 2026-10-13: "i thought more of a board in
+  the range of 200€ max. Ideally something used, not a 15k$ board"). A used
+  Jetson Orin Nano (six Cortex-A78AE, split mode only, an SMMUv2 Ferrix does
+  not drive) was proposed first.
+  The customer then found a used Orin Nano at €450, over budget ("the :
+  NVIDIA's Jetson Orin Nano used is 450€!"). So:
+  * **The Pixel 7 (already owned, €0)** for the A78 family's measurements:
+    two Cortex-A78 cores (Tensor G2, the A78AE's core without split-lock),
+    Ferrix already boots on it. It serves the barrier, CSV2 and BHB
+    measurements and the timing method's development on the A78 core. Its
+    IOMMU is Samsung's own, which Ferrix does not drive, so it carries no
+    isolation evidence.
+  * **A Radxa Orion O6 (8 GB, about $200 at launch; to buy in M0 or M1)** for
+    AArch64 bring-up on real hardware **with device isolation**: the CIX P1
+    has Arm SMMUv3 instances described by ACPI's IORT, which Ferrix drives,
+    standard EDK2 UEFI (Arm SystemReady SR), and Cortex-A720 and A520 cores
+    (the A720 is the non-safety twin of the A720AE, this plan's later
+    extension class). It is where K1, K8, K9 and K11 meet a real SMMUv3 and
+    interrupt controller first. A known quirk to plan for: an interrupt storm
+    on one SMMUv3's event queue under Linux, the PCIe one. No Lock-mode, and
+    not the timing claim's class, so no timing evidence from it.
+  * **Later, for the claim's evidence: a Lock-mode A78AE platform** (AMD's
+    VEK385, an NXP S32N7 or a production SoC an integrator brings), bought
+    only when an assessment or a customer project funds it, once its
+    open facts are settled (RC4, ledger 957). Until then the timing claim's
+    method is developed and measured on split-mode A78AE, which the
+    claim does not cite as evidence.
 * **Independence.** F-27 (independent reviewers), F-28 (a QMS) and F-29 (a
   position on AI-authored code, which ALC_DVS.2 makes pressing) block more at
   these levels, not less. The consultant's reviews stay internal.
@@ -1181,13 +1196,14 @@ still to write.
     contract; a Common Criteria lab after the assessor has answered and F1
     exists. The customer sends the messages; drafts are kept outside the
     repository (`~/.local/share/ferrix/microkernel/contacts/`).
-  * **Q18, the board: neither yet.** The VEK385 is ordered by the end of M1 at
-    the latest, once M0's research check confirms AMD's per-cluster lock-step configuration (found: Bootgen's per-partition `lockstep` attribute, applied by the PLM; to confirm on the board that it is Arm's Lock-mode, CEMODE 0b11, not Hybrid), the SoC's safety rating and
-    safety-manual access (AMD's Functional Safety Lounge is a paid subscription; whether it holds a Versal Gen 2 safety manual is not public), the SMMUv3 and GICv3 ITS,
-    and the price and lead time. No Orin: the Pixel 7 Ferrix already boots
-    has Cortex-A78 cores (Tensor G2; M0 confirms by reading MIDR_EL1: expected implementer 0x41, part 0xD41 on the two middle-cluster cores; the A78AE is 0xD42), the
-    A78AE's core without split-lock, for early barrier, CSV2 and timing
-    measurements; the VEK385's QEMU model covers bring-up.
+  * **Q18, the board** (revised by the customer, 2026-10-13: "i thought more
+    of a board in the range of 200€ max. Ideally something used, not a 15k$
+    board", then, of a used Orin Nano: "450€!"): **the Pixel 7 (owned)** for
+    A78-family measurements, and **a Radxa Orion O6 (about €200)** for
+    AArch64 bring-up with a real SMMUv3 (§6.5, *The boards*). The Lock-mode
+    evidence platform is deferred until an assessment or a customer project
+    funds it. The Pixel 7's expected MIDR_EL1: implementer 0x41, part 0xD41
+    on the two middle-cluster cores (the A78AE is 0xD42).
 
 
 ## 12. Build profiles: one source, several kernels
