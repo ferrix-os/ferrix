@@ -1,9 +1,14 @@
 # Ferrix as a certifiable microkernel
 
-**Draft, revision 4, 2026-10-13.** The customer asked for a plan to switch
-Ferrix to a microkernel whose ring 0 can be certified whole. This document is
-that plan. Nothing in it is decided until the customer answers §11 and the
-answers are written under *Decisions* in `docs/BACKLOG.md`. It reopens three
+**Revision 5, 2026-10-13.** The customer asked for a plan to switch Ferrix
+to a microkernel whose ring 0 can be certified whole. This document is that
+plan. **The customer answered most of §11 on 2026-10-13** (recorded under
+*Decisions* in `docs/BACKLOG.md` on this branch): route C with the Linux ABI
+in user space, maximum performance, a certified `btrfsd`, **maximum
+certification** (ISO 26262 ASIL D and the top level of each other standard),
+a build switch for speculation inside a Linux partition, ARMv7-A as a
+native-only safety target, feature work allowed with growth reported, and
+user-space disk checks. §11 lists what is still open. It reopens three
 earlier positions:
 
 * the 2026-09-16 decision (a monolithic core, capability seams, device
@@ -54,10 +59,11 @@ address space (§6.4 says how far that goes, and where it does not).
 ### 2.1 The target
 
 **Ring 0 holds no `load` ring.** The manifest keeps two rings in the kernel:
-`core`, with its dependency rule and its aspirational targets unchanged
-(EAL6+, SIL 3/4, DAL B; `ITEM.md` §2 and `CLAIM.md` §2 make it the
-destination of the SIL 3 ratchet), and `item`. Whether `core` is later
-merged into `item` is §11 Q11, not part of this plan.
+`core`, with its dependency rule, and `item`. Under the customer's
+maximum-certification answer (§6.5) **both rings carry the top targets**:
+`core`'s aspirational ones become the whole kernel's present ones. The split
+is kept as structure (the dependency rule), not as two levels; merging the
+rings is §11 Q11, not part of this plan.
 
 Ring 0 also holds the in-kernel boot checks, 84,025 lines of verification
 code today (36,706 of them the item's and the core's). Those that test the
@@ -168,8 +174,8 @@ rings serve every partition and the native processes. So the lift (§4) has
 two outcomes:
 
 * **Until M8 there is exactly one Linux partition.** The lift puts every
-  system-wide service inside that one `linuxd`, except `btrfsd` if §11 Q4 is
-  yes. The mixed-criticality claim until then is *native safety partitions
+  system-wide service inside that one `linuxd`, except `btrfsd`,
+  a certified item of its own (§11 Q4). The mixed-criticality claim until then is *native safety partitions
   beside one Linux partition*: it is what `CLAIM.md` §1 proposes, and it is
   true from M5. A safety partition uses devices only through native drivers
   devmgr assigns to it directly, never through `linuxd`'s device cores.
@@ -212,7 +218,7 @@ before any code leaves ring 0.
 
 | # | Mechanism | Today | What is new, and what it must hold |
 |---|---|---|---|
-| K1 | **Restricted mode**: enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root |
+| K1 | **Restricted mode**, on x86-64 and AArch64 (ARMv7-A is native-only, §11 Q7): enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root |
 | K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only | ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13). **`fork`, `exec` and `ptrace` need three more operations**: a copy-on-write clone of a restricted space (or copy-on-write child VMOs); reads and writes of another process's space by handle, each with its own right (`ptrace`, `process_vm_readv`, core dumps); and a fresh restricted space for `exec`. A check, with a control, that a copy-on-write child never sees a write its parent makes after the clone (the F-41 lesson, ledger 29 and 31) |
 | K3 | **Pager-backed VMOs** | none (`fs/pages.rs` fills from the block ring in ring 0) | The pager protocol over a port; dirty tracking and write-back requests. The faulting job pays for the page, by K7's token. A fault waiting on a dead or slow pager returns `SIGBUS`/`EIO` to the faulting process after a bounded wait, never the safe state. **One fault-forwarding mechanism**: K3 and `NVIDIA.md` §11.4's fault windows (OK IF 2026-10-02, L.user.111-124 reserved) are reconciled into one design, not built twice. An AoU: a native safety partition maps no pager-backed VMO it did not choose |
 | K4 | **Exception channels**: faults of native processes delivered to a supervisor | panic or kill | needed for supervised servers and for `linuxd`'s own faults |
@@ -220,10 +226,11 @@ before any code leaves ring 0.
 | K6 | **Kernel-attested sender identity** on a channel message | none | `OPAQUE-KERNEL.md` §2 point 4: the job and process written by the kernel, never taken from the body |
 | K7 | **Charging that follows the client** | F-35/F-37 charge the caller's job | `OPAQUE-KERNEL.md` §2 point 5 and ledger 35-36: a token tied to one outstanding request, valid until the reply, so a server never names a job to charge |
 | K8 | **Device authority for devmgr**, by handle | the kernel enumerates PCI and claims for devmgr | devmgr gets the right to bind a function to an IOMMU domain, never an IOMMU unit: **IOMMU registers and tables are never mapped to ring 3.** Configuration writes stay kernel-mediated (`DEVICE_CONFIG_WRITE`'s rule); BAR placement, MSI/MSI-X, ATS/PRI/ACS and bus mastering stay kernel-owned, bus mastering only with a domain attached (AoU-12, AoU-21/22/23, `device.rs`'s `verify_config`, `keep_ats_off`). PCI enumeration stays in the kernel, so `ITEM.md`'s "device enumeration is inside" holds; what changes is that devmgr, not the kernel's own matching, decides which driver gets a function |
-| K9 | **Time budgets per job** | `cpu.max` throttling (a cap only); `ferrix-sched` answers `ModeUnavailable` for SoftRt and HardRt | **Stage 14's HardRt** (`ARCHITECTURE.md` §5: partitioned EDF with CBS admission; `CLAIM.md` M3), not a second model. Plus the two halves stage 14 lacks: a server's time on a client's request is charged to the client's budget (K7's temporal twin, as seL4 MCS donates a scheduling context), and interrupt time is charged to the line's holder or bounded per partition (`MEMORY-AND-TIMING.md` §2.2: today the victim pays). No WCET is claimed: AoU-4 and F-24 stay |
+| K9 | **Time budgets per job** | `cpu.max` throttling (a cap only); `ferrix-sched` answers `ModeUnavailable` for SoftRt and HardRt | **Stage 14's HardRt** (`ARCHITECTURE.md` §5: partitioned EDF with CBS admission; `CLAIM.md` M3), not a second model. Plus the two halves stage 14 lacks: a server's time on a client's request is charged to the client's budget (K7's temporal twin, as seL4 MCS donates a scheduling context), and interrupt time is charged to the line's holder or bounded per partition (`MEMORY-AND-TIMING.md` §2.2: today the victim pays). Under maximum certification (§6.5) a **static time-partition schedule** is added beside EDF (fixed windows per partition in a major frame, the ARINC 653 shape avionics integrators expect), and AoU-4/F-24's "no WCET claimed" is replaced by §6.5's timing work |
 | K10 | **Timer objects** | the Linux personality's timers in the load | a deadline object signalled to a port, with slack |
 | K11 | **Shared processes**: a process created with another's shared region mapped, and its own restricted space | none | **Two handle tables per process.** The *shared* table is the partition's (`linuxd`'s server channels, the cgroup jobs, the pager ports) and serves calls made in normal mode, from `linuxd`'s code; the *private* table is the Linux program's and serves calls made from restricted mode. The kernel picks the table from the mode the call came from, never from an argument. A handle moves between the two only through an explicit call that checks its rights (the way `PORT_FD`'s port reaches `linuxd`, §2.4). A check with a negative control shows that neither side can name the other's handles. The creating `linuxd` gets no handle into the new process's restricted space beyond K2's rights on it |
 | K12 | **Kernel-memory reservation**: a job's reserved frames and kernel heap, guaranteed, beside its limit | limits only (F-35, F-37); the frame watermark of the endfield-oom review (ledger 797) is the first step | a QM partition cannot take the kernel memory a certified partition was promised |
+| K16 | **No kernel heap after boot**: every kernel object made from memory its job has given the kernel (K12's reservation, retyped on creation), never from a shared heap | F-23 made every allocation fallible; F-37 charges them; the heap stays shared | `CLAIM.md` §2: dynamic memory "justified rather than forbidden" does not survive SIL 3 and above, and ISO 26262-6 asks the same at ASIL C/D. seL4's untyped memory is the reference. The kernel's own boot-time structures are sized at boot and never grow. This retires AoU-5's dynamic-memory justification |
 | K13 | **The rebind contract**: a server's restart without its clients' loss | T0's park and take-up, per kind, in ring 0 | `OPAQUE-KERNEL.md` §2 point 6, generalised to user space: a pager VMO handed to the next instance of its server, parked state charged to its clients' jobs (ledger 36). `linuxd` itself is not rebound: **a `linuxd` that dies takes its partition's programs with it** |
 | K14 | **Image integrity for certified user-space items** | `A.FIRMWARE` covers the kernel image | whoever starts a certified user-space item (`btrfsd`, a safety partition), with which capabilities, and how its image is shown to be the certified one: `A.FIRMWARE` extended over the initramfs, or the kernel checking a digest before it loads the image (ST §9.2; the AoU-26 precedent) |
 | K15 | **The native ELF loader leaves the kernel** | `PROCESS_CREATE`/`PROCESS_START` run the load ring's loader (`syscall/exec.rs`, `syscall/launch.rs`) in ring 0, an untrusted-input parser | `PROCESS_START` takes an entry point, a stack and a bootstrap channel; the creator maps the image's segments itself through K2, with a user-space loader library (Zircon's process builder is the reference). The native ABI changes, and every native starter (devmgr, `linuxd`, the test programs) moves to the library. The kernel keeps one loader only: for the two first images of §5, read from the initramfs, which K14 vouches for, held to the item's rules with its own requirements |
@@ -354,8 +361,8 @@ disk path, and §11 Q9 puts it to the customer.
   by argument and measured, the kernel's longest non-preemptible section
   stated and measured per architecture, K9's guarantee argued. AoU-4 and F-24
   stay: no WCET is claimed.
-* A seL4-style "no kernel heap" design is the route to SIL 3 and is out of
-  scope (§11 Q8).
+* The "no kernel heap" design, out of scope in earlier revisions, is in
+  scope since the customer chose maximum certification: K16 and §6.5.
 
 ### 6.2 What the kernel's code must meet
 
@@ -438,7 +445,8 @@ Not gained:
 * **DMA on ARMv7-A, and behind a refused IOMMU unit**, is untranslated (V-03,
   degraded trusted mode). A server that drives a DMA device there stays
   trusted, so "a boundary the hardware enforces" is qualified on those
-  configurations.
+  configurations. ARMv7-A is native-only (§11 Q7): no Linux programs, its
+  DMA-capable drivers trusted, and an AoU the integrator signs for that.
 * **The kernel does not shrink much.** K1 to K15 add code; M6 removes the
   console's screen and input, the panic screen and the board glue. *Guess*:
   the kernel's product code ends near today's core plus item, 75,000 to
@@ -453,6 +461,57 @@ Not gained:
   (F-28), independent reviewers (F-27), a position on AI-authored code (F-29)
   and a qualified toolchain (F-17). The consultant's reviews remain internal
   and are not independent verification.
+
+### 6.5 Maximum certification
+
+The customer's answer (2026-10-13): "ASIL D etc, so max certification". The
+whole kernel is argued at the top level each standard has:
+
+| Standard | Before | Now |
+|---|---|---|
+| ISO 26262 | ASIL D aspirational (`core` only) | **ASIL D**, as a SEooC |
+| IEC 61508 | SIL 2 (`item`), SIL 3/4 aspirational (`core`) | **SIL 3**, with SIL 4's highly recommended software techniques applied where this plan can reach them |
+| DO-178C | DAL C (`item`), DAL B aspirational | **DAL A** |
+| EN 50716 | SIL 2 | **SIL 4** |
+| IEC 62304 | Class C | Class C (already the top class) |
+| Common Criteria | EAL5+ (`item`), EAL6+ aspirational | **EAL6+, toward EAL7** |
+
+`CLAIM.md` §2 called SIL 3 and ASIL C/D "not a near target"; that text
+changes with this plan. What the top levels add on top of §6.2:
+
+* **No dynamic memory in the kernel** after boot: K16.
+* **MC/DC coverage** of the whole kernel (DAL A requires it; ASIL D and
+  SIL 4 highly recommend it), on top of statement and decision coverage.
+  This plan knows of no qualified MC/DC tool for Rust on the kernel's
+  targets; finding or building one, and qualifying it, is work item V1, tied
+  to F-17.
+* **Formal methods.** EAL7 needs a formal security policy model and a formal
+  functional specification and design (ADV_SPM, ADV_FSP.6, ADV_TDS.6); SIL 4
+  and ASIL D highly recommend formal or semi-formal verification. Work item
+  F1: a formal model of the kernel's isolation policy (handles and rights,
+  address spaces, channels, jobs and quotas, the scheduler's partitions) with
+  machine-checked proofs that the policy gives spatial, temporal and resource
+  isolation between partitions. F2: proofs that the Rust code refines the
+  model for the core object, handle, IPC and address-space code (Verus or
+  Kani at the code level, as a first choice to be designed and reviewed).
+  seL4's proofs are the precedent for the size of this, and they took many
+  person-years; it is the largest single item in the plan.
+* **Timing.** A WCET method for every system call and the non-preemptible
+  sections, measured on target hardware and argued, with the static
+  time-partition schedule of K9 (work item T1). AoU-4 and F-24 change from
+  "no WCET claimed" to stated bounds per supported processor, with
+  speculation's timing effects named.
+* **Independence.** ASIL D's confirmation measures, DAL A's independence of
+  verification and SIL 3/4's independent assessment are all stricter. F-27
+  (independent reviewers), F-28 (a QMS) and F-29 (a position on AI-authored
+  code) block more at these levels, not less; the consultant's reviews stay
+  internal.
+* **Hardware assumptions.** ASIL D's hardware metrics, ECC and lockstep
+  belong to the integrator's hardware, stated as AoUs of the SEooC. An
+  IOMMU is required for the certified configuration on x86-64 and AArch64;
+  ARMv7-A carries its DMA AoU.
+* **The speculation switch** (§11 Q5): the certified reference builds with
+  the barrier; the performance build is outside the certified configuration.
 
 ## 7. Performance rows
 
@@ -471,20 +530,35 @@ method is written before the work, and every row can fail:
 nazuna has no PCID, and no row runs on hardware; both are stated beside each
 figure.
 
-| Row | Today (hash, date) | Target (proposal; §11 Q3 decides) |
+**Maximum performance** (the customer, 2026-10-13). Every Linux-facing row's
+target is **no slower than today's in-kernel personality** (1.00x of
+`--personality kernel` on the same tree), failing above 1.10x; the native
+rows keep the customer's existing targets. Every means is in scope: PCIDs and
+ASIDs, ERAPS, global pages for `linuxd`'s shared text, a restricted-mode fast
+path for the commonest calls, batching. Because nazuna has no PCID, M0 adds a
+measurement host or a board that has PCID (or ASIDs), and the restricted row
+is gated there as well as on nazuna.
+
+**Two builds, one gate each** (§11 Q5, the build switch). The rows are gated
+on the **performance build** (no barrier inside a Linux partition, every
+other mitigation on). The **certified reference build** (the barrier on) is
+measured on the same boots and reported beside, with its own fail rule fixed
+from M3's measurement, so that it cannot drift unseen.
+
+| Row | Today (hash, date) | Target (the customer: maximum performance) |
 |---|---|---|
 | Native channel round trip, `domain-call` p50 | about 820 ns (523fc3d50, 2026-10-07) | seL4's 440 ns (the customer's target, 2026-10-02) |
 | Linux `getppid`, `--personality kernel` | 357 ns, `qemu64` with controls; Linux 53 ns (2026-10-10) | baseline for the next row |
-| Linux `getppid` through restricted mode, including §11 Q5's barrier if (i) and K1's vector-state save | not built | within 1.10x of the row above on the same tree. A target in multiples of Linux would be below today's in-kernel call (3x Linux is 159 ns) and is not used |
-| `fork` + `exec` + `wait` of a static program | to measure in M0 | within 1.10x of `--personality kernel` |
-| `mmap`/`munmap` churn, 4 KiB anonymous | to measure in M0 | within 1.10x |
-| A page-cache miss end to end (through `linuxd`, `btrfsd` if split, and the ring-3 driver) | to measure in M0 | within 1.10x |
+| Linux `getppid` through restricted mode, K1's vector-state save included; the performance build gated, the certified build beside | not built | 1.00x of the row above on the same tree, failing above 1.10x. A target in multiples of Linux would be below today's in-kernel call (3x Linux is 159 ns) and is not used |
+| `fork` + `exec` + `wait` of a static program | to measure in M0 | 1.00x of `--personality kernel` |
+| `mmap`/`munmap` churn, 4 KiB anonymous | to measure in M0 | 1.00x |
+| A page-cache miss end to end (through `linuxd`, `btrfsd` if split, and the ring-3 driver) | to measure in M0 | 1.00x |
 | 4 KiB block read, ring and ring-3 driver | 300 to 844 us (2026-09-27; to re-measure in M0) | under Redox's 80 us p50 (the customer's target, 2026-10-03) |
-| Signal delivery to a running thread | to measure in M0 | within 1.10x |
-| `futex` wake to a waiting thread | to measure in M0 | within 1.10x |
-| Warm `rustc hello.rs` | 0.14 s (to re-measure in M0) | within 1.05x |
-| Cold `test-rustc` and the self-host build | to measure in M0 | within 1.10x |
-| Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | within 1.05x |
+| Signal delivery to a running thread | to measure in M0 | 1.00x |
+| `futex` wake to a waiting thread | to measure in M0 | 1.00x |
+| Warm `rustc hello.rs` | 0.14 s (to re-measure in M0) | 1.00x |
+| Cold `test-rustc` and the self-host build | to measure in M0 | 1.00x |
+| Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | 1.00x |
 
 **What the restricted-mode row is expected to cost** (all *guesses*, x86-64 on
 nazuna, before the work; M3 measures each):
@@ -500,11 +574,15 @@ nazuna, before the work; M3 measures each):
 Under (ii) that is about 0.7 to 1.2 us a call, two to three times the
 baseline; under (i), about 1.2 to 1.7 us, three to five times. **The row's
 1.10x target is expected to fail under both on nazuna**, under (i) on the
-barrier alone. What would close the gap is a processor with PCID or ASIDs
+barrier alone. Under the customer's answers the gated build is (ii)'s,
+so the gap to close is 0.3 to 0.8 us a call, almost all of it the root
+switch: the restricted-mode fast path and PCID or ASIDs are on M3's critical
+path, not optional. What would close the gap is a processor with PCID or ASIDs
 (the root switch to tens of nanoseconds), ERAPS or an equivalent in place of
 the refill, and a cheaper barrier; none of these is on nazuna. So Q3 (the
 target) and Q5 (the barrier) are in practice one decision, and the customer
-sees these figures before choosing either. A Linux program making 10,000
+sees these figures before choosing either. (The customer has since chosen:
+§11 Q3 and Q5.) A Linux program making 10,000
 calls a second (Chrome makes about 8,000) would spend 0.3 to 1.3% of a
 processor more than today; a warm `rustc` compile (4,345 calls, `OPAQUE-KERNEL.md` S0), under
 6 ms more. The cold run's call count is measured in M0.
@@ -518,25 +596,39 @@ decides again on the numbers, as on 2026-09-27.
 Points are *guesses*. A stage's gate passes before the next stage's code
 lands; designs may be written and reviewed ahead. **"Unchanged"** in a gate
 means: PASSED, the same check counts, on all four boots (x86-64 under KVM and
-TCG, AArch64, ARMv7-A). A consultant's OK on a document is a review, recorded
+TCG, AArch64, ARMv7-A; after the flip, ARMv7-A boots native programs only). A consultant's OK on a document is a review, recorded
 in the ledger, and not a gate.
 
 | Stage | What | Points | Gate |
 |---|---|---|---|
 | **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control | 10 | the customer's answers; baselines on `main` |
-| **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first | 25 | each mechanism's boot check and controls FIRED |
+| **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first; the PCID-capable measurement host | 30 | each mechanism's boot check and controls FIRED |
 | **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
-| **M3** | K1, K11 on x86-64, then AArch64, then ARMv7-A; K9 on stage 14's HardRt; K14; B5's second half | 55, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
+| **M3** | K1, K11 on x86-64, then AArch64; the restricted-mode fast path; PCIDs and ASIDs; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
 | **M4** | §7's rows that are not K-items: the round trip, the bare system call, the block read | on the backlog already | §7's rows |
-| **M5** | **The lift**: `linuxd` behind `--personality user`, with one Linux partition and every system-wide service inside it; `btrfsd` split out if §11 Q4 is yes; devmgr started by the kernel with K8's handles; the retired calls removed | 130 to 200 | every gate of `docs/BACKLOG.md`'s gate table under `--personality user`, unchanged; §7's rows; the Steam and Chrome rows; then the flip, with coverage and rows measured afresh, and the in-kernel load deleted |
-| **M6** | **Shrink**: the console's screen and input, the panic screen's drawing and the board glue out; discovery cut to §2.1's list; the retired calls' requirements withdrawn | 25 | `check-item-boundary.py` fails on a planted load file; coverage carried (§6.2, *Moves*); boot lines identical on four boots where the code did not change |
+| **M5** | **The lift**: `linuxd` behind `--personality user`, with one Linux partition and every system-wide service inside it; `btrfsd` split out as a certified item (§11 Q4, yes); devmgr started by the kernel with K8's handles; the retired calls removed | 130 to 200 | every gate of `docs/BACKLOG.md`'s gate table under `--personality user`, unchanged; §7's rows; the Steam and Chrome rows; then the flip, with coverage and rows measured afresh, and the in-kernel load deleted |
+| **M6** | **Shrink**: the console's screen and input, the panic screen's drawing and the board glue out; discovery cut to §2.1's list; the retired calls' requirements withdrawn; K16, the kernel heap retired | 70 | `check-item-boundary.py` fails on a planted load file; coverage carried (§6.2, *Moves*); boot lines identical on four boots where the code did not change |
 | **M7** | **Evidence**: `ITEM.md`, ST, SAFETY-MANUAL, MEMORY-AND-TIMING, TRACEABILITY, VULNERABILITY-ANALYSIS and CLAIM rewritten for the new boundary; the stack-depth check; coverage at 100%-or-justified on the whole kernel; the register recounted | 40 | the stack-depth and coverage checks in `xtask check`, each with a control; the consultant's review of each document recorded |
 | **M8** | **Split** `linuxd`: `netd`, the device servers, the console server; then several Linux partitions | 45 | `test-net`, compositor, audio and card rows unchanged; a kill-and-restart row per server on K13; a two-partition row (one partition's `linuxd` killed, the other's programs unaffected) |
 
-Total *guess*: about 375 to 445 points, plus stage 14's HardRt, three to
-four times option B's 117. M1 to M4 can run as parallel streams split by file
-ownership (CONVENTIONS, *Splitting one piece of work across several
-agents*). M5 is one stream with one owner; its shim is one interface.
+**Maximum-certification streams** (§6.5), run beside M1 to M8 and finished
+before the claim:
+
+| Stream | What | Points | Gate |
+|---|---|---|---|
+| **V1** | MC/DC: a tool for Rust on the kernel's targets, found or built, qualified (F-17); MC/DC on the whole kernel, 100% or justified | 60 to 120 | an `xtask` MC/DC step with a control (a planted untested condition fails it) |
+| **T1** | Timing: the WCET method, bounds for every system call and non-preemptible section on each supported processor, the static schedule's interference test on hardware | 60 to 100 | a timing row per processor on hardware, with an injected-delay control |
+| **F1** | The formal isolation model and its proofs (spatial, temporal, resource isolation between partitions) | 150 to 300 | the proofs checked in `xtask check`; a control that breaks one rule of the model and fails a proof |
+| **F2** | Code-level proofs that the core's object, handle, IPC and address-space code refines F1's model | 300 to 700 | the same, per module; its scope recorded |
+
+Total *guess*: about 470 to 560 points for M0 to M8, plus stage 14's HardRt,
+plus 570 to 1,220 for V1, T1, F1 and F2: **about 1,000 to 1,800 points**,
+most of it the formal work. That is many times option B's 117, and the
+largest piece of work Ferrix has planned. M1 to M4 and the four streams can
+run as parallel streams split by file ownership (CONVENTIONS, *Splitting
+one piece of work across several agents*). M5 is one stream with one owner;
+its shim is one interface. F2 should start only after M6, on the code that
+stays, so it is not proving code the lift moves.
 
 ## 9. The alternatives
 
@@ -549,6 +641,7 @@ between these, not a yes or no:
 | **2b**: the item as a separation kernel, real Linux as a guest | all four isolations; SIL 3 with industry precedent | 80 to 150 | a Linux VM; Ferrix's Linux layer becomes unnecessary |
 | **5 + 4 + 3 (btrfs)**, `CLAIM.md` §3.3's SIL 2 proposal: software compartments in ring 0, the IPC fast path, btrfs in ring 3 | resources, memory by language, time if the load is made preemptible; isolation by hardware only for btrfs | 90 to 160, plus stage 14 | Ferrix's own Linux layer, as today |
 
+**The customer chose C on 2026-10-13** ("Linux = user space => ok").
 C is the only route that both keeps Ferrix's own Linux layer and takes it out
 of ring 0. 2b is cheaper and proven, and gives up the Linux layer as a
 product. 5 is cheapest and leaves the load in ring 0, with §3.1's arguments
@@ -572,50 +665,65 @@ still to write.
 * **Certification evidence moves under a moving tree.** Mitigation: ids of
   code that does not change keep their checks; B5 re-homes evidence before the
   lift; the boundary documents are rewritten once, in M7.
+* **The formal work (F1, F2) is open-ended.** Its size is the least certain
+  figure here. Mitigation: F1's model and its first proofs come before F2 is
+  sized, and F2 is scoped module by module; the claim's level can be decided
+  again on F1's result.
+* **Maximum performance and maximum certification pull apart** on the
+  barrier, the kernel heap (K16 replaces a fast shared heap with per-job
+  memory) and the static schedule. Mitigation: the two builds of §7, and the
+  rows that gate both.
 * **The plan competes** with NVIDIA, Steam, the installer and the
   certification backlog for the same sessions.
 
 ## 11. Decisions for the customer
 
-1. **The route** (§9): C as drawn here, 2b, or `CLAIM.md` §3.3's 5 + 4 + 3.
-   This reopens the 2026-09-16 decision and the 2026-09-27 shelving.
-   `CLAIM.md`'s two open decisions (the claim's wording, the first standard)
-   are inputs to this choice.
-2. **`ARCHITECTURE.md` §2**: the Linux ABI served by a user-space process on
-   the native kernel, and programs that use both ABIs handled as §2.4 says
-   (native calls straight to the kernel against the program's own handles).
-3. **The rows** of §7: their targets, fail rules and the stop rule. The
-   restricted-mode row's target is decided together with Q5: §7's pricing
-   expects 1.10x to fail on nazuna under either answer.
-4. **btrfs**: a certified `btrfsd` split out at the lift (the plan's
-   proposal), or btrfs inside `linuxd` and out of the item.
-5. **Speculation inside a Linux partition.** Today two Linux programs not in
-   one marked domain get the full barrier between them (SPECULATION §3,
-   FDP_IFC). In restricted mode the program trains predictors that `linuxd`'s
-   code then runs on (user to user, which eIBRS and AutoIBRS do not cover),
-   and `linuxd`'s memory holds the partition's other programs' data. Either:
-   **(i)** the predictor barrier and return-stack refill on every restricted
-   exit and entry between contexts not in one marked domain, priced in §7's
-   restricted row with the matched figure; or **(ii)** one Linux partition is
-   one speculation domain, with AoU-14, SPECULATION §3, ST FDP_IFC's
-   exception and V-07 amended to say the item does not isolate a partition's
-   Linux programs from each other against speculation. Under (ii), the domain
-   leave on set-id `execve`, credential change and `PR_SET_DUMPABLE` is driven
-   by credentials the kernel no longer holds, and that is stated. The
-   consultant's view: both are acceptable if stated; neither may be silent.
+**Answered 2026-10-13** (the customer's words in quotes; *Decisions* in
+`docs/BACKLOG.md` on this branch):
+
+1. **The route**: C, this plan ("Linux = user space => ok"). The 2026-09-16
+   decision and the 2026-09-27 shelving are replaced.
+2. **`ARCHITECTURE.md` §2**: the Linux ABI is served by `linuxd` in user
+   space, and mixed-ABI programs as §2.4 says. Yes, by the same answer.
+3. **The rows**: "maximum performance". §7: every Linux-facing row at 1.00x
+   of today's in-kernel figure, failing above 1.10x, every means in scope.
+4. **btrfs**: "btrfs server: ok". `btrfsd` is a certified user-space item,
+   split out at the lift.
+5. **Speculation inside a Linux partition**: the **build switch**. The
+   certified reference builds with the barrier on every restricted exit and
+   entry (i); a performance build treats one Linux partition as one
+   speculation domain (ii) and is outside the certified configuration. The
+   switch is a `--cfg` xtask sets, recorded in `reference_configuration` and
+   `ITEM.md` §5 like `--personality`; `xtask check` builds both. Under (ii)
+   AoU-14, SPECULATION §3, ST FDP_IFC's exception and V-07 are amended for
+   that build. The 2026-10-11 game-mode decision (privileged trades of
+   protections for frame rate) is a separate mechanism and is not decided by
+   this.
+7. **ARMv7-A**: a native-only safety target. No restricted mode and no
+   `linuxd` there; its DMA-capable drivers are trusted, under an AoU. The
+   ARMv7-A Linux programs' gates retire at the flip.
+8. **Certification level**: "ASIL D etc, so max certification". §6.5.
+9. **The reference boot's disk path**: proven by user-space checks; every
+   certified id keeps a kernel check (§6.2, B5).
+10. **Feature work in the load during M1 to M5**: allowed as now; M0's
+    ratchet reports growth and does not fail on it.
+
+**Still open:**
+
 6. **Which user-space components become certified items** beyond `btrfsd`.
-7. **ARMv7-A**: restricted mode shares the 3 GiB user half between the program
-   and `linuxd`. Keep ARMv7-A for Linux programs, or make it native-only (the
-   DK1's safety role)?
-8. **Ambition**: SIL 2 / DAL C / Class C / EAL5+ for the kernel (the present
-   targets), with SIL 3 and a no-kernel-heap design left for later?
-9. **The reference boot's disk path** (§5): stages 10 to 12's in-kernel disk
-   checks become user-space checks, and the reference boot stops proving its
-   own disk path from ring 0.
-10. **Feature work in the load** during M1 to M5: allowed as now, allowed only
-    if it keeps M0's ratchet, or frozen for M5?
-11. **`core`**: kept inside the kernel with its dependency rule (the plan's
-    assumption), or merged into `item` later?
+   Proposed, given maximum certification: devmgr, K15's loader library, and a
+   block driver for a safety partition's storage.
+11. **`core`**: both rings now carry the top targets (§2.1). Keep the split as
+    structure (proposed), or merge them.
+12. **`CLAIM.md`'s open decisions**: the claim's wording (§1 there), and the
+    first standard (§2 there). The targets are now the top levels; which one
+    is pursued first (ASIL D, given the customer's words, is proposed) is
+    still to say.
+13. **The formal work's approach** (F1, F2): a model and proofs in a proof
+    assistant with refinement to the code (seL4's way), or code-level
+    verification in Rust (Verus or Kani) against a smaller model. Proposed:
+    decide after F1's first model, on its cost.
+14. **The PCID-capable measurement host** (§7): which machine or board.
 
 ## Where it stands
 
@@ -643,6 +751,9 @@ Draft on branch `microkernel-plan`.
   and shared roots of one partition must count as one domain in
   `speculation::entered_space`, which is keyed on the root, or (ii) pays
   (i)'s barrier.
+* Revision 5 (this text): the customer's answers of 2026-10-13 (§11), and
+  what maximum certification adds (§6.5, K16, the static schedule in K9, the
+  V1, T1, F1 and F2 streams, the points). Sent to the consultant for review.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).

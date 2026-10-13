@@ -1059,6 +1059,28 @@ from it, and the forecast's scope, 647 points, is in `docs/roadmap/status.md`.
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-13 (customer)** **Ferrix becomes a microkernel whose ring 0
+  is the certified item whole** (`docs/MICROKERNEL.md`, route C with
+  restricted mode). Asked to "plan out the switch of ferrix to become fully
+  certifiable microkernels", reviewed by the certification consultant
+  (ledger lines 812, 837, 847), the customer answered: the Linux ABI served
+  from user space by `linuxd` ("Linux = user space => ok"), which replaces
+  the 2026-09-16 decision below and the 2026-09-27 shelving of the
+  opaque-kernel plan, and reopens `docs/ARCHITECTURE.md` §2; "maximum
+  performance", so every Linux-facing row in MICROKERNEL.md §7 aims at
+  today's in-kernel figure and fails above 1.10 times it; a certified
+  `btrfsd` split out at the lift ("btrfs server: ok"); "ASIL D etc, so max
+  certification", so the whole kernel is argued at the top level of each
+  standard (MICROKERNEL.md §6.5: no kernel heap, MC/DC, formal proofs, WCET);
+  a build switch for speculation inside a Linux partition, with the barrier
+  in the certified reference and none in a performance build; ARMv7-A a
+  native-only safety target; feature work in the load allowed during the
+  move with its growth reported; and the reference boot's disk path proven
+  by user-space checks. Still open (MICROKERNEL.md §11): further certified
+  user-space items, keeping the `core` ring, `CLAIM.md`'s two open decisions,
+  the formal work's approach and a PCID-capable measurement host. Each
+  kernel mechanism still gets its own design review before code; nothing is
+  built.
 * **2026-10-11 (customer)** **Game mode: a mark first, then the
   protections, behind administrator privilege** (`docs/SETTINGS.md` §8).
   Three answers. That a mark with no effect is acceptable as Settings'
