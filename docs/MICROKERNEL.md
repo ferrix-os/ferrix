@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Draft, revision 2, 2026-10-13.** The customer asked for a plan to switch
+**Draft, revision 3, 2026-10-13.** The customer asked for a plan to switch
 Ferrix to a microkernel whose ring 0 can be certified whole. This document is
 that plan. Nothing in it is decided until the customer answers §11 and the
 answers are written under *Decisions* in `docs/BACKLOG.md`. It reopens three
@@ -146,7 +146,7 @@ system call does today, and no IPC. §7 gates that.
 run on it, and a job above them that carries its quota and time budget.
 **cgroups stay kernel jobs**: `linuxd` creates a child job for each cgroup
 and puts each Linux process in its cgroup's job, as C8 (2026-09-23) built
-them so that "a microkernel can keep the jobs". `JOB_FOR_CGROUP`,
+them "so a future microkernel keeps working" (`OPAQUE-KERNEL.md` §0). `JOB_FOR_CGROUP`,
 `JOB_SET_LIMIT` and `JOB_GET_QUOTA` stay. So within a partition:
 
 | Isolation between Linux processes | Today (the load in ring 0) | After |
@@ -188,11 +188,14 @@ init does (`DEVMGR_START` under `ferrix.devmgr=init`, the audit handle,
   ABIs apart by number, as `syscall/mod.rs` does today: 0x1000 to 0x1FFF is
   native. `linuxd` is not on the path, so it never acts with a program's
   authority (no confused deputy) and never holds a program's handles.
-* **The native calls that touch Linux state** cannot be answered by the
-  kernel alone: `PORT_FD` (0x101B), which makes an fd, and the chardev
-  calls, which are `linuxd`'s after the lift (§3, *Retired calls*). These
-  exit to `linuxd` like a Linux call, and are listed in the native ABI as
-  such.
+* **`PORT_FD` (0x101B)** makes an fd, which is Linux state the kernel no
+  longer holds. It exits to `linuxd` like a Linux call; the port moves from
+  the program's private handle table to the shared one through K11's
+  explicit, rights-checked move. It is listed in the native ABI as such.
+* **The chardev calls (0x105A to 0x1064) are retired** (§3, *Retired
+  calls*): no native call answers them under any mode. `nvrm`, which serves
+  `/dev/nvidia*` through them today, talks to `linuxd`'s `/dev` service over
+  a channel instead, and is re-planned for it (§10).
 * Every other Linux call exits to `linuxd`.
 
 ## 3. Kernel mechanisms the switch needs
@@ -207,8 +210,8 @@ before any code leaves ring 0.
 
 | # | Mechanism | Today | What is new, and what it must hold |
 |---|---|---|---|
-| K1 | **Restricted mode**: enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. The restricted context runs on a root that maps nothing of the shared region writable or executable from restricted mode, held by the boot's mapping sweep |
-| K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only | ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13) |
+| K1 | **Restricted mode**: enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root |
+| K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13). **`fork`, `exec` and `ptrace` need three more operations**: a copy-on-write clone of a restricted space (or copy-on-write child VMOs); reads and writes of another process's space by handle, each with its own right (`ptrace`, `process_vm_readv`, core dumps); and a fresh restricted space for `exec`. A check, with a control, that a copy-on-write child never sees a write its parent makes after the clone (the F-41 lesson, ledger 29 and 31) |
 | K3 | **Pager-backed VMOs** | none (`fs/pages.rs` fills from the block ring in ring 0) | The pager protocol over a port; dirty tracking and write-back requests. The faulting job pays for the page, by K7's token. A fault waiting on a dead or slow pager returns `SIGBUS`/`EIO` to the faulting process after a bounded wait, never the safe state. **One fault-forwarding mechanism**: K3 and `NVIDIA.md` §11.4's fault windows (OK IF 2026-10-02, L.user.111-124 reserved) are reconciled into one design, not built twice. An AoU: a native safety partition maps no pager-backed VMO it did not choose |
 | K4 | **Exception channels**: faults of native processes delivered to a supervisor | panic or kill | needed for supervised servers and for `linuxd`'s own faults |
 | K5 | **Wait on a user address** | the Linux `futex(2)` in the load | a generic primitive; `linuxd` maps Linux's operations onto it |
@@ -217,10 +220,11 @@ before any code leaves ring 0.
 | K8 | **Device authority for devmgr**, by handle | the kernel enumerates PCI and claims for devmgr | devmgr gets the right to bind a function to an IOMMU domain, never an IOMMU unit: **IOMMU registers and tables are never mapped to ring 3.** Configuration writes stay kernel-mediated (`DEVICE_CONFIG_WRITE`'s rule); BAR placement, MSI/MSI-X, ATS/PRI/ACS and bus mastering stay kernel-owned, bus mastering only with a domain attached (AoU-12, AoU-21/22/23, `device.rs`'s `verify_config`, `keep_ats_off`). PCI enumeration stays in the kernel, so `ITEM.md`'s "device enumeration is inside" holds; what changes is that devmgr, not the kernel's own matching, decides which driver gets a function |
 | K9 | **Time budgets per job** | `cpu.max` throttling (a cap only); `ferrix-sched` answers `ModeUnavailable` for SoftRt and HardRt | **Stage 14's HardRt** (`ARCHITECTURE.md` §5: partitioned EDF with CBS admission; `CLAIM.md` M3), not a second model. Plus the two halves stage 14 lacks: a server's time on a client's request is charged to the client's budget (K7's temporal twin, as seL4 MCS donates a scheduling context), and interrupt time is charged to the line's holder or bounded per partition (`MEMORY-AND-TIMING.md` §2.2: today the victim pays). No WCET is claimed: AoU-4 and F-24 stay |
 | K10 | **Timer objects** | the Linux personality's timers in the load | a deadline object signalled to a port, with slack |
-| K11 | **Shared processes**: a process created with another's shared region mapped, its own restricted space and handle table | none | the creating `linuxd` gets no handle into the new process's restricted space beyond K2's rights on it; native calls from restricted mode are answered against the process's own table (§2.4) |
+| K11 | **Shared processes**: a process created with another's shared region mapped, and its own restricted space | none | **Two handle tables per process.** The *shared* table is the partition's (`linuxd`'s server channels, the cgroup jobs, the pager ports) and serves calls made in normal mode, from `linuxd`'s code; the *private* table is the Linux program's and serves calls made from restricted mode. The kernel picks the table from the mode the call came from, never from an argument. A handle moves between the two only through an explicit call that checks its rights (the way `PORT_FD`'s port reaches `linuxd`, §2.4). A check with a negative control shows that neither side can name the other's handles. The creating `linuxd` gets no handle into the new process's restricted space beyond K2's rights on it |
 | K12 | **Kernel-memory reservation**: a job's reserved frames and kernel heap, guaranteed, beside its limit | limits only (F-35, F-37); the frame watermark of the endfield-oom review (ledger 797) is the first step | a QM partition cannot take the kernel memory a certified partition was promised |
 | K13 | **The rebind contract**: a server's restart without its clients' loss | T0's park and take-up, per kind, in ring 0 | `OPAQUE-KERNEL.md` §2 point 6, generalised to user space: a pager VMO handed to the next instance of its server, parked state charged to its clients' jobs (ledger 36). `linuxd` itself is not rebound: **a `linuxd` that dies takes its partition's programs with it** |
 | K14 | **Image integrity for certified user-space items** | `A.FIRMWARE` covers the kernel image | whoever starts a certified user-space item (`btrfsd`, a safety partition), with which capabilities, and how its image is shown to be the certified one: `A.FIRMWARE` extended over the initramfs, or the kernel checking a digest before it loads the image (ST §9.2; the AoU-26 precedent) |
+| K15 | **The native ELF loader leaves the kernel** | `PROCESS_CREATE`/`PROCESS_START` run the load ring's loader (`syscall/exec.rs`, `syscall/launch.rs`) in ring 0, an untrusted-input parser | `PROCESS_START` takes an entry point, a stack and a bootstrap channel; the creator maps the image's segments itself through K2, with a user-space loader library (Zircon's process builder is the reference). The native ABI changes, and every native starter (devmgr, `linuxd`, the test programs) moves to the library. The kernel keeps one loader only: for the two first images of §5, read from the initramfs, which K14 vouches for, held to the item's rules with its own requirements |
 
 ### Retired calls
 
@@ -269,7 +273,7 @@ VFS itself leaves. This plan does not build it:
    leads (363: the item's `syscall/mod.rs`, `native` and `program`, and the
    core's `uaccess`), then `object` (307), `sched` (210), `sync` (192),
    `user` (112), `timer` (101), `arch` (99), `trap` (85) and `console` (68).
-   K1 to K14 are what the shim needs from the kernel. The `Personality`
+   K1 to K15 are what the shim needs from the kernel. The `Personality`
    trait (W-5) is a seam only for the item-to-load direction; the
    load-to-core direction is these 401 items. That the rest is "mostly
    mechanical" is a *guess*, and M5's points carry that uncertainty.
@@ -299,10 +303,19 @@ today (K8's handles, never through init or `linuxd`: the L12 rulings, ledger
 33-34; `OPAQUE-KERNEL.md` §3), and `linuxd`, whose first program is init.
 That is the reference configuration's shape today (the kernel starts devmgr;
 `ferrix.devmgr=init` is outside it, `ITEM.md` §5, AoU-8, AoU-13), so the
-reference does not move to a devmgr the kernel does not start. The kernel
-keeps L.init.2's duties for both images and AoU-24's for the archive;
-`linuxd` reads init from the initramfs itself. `btrfsd` and any certified
-user-space item are started under K14.
+reference does not move to a devmgr the kernel does not start. `btrfsd` and
+any certified user-space item are started under K14.
+
+**What the kernel hands each at start:**
+
+| To | Handles |
+|---|---|
+| devmgr | the device authority it holds today, as K8's handles (the right to bind a function to a domain, apertures, interrupts, I/O mappings, configuration reads and the mediated writes, quiesce, limits, isolation); the debug log's write handle |
+| `linuxd` | **init's image and script as read-only VMOs**, read by the kernel from `.ferrix/init/program` and `.ferrix/init/script` (`init.rs`), so L.init.2, choosing pid 1's inputs, stays the kernel's; the initramfs as a read-only VMO for the rest of the root; the Linux partition's job; the audit-read handle pid 1 holds today, which `linuxd` moves into init's private table (K11) and holds no use of itself; a channel to devmgr; the time page's VMO; the debug log's write handle |
+
+AoU-24 is about the initramfs unpacker in `ferrix-vfs`, which leaves ring 0
+with `linuxd`; it becomes an assumption on `linuxd`, outside the TSF, and
+the kernel no longer discharges it.
 
 What does move: the root mount becomes `linuxd`'s, and the kernel's re-root
 of pid 1 (`INIT.md` §7.3) goes. Stages 10 to 12's in-kernel disk checks,
@@ -321,7 +334,10 @@ disk path, and §11 Q9 puts it to the customer.
 * The Security Target's TOE is the kernel. The Linux personality is already
   a threat agent outside the TSF (ST §3.2). What leaves the TSF with the load
   is stated in ST §1.3 and §3.2: the audit of the switch of `/`; any
-  file-level event. FDP_ACC is unchanged: it claims capabilities only, and
+  file-level event. The audit records change as follows: FAU_GEN.1 b) loses
+  the `ferrix.devmgr` record with the option (§3, 0x1052); in c), the
+  cgroup-kill and cgroup-file-limit records become job records whose subject
+  is the Linux process the job holds; the OOM-kill record stays the kernel's. FDP_ACC is unchanged: it claims capabilities only, and
   file permissions were never in it.
 * AoU-3 changes from "the Linux layer is excluded" to "no user-space
   component is part of the safety element unless it is certified as one
@@ -356,10 +372,16 @@ L.aarch64, L.armv7a, L.device, L.object, L.quiesce, L.sched, L.syscall,
 L.trap, L.user and L.x86_64 ids. The most are in `syscall/check.rs` (31,
 which also holds ASR-7's 427 refusal assertions), `fs/mmap_check.rs` (9),
 `syscall/seccomp_check.rs` (7), `interfaces/block_ring/check.rs` (6) and
-the cgroupfs checks (20 together). In M2 and M3, before M5, each is
+the cgroupfs checks (22 together). In M2 and M3, before M5, each is
 re-homed to a check in a core or item file with its negative control fired
 again (`gate.sh control --expect`, FIRED). A new `xtask check` step fails when
 a core or item id is verified only from a load-ring or user-space check.
+It is an evidence gate, so it has a negative control: a planted orphan id
+(a `Verifies:` tag for a kernel id moved into a load-ring check) makes it
+fail. Its scope is stated where it runs: it counts `Verifies:` tags in
+kernel source files only, not host tests or gate-level checks, so an id
+whose only check is a host test or an xtask row is outside it and argued
+apart. It gets a `TOOLS.md` entry when it joins `xtask check` (F-19).
 
 **Moves.** Core and item code that leaves or moves in M6 (the console's
 screen and input, the panic screen, the board glue) goes through
@@ -410,7 +432,7 @@ Not gained:
   degraded trusted mode). A server that drives a DMA device there stays
   trusted, so "a boundary the hardware enforces" is qualified on those
   configurations.
-* **The kernel does not shrink much.** K1 to K14 add code; M6 removes the
+* **The kernel does not shrink much.** K1 to K15 add code; M6 removes the
   console's screen and input, the panic screen and the board glue. *Guess*:
   the kernel's product code ends near today's core plus item, 75,000 to
   90,000 lines across three architectures, against 79,540 today. The gain is
@@ -457,6 +479,29 @@ figure.
 | Cold `test-rustc` and the self-host build | to measure in M0 | within 1.10x |
 | Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | within 1.05x |
 
+**What the restricted-mode row is expected to cost** (all *guesses*, x86-64 on
+nazuna, before the work; M3 measures each):
+
+| Part | Each way | A round trip |
+|---|---|---|
+| Today's in-kernel call (the baseline row) | | 357 ns |
+| Restricted exit and re-entry: saving and checking the context (K1, C6) | 30 to 60 ns | 60 to 120 ns |
+| A root switch, since R1 puts the restricted space and the shared region on different roots; nazuna has no PCID, so each is a full non-global TLB flush and its refill | 100 to 300 ns | 200 to 600 ns |
+| The program's whole vector state saved and restored (K1) | 25 to 50 ns | 50 to 100 ns |
+| Under §11 Q5 (i): the predictor barrier (IBPB, about 230 ns on nazuna) and the return-stack refill | about 250 ns | about 500 ns |
+
+Under (ii) that is about 0.7 to 1.2 us a call, two to three times the
+baseline; under (i), about 1.2 to 1.7 us, three to five times. **The row's
+1.10x target is expected to fail under both on nazuna**, under (i) on the
+barrier alone. What would close the gap is a processor with PCID or ASIDs
+(the root switch to tens of nanoseconds), ERAPS or an equivalent in place of
+the refill, and a cheaper barrier; none of these is on nazuna. So Q3 (the
+target) and Q5 (the barrier) are in practice one decision, and the customer
+sees these figures before choosing either. A Linux program making 10,000
+calls a second (Chrome makes about 8,000) would spend 0.3 to 1.3% of a
+processor more than today; a cold `rustc` run (about 4,300 calls), under
+6 ms more.
+
 **The stop rule.** If the restricted-mode row cannot be met, the plan stops
 after M4, with every mechanism landed and nothing lost, and the customer
 decides again on the numbers, as on 2026-09-27.
@@ -471,9 +516,9 @@ in the ledger, and not a gate.
 
 | Stage | What | Points | Gate |
 |---|---|---|---|
-| **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` that fails when the `load` ring grows, with a planted file as its control | 10 | the customer's answers; baselines on `main` |
+| **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control | 10 | the customer's answers; baselines on `main` |
 | **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first | 25 | each mechanism's boot check and controls FIRED |
-| **M2** | K2, K3, K4, K13; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
+| **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
 | **M3** | K1, K11 on x86-64, then AArch64, then ARMv7-A; K9 on stage 14's HardRt; K14; B5's second half | 55, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
 | **M4** | §7's rows that are not K-items: the round trip, the bare system call, the block read | on the backlog already | §7's rows |
 | **M5** | **The lift**: `linuxd` behind `--personality user`, with one Linux partition and every system-wide service inside it; `btrfsd` split out if §11 Q4 is yes; devmgr started by the kernel with K8's handles; the retired calls removed | 130 to 200 | every gate of `docs/BACKLOG.md`'s gate table under `--personality user`, unchanged; §7's rows; the Steam and Chrome rows; then the flip, with coverage and rows measured afresh, and the in-kernel load deleted |
@@ -532,7 +577,9 @@ still to write.
 2. **`ARCHITECTURE.md` §2**: the Linux ABI served by a user-space process on
    the native kernel, and programs that use both ABIs handled as §2.4 says
    (native calls straight to the kernel against the program's own handles).
-3. **The rows** of §7: their targets, fail rules and the stop rule.
+3. **The rows** of §7: their targets, fail rules and the stop rule. The
+   restricted-mode row's target is decided together with Q5: §7's pricing
+   expects 1.10x to fail on nazuna under either answer.
 4. **btrfs**: a certified `btrfsd` split out at the lift (the plan's
    proposal), or btrfs inside `linuxd` and out of the item.
 5. **Speculation inside a Linux partition.** Today two Linux programs not in
@@ -571,6 +618,15 @@ Draft on branch `microkernel-plan`.
   **NOT YET** (B1 to B7, C1 to C16), ledger line 812 of
   `~/.local/share/ferrix/cert-consultant/reviews.md`, 2026-10-13. It accepted
   the direction.
-* Revision 2 (this text) folds in B1 to B7 and C1 to C16 and adds
+* Revision 2 (2ae2d74f1) folded in B1 to B7 and C1 to C16 and added
   `tools/common/gen/microkernel-surface.py`, which reproduces the
-  consultant's surface and orphan figures. Sent back for the next round.
+  consultant's surface and orphan figures. Second round: **OK IF** R1 to R8,
+  ledger line 837.
+* Revision 3 (this text) folds in R1 to R8: nothing of the shared region
+  reachable from restricted mode (K1), two handle tables (K11), the native
+  loader out (K15), `fork`/`exec`/`ptrace` on K2, what the kernel hands
+  devmgr and `linuxd` (§5), the restricted row priced (§7), the corrections,
+  and the orphan step's control and scope (§6.2).
+* Each K-row still needs its own design review before code. This plan
+  approves no code. The reviews are internal, not independent verification
+  (F-27).
