@@ -59,6 +59,13 @@
       "branch": "gap-kill-reaped",
       "date": "2026-10-12",
       "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
+    },
+    {
+      "ids": ["L.user.128-129"],
+      "owner": "endfield-mprotect",
+      "branch": "endfield-mprotect",
+      "date": "2026-10-13",
+      "purpose": "Proton's Wine on Ferrix (stage 23): protect changes a region's read, write and execute and keeps MAP_SHARED, the stack's growth and mlock (L.user.128); a writable region reads as Linux's protection_map lets it (L.user.129)"
     }
   ]
 }
