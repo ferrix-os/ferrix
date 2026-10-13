@@ -1070,7 +1070,14 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   feature work in the load allowed during the move, its growth reported; the
   reference boot's disk path proven by user-space checks; both builds gated;
   the new targets for the new kernel from M7; IEC 61508 at SIL 4; timing
-  claims on AArch64 safety chips. **The plan reads these as** (MICROKERNEL.md
+  claims on AArch64 safety chips; later the same day, "which other
+  components to certify; which one would the cert agent recommend?" and,
+  offered the consultant's set, "Accept as recommended"; on the `core` ring,
+  "ask the cert agent"; on the first standard, "the SIL D / ASIL D", then
+  "SIL 4 first"; "find a proofer"; on the measurement host, "i don't have
+  one, so use amd instead"; on the stop rule, "Use the same methods seL4
+  uses, it must be possible to reach the same level, they did it, so can
+  we"; and on the safety processor, "find one". **The plan reads these as** (MICROKERNEL.md
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
@@ -1082,11 +1089,18 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   objectives, IEC 62304 Class C, Common Criteria EAL6+ (MICROKERNEL.md
   §6.5). Until the flip, today's item keeps the 2026-10-01 targets (EAL5+,
   DAL C, Class C, SIL 2); `README.md`, `CLAIM.md` and the manifest's ring
-  targets change in M7. The certification consultant's review is **still
-  open** (ledger lines 812, 837, 847, 858, 869). Still open for the customer
-  (MICROKERNEL.md §11): further certified user-space items, keeping the
-  `core` ring, `CLAIM.md`'s two open decisions, the formal work's approach,
-  a PCID-capable measurement host and the AArch64 safety processor class.
+  targets change in M7. Further readings (MICROKERNEL.md §5, §6.3, §6.5,
+  §7): a certified partition manager, loader library and `rt`, devmgr
+  uncertified with safety devices static; `core` kept as a layer with one
+  set of targets; IEC 61508 SIL 4 first, ISO 26262 ASIL D alongside, and the
+  claim's wording; F1 in Isabelle/HOL, F2 in Verus, Proofcraft and the Verus
+  groups or CertiK as providers; nazuna as the measurement host, SVM ASIDs
+  rejected, the bare-call targets kept and reached by seL4's methods;
+  Cortex-A78AE in Lock-mode as the timing class, AMD's VEK385 as the board. The certification consultant's review is **still
+  open** (ledger lines 812, 837, 847, 858, 869, 886). Still open for the customer
+  (MICROKERNEL.md §11): where the certified build's barrier sits under
+  seL4's methods, approaching the proof providers and the compiler vendor,
+  and buying the board.
   Each kernel mechanism gets its own design review before code; nothing is
   built.
 * **2026-10-11 (customer)** **Game mode: a mark first, then the

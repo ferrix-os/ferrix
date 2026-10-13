@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 7, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 8, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -9,8 +9,11 @@ maximum performance with both builds gated, a certified `btrfsd`, maximum
 certification (the top level of each standard, IEC 61508 at SIL 4, for the
 new kernel from M7), a build switch for speculation inside a Linux partition,
 ARMv7-A as a native-only safety target, timing claims on AArch64 safety
-processors only, feature work allowed with growth reported, and user-space
-disk checks. §11 lists what is still open. It reopens three
+processors only, feature work allowed with growth reported, user-space disk
+checks, the consultant's certified-component set, IEC 61508 SIL 4 as the
+first standard, nazuna as the measurement host with seL4's methods to reach
+the targets, a proof toolchain and a safety board. §11 lists what is still
+open. It reopens three
 earlier positions:
 
 * the 2026-09-16 decision (a monolithic core, capability seams, device
@@ -62,10 +65,15 @@ address space (§6.4 says how far that goes, and where it does not).
 
 **Ring 0 holds no `load` ring.** The manifest keeps two rings in the kernel:
 `core`, with its dependency rule, and `item`. Under the customer's
-maximum-certification answer (§6.5) **both rings carry the top targets**:
-`core`'s aspirational ones become the whole kernel's present ones. The split
-is kept as structure (the dependency rule), not as two levels; merging the
-rings is §11 Q11, not part of this plan.
+maximum-certification answer (§6.5) **the targets move from the rings to the
+item**: one item, one set of targets. `core` and `item` stay as two
+**layers**, and the rule that `core` names nothing in `item` stays checked
+(§11 Q11, the consultant's recommendation, ledger 886): a layered kernel with
+an enforced dependency direction is the architecture evidence CC ADV_INT.3,
+ISO 26262-6 and IEC 61508-3 ask for, `core` is F2's natural proof scope (no
+firmware parsing or bring-up), and keeping it costs one manifest field.
+Coverage, MC/DC and requirements are reported per item, with per-layer sizes
+for information.
 
 Ring 0 also holds the in-kernel boot checks, 84,025 lines of verification
 code today (36,706 of them the item's and the core's). Those that test the
@@ -308,8 +316,8 @@ VFS itself leaves. This plan does not build it:
 ## 5. Boot and authority
 
 init is a Linux program (std on musl, `INIT.md`), so it cannot be the first
-process of a kernel without a Linux personality. **The kernel starts two
-processes from the initramfs**: devmgr, with the device authority it holds
+process of a kernel without a Linux personality. **The kernel starts three
+processes from the initramfs**: the **partition manager** (below), devmgr, with the device authority it holds
 today (K8's handles, never through init or `linuxd`: the L12 rulings, ledger
 33-34; `OPAQUE-KERNEL.md` §3), and `linuxd`, whose first program is init.
 That is the reference configuration's shape today (the kernel starts devmgr;
@@ -317,11 +325,24 @@ That is the reference configuration's shape today (the kernel starts devmgr;
 reference does not move to a devmgr the kernel does not start. `btrfsd` and
 any certified user-space item are started under K14.
 
+**The partition manager** (§6.3; the consultant's recommendation, ledger
+886, accepted by the customer 2026-10-13) is a small certified native
+program. It reads a static description of the safety partitions (their
+images by K14 digest, K9 windows and budgets, K12 reservations, handles and
+statically assigned devices), starts them, holds their authority and
+supervises them through K4's exception channels. So a safety partition's
+authority never passes through init, `linuxd` or devmgr. The description is
+security-policy data: for Common Criteria the manager is in the TOE and the
+description is set by an administrator (A.ADMIN); the tool that generates it
+is qualified, or its output is checked. Devices go to safety partitions
+statically, from the description; devmgr serves only the Linux side.
+
 **What the kernel hands each at start:**
 
 | To | Handles |
 |---|---|
-| devmgr | the device authority it holds today, as K8's handles (the right to bind a function to a domain, apertures, interrupts, I/O mappings, configuration reads and the mediated writes, quiesce, limits, isolation); the debug log's write handle |
+| the partition manager | the safety partitions' devices (K8 handles, statically, as the description names them), their images' sealed VMOs, the K9 windows and K12 reservations to hand out, the debug log's write handle |
+| devmgr | the device authority it holds today, less the safety partitions' devices, as K8's handles (the right to bind a function to a domain, apertures, interrupts, I/O mappings, configuration reads and the mediated writes, quiesce, limits, isolation); the debug log's write handle |
 | `linuxd` | **init's three inputs as read-only VMOs**, read by the kernel from `.ferrix/init/program`, `.ferrix/init/script` and `.ferrix/init/commands` (`init.rs`), so L.init.2, choosing pid 1's inputs, stays the kernel's; the initramfs as a read-only VMO for the rest of the root; the Linux partition's job; the audit-read handle pid 1 holds today, which `linuxd` moves into init's private table (K11) and holds no use of itself; a channel to devmgr; the time page's VMO; the debug log's write handle |
 
 AoU-24 is about the initramfs unpacker in `ferrix-vfs`, which leaves ring 0
@@ -427,8 +448,22 @@ release uncertified. If the customer agrees:
   btrfs today;
 * it is started under K14.
 
-Others are the customer's choice: devmgr, a block driver for a safety
-partition's storage.
+**The certified set** (the consultant's recommendation, ledger 886; the
+customer: "Accept as recommended", 2026-10-13):
+
+| Component | Status | Why |
+|---|---|---|
+| The partition manager (§5) | **required** | without it a safety partition is started by a Linux program, against the L12 rule; a few thousand lines with the loader (*guess*) |
+| K15's loader library, as the partition manager links it | **required** | K14 measures the code, but the layout, relocations and initial data are the loader's |
+| The native runtime library (`rt`, 1,166 lines today), with no heap | **certified** (strongly recommended) | every safety application links it; Ferrocene covers `core`, not `rt` |
+| `btrfsd` | certified (decided) | §6.3 above |
+| One block driver per safety storage medium | certified, as used | virtio-blk about 1.6k lines, stm32-sdmmc about 2k, NVMe about 3.6k; an NVMe controller's firmware stays an AoU |
+| ARMv7-A's DMA-capable drivers | certified, only those a safety configuration uses | X1's rule; none if the safety partitions use no DMA device |
+| devmgr | **not certified** | safety devices are assigned statically by the partition manager; devmgr serves the Linux side, confined by the IOMMU and X1's rule. If devices are ever to reach safety partitions at run time, devmgr joins the set |
+| The log and audit server, the console server, init, `linuxd`, authd, sessiond | not certified | audit stays the kernel's; an AoU says no safety partition calls any of them |
+
+Each certified component carries the kernel's targets: its requirements,
+MC/DC coverage, an FMEA and a safety-manual section.
 
 ### 6.4 What it gains, and what it does not
 
@@ -485,6 +520,36 @@ the whole new kernel argued at the top level of each standard, from M7
 `CLAIM.md` §2 called SIL 3 and ASIL C/D "not a near target"; that text
 changes in M7.
 
+**The first standard is IEC 61508 at SIL 4**, with ISO 26262 ASIL D pursued
+alongside (the customer, 2026-10-13: "SIL 4 first"). The first assessment's
+reference platform is the AArch64 safety processor class below, because
+x86-64 carries no timing claim. **The claim**, for `CLAIM.md` §1, for the
+new kernel from M7 (the consultant's draft, ledger 886, fitted to SIL 4
+first; until the flip `CLAIM.md`'s present sentence stands):
+
+> Ferrix is a Rust microkernel being developed as a compliant item to IEC
+> 61508 SIL 4, out of context, with ISO 26262 ASIL D pursued alongside.
+> Everything that runs in the processor's privileged mode is the element. It
+> keeps native safety partitions apart from one another and from a partition
+> running unmodified Linux software (QM, carrying no safety claim) in memory,
+> devices and failure on x86-64 and AArch64, and in processor time on Arm
+> Cortex-A78AE processors in Lock-mode. It has not been assessed.
+
+Its rules: never "certified", "compliant", "a SIL 4 kernel" or "safe Linux"
+before an assessment says so; "not assessed" in the same sentence as any
+standard named; the Linux software never in a sentence that says "assured"
+or "safety"; the hardware assumptions (an IOMMU on x86-64 and AArch64, the
+processor class for timing) named wherever the claim is given in full.
+
+**The toolchain falls short of SIL 4 today** (research, 2026-10-13, sources at
+the end of this document; F-17): Ferrocene 26.05 (Rust 1.95)
+is qualified for ISO 26262 ASIL D, IEC 61508 SIL 3 (it "supports" SIL 4) and
+IEC 62304 Class C, and offers no DO-178C qualification. Of the kernel's
+targets it qualifies `aarch64-unknown-none` only: `x86_64-unknown-none` and
+`armv7a-none-eabi` are not offered. A SIL 4 qualification of the compiler
+for the reference platform's target, and a route for the other two targets,
+are items for the vendor (F-17) before any SIL 4 claim.
+
 **What the levels ask, and where.** The standards' texts are not in the
 tree. The clauses below are the plan's and the consultant's reading, marked
 by the standards' own grades (*required*; *HR* highly recommended; *R*
@@ -532,9 +597,64 @@ this table before any stream is sized on it.
   impact (Verus brings its own compiler driver, which must agree with the
   pinned rustc and with Ferrocene), and lists every proof tool in
   `TOOLS.md`.
+* **The proof tools and who does the proofs** (the customer: "find a
+  proofer"; research of 2026-10-13, sources at the end of this document):
+  * **F1 in Isabelle/HOL.** It has the deepest separation-kernel precedent:
+    seL4's integrity and confidentiality proofs (AArch64's completed in
+    2026), PikeOS's formal API and its noninterference model, and AWS's
+    Nitro Isolation Engine. Its LCF kernel is the easiest to defend to CC
+    and DO-333 assessors. Under CC:2022, ADV_SPM.1 requires a formal model
+    of the **entire TSF**, so F1 covers every kernel interface, not only
+    `core`.
+  * **F2 in Verus.** It is the only Rust verifier with an end-to-end verified
+    microkernel close to Ferrix's shape (Atmosphere, SOSP 2025: capabilities,
+    IPC, address spaces, IOMMU, with refinement and noninterference proofs,
+    about 3.3 lines of proof per line of code), it handles the raw pointers
+    and interior mutability the core needs, and the verified source builds
+    with a plain rustc because ghost code is erased. The alternative is all
+    of it in Isabelle with AWS's AutoCorrode (one prover, Nitro's
+    precedent), at the price of µRust's lack of traits and dynamic dispatch.
+  * **The seam**: Verus's top-level specification is shown equal to F1's
+    Isabelle model, by a translation argument or by mirroring under review;
+    EAL7's formal correspondence may push toward the all-Isabelle option,
+    which F1's first model decides.
+  * **Gaps**: no Rust verifier has a DO-330 or ISO 26262-8 qualification or
+    has served as certification evidence, so F2 builds a TQL-5 case around a
+    frozen Verus and Z3; Verus pins rustc 1.98.1 against Ferrocene's 1.95,
+    so the plan argues that the two front ends agree on the verified source;
+    Verus's trusted base includes about 700 lines of axioms.
+  * **Who**: **Proofcraft** (the seL4 proof engineers; they did seL4's
+    AArch64 security proofs and work with Verus in DARPA INSPECTA) for F1,
+    the proof architecture and certification-grade proof engineering; for
+    F2, the Verus kernel groups (Utah's Atmosphere team, Kansas State with
+    Collins Aerospace, who helped write DO-333), or **CertiK** as a
+    commercial Verus contractor. None publishes prices; contacting them is
+    the customer's.
+  * **Effort** (*guess*, from seL4's about 25 person-years for 8,700 lines
+    of C and Atmosphere's 1.5 person-years for 6,000 lines): F1 2 to 4
+    person-years, F2 6 to 15, so **8 to 20 person-years** before the
+    certification paperwork, the same order as seL4. The core's size after
+    M6 decides it.
 * **T1, timing**, claimed on **AArch64 safety processors only** (the
-  customer, 2026-10-13): a class of lockstep-capable cores without SMT,
-  named in T1's design. x86-64 stays certified for isolation, with **no
+  customer, 2026-10-13). **The named class: Arm Cortex-A78AE (Armv8.2-A, no
+  SMT) in DSU-AE Lock-mode** (CEMODE 0b11, set at cluster cold reset; each
+  core pair seen by the OS as one core), which Arm rates ASIL D / SIL 3 for
+  hardware metrics. Hybrid mode is outside the claim (Arm rates it ASIL B).
+  Software facts from Arm's TRM that the kernel must honour: MPIDR_EL1.MT
+  reads 1 although the core is not multithreaded, so SMT is never inferred
+  from it; there is no MPAM, so the shared L3 is partitioned only through
+  CLUSTERPARTCR_EL1; a lockstep mismatch is reported to the SoC, which owns
+  the fault reaction. Cortex-A720AE and Neoverse V3AE are a later extension.
+  **The board**: AMD's VEK385 (Versal AI Edge Gen 2: 8 Cortex-A78AE in four
+  two-core clusters with documented per-cluster lock-step, SMMUv3, GICv3
+  with ITS, upstream TF-A, U-Boot with UEFI, a public TRM and a QEMU model;
+  about $16,000, 10 to 16 weeks' lead). The runner-up, NVIDIA's Jetson AGX
+  Orin developer kit (12 Cortex-A78AE, EDK2 UEFI, about $3,500), has the same
+  core and is a cheap porting platform, but Lock-mode is unsupported by
+  NVIDIA's own software, its IOMMU is an SMMUv2 with quirks and the SoC is
+  rated ASIL B for random faults, so it is not the evidence platform. NXP's
+  S32G is excluded (no SMMU). Buying a board is the customer's decision
+  (§11 Q18). x86-64 stays certified for isolation, with **no
   timing claim**; AoU-4 says so. A bound is a **measured high-water mark plus
   a stated margin**, on the named processors, with multicore interference
   channels identified and bounded per AMC 20-193 / CAST-32A (shared caches,
@@ -594,9 +714,52 @@ survives the switch into a restricted root and would let a program read and
 run `linuxd`'s text (R1; the consultant ruled global user pages NOT YET
 until a design of their own, ledger 413, U10 to U14); and answering any
 Linux call in ring 0, which would put Linux personality code back in the
-item. Because nazuna has no PCID, M0 adds a
-measurement host or a board that has PCID (or ASIDs), and the restricted row
-is gated there as well as on nazuna.
+item.
+
+**The measurement host is nazuna** (AMD Ryzen 9 9900X, Zen 5; the customer:
+"use amd instead"), which has no PCID (CPUID.1:ECX[17] clear), has INVPCID,
+ERAPS, AutoIBRS and SVM with 32,768 ASIDs (the consultant's measurement,
+ledger 886). **Tagging restricted mode with SVM ASIDs is rejected**: a
+VMRUN world switch is not cheaper than the root switch it removes on Zen,
+every Linux call would become an exit, it would put a hypervisor into the
+x86-64 item only, its evidence would come from nested SVM under KVM, and it
+would buy speed on the platform with no timing claim (ledger 886). K1's
+design records it as rejected.
+
+**seL4's methods, to reach seL4's level** (the customer, 2026-10-13: "Use
+the same methods seL4 uses, it must be possible to reach the same level,
+they did it, so can we"). The targets stay as they are, and the stop rule
+stays on the bare-call rows. The evidence that they are in reach is seL4's
+own figure on this machine: **440 ns for a round trip with two page-table
+switches and no PCID** (`OPAQUE-KERNEL.md` §9.6). A Linux call through
+restricted mode has the same shape as a seL4 call and reply: out of the
+program, into `linuxd`, and back. The (ii) row's fail line, 1.10 times
+today's 357 ns, is 393 ns, which is the customer's existing round-trip goal
+of under 400 ns (2026-10-06). The methods, each a design for K1's review:
+
+* **A fastpath** for the common restricted exit and re-entry, as seL4's
+  fastpath for Call and ReplyRecv: one hand-tuned path with no scheduler
+  decision, no lock, no allocation and no general dispatch, falling back to
+  the general path on any unusual state.
+* **Lazy vector state**, as seL4 switches the FPU lazily: `linuxd`'s call
+  path is built to use no vector registers, so an exit saves none; the first
+  use traps (CR0.TS, CPACR_EL1) and saves the program's state then. K1's
+  rule that the program's whole vector state survives is kept; only when it
+  is saved changes.
+* **A small, hot path**: the entry, the check of the context (C6), the root
+  switch and the return in as few cache lines and TLB entries as possible;
+  `linuxd`'s dispatch reached by a direct call.
+* **Nothing global**: no global pages (P1), no TLB tricks the R1 rule
+  forbids; the root switch is paid, as seL4 pays it.
+* **ERAPS** on nazuna in place of the return-stack refill (about 20 ns).
+
+**The certified build under seL4's methods.** seL4 places its speculation
+barriers at domain switches (its time-protection work), not on every call.
+§11 Q5's certified build (i) has a barrier on every restricted exit and
+entry, about 460 ns a round trip on nazuna on top of seL4's 440, so about
+900 ns against (i)'s 714 ns limit (2.00 times 357). (i)'s gate can be met by
+seL4's methods only if its barrier moves to partition switches, which is
+(ii)'s shape. That is §11 Q16, for the customer.
 
 **Two builds, both gated** (§11 Q3 and Q5, the customer, 2026-10-13: "gate
 both"):
@@ -617,12 +780,10 @@ both"):
   Under (ii), the partition's job becomes a speculation domain by the
   2026-10-01 rules: marked by its MANAGE holder at creation, with an audit
   record.
-* **The stop rule** is driven by (ii)'s restricted row **on the
-  PCID-capable host**; nazuna's figures are reported beside. A failing (i)
+* **The stop rule** is driven by (ii)'s restricted row **on nazuna**. A failing (i)
   row blocks the flip (M5) until it passes or the customer decides again.
-  §7's pricing expects (i) near 3x even with PCID, because of the barrier
-  (about 500 ns a call): (i)'s 2x needs the barrier's cost cut (ERAPS or a
-  processor with a cheaper IBPB), and M3 says early whether that is in reach.
+  The pricing below expects (i) near 900 ns even at seL4's level, because of
+  the barrier, over its 714 ns limit: §11 Q16.
 
 | Row | Today (hash, date) | Target (the customer: maximum performance) |
 |---|---|---|
@@ -639,32 +800,23 @@ both"):
 | Cold `test-rustc` and the self-host build | to measure in M0 | 1.00x |
 | Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | 1.00x |
 
-**What the restricted-mode row is expected to cost** (all *guesses*, x86-64 on
-nazuna, before the work; M3 measures each):
+**What the restricted-mode row is expected to cost** (x86-64 on nazuna; M3
+measures each). The first estimate, by parts, was 0.7 to 1.2 us for (ii) and
+1.2 to 1.7 us for (i), with the root switch priced at 100 to 300 ns each
+way. seL4's measured round trip on the same machine, both switches
+included, is 440 ns, so the root switch costs much less than that estimate
+took (about 130 ns each way, §9.6) and the estimate is replaced by seL4's
+figure as the target to reach:
 
-| Part | Each way | A round trip |
-|---|---|---|
-| Today's in-kernel call (the baseline row) | | 357 ns |
-| Restricted exit and re-entry: saving and checking the context (K1, C6) | 30 to 60 ns | 60 to 120 ns |
-| A root switch, since R1 puts the restricted space and the shared region on different roots; nazuna has no PCID, so each is a full non-global TLB flush and its refill | 100 to 300 ns | 200 to 600 ns |
-| The program's whole vector state saved and restored (K1) | 25 to 50 ns | 50 to 100 ns |
-| Under §11 Q5 (i): the predictor barrier (IBPB, about 230 ns on nazuna) and the return-stack refill | about 250 ns | about 500 ns |
+| Build | At seL4's level | Fail line | Expected |
+|---|---|---|---|
+| (ii), the performance build | about 440 ns | 393 ns (1.10 times 357) | **reachable by beating seL4 by about 11%**, which is the customer's existing goal (under 400 ns) |
+| (i), the certified build | about 900 ns (seL4's 440 plus the barrier, about 460) | 714 ns (2.00 times 357) | **fails** unless the barrier moves to partition switches (§11 Q16) |
 
-Under (ii) that is about 0.7 to 1.2 us a call, two to three times the
-baseline; under (i), about 1.2 to 1.7 us, three to five times. **The row's
-1.10x target is expected to fail under both on nazuna**, under (i) on the
-barrier alone. Under the customer's answers the gated build is (ii)'s,
-so the gap to close is 0.3 to 0.8 us a call, almost all of it the root
-switch: a cheaper generic exit and PCID or ASIDs are on M3's critical path,
-not optional. What would close the gap is a processor with PCID or ASIDs
-(the root switch to tens of nanoseconds), ERAPS or an equivalent in place of
-the refill, and a cheaper barrier; none of these is on nazuna. So Q3 (the
-target) and Q5 (the barrier) are in practice one decision, and the customer
-sees these figures before choosing either. (The customer has since chosen:
-§11 Q3 and Q5.) A Linux program making 10,000
-calls a second (Chrome makes about 8,000) would spend 0.3 to 1.3% of a
-processor more than today; a warm `rustc` compile (4,345 calls, `OPAQUE-KERNEL.md` S0), under
-6 ms more. The cold run's call count is measured in M0.
+A Linux program making 10,000 calls a second (Chrome makes about 8,000)
+would spend under 0.1% of a processor more than today at (ii)'s target; a
+warm `rustc` compile (4,345 calls, `OPAQUE-KERNEL.md` S0) well under 1 ms
+more. The cold run's call count is measured in M0.
 
 **The stop rule.** If the restricted-mode row cannot be met, the plan stops
 after M4, with every mechanism landed and nothing lost, and the customer
@@ -681,9 +833,9 @@ in the ledger, and not a gate.
 | Stage | What | Points | Gate |
 |---|---|---|---|
 | **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control; **§6.5's clause table checked against the purchased standards' texts** and corrected before V1, V2, T1, F1 or F2 is sized | 15 | the customer's answers; baselines on `main`; the clause table's check recorded (each row's clause, table, grade and level confirmed or corrected), and no stream's points stated before it |
-| **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first; the PCID-capable measurement host | 30 | each mechanism's boot check and controls FIRED |
+| **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first | 25 | each mechanism's boot check and controls FIRED |
 | **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
-| **M3** | K1, K11 on x86-64, then AArch64; a cheaper generic restricted exit; PCIDs and ASIDs; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
+| **M3** | K1, K11 on x86-64, then AArch64; seL4's methods for the restricted exit (fastpath, lazy vector state, a small hot path); ASIDs on AArch64; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
 | **M4** | §7's rows that are not K-items: the round trip, the bare system call, the block read | on the backlog already | §7's rows |
 | **M5** | **The lift**: `linuxd` behind `--personality user`, with one Linux partition and every system-wide service inside it; `btrfsd` split out as a certified item (§11 Q4, yes); devmgr started by the kernel with K8's handles; the retired calls removed | 130 to 200 | every gate of `docs/BACKLOG.md`'s gate table under `--personality user`, unchanged; §7's rows; the Steam and Chrome rows; then the flip, with coverage and rows measured afresh, and the in-kernel load deleted |
 | **M6** | **Shrink**: the console's screen and input, the panic screen's drawing and the board glue out; discovery cut to §2.1's list; the retired calls' requirements withdrawn; K16, the kernel heap retired | 70 (a *guess*, re-sized after K16's design) | `check-item-boundary.py` fails on a planted load file; coverage carried (§6.2, *Moves*); boot lines identical on four boots where the code did not change |
@@ -696,10 +848,10 @@ before the claim:
 | Stream | What | Points | Gate |
 |---|---|---|---|
 | **V1** | MC/DC: a tool for Rust on the kernel's targets, found or built, qualified (F-17); MC/DC on the whole kernel, 100% or justified | 60 to 120 | an `xtask` MC/DC step with a control (a planted untested condition fails it) |
-| **T1** | Timing on the named AArch64 safety processors: the method (high-water mark plus margin), bounds for every system call and non-preemptible section, the multicore interference channels (AMC 20-193), the static schedule's interference test on hardware | 60 to 100 | a timing row per processor on hardware, with an injected-delay control |
+| **T1** | Timing on Cortex-A78AE in Lock-mode, on the VEK385: the method (high-water mark plus margin), bounds for every system call and non-preemptible section, the multicore interference channels (AMC 20-193), the static schedule's interference test on hardware | 60 to 100 | a timing row per processor on hardware, with an injected-delay control |
 | **V2** | Object-code verification (DO-178C 6.4.4.2b) for what the compiler adds beyond the source | 30 to 80 | a check over the image's functions against the source's, with a control |
-| **F1** | The formal isolation model and its proofs (spatial, temporal, resource isolation between partitions) | 150 to 300 | the proofs checked in `xtask check`; a control that breaks one rule of the model and fails a proof |
-| **F2** | Code-level proofs that the core's object, handle, IPC and address-space code refines F1's model | 300 to 700 | the same, per module; its scope recorded |
+| **F1** | The formal isolation model of the whole TSF, in Isabelle/HOL, and its proofs (spatial, temporal, resource isolation between partitions) | 150 to 300 (2 to 4 person-years, *guess*) | the proofs checked in `xtask check`; a control that breaks one rule of the model and fails a proof |
+| **F2** | Code-level proofs in Verus that the core's object, handle, IPC and address-space code refines F1's model; the TQL-5 case for frozen Verus and Z3 | 300 to 700 (6 to 15 person-years, *guess*) | the same, per module; its scope recorded |
 
 Total *guess*: about 470 to 560 points for M0 to M8, plus stage 14's HardRt,
 plus 600 to 1,300 for V1, V2, T1, F1 and F2: **about 1,050 to 1,900 points**,
@@ -761,61 +913,79 @@ still to write.
 **Answered 2026-10-13** (the customer's words in quotes; *Decisions* in
 `docs/BACKLOG.md` on this branch):
 
-1. **The route**: C, this plan ("Linux =use space => ok"). The 2026-09-16
-   decision and the 2026-09-27 shelving are replaced.
-2. **`ARCHITECTURE.md` §2**: the plan reads the same answer as yes: the Linux
-   ABI served by `linuxd` in user space, and mixed-ABI programs as §2.4 says.
-3. **The rows**: "performance: maximum performance", and, asked how to gate
-   the two builds, "gate both". The plan reads these as §7's: (ii) at 1.00x,
-   failing above 1.10x; (i) within 2.00x, failing if missed (the chosen
-   answer's own words); (i) the evidence. §7's pricing expects (i) near 3x
-   even on a PCID host, because of the barrier, so this gate is expected to
-   hold the flip (M5) until the barrier gets cheaper.
-4. **btrfs**: "btrfs server: ok". The plan reads it, with Q8, as `btrfsd` a
-   certified user-space item, split out at the lift.
-5. **Speculation inside a Linux partition**: the **build switch**. The
-   certified reference builds with the barrier on every restricted exit and
-   entry (i); a performance build treats one Linux partition as one
-   speculation domain (ii) and is outside the certified configuration. The
-   switch is a `--cfg` xtask sets, recorded in `reference_configuration` and
-   `ITEM.md` §5 like `--personality`; `xtask check` builds both. Under (ii)
-   AoU-14, SPECULATION §3, ST FDP_IFC's exception and V-07 are amended for
-   that build. The 2026-10-11 game-mode decision (privileged trades of
-   protections for frame rate) is a separate mechanism and is not decided by
-   this.
-7. **ARMv7-A**: a native-only safety target. No restricted mode and no
-   `linuxd` there. The plan reads this, under maximum certification, as
-   §6.5's rule: a DMA-capable function goes only to a certified driver,
-   enforced by the kernel. The ARMv7-A Linux programs' gates retire at the
-   flip.
-8. **Certification level**: "cert level asil d etc so max certification";
-   asked for IEC 61508, "SIL 4"; asked when, "new kernel, from M7". The plan
-   reads these as §6.5's table, which amends the 2026-10-01 targets for the
-   new kernel from M7. Asked which processors the timing claim covers:
-   "AArch64 safety chips".
-9. **The reference boot's disk path**: proven by user-space checks; every
-   certified id keeps a kernel check (§6.2, B5).
-10. **Feature work in the load during M1 to M5**: allowed as now; M0's
-    ratchet reports growth and does not fail on it.
+* **Q1, The route**: C, this plan ("Linux =use space => ok"). The 2026-09-16
+  decision and the 2026-09-27 shelving are replaced.
+* **Q2, `ARCHITECTURE.md` §2**: the plan reads the same answer as yes: the Linux
+  ABI served by `linuxd` in user space, and mixed-ABI programs as §2.4 says.
+* **Q3, The rows**: "performance: maximum performance", and, asked how to gate
+  the two builds, "gate both". The plan reads these as §7's: (ii) at 1.00x,
+  failing above 1.10x; (i) within 2.00x, failing if missed (the chosen
+  answer's own words); (i) the evidence. §7's pricing expects (i) near 3x
+  even on a PCID host, because of the barrier, so this gate is expected to
+  hold the flip (M5) until the barrier gets cheaper.
+* **Q4, btrfs**: "btrfs server: ok". The plan reads it, with Q8, as `btrfsd` a
+  certified user-space item, split out at the lift.
+* **Q5, Speculation inside a Linux partition**: the **build switch**. The
+  certified reference builds with the barrier on every restricted exit and
+  entry (i); a performance build treats one Linux partition as one
+  speculation domain (ii) and is outside the certified configuration. The
+  switch is a `--cfg` xtask sets, recorded in `reference_configuration` and
+  `ITEM.md` §5 like `--personality`; `xtask check` builds both. Under (ii)
+  AoU-14, SPECULATION §3, ST FDP_IFC's exception and V-07 are amended for
+  that build. The 2026-10-11 game-mode decision (privileged trades of
+  protections for frame rate) is a separate mechanism and is not decided by
+  this.
+* **Q7, ARMv7-A**: a native-only safety target. No restricted mode and no
+  `linuxd` there. The plan reads this, under maximum certification, as
+  §6.5's rule: a DMA-capable function goes only to a certified driver,
+  enforced by the kernel. The ARMv7-A Linux programs' gates retire at the
+  flip.
+* **Q8, Certification level**: "cert level asil d etc so max certification";
+  asked for IEC 61508, "SIL 4"; asked when, "new kernel, from M7". The plan
+  reads these as §6.5's table, which amends the 2026-10-01 targets for the
+  new kernel from M7. Asked which processors the timing claim covers:
+  "AArch64 safety chips".
+* **Q9, The reference boot's disk path**: proven by user-space checks; every
+  certified id keeps a kernel check (§6.2, B5).
+* **Q10, Feature work in the load during M1 to M5**: allowed as now; M0's
+  ratchet reports growth and does not fail on it.
+* **Q6, Certified user-space components**: asked "which other components to
+  certify; which one would the cert agent recommend?", then, offered the
+  consultant's set, "Accept as recommended". §6.3's table: the partition
+  manager, the loader library and `rt` certified; `btrfsd` and block
+  drivers as used; devmgr not certified, safety devices static.
+* **Q11, `core`**: "whether to keep the core ring as a separate structure; ask
+  the cert agent". The consultant recommends keeping it as a layer with
+  one set of targets for the item (§2.1); the plan follows it.
+* **Q12, The first standard and the claim**: "the SIL D / ASIL D", then, asked,
+  "SIL 4 first". IEC 61508 SIL 4 first, ASIL D alongside; the claim's
+  wording in §6.5.
+* **Q13, The proofs**: "how to do the formal proofs; find a proofer". The plan
+  reads this as asking for a recommendation: F1 in Isabelle/HOL, F2 in
+  Verus, Proofcraft and the Verus kernel groups or CertiK as providers
+  (§6.5).
+* **Q14, The measurement host**: "i don't have one, so use amd instead";
+  nazuna. Asked what the stop rule should use: "Use the same methods seL4
+  uses, it must be possible to reach the same level, they did it, so can
+  we". The plan reads this as: the bare-call targets and the stop rule
+  stay, reached by seL4's methods (§7).
+* **Q15, The AArch64 safety processor class**: "find one". Cortex-A78AE in
+  Lock-mode, the VEK385 to buy (§6.5).
 
 **Still open:**
 
-6. **Which user-space components become certified items** beyond `btrfsd`.
-   Proposed, given maximum certification: devmgr, K15's loader library, and a
-   block driver for a safety partition's storage.
-11. **`core`**: both rings now carry the top targets (§2.1). Keep the split as
-    structure (proposed), or merge them.
-12. **`CLAIM.md`'s open decisions**: the claim's wording (§1 there), and the
-    first standard (§2 there). The targets are now the top levels; which one
-    is pursued first (ASIL D, given the customer's words, is proposed) is
-    still to say.
-13. **The formal work's approach** (F1, F2): a model and proofs in a proof
-    assistant with refinement to the code (seL4's way), or code-level
-    verification in Rust (Verus or Kani) against a smaller model. Proposed:
-    decide after F1's first model, on its cost.
-14. **The PCID-capable measurement host** (§7): which machine or board.
-15. **The AArch64 safety processor class** for T1, and a board of it to
-    measure on.
+* **Q16, The certified build's barrier under seL4's methods** (§7): keep the
+  barrier on every restricted exit and entry, which is expected to miss
+  (i)'s 2x limit at about 900 ns; or move it to partition switches, as
+  seL4 does, which meets the limit and makes (i)'s isolation inside a
+  Linux partition the same as (ii)'s (the 2026-10-13 build switch then
+  differs only in what else the performance build drops).
+* **Q17, Approaching the proof providers** (Proofcraft; the Verus groups or
+  CertiK), and the compiler vendor for a SIL 4 qualification of the
+  reference target (F-17): the customer's, since both cost money.
+* **Q18, Buying the VEK385** (about $16,000, 10 to 16 weeks' lead), or the Jetson
+  AGX Orin kit first as a cheaper porting platform (about $3,500).
+
 
 ## Where it stands
 
@@ -867,6 +1037,55 @@ Draft on branch `microkernel-plan`.
   answer read (X3); the duplicated heading, one verbatim quote, K16's
   ISO 26262 grade (X4); M0 owning the clause check (X5). To be checked
   against the diff by the consultant who reviews the docs landing.
+* Sixth round (revision 7): **OK**, no conditions, ledger line 886, with
+  the consultant's answers to Q6, Q11, Q12 and Q14. Revision 8 (this text)
+  writes in the customer's answers to them (§11), the partition manager
+  (§5, §6.3), the core layer (§2.1), SIL 4 first and the claim (§6.5), the
+  proof tools and providers and the safety processor and board from the
+  research of 2026-10-13 (§6.5), nazuna as the host with SVM ASIDs rejected
+  and seL4's methods (§7), and three new questions (§11 Q16 to Q18).
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
+
+## Sources (research of 2026-10-13)
+
+Read on 2026-10-13; each is the source of a figure or claim in §6.5 or §7.
+
+* **Ferrocene**: [ferrocene.dev](https://ferrocene.dev/) (qualifications),
+  [26.05.0](https://ferrous-systems.com/blog/ferrocene-26-05-0/) (Rust 1.95),
+  [targets](https://public-docs.ferrocene.dev/main/user-manual/targets/index.html).
+* **Verus**: [repository](https://github.com/verus-lang/verus),
+  [toolchain pin](https://raw.githubusercontent.com/verus-lang/verus/main/rust-toolchain.toml),
+  [supported features](https://verus-lang.github.io/verus/guide/features.html);
+  **Atmosphere** (SOSP 2025): [paper](https://mars-research.github.io/doc/2025-sosp-atmo.pdf).
+* **seL4**: [proof effort](https://trustworthy.systems/projects/OLD/l4.verified/numbers),
+  [AArch64 security proofs](https://sel4.discourse.group/t/sel4-security-proofs-now-complete-on-aarch64/1074),
+  [certification](https://sel4.systems/Verification/certification.html).
+* **Proofcraft**: [proofcraft.systems](https://proofcraft.systems/);
+  **Kansas State / Collins (HAMR, DO-333)**: [seL4 Summit 2025](https://sel4.systems/Summit/2025/abstracts2025.html);
+  **CertiK on Asterinas**: [LWN](https://lwn.net/Articles/1022920/).
+* **AWS Nitro Isolation Engine and AutoCorrode**:
+  [Amazon Science](https://www.amazon.science/blog/ec2s-formally-verified-isolation-engine-provides-mathematical-assurance-of-virtual-machine-isolation),
+  [AutoCorrode](https://github.com/awslabs/AutoCorrode).
+* **CC:2022 ADV_SPM.1 covers the entire TSF**:
+  [JIL interpretation](https://www.ipa.go.jp/en/security/jisec/g6ovkg00000067p3-att/5_JIL-SPM-Interpretation-v1.0.pdf).
+* **DO-330 Criterion 3, TQL-5**:
+  [LDRA briefing](https://ldra.com/wp-content/uploads/ldra/DO-330-Test-Tool-Qualification-Technical-Briefing-v2.0.pdf).
+* **Cortex-A78AE Lock-mode** (CEMODE, MPIDR_EL1.MT, no MPAM): Arm's
+  [TRM 101779_0002_07](https://documentation-service.arm.com/static/62502fb164e3265f7c90b120);
+  hybrid mode's rating: [Arm blog](https://developer.arm.com/community/arm-community-blogs/b/automotive-blog/posts/functional-safety-compute).
+* **AMD Versal AI Edge Gen 2 / VEK385**:
+  [UG1304](https://docs.amd.com/r/en-US/ug1304-versal-acap-ssdg/Key-Hardware-Components),
+  [TRM AM026](https://docs.amd.com/r/en-US/am026-versal-ai-edge-prime-gen2-trm),
+  [board](https://www.amd.com/en/products/adaptive-socs-and-fpgas/evaluation-boards/vek385.html),
+  [TF-A](https://trustedfirmware-a.readthedocs.io/en/latest/plat/amd-versal2.html).
+* **NVIDIA Orin Lock-mode**:
+  [Jetson adaptation guide](https://docs.nvidia.com/jetson/archives/r35.2.1/DeveloperGuide/_sources/text/HR/JetsonModuleAdaptationAndBringUp/JetsonAgxOrinSeries.rst.txt);
+  **NXP S32G without an SMMU**: [NXP community](https://community.nxp.com/t5/S32G/S32G274A-SMMU-Support-and-Configuration/m-p/2230972).
+
+Not verified by the research and to be confirmed before relying on them: how
+lock-step is configured in AMD's boot tools; AMD's ASIL D status for the
+Versal APU (its briefs say "certified" in one place and "targeted" in
+another); whether Cortex-A720AE and Neoverse V3AE lack SMT; ProvenCore's
+EAL7 certificate.
