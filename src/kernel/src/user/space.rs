@@ -2446,7 +2446,12 @@ fn permits(flags: VmaFlags, access: Access) -> bool {
     // should get `SIGSEGV`. Silent in the way a mapping more permissive than
     // the map always is: nothing that worked stops working, so nothing
     // notices.
-    access.write || access.execute || flags.read
+    //
+    // A writable region reads, as Linux's `protection_map` makes a
+    // `PROT_WRITE` mapping readable on every architecture this kernel runs
+    // on, none of whose tables can say write-only (`L.user.129`). wineserver
+    // maps its user shared data `PROT_WRITE` alone and reads it back.
+    access.write || access.execute || flags.read || flags.write
 }
 
 /// Whether object `id` is named by a region that shares it.

@@ -837,6 +837,45 @@ fn protect_a_whole_region() {
     );
 }
 
+/// `protect` changes read, write and execute and keeps what the mapping is:
+/// `MAP_SHARED`, a stack's growth and `mlock`. Taking the new flags whole
+/// made a shared mapping private, and Proton's Wine wrote to a private copy
+/// of its user shared data.
+#[test]
+fn protect_keeps_shared_grows_down_and_locked() {
+    let mut space = space();
+    let kept = VmaFlags {
+        shared: true,
+        grows_down: true,
+        locked: true,
+        ..VmaFlags::READ_WRITE
+    };
+    map(&mut space, 0x10_000, 0x20_000, kept);
+
+    assert_eq!(
+        space.protect(range(0x10_000, 0x20_000), VmaFlags::READ),
+        Ok(())
+    );
+    check(&space);
+    assert_eq!(
+        space.find(0x18_000).map(|region| region.flags),
+        Some(VmaFlags {
+            write: false,
+            ..kept
+        }),
+        "the permissions changed and nothing else"
+    );
+    assert_eq!(
+        space.protect(range(0x10_000, 0x20_000), VmaFlags::READ_WRITE),
+        Ok(())
+    );
+    assert_eq!(
+        space.find(0x18_000).map(|region| region.flags),
+        Some(kept),
+        "made writable again, it is the mapping it was"
+    );
+}
+
 #[test]
 fn protect_spanning_several_regions_merges_them() {
     let mut space = space();

@@ -203,6 +203,10 @@ fn check_once(process: &Process) -> Result<(u32, u32), &'static str> {
 /// refusals counted.
 fn check_memfd(process: &Process, page: u64) -> Result<(u32, u32), &'static str> {
     let mut refusals = 0;
+    // First, so that each of their controls fails on its own message rather
+    // than on a later check that leans on the same code.
+    check_protect_keeps_a_mapping_shared(process, page)?;
+    check_a_protected_read_only_mapping_stays_read_only(process, page, &mut refusals)?;
     let create = |name: u64, flags: u32| {
         by_number(
             process,
@@ -393,6 +397,65 @@ fn check_the_write_seal(
     Ok(1)
 }
 
+/// A shared read-only mapping of a file opened read-only, `mprotect`ed to
+/// `PROT_READ` first, still may not be made writable, and its file is left as
+/// it was. Before `protect` kept `MAP_SHARED`, the first `mprotect` made the
+/// region private, so the second one turning it writable was safe only by
+/// accident; now the may-write test alone stands on that path. With that test
+/// taken out of `AddressSpace::protect` (scratch), this fails on its own
+/// message, ahead of the seal checks that lean on the same test.
+///
+/// Verifies: L.user.89
+fn check_a_protected_read_only_mapping_stays_read_only(
+    process: &Process,
+    page: u64,
+    refusals: &mut u32,
+) -> Result<(), &'static str> {
+    let cwd = AT_FDCWD as i64 as u64;
+    let open = |flags: u32| {
+        by_number(
+            process,
+            Syscall::Openat,
+            [cwd, page + AT_PATH, u64::from(flags), 0o600, 0, 0],
+        )
+    };
+    let writer = descriptor(
+        open(O_RDWR | O_CREAT | O_TRUNC),
+        "the memfd check's file would not open",
+    )?;
+    let file = fd::file(process, fd::arg(writer)).map_err(|_| "the check's file names nothing")?;
+    if file.write_at(0, b"read only") != Ok(9) {
+        return Err("the memfd check's file could not be written");
+    }
+    let reader = descriptor(
+        open(O_RDONLY),
+        "the memfd check's file would not open read-only",
+    )?;
+    let at = map(process, reader, PAGE_SIZE, PROT_READ, MAP_SHARED)
+        .map_err(|_| "a shared read-only mapping of a file opened read-only was refused")?
+        as u64;
+    let outcome = (|| {
+        if memory::sys_mprotect(process, at, PAGE_SIZE, PROT_READ) != Ok(0) {
+            return Err("mprotect of a shared read-only mapping to PROT_READ was refused");
+        }
+        refused(
+            memory::sys_mprotect(process, at, PAGE_SIZE, PROT_READ | PROT_WRITE),
+            Errno::EACCES,
+            "mprotect made a shared mapping of a file opened read-only writable after a PROT_READ",
+            refusals,
+        )?;
+        let mut held = [0u8; 9];
+        if file.read_at(0, &mut held) != Ok(9) || &held != b"read only" {
+            return Err("a refused mprotect left the read-only file changed");
+        }
+        Ok(())
+    })();
+    let _ = memory::sys_munmap(process, at, PAGE_SIZE);
+    let _ = fd::sys_close(process, fd::arg(reader));
+    let _ = fd::sys_close(process, fd::arg(writer));
+    outcome
+}
+
 /// The gap the may-write accounting closed: a shared read-only mapping of a
 /// file opened read-only may not be made writable.
 ///
@@ -432,6 +495,71 @@ fn check_a_read_only_mapping_stays_read_only(
         refusals,
     );
     let _ = memory::sys_munmap(process, at, PAGE_SIZE);
+    outcome
+}
+
+/// What Proton's Wine does with its user shared data: a memfd mapped shared
+/// and read-write, `mprotect`ed read-write again, then written through the
+/// mapping, must have the byte in the file -- `protect` changes the
+/// permissions and keeps `MAP_SHARED` -- and a mapping of it with
+/// `PROT_WRITE` alone, as wineserver makes, must read what the file holds.
+///
+/// `protect` took the new flags whole, so the region came out private, and
+/// the write after it went to a private copy (Proton's `wineboot` faulted
+/// on it); and a write-only region refused a read. With `region.flags =
+/// flags` put back in `ferrix_vma`'s `protect` (scratch), the first test
+/// here fails; with the write-implies-read taken out of `permits`, the
+/// second.
+///
+/// Whether `protect` keeps a region's growth and `mlock` is ferrix-vma's
+/// host test alone: no kernel path sets either today.
+///
+/// Verifies: L.user.128
+/// Verifies: L.user.129
+fn check_protect_keeps_a_mapping_shared(process: &Process, page: u64) -> Result<(), &'static str> {
+    let shared = descriptor(
+        by_number(
+            process,
+            Syscall::MemfdCreate,
+            [page + AT_NAME, u64::from(MFD_EXEC), 0, 0, 0, 0],
+        ),
+        "memfd_create refused an MFD_EXEC memfd",
+    )?;
+    let file = fd::file(process, fd::arg(shared)).map_err(|_| "the shared memfd names nothing")?;
+    if by_number(process, Syscall::Ftruncate, [shared, PAGE_SIZE, 0, 0, 0, 0]) != Ok(0) {
+        return Err("the shared memfd could not be sized");
+    }
+    let at = map(
+        process,
+        shared,
+        PAGE_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+    )
+    .map_err(|_| "a shared read-write mapping of a memfd was refused")? as u64;
+    let outcome = (|| {
+        if memory::sys_mprotect(process, at, PAGE_SIZE, PROT_READ | PROT_WRITE) != Ok(0) {
+            return Err("mprotect of a shared mapping to read-write was refused");
+        }
+        uaccess::copy_to_user(process.space(), at + 0x268, &[0x5a])
+            .map_err(|_| "a write through a shared mapping mprotect made read-write faulted")?;
+        let mut byte = [0u8];
+        if file.read_at(0x268, &mut byte) != Ok(1) || byte[0] != 0x5a {
+            return Err("a write through a shared mapping after mprotect did not reach its file");
+        }
+        let writer = map(process, shared, PAGE_SIZE, PROT_WRITE, MAP_SHARED)
+            .map_err(|_| "a write-only shared mapping of a memfd was refused")?
+            as u64;
+        let mut read = [0u8];
+        let got = uaccess::copy_from_user(process.space(), writer + 0x268, &mut read);
+        let _ = memory::sys_munmap(process, writer, PAGE_SIZE);
+        if got.is_err() || read[0] != 0x5a {
+            return Err("a write-only mapping did not read what its file holds");
+        }
+        Ok(())
+    })();
+    let _ = memory::sys_munmap(process, at, PAGE_SIZE);
+    let _ = fd::sys_close(process, shared as i32);
     outcome
 }
 

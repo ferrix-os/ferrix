@@ -1639,6 +1639,27 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::protect",
                 "user::space::AddressSpace::resolve", "user::space::copy_on_write");
         }
+        requirement <'L.user.128'> protectKeepsAMappingShared : ItemLowLevel {
+            attribute :>> statement = "protect shall change a region's read, write
+                and execute permissions and keep whether it is shared.";
+            attribute :>> criterion = "A memfd mapped shared and read-write and
+                protected read-write again is written through the mapping: the
+                byte is in the file (the memfd line).";
+            attribute :>> parent = "H.MEM.16";
+            attribute :>> unit = "user::space::AddressSpace::protect";
+        }
+        requirement <'L.user.129'> aWritableRegionReads : ItemLowLevel {
+            attribute :>> statement = "fault shall permit a read of a region that
+                permits writing, as Linux's protection_map makes a PROT_WRITE
+                mapping readable, and still refuse a read of one that permits
+                nothing.";
+            attribute :>> criterion = "A memfd's page mapped shared with PROT_WRITE
+                alone reads what the file holds (the memfd line), while a read
+                of a PROT_NONE region is still refused (L.user.53).";
+            attribute :>> parent = "H.MEM.1";
+            attribute :>> unit = ("user::space::AddressSpace::fault",
+                "user::space::permits");
+        }
         requirement <'L.user.61'> aProgramsCopyOnWriteWriteIsItsOwn : ItemLowLevel {
             attribute :>> statement = "A write by a program's own instruction to a
                 private page its fork still shares shall be copied for the side that

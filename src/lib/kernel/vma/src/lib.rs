@@ -914,7 +914,19 @@ impl AddressSpace {
         let first = self.first_touching(range.start);
         let last = self.first_beyond(range.end);
         for region in self.regions.get_mut(first..last).into_iter().flatten() {
-            region.flags = flags;
+            // `mprotect` changes what the pages permit and nothing else:
+            // `MAP_SHARED`, a stack's growth and `mlock` are the mapping's,
+            // as Linux's `mprotect_fixup` keeps them. Taking `flags` whole
+            // made a shared mapping private, so a write after it went to a
+            // private copy and never reached the object -- Proton's Wine
+            // stopped on its user shared data, mapped shared and then
+            // `mprotect`ed read-write (stage 23).
+            region.flags = VmaFlags {
+                read: flags.read,
+                write: flags.write,
+                execute: flags.execute,
+                ..region.flags
+            };
             // A private region made writable may hold frames a fork left in
             // another space: read-only at the fork, it was not marked then,
             // and its first write would land in the frame the other space
