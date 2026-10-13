@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 13, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 14, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -861,18 +861,16 @@ may cost little there; K1's design measures it on the board.
 **Two builds, both gated** (§11 Q3 and Q5, the customer, 2026-10-13: "gate
 both"):
 
-* **(i), the certified reference build** (`max`), with the barrier on every
-  restricted exit and entry. It is the reference configuration: every gate
-  whose result counts as evidence (coverage, boot checks, controls, any row a
-  claim cites) runs on it. **Its restricted row is gated at 900 ns, failing
-  above 990 ns** (1.10x): seL4's own round trip with IBPB at every switch on
-  nazuna (`OPAQUE-KERNEL.md` §9.6), measured as below with five boots a side
-  and the frozen baseline reported beside. This replaces "within 2x" for
-  `max` only (§11 Q16, decided by the consultant under the customer's
-  delegation, ledger 926): x86-64's speed is not a certification property,
-  and x86-64 carries no timing claim. On the AArch64 board the row is
-  measured in M3 and gets its own number then; FEAT_CSV2 may make the
-  barrier cheap there.
+* **(i), the certified reference build** (`max`). It is the reference
+  configuration: every gate whose result counts as evidence (coverage, boot
+  checks, controls, any row a claim cites) runs on it. **Its restricted row
+  is gated at 660 ns, failing above 660 ns: at most 1.5 times seL4's 440 ns**
+  on nazuna (the customer, 2026-10-13: "can you optimze max as well with a
+  1.5x seL4 difference max"), measured as below with five boots a side and
+  the frozen baseline reported beside. This replaces the consultant's 900 ns
+  (ledger 926), which priced an IBPB on every restricted exit and entry.
+  **How `max` keeps maximum security at that speed** (a design for the
+  consultant's review, §7 *The certified build's speculation rule*).
 * **(ii), the performance build**, with one Linux partition as one
   speculation domain. Its rows are gated at **1.00x, failing above 1.10x**,
   and labelled as `--mitigations off`'s figures are: measured and gated, not
@@ -903,6 +901,34 @@ both"):
 | Cold `test-rustc` and the self-host build | to measure in M0 | 1.00x |
 | Chrome network bench, compositor frame time, `test-unity` | to measure in M0 | 1.00x |
 
+**The certified build's speculation rule** (proposed, for review). An IBPB
+on every restricted exit and entry protects `linuxd` from branch-target
+poisoning by the program it serves. The same protection, without the
+per-call IBPB:
+
+* **`linuxd`'s call path has no poisonable indirect branch**: built with
+  retpoline-equivalent indirect calls (or none, by the direct dispatch of the
+  seL4 methods above), with a compiler-setting rule and a check over the
+  shipped binary that finds no unprotected indirect branch on the path, and a
+  planted one as its negative control.
+* **Returns are protected**: the return-stack refill, or ERAPS where
+  SPECULATION §3 allows it, on every restricted exit (about 20 ns).
+* **Spectre v1 in `linuxd`** is handled by clamped indices on every
+  program-controlled index, as in the kernel; an IBPB never stopped v1, so
+  this is needed in any case.
+* **The full IBPB stays at every switch between different programs**
+  (different restricted spaces), as SPECULATION §3 does today between
+  programs not in one marked domain, and at every switch between
+  partitions; `smt=off` and `ssbd=always` stay in `max`.
+* **On the AArch64 class**, the program and `linuxd` run under different
+  ASIDs and FEAT_CSV2 keeps branch-predictor targets from crossing them; the
+  board measures what, if any, barrier is still needed.
+
+Expected cost on nazuna: seL4's 440 ns plus the refill (about 20 ns each way)
+and the retpoline-style calls on the path (a few tens of nanoseconds),
+**about 500 ns against the 660 ns limit**. If the review refuses the rule,
+the per-call IBPB stays and `max`'s limit returns to the customer.
+
 **What the restricted-mode row is expected to cost** (x86-64 on nazuna; M3
 measures each). The first estimate, by parts, was 0.7 to 1.2 us for (ii) and
 1.2 to 1.7 us for (i), with the root switch priced at 100 to 300 ns each
@@ -914,7 +940,8 @@ figure as the target to reach:
 | Build | At seL4's level | Fail line | Expected |
 |---|---|---|---|
 | (ii), the performance build | about 440 ns | 393 ns (1.10 times 357) | **reachable by beating seL4 by about 11%**, which is the customer's existing goal (under 400 ns) |
-| (i), the certified build | about 900 ns (seL4's 440 plus the barrier, about 460) | 714 ns (2.00 times 357) | **fails** unless the barrier moves to partition switches (§11 Q16) |
+| (i), the certified build (`max`), with the per-call IBPB | about 900 ns (seL4's 440 plus the barrier, about 460) | 660 ns (1.5 times seL4's 440) | fails |
+| (i), the certified build (`max`), under the rule above | about 500 ns | 660 ns | **within the limit**, if the rule is accepted |
 
 A Linux program making 10,000 calls a second (Chrome makes about 8,000)
 would spend under 0.1% of a processor more than today at (ii)'s target; a
@@ -1090,7 +1117,10 @@ still to write.
   max security for max"). Its decisions, ledger line 926, which the customer
   can override:
   * **Q16, the barrier**: `max` on every restricted exit and entry, no SMT on
-    x86-64, the row at 900 ns failing above 990 ns (option (a)); `fast` at
+    x86-64, the row at 900 ns failing above 990 ns (option (a)), **since
+    replaced by the customer**: "can you optimze max as well with a 1.5x
+    seL4 difference max", so `max`'s row is 660 ns at most, reached by §7's
+    proposed speculation rule (under review); `fast` at
     partition switches with STIBP; `desktop` barriers only between login
     sessions' domains, SSBD on request, game mode's trades compiled in,
     `mitigations=off` by `--set`, and Zenbleed's and GDS's fixes on in every
@@ -1326,6 +1356,9 @@ Draft on branch `microkernel-plan`.
 * The customer delegated Q16 to Q18 to the consultant; its decisions,
   ledger 926, are in §11 and `BUILD-FLAGS.md` §3 (revision 13, this text).
   `max`'s restricted row is 900 ns, failing above 990 (§7).
+* Revision 14 (this text): the customer's 1.5x-seL4 limit for `max` (660
+  ns) and the speculation rule that reaches it without the per-call IBPB
+  (§7), sent for review.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).

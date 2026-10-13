@@ -1085,7 +1085,9 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   "Only max"; and on the barrier, the contacts and the board, "let the cert
   agent decide. ideally it shall be almost not realizable on desktop, maybe
   even deactivateable, as it is not certified anyways, and max security for
-  max" (the consultant's decisions: ledger line 926, MICROKERNEL.md §11). **The plan reads these as** (MICROKERNEL.md
+  max" (the consultant's decisions: ledger line 926, MICROKERNEL.md §11). Then: "can you optimze max as well with a 1.5x seL4
+  difference max", so `max`'s restricted row is at most 660 ns (MICROKERNEL.md
+  §7). **The plan reads these as** (MICROKERNEL.md
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
