@@ -1077,7 +1077,11 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   "SIL 4 first"; "find a proofer"; on the measurement host, "i don't have
   one, so use amd instead"; on the stop rule, "Use the same methods seL4
   uses, it must be possible to reach the same level, they did it, so can
-  we"; and on the safety processor, "find one". **The plan reads these as** (MICROKERNEL.md
+  we"; and on the safety processor, "find one"; then "3 builds sounds
+  good, so a good start would then be to define the build time flags?",
+  "yes desktop build is a hybrid kernel, while max and fast are true
+  microkernels", and, asked whether the IPC fast path becomes a build flag,
+  "Build-time flag". **The plan reads these as** (MICROKERNEL.md
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
@@ -1096,8 +1100,13 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   claim's wording; F1 in Isabelle/HOL, F2 in Verus, Proofcraft and the Verus
   groups or CertiK as providers; nazuna as the measurement host, SVM ASIDs
   rejected, the bare-call targets kept and reached by seL4's methods;
-  Cortex-A78AE in Lock-mode as the timing class, AMD's VEK385 as the board. The certification consultant's review is **still
-  open** (ledger lines 812, 837, 847, 858, 869, 886). Still open for the customer
+  Cortex-A78AE in Lock-mode as the timing class, AMD's VEK385 as the board.
+  Three build profiles from one source (MICROKERNEL.md §12,
+  `docs/BUILD-FLAGS.md`): `max` (SC 4 / ASIL D) and `fast` (SC 2 / ASIL B)
+  microkernels carrying claims, and `desktop`, a hybrid kernel with the
+  Linux layer and btrfs in ring 0 and no claim; the IPC fast path a build
+  flag, off in `max` until the 2026-10-02 rule is met. The certification consultant's review is **still
+  open** (ledger lines 812 to 913). Still open for the customer
   (MICROKERNEL.md §11): where the certified build's barrier sits under
   seL4's methods, approaching the proof providers and the compiler vendor,
   and buying the board.

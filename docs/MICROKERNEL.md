@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 11, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 12, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -243,7 +243,7 @@ partitions, and not inside one address space.**
   decommit or range-operation right on a VMO a higher level maps, and is
   never its pager (K3), so the mapping cannot change or fault under the
   reader; (e) a child job's level is at most its parent's; (f) a speculation
-  domain never spans levels, under `partition_speculation=domain` too, with a
+  domain never spans levels, under `partition_speculation=partition` too, with a
   check; (g) every refusal is audited. Freedom from interference between
   levels then rests on the kernel's spatial (ASR-1, K17), temporal (K9) and
   resource (K12, K16) isolation, which F1 models.
@@ -1067,6 +1067,12 @@ still to write.
   uses, it must be possible to reach the same level, they did it, so can
   we". The plan reads this as: the bare-call targets and the stop rule
   stay, reached by seL4's methods (§7).
+* **Q19 and Q20, the profiles**: "3 builds sounds good", and "yes desktop
+  build is a hybrid kernel, while max and fast are true microkernels". The
+  plan reads these as: `max` and `fast` both carry claims, and `desktop`
+  keeps the Linux layer and btrfs in ring 0 permanently (§12,
+  `BUILD-FLAGS.md`).
+* **The IPC fast path's mechanism** (Z10): "Build-time flag" (§12.1).
 * **Q15, The AArch64 safety processor class**: "find one". Cortex-A78AE in
   Lock-mode, the VEK385 to buy (§6.5).
 
@@ -1091,13 +1097,6 @@ still to write.
 * **Q17, Approaching the proof providers** (Proofcraft; the Verus groups or
   CertiK), and the compiler vendor for a SIL 4 qualification of the
   reference target (F-17): the customer's, since both cost money.
-* **Q19, Which profiles carry a claim** (§12): `max` (SC 4 / ASIL D) and
-  `fast` (SC 2 / ASIL B), as proposed, or `max` only, with `fast` an
-  uncertified speed build.
-* **Q20, The in-kernel Linux layer for `desktop`** (§12): keep
-  `personality=kernel` permanently for the fastest uncertified kernel, at the
-  cost of building and gating both forms of the Linux layer, or delete it at
-  the flip as §4 planned.
 * **Q18, Buying the VEK385** (about $16,000, 10 to 16 weeks' lead), or the Jetson
   AGX Orin kit first as a cheaper porting platform (about $3,500).
 
@@ -1115,39 +1114,41 @@ level the customer chose earlier: SC 4 / ASIL D.)
 
 ### 12.1 The options
 
-Each option is a compile-time `--cfg` that xtask sets from one configuration
-file, never a Cargo feature (`kernel_cargo_features` stays 0) and never a
-boot option. Code a profile does not select is not in its image, so it is
-neither dead nor deactivated code in that profile, which is why compile time
-is the right place for this, as `ITEM.md` §5 already argues for
-`--mitigations`.
+**The flags are defined in [`docs/BUILD-FLAGS.md`](BUILD-FLAGS.md)** (the
+customer, 2026-10-13: "a good start would then be to define the build time
+flags"): `personality`, `fs`, `mitigations`, `partition_speculation`,
+`ipc_fastpath`, `restricted_fastpath`, `kernel_memory`, `schedule` and
+`checks`, each a compile-time key-value `--cfg`, never a Cargo feature
+(`kernel_cargo_features` stays 0) and never a boot option. Code a profile
+does not select is not in its image, so it is neither dead nor deactivated
+code in that profile, which is why compile time is the right place for
+this, as `ITEM.md` §5 already argues for `--mitigations`.
 
-| Option | Values | What it moves or relaxes | Highest level it allows |
-|---|---|---|---|
-| `personality` | `user`, `kernel` | `kernel` links `linuxd` (QM) into ring 0 for speed: the cached-file path loses the restricted-mode round trip | `user`: any; `kernel`: **no claim** |
-| `fs_in_kernel` | `off`, `btrfs` | `btrfs` links the btrfs crates into ring 0 instead of `btrfsd`. Under `personality=user` that is more than linking: it needs ring-0 glue (`Device`/`WriteDevice` over a block client, and a served-filesystem interface to `linuxd`, `OPAQUE-KERNEL.md` option B's forwarding) at the profile's level. **The plan makes it `desktop`-only** (with `personality=kernel`, where today's glue exists); `fast` uses `btrfsd` | `btrfs`: no claim |
-| `partition_speculation` | `barrier`, `domain` | §11 Q5's build switch | `barrier`: any; `domain`: as §11 Q16 decides |
-| `mitigations` | `on`, `off` | F-31's switch | `on`: any; `off`: no claim |
-| `kernel_memory` | `retyped`, `heap` | K16's no-heap model, or today's fallible, charged shared heap (F-23, F-37) | `retyped`: any; `heap`: up to SC 2 / ASIL B, under `fast`'s own justification (§12.2) |
-| `schedule` | `static+edf`, `edf` | K9's static windows, or **stage 14's HardRt** (partitioned EDF with CBS budget enforcement and admission, K9's donation and interrupt charging), built; never today's EEVDF, and `ferrix-sched` answers `ModeUnavailable` for HardRt today | `edf`: up to SC 2 / ASIL B |
-| `fastpath` | `off`, `on` | the 0x1013 fast path and K1's fastpath. The 0x1013 fast path is a **boot option today** (`ferrix.fastpath`, off unless set to `on`; L.x86_64.159); its certified default is off for the first certified release (the customer's call of 2026-10-02, `OPAQUE-KERNEL.md` §9.7, *The customer's calls*). **M0 turns the boot option into this `cfg`**, an item change with its own review and L.x86_64.159 restated, so §12.1's "never a boot option" holds and `ITEM.md` §5's count of boot options falls by one | per each fast path's own review |
-| `checks` | `on`, `off` | the in-kernel boot checks | `on` in every certified profile |
+**The IPC fast path becomes a flag** (the customer, 2026-10-13, asked:
+"Build-time flag"). It is a boot option today (`ferrix.fastpath`, off unless
+set to `on`; L.x86_64.159), and the customer's call of 2026-10-02
+(`OPAQUE-KERNEL.md` §9.7, *The customer's calls*) keeps its rule with the
+mechanism changed: `max` builds with `ipc_fastpath=off` until one coverage
+run has measured the fast path and its vulnerability-analysis entry exists,
+then with `on`. M0 makes the change, an item change with its own review and
+L.x86_64.159 restated (Z10, ledger 913).
 
-Each option value declares the **highest level it allows** in the
-configuration file, and its dependencies and conflicts, as Kconfig's
-`depends on` does. A component may be linked into ring 0 only if it is
-certified at or above the profile's level: the item-boundary gate reads the
-profile and each component's level from `certification-item.json` and fails
-a profile that breaks the rule, with a planted QM component in a certified
-profile as its negative control.
+Each value declares the **highest level it allows**, and its dependencies
+and conflicts, as Kconfig's `depends on` does. A component may be linked
+into ring 0 only if it is certified at or above the profile's level: the
+item-boundary gate reads the profile and each component's level from
+`certification-item.json` and fails a profile that breaks the rule, with a
+planted QM component in a certified profile as its negative control.
+`fs=kernel` (btrfs in ring 0) needs `personality=kernel`, since only the
+hybrid kernel has the glue (Z7).
 
 ### 12.2 The profiles
 
 | Profile | Claim | Options |
 |---|---|---|
-| **`max`** | IEC 61508-3 SC 4 / ISO 26262 ASIL D, the first assessment (§6.5) | `personality=user`, `fs_in_kernel=off`, `partition_speculation` per Q16, `mitigations=on`, `kernel_memory=retyped`, `schedule=static+edf`, `fastpath` per its reviews, `checks=on` |
-| **`fast`** | IEC 61508-3 SC 2 / ISO 26262 ASIL B; **no timing claim** (measured bounds on named processors may be added later) | `personality=user`, `fs_in_kernel=off` (`btrfsd`), `partition_speculation=domain`, `mitigations=on`, `kernel_memory=heap`, `schedule=edf`, `fastpath=on`, `checks=on` |
-| **`desktop`** | **none** | `personality=kernel`, `fs_in_kernel=btrfs`, the rest as the customer's machines want, `mitigations` per F-31 and game mode |
+| **`max`** | IEC 61508-3 SC 4 / ISO 26262 ASIL D, the first assessment (§6.5) | `personality=user`, `fs=server`, `partition_speculation` per Q16, `mitigations=on`, `ipc_fastpath=off` until its rule is met, `kernel_memory=retyped`, `schedule=windows`, `checks=on` (`BUILD-FLAGS.md` §3) |
+| **`fast`** | IEC 61508-3 SC 2 / ISO 26262 ASIL B; **no timing claim** (measured bounds on named processors may be added later) | `personality=user`, `fs=server` (`btrfsd`), `partition_speculation=partition`, `mitigations=on`, `kernel_memory=heap`, `schedule=edf`, `fastpath=on`, `checks=on` |
+| **`desktop`** | **none**; a **hybrid kernel** (the customer, 2026-10-13: "desktop build is a hybrid kernel, while max and fast are true microkernels") | `personality=kernel`, `fs=kernel`, the rest per `BUILD-FLAGS.md` §3 |
 
 **`fast`'s justification for a kernel heap.** ISO 26262-6 grades "no
 dynamic objects or variables, or else online test during their creation" HR
@@ -1209,7 +1210,7 @@ it in any certified profile, and the planted-QM control covers that.
 M0 adds the configuration file, the resolver, the boot line and the
 profile rule in the item-boundary gate (with today's options:
 `mitigations`, `fastpath`, `checks`); each K-row that adds an option adds
-its line. M5 keeps `personality=kernel` for `desktop` instead of deleting
+its line. M5 keeps `personality=kernel` for `desktop`, the hybrid kernel, instead of deleting
 it. M7 produces `max`'s and `fast`'s evidence. §11 Q19 and Q20 ask which
 profiles to certify and whether `desktop` keeps the in-kernel Linux layer.
 
@@ -1299,6 +1300,12 @@ Draft on branch `microkernel-plan`.
   of 2026-10-02, which do make it off in the certified configuration), and
   M0 turning the boot option into a `cfg` (Z9). To be checked against the
   diff.
+* Diff check of revision 11: **OK IF** Z10, ledger line 913 (the
+  consultant also corrected its line 903: the customer's 2026-10-02 call on
+  the fast path exists). Revision 12 (this text) takes the customer's
+  answers: three profiles, `desktop` a hybrid kernel, the fast path a
+  build flag under its 2026-10-02 rule (Z10); the flags are defined in
+  `docs/BUILD-FLAGS.md`, sent for design review.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
