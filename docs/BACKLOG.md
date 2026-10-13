@@ -1082,7 +1082,10 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   "yes desktop build is a hybrid kernel, while max and fast are true
   microkernels", and, asked whether the IPC fast path becomes a build flag,
   "Build-time flag"; asked whether its 2026-10-02 rule binds `fast` too,
-  "Only max". **The plan reads these as** (MICROKERNEL.md
+  "Only max"; and on the barrier, the contacts and the board, "let the cert
+  agent decide. ideally it shall be almost not realizable on desktop, maybe
+  even deactivateable, as it is not certified anyways, and max security for
+  max" (the consultant's decisions: ledger line 926, MICROKERNEL.md §11). **The plan reads these as** (MICROKERNEL.md
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
@@ -1107,10 +1110,9 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   microkernels carrying claims, and `desktop`, a hybrid kernel with the
   Linux layer and btrfs in ring 0 and no claim; the IPC fast path a build
   flag, off in `max` until the 2026-10-02 rule is met. The certification consultant's review is **still
-  open** (ledger lines 812 to 914). Still open for the customer
-  (MICROKERNEL.md §11): where the certified build's barrier sits under
-  seL4's methods, approaching the proof providers and the compiler vendor,
-  and buying the board.
+  open** (ledger lines 812 to 926). The barrier, the contacts and
+  the board were decided by the consultant under the customer's delegation;
+  sending the contact messages and buying the board stay the customer's.
   Each kernel mechanism gets its own design review before code; nothing is
   built.
 * **2026-10-11 (customer)** **Game mode: a mark first, then the

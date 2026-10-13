@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 12, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 13, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -861,12 +861,18 @@ may cost little there; K1's design measures it on the board.
 **Two builds, both gated** (§11 Q3 and Q5, the customer, 2026-10-13: "gate
 both"):
 
-* **(i), the certified reference build**, with the barrier on every
+* **(i), the certified reference build** (`max`), with the barrier on every
   restricted exit and entry. It is the reference configuration: every gate
   whose result counts as evidence (coverage, boot checks, controls, any row a
-  claim cites) runs on it. Its rows are gated at **2.00x of today's in-kernel
-  figure, failing above 2.00x**: the customer's chosen answer read "within
-  2x of today ... and also fails if missed", so no tolerance is laid on it.
+  claim cites) runs on it. **Its restricted row is gated at 900 ns, failing
+  above 990 ns** (1.10x): seL4's own round trip with IBPB at every switch on
+  nazuna (`OPAQUE-KERNEL.md` §9.6), measured as below with five boots a side
+  and the frozen baseline reported beside. This replaces "within 2x" for
+  `max` only (§11 Q16, decided by the consultant under the customer's
+  delegation, ledger 926): x86-64's speed is not a certification property,
+  and x86-64 carries no timing claim. On the AArch64 board the row is
+  measured in M3 and gets its own number then; FEAT_CSV2 may make the
+  barrier cheap there.
 * **(ii), the performance build**, with one Linux partition as one
   speculation domain. Its rows are gated at **1.00x, failing above 1.10x**,
   and labelled as `--mitigations off`'s figures are: measured and gated, not
@@ -1078,27 +1084,34 @@ still to write.
 
 **Still open:**
 
-* **Q16, The certified build's barrier under seL4's methods** (§7). Three
-  options:
-  * **(a) Gate (i) at what its barrier costs** (recommended by the
-    consultant, ledger 892): keep the barrier on every restricted exit and
-    entry and set (i)'s fail line near 1 us, seL4's own figure with IBPB at
-    every switch on nazuna. This revisits the earlier "within 2x" answer.
-    The reason: (i)'s speed on x86-64 is not a certification property, and
-    x86-64 carries no timing claim.
-  * **(b) Keep the barrier on every exit and the 2x limit**: expected to miss
-    at about 900 ns, so (i)'s gate holds the flip (M5) until the barrier
-    gets cheaper.
-  * **(c) Move the barrier to partition switches**, as seL4's
-    time-protection work does: meets the limit, and gives the certified
-    build (ii)'s claim inside a Linux partition, with AoU-14 amended: the
-    certified build no longer protects one Linux partition's programs from
-    each other against speculation.
-* **Q17, Approaching the proof providers** (Proofcraft; the Verus groups or
-  CertiK), and the compiler vendor for a SIL 4 qualification of the
-  reference target (F-17): the customer's, since both cost money.
-* **Q18, Buying the VEK385** (about $16,000, 10 to 16 weeks' lead), or the Jetson
-  AGX Orin kit first as a cheaper porting platform (about $3,500).
+* **Q16 to Q18: delegated to the consultant** (the customer, 2026-10-13:
+  "let the cert agent decide. ideally it shall be almost not realizable on
+  desktop, maybe even deactivateable, as it is not certified anyways, and
+  max security for max"). Its decisions, ledger line 926, which the customer
+  can override:
+  * **Q16, the barrier**: `max` on every restricted exit and entry, no SMT on
+    x86-64, the row at 900 ns failing above 990 ns (option (a)); `fast` at
+    partition switches with STIBP; `desktop` barriers only between login
+    sessions' domains, SSBD on request, game mode's trades compiled in,
+    `mitigations=off` by `--set`, and Zenbleed's and GDS's fixes on in every
+    profile (`BUILD-FLAGS.md` §3).
+  * **Q17, contacts, in this order**: in M0, an accredited IEC 61508 / ISO
+    26262 certification body for `CLAIM.md` M2's pre-assessment (its answers
+    decide whether SC 4 is reachable before money goes elsewhere), and
+    Ferrous Systems for Ferrocene in parallel; in M0 to M1, Proofcraft for
+    F1; after F1's first model (about M3), the Verus kernel groups for a
+    pilot refinement of one core module, CertiK only if no group can
+    contract; a Common Criteria lab after the assessor has answered and F1
+    exists. The customer sends the messages; drafts are kept outside the
+    repository (`~/.local/share/ferrix/microkernel/contacts/`).
+  * **Q18, the board: neither yet.** The VEK385 is ordered by the end of M1 at
+    the latest, once M0's research check confirms AMD's per-cluster Lock-mode
+    configuration in its own boot software, the SoC's safety rating and
+    safety-manual access (under NDA if need be), the SMMUv3 and GICv3 ITS,
+    and the price and lead time. No Orin: the Pixel 7 Ferrix already boots
+    has Cortex-A78 cores (Tensor G2; M0 confirms by reading MIDR_EL1), the
+    A78AE's core without split-lock, for early barrier, CSV2 and timing
+    measurements; the VEK385's QEMU model covers bring-up.
 
 
 ## 12. Build profiles: one source, several kernels
@@ -1310,6 +1323,9 @@ Draft on branch `microkernel-plan`.
   folded in (BF9 here: `fast`'s row). The interim `present` profile keeps
   today's item its claim until the flip. Diff check OK IF BF10 (ledger 925), folded in;
   M0's code may start.
+* The customer delegated Q16 to Q18 to the consultant; its decisions,
+  ledger 926, are in §11 and `BUILD-FLAGS.md` §3 (revision 13, this text).
+  `max`'s restricted row is 900 ns, failing above 990 (§7).
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
