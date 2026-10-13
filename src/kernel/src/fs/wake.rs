@@ -19,6 +19,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_vfs::{OpenFile, WakeSource};
 
+use crate::fallible;
 use crate::sched::WaitQueue;
 
 /// How long a wait whose every queue is trusted sleeps between its own looks.
@@ -72,16 +73,26 @@ impl Sources {
     }
 
     /// Add a file's queues.
+    ///
+    /// Never fails: a queue there is no memory to hold is left out and the
+    /// wait no longer trusted, as for an object that names none, so its
+    /// recheck finds what that queue's wake would have said. An
+    /// `epoll_wait` on a machine out of memory stopped it here once
+    /// (`docs/BACKLOG.md`, endfield-s3's control).
     pub(crate) fn add(&mut self, file: &OpenFile) {
         let mut offered = Vec::new();
-        let trusted = file.poll_queues(&mut |source| offered.push(source));
-        self.trusted &= trusted;
+        let mut kept = true;
+        let trusted = file.poll_queues(&mut |source| {
+            kept &= fallible::try_push(&mut offered, source).is_ok();
+        });
+        self.trusted &= trusted && kept;
         for source in offered {
             self.add_source(source);
         }
     }
 
-    /// Add one queue an object named, once however often it is named.
+    /// Add one queue an object named, once however often it is named; with
+    /// no memory to hold it, the wait is no longer trusted instead.
     pub(crate) fn add_source(&mut self, source: WakeSource) {
         let held = match source {
             WakeSource::Static(any) => match any.downcast_ref::<WaitQueue>() {
@@ -103,9 +114,14 @@ impl Sources {
             .held
             .iter()
             .any(|kept| core::ptr::eq(kept.queue(), held.queue()));
-        if !already {
-            self.held.push(held);
+        if !already && fallible::try_push(&mut self.held, held).is_err() {
+            self.trusted = false;
         }
+    }
+
+    /// How many queues it holds, for the check of a wait with no memory.
+    pub(crate) fn held(&self) -> usize {
+        self.held.len()
     }
 
     /// How long this wait may sleep between its own looks.
@@ -118,13 +134,18 @@ impl Sources {
     }
 
     /// Sleep until `ready`, a wake of any of the queues, or `deadline`.
+    ///
+    /// With no memory for the list of queues, it sleeps on none and looks
+    /// again as an untrusted wait does.
     pub(crate) fn wait(&self, mut ready: impl FnMut() -> bool, deadline: u64) -> bool {
-        let queues: Vec<&WaitQueue> = self.held.iter().map(Held::queue).collect();
         let counted = || {
             let _ = LOOKS.fetch_add(1, Ordering::Relaxed);
             ready()
         };
-        WaitQueue::wait_on_any(&queues, counted, deadline, self.recheck())
+        match fallible::try_collect(self.held.iter().map(Held::queue)) {
+            Ok(queues) => WaitQueue::wait_on_any(&queues, counted, deadline, self.recheck()),
+            Err(_) => WaitQueue::wait_on_any(&[], counted, deadline, UNTRUSTED_RECHECK_NANOS),
+        }
     }
 }
 

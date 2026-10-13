@@ -69,6 +69,8 @@ const LISTED_LOOK_NANOS: u64 = 1_000_000;
 /// 0.8 s of every boot on the DK1 and under QEMU alike (2026-09-24) for a
 /// margin of ten where two is plenty.
 const QUIET_POLL_MILLIS: i32 = 120;
+/// How long a wait with no memory for its queues is given to time out.
+const STARVED_WAIT_NANOS: u64 = 20_000_000;
 /// The most looks a quiet poll may take in that time: a wait trusting its
 /// queues takes two or three, one looking every 5 ms about twenty-four.
 const QUIET_POLL_LOOKS: u64 = 12;
@@ -153,6 +155,7 @@ fn check_once(process: &Arc<Process>) -> Result<Counts, &'static str> {
         .and_then(|()| check_a_blocked_read_is_woken(&mut counts))
         .and_then(|()| check_edges_in_epoll(process, page, &mut counts))
         .and_then(|()| check_a_quiet_poll_sleeps(process, page))
+        .and_then(|()| check_a_wait_without_memory(process))
         .and_then(|()| check_waits_are_woken(process, page, &mut counts));
     for fd in 3..32 {
         let _ = fd::sys_close(process, fd);
@@ -455,6 +458,57 @@ fn check_a_quiet_poll_sleeps(process: &Process, page: u64) -> Result<(), &'stati
             "  eventfd  a {QUIET_POLL_MILLIS} ms poll on a quiet eventfd looked {looked} times"
         );
         return Err("a poll on a quiet eventfd kept looking instead of sleeping on its queues");
+    }
+    closed(process, counter)
+}
+
+/// A wait gathered with no memory for its queues still sleeps and ends.
+/// With memory, both of the eventfd's queues are held and trusted. With
+/// the second fallible allocation of this task failing, `Sources::add`
+/// gathers the queues (the first) and cannot hold the first of them (the
+/// second): fewer are held, the wait is not trusted, so it looks again
+/// every few milliseconds, and it times out with nothing ready. With every
+/// allocation failing, a wait that holds its queues still times out,
+/// sleeping on none.
+///
+/// `Sources` pushed with `Vec::push`, which reached the allocation error
+/// handler when the heap was empty: an `epoll_wait` stopped the kernel with
+/// FX-0008 on a guest Wine's own Direct3D had run out of memory
+/// (`docs/BACKLOG.md`, endfield-s3's control). An injected failure cannot
+/// empty the heap, so what is checked is that both pushes ask the policy:
+/// with either made a plain `Vec::push` again (scratch), the other is the
+/// first allocation counted, nothing fails, every queue is held and the
+/// starved test here fails.
+fn check_a_wait_without_memory(process: &Process) -> Result<(), &'static str> {
+    let counter = create(process, 0, 0)?;
+    let file = fd::file(process, counter).map_err(|_| "an eventfd had no open file")?;
+    let task = crate::sched::current_id().ok_or("the eventfd check runs outside a task")?;
+    let wait_briefly = |sources: &fs::wake::Sources| {
+        let deadline = crate::timer::now_nanos().saturating_add(STARVED_WAIT_NANOS);
+        sources.wait(|| false, deadline)
+    };
+    let mut fed = fs::wake::Sources::new();
+    fed.add(&file);
+    if fed.held() == 0 || fed.recheck() != fs::wake::TRUSTED_RECHECK_NANOS {
+        return Err("a wait on an eventfd did not hold and trust its queues with memory to spare");
+    }
+    crate::fallible::inject_once(task, 2, false);
+    let mut starved = fs::wake::Sources::new();
+    starved.add(&file);
+    let lost =
+        starved.held() < fed.held() && starved.recheck() == fs::wake::UNTRUSTED_RECHECK_NANOS;
+    let failed = crate::fallible::stop_injecting();
+    if !lost || failed != 1 {
+        return Err("a wait held its queue with the allocation to hold it failing");
+    }
+    if wait_briefly(&starved) {
+        return Err("a wait with no memory for its queues did not time out");
+    }
+    crate::fallible::inject(task, 1);
+    let ended = !wait_briefly(&fed);
+    let _ = crate::fallible::stop_injecting();
+    if !ended {
+        return Err("a wait with no memory for its list of queues did not time out");
     }
     closed(process, counter)
 }
