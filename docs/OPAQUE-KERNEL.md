@@ -1,5 +1,11 @@
 # An opaque kernel: services as supervised userspace servers
 
+**Superseded for the architecture (customer, 2026-10-13):** route C, the
+fully opaque kernel with restricted mode, is now the plan, in
+[`docs/MICROKERNEL.md`](MICROKERNEL.md). This document keeps its history,
+§2's mechanisms (MICROKERNEL.md's K6, K7 and K13 come from them) and §9's
+round-trip work, which continues.
+
 **Shelved (customer, 2026-09-27): off the table for now.** S0 measured the
 seam, and the customer read the numbers and set the plan aside. S1 and
 everything after it are not started. The 2026-09-16 decision stands:

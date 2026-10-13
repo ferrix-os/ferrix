@@ -34,6 +34,12 @@ discovered to be dead ends at the end.
 
 ## 1. Shape of the system
 
+> **Being replaced (customer, 2026-10-13).** Ferrix is to become a
+> microkernel whose ring 0 is the certified item whole, with the Linux ABI
+> served from user space by `linuxd` (`docs/MICROKERNEL.md`;
+> `docs/BACKLOG.md`, Decisions). This section and §2 describe the system as
+> built today and stay true until that plan's flip (its M5).
+
 ```
         ┌─────────────────────────────────────────────────────────────┐
         │ userspace                                                    │

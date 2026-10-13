@@ -1065,8 +1065,8 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   certifiable microkernels", reviewed by the certification consultant
   (ledger lines 812, 837, 847), the customer answered: the Linux ABI served
   from user space by `linuxd` ("Linux = user space => ok"), which replaces
-  the 2026-09-16 decision below and the 2026-09-27 shelving of the
-  opaque-kernel plan, and reopens `docs/ARCHITECTURE.md` §2; "maximum
+  the 2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving
+  of the opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md` §2; "maximum
   performance", so every Linux-facing row in MICROKERNEL.md §7 aims at
   today's in-kernel figure and fails above 1.10 times it; a certified
   `btrfsd` split out at the lift ("btrfs server: ok"); "ASIL D etc, so max
@@ -1271,16 +1271,6 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   client against it), then a written design sent to the coordinator, then
   the build in small landings (`docs/roadmap/stage-22-steam.md`). Owner:
   ferrix-c3 (was ferrix-41).
-* **2026-09-27 (customer)** The opaque-kernel plan (`docs/OPAQUE-KERNEL.md`,
-  option B: the net stack, btrfs and the device cores as supervised servers
-  behind the page cache) is measured before it is decided. S0 is the two
-  "seam measured" rows in P2, then S1, the in-kernel refactors that pay off
-  either way. The decision of 2026-09-16 stands until S0's numbers are read,
-  and nothing past S1 starts before that. Owner: ferrix-55b. **Later the
-  same day, S0 measured, the customer shelved the plan: off the table for
-  now.** S1 is not started, and the 2026-09-16 decision stands. A trip to
-  ring 3 costs 10 to 20 times Linux's in QEMU, which is what would have to
-  change first (`docs/OPAQUE-KERNEL.md`, *The verdict of S0*).
 * **2026-09-27 (customer, ferrix-55)** `src/kernel/src` is grouped by what each
   file is (`docs/LAYOUT.md`): `arch/<isa>/`, `arch/arm_common/`,
   `platform/<vendor>/<soc>/`. Every file kept its ring in the move.
@@ -1386,32 +1376,6 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   `/usr/share/wayland-protocols/`), and so is Hyprland 0.56.2's own source,
   the behaviour reference. `xkbcommon` stays the one C library allowed at
   stage 18 and is unaffected; the stage 19 GPU choice was settled on 2026-09-18.
-* **2026-09-16 (customer)** The architecture stays what `docs/ARCHITECTURE.md`
-  §1 says: a monolithic core, capability seams, device drivers in ring 3.
-  Asked whether Ferrix should be a monolith, a microkernel or a hybrid, the
-  answer is that the seam sits at devices because the goal puts it there:
-  `rustc`'s system calls are `open`, `stat`, `read` and `mmap` on files the
-  page cache already holds, and those stay function calls; only disk traffic
-  crosses to ring 3, batched through a ring behind the page cache, where a
-  hop is amortised over a queue. The hybrid that is "the worst of both
-  worlds" keeps message passing between subsystems and compiles them into
-  one address space; Ferrix passes messages only across the privilege
-  boundary, and in-kernel subsystems call each other. Rust confines the
-  core's memory bugs to its audited `unsafe`, and the IOMMU confines what
-  Rust cannot, a device's DMA. What the shape gives up is restarting a
-  kernel subsystem, which the goal does not need. A full microkernel would
-  make the Linux ABI an emulation layer over servers, against §2; a full
-  monolith would delete stages 9 and 10 and gain nothing on the compiler's
-  path, which crosses no seam. The decision is closed by evidence rather
-  than by argument: the two "seam measured" rows in P2, the seam gate and
-  the per-platform isolation table in P1. The second row was measured on
-  2026-09-27: a warm `rustc` compile crossed to ring 3 once in 4,345 system
-  calls, and a cold one about once per three, while the page cache filled
-  (stage 11's roadmap section). The first row was measured the same day: a
-  crossing, one 4 KiB read, costs ten to twenty times stock Linux's on
-  x86-64 under KVM (300 to 844 us against 27 to 48) and three times on
-  AArch64 under TCG, paid on cold reads only. Drivers stay in ring 3 and no
-  kernel disk path is built for the measurement (2026-09-13 below).
 
 * **2026-09-15 (customer)** The customer holds the product owner seat:
   there is no product-owner session. A session lands when the gate its
