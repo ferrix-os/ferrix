@@ -136,7 +136,12 @@ planted file is its control.
 * **The VEK385's four facts**, so it can be ordered by the end of M1: AMD's
   per-cluster Lock-mode configuration in its own boot software, the SoC's
   safety rating and safety-manual access, the SMMUv3 and GICv3 ITS, the
-  price and lead time.
+  price and lead time. **Still open after the research check** (RC4, ledger
+  957): AMD says ASIL D only "targeted"; the safety manual's availability is
+  unknown (the Functional Safety Lounge is a paid subscription); the
+  silicon's GIC ITS is unconfirmed; and which CEMODE the PLM writes (Arm's
+  Lock-mode, 0b11, or Hybrid) must be confirmed from `xloader_plat.c` or
+  AMD's documentation before buying. The price and lead time are confirmed.
 
 ## What the customer does in M0
 

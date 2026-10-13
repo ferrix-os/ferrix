@@ -265,7 +265,16 @@ partitions, and not inside one address space.**
 * **Timing channels between levels** that the kernel mediates are named in
   K9's and T1's designs and bounded or argued there: contention on kernel
   locks, TLB-shootdown IPIs, a lower level's device interrupts, and the shared
-  L3 (partitioned with CLUSTERPARTCR_EL1 on the A78AE).
+  L3. On the A78AE the DSU-AE gives **at most four private cache
+  partitions** (groups of four ways), and partitioning restricts allocation
+  (eviction), not lookups of shared lines (RC3, ledger 957). So K9, T1 and
+  K17(f) map partitions onto them by level: the QM side (every Linux
+  partition and every QM native partition) shares one cache partition, and
+  each certified level gets one of its own, so a lower level can never evict
+  a higher level's lines; partitions within one level share their level's.
+  What this bounds is eviction; a higher level reading a line a lower level
+  also maps (a shared VMO) can still see its timing, which is argued, not
+  closed, and K17's declared buffers are kept as small as their messages.
 * **Not inside one address space at high levels.** Compartments within one
   process (x86's protection keys, Arm's MTE or POE, language-level
   boundaries) cannot carry an ASIL D or SC 4 freedom-from-interference
@@ -636,6 +645,16 @@ are items for the vendor (F-17) before any SIL 4 claim. Consequences:
 * **Whether a compiler qualified to SIL 3 suffices for SC 4** is a question
   for the pre-assessment (`CLAIM.md` M2), with V2's object-code verification
   named as the compensating measure.
+* **The certified library is narrower than the kernel's use of it** (RC1,
+  ledger 957). Ferrocene's certified `core` subset is SIL 2 / ASIL B, and
+  `alloc` is not in it. So at SC 4 / ASIL D the kernel's use of `core` beyond
+  that subset or above that level, and its use of `alloc` at all, are outside
+  the certified library. They are covered by staying within the certified
+  subset wherever possible (and with K16, `max` uses `alloc` for nothing
+  after boot), and by verifying the rest as the kernel's own code: its
+  requirements, V1's MC/DC, V2's object-code check, and F2 where the proofs
+  reach. `fast` at ASIL B relies on the subset only for what is in it. Draft
+  2 to the vendor asks the subset's level and `alloc`'s scope.
 * **x86-64's and ARMv7-A's places in the claim wait on a compiler route**
   for `x86_64-unknown-none` and `armv7a-none-eabi` (F-17, §11 Q17); until
   then both are outside the first assessment (§11 Q7). Both stay built,
@@ -669,10 +688,20 @@ this table before any stream is sized on it.
   on the kernel's targets, so V1 finds or builds one.
 * **V2, object-code verification** (DO-178C 6.4.4.2b): what monomorphisation,
   inlining and the compiler's generated code add beyond the source,
-  identified and verified. A work item of its own.
-* **F1, the formal isolation model**, an EAL6 deliverable (ADV_SPM.1), not
-  only an EAL7 one. Its properties, each mapped to the ST's policies and the
-  safety requirements: spatial isolation, no partition reads or writes
+  identified and verified. A work item of its own, and **required evidence
+  for the DAL A objectives, not optional**: Ferrocene's DO-178C position
+  reaches only "toward" DAL C (RC4, ledger 957).
+* **F1, the formal model**, an EAL6 deliverable (ADV_SPM.1), not only an
+  EAL7 one. **Its scope is every SFR in the Security Target** (RC2, ledger
+  957: ADV_SPM.1.3C, "the complete set of SFRs that define the TSF"), so
+  besides the isolation properties below it models audit (FAU_GEN, FAU_SAR,
+  FAU_STG), failure with preservation of a secure state (FPT_FLS), the
+  consistency of data the kernel takes from outside (FPT_TDC), time stamps
+  (FPT_STM), resource allocation (FRU_RSA) and security management (FMT).
+  The multi-assurance ST route, ADV_SPM.1 on named sub-TSFs only, would
+  leave those at lower assurance, and the plan does not take it. F1's size
+  is set in M0's clause check with that scope. Its isolation properties,
+  each mapped to the ST's policies and the safety requirements: spatial isolation, no partition reads or writes
   another's memory except through a VMO granted by handle (the Address Space
   Separation SFP, ASR-1, ASR-5); authority confinement, a partition reaches a
   resource only through a handle it holds and rights never grow (the
