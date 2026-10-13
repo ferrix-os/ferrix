@@ -1,6 +1,6 @@
 # Ferrix as a certifiable microkernel
 
-**Revision 8, 2026-10-13.** The customer asked for a plan to switch Ferrix
+**Revision 9, 2026-10-13.** The customer asked for a plan to switch Ferrix
 to a microkernel whose ring 0 can be certified whole. This document is that
 plan. **The customer answered most of §11 on 2026-10-13** (recorded under
 *Decisions* in `docs/BACKLOG.md` on this branch; §11 has the words and the
@@ -55,8 +55,8 @@ load is a kernel stop.
 The shape a certificate wants is the separation kernel's: **all product code
 in ring 0 is the certified item, and everything else is a process the item
 isolates** (§2.1 says what else stays in ring 0: the item's own boot checks).
-Then the TOE and the safety element have one boundary, the privilege
-boundary, and §3.1's (a) to (d) stop being arguments about code in the same
+Then the safety element's boundary is the privilege boundary (the TOE and
+the element's certified user-space items are stated in §6.1), and §3.1's (a) to (d) stop being arguments about code in the same
 address space (§6.4 says how far that goes, and where it does not).
 
 ## 2. What the switch is
@@ -228,7 +228,7 @@ before any code leaves ring 0.
 
 | # | Mechanism | Today | What is new, and what it must hold |
 |---|---|---|---|
-| K1 | **Restricted mode**, on x86-64 and AArch64 (ARMv7-A is native-only, §11 Q7): enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root |
+| K1 | **Restricted mode**, on x86-64 and AArch64 (ARMv7-A is native-only, §11 Q7): enter a saved user context; return on system call, fault or kick, with the context saved; a kick from another thread, for signals | nothing | Every context `linuxd` hands in is checked as sigreturn's is (the I2a/I2b rules, ledger 7, 15, 23): `cs`/`ss` pinned, IOPL, VM, VIF and VIP refused, selectors through `gdt::loadable`, descriptors DPL 3, S=1, L=0; forged contexts as checks with negative controls. It covers the FS and GS bases, the i386 TLS descriptors and ARMv7-A's TPIDRURO (user read-only, so the kernel sets it). It saves the program's whole vector state across an exit: §9.8 3a's contract and AoU-25/27 bind `linuxd`'s own native calls, never a Linux program that made none. **Nothing of the shared region is reachable from restricted mode**, neither readable, writable nor executable: it holds every process's fd table, page cache and credentials, and a readable region would undo §2.3's first row. The restricted context runs on a root that maps none of it; the vDSO, the ARMv7-A sigpage and the time page are VMOs of their own, mapped read and execute (or read only) into the restricted space. The boot's mapping sweep proves it, with a negative control that maps one shared page into a restricted root. **Lazy vector state** (§7) holds only under four rules: (a) the program never sees `linuxd`'s register values: on re-entry, if `linuxd` touched vector state, the program's is restored at once, or the registers are cleared and the program's first use traps and restores; (b) the 3a contract (AoU-25/27) never applies while the program's state is still in the registers: a per-thread "unsaved" mark forces the save before any switch away (a blocking native call by `linuxd`, preemption, migration), with a check and a negative control that another thread never reads the program's values; (c) `SPECULATION.md` gains an entry for LazyFP (CVE-2018-3665), argued, not assumed; (d) "`linuxd`'s call path uses no vector registers" is a compiler-setting rule with a check. **The fastpath** (§7) is valid only when the context the kernel holds is unchanged apart from the result registers; any write by `linuxd` to the context (signals, sigreturn, `exec`, `ptrace`) takes the checked path, and a check with a negative control shows a forged context offered through the fastpath refused |
 | K2 | **Address space by handle**: map, unmap, protect in another process's restricted space | `VMO_MAP` into the caller only | ASR-2 (W^X) holds on every space mapped by handle; an executable mapping only through a handle with the EXECUTE right (PO, 2026-09-13). **`fork`, `exec` and `ptrace` need three more operations**: a copy-on-write clone of a restricted space (or copy-on-write child VMOs); reads and writes of another process's space by handle, each with its own right (`ptrace`, `process_vm_readv`, core dumps); and a fresh restricted space for `exec`. A check, with a control, that a copy-on-write child never sees a write its parent makes after the clone (the F-41 lesson, ledger 29 and 31) |
 | K3 | **Pager-backed VMOs** | none (`fs/pages.rs` fills from the block ring in ring 0) | The pager protocol over a port; dirty tracking and write-back requests. The faulting job pays for the page, by K7's token. A fault waiting on a dead or slow pager returns `SIGBUS`/`EIO` to the faulting process after a bounded wait, never the safe state. **One fault-forwarding mechanism**: K3 and `NVIDIA.md` §11.4's fault windows (OK IF 2026-10-02, L.user.111-124 reserved) are reconciled into one design, not built twice. An AoU: a native safety partition maps no pager-backed VMO it did not choose |
 | K4 | **Exception channels**: faults of native processes delivered to a supervisor | panic or kill | needed for supervised servers and for `linuxd`'s own faults |
@@ -333,8 +333,11 @@ statically assigned devices), starts them, holds their authority and
 supervises them through K4's exception channels. So a safety partition's
 authority never passes through init, `linuxd` or devmgr. The description is
 security-policy data: for Common Criteria the manager is in the TOE and the
-description is set by an administrator (A.ADMIN); the tool that generates it
-is qualified, or its output is checked. Devices go to safety partitions
+description is set by an administrator (A.ADMIN). The tool that generates
+the description is classed by how its output is used: **T3 / TQL-1** if its
+output is not independently verified, or a qualified independent checker of
+the description at **T2 / TQL-5** with the generator then uncertified; the
+plan proposes the second. Devices go to safety partitions
 statically, from the description; devmgr serves only the Linux side.
 
 **What the kernel hands each at start:**
@@ -363,7 +366,9 @@ disk path, and §11 Q9 puts it to the customer.
   composition-root edges and the higher-ring `mod` declarations go to zero,
   and `check-item-boundary.py` fails on any load-ring file in the kernel,
   with a planted file as its negative control.
-* The Security Target's TOE is the kernel. The Linux personality is already
+* **The TOE is the kernel plus the partition manager and its loader
+  library** (§5, §6.3). **The safety element is the kernel**, with those two
+  as certified items of the minimum set the claim names. The Linux personality is already
   a threat agent outside the TSF (ST §3.2). What leaves the TSF with the load
   is stated in ST §1.3 and §3.2: the audit of the switch of `/`; any
   file-level event. The audit records change as follows: FAU_GEN.1 b) loses
@@ -528,15 +533,25 @@ new kernel from M7 (the consultant's draft, ledger 886, fitted to SIL 4
 first; until the flip `CLAIM.md`'s present sentence stands):
 
 > Ferrix is a Rust microkernel being developed as a compliant item to IEC
-> 61508 SIL 4, out of context, with ISO 26262 ASIL D pursued alongside.
-> Everything that runs in the processor's privileged mode is the element. It
-> keeps native safety partitions apart from one another and from a partition
-> running unmodified Linux software (QM, carrying no safety claim) in memory,
-> devices and failure on x86-64 and AArch64, and in processor time on Arm
-> Cortex-A78AE processors in Lock-mode. It has not been assessed.
+> 61508-3 with systematic capability SC 4, with a safety manual for compliant
+> items (IEC 61508-3 Annex D), and as a Safety Element out of Context to ISO
+> 26262 ASIL D. Everything that runs in the processor's privileged mode is
+> the element. It keeps native safety partitions apart from one another and
+> from a partition running unmodified Linux software (QM, carrying no safety
+> claim) in memory, devices and failure on x86-64 and AArch64, and in
+> processor time on Arm Cortex-A78AE processors in Lock-mode. ARMv7-A is
+> outside the first assessment. It has not been assessed.
 
-Its rules: never "certified", "compliant", "a SIL 4 kernel" or "safe Linux"
-before an assessment says so; "not assessed" in the same sentence as any
+61508 gives SILs to safety functions; a software element is claimed with a
+systematic capability, hence SC 4. "Out of context" is ISO 26262's term
+(SEooC), used here only for that standard. **ARMv7-A is outside the first
+assessment** because no qualified compiler offers its target (below); when
+it enters, the claim names it as native partitions only, isolation without
+timing, user-memory protection by software alone.
+
+Its rules: never "certified", "is compliant", "compliant with", "a SIL 4
+kernel" or "safe Linux" before an assessment says so ("being developed as a
+compliant item" is allowed); "not assessed" in the same sentence as any
 standard named; the Linux software never in a sentence that says "assured"
 or "safety"; the hardware assumptions (an IOMMU on x86-64 and AArch64, the
 processor class for timing) named wherever the claim is given in full.
@@ -548,7 +563,18 @@ IEC 62304 Class C, and offers no DO-178C qualification. Of the kernel's
 targets it qualifies `aarch64-unknown-none` only: `x86_64-unknown-none` and
 `armv7a-none-eabi` are not offered. A SIL 4 qualification of the compiler
 for the reference platform's target, and a route for the other two targets,
-are items for the vendor (F-17) before any SIL 4 claim.
+are items for the vendor (F-17) before any SIL 4 claim. Consequences:
+
+* **The compiler that builds the certified kernel is Ferrocene's**, on the
+  reference platform's target. Today Ferrocene is at Rust 1.95, the tree
+  pins 1.97.1 and Verus pins 1.98.1. From M0, CI builds `core` and `item`
+  with Ferrocene's compiler, so no language feature newer than it creeps in.
+* **Whether a compiler qualified to SIL 3 suffices for SC 4** is a question
+  for the pre-assessment (`CLAIM.md` M2), with V2's object-code verification
+  named as the compensating measure.
+* **ARMv7-A's safety role waits on a compiler route** for
+  `armv7a-none-eabi` (F-17); until then it is outside the first assessment
+  (§11 Q7).
 
 **What the levels ask, and where.** The standards' texts are not in the
 tree. The clauses below are the plan's and the consultant's reading, marked
@@ -741,7 +767,9 @@ of under 400 ns (2026-10-06). The methods, each a design for K1's review:
   fastpath for Call and ReplyRecv: one hand-tuned path with no scheduler
   decision, no lock, no allocation and no general dispatch, falling back to
   the general path on any unusual state.
-* **Lazy vector state**, as seL4 switches the FPU lazily: `linuxd`'s call
+* **Lazy vector state**, under K1's four rules, as seL4 switches the FPU
+  lazily. Calls that copy data (`read`, `write`) will trap anyway, so the
+  saving is for calls like `getppid`: `linuxd`'s call
   path is built to use no vector registers, so an exit saves none; the first
   use traps (CR0.TS, CPACR_EL1) and saves the program's state then. K1's
   rule that the program's whole vector state survives is kept; only when it
@@ -753,13 +781,17 @@ of under 400 ns (2026-10-06). The methods, each a design for K1's review:
   forbids; the root switch is paid, as seL4 pays it.
 * **ERAPS** on nazuna in place of the return-stack refill (about 20 ns).
 
-**The certified build under seL4's methods.** seL4 places its speculation
-barriers at domain switches (its time-protection work), not on every call.
-§11 Q5's certified build (i) has a barrier on every restricted exit and
-entry, about 460 ns a round trip on nazuna on top of seL4's 440, so about
-900 ns against (i)'s 714 ns limit (2.00 times 357). (i)'s gate can be met by
-seL4's methods only if its barrier moves to partition switches, which is
-(ii)'s shape. That is §11 Q16, for the customer.
+**The certified build under seL4's methods.** seL4 sets no speculation
+barrier per call by default; it offers an optional IBPB on every context
+switch, and its time-protection research flushes at domain switches. With
+IBPB at every switch, seL4's own round trip on nazuna is about 900 ns
+(§9.6's figures: 440 ns plus about 230 ns each way). §11 Q5's certified
+build (i) has a barrier on every restricted exit and entry, so at seL4's
+level it lands near the same 900 ns, over its 714 ns limit (2.00 times
+357). That is §11 Q16, for the customer. On the AArch64 class the picture
+differs: restricted mode and `linuxd` run under different ASIDs, and
+FEAT_CSV2 keeps branch-predictor targets from crossing ASIDs, so the barrier
+may cost little there; K1's design measures it on the board.
 
 **Two builds, both gated** (§11 Q3 and Q5, the customer, 2026-10-13: "gate
 both"):
@@ -787,9 +819,9 @@ both"):
 
 | Row | Today (hash, date) | Target (the customer: maximum performance) |
 |---|---|---|
-| Native channel round trip, `domain-call` p50 | about 820 ns (523fc3d50, 2026-10-07) | seL4's 440 ns (the customer's target, 2026-10-02) |
-| Linux `getppid`, `--personality kernel` | 357 ns, `qemu64` with controls; Linux 53 ns (2026-10-10) | baseline for the next row |
-| Linux `getppid` through restricted mode, K1's vector-state save included; the performance build gated, the certified build beside | not built | 1.00x of the row above on the same tree, failing above 1.10x. A target in multiples of Linux would be below today's in-kernel call (3x Linux is 159 ns) and is not used |
+| Native channel round trip, `domain-call` p50 | about 820 ns (523fc3d50, 2026-10-07) | under 400 ns (the customer's target, 2026-10-06) |
+| Linux `getppid`, `--personality kernel` | 357 ns, `qemu64` with controls; Linux 53 ns (2026-10-10) | **the baseline, frozen**: M0 re-measures it on a named commit and that figure is the baseline for the next row from then on |
+| Linux `getppid` through restricted mode, K1's vector-state save included; the performance build gated, the certified build beside | not built | 1.00x of the frozen baseline above, failing above 1.10x. The baseline does not follow the tree: M4 makes the in-kernel call faster, and a moving baseline would push this target below its floor (two root switches, about 260 ns on nazuna). A target in multiples of Linux would be below today's in-kernel call (3x Linux is 159 ns) and is not used |
 | `fork` + `exec` + `wait` of a static program | to measure in M0 | 1.00x of `--personality kernel` |
 | `mmap`/`munmap` churn, 4 KiB anonymous | to measure in M0 | 1.00x |
 | A page-cache miss end to end (through `linuxd`, `btrfsd` if split, and the ring-3 driver) | to measure in M0 | 1.00x |
@@ -832,7 +864,7 @@ in the ledger, and not a gate.
 
 | Stage | What | Points | Gate |
 |---|---|---|---|
-| **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control; **§6.5's clause table checked against the purchased standards' texts** and corrected before V1, V2, T1, F1 or F2 is sized | 15 | the customer's answers; baselines on `main`; the clause table's check recorded (each row's clause, table, grade and level confirmed or corrected), and no stream's points stated before it |
+| **M0** | §11's decisions written in BACKLOG; §7's rows with methods, baselines and controls; `--personality` recorded as a reference-configuration setting (C11); a ratchet in `xtask check` on the `load` ring's size, set to §11 Q10's answer (it reports growth if feature work stays allowed as now, and fails on it if not), with a planted file as its control; **§6.5's clause table checked against the purchased standards' texts** and corrected before V1, V2, T1, F1 or F2 is sized; **the research of 2026-10-13 checked with it**, each item against its source in the appendix (CC:2022's ADV_SPM.1 "entire TSF" reading, Arm's Lock-mode ratings and the A78AE manual's facts, seL4's AArch64 proofs, Ferrocene's qualifications and targets, Verus's compiler pin), confirmed or corrected before any stream or purchase is sized on it; the CI build of `core` and `item` with Ferrocene's compiler | 15 | the customer's answers; baselines on `main`; the clause table's check recorded (each row's clause, table, grade and level confirmed or corrected), and no stream's points stated before it |
 | **M1** | K5, K6, K7, K10, K12 (small and independent), each with its ids reserved first | 25 | each mechanism's boot check and controls FIRED |
 | **M2** | K2, K3, K4, K13, K15; the in-kernel page cache moved onto K3 **while still in ring 0**; B5's re-homing of the 91 ids, first half | 45 | `test-btrfs`, `test-powerfail`, `test-rustc` unchanged; F-37's charging tests; the orphan step of §6.2 passes for the ids re-homed |
 | **M3** | K1, K11 on x86-64, then AArch64; seL4's methods for the restricted exit (fastpath, lazy vector state, a small hot path); ASIDs on AArch64; K9 on stage 14's HardRt with the static time-partition schedule; K14; B5's second half | 75, plus stage 14's own size | the restricted-mode row; a K9 interference row (a QM job at full load does not push a budgeted job past its deadline, with a control that removes the budget); the orphan step passes for all 91 |
@@ -939,7 +971,8 @@ still to write.
   `linuxd` there. The plan reads this, under maximum certification, as
   §6.5's rule: a DMA-capable function goes only to a certified driver,
   enforced by the kernel. The ARMv7-A Linux programs' gates retire at the
-  flip.
+  flip. ARMv7-A's safety role waits on a qualified compiler for
+  `armv7a-none-eabi` (§6.5), so it is outside the first assessment.
 * **Q8, Certification level**: "cert level asil d etc so max certification";
   asked for IEC 61508, "SIL 4"; asked when, "new kernel, from M7". The plan
   reads these as §6.5's table, which amends the 2026-10-01 targets for the
@@ -974,12 +1007,22 @@ still to write.
 
 **Still open:**
 
-* **Q16, The certified build's barrier under seL4's methods** (§7): keep the
-  barrier on every restricted exit and entry, which is expected to miss
-  (i)'s 2x limit at about 900 ns; or move it to partition switches, as
-  seL4 does, which meets the limit and makes (i)'s isolation inside a
-  Linux partition the same as (ii)'s (the 2026-10-13 build switch then
-  differs only in what else the performance build drops).
+* **Q16, The certified build's barrier under seL4's methods** (§7). Three
+  options:
+  * **(a) Gate (i) at what its barrier costs** (recommended by the
+    consultant, ledger 892): keep the barrier on every restricted exit and
+    entry and set (i)'s fail line near 1 us, seL4's own figure with IBPB at
+    every switch on nazuna. This revisits the earlier "within 2x" answer.
+    The reason: (i)'s speed on x86-64 is not a certification property, and
+    x86-64 carries no timing claim.
+  * **(b) Keep the barrier on every exit and the 2x limit**: expected to miss
+    at about 900 ns, so (i)'s gate holds the flip (M5) until the barrier
+    gets cheaper.
+  * **(c) Move the barrier to partition switches**, as seL4's
+    time-protection work does: meets the limit, and gives the certified
+    build (ii)'s claim inside a Linux partition, with AoU-14 amended: the
+    certified build no longer protects one Linux partition's programs from
+    each other against speculation.
 * **Q17, Approaching the proof providers** (Proofcraft; the Verus groups or
   CertiK), and the compiler vendor for a SIL 4 qualification of the
   reference target (F-17): the customer's, since both cost money.
@@ -1044,6 +1087,16 @@ Draft on branch `microkernel-plan`.
   proof tools and providers and the safety processor and board from the
   research of 2026-10-13 (§6.5), nazuna as the host with SVM ASIDs rejected
   and seL4's methods (§7), and three new questions (§11 Q16 to Q18).
+* Seventh round (revision 8, fe3aad1fb): **OK IF** Y1 to Y8, ledger line
+  892. Revision 9 (this text) folds them in: K1's four rules for lazy vector
+  state and the fastpath's rule (Y1, Y2, for K1's own review); the frozen
+  baseline and the under-400 ns round-trip target (Y3); Q16 posed in full
+  with the consultant's recommended option, seL4 described accurately, the
+  AArch64 note (Y4); the claim as SC 4 under 61508-3 Annex D, the usage
+  rule narrowed, ARMv7-A outside the first assessment (Y5); the TOE and the
+  element stated, the generator's tool class (Y6); the toolchain's
+  consequences (Y7); the research in M0's check (Y8). To be checked against
+  the diff.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
