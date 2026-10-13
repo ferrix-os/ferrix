@@ -123,6 +123,7 @@ mod edid;
 mod everything;
 mod fat;
 mod ferrousli;
+mod flags;
 mod flash;
 mod frames;
 mod fuzzel;
@@ -255,10 +256,16 @@ OPTIONS:
     --strip-kernel                       Images carry the kernel without its debug information, as
                                          flash writes it; the loader reads the whole file into
                                          memory, so a small --memory needs it [default: off]
-    --mitigations <on|off>              The kernel's side-channel defences [default: on, the
-                                         certified setting]. off builds with
-                                         --cfg ferrix_mitigations_off into target/mitigations-off:
-                                         no index clamps, no speculation controls, no barriers
+    --kernel-profile <NAME>              The kernel's profile in tools/common/data/profiles/
+                                         [default: present, today's reference configuration]:
+                                         every build flag's value (docs/BUILD-FLAGS.md)
+    --set <FLAG=VALUE>                   Change one build flag, as often as needed: an ad-hoc
+                                         build, profile=none level=none, which carries no claim
+                                         and which the gate refuses as its profile's evidence
+    --mitigations <on|off>              --set mitigations=on|off by its older name. off builds
+                                         with ferrix_mitigations=\"off\" and the static relocation
+                                         model into target/mitigations-off: no index clamps in
+                                         the kernel, no speculation controls, no barriers
                                          (docs/certification/SPECULATION.md)
     --smp <N>                            Virtual CPUs          [default: 4; 1 under whpx with a
                                          QEMU not built by fetch-qemu-windows.sh]
@@ -519,6 +526,7 @@ const TASKS: &[&[Task]] = &[
     display::TASKS,
     dxvk::TASKS,
     everything::TASKS,
+    flags::TASKS,
     flash::TASKS,
     frames::TASKS,
     gate_rows::TASKS,
@@ -568,7 +576,7 @@ const MAIN_TASKS: &[Task] = &[
         help_at: 190,
         help: &[
             "test-boot     Boot the image under QEMU and assert the kernel came up, moved (KASLR) unless built",
-            "              --mitigations off or told nokaslr",
+            "              --mitigations off or told nokaslr, and that its build line is its profile's",
         ],
         run: |_, args| test_boot(args),
     },
@@ -633,7 +641,12 @@ fn command_of(args: &Args) -> Result<&str> {
 /// Every kernel and image this run builds, whichever command builds it:
 /// set once, here, rather than threaded through each of them.
 fn set_for_the_run(args: &Args) -> Result<()> {
-    cargo::set_kernel_build(args.mitigations, args.iterate, args.release)?;
+    cargo::set_kernel_build(
+        args.kernel_profile.clone(),
+        args.sets.clone(),
+        args.iterate,
+        args.release,
+    )?;
     cargo::set_full_debug(args.gdb);
     fat::set_strip_kernel(args.strip_kernel);
     everything::set_steam_preinstall(args.steam_preinstall);

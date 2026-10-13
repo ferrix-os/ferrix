@@ -1080,12 +1080,12 @@ fn item_crates_allocate_fallibly() -> Result<()> {
 fn cross_target_clippy() -> Result<()> {
     // The freestanding halves, once per target. A lint pass for x86-64 cannot
     // see Arm code at all, so skipping these means two thirds of the kernel go
-    // unlinted until CI. The kernel for every target is one cargo call, and
-    // the kernel `--mitigations off` another in its own target directory, so
-    // the two run at once (`docs/TEST-TIME.md`, C1).
+    // unlinted until CI. The kernel for every target is one cargo call per
+    // build, and the kernel `mitigations=off` another in its own target
+    // directory, so the two run at once (`docs/TEST-TIME.md`, C1).
     step(
-        "clippy (kernel, every architecture, and again --mitigations off)",
-        kernel_clippy_both_settings,
+        "clippy (kernel, every architecture: each buildable profile, checks=off, mitigations=off)",
+        kernel_clippy_every_build,
     )?;
     for arch in Arch::ALL {
         step(&format!("clippy (loader, {arch})"), || {
@@ -2279,72 +2279,117 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
     }
 }
 
-/// `cargo clippy` over the kernel for every architecture, and at the same
-/// time over the kernel built `--mitigations off`.
+/// `cargo clippy` over the kernel for every architecture, once for each
+/// kernel build that can be made today, which is what `check` "builds"
+/// them with: every named profile that builds (`present`, `desktop`), and the
+/// two ad-hoc builds that must not rot (`docs/BUILD-FLAGS.md` §6):
+/// `checks=off` (BF7) and `mitigations=off`. A profile refused by `lands`
+/// (`max`, `fast` before M5) is reported as not yet buildable, not as a
+/// failure; one that does not resolve at all fails.
 ///
-/// That is the kernel's one build setting, the other way: it compiles out
-/// every side-channel defence, and code only one setting builds rots in the
-/// other. It is linted in the target directory `cargo::kernel` builds that
-/// setting into, so neither setting's cache is thrown away for the other's,
-/// and cargo's lock on one directory never waits for the other.
+/// `mitigations=off` changes codegen for every crate, so it is linted in the
+/// target directory `cargo::kernel` builds it into, beside the others: no
+/// cache is thrown away for another's, and cargo's lock on one directory
+/// never waits for the other. The rest differ only in the kernel crate's
+/// `cfg`s, so each relints that crate alone, one after another.
 ///
 /// Every one of the kernel's packages is linted: the binary and whatever
 /// library crates sit beneath `src/kernel` (`docs/KERNEL-CRATES.md`), as
 /// `workspace::members` finds them, so a crate split out of the kernel
 /// cannot leave the lint pass by being missed from a list.
-fn kernel_clippy_both_settings() -> Result<()> {
+fn kernel_clippy_every_build() -> Result<()> {
     let packages = workspace::members(&paths::workspace_root())?.kernel;
     if !packages.iter().any(|name| name == "ferrix-kernel") {
         return Err(Error::new(
             "the workspace has no ferrix-kernel package under src/kernel to lint",
         ));
     }
-    let mut with_defences: Vec<&str> = Vec::new();
+    let mut every_arch: Vec<&str> = Vec::new();
     for package in &packages {
-        with_defences.extend(["-p", package.as_str()]);
+        every_arch.extend(["-p", package.as_str()]);
     }
     for arch in Arch::ALL {
-        with_defences.extend(["--target", arch.kernel_target()]);
+        every_arch.extend(["--target", arch.kernel_target()]);
     }
+    let mut builds = Vec::new();
+    for profile in crate::flags::profile_names()? {
+        match crate::flags::resolve(Some(&profile), &[]) {
+            Ok(resolved) => builds.push((format!("profile {profile}"), resolved)),
+            Err(why) => {
+                // Refused by `lands` only: one that does not resolve at all
+                // is red.
+                let _ = crate::flags::resolve_unbuilt(Some(&profile), &[])?;
+                println!("   {why}: not yet buildable, validated statically");
+            }
+        }
+    }
+    let ad_hoc = |flag: &str| {
+        crate::flags::resolve(None, &[(flag.to_owned(), "off".to_owned())])
+            .map(|resolved| (format!("ad hoc, {flag}=off"), resolved))
+    };
+    builds.push(ad_hoc("checks")?);
+    let (_, off) = ad_hoc("mitigations")?;
+
     let configs: Vec<String> = Arch::ALL
         .iter()
         .map(|arch| cargo::mitigations_off_config(arch.kernel_target()))
         .collect();
     let directory = cargo::mitigations_off_target_dir();
     let directory = directory.to_string_lossy();
-    let mut without = with_defences.clone();
+    let mut without = every_arch.clone();
     for config in &configs {
         without.extend(["--config", config]);
     }
     without.extend(["--target-dir", &directory]);
-    // The second is captured and printed after the first, so the two passes'
+    // The off build is captured and printed after the rest, so the passes'
     // diagnostics never interleave.
     let (first, second) = std::thread::scope(|scope| {
-        let off = scope.spawn(|| clippy_captured(&without));
-        let on = clippy(&with_defences);
+        let off = scope.spawn(|| clippy_captured(&without, &cargo::flag_environment(&off)));
+        let mut on = Ok(());
+        for (name, resolved) in &builds {
+            println!("\n   -- {name}: {}", resolved.cfg_words());
+            on = clippy_with(&every_arch, &cargo::flag_environment(resolved));
+            if on.is_err() {
+                break;
+            }
+        }
         let off = off
             .join()
-            .unwrap_or_else(|_| Err(Error::new("the --mitigations off clippy thread panicked")));
+            .unwrap_or_else(|_| Err(Error::new("the mitigations=off clippy thread panicked")));
         (on, off)
     });
-    println!("\n   -- the same, --mitigations off:");
+    println!("\n   -- ad hoc, mitigations=off: {}", off.cfg_words());
     second?;
     first
 }
 
-/// [`clippy`], with its output kept and printed whole when it ends.
-fn clippy_captured(arguments: &[&str]) -> Result<()> {
+/// [`clippy`], with the kernel's flags in its environment and its output
+/// kept and printed whole when it ends.
+fn clippy_captured(arguments: &[&str], flags: &[(&str, String)]) -> Result<()> {
     let output = Command::new(cargo_binary())
         .current_dir(paths::workspace_root())
         .arg("clippy")
         .args(arguments)
         .args(["--", "-D", "warnings"])
+        .envs(flags.iter().map(|(key, value)| (*key, value)))
         .stdin(Stdio::null())
         .output()
         .map_err(|error| Error::new(format!("could not run cargo clippy: {error}")))?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    cargo::finished(output.status, "cargo clippy --mitigations off")
+    cargo::finished(output.status, "cargo clippy, mitigations=off")
+}
+
+/// [`clippy`], with the kernel's flags in its environment.
+fn clippy_with(arguments: &[&str], flags: &[(&str, String)]) -> Result<()> {
+    let mut command = Command::new(cargo_binary());
+    let _ = command
+        .current_dir(paths::workspace_root())
+        .arg("clippy")
+        .args(arguments)
+        .args(["--", "-D", "warnings"])
+        .envs(flags.iter().map(|(key, value)| (*key, value)));
+    cargo::run(command, "cargo clippy")
 }
 
 /// `cargo clippy ... -- -D warnings`.

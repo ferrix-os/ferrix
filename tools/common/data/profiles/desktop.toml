@@ -1,0 +1,63 @@
+# `desktop`: the customer's machines (docs/BUILD-FLAGS.md §1). The hybrid
+# kernel, the Linux layer and btrfs in ring 0, with the light values of §3.1;
+# no claim. Its boot line names those light values on every boot (DF8).
+# Every flag is set explicitly.
+
+profile = "desktop"
+level = "none"
+claim = "none"
+claim_architectures = []
+buildable_from = "today"
+image = { driver_updates = "absent" }
+exceptions = []
+
+[flags]
+personality = "kernel"
+fs = "kernel"
+mitigations = "on"
+partition_speculation = "not_applicable"
+ipc_fastpath = "on"
+restricted_fastpath = "not_applicable"
+kernel_memory = "heap"
+schedule = "fair"
+checks = "on"
+program_barrier = "session"
+ssbd = "on_request"
+smt = "stibp"
+runtime_trades = "game_mode"
+
+# No claim, so every option the registry declares, with any of its values.
+[boot_options]
+"ferrix.checks" = ["run", "skip"]
+"ferrix.root" = ["*"]
+"ferrix.init" = ["*"]
+"ferrix.onexit" = ["*"]
+"ferrix.fbcon" = true
+"ferrix.btrfs" = ["*"]
+"ferrix.btrfs.seed" = ["*"]
+console = ["*"]
+"drm.edid_firmware" = ["*"]
+nokaslr = true
+nosmp = true
+noactlr = true
+"ferrix.devmgr" = ["kernel", "init"]
+"ferrix.fastpath" = ["on", "off"]
+
+# The build settings that change code without a cfg (BF4), compared with the
+# tree by check-item-boundary.py: the toolchain with rust-toolchain.toml, the
+# codegen with Cargo.toml's [profile.release], the rustflags with
+# .cargo/config.toml, and the link arguments with src/kernel/build.rs.
+[build]
+cargo_profile = "release"
+toolchain = "1.97.1"
+codegen = { opt-level = 2, lto = true, codegen-units = 1, panic = "abort" }
+
+[build.rustflags]
+x86_64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=pie", "-C", "link-arg=-no-pie", "-C", "force-frame-pointers=yes"]
+aarch64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+armv7a = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+
+[build.link]
+x86_64 = { mode = "static PIE, PIC code model", args = ["-pie", "--no-dynamic-linker"] }
+aarch64 = { mode = "static PIE", args = ["-pie", "--no-dynamic-linker", "-znotext"] }
+armv7a = { mode = "fixed address with relocations", args = ["--emit-relocs"] }

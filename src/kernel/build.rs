@@ -76,9 +76,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // The `--defsym` comes before the `-T`, so the symbol exists before the
     // script names it. A build that loses the definition fails to link rather
     // than producing an image at address zero.
+    let flags = build_flags()?;
+
     println!("cargo::rustc-link-arg-bins=--defsym=KERNEL_VIRT_BASE={base}");
     println!("cargo::rustc-link-arg-bins=-T{}", script.display());
-    for argument in relocatable_link()? {
+    for argument in relocatable_link(&flags)? {
         println!("cargo::rustc-link-arg-bins={argument}");
     }
 
@@ -113,8 +115,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 ///   expresses, so the link fails. It is linked at its fixed address and
 ///   keeps its relocations with `--emit-relocs`; the loader applies the
 ///   absolute ones (`ferrix_elf::Elf::fixups`).
-fn relocatable_link() -> Result<&'static [&'static str], Box<dyn Error>> {
-    if std::env::var_os("CARGO_CFG_FERRIX_MITIGATIONS_OFF").is_some() {
+fn relocatable_link(flags: &[(String, String)]) -> Result<&'static [&'static str], Box<dyn Error>> {
+    if flags
+        .iter()
+        .any(|(flag, value)| flag == "mitigations" && value == "off")
+    {
         return Ok(&[]);
     }
     Ok(match std::env::var("CARGO_CFG_TARGET_ARCH")?.as_str() {
@@ -123,4 +128,92 @@ fn relocatable_link() -> Result<&'static [&'static str], Box<dyn Error>> {
         "arm" => &["--emit-relocs"],
         other => return Err(format!("the kernel does not know how to move on {other}").into()),
     })
+}
+
+/// The build flags (`docs/BUILD-FLAGS.md`): what xtask resolved from the
+/// kernel's profile and any `--set`, made into this crate's `cfg`s, and
+/// every declared flag and value made into its `--check-cfg`s.
+///
+/// xtask gives them in two variables: `FERRIX_BUILD_FLAGS`, the chosen
+/// `name=value` words (`profile` and `level` among them), and
+/// `FERRIX_FLAG_VALUES`, each declared flag as `name=a,b,c`. They become
+/// `cfg(ferrix_<name> = "<value>")` for this crate alone: a flag is read only
+/// in the kernel crate (rule 6 b), and no library is ever compiled with one,
+/// so none can take a branch on it. The workspace denies `unexpected_cfgs`,
+/// so a `cfg` naming a flag or value not declared fails the build. Without
+/// the variables the build is refused: a kernel without its flags would
+/// compute no `build` line, and is no configuration anybody declared.
+fn build_flags() -> Result<Vec<(String, String)>, Box<dyn Error>> {
+    println!("cargo::rerun-if-env-changed=FERRIX_BUILD_FLAGS");
+    println!("cargo::rerun-if-env-changed=FERRIX_FLAG_VALUES");
+    let (Ok(chosen), Ok(declared)) = (
+        std::env::var("FERRIX_BUILD_FLAGS"),
+        std::env::var("FERRIX_FLAG_VALUES"),
+    ) else {
+        return Err(
+            "the kernel is built through `cargo xtask`, which gives it its build flags \
+                    (FERRIX_BUILD_FLAGS and FERRIX_FLAG_VALUES; docs/BUILD-FLAGS.md)"
+                .into(),
+        );
+    };
+    let mut values: Vec<(String, Vec<String>)> = Vec::new();
+    for word in declared.split_whitespace() {
+        let (name, list) = word
+            .split_once('=')
+            .ok_or_else(|| format!("FERRIX_FLAG_VALUES: `{word}` is not name=a,b"))?;
+        let list: Vec<String> = list.split(',').map(str::to_owned).collect();
+        for item in std::iter::once(name).chain(list.iter().map(String::as_str)) {
+            plain(item)?;
+        }
+        let quoted: Vec<String> = list.iter().map(|value| format!("\"{value}\"")).collect();
+        println!(
+            "cargo::rustc-check-cfg=cfg(ferrix_{name}, values({}))",
+            quoted.join(", ")
+        );
+        values.push((name.to_owned(), list));
+    }
+    let mut flags = Vec::new();
+    for word in chosen.split_whitespace() {
+        let (name, value) = word
+            .split_once('=')
+            .ok_or_else(|| format!("FERRIX_BUILD_FLAGS: `{word}` is not name=value"))?;
+        let known = values
+            .iter()
+            .any(|(flag, list)| flag == name && list.iter().any(|item| item == value));
+        if !known
+            || flags
+                .iter()
+                .any(|(flag, _): &(String, String)| flag == name)
+        {
+            return Err(
+                format!("FERRIX_BUILD_FLAGS: `{word}` is undeclared or given twice").into(),
+            );
+        }
+        println!("cargo::rustc-cfg=ferrix_{name}=\"{value}\"");
+        flags.push((name.to_owned(), value.to_owned()));
+    }
+    if let Some((missing, _)) = values
+        .iter()
+        .find(|(flag, _)| !flags.iter().any(|(name, _)| name == flag))
+    {
+        return Err(format!("FERRIX_BUILD_FLAGS gives no value for `{missing}`").into());
+    }
+    Ok(flags)
+}
+
+/// A flag's or value's name: lower case, digits and `_`, which is all a `cfg`
+/// and the boot line carry.
+fn plain(word: &str) -> Result<(), Box<dyn Error>> {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        Ok(())
+    } else {
+        Err(
+            format!("a build flag's name or value `{word}` is not lower case, digits and `_`")
+                .into(),
+        )
+    }
 }

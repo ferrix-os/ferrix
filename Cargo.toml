@@ -253,11 +253,13 @@ unused_results = "deny"
 missing_debug_implementations = "deny"
 unused_qualifications = "warn"
 unreachable_pub = "warn"
-# The one configuration switch the kernel has: `cargo xtask --mitigations off`
-# builds with `--cfg ferrix_mitigations_off`, which takes out every
-# side-channel defence (docs/certification/SPECULATION.md). Declared here so a
-# misspelt `cfg` is a warning, and so the switch is visibly the only one.
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ferrix_mitigations_off)"] }
+# Denied (docs/BUILD-FLAGS.md rule 2). The kernel's build flags,
+# `cfg(ferrix_<flag> = "<value>")`, are declared to the kernel crate alone, by
+# its build script from tools/common/data/build-flags.toml through xtask, so a
+# misspelt flag or value fails the kernel's build, and a `ferrix_` cfg in any
+# other crate fails that crate's: flags are read in the kernel crate only
+# (rule 6 b).
+unexpected_cfgs = "deny"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"

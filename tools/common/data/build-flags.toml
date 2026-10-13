@@ -1,0 +1,229 @@
+# Ferrix's build flags: what a kernel image contains, chosen at compile time.
+#
+# docs/BUILD-FLAGS.md is the design and its rules; this file is the one place
+# the flags, their values, the levels and the boot options are declared.
+# Read by:
+#
+#   * xtask's resolver (tools/common/xtask/src/flags.rs), which turns a
+#     profile and any `--set` into the kernel's `--cfg ferrix_<flag>="<value>"`
+#     set and the `--check-cfg` list that declares every flag and value;
+#   * tools/common/check/check-item-boundary.py, which holds the profile rule
+#     (BUILD-FLAGS.md rule 3) and this file's own consistency;
+#   * tools/common/check/check-boot-line.py, the gate, which compares a
+#     kernel's `build` boot line with its profile file (rule 6) -- never with
+#     anything xtask printed.
+#
+# Nothing here is a Cargo feature, and nothing here is a boot option: rule 1.
+
+# ---------------------------------------------------------------------------
+# The standards, each as an ordered scale, lowest first. A level (below) names
+# one target per standard it covers; "allows" compares standard by standard
+# (BUILD-FLAGS.md §4, BF10): a level A covers a level B only if, for every
+# standard in B's set, A names a target at least as high on that standard's
+# scale. So `sc4` covers `present` and `sc2`, while `present` and `sc2` are
+# incomparable, which the gate tests.
+
+[standards.iec61508_3]
+name = "IEC 61508-3 systematic capability"
+scale = ["SC 1", "SC 2", "SC 3", "SC 4"]
+
+[standards.iso26262]
+name = "ISO 26262 ASIL"
+scale = ["ASIL A", "ASIL B", "ASIL C", "ASIL D"]
+
+[standards.en50716]
+name = "EN 50716 SIL"
+scale = ["SIL 1", "SIL 2", "SIL 3", "SIL 4"]
+
+[standards.do178c]
+name = "DO-178C design assurance level"
+scale = ["DAL E", "DAL D", "DAL C", "DAL B", "DAL A"]
+
+[standards.iec62304]
+name = "IEC 62304 software safety class"
+scale = ["Class A", "Class B", "Class C"]
+
+[standards.common_criteria]
+name = "Common Criteria evaluation assurance level (the TOE)"
+scale = ["EAL4+", "EAL5", "EAL5+", "EAL6", "EAL6+", "EAL7"]
+
+# ---------------------------------------------------------------------------
+# The levels, each defined once as its full set of targets (BF2). The names
+# are labels only. `sc2`'s Common Criteria target is what `fast`'s Security
+# Target will say, and is not fixed yet, so it names none.
+
+[levels.none]
+targets = {}
+why = "no claim: `desktop`, and every ad-hoc build"
+
+[levels.present]
+targets = { iec61508_3 = "SC 2", en50716 = "SIL 2", do178c = "DAL C", iec62304 = "Class C", common_criteria = "EAL5+" }
+why = "interim: today's item and its four targets (the customer, ledger 869), until M5's flip"
+
+[levels.sc2]
+targets = { iec61508_3 = "SC 2", iso26262 = "ASIL B", en50716 = "SIL 2", iec62304 = "Class C" }
+why = "`fast`: IEC 61508-3 SC 2 / ISO 26262 ASIL B; its Common Criteria target as fast's ST says"
+
+[levels.sc4]
+targets = { iec61508_3 = "SC 4", iso26262 = "ASIL D", en50716 = "SIL 4", do178c = "DAL A", iec62304 = "Class C", common_criteria = "EAL6+" }
+why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A's objectives"
+
+# ---------------------------------------------------------------------------
+# The flags, in the order the kernel's `build` boot line names them. Each
+# value says:
+#
+#   allows  the levels it allows, explicitly (DF1); `all` is never written;
+#   lands   where its code is or will be: `today` for what the tree had
+#           before M0, else the stage that builds it (MICROKERNEL.md §8);
+#   built   `yes`: its code is in the tree and the value builds;
+#           `stand-in`: it builds today's code of the value it names in
+#           `stands_in`, which is the stricter one, and is allowed only in a
+#           profile at level `none` or an ad-hoc build, so no certified image
+#           ever carries one; its kernel still names the value it was built
+#           with, which overstates what it relaxes and never understates it;
+#           `no`: xtask refuses to build it, naming `lands`;
+#   requires / conflicts  other flags' values, as `flag=value`.
+#
+# A value's code is selected only in the kernel crate, by
+# `cfg(ferrix_<flag> = "<value>")` (rule 6 b).
+
+[flags.personality]
+why = "the Linux layer as linuxd in user space, or built into ring 0 through the shim (MICROKERNEL.md §4)"
+values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
+values.kernel = { allows = ["none"], lands = "today", built = "yes" }
+
+[flags.fs]
+why = "btrfs as btrfsd, or the btrfs crates in ring 0 with today's glue"
+values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
+values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+
+[flags.mitigations]
+why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes leave it with DF6"
+values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.off = { allows = ["none"], lands = "M0", built = "yes" }
+
+[flags.partition_speculation]
+why = "the barriers at a restricted exit (`exit`) or only at partition switches (`partition`); not applicable to a hybrid kernel"
+values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.partition = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+
+[flags.ipc_fastpath]
+why = "the fast path for channel_write_read (0x1013); `on` allows sc4 and present only once the 2026-10-02 rule is met, recorded as a dated change here"
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.on = { allows = ["sc2", "none"], lands = "M0", built = "stand-in", stands_in = "off" }
+
+[flags.restricted_fastpath]
+why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.on = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
+values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+
+[flags.kernel_memory]
+why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
+values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
+values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
+
+[flags.schedule]
+why = "K9's static windows with EDF inside them, stage 14's HardRt (partitioned EDF with CBS), or today's fair scheduler"
+values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
+values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
+values.fair = { allows = ["present", "none"], lands = "today", built = "yes" }
+
+[flags.checks]
+why = "the in-kernel boot checks compiled in; with `on`, ferrix.checks still chooses whether they run. `off` is for ad-hoc builds alone, built by xtask check on every architecture (BF7)"
+values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.off = { allows = ["none"], lands = "M0", built = "yes" }
+
+[flags.program_barrier]
+why = "the barrier at every switch between programs not in one marked domain (`switch`), or between login sessions' domains only (`session`, BUILD-FLAGS.md §3.1)"
+values.switch = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.session = { allows = ["none"], lands = "M0", built = "stand-in", stands_in = "switch" }
+
+[flags.ssbd]
+why = "Speculative Store Bypass Disable for every program, or per thread for programs that ask (BUILD-FLAGS.md §3.1)"
+values.always = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.on_request = { allows = ["none"], lands = "M0", built = "stand-in", stands_in = "always" }
+
+[flags.smt]
+why = "one hardware thread per core, parked by the kernel (`off`), or sibling threads running under STIBP or eIBRS/AutoIBRS (`stibp`)"
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M0", built = "no" }
+values.stibp = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
+
+[flags.runtime_trades]
+why = "whether the image contains game mode's privileged, per-application run-time trades; with `none` their code is absent"
+values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.game_mode = { allows = ["none"], lands = "game mode's design", built = "stand-in", stands_in = "none" }
+
+# ---------------------------------------------------------------------------
+# The boot options that stay boot options (BF4): the registry. A read of any
+# option not declared here fails the gate (check-item-boundary.py, with a
+# planted reader as its negative control). `values` lists what the kernel
+# understands, `*` for any one word; a `kind = "flag"` option is a bare word.
+# Each profile file names, of these, the values it permits. `until` is the
+# stage an option retires at, if it does.
+
+[boot_options."ferrix.checks"]
+values = ["run", "skip"]
+why = "whether the boot checks run; a certified profile permits only `run`"
+
+[boot_options."ferrix.root"]
+values = ["*"]
+why = "the root filesystem: a disk, or tmpfs"
+
+[boot_options."ferrix.init"]
+values = ["*"]
+why = "the program pid 1 runs"
+
+[boot_options."ferrix.onexit"]
+values = ["*"]
+why = "what the machine does when init exits"
+
+[boot_options."ferrix.fbcon"]
+kind = "flag"
+why = "the framebuffer console"
+
+[boot_options."ferrix.btrfs"]
+values = ["*"]
+test_only = true
+why = "the btrfs power-fail check's mode (test-only)"
+
+[boot_options."ferrix.btrfs.seed"]
+values = ["*"]
+test_only = true
+why = "the btrfs power-fail check's seed (test-only); never in a certified profile"
+
+[boot_options.console]
+values = ["*"]
+why = "the console port on AArch64 and ARMv7-A (arch/*/console.rs)"
+
+[boot_options."drm.edid_firmware"]
+values = ["*"]
+why = "EDID files for a display's connectors (interfaces/display/edid.rs)"
+
+[boot_options.nokaslr]
+kind = "flag"
+why = "keep the kernel where it was linked; read by the loaders"
+
+[boot_options.nosmp]
+kind = "flag"
+why = "start the boot processor alone, for a new board's bring-up"
+
+[boot_options.noactlr]
+kind = "flag"
+why = "ARMv7-A: do not read ACTLR (arch/armv7a/smp.rs), for a board whose firmware traps it; read today and not in BF4's list"
+
+[boot_options."ferrix.devmgr"]
+values = ["kernel", "init"]
+until = "M5"
+why = "who starts devmgr (docs/INIT.md §7.3); retires with DEVMGR_START at M5"
+
+[boot_options."ferrix.fastpath"]
+values = ["on", "off"]
+until = "M0"
+why = "the channel_write_read fast path (L.x86_64.159), until the ipc_fastpath flag replaces it (BF6)"
+
+# A call that reads an option through a name the check cannot see as a
+# literal: the file, and the local function every read goes through there.
+[boot_option_forwarders]
+"src/kernel/src/arch/armv7a/smp.rs" = "flag"

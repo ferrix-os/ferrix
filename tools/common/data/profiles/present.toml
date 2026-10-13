@@ -1,0 +1,69 @@
+# `present`: today's tree as a profile, and today's reference configuration
+# (docs/BUILD-FLAGS.md §1, BF1). The hybrid kernel, carrying today's four
+# targets until M5's flip, when this file is deleted. Every flag is set
+# explicitly (rule 4). A kernel built from this file prints, on its `build`
+# line, exactly these values (rule 6); the gate compares the two.
+
+profile = "present"
+level = "present"
+claim = "EAL5+, DO-178C DAL C, IEC 62304 Class C, EN 50716 SIL 2 (ledger 869), until M5's flip"
+claim_architectures = ["x86_64", "aarch64", "armv7a"]
+buildable_from = "today"
+image = { driver_updates = "absent" }
+
+# Below-level values this profile uses by a dated exception (BF1, ledger
+# 914): today's item keeps its claim with the Linux layer and btrfs in ring 0
+# until the flip. The profile rule accepts a value below the profile's level
+# only when it is listed here, and only in this profile.
+exceptions = [
+    { flag = "personality", value = "kernel", ends = "M5", why = "BF1, ledger 914: today's item keeps its claim until the flip" },
+    { flag = "fs", value = "kernel", ends = "M5", why = "BF1, ledger 914: the same exception" },
+]
+
+[flags]
+personality = "kernel"
+fs = "kernel"
+mitigations = "on"
+partition_speculation = "not_applicable"
+ipc_fastpath = "off"
+restricted_fastpath = "not_applicable"
+kernel_memory = "heap"
+schedule = "fair"
+checks = "on"
+program_barrier = "switch"
+ssbd = "always"
+smt = "stibp"
+runtime_trades = "none"
+
+# The boot options this configuration permits, by value (BF4). `*` is any one
+# word; a flag option is permitted as `true`. Anything not named is outside
+# the certified configuration.
+[boot_options]
+"ferrix.checks" = ["run"]
+"ferrix.root" = ["*"]
+"ferrix.init" = ["*"]
+"ferrix.onexit" = ["*"]
+"ferrix.fbcon" = true
+console = ["*"]
+"drm.edid_firmware" = ["*"]
+"ferrix.devmgr" = ["kernel"]
+"ferrix.fastpath" = ["off"]
+
+# The build settings that change code without a cfg (BF4), compared with the
+# tree by check-item-boundary.py: the toolchain with rust-toolchain.toml, the
+# codegen with Cargo.toml's [profile.release], the rustflags with
+# .cargo/config.toml, and the link arguments with src/kernel/build.rs.
+[build]
+cargo_profile = "release"
+toolchain = "1.97.1"
+codegen = { opt-level = 2, lto = true, codegen-units = 1, panic = "abort" }
+
+[build.rustflags]
+x86_64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=pie", "-C", "link-arg=-no-pie", "-C", "force-frame-pointers=yes"]
+aarch64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+armv7a = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+
+[build.link]
+x86_64 = { mode = "static PIE, PIC code model", args = ["-pie", "--no-dynamic-linker"] }
+aarch64 = { mode = "static PIE", args = ["-pie", "--no-dynamic-linker", "-znotext"] }
+armv7a = { mode = "fixed address with relocations", args = ["--emit-relocs"] }

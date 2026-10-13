@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::args::Mitigations;
 use crate::builds::Build;
 use crate::paths::{self, Arch};
 use crate::{Error, Result};
@@ -45,27 +44,26 @@ pub(crate) fn build_loader(arch: Arch, release: bool) -> Result<PathBuf> {
     Ok(efi)
 }
 
-/// Whether this run builds its kernels with `--mitigations off`.
-static MITIGATIONS_OFF: AtomicBool = AtomicBool::new(false);
-
-/// Whether this run builds its kernels with `--mitigations off`, for a check
-/// that has to know what the image it boots was built to do.
+/// Whether this run builds its kernels with `mitigations=off`, for a check
+/// that has to know what the image it boots was built to do. False when the
+/// run's flags do not resolve, which no kernel was built from.
 pub(crate) fn mitigations_off() -> bool {
-    MITIGATIONS_OFF.load(Ordering::Relaxed)
+    crate::flags::this_run().is_ok_and(crate::flags::Resolved::mitigations_off)
 }
 
 /// Whether this run's release kernels are built in the `iterate` profile.
 static ITERATE: AtomicBool = AtomicBool::new(false);
 
 /// Say how every kernel this run builds is to be built: `main` calls it once,
-/// with what `--mitigations` said, and whether `--iterate` asked for a
-/// release kernel linked for working on it.
+/// with `--kernel-profile` and the `--set`s ([`crate::flags`]), and whether
+/// `--iterate` asked for a release kernel linked for working on it.
 ///
 /// # Errors
 ///
 /// `--iterate` without `--release`, which would change nothing.
 pub(crate) fn set_kernel_build(
-    mitigations: Mitigations,
+    profile: Option<String>,
+    sets: Vec<(String, String)>,
     iterate: bool,
     release: bool,
 ) -> Result<()> {
@@ -74,7 +72,7 @@ pub(crate) fn set_kernel_build(
             "--iterate changes how a --release kernel is linked; give --release with it",
         ));
     }
-    MITIGATIONS_OFF.store(mitigations == Mitigations::Off, Ordering::Relaxed);
+    crate::flags::ask(profile, sets);
     ITERATE.store(iterate, Ordering::Relaxed);
     Ok(())
 }
@@ -95,6 +93,16 @@ pub(crate) fn set_full_debug(full: bool) {
 /// release profiles keep their own `debug` setting.
 fn full_debug_config(profile: &str, full: bool) -> Option<&'static str> {
     (profile == "debug" && full).then_some("profile.dev.debug=true")
+}
+
+/// The environment the kernel's build script reads its flags from
+/// (`src/kernel/build.rs`): the resolved `cfg`s, and every declared flag
+/// and value for `--check-cfg`.
+pub(crate) fn flag_environment(resolved: &crate::flags::Resolved) -> [(&'static str, String); 2] {
+    [
+        ("FERRIX_BUILD_FLAGS", resolved.cfg_words()),
+        ("FERRIX_FLAG_VALUES", resolved.declared_words()),
+    ]
 }
 
 /// The cargo profile a kernel is built in, and so the directory cargo puts
@@ -127,20 +135,19 @@ fn profile_for(release: bool, iterate: bool, traced: bool) -> &'static str {
     }
 }
 
-/// The `--config` that builds the kernel for `target` without its
-/// side-channel defences, and without KASLR: the static relocation model,
-/// which on x86-64 is the code the kernel was built as before it moved, and
-/// which `src/kernel/build.rs` links at its fixed address.
+/// The `--config` that builds every crate for `target` for a kernel without
+/// its side-channel defences, and without KASLR: the static relocation
+/// model, which on x86-64 is the code the kernel was built as before it
+/// moved, and which `src/kernel/build.rs` links at its fixed address when the
+/// flags say `mitigations=off`.
 ///
 /// A `--config` array is *appended* to the one in `.cargo/config.toml`, so the
 /// per-target flags [`refuse_inherited_rustflags`] protects are kept and the
-/// `cfg` is added -- where `RUSTFLAGS` would have replaced them. It reaches
-/// every crate built for the target, the libraries' clamps included
-/// (`ferrix_sync::nospec`).
+/// model is added -- where `RUSTFLAGS` would have replaced them. It is
+/// codegen, so it reaches every crate built for the target; the flag itself
+/// reaches the kernel crate alone ([`crate::flags`]).
 pub(crate) fn mitigations_off_config(target: &str) -> String {
-    format!(
-        "target.{target}.rustflags=[\"--cfg\",\"ferrix_mitigations_off\",\"-C\",\"relocation-model=static\"]"
-    )
+    format!("target.{target}.rustflags=[\"-C\",\"relocation-model=static\"]")
 }
 
 /// Where a kernel without its defences is built: a target directory of its
@@ -154,6 +161,7 @@ pub(crate) fn mitigations_off_target_dir() -> PathBuf {
 fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     let target = arch.kernel_target();
     let profile = kernel_profile(release);
+    let flags = crate::flags::this_run()?;
     let mut build = match profile {
         "iterate" => {
             println!("  with --iterate: thin LTO, not the release kernel a gate builds");
@@ -171,7 +179,24 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
         println!("  with --gdb: the full DWARF");
         build = build.args(["--config", config]);
     }
-    if !MITIGATIONS_OFF.load(Ordering::Relaxed) {
+    for (key, value) in flag_environment(flags) {
+        build = build.env(key, value);
+    }
+    if flags.profile == "none" {
+        println!(
+            "  an ad-hoc build of profile {}, no claim: {}",
+            flags.base,
+            flags
+                .changed
+                .iter()
+                .map(|(flag, value)| format!("{flag}={value}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    } else if flags.profile != crate::flags::DEFAULT_PROFILE {
+        println!("  profile {} (level {})", flags.profile, flags.level);
+    }
+    if !flags.mitigations_off() {
         let made = paths::target_dir()
             .join(target)
             .join(profile)
@@ -318,7 +343,9 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
     let kernels: Vec<&str> = arches.iter().map(|arch| arch.kernel_target()).collect();
     let loaders: Vec<&str> = arches.iter().map(|arch| arch.loader_target()).collect();
 
+    let flags = crate::flags::this_run()?;
     let mut kernel = ahead("ferrix-kernel", &kernels);
+    let _ = kernel.envs(flag_environment(flags));
     match kernel_profile(release) {
         "iterate" => {
             let _ = kernel.args(["--profile", "iterate"]);
@@ -335,7 +362,7 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
             }
         }
     }
-    if MITIGATIONS_OFF.load(Ordering::Relaxed) {
+    if flags.mitigations_off() {
         for target in &kernels {
             let _ = kernel.args(["--config", &mitigations_off_config(target)]);
         }

@@ -34,11 +34,11 @@
 //! processor to *predict the value* of a conditional select. The kernel's own
 //! sites, which can issue it, do; these two are recorded as a residual.
 //!
-//! # The switch
+//! # No switch
 //!
-//! Built with `--cfg ferrix_mitigations_off` -- `cargo xtask --mitigations off`
-//! -- the clamp is the identity and the check above it is all that is left.
-//! That is the whole of the off setting's effect here.
+//! The clamp is the same in every build: a library reads no build flag, since
+//! one built without it would take its other branch silently (BUILD-FLAGS.md
+//! rule 6 b). `mitigations=off` takes out the kernel's own clamps, not these.
 
 /// `Some(index)` when `index < len`, clamped so that no mispredicted path can
 /// use it to reach past `len`; `None` otherwise.
@@ -55,20 +55,13 @@ pub fn bounded(index: usize, len: usize) -> Option<usize> {
 }
 
 /// `index` if `index < len`, else zero, computed without a branch.
-#[cfg(not(ferrix_mitigations_off))]
+// One clamp in every build; until M0 a `cfg` made it the identity here.
 #[inline(always)]
 fn clamp(index: usize, len: usize) -> usize {
     let (index, len) = core::hint::black_box((index, len));
     // All ones when inside, all zeros when not.
     let mask = 0_usize.wrapping_sub(usize::from(index < len));
     index & mask
-}
-
-/// The off setting: the ordinary check alone.
-#[cfg(ferrix_mitigations_off)]
-#[inline(always)]
-fn clamp(index: usize, _len: usize) -> usize {
-    index
 }
 
 #[cfg(test)]

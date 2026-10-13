@@ -8,34 +8,6 @@
 use crate::paths::Arch;
 use crate::{Error, Result};
 
-/// `--mitigations`: the kernel's one build setting.
-///
-/// `On` is the certified reference configuration and the default; `Off` is the
-/// explicit opt-out, for measuring what the defences cost and for machines
-/// whose owner has decided they do not need them. See
-/// `docs/certification/SPECULATION.md`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mitigations {
-    /// Every side-channel defence the processor needs and offers.
-    #[default]
-    On,
-    /// None: the kernel is built with `--cfg ferrix_mitigations_off`.
-    Off,
-}
-
-impl Mitigations {
-    /// `on` or `off`, and nothing else.
-    fn parse(value: &str) -> Result<Mitigations> {
-        match value {
-            "on" => Ok(Mitigations::On),
-            "off" => Ok(Mitigations::Off),
-            other => Err(Error::new(format!(
-                "--mitigations takes `on` or `off`, not `{other}`"
-            ))),
-        }
-    }
-}
-
 /// Parsed command line.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Args {
@@ -49,9 +21,13 @@ pub(crate) struct Args {
     /// profile, release with thin LTO, for working on it rather than gating
     /// it (`docs/TEST-TIME.md`, C4).
     pub(crate) iterate: bool,
-    /// `--mitigations`: whether the kernel is built with its side-channel
-    /// defences, which it is unless told `off`.
-    pub(crate) mitigations: Mitigations,
+    /// `--kernel-profile`: the profile in `tools/common/data/profiles/` the
+    /// kernel is built from (`docs/BUILD-FLAGS.md`); `present` when none.
+    pub(crate) kernel_profile: Option<String>,
+    /// `--set flag=value`, in order, and `--mitigations` as the `--set` it
+    /// stands for: single flags changed for an ad-hoc build, which carries
+    /// no claim.
+    pub(crate) sets: Vec<(String, String)>,
     /// `--gdb`: stop and wait for a debugger before the first instruction.
     pub(crate) gdb: bool,
     /// `--fast`: skip the slow half of `check`.
@@ -618,7 +594,6 @@ impl Args {
         }
     }
 
-    /// `--mitigations on|off`.
     /// `--ssh PORT` forwards that host port to the guest's sshd, which
     /// needs the network, so it turns the network on as well.
     fn ssh(&mut self, items: &mut impl Iterator<Item = String>) -> Result<()> {
@@ -635,8 +610,26 @@ impl Args {
         Ok(())
     }
 
-    fn mitigations(&mut self, items: &mut impl Iterator<Item = String>) -> Result<()> {
-        self.mitigations = Mitigations::parse(&value(items, "--mitigations")?)?;
+    /// `--kernel-profile NAME`, `--set flag=value`, and `--mitigations on|off`,
+    /// which is `--set mitigations=on|off` by its older name.
+    fn flags(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
+        let given = value(items, key)?;
+        match key {
+            "--kernel-profile" => self.kernel_profile = Some(given),
+            "--mitigations" => {
+                if given != "on" && given != "off" {
+                    return Err(Error::new(format!(
+                        "--mitigations takes `on` or `off`, not `{given}`"
+                    )));
+                }
+                self.sets.push(("mitigations".to_owned(), given));
+            }
+            _ => {
+                let pair = crate::flags::assignment(&given)
+                    .map_err(|_| Error::new(format!("--set wants flag=value, not `{given}`")))?;
+                self.sets.push(pair);
+            }
+        }
         Ok(())
     }
 
@@ -826,7 +819,7 @@ impl Args {
             match item.as_str() {
                 "-h" | "--help" => args.help = true,
                 "--release" | "--strip-kernel" | "--iterate" => args.build(&item),
-                "--mitigations" => args.mitigations(&mut items)?,
+                "--mitigations" | "--kernel-profile" | "--set" => args.flags(&item, &mut items)?,
                 "--gdb" => args.gdb = true,
                 "--fast" => args.fast = true,
                 "--ferrousli" => args.ferrousli = true,
@@ -1209,23 +1202,21 @@ mod tests {
     }
 
     #[test]
-    fn mitigations_default_on_and_take_on_or_off_only() {
-        use super::Mitigations;
-        assert_eq!(parse(&["build"]).unwrap().mitigations, Mitigations::On);
+    fn mitigations_is_a_set_of_its_own_and_profile_and_sets_are_kept() {
+        assert!(parse(&["build"]).unwrap().sets.is_empty());
+        let args = parse(&["build", "--mitigations", "off", "--set", "checks=off"]).unwrap();
         assert_eq!(
-            parse(&["build", "--mitigations", "off"])
-                .unwrap()
-                .mitigations,
-            Mitigations::Off
-        );
-        assert_eq!(
-            parse(&["build", "--mitigations", "on"])
-                .unwrap()
-                .mitigations,
-            Mitigations::On
+            args.sets,
+            [
+                ("mitigations".to_owned(), "off".to_owned()),
+                ("checks".to_owned(), "off".to_owned())
+            ]
         );
         assert!(parse(&["build", "--mitigations", "auto"]).is_err());
         assert!(parse(&["build", "--mitigations"]).is_err());
+        assert!(parse(&["build", "--set", "checks"]).is_err());
+        let args = parse(&["build", "--kernel-profile", "desktop"]).unwrap();
+        assert_eq!(args.kernel_profile.as_deref(), Some("desktop"));
     }
 
     #[test]

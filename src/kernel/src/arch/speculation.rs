@@ -18,9 +18,9 @@
 //!
 //! # The switch
 //!
-//! [`HARDENED`] is false only in a kernel built with
-//! `--cfg ferrix_mitigations_off` (`cargo xtask --mitigations off`), and then
-//! every defence here and in the architectures is compiled out: the clamps are
+//! [`HARDENED`] is false only in a kernel built with the flag `mitigations=off`
+//! (`cfg(ferrix_mitigations = "off")`, `cargo xtask --mitigations off`), and
+//! then every defence here and in the architectures is compiled out: clamps are
 //! the identity, nothing is written to the processor, no barrier is issued,
 //! and the entry paths' extra instructions are assembled away. The reference
 //! configuration is the other setting.
@@ -33,7 +33,7 @@ use super::machine_speculation as machine;
 
 /// Whether this kernel carries its side-channel defences: every build but one
 /// made with `--mitigations off`.
-pub(crate) const HARDENED: bool = !cfg!(ferrix_mitigations_off);
+pub(crate) const HARDENED: bool = !cfg!(ferrix_mitigations = "off");
 
 /// `Some(index)` when `index < len`, clamped so that no mispredicted path can
 /// use it to reach past `len`; `None` otherwise.

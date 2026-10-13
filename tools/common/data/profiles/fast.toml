@@ -1,0 +1,53 @@
+# `fast`: the microkernel for safety products that want speed (docs/
+# BUILD-FLAGS.md §1): IEC 61508-3 SC 2 / ISO 26262 ASIL B, no timing claim,
+# carried from M7. Its true values from M0 (BF8): the gate validates this
+# file statically, and xtask refuses to build it by `lands` until M5.
+
+profile = "fast"
+level = "sc2"
+claim = "IEC 61508-3 SC 2 / ISO 26262 ASIL B, from M7"
+claim_architectures = ["aarch64"]
+buildable_from = "M5"
+image = { driver_updates = "absent" }
+exceptions = []
+
+[flags]
+personality = "user"
+fs = "server"
+mitigations = "on"
+partition_speculation = "partition"
+ipc_fastpath = "on"
+restricted_fastpath = "on"
+kernel_memory = "heap"
+schedule = "edf"
+checks = "on"
+program_barrier = "switch"
+ssbd = "always"
+smt = "stibp"
+runtime_trades = "none"
+
+[boot_options]
+"ferrix.checks" = ["run"]
+"ferrix.root" = ["*"]
+"ferrix.init" = ["*"]
+"ferrix.onexit" = ["*"]
+console = ["*"]
+
+# The build settings that change code without a cfg (BF4), compared with the
+# tree by check-item-boundary.py: the toolchain with rust-toolchain.toml, the
+# codegen with Cargo.toml's [profile.release], the rustflags with
+# .cargo/config.toml, and the link arguments with src/kernel/build.rs.
+[build]
+cargo_profile = "release"
+toolchain = "1.97.1"
+codegen = { opt-level = 2, lto = true, codegen-units = 1, panic = "abort" }
+
+[build.rustflags]
+x86_64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=pie", "-C", "link-arg=-no-pie", "-C", "force-frame-pointers=yes"]
+aarch64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+armv7a = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+
+[build.link]
+x86_64 = { mode = "static PIE, PIC code model", args = ["-pie", "--no-dynamic-linker"] }
+aarch64 = { mode = "static PIE", args = ["-pie", "--no-dynamic-linker", "-znotext"] }
+armv7a = { mode = "fixed address with relocations", args = ["--emit-relocs"] }

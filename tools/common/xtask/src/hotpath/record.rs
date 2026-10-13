@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use super::Fingerprint;
 use super::json::Value;
-use crate::args::{Args, Mitigations};
+use crate::args::Args;
 use crate::{Error, Result};
 
 /// What a record's text says it is.
@@ -295,7 +295,7 @@ pub(crate) fn ipc_configuration(args: &Args, rounds: u32, alternate: Option<&str
         ("pin", Value::str(args.pin.as_deref().unwrap_or("none"))),
         (
             "mitigations",
-            Value::str(if args.mitigations == Mitigations::Off {
+            Value::str(if crate::cargo::mitigations_off() {
                 "off"
             } else {
                 "on"
