@@ -787,6 +787,33 @@ this table before any stream is sized on it.
     open facts are settled (RC4, ledger 957). Until then the timing claim's
     method is developed and measured on split-mode A78AE, which the
     claim does not cite as evidence.
+  x86-64 stays certified for isolation, with **no timing claim**; AoU-4 says
+  so. A bound is a **measured high-water mark plus a stated margin**, on the
+  named processors, with multicore interference channels identified and
+  bounded per AMC 20-193 / CAST-32A (shared caches, interconnect, memory
+  controller), and static analysis where a qualified tool exists for the
+  core. F-24 changes from "no WCET claimed" to these bounds on these
+  processors. **T1 is split in two** (OB2, ledger 958): its **method** (the
+  harness, the interference workloads, the high-water-mark procedure, the
+  barrier, CSV2 and BHB costs) is developed on the Pixel 7's A78 cores, and
+  its gate is the method written and its controls fired; its **evidence**,
+  every bound, is measured again on the Lock-mode platform once funded, with
+  the hardware timing row as its gate, since Lock-mode changes the core
+  count, the cluster topology and the comparator's latency and a bound
+  belongs to a whole SoC, not a core.
+* **What the claim and the first assessment wait for** (OB3, ledger 958).
+  The first assessment cannot close without target hardware. Until the
+  Lock-mode platform is funded, AArch64 evidence comes from QEMU (`virt` with
+  SMMUv3) and counts as development evidence; an assessment before then
+  covers the isolation argument on QEMU at most, and the claim then names no
+  timing.
+* **The boards carry no evidence** (OB4, ledger 958). On the Pixel 7 and the
+  Orion O6 only ad-hoc or `desktop` builds run, so their boot lines say
+  `profile=none level=none` (or `desktop`) and no certified profile's rule is
+  exercised there; where Ferrix does not drive the board's IOMMU (the Pixel
+  7's), the boot line says so (degraded trusted mode, V-03); and every log
+  from a board is filed as a measurement, never as a gate row or a FIRED
+  control.
 * **Independence.** F-27 (independent reviewers), F-28 (a QMS) and F-29 (a
   position on AI-authored code, which ALC_DVS.2 makes pressing) block more at
   these levels, not less. The consultant's reviews stay internal.
@@ -891,7 +918,7 @@ level it lands near the same 900 ns, over its 714 ns limit (2.00 times
 357). That is §11 Q16, for the customer. On the AArch64 class the picture
 differs: restricted mode and `linuxd` run under different ASIDs, and
 FEAT_CSV2 keeps branch-predictor targets from crossing ASIDs, so the barrier
-may cost little there; K1's design measures it on the board.
+may cost little there; K1's design measures it on the Pixel 7's A78 cores as development figures, and on the Lock-mode platform as evidence.
 
 **Two builds, both gated** (§11 Q3 and Q5, the customer, 2026-10-13: "gate
 both"):
@@ -970,7 +997,7 @@ no route on the stable toolchain. **The rule `max` uses instead:**
   history, so every restricted exit runs Arm's Spectre-BHB clearing sequence
   (CLRBHB, or the loop with Arm's published count for the core) unless the
   core reports history isolation across contexts; SSBS provides SSBD.
-  Measured on the board in M3.
+  Measured in M3 on the Pixel 7's A78 cores, as development figures; the evidence waits for the Lock-mode platform.
 * **A residual both rules share**: no barrier closes Spectre v1 gadgets in
   `linuxd`, which is QM code outside the TSF. `SPECULATION.md` §3, the ST's
   FDP_IFC and an assumption of use say so for Linux processes within one
@@ -1039,7 +1066,7 @@ before the claim:
 | Stream | What | Points | Gate |
 |---|---|---|---|
 | **V1** | MC/DC: a tool for Rust on the kernel's targets, found or built, qualified (F-17); MC/DC on the whole kernel, 100% or justified | 60 to 120 | an `xtask` MC/DC step with a control (a planted untested condition fails it) |
-| **T1** | Timing on Cortex-A78AE in Lock-mode, on the VEK385: the method (high-water mark plus margin), bounds for every system call and non-preemptible section, the multicore interference channels (AMC 20-193), the static schedule's interference test on hardware | 60 to 100 | a timing row per processor on hardware, with an injected-delay control |
+| **T1** | Timing for Cortex-A78AE in Lock-mode, in two parts: the **method** (high-water mark plus margin, the interference workloads, the multicore interference channels per AMC 20-193) developed on the Pixel 7's A78 cores; the **evidence** (bounds for every system call and non-preemptible section, the static schedule's interference test) on the Lock-mode platform once funded | 60 to 100 | method: the method written and its controls fired; evidence: a timing row per processor on the Lock-mode platform, with an injected-delay control |
 | **V2** | Object-code verification (DO-178C 6.4.4.2b) for what the compiler adds beyond the source | 30 to 80 | a check over the image's functions against the source's, with a control |
 | **F1** | The formal isolation model of the whole TSF, in Isabelle/HOL, and its proofs (spatial, temporal, resource isolation between partitions) | 150 to 300 (2 to 4 person-years, *guess*) | the proofs checked in `xtask check`; a control that breaks one rule of the model and fails a proof |
 | **F2** | Code-level proofs in Verus that the core's object, handle, IPC and address-space code refines F1's model; the TQL-5 case for frozen Verus and Z3 | 300 to 700 (6 to 15 person-years, *guess*) | the same, per module; its scope recorded |
@@ -1168,7 +1195,7 @@ still to write.
   `BUILD-FLAGS.md`).
 * **The IPC fast path's mechanism** (Z10): "Build-time flag" (§12.1).
 * **Q15, The AArch64 safety processor class**: "find one". Cortex-A78AE in
-  Lock-mode, the VEK385 to buy (§6.5).
+  Lock-mode as the timing class; the boards are in §6.5, *The boards* (Q18).
 
 **Still open:**
 

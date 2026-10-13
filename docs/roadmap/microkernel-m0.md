@@ -138,7 +138,11 @@ planted file is its control.
   **a Radxa Orion O6 (8 GB, about €200)**, bought by the customer in M0 or
   M1, for AArch64 bring-up with a real SMMUv3 and UEFI (`MICROKERNEL.md`
   §6.5). The Lock-mode evidence platform (the VEK385 or another) is deferred
-  until funded; its open facts stay as RC4 left them (ledger 957).
+  until funded; its open facts stay as RC4 left them (ledger 957). On the
+  boards only ad-hoc or `desktop` builds run, the boot line names an IOMMU
+  Ferrix does not drive and says `profile=none level=none` (or `desktop`),
+  and their logs are filed as measurements, never as gate rows or FIRED
+  controls (OB4, ledger 958).
 
 ## What the customer does in M0
 
