@@ -166,4 +166,6 @@ agents*); B waits on A.
 Planned, 2026-10-13, on branch `microkernel-plan`. Nothing is built. The
 plan (`docs/MICROKERNEL.md`) and the flag design (`docs/BUILD-FLAGS.md`)
 passed the certification consultant's reviews with every condition folded
-in. M0's code starts when the customer says so.
+in (ledger lines 812 to 941, and 950 for landing); each kernel mechanism,
+the `ipc_fastpath` move and the Zenbleed/GDS change still get their own
+reviews before code. The customer, 2026-10-13: "ok go with m0".

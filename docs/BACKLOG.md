@@ -1111,8 +1111,11 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   `docs/BUILD-FLAGS.md`): `max` (SC 4 / ASIL D) and `fast` (SC 2 / ASIL B)
   microkernels carrying claims, and `desktop`, a hybrid kernel with the
   Linux layer and btrfs in ring 0 and no claim; the IPC fast path a build
-  flag, off in `max` until the 2026-10-02 rule is met. The certification consultant's review is **still
-  open** (ledger lines 812 to 926). The barrier, the contacts and
+  flag, off in `max` until the 2026-10-02 rule is met. The plan's and the flag design's reviews by the certification consultant
+  **passed with every condition folded in** (ledger lines 812 to 941, and
+  950 for landing); each kernel mechanism, the `ipc_fastpath` move and the
+  Zenbleed/GDS change still get their own reviews before code. The customer
+  then said "ok go with m0". The barrier, the contacts and
   the board were decided by the consultant under the customer's delegation;
   sending the contact messages and buying the board stay the customer's.
   Each kernel mechanism gets its own design review before code; nothing is
