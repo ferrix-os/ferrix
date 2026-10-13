@@ -19,6 +19,7 @@ use ferrix_paging::{Leaf, MapFlags, Mapper, PhysAddr, WalkOutcome};
 use super::{KernelPhysMem, PHYSMAP, PHYSMAP_PHYS, ROOT_TABLE, TABLES, direct_map};
 use crate::console::{println, println_unlogged};
 use crate::{fallible, mm, vmap};
+use ferrix_paging::PhysMem;
 
 // ---------------------------------------------------------------------------
 // The sweeps at the end of bring-up
@@ -326,6 +327,199 @@ pub(crate) fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     check_no_device_window_wraps()?;
     check_stacks()?;
     check_only_ram_has_a_checked_alias()?;
+    check_the_watermark(stats)?;
+    Ok(())
+}
+
+/// Frames taken for a check and held through themselves: each frame's first
+/// word is the next one's number, so holding all of memory takes no heap,
+/// however much memory there is.
+struct Chain {
+    /// The last frame taken, or [`Chain::END`].
+    head: u64,
+    /// How many frames are held.
+    len: u64,
+}
+
+impl Chain {
+    /// No frame: what the last frame's first word holds.
+    const END: u64 = u64::MAX;
+
+    const fn new() -> Chain {
+        Chain {
+            head: Chain::END,
+            len: 0,
+        }
+    }
+
+    /// Hold `frame`, which the caller has just taken and nothing else uses.
+    fn push(&mut self, frame: u64) {
+        KernelPhysMem.write(PhysAddr(frame * PAGE_SIZE), self.head);
+        self.head = frame;
+        self.len += 1;
+    }
+
+    /// Let go of the frame held last.
+    fn pop(&mut self) -> Option<u64> {
+        if self.head == Chain::END {
+            return None;
+        }
+        let frame = self.head;
+        self.head = KernelPhysMem.read(PhysAddr(frame * PAGE_SIZE));
+        self.len -= 1;
+        Some(frame)
+    }
+}
+
+/// The kernel's watermark (`mm::WATERMARK`): a program's frames, its runs
+/// of frames and its page tables are refused exactly where taking them would
+/// leave fewer free than the watermark, with nothing taken, while the
+/// kernel's own frames and the heap's pages are still given below it.
+///
+/// At stage 2, on one processor with no program running, so nothing else
+/// moves the free count: most of memory is taken as the largest blocks by
+/// the kernel's route, then program frames until refused, and the free
+/// count must then be the watermark itself. At that count a program's
+/// page table is refused; with one frame back it is given, and the count is
+/// the watermark again. A run of two frames is given at two above and
+/// refused at one above, with a block of two free to show the refusal is
+/// the watermark's and not the allocator's, and a single frame is given
+/// there. Then, at the watermark and below it, a kernel frame is given and
+/// the heap takes a fresh page. Every
+/// frame goes back and the window must close on the count it opened at.
+///
+/// Nothing is charged here: the running group at stage 2 is no job's, so
+/// every route takes its `quota::NONE` branch; a refusal returns before the
+/// frame is tagged and through the same uncharge branch as an empty
+/// allocator, which is what `L.mm.72` holds.
+///
+/// Its negative controls are each route made to take its frames with
+/// `mm::allocate_frames` (the frame, the run and the table), and the
+/// watermark applied to `mm::allocate_frames` itself (the kernel's step).
+///
+/// Verifies: H.QUOTA.13
+/// Verifies: L.mm.71
+/// Verifies: L.mm.72
+/// Verifies: L.mm.73
+/// Verifies: L.mm.74
+fn check_the_watermark(stats: &mm::Stats) -> Result<(), &'static str> {
+    let floor = mm::watermark();
+    if floor != mm::watermark_for(stats.managed_frames)
+        || mm::watermark_for(0) != 256
+        || mm::watermark_for(128 * 300) != 300
+        || mm::watermark_for(u64::MAX) != 8192
+    {
+        return Err("the watermark is not managed frames / 128 within 256 and 8192");
+    }
+    let window = mm::FrameWindow::open();
+    // Most of memory taken as the allocator's largest blocks, by the
+    // kernel's own route, which the watermark does not hold: one link
+    // written per block rather than per frame, which under emulation is
+    // most of the check's time. What is left, a block's worth above the
+    // watermark and whatever smaller blocks lie free, the program routes
+    // take below.
+    let largest = 1u64 << ferrix_frame::MAX_ORDER;
+    let mut blocks = Chain::new();
+    while mm::free_frames() > floor + 2 * largest {
+        match mm::allocate_frames(ferrix_frame::MAX_ORDER) {
+            Some(block) => blocks.push(block),
+            None => break,
+        }
+    }
+    let mut frames = Chain::new();
+    let outcome = watermark_routes(floor, &mut frames);
+    let taken = frames.len + blocks.len * largest;
+    while let Some(frame) = frames.pop() {
+        let _ = mm::release_frame(frame);
+    }
+    while let Some(block) = blocks.pop() {
+        mm::deallocate_frames(block, ferrix_frame::MAX_ORDER);
+    }
+    outcome?;
+    let kept = window.kept();
+    if kept != 0 {
+        window.report("watermark");
+        return Err("the watermark check did not give back every frame it took");
+    }
+    println!(
+        "  watermark {} KiB kept from programs of {} KiB: frames, runs and tables refused there, \
+         the kernel served below it ({} frames taken and given back)",
+        floor * 4,
+        stats.managed_frames * 4,
+        taken,
+    );
+    Ok(())
+}
+
+/// [`check_the_watermark`]'s steps, every frame a program route gave held in
+/// `frames` for the caller to give back.
+fn watermark_routes(floor: u64, frames: &mut Chain) -> Result<(), &'static str> {
+    while let Some(frame) = mm::allocate_user_frame() {
+        frames.push(frame);
+    }
+    if mm::free_frames() != floor {
+        return Err("a program's frame was refused away from the watermark");
+    }
+    // The table route, at the watermark and one above it.
+    let mut tables = super::ChargedTables {
+        owner: crate::object::quota::NONE,
+        program: true,
+    };
+    if let Some(table) = tables.allocate_table() {
+        mm::deallocate_frames(table.0 / PAGE_SIZE, 0);
+        return Err("a program's page table was taken at the watermark");
+    }
+    let one = frames.pop().ok_or("no program frame was taken")?;
+    let _ = mm::release_frame(one);
+    let table = tables
+        .allocate_table()
+        .ok_or("a program's page table was refused above the watermark")?;
+    let at_floor = mm::free_frames() == floor;
+    mm::deallocate_frames(table.0 / PAGE_SIZE, 0);
+    if !at_floor {
+        return Err("a program's page table was not one frame of the free count");
+    }
+    // The run route: given at two above, refused at one above while a block
+    // of two is free.
+    let spare = frames.pop().ok_or("no second program frame was taken")?;
+    let _ = mm::release_frame(spare);
+    if mm::free_frames() != floor + 2 {
+        return Err("the free count is not two above the watermark");
+    }
+    let run = mm::allocate_user_run(1).ok_or("a program's run was refused above the watermark")?;
+    frames.push(run);
+    frames.push(run + 1);
+    let back = frames.pop().ok_or("the run was not held")?;
+    let _ = mm::release_frame(back);
+    let block_free =
+        super::with_frames(|all| all.free_blocks().iter().skip(1).any(|&n| n > 0)).unwrap_or(false);
+    if !block_free {
+        return Err("no block of two was free to show a run's refusal");
+    }
+    if let Some(run) = mm::allocate_user_run(1) {
+        frames.push(run);
+        frames.push(run + 1);
+        return Err("a program's run was taken across the watermark");
+    }
+    // A program's frame is still given at one above, which leaves the
+    // watermark; then the kernel's own: a frame and a heap page, at the
+    // watermark and below it.
+    let last =
+        mm::allocate_user_frame().ok_or("a program's frame was refused above the watermark")?;
+    frames.push(last);
+    if mm::free_frames() != floor {
+        return Err("the free count is not the watermark before the kernel's step");
+    }
+    let kernel = mm::allocate_frames(0).ok_or("a kernel frame was refused at the watermark")?;
+    let pages = mm::heap_pages();
+    let block: Result<Vec<u8>, _> =
+        fallible::try_with_capacity(usize::try_from(PAGE_SIZE * 4).unwrap_or(usize::MAX));
+    let grew = mm::heap_pages() > pages;
+    drop(block);
+    mm::deallocate_frames(kernel, 0);
+    if !grew {
+        return Err("the heap took no fresh page below the watermark");
+    }
     Ok(())
 }
 

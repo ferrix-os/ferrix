@@ -14,14 +14,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 130 | 79 | 51 |
-| Low (`L.*`) | 884 | 620 | 264 |
+| High (`H.*`) | 131 | 80 | 51 |
+| Low (`L.*`) | 888 | 624 | 264 |
 
-1865 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1868 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1867 |
+| Named by a low-level requirement | 1870 |
 | Accessors, covered by the requirement they serve | 910 |
 | Check code in a product file | 80 |
 | Named by none | 897 |
@@ -135,14 +135,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | G.4 | `H.OBJ.13`, `H.TRAP.10` |
 | G.5 | `H.SCHED.9`, `H.TRAP.8`, `H.TRAP.10`, `H.TRAP.14`, `H.TRAP.15` |
 | G.7 | `H.OBJ.11`, `H.OBJ.17`, `H.OBJ.18` |
-| G.8 | `H.OBJ.12`, `H.QUOTA.6`, `H.QUOTA.12` |
+| G.8 | `H.OBJ.12`, `H.QUOTA.6`, `H.QUOTA.12`, `H.QUOTA.13` |
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
 | O.CAPABILITY | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DEV.2`, `H.DEV.4` |
 | O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
-| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.STORE.7` |
+| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
 | O.SCRUB | `H.MEM.6` |
 | O.VALIDATE | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.3`, `H.TRAP.5`, `H.TRAP.7`, `H.TRAP.11`, `H.TRAP.12`, `H.TRAP.13`, `H.TRAP.16` |
 | O.WXN | `H.MEM.4`, `H.MEM.5`, `H.MEM.10`, `H.MEM.13`, `H.MEM.18` |
@@ -315,6 +315,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.QUOTA.10` | A job's tasks, with those of every job beneath it, shall use no more processor time in a period than the job's cpu.max allows, and a task kept waiting for the period to end shall leave the wait at once for a kill or a signal. | A program in a job limited to 20000 of 100000 microseconds is held to between a twelfth and two thirds of a processor with the throttling counted in cpu.stat, and one in a job limited to 1000 of 1000000 ends within a quarter of a second of its SIGKILL (the `cgroups` line, cpu). | O.QUOTA | `src/kernel/src/fs/cgroupfs/cpu_check.rs::killed_throttled` | not built | not built | not built |
 | `H.QUOTA.11` | A process in a job, or beneath one, whose cgroup.freeze is set shall run no user code until the job is thawed or the process is killed; SIGCONT shall not thaw it, and cgroup.events shall say frozen only once every live process beneath has stopped. | A program of three threads in a frozen cgroup stops counting, cgroup.events says frozen 1 and wakes its poller, SIGCONT changes neither, and thawing restarts its futex wait (the `cgroups` line, freeze). | O.QUOTA | `src/kernel/src/fs/cgroupfs/freeze_check.rs::freeze_a_program` | not built | not built | not built |
 | `H.QUOTA.12` | A charge refused by a job's memory limit, and a program over its memory.high, shall first take back clean file cache charged to that job or beneath it, never a sibling's and never a child's at or under its memory.min, and read back as its source has it, before anything is killed. | A cgroup reading a file twice its memory.high is brought back to it, its sibling's cache untouched, every page read back as the source has it, and a read at memory.max kills nothing where its clean cache was room (the `cgroups` line, reclaim). | G.8, O.QUOTA | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | not built | not built | not built |
+| `H.QUOTA.13` | A frame for a program's memory or page tables shall be refused when taking it would leave fewer frames free than the kernel's watermark, whatever job the program is in, with nothing taken; the kernel's own allocations shall not be refused by it. | At stage 2, program frames taken until refused leave exactly the watermark free; at that count a program's page table is refused and a kernel frame and a fresh heap page are given; a run of two frames is given at two above it and refused at one above with a block of two free; every frame comes back (the `watermark` line). | G.8, O.QUOTA | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 
 ### Audit (`H.AUD`)
 
@@ -776,6 +777,10 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.mm.32` | Once bring-up has dropped the loader's identity map, no leaf under the kernel's root, nor under the identity map's own root where the architecture has one, shall be both writable and executable. | The sweep of every leaf under those roots, after the identity map is dropped, counts N leaves, E > 0 of them executable, and 0 both writable and executable (the w^x line). | H.MEM.4 | `mm::map_kernel`, `mm::protect_kernel`, `mm::clear_root_slots`, `early::EarlyMemory::map_window` | `src/kernel/src/mm/check.rs::sweep_w_xor_x` | reached | reached | reached |
 | `L.mm.33` | No leaf under the kernel's root that maps a frame of the image's text or read-only data shall be writable, and the direct map shall alias every byte of them read-only. | The sweep of every leaf under the kernel's root finds the image's text and read-only data non-empty, 0 of the leaves mapping them writable, and the direct map's leaves over them covering every byte (the sealed line). | H.MEM.5 | `mm::direct_map`, `mm::overlaps_image`, `vmap::map_device`, `early::EarlyMemory::map_window` | `src/kernel/src/mm/check.rs::check_sealed_image` | reached | reached | reached |
 | `L.mm.34` | reclaim_boot_memory shall give the frame allocator the loader's and the ACPI-reclaimable frames the per-frame array covers, above frame 0, and none of the page tables, boot stack or boot information the kernel still uses. | The frames reclaimed equal the loader and ACPI-reclaim frames of the memory map inside the array, above frame 0, and greater than 0; afterwards no frame of a PageTables, BootStack or BootInfo region is free. | H.MEM.14 | `mm::reclaim_boot_memory` | *baselined* | — | — | — |
+| `L.mm.71` | init shall set the watermark once, to the frames the allocator manages divided by 128, and no fewer than 256 frames nor more than 8192. | The watermark equals watermark_for of the frames managed at init, and watermark_for gives 256 for 0 frames, 300 for 38400 and 8192 for the largest count (the `watermark` line). | H.QUOTA.13 | `mm::init`, `mm::watermark_for`, `mm::watermark` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+| `L.mm.72` | allocate_user_frame and allocate_user_run shall refuse frames that would leave fewer than the watermark free, deciding in the same hold of the frame allocator's lock as the frames are taken, and a refusal shall take back any charge made for them. | At stage 2, with no job charged, single frames taken until refused leave exactly the watermark free; a run of two is given at two above it and refused at one above it while a block of two is free; a single frame is given at one above it. | H.QUOTA.13 | `mm::allocate_program_frames`, `mm::allocate_user_frame`, `mm::allocate_user_run` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+| `L.mm.73` | A page table for a user mapping shall be taken as a program's frame, refused at the watermark whether or not its job has a quota slot, and zeroed before it is used. | At stage 2, with exactly the watermark free, a program's page table with no job to charge is refused; with one frame more it is given, and the free count is the watermark again. | H.QUOTA.13 | `mm::ChargedTables::allocate_table`, `mm::map_in` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+| `L.mm.74` | allocate_frames and the heap's page supply shall not be refused by the watermark. | At stage 2, with exactly the watermark free, a kernel frame is given, and then a 16 KiB heap allocation takes a fresh page; both are given back and the frame window closes on the count it opened at. | H.QUOTA.13 | `mm::allocate_frames`, `mm::KernelPages::allocate_pages` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 
 ### AllocationReserve
 
@@ -1824,6 +1829,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/mm/check.rs::check_only_ram_has_a_checked_alias` | kernel | L.mm.62 |
 | `src/kernel/src/mm/check.rs::check_sealed_image` | kernel | H.MEM.5, L.mm.33 |
 | `src/kernel/src/mm/check.rs::check_stacks` | kernel | H.FAIL.2, L.mm.55 |
+| `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | H.QUOTA.13 |
+| `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.71 |
+| `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.72 |
+| `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.73 |
+| `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.74 |
 | `src/kernel/src/mm/check.rs::check_vmap` | kernel | H.MEM.15, L.mm.42, L.mm.46 |
 | `src/kernel/src/mm/check.rs::check_vmap_contents` | kernel | L.mm.44 |
 | `src/kernel/src/mm/check.rs::check_vmap_guards` | kernel | L.mm.43 |

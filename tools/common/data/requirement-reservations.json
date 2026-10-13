@@ -59,13 +59,6 @@
       "branch": "gap-kill-reaped",
       "date": "2026-10-12",
       "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
-    },
-    {
-      "ids": ["H.QUOTA.13", "L.mm.71-74"],
-      "owner": "endfield-oom",
-      "branch": "endfield-oom",
-      "date": "2026-10-13",
-      "purpose": "The kernel watermark: frames a program's memory and page tables cannot take, so a program out of memory is refused before the kernel's heap runs dry (BACKLOG, endfield-s3's FX-0008 in epoll_wait). H.QUOTA.13 under O.QUOTA, L.mm.71 its size, L.mm.72 allocate_user_frame and allocate_user_run refused at it with nothing charged, L.mm.73 a program's page tables refused at it, L.mm.74 kernel allocations not refused by it (consultant endfield-oom, ledger 2026-10-13 line 797, W4)"
     }
   ]
 }

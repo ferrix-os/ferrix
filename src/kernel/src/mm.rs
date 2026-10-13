@@ -111,6 +111,31 @@ impl core::fmt::Display for MemoryError {
 /// The innermost lock in the kernel; the module documentation gives the order.
 static FRAMES: IrqSpinLock<Option<Frames<'static>>, crate::arch::Irq> = IrqSpinLock::new(None);
 
+/// Frames a program's memory and page tables may not take: the kernel's
+/// watermark (`H.QUOTA.13`). [`allocate_program_frames`] refuses a program
+/// any frame that would leave fewer free than this, so a machine out of
+/// memory refuses its programs first and its own allocations -- the heap's
+/// pages, kernel stacks, tables of its own -- still find frames. Set once, at
+/// the end of [`init`], from the frames that allocator was given; the
+/// loader's and ACPI's memory reclaimed afterwards is not counted in it.
+///
+/// It is a count, not a promise of contiguity: a kernel allocation of more
+/// than one frame can still fail on a fragmented machine with this many
+/// free. And it bounds only what programs take, not what the kernel itself
+/// takes on their behalf from the heap (`docs/certification/MEMORY-AND-TIMING.md`).
+static WATERMARK: AtomicU64 = AtomicU64::new(0);
+
+/// The watermark is the frames managed divided by this, ...
+const WATERMARK_DIVISOR: u64 = 128;
+
+/// ... and never fewer than this many frames (1 MiB) ...
+const WATERMARK_LEAST: u64 = 256;
+
+/// ... nor more than this many (32 MiB). An engineering margin, not a
+/// derivation: Linux's `min_free_kbytes` is about 11 MB at 8 GiB, and this
+/// is larger because the kernel's heap has nothing to give back on demand.
+const WATERMARK_MOST: u64 = 8192;
+
 /// The kernel heap.
 static HEAP: IrqSpinLock<Heap, crate::arch::Irq> = IrqSpinLock::new(Heap::new());
 
@@ -251,8 +276,27 @@ pub(crate) fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
         page_array_at: host.base,
     };
 
+    WATERMARK.store(watermark_for(stats.managed_frames), Ordering::Relaxed);
     *FRAMES.lock() = Some(frames);
     Ok(stats)
+}
+
+/// The watermark for a machine whose allocator manages `managed` frames
+/// (`L.mm.71`).
+pub(crate) const fn watermark_for(managed: u64) -> u64 {
+    let share = managed / WATERMARK_DIVISOR;
+    if share < WATERMARK_LEAST {
+        WATERMARK_LEAST
+    } else if share > WATERMARK_MOST {
+        WATERMARK_MOST
+    } else {
+        share
+    }
+}
+
+/// Frames a program's memory and page tables may not take ([`WATERMARK`]).
+pub(crate) fn watermark() -> u64 {
+    WATERMARK.load(Ordering::Relaxed)
 }
 
 /// The lowest frame of anything firmware called memory.
@@ -353,6 +397,28 @@ pub(crate) fn allocate_frames(order: u8) -> Option<Frame> {
     Some(frame)
 }
 
+/// Take `2^order` contiguous frames for a program's memory or page tables:
+/// refused, as an empty allocator refuses, when taking them would leave
+/// fewer than [`WATERMARK`] frames free. The free count is read in the same
+/// hold of the allocator's lock as the frames are taken, so two processors
+/// cannot both pass the test on the last frames above it. Charging is the
+/// caller's, and stays outside the lock.
+fn allocate_program_frames(order: u8) -> Option<Frame> {
+    if fallible::frame_refused() {
+        return None;
+    }
+    let floor = WATERMARK.load(Ordering::Relaxed);
+    let frame = with_frames(|frames| {
+        let left = frames.free_frames().checked_sub(1 << order)?;
+        if left < floor {
+            return None;
+        }
+        frames.allocate(order)
+    })??;
+    count(Route::Allocated, 1 << order);
+    Some(frame)
+}
+
 /// Take one frame of a program's memory, charged to the job the running task
 /// is in (`object::quota`, `FRU_RSA.1`): refused, as if memory had run out,
 /// when that job or one above it is at its memory limit.
@@ -364,7 +430,7 @@ pub(crate) fn allocate_frames(order: u8) -> Option<Frame> {
 pub(crate) fn allocate_user_frame() -> Option<Frame> {
     let owner = crate::sched::running_group();
     crate::object::quota::charge_frame(owner).ok()?;
-    let frame = allocate_frames(0).and_then(|frame| {
+    let frame = allocate_program_frames(0).and_then(|frame| {
         with_frames(|frames| frames.set_owner(frame, owner))
             .and_then(Result::ok)
             .map(|()| frame)
@@ -401,7 +467,7 @@ pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
         uncharge(charged);
         return None;
     }
-    let Some(block) = allocate_frames(order) else {
+    let Some(block) = allocate_program_frames(order) else {
         uncharge(count);
         return None;
     };
@@ -752,9 +818,16 @@ unsafe impl PhysMem for KernelPhysMem {
 /// charged to the job the running task is in, as [`allocate_user_frame`]
 /// charges a page (`object::quota`). A table is freed through
 /// [`deallocate_frames`], which takes the charge back wherever that happens.
+///
+/// A program's tables are refused at the [`WATERMARK`], as its pages are,
+/// whether or not there is a job to charge (`L.mm.73`): the rule follows the
+/// route, a user mapping, not the owner, so a program in the tree's root,
+/// whose job has no slot, is held to it too.
 struct ChargedTables {
     /// The job's quota slot, or `quota::NONE`.
     owner: u32,
+    /// Whether these are a program's tables, for a user mapping.
+    program: bool,
 }
 
 // SAFETY: (TRANSLATE) every descriptor access is `KernelPhysMem`'s, whose argument this
@@ -770,11 +843,23 @@ unsafe impl PhysMem for ChargedTables {
     }
 
     fn allocate_table(&mut self) -> Option<PhysAddr> {
-        if self.owner == crate::object::quota::NONE {
+        if !self.program {
             return KernelPhysMem.allocate_table();
         }
+        // A program's table is a program's demand: refused at the watermark,
+        // as its pages are, and zeroed for the reason
+        // `KernelPhysMem::allocate_table` gives.
+        let take = || {
+            allocate_program_frames(0).map(|frame| {
+                zero_frame(frame);
+                PhysAddr(frame * PAGE_SIZE)
+            })
+        };
+        if self.owner == crate::object::quota::NONE {
+            return take();
+        }
         crate::object::quota::charge_frame(self.owner).ok()?;
-        let table = KernelPhysMem.allocate_table();
+        let table = take();
         let owned = table.and_then(|table| {
             with_frames(|frames| frames.set_owner(table.0 / PAGE_SIZE, self.owner))
                 .and_then(Result::ok)
@@ -981,7 +1066,10 @@ pub(crate) fn map_in(
         crate::object::quota::NONE
     };
     mapper.map_range(
-        &mut ChargedTables { owner },
+        &mut ChargedTables {
+            owner,
+            program: flags.user,
+        },
         VirtAddr(virt),
         PhysAddr(phys),
         len.next_multiple_of(PAGE_SIZE),

@@ -1244,6 +1244,20 @@ package FerrixItemRequirements {
                 `cgroups` line, reclaim).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
+        requirement <'H.QUOTA.13'> programsStopAtTheWatermark : ItemHighLevel {
+            attribute :>> statement = "A frame for a program's memory or page
+                tables shall be refused when taking it would leave fewer frames
+                free than the kernel's watermark, whatever job the program is in,
+                with nothing taken; the kernel's own allocations shall not be
+                refused by it.";
+            attribute :>> criterion = "At stage 2, program frames taken until
+                refused leave exactly the watermark free; at that count a
+                program's page table is refused and a kernel frame and a fresh
+                heap page are given; a run of two frames is given at two above it
+                and refused at one above with a block of two free; every frame
+                comes back (the `watermark` line).";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
     }
 
     package Audit {

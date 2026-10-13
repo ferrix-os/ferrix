@@ -177,6 +177,48 @@ refused, and reports **FX-0007** before the boot completes.
 shares the heap. One that fails after boot stops the machine with **FX-0008**.
 That is an application condition, AoU-5, not a property of the item.
 
+**The kernel's watermark** (`H.QUOTA.13`, L.mm.71 to 74; since 2026-10-13).
+The heap takes its pages from the same frame allocator as a program's
+memory, so a program in a job with no limit could take the last free frame,
+and the next infallible allocation in the load stopped the machine: an
+`epoll_wait` did, with FX-0008, when Wine's own Direct3D used up an 8 GiB
+guest (endfield-s3's control, `~/.local/share/ferrix/logs/queue/endfield-s3-ctl-wined3d.log`).
+Since then a program's frames, its runs of frames and its page tables are
+refused when taking them would leave fewer than the watermark free, decided
+in the same hold of the frame allocator's lock as the take
+(`mm::allocate_program_frames`); the kernel's own frames and the heap's
+pages are not. A refused program frame takes the path a machine out of
+frames always took: clean cache reclaimed first, then the fault fails
+(`SIGSEGV`, `EFAULT`) or the call answers `ENOMEM`.
+
+* **Its size** is the frames managed at `mm::init` over 128, within 256 and
+  8192 frames (1 to 32 MiB); the loader's and ACPI's memory reclaimed after
+  `init` is not counted. It is an engineering margin, not a derivation, and
+  it is fixed: not a boot option, which would widen the configuration space
+  ITEM.md describes. The boot's `memory` line prints it.
+* **It is a count, not contiguity.** A kernel allocation of more than one
+  frame can still fail with the watermark's frames free, if they are
+  scattered.
+* **It bounds what programs take, not what the kernel takes for them.**
+  Heap-borne demand -- the load's lists, a job with no limit's descriptors
+  and sockets -- draws on the same frames below the watermark, and the
+  load's infallible allocations still stop the machine with FX-0008 once
+  those are gone too. What it buys is that page demand alone, a program's
+  memory and tables, cannot get there.
+* **Routes left outside it**, each bounded otherwise: an address space's
+  root table (one per space, spaces bounded by the job's task limit);
+  kernel stacks (one per task, the same limit); a display client's
+  contiguous buffers (`interfaces/display`, at most the card VMO's size per
+  card); and every frame the kernel takes for itself, by `allocate_frames`.
+* `/proc/meminfo`'s `MemAvailable` still counts the watermark's frames as
+  available, where Linux leaves out its reserve (`totalreserve_pages`).
+
+Where it stands: the consultant's design review is OK IF W1 to W11 (ledger
+2026-10-13, line 797, `~/.local/share/ferrix/cert-consultant/reviews.md`);
+the stage-2 check and its four negative controls are in the landing. The
+BACKLOG row for the FX-0008 in `epoll_wait` stays open until the same Wine
+run at 8 GiB is shown to end without it.
+
 **The load the item runs.** That line is clean for the Linux personality,
 which is load from its entry, and not clean for two native calls, which are
 item calls that run load code. `process_create` makes a POSIX process through

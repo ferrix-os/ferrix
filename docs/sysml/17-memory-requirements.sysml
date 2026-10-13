@@ -418,6 +418,51 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.14";
             attribute :>> unit = "mm::reclaim_boot_memory";
         }
+        requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
+            attribute :>> statement = "init shall set the watermark once, to the
+                frames the allocator manages divided by 128, and no fewer than 256
+                frames nor more than 8192.";
+            attribute :>> criterion = "The watermark equals watermark_for of the
+                frames managed at init, and watermark_for gives 256 for 0 frames,
+                300 for 38400 and 8192 for the largest count (the `watermark`
+                line).";
+            attribute :>> parent = "H.QUOTA.13";
+            attribute :>> unit = ("mm::init", "mm::watermark_for", "mm::watermark");
+        }
+        requirement <'L.mm.72'> aProgramsFramesStopAtTheWatermark : ItemLowLevel {
+            attribute :>> statement = "allocate_user_frame and allocate_user_run
+                shall refuse frames that would leave fewer than the watermark free,
+                deciding in the same hold of the frame allocator's lock as the
+                frames are taken, and a refusal shall take back any charge made for
+                them.";
+            attribute :>> criterion = "At stage 2, with no job charged, single
+                frames taken until refused leave exactly the watermark free; a run
+                of two is given at two above it and refused at one above it while a
+                block of two is free; a single frame is given at one above it.";
+            attribute :>> parent = "H.QUOTA.13";
+            attribute :>> unit = ("mm::allocate_program_frames",
+                "mm::allocate_user_frame", "mm::allocate_user_run");
+        }
+        requirement <'L.mm.73'> aProgramsTablesStopAtTheWatermark : ItemLowLevel {
+            attribute :>> statement = "A page table for a user mapping shall be
+                taken as a program's frame, refused at the watermark whether or not
+                its job has a quota slot, and zeroed before it is used.";
+            attribute :>> criterion = "At stage 2, with exactly the watermark free,
+                a program's page table with no job to charge is refused; with one
+                frame more it is given, and the free count is the watermark again.";
+            attribute :>> parent = "H.QUOTA.13";
+            attribute :>> unit = ("mm::ChargedTables::allocate_table", "mm::map_in");
+        }
+        requirement <'L.mm.74'> theKernelIsServedBelowTheWatermark : ItemLowLevel {
+            attribute :>> statement = "allocate_frames and the heap's page supply
+                shall not be refused by the watermark.";
+            attribute :>> criterion = "At stage 2, with exactly the watermark free,
+                a kernel frame is given, and then a 16 KiB heap allocation takes a
+                fresh page; both are given back and the frame window closes on the
+                count it opened at.";
+            attribute :>> parent = "H.QUOTA.13";
+            attribute :>> unit = ("mm::allocate_frames", "mm::KernelPages::allocate_pages");
+        }
     }
 
     package AllocationReserve {

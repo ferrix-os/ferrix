@@ -379,9 +379,11 @@ fn say_booted() {
     // stage 2's line of what it started with: the number a small machine's
     // memory is sized by (a `--memory` sweep reads it from each boot).
     println!(
-        "  memory   {} KiB free of {} KiB managed at the end of boot",
+        "  memory   {} KiB free of {} KiB managed at the end of boot, {} KiB of it kept from \
+         programs",
         mm::free_frames() * 4,
         mm::managed_frames() * 4,
+        mm::watermark() * 4,
     );
     if checks::run() {
         // After every check that counts what was given back, since it loses

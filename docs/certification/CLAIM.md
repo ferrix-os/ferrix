@@ -131,7 +131,10 @@ Annex F: spatial and temporal) that is not yet written. It has four parts:
   does for the item.
 * **(b) Resources.** The load's allocations are not fallible and share the
   item's heap. A Linux program that drives the load to exhaustion takes the
-  whole machine to the safe state (FX-0008, AoU-5). In mixed criticality a
+  whole machine to the safe state (FX-0008, AoU-5). Since 2026-10-13 this is
+  narrowed for page demand -- a program's frames and tables stop at the
+  kernel's watermark (`H.QUOTA.13`) -- and still open for heap-borne demand.
+  In mixed criticality a
   QM partition must not halt the safety partitions. The fix is per-job heap
   arenas for the load's work, or fallible program-driven load paths, so that
   exhaustion answers `ENOMEM` to the partition that caused it.
