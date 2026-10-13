@@ -1081,7 +1081,8 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   good, so a good start would then be to define the build time flags?",
   "yes desktop build is a hybrid kernel, while max and fast are true
   microkernels", and, asked whether the IPC fast path becomes a build flag,
-  "Build-time flag". **The plan reads these as** (MICROKERNEL.md
+  "Build-time flag"; asked whether its 2026-10-02 rule binds `fast` too,
+  "Only max". **The plan reads these as** (MICROKERNEL.md
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
@@ -1106,7 +1107,7 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   microkernels carrying claims, and `desktop`, a hybrid kernel with the
   Linux layer and btrfs in ring 0 and no claim; the IPC fast path a build
   flag, off in `max` until the 2026-10-02 rule is met. The certification consultant's review is **still
-  open** (ledger lines 812 to 913). Still open for the customer
+  open** (ledger lines 812 to 914). Still open for the customer
   (MICROKERNEL.md §11): where the certified build's barrier sits under
   seL4's methods, approaching the proof providers and the compiler vendor,
   and buying the board.

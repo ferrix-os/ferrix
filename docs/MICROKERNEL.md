@@ -1147,7 +1147,7 @@ hybrid kernel has the glue (Z7).
 | Profile | Claim | Options |
 |---|---|---|
 | **`max`** | IEC 61508-3 SC 4 / ISO 26262 ASIL D, the first assessment (§6.5) | `personality=user`, `fs=server`, `partition_speculation` per Q16, `mitigations=on`, `ipc_fastpath=off` until its rule is met, `kernel_memory=retyped`, `schedule=windows`, `checks=on` (`BUILD-FLAGS.md` §3) |
-| **`fast`** | IEC 61508-3 SC 2 / ISO 26262 ASIL B; **no timing claim** (measured bounds on named processors may be added later) | `personality=user`, `fs=server` (`btrfsd`), `partition_speculation=partition`, `mitigations=on`, `kernel_memory=heap`, `schedule=edf`, `fastpath=on`, `checks=on` |
+| **`fast`** | IEC 61508-3 SC 2 / ISO 26262 ASIL B; **no timing claim** (measured bounds on named processors may be added later) | `personality=user`, `fs=server` (`btrfsd`), `partition_speculation=partition`, `mitigations=on`, `kernel_memory=heap`, `schedule=edf`, `ipc_fastpath=on` (the 2026-10-02 rule binds `max` only: the customer, 2026-10-13), `restricted_fastpath=on`, `checks=on` |
 | **`desktop`** | **none**; a **hybrid kernel** (the customer, 2026-10-13: "desktop build is a hybrid kernel, while max and fast are true microkernels") | `personality=kernel`, `fs=kernel`, the rest per `BUILD-FLAGS.md` §3 |
 
 **`fast`'s justification for a kernel heap.** ISO 26262-6 grades "no
@@ -1306,6 +1306,9 @@ Draft on branch `microkernel-plan`.
   answers: three profiles, `desktop` a hybrid kernel, the fast path a
   build flag under its 2026-10-02 rule (Z10); the flags are defined in
   `docs/BUILD-FLAGS.md`, sent for design review.
+* `BUILD-FLAGS.md`'s design review: **OK IF** BF1 to BF9, ledger line 914,
+  folded in (BF9 here: `fast`'s row). The interim `present` profile keeps
+  today's item its claim until the flip.
 * Each K-row still needs its own design review before code. This plan
   approves no code. The reviews are internal, not independent verification
   (F-27).
