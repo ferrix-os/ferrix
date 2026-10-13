@@ -1074,15 +1074,16 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   §11): the Linux ABI served from user space by `linuxd`, which replaces the
   2026-09-16 decision (a monolithic core) and the 2026-09-27 shelving of the
   opaque-kernel plan, both deleted here, and reopens `docs/ARCHITECTURE.md`
-  §2; the certified build (barrier on) gated at 2x today's in-kernel figures
-  and the performance build at 1x, failing above 1.1 times each; a certified
+  §2; the certified build (barrier on) gated within 2x today's in-kernel
+  figures, failing if missed, and the performance build at 1x, failing
+  above 1.1 times; a certified
   `btrfsd`; and **an amendment of the 2026-10-01 targets for the new kernel
   from M7**: ISO 26262 ASIL D, IEC 61508 SIL 4, EN 50716 SIL 4, DO-178C DAL A
   objectives, IEC 62304 Class C, Common Criteria EAL6+ (MICROKERNEL.md
   §6.5). Until the flip, today's item keeps the 2026-10-01 targets (EAL5+,
   DAL C, Class C, SIL 2); `README.md`, `CLAIM.md` and the manifest's ring
   targets change in M7. The certification consultant's review is **still
-  open** (ledger lines 812, 837, 847, 858). Still open for the customer
+  open** (ledger lines 812, 837, 847, 858, 869). Still open for the customer
   (MICROKERNEL.md §11): further certified user-space items, keeping the
   `core` ring, `CLAIM.md`'s two open decisions, the formal work's approach,
   a PCID-capable measurement host and the AArch64 safety processor class.
