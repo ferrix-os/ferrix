@@ -579,6 +579,28 @@ impl MsgHdr {
     }
 }
 
+/// `struct mmsghdr`, the element of the array `sendmmsg` and `recvmmsg`
+/// take: a [`MsgHdr`] and then `unsigned int msg_len`, the bytes that message
+/// sent or received, padded to the structure's word alignment. 64 bytes on a
+/// 64-bit target and 32 on a 32-bit one -- `compat_mmsghdr` for an i386
+/// program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MmsgHdr;
+
+impl MmsgHdr {
+    /// Where `msg_len` is: just past the `msghdr`.
+    #[must_use]
+    pub const fn len_offset(width: Width) -> usize {
+        MsgHdr::size(width)
+    }
+
+    /// Bytes in one element, and so the distance from one to the next.
+    #[must_use]
+    pub const fn size(width: Width) -> usize {
+        (MsgHdr::size(width) + 4).next_multiple_of(width.bytes())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // struct cmsghdr
 // ---------------------------------------------------------------------------

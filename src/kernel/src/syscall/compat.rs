@@ -112,8 +112,11 @@ const SOCKETCALL_WORDS: [usize; 21] = [
 /// Linux's order: a sub-call outside 1 to 20 is `EINVAL` before anything is
 /// read, and a block that cannot be read is `EFAULT`. `send` and `recv` are
 /// `sendto` and `recvfrom` with no address, as Linux answers them.
-/// `recvmmsg` and `sendmmsg` have no handler here and are `ENOSYS` once
-/// their block has been read.
+/// `recvmmsg` and `sendmmsg` are answered by their own numbers (i386's 337,
+/// 345 and 417, which glibc uses from Linux 4.3 on) but are still `ENOSYS`
+/// here once their block has been read: the i386 boot check in
+/// `arch/x86_64/trap/check.rs`, a core-ring file, requires that of sub-call
+/// 19, and changing it goes through the certification review.
 ///
 /// # Errors
 ///

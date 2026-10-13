@@ -53,9 +53,10 @@ use ferrix_linux_abi::inet::{
 use ferrix_linux_abi::nr::Syscall;
 use ferrix_linux_abi::socket::{
     AF_INET, AF_INET6, AF_MAX, AF_NETLINK, AF_PACKET, AF_UNIX, CmsgHdr, ControlMessages,
-    MSG_CMSG_CLOEXEC, MSG_CMSG_COMPAT, MSG_CTRUNC, MSG_OOB, MSG_TRUNC, MsgHdr, SCM_CREDENTIALS,
-    SCM_MAX_FD, SCM_RIGHTS, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOCK_STREAM,
-    SOCK_TYPE_MASK, SOL_SOCKET, Ucred, UnixAddress, Width, cmsg_align, cmsg_len, cmsg_space,
+    MSG_CMSG_CLOEXEC, MSG_CMSG_COMPAT, MSG_CTRUNC, MSG_DONTWAIT, MSG_OOB, MSG_TRUNC,
+    MSG_WAITFORONE, MmsgHdr, MsgHdr, SCM_CREDENTIALS, SCM_MAX_FD, SCM_RIGHTS, SOCK_CLOEXEC,
+    SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOCK_STREAM, SOCK_TYPE_MASK, SOL_SOCKET, Ucred,
+    UnixAddress, Width, cmsg_align, cmsg_len, cmsg_space,
 };
 use ferrix_net::packet::PacketKind;
 use ferrix_net::socket::Family;
@@ -71,6 +72,7 @@ use crate::syscall::credentials;
 use crate::syscall::fd;
 use crate::syscall::pidns;
 use crate::syscall::process::Process;
+use crate::syscall::time::{self, TimeWidth};
 use crate::syscall::uaccess;
 use crate::trap::Abi;
 
@@ -91,6 +93,9 @@ const MAX_RW_COUNT: usize = 0x7FFF_F000;
 
 /// `UIO_MAXIOV`: the most iovecs one message may have.
 const UIO_MAXIOV: u64 = 1024;
+
+/// Nanoseconds in a second, for `recvmmsg`'s timeout.
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// The most one send or receive holds in the kernel at once.
 const MAX_TRANSFER: usize = 16 << 20;
@@ -144,6 +149,27 @@ pub(crate) fn dispatch(
         Syscall::Recv => sys_recvfrom(process, descriptor, a[1], a[2], a[3] as u32, 0, 0),
         Syscall::Sendmsg => sys_sendmsg(process, descriptor, a[1], a[2] as u32, width),
         Syscall::Recvmsg => sys_recvmsg(process, descriptor, a[1], a[2] as u32, width),
+        Syscall::Sendmmsg => {
+            sys_sendmmsg(process, descriptor, (a[1], a[2] as u32), a[3] as u32, width)
+        }
+        // `recvmmsg`'s timeout is a `long` pair, `recvmmsg_time64`'s two
+        // 64-bit fields, whatever the program's word.
+        Syscall::Recvmmsg | Syscall::RecvmmsgTime64 => {
+            let time = if call == Syscall::RecvmmsgTime64 {
+                TimeWidth::Wide
+            } else {
+                TimeWidth::Native
+            }
+            .in_abi(abi);
+            let vector = (a[1], a[2] as u32);
+            sys_recvmmsg(
+                process,
+                descriptor,
+                vector,
+                (a[3] as u32, a[4]),
+                (width, time),
+            )
+        }
         Syscall::Getsockopt => {
             let option = (int(a[1]), int(a[2]));
             sys_getsockopt(process, descriptor, option, a[3], a[4], width)
@@ -1203,9 +1229,23 @@ fn sys_sendmsg(
         return Err(Errno::EINVAL);
     }
     let (file, socket) = socket_of(process, descriptor)?;
+    send_message(process, (&file, &socket), header, flags, width).map(|(sent, _)| sent)
+}
+
+/// One `msghdr`'s message sent on a socket already looked up, as
+/// `___sys_sendmsg` sends it for `sendmsg` and for each of `sendmmsg`'s:
+/// the bytes sent, and the bytes the message's buffers held, so that
+/// `sendmmsg` can stop after a short send as Linux's does.
+fn send_message(
+    process: &Process,
+    (file, socket): (&OpenFile, &Any),
+    header: u64,
+    flags: u32,
+    width: Width,
+) -> Result<(usize, usize), Errno> {
     let message = read_header(process, header, width)?;
     let name_length = name_length_of(&message)?;
-    check_destination(&socket, name_length)?;
+    check_destination(socket, name_length)?;
     if flags & MSG_OOB != 0 {
         return Err(Errno::EOPNOTSUPP);
     }
@@ -1215,12 +1255,9 @@ fn sys_sendmsg(
         Some(read_address(process, message.name, name_length)?)
     };
     let segments = iovecs(process, &message, width)?;
-    let passed = control(process, &message, &socket, width)?;
-    let total = segments
-        .iter()
-        .map(|&(_, length)| length)
-        .sum::<usize>()
-        .min(MAX_TRANSFER);
+    let passed = control(process, &message, socket, width)?;
+    let length = segments.iter().map(|&(_, length)| length).sum::<usize>();
+    let total = length.min(MAX_TRANSFER);
     let mut data = zeroed(total)?;
     let mut filled = 0;
     for (base, length) in segments {
@@ -1232,10 +1269,163 @@ fn sys_sendmsg(
         uaccess::copy_from_user(process.space(), base, slot).map_err(|_| Errno::EFAULT)?;
         filled += take;
     }
-    match &socket {
+    let sent = match socket {
         Any::Unix(unix) => unix.send_from(process, &data, flags, file.status().nonblock, passed),
         _ => socket.send(&data, flags, file.status().nonblock, destination.as_deref()),
+    }?;
+    Ok((sent, length))
+}
+
+/// The `index`th element of an `mmsghdr` array at `vector`. An address past
+/// the user half is refused by the copy that uses it.
+fn mmsg_entry(vector: u64, index: u32, width: Width) -> u64 {
+    vector.saturating_add(u64::from(index).saturating_mul(MmsgHdr::size(width) as u64))
+}
+
+/// Write one `mmsghdr`'s `msg_len`.
+fn put_mmsg_len(process: &Process, entry: u64, count: usize, width: Width) -> Result<(), Errno> {
+    let at = entry.saturating_add(MmsgHdr::len_offset(width) as u64);
+    uaccess::put_u32(
+        process.space(),
+        at,
+        u32::try_from(count).unwrap_or(u32::MAX),
+    )
+}
+
+/// What a batch call answers: how many messages went, if any did, and
+/// otherwise the error that stopped the first, or zero for an empty batch
+/// -- `__sys_sendmmsg`'s and `do_recvmmsg`'s last lines.
+///
+/// Linux's `recvmmsg` also keeps an error met after the first message for
+/// the socket's next call to report (`sk_err`), unless it is `EAGAIN`;
+/// Ferrix drops it, and the next call meets the condition again or not, as
+/// it stands then.
+fn batch_answer(done: u32, error: Option<Errno>) -> Result<usize, Errno> {
+    if done > 0 {
+        Ok(done as usize)
+    } else {
+        error.map_or(Ok(0), Err)
     }
+}
+
+/// `sendmmsg`: `sendmsg` for each of the first `vlen` elements of the
+/// `mmsghdr` array at `vector`, at most `UIO_MAXIOV` of them, with each
+/// one's `msg_len` written back, as `__sys_sendmmsg` sends them.
+///
+/// The socket is looked up once. The batch stops at the first message that
+/// fails, at a `msg_len` that cannot be written, and after a short send;
+/// it answers how many were sent, or, if none was, the first one's error.
+/// glibc's resolver sends its A and AAAA queries together by this call.
+fn sys_sendmmsg(
+    process: &Process,
+    descriptor: i32,
+    (vector, vlen): (u64, u32),
+    flags: u32,
+    width: Width,
+) -> Result<usize, Errno> {
+    if flags & MSG_CMSG_COMPAT != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let vlen = vlen.min(UIO_MAXIOV as u32);
+    let (file, socket) = socket_of(process, descriptor)?;
+    let mut sent = 0_u32;
+    let mut error = None;
+    while sent < vlen {
+        let entry = mmsg_entry(vector, sent, width);
+        let (count, length) = match send_message(process, (&file, &socket), entry, flags, width) {
+            Ok(answer) => answer,
+            Err(failed) => {
+                error = Some(failed);
+                break;
+            }
+        };
+        if let Err(failed) = put_mmsg_len(process, entry, count, width) {
+            error = Some(failed);
+            break;
+        }
+        sent += 1;
+        if count < length {
+            break;
+        }
+    }
+    batch_answer(sent, error)
+}
+
+/// `recvmmsg` and `recvmmsg_time64`: `recvmsg` into each of the first
+/// `vlen` elements of the `mmsghdr` array at `vector`, with each one's
+/// `msg_len` written back, as `do_recvmmsg` receives them.
+///
+/// `MSG_WAITFORONE` waits for the first message only: every receive after
+/// it is made with `MSG_DONTWAIT`, so the call returns with what had
+/// arrived. `MSG_DONTWAIT`, or a non-blocking descriptor, waits for none.
+/// The timeout at `timeout`, if there is one, is read at `time`'s width
+/// before the descriptor is looked up -- `EFAULT` if it cannot be, `EINVAL`
+/// if it is not a valid `timespec` -- and, as on Linux, is looked at only
+/// after each message arrives: once it has run out the batch stops, and
+/// what is left of it is written back. It does not end a wait for a
+/// message, which is Linux's documented behaviour (`recvmmsg(2)`, BUGS).
+///
+/// The batch stops at the first receive that fails or `msg_len` that
+/// cannot be written, and answers how many messages arrived, or, if none
+/// did, the error.
+fn sys_recvmmsg(
+    process: &Process,
+    descriptor: i32,
+    (vector, vlen): (u64, u32),
+    (flags, timeout): (u32, u64),
+    (width, time): (Width, TimeWidth),
+) -> Result<usize, Errno> {
+    if flags & MSG_CMSG_COMPAT != 0 {
+        return Err(Errno::EINVAL);
+    }
+    // `poll_select_set_timeout`: a zero timeout is a deadline already past.
+    let deadline = if timeout == 0 {
+        None
+    } else {
+        let (seconds, nanos) = time::read_pair(process, timeout, time)?;
+        let wait = time::nanos_of(seconds, nanos)?;
+        Some(if wait == 0 {
+            0
+        } else {
+            time::now_nanos().saturating_add(wait)
+        })
+    };
+    let (file, socket) = socket_of(process, descriptor)?;
+    let wait_for_one = flags & MSG_WAITFORONE != 0;
+    let mut flags = flags & !MSG_WAITFORONE;
+    let mut received = 0_u32;
+    let mut error = None;
+    let mut left = 0_u64;
+    while received < vlen {
+        let entry = mmsg_entry(vector, received, width);
+        let count = match receive_message(process, (&file, &socket), entry, flags, width) {
+            Ok(count) => count,
+            Err(failed) => {
+                error = Some(failed);
+                break;
+            }
+        };
+        if let Err(failed) = put_mmsg_len(process, entry, count, width) {
+            error = Some(failed);
+            break;
+        }
+        received += 1;
+        if wait_for_one {
+            flags |= MSG_DONTWAIT;
+        }
+        if let Some(deadline) = deadline {
+            left = deadline.saturating_sub(time::now_nanos());
+            if left == 0 {
+                break;
+            }
+        }
+    }
+    let answer = batch_answer(received, error)?;
+    if answer > 0 && deadline.is_some() {
+        let (seconds, nanos) = (left / NANOS_PER_SECOND, left % NANOS_PER_SECOND);
+        time::write_pair(process, timeout, seconds, nanos, time).map_err(|_| Errno::EFAULT)?;
+    }
+    Ok(answer)
 }
 
 /// A Unix socket's control messages for `recvmsg`, into the `capacity` bytes
@@ -1288,6 +1478,19 @@ fn sys_recvmsg(
         return Err(Errno::EINVAL);
     }
     let (file, socket) = socket_of(process, descriptor)?;
+    receive_message(process, (&file, &socket), header, flags, width)
+}
+
+/// One message received into a `msghdr` on a socket already looked up, as
+/// `___sys_recvmsg` receives it for `recvmsg` and for each of `recvmmsg`'s:
+/// what the call answers for it.
+fn receive_message(
+    process: &Process,
+    (file, socket): (&OpenFile, &Any),
+    header: u64,
+    flags: u32,
+    width: Width,
+) -> Result<usize, Errno> {
     let message = read_header(process, header, width)?;
     let _ = name_length_of(&message)?;
     if flags & MSG_OOB != 0 {
@@ -1305,7 +1508,7 @@ fn sys_recvmsg(
         usize::try_from(message.name_len).unwrap_or(0)
     };
     let mut data = zeroed(total)?;
-    let (received, from, passed, control) = match &socket {
+    let (received, from, passed, control) = match socket {
         Any::Unix(unix) => {
             let (received, passed) = unix.recv_passing(&mut data, flags, file.status().nonblock)?;
             (received, None, passed, Vec::new())
@@ -1338,7 +1541,7 @@ fn sys_recvmsg(
         )?;
     }
     let control_capacity = usize::try_from(message.control_len).unwrap_or(usize::MAX);
-    let (control_used, control_truncated) = match &socket {
+    let (control_used, control_truncated) = match socket {
         Any::Unix(unix) => unix_control(
             process,
             unix,
@@ -1368,7 +1571,7 @@ fn sys_recvmsg(
         field(MsgHdr::control_len_offset(width)),
         control_used as u64,
     )?;
-    Ok(received_count(&socket, received, flags))
+    Ok(received_count(socket, received, flags))
 }
 
 /// Lay `messages` out one after another in the program's control buffer at

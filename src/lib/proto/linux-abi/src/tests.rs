@@ -223,6 +223,8 @@ const SHARED: &[(usize, usize, Syscall)] = &[
     (x86_64::RECVFROM, aarch64::RECVFROM, Syscall::Recvfrom),
     (x86_64::SENDMSG, aarch64::SENDMSG, Syscall::Sendmsg),
     (x86_64::RECVMSG, aarch64::RECVMSG, Syscall::Recvmsg),
+    (x86_64::SENDMMSG, aarch64::SENDMMSG, Syscall::Sendmmsg),
+    (x86_64::RECVMMSG, aarch64::RECVMMSG, Syscall::Recvmmsg),
     (x86_64::SHUTDOWN, aarch64::SHUTDOWN, Syscall::Shutdown),
     (x86_64::SETSOCKOPT, aarch64::SETSOCKOPT, Syscall::Setsockopt),
     (x86_64::GETSOCKOPT, aarch64::GETSOCKOPT, Syscall::Getsockopt),
@@ -1783,13 +1785,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        255,
-        "the x86-64 table maps 255 calls"
+        257,
+        "the x86-64 table maps 257 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        223,
-        "the AArch64 table maps 223 calls"
+        225,
+        "the AArch64 table maps 225 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -1830,6 +1832,7 @@ const ARM_ONLY: &[Syscall] = &[
     Syscall::TimerfdSettime64,
     Syscall::TimerfdGettime64,
     Syscall::ClockGetresTime64,
+    Syscall::RecvmmsgTime64,
 ];
 
 /// Every ARMv7-A number this crate knows, paired with the call it means.
@@ -2065,10 +2068,12 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (358, Syscall::Dup3),                     // dup3
     (359, Syscall::Pipe2),                    // pipe2
     (360, Syscall::InotifyInit1),             // inotify_init1
+    (365, Syscall::Recvmmsg),                 // recvmmsg
     (366, Syscall::Accept4),                  // accept4
     (369, Syscall::Prlimit64),                // prlimit64
     (370, Syscall::NameToHandleAt),           // name_to_handle_at
     (372, Syscall::ClockAdjtime),             // clock_adjtime
+    (374, Syscall::Sendmmsg),                 // sendmmsg
     (375, Syscall::Setns),                    // setns
     (379, Syscall::FinitModule),              // finit_module
     (382, Syscall::Renameat2),                // renameat2
@@ -2089,6 +2094,7 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (412, Syscall::UtimensatTime64),          // utimensat_time64
     (413, Syscall::Pselect6Time64),           // pselect6_time64
     (414, Syscall::PpollTime64),              // ppoll_time64
+    (417, Syscall::RecvmmsgTime64),           // recvmmsg_time64
     (420, Syscall::SemtimedopTime64),         // semtimedop_time64
     (421, Syscall::RtSigtimedwaitTime64),     // rt_sigtimedwait_time64
     (422, Syscall::FutexTime64),              // futex_time64
@@ -2302,7 +2308,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 275, "the ARMv7-A table maps 275 calls");
+    assert_eq!(mapped_arm().len(), 278, "the ARMv7-A table maps 278 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
@@ -2666,7 +2672,7 @@ fn arm_fields_are_read_as_linux_reads_them() {
 
 use crate::socket::{
     self, AddressError, BadControlMessage, CmsgHdr, ControlMessage, ControlMessages, Linger,
-    MsgHdr, SOCKADDR_UN_SIZE, Ucred, UnixAddress, Width, cmsg_align, cmsg_len, cmsg_space,
+    MmsgHdr, MsgHdr, SOCKADDR_UN_SIZE, Ucred, UnixAddress, Width, cmsg_align, cmsg_len, cmsg_space,
 };
 
 #[test]
@@ -2871,6 +2877,62 @@ fn msghdr_is_seven_words_with_every_field_on_a_word_boundary() {
         assert_eq!(offsets, literal, "{width:?} offsets");
         assert_eq!(offsets, model, "{width:?} offsets against the model");
     }
+}
+
+#[test]
+fn mmsghdr_is_a_msghdr_then_its_length_padded_to_a_word() {
+    // `struct mmsghdr` and `struct compat_mmsghdr`, transcribed: the
+    // `msghdr` modelled above as seven words, then `unsigned int msg_len`.
+    #[repr(C)]
+    struct Wide {
+        header: [u64; 7],
+        len: u32,
+    }
+    #[repr(C)]
+    struct Narrow {
+        header: [u32; 7],
+        len: u32,
+    }
+    assert_eq!(MmsgHdr::len_offset(Width::Bits64), offset_of!(Wide, len));
+    assert_eq!(MmsgHdr::size(Width::Bits64), size_of::<Wide>());
+    assert_eq!(MmsgHdr::len_offset(Width::Bits32), offset_of!(Narrow, len));
+    assert_eq!(MmsgHdr::size(Width::Bits32), size_of::<Narrow>());
+    assert_eq!(
+        (
+            MmsgHdr::len_offset(Width::Bits64),
+            MmsgHdr::size(Width::Bits64)
+        ),
+        (56, 64)
+    );
+    assert_eq!(
+        (
+            MmsgHdr::len_offset(Width::Bits32),
+            MmsgHdr::size(Width::Bits32)
+        ),
+        (28, 32)
+    );
+    assert_eq!(socket::MSG_WAITFORONE, 0x10000, "MSG_WAITFORONE");
+}
+
+#[test]
+fn the_mmsg_calls_have_the_headers_numbers() {
+    // `asm-x86/unistd_64.h`, `asm-generic/unistd.h` (AArch64),
+    // `asm-arm/unistd-common.h` and `asm-x86/unistd_32.h`.
+    assert_eq!((x86_64::RECVMMSG, x86_64::SENDMMSG), (299, 307));
+    assert_eq!((aarch64::RECVMMSG, aarch64::SENDMMSG), (243, 269));
+    assert_eq!(
+        (arm::RECVMMSG, arm::SENDMMSG, arm::RECVMMSG_TIME64),
+        (365, 374, 417)
+    );
+    assert_eq!(
+        (i386::RECVMMSG, i386::SENDMMSG, i386::RECVMMSG_TIME64),
+        (337, 345, 417)
+    );
+    assert_eq!(from_x86_64(299), Some(Syscall::Recvmmsg));
+    assert_eq!(from_x86_64(307), Some(Syscall::Sendmmsg));
+    assert_eq!(from_aarch64(243), Some(Syscall::Recvmmsg));
+    assert_eq!(from_aarch64(269), Some(Syscall::Sendmmsg));
+    assert_eq!(from_i386(417), Some(Syscall::RecvmmsgTime64));
 }
 
 #[test]
@@ -3304,7 +3366,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 245] = [
+const I386_NUMBERS: [(usize, usize, usize); 248] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3552,6 +3614,9 @@ const I386_NUMBERS: [(usize, usize, usize); 245] = [
     (i386::RECVFROM, 371, arm::RECVFROM),
     (i386::RECVMSG, 372, arm::RECVMSG),
     (i386::SHUTDOWN, 373, arm::SHUTDOWN),
+    (i386::RECVMMSG, 337, arm::RECVMMSG),
+    (i386::SENDMMSG, 345, arm::SENDMMSG),
+    (i386::RECVMMSG_TIME64, 417, arm::RECVMMSG_TIME64),
     (i386::UGETRLIMIT, 191, arm::UGETRLIMIT),
     (i386::SETRLIMIT, 75, arm::SETRLIMIT),
     (i386::SET_ROBUST_LIST, 311, arm::SET_ROBUST_LIST),

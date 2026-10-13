@@ -495,12 +495,16 @@ pub mod x86_64 {
     pub const PIPE2: usize = 293;
     /// Make an inotify instance, with flags.
     pub const INOTIFY_INIT1: usize = 294;
+    /// Receive several messages in one call, each into an `mmsghdr`.
+    pub const RECVMMSG: usize = 299;
     /// Read and set a resource limit of any process in one call.
     pub const PRLIMIT64: usize = 302;
     /// Encode a file handle for a path; opening one back is `open_by_handle_at`.
     pub const NAME_TO_HANDLE_AT: usize = 303;
     /// Read or tune a chosen clock's discipline.
     pub const CLOCK_ADJTIME: usize = 305;
+    /// Send several messages in one call, each described by an `mmsghdr`.
+    pub const SENDMMSG: usize = 307;
     /// Move the calling thread into an existing namespace.
     pub const SETNS: usize = 308;
     /// Report the processor and NUMA node the caller is running on.
@@ -963,6 +967,8 @@ pub mod aarch64 {
     pub const MADVISE: usize = 233;
     /// Accept a connection, with flags for the new descriptor.
     pub const ACCEPT4: usize = 242;
+    /// Receive several messages in one call, each into an `mmsghdr`.
+    pub const RECVMMSG: usize = 243;
     /// Wait for a child to change state, reporting resource usage.
     pub const WAIT4: usize = 260;
     /// Read and set a resource limit of any process in one call.
@@ -973,6 +979,8 @@ pub mod aarch64 {
     pub const CLOCK_ADJTIME: usize = 266;
     /// Move the calling thread into an existing namespace.
     pub const SETNS: usize = 268;
+    /// Send several messages in one call, each described by an `mmsghdr`.
+    pub const SENDMMSG: usize = 269;
     /// Load a kernel module from a file descriptor.
     pub const FINIT_MODULE: usize = 273;
     /// Restrict the system calls a thread may make: `seccomp(2)`.
@@ -1534,6 +1542,9 @@ pub mod arm {
     pub const PIPE2: usize = 359;
     /// Make an inotify instance, with flags.
     pub const INOTIFY_INIT1: usize = 360;
+    /// Receive several messages in one call, each into an `mmsghdr`, with a
+    /// 32-bit `timespec` timeout.
+    pub const RECVMMSG: usize = 365;
     /// Accept a connection, with flags for the new descriptor.
     pub const ACCEPT4: usize = 366;
     /// Read and set a resource limit of any process in one call.
@@ -1542,6 +1553,8 @@ pub mod arm {
     pub const NAME_TO_HANDLE_AT: usize = 370;
     /// Read or tune a chosen clock's discipline.
     pub const CLOCK_ADJTIME: usize = 372;
+    /// Send several messages in one call, each described by an `mmsghdr`.
+    pub const SENDMMSG: usize = 374;
     /// Move the calling thread into an existing namespace.
     pub const SETNS: usize = 375;
     /// Load a kernel module from a file descriptor.
@@ -1591,6 +1604,8 @@ pub mod arm {
     /// Poll with a signal mask and a 64-bit `timespec`. The timeout is a pair
     /// of 64-bit fields rather than the 32-bit pair [`PPOLL`] takes.
     pub const PPOLL_TIME64: usize = 414;
+    /// [`RECVMMSG`] with a 64-bit `timespec` timeout: what a time64 libc calls.
+    pub const RECVMMSG_TIME64: usize = 417;
     /// Operate on System V semaphores, with a 64-bit `timespec` timeout.
     pub const SEMTIMEDOP_TIME64: usize = 420;
     /// Wait for one of a set of signals, with a 64-bit `timespec` timeout.
@@ -2015,12 +2030,17 @@ pub mod i386 {
     pub const PIPE2: usize = 331;
     /// Make an inotify instance, with flags.
     pub const INOTIFY_INIT1: usize = 332;
+    /// Receive several messages in one call, each into an `mmsghdr`, with a
+    /// 32-bit `timespec` timeout.
+    pub const RECVMMSG: usize = 337;
     /// Read and set a resource limit of any process in one call.
     pub const PRLIMIT64: usize = 340;
     /// Encode a file handle for a path; opening one back is `open_by_handle_at`.
     pub const NAME_TO_HANDLE_AT: usize = 341;
     /// Flush the file system holding an open file.
     pub const SYNCFS: usize = 344;
+    /// Send several messages in one call, each described by an `mmsghdr`.
+    pub const SENDMMSG: usize = 345;
     /// Move the calling thread into an existing namespace.
     pub const SETNS: usize = 346;
     /// Rename with flags, such as `RENAME_NOREPLACE`.
@@ -2073,6 +2093,8 @@ pub mod i386 {
     /// Query or control a System V semaphore set, directly. The `cmd` carries
     /// `IPC_64` as it does through [`IPC`].
     pub const SEMCTL: usize = 394;
+    /// [`RECVMMSG`] with a 64-bit `timespec` timeout: what a time64 libc calls.
+    pub const RECVMMSG_TIME64: usize = 417;
     /// Operate on System V semaphores with a 64-bit `timespec` timeout. i386
     /// has no direct `semop` or 32-bit `semtimedop`; those go through [`IPC`].
     pub const SEMTIMEDOP_TIME64: usize = 420;
@@ -2477,6 +2499,14 @@ pub enum Syscall {
     Sendmsg,
     /// Receive a message with ancillary data from a socket.
     Recvmsg,
+    /// Send several messages in one call: `sendmsg` for each `mmsghdr`.
+    Sendmmsg,
+    /// Receive several messages in one call: `recvmsg` for each `mmsghdr`,
+    /// with a native `timespec` timeout.
+    Recvmmsg,
+    /// [`Syscall::Recvmmsg`] with a 64-bit `timespec` timeout. ARMv7-A and
+    /// i386 only.
+    RecvmmsgTime64,
     /// Shut down part or all of a full-duplex connection.
     Shutdown,
     /// Set a socket option.
@@ -3167,6 +3197,8 @@ fn x86_64_sockets_and_shm(nr: usize) -> Option<Syscall> {
         x86_64::RECVFROM => Syscall::Recvfrom,
         x86_64::SENDMSG => Syscall::Sendmsg,
         x86_64::RECVMSG => Syscall::Recvmsg,
+        x86_64::SENDMMSG => Syscall::Sendmmsg,
+        x86_64::RECVMMSG => Syscall::Recvmmsg,
         x86_64::SHUTDOWN => Syscall::Shutdown,
         x86_64::BIND => Syscall::Bind,
         x86_64::LISTEN => Syscall::Listen,
@@ -3497,6 +3529,8 @@ fn aarch64_sockets_and_shm(nr: usize) -> Option<Syscall> {
         aarch64::SHUTDOWN => Syscall::Shutdown,
         aarch64::SENDMSG => Syscall::Sendmsg,
         aarch64::RECVMSG => Syscall::Recvmsg,
+        aarch64::SENDMMSG => Syscall::Sendmmsg,
+        aarch64::RECVMMSG => Syscall::Recvmmsg,
         aarch64::ACCEPT4 => Syscall::Accept4,
         aarch64::MSGGET => Syscall::Msgget,
         aarch64::MSGSND => Syscall::Msgsnd,
@@ -3851,6 +3885,9 @@ fn arm_sockets_and_shm(nr: usize) -> Option<Syscall> {
         arm::GETSOCKOPT => Syscall::Getsockopt,
         arm::SENDMSG => Syscall::Sendmsg,
         arm::RECVMSG => Syscall::Recvmsg,
+        arm::SENDMMSG => Syscall::Sendmmsg,
+        arm::RECVMMSG => Syscall::Recvmmsg,
+        arm::RECVMMSG_TIME64 => Syscall::RecvmmsgTime64,
         arm::SHMAT => Syscall::Shmat,
         arm::SHMDT => Syscall::Shmdt,
         arm::SHMGET => Syscall::Shmget,
@@ -4255,6 +4292,9 @@ fn i386_recent(nr: usize) -> Option<Syscall> {
         i386::SENDMSG => Syscall::Sendmsg,
         i386::RECVFROM => Syscall::Recvfrom,
         i386::RECVMSG => Syscall::Recvmsg,
+        i386::SENDMMSG => Syscall::Sendmmsg,
+        i386::RECVMMSG => Syscall::Recvmmsg,
+        i386::RECVMMSG_TIME64 => Syscall::RecvmmsgTime64,
         i386::SHUTDOWN => Syscall::Shutdown,
         i386::SET_ROBUST_LIST => Syscall::SetRobustList,
         i386::GET_ROBUST_LIST => Syscall::GetRobustList,

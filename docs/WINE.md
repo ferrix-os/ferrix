@@ -467,8 +467,8 @@ gateway (a lease from `udhcpc` first), the payload on a btrfs volume, the
 prefix on tmpfs, 8 GiB. The launcher draws its first screen there too,
 with the news and pictures fetched over TLS by its web view; its window is
 titled `GRYPHLINK` and floats at 1312 by 754, wider than the 1024 by 768
-screen. Two things are wrong on the way, neither in the kernel as far as
-is known:
+screen. Two things are wrong on the way: the first is yserver's, and the
+second was the kernel's and is fixed:
 
 * **`XF86VidModeSetGamma` ends the launcher.** yserver serves XVidMode's
   reads and refuses every write with `ClientNotLocal`, and still gives a
@@ -482,17 +482,33 @@ is known:
   either answer the write as Xwayland is understood to (success, not
   applied; to be checked in `xwayland-vidmode.c`) or stop offering a local
   client the write permission and a ramp Wine takes the unguarded way for.
-* **The launcher's own queries never connect.** Its Qt side resolves
+* **The launcher's own queries never connected.** Its Qt side resolved
   `launcher.gryphline.com` and `game-config.gryphline.com` again and again
-  in one thread and never opens a socket; `games.log` says `qehr OnError
-  error:3` (Qt's `HostNotFoundError`) and `nCode=-2`, so it never learns
+  in one thread and never opened a socket; `games.log` said `qehr OnError
+  error:3` (Qt's `HostNotFoundError`) and `nCode=-2`, so it never learnt
   the game's version. The web view's lookups (Chromium's own resolver) and
-  libcurl's (with a service of `"443"`) succeed in the same boot, and
-  busybox's `nslookup` answers through `10.0.2.3`. On linux-host the same
-  Qt lookups succeed. Not found yet; the first place to look is the
-  `getaddrinfo` flags Qt passes (`AI_ADDRCONFIG`, which glibc answers by
-  asking netlink for the configured addresses), against what Ferrix's
-  `NETLINK_ROUTE` answers. `WINEDEBUG=+winsock` shows the lookups.
+  libcurl's succeeded in the same boot. The cause was two missing system
+  calls. Qt on Windows resolves through Wine's `ws2_32`, which calls glibc's
+  `getaddrinfo` with `AF_UNSPEC` and no `AI_ADDRCONFIG`; glibc's resolver
+  then sends the A and AAAA queries together with `sendmmsg` (`send_dg` in
+  `resolv/res_send.c`), which x86-64 glibc assumes the kernel has, and
+  takes `ENOSYS` from it as a failed query. Ferrix had neither `sendmmsg`
+  nor `recvmmsg`, so every such lookup ended in `EAI_AGAIN`, while one with
+  `AI_ADDRCONFIG` (only IPv4 configured, so one A query, sent by `sendto`)
+  succeeded. A static glibc program run as init with the network showed it
+  on 2026-10-13 (`~/.local/share/ferrix/endfield/probe/addrconfig.c`): both
+  names failed with flags 0 and resolved with `AI_ADDRCONFIG`. Both calls
+  are now in the kernel (`src/kernel/src/syscall/sockets.rs`, on
+  `sendmsg` and `recvmsg` as Linux's `net/socket.c` builds them, with a
+  boot check beside the other socket checks), and the same probe resolves
+  both names with flags 0 (`~/.local/share/ferrix/logs/endfield-mmsg/probe-addrconfig.log`).
+  i386's `socketcall` still answers its sub-calls 19 and 20 with `ENOSYS`:
+  the boot check that requires it is in the core ring. With the fix, the
+  launcher reached its server on Ferrix on 2026-10-13: `games.log` says
+  `OnQuery_ProtocolVer_LauncherVer_GameVer_Result ... bRet=true,
+  nCode=200`, and Gryphline's GPU configuration query answered 200 too
+  (`test-endfield-launcher` on the branch `endfield-s4` over this kernel,
+  `~/.local/share/ferrix/logs/queue/endfield-mmsg-launcher-try.log`).
 
 **The gate on the branch.** `tools/common/fetch/fetch-endfield-launcher.sh`
 pins the installer and 7-Zip 25.01's Linux build by SHA-256, checks the
@@ -502,8 +518,8 @@ sessions bind for bubblewrap, and held an older yserver than its stamp on
 2026-10-12) with `/GRYPHLINK` added. `cargo xtask test-endfield-launcher`
 requires hyprix to list the window by its title, the yellow button on the
 screen, and `games.log` saying the server answered with 200. The first two
-held on Ferrix on 2026-10-13; the third is the second defect above. It has
-no negative control yet.
+held on Ferrix on 2026-10-13, and the third once the second defect above
+was fixed the same day. It has no negative control yet.
 
 ## 9. A real Unity game, with no card (`test-unity`)
 

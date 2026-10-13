@@ -9299,7 +9299,7 @@ fn check_unix_sockets(process: &Process, page: u64) -> Result<(), &'static str> 
         .and_then(|()| check_records_keep_their_boundaries(process, page))
         .and_then(|()| check_shutdown_ends_one_direction(process, page))
         .and_then(|()| check_a_socket_reports_itself(process, page))
-        .and_then(|()| check_a_message_scatters_and_gathers(process, page))
+        .and_then(|()| check_messages_singly_and_in_batches(process, page))
         .and_then(|()| check_a_stream_read_runs_into_descriptors(process, page))
         .and_then(|()| check_a_name_carries_a_connection(process, page))
         .and_then(|()| check_an_accepted_socket_blocks_unless_asked(process, page))
@@ -11593,4 +11593,295 @@ pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
         );
     }
     Ok((online, counted))
+}
+
+// ---------------------------------------------------------------------------
+// Batches of messages
+//
+// `sendmmsg` and `recvmmsg`, on the Unix-domain sockets' page and helpers.
+// At the end of the file, so that adding them moved no line of a check the
+// coverage evidence names (docs/certification/coverage-*.json).
+// ---------------------------------------------------------------------------
+
+/// [`check_a_message_scatters_and_gathers`], then
+/// [`check_a_batch_of_messages_travels`], which says what it found on a line
+/// of its own.
+fn check_messages_singly_and_in_batches(process: &Process, page: u64) -> Result<(), &'static str> {
+    check_a_message_scatters_and_gathers(process, page)?;
+    check_a_batch_of_messages_travels(process, page)?;
+    println!(
+        "  unix     sendmmsg sent two datagrams as two and recvmmsg took both in one call, each \
+         msg_len written; an empty batch was 0, an unreadable one EFAULT, one failing at its \
+         second message 1; a zero timeout stopped after one message, an invalid one was \
+         EINVAL, and MSG_WAITFORONE did not wait for a second"
+    );
+    Ok(())
+}
+
+/// Where a batch check builds its `mmsghdr` array, as an offset in its page:
+/// two elements, then their iovecs at [`MMSG_IOV`].
+const MMSG: u64 = 0x700;
+
+/// Where the batch check's iovecs go, one per element.
+const MMSG_IOV: u64 = 0x780;
+
+/// What a check that breaks `sendmmsg`'s batch fails with, which the
+/// negative control requires by name.
+const BATCH_NOT_SENT: &str = "sendmmsg did not send both datagrams of its batch";
+
+/// `sendmmsg` and `recvmmsg` move a batch of datagrams in one call each, on
+/// a datagram pair: what glibc's resolver does with its A and AAAA queries,
+/// which failed for every name while Ferrix had neither call.
+///
+/// Two datagrams sent by one `sendmmsg` must arrive as two, each `msg_len`
+/// written; one `recvmmsg` must take both, with each `msg_len` and the bytes
+/// in each element's buffer. Then Linux's edges: an empty batch is 0 for
+/// both calls; a batch whose first element cannot be read is `EFAULT`, and
+/// leaves a queued datagram where it was; one whose second element names a
+/// buffer that cannot be read answers 1, the count before the error; a zero
+/// timeout stops a receive after the first message and writes back zero; a
+/// timeout that is not a `timespec` is `EINVAL`; and `MSG_WAITFORONE`, on a
+/// blocking socket with one datagram queued, returns that one at once,
+/// rather than waiting out the socket's receive timeout for a second.
+fn check_a_batch_of_messages_travels(process: &Process, page: u64) -> Result<(), &'static str> {
+    let pair = socket_pair(process, page, SOCK_DGRAM)?;
+    let outcome = batch_answers(process, page, pair);
+    close_socket_pair(process, pair);
+    outcome
+}
+
+/// Stage the two-element `mmsghdr` array: element `i` names one buffer, at
+/// `buffers[i]` with its length, and its `msg_len` holds a mark a call that
+/// writes it back must replace.
+fn stage_batch(process: &Process, page: u64, buffers: [(u64, u64); 2]) -> Result<(), &'static str> {
+    let word = size_of::<usize>() as u64;
+    let stride = ferrix_linux_abi::socket::MmsgHdr::size(width()) as u64;
+    for (index, (base, len)) in buffers.into_iter().enumerate() {
+        let index = index as u64;
+        let iov = page + MMSG_IOV + index * word * 2;
+        write_word(process, iov, base)?;
+        write_word(process, iov + word, len)?;
+        let entry = page + MMSG + index * stride;
+        stage_header(process, entry, iov, 1)?;
+        let len_at = entry + ferrix_linux_abi::socket::MmsgHdr::len_offset(width()) as u64;
+        uaccess::put_u32(process.space(), len_at, 0xDEAD_BEEF)
+            .map_err(|_| "could not stage an mmsghdr's msg_len")?;
+    }
+    Ok(())
+}
+
+/// The `msg_len` of the batch's element `index`.
+fn batch_len(process: &Process, page: u64, index: u64) -> Result<u32, &'static str> {
+    let at = page
+        + MMSG
+        + index * ferrix_linux_abi::socket::MmsgHdr::size(width()) as u64
+        + ferrix_linux_abi::socket::MmsgHdr::len_offset(width()) as u64;
+    uaccess::get_u32(process.space(), at).map_err(|_| "could not read back an mmsghdr's msg_len")
+}
+
+/// `sendmmsg(fd, page + MMSG, vlen, MSG_NOSIGNAL)`.
+fn send_batch(process: &Process, page: u64, fd: i32, vlen: u64) -> Result<usize, Errno> {
+    let flags = u64::from(MSG_NOSIGNAL);
+    socket_call(
+        process,
+        Call::Sendmmsg,
+        &[as_arg(fd), page + MMSG, vlen, flags, 0, 0],
+    )
+}
+
+/// `recvmmsg(fd, page + MMSG, vlen, flags, timeout)`.
+fn receive_batch(
+    process: &Process,
+    page: u64,
+    fd: i32,
+    (vlen, flags): (u64, u32),
+    timeout: u64,
+) -> Result<usize, Errno> {
+    let flags = u64::from(flags);
+    socket_call(
+        process,
+        Call::Recvmmsg,
+        &[as_arg(fd), page + MMSG, vlen, flags, timeout, 0],
+    )
+}
+
+/// [`check_a_batch_of_messages_travels`]'s questions.
+fn batch_answers(
+    process: &Process,
+    page: u64,
+    (one, other): (i32, i32),
+) -> Result<(), &'static str> {
+    uaccess::copy_to_user(process.space(), page + SENT, b"one-----three")
+        .map_err(|_| "could not stage a batch")?;
+    let sent = [(page + SENT, 3), (page + SENT + 8, 5)];
+    let into = [(page + RECEIVED, 16), (page + RECEIVED + 0x80, 16)];
+    stage_batch(process, page, sent)?;
+    if send_batch(process, page, one, 2) != Ok(2) {
+        return Err(BATCH_NOT_SENT);
+    }
+    if (batch_len(process, page, 0)?, batch_len(process, page, 1)?) != (3, 5) {
+        return Err("sendmmsg did not write back each message's msg_len");
+    }
+    if socket_queued(process, page, other, SIOCINQ)? != 3 {
+        return Err("the first datagram of a batch did not arrive as one of its own");
+    }
+    stage_batch(process, page, into)?;
+    if receive_batch(process, page, other, (2, 0), 0) != Ok(2) {
+        return Err("recvmmsg did not take both datagrams of a batch in one call");
+    }
+    if (batch_len(process, page, 0)?, batch_len(process, page, 1)?) != (3, 5) {
+        return Err("recvmmsg did not write back each message's msg_len");
+    }
+    let first = socket_received(process, page, 3)?;
+    let mut second = alloc::vec![0_u8; 5];
+    uaccess::copy_from_user(process.space(), page + RECEIVED + 0x80, &mut second)
+        .map_err(|_| "could not read back a batch's second datagram")?;
+    if first != b"one" || second != b"three" {
+        return Err("recvmmsg did not put each datagram in its own element's buffer");
+    }
+    batch_edges(process, page, (one, other))?;
+    batch_timeouts(process, page, (one, other))
+}
+
+/// An empty batch, a batch that cannot be read, and one that fails at its
+/// second element.
+fn batch_edges(process: &Process, page: u64, (one, other): (i32, i32)) -> Result<(), &'static str> {
+    answers(
+        send_batch(process, page, one, 0),
+        0,
+        "sendmmsg of no messages was not 0",
+    )?;
+    answers(
+        receive_batch(process, page, other, (0, 0), 0),
+        0,
+        "recvmmsg of no messages was not 0",
+    )?;
+    answers(
+        socket_send(process, page, one, b"q", 0),
+        1,
+        "a datagram was not sent",
+    )?;
+    refuses(
+        socket_call(
+            process,
+            Call::Sendmmsg,
+            &[as_arg(one), 0, 2, u64::from(MSG_NOSIGNAL), 0, 0],
+        ),
+        Errno::EFAULT,
+        "sendmmsg of an array it cannot read was not EFAULT",
+    )?;
+    refuses(
+        socket_call(process, Call::Recvmmsg, &[as_arg(other), 0, 2, 0, 0, 0]),
+        Errno::EFAULT,
+        "recvmmsg into an array it cannot read was not EFAULT",
+    )?;
+    if socket_queued(process, page, other, SIOCINQ)? != 1 {
+        return Err("recvmmsg into an array it cannot read took the datagram queued");
+    }
+    answers(
+        socket_recv(process, page, other, 16, 0),
+        1,
+        "a queued datagram was lost",
+    )?;
+    // The second element's buffer is at address zero, which nothing maps.
+    stage_batch(process, page, [(page + SENT, 3), (0, 1)])?;
+    answers(
+        send_batch(process, page, one, 2),
+        1,
+        "sendmmsg failing at its second message did not answer the one it sent",
+    )?;
+    if batch_len(process, page, 0)? != 3 {
+        return Err("sendmmsg failing at its second message did not write the first's msg_len");
+    }
+    answers(
+        socket_recv(process, page, other, 16, 0),
+        3,
+        "the batch's one datagram was lost",
+    )?;
+    refuses(
+        socket_recv(process, page, other, 16, 0),
+        Errno::EAGAIN,
+        "sendmmsg sent part of a message it could not read",
+    )
+}
+
+/// A zero timeout, an invalid one, and `MSG_WAITFORONE` on a blocking socket.
+fn batch_timeouts(
+    process: &Process,
+    page: u64,
+    (one, other): (i32, i32),
+) -> Result<(), &'static str> {
+    let word = size_of::<usize>();
+    let timeout = page + MMSG_IOV + 0x40;
+    let stage_timeout = |seconds: u64, nanos: u64| {
+        write_word(process, timeout, seconds)?;
+        write_word(process, timeout + word as u64, nanos)
+    };
+    stage_batch(process, page, [(page + SENT, 3), (page + SENT + 8, 5)])?;
+    if send_batch(process, page, one, 2) != Ok(2) {
+        return Err(BATCH_NOT_SENT);
+    }
+    stage_batch(
+        process,
+        page,
+        [(page + RECEIVED, 16), (page + RECEIVED + 0x80, 16)],
+    )?;
+    stage_timeout(0, 1_000_000_000)?;
+    refuses(
+        receive_batch(process, page, other, (2, 0), timeout),
+        Errno::EINVAL,
+        "recvmmsg took a timeout of a whole second in nanoseconds",
+    )?;
+    stage_timeout(0, 0)?;
+    answers(
+        receive_batch(process, page, other, (2, 0), timeout),
+        1,
+        "recvmmsg with a zero timeout did not stop after its first message",
+    )?;
+    let mut left = alloc::vec![0xFF_u8; word * 2];
+    uaccess::copy_from_user(process.space(), timeout, &mut left)
+        .map_err(|_| "could not read back recvmmsg's timeout")?;
+    if left.iter().any(|&byte| byte != 0) {
+        return Err("recvmmsg with a zero timeout did not write back zero");
+    }
+    answers(
+        socket_recv(process, page, other, 16, 0),
+        5,
+        "a batch's second datagram was lost",
+    )?;
+
+    // A blocking receiver with a 200 ms receive timeout and one datagram.
+    if fd::sys_fcntl(process, other, F_SETFL, 0) != Ok(0) {
+        return Err("F_SETFL would not make a socket blocking");
+    }
+    let mut patience = alloc::vec![0_u8; word * 2];
+    stage_word(&mut patience, word, 200_000)?;
+    answers(
+        set_socket_option(process, page, other, SO_RCVTIMEO_OLD, &patience),
+        0,
+        "SO_RCVTIMEO was refused",
+    )?;
+    answers(
+        socket_send(process, page, one, b"w", 0),
+        1,
+        "a datagram was not sent",
+    )?;
+    let began = crate::timer::now_nanos();
+    let taken = receive_batch(
+        process,
+        page,
+        other,
+        (2, ferrix_linux_abi::socket::MSG_WAITFORONE),
+        0,
+    );
+    let took = crate::timer::now_nanos().saturating_sub(began);
+    answers(
+        taken,
+        1,
+        "recvmmsg with MSG_WAITFORONE did not take the one datagram there was",
+    )?;
+    if took >= 100_000_000 {
+        return Err("recvmmsg with MSG_WAITFORONE waited for a second datagram");
+    }
+    Ok(())
 }
