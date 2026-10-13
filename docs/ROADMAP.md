@@ -134,6 +134,10 @@ Now [`docs/roadmap/stage-23-arknights-endfield.md`](roadmap/stage-23-arknights-e
 
 Now [`docs/roadmap/stage-24-game-path.md`](roadmap/stage-24-game-path.md).
 
+## Microkernel M0 — the build flags, the baselines, the checks  ·  *≈ 45–60 points*
+
+Now [`docs/roadmap/microkernel-m0.md`](roadmap/microkernel-m0.md).
+
 ## Written ahead of their stage
 
 Now [`docs/roadmap/written-ahead.md`](roadmap/written-ahead.md).
