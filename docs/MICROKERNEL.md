@@ -785,7 +785,7 @@ this table before any stream is sized on it.
     VEK385, an NXP S32N7 or a production SoC an integrator brings), bought
     only when an assessment or a customer project funds it, once its
     open facts are settled (RC4, ledger 957). Until then the timing claim's
-    method is developed and measured on split-mode A78AE, which the
+    method is developed and measured on the Pixel 7's A78 cores, which the
     claim does not cite as evidence.
   x86-64 stays certified for isolation, with **no timing claim**; AoU-4 says
   so. A bound is a **measured high-water mark plus a stated margin**, on the

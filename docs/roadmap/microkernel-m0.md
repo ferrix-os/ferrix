@@ -139,10 +139,9 @@ planted file is its control.
   M1, for AArch64 bring-up with a real SMMUv3 and UEFI (`MICROKERNEL.md`
   §6.5). The Lock-mode evidence platform (the VEK385 or another) is deferred
   until funded; its open facts stay as RC4 left them (ledger 957). On the
-  boards only ad-hoc or `desktop` builds run, the boot line names an IOMMU
-  Ferrix does not drive and says `profile=none level=none` (or `desktop`),
+  boards only ad-hoc or `desktop` builds run, the boot line says, where Ferrix does not drive the board's IOMMU (the Pixel 7's; the O6's SMMUv3 is driven), that it is not driven, and says `profile=none level=none` (or `desktop`),
   and their logs are filed as measurements, never as gate rows or FIRED
-  controls (OB4, ledger 958).
+  controls (OB4, ledger 958). Figures from the Pixel 7 are taken with Ferrix on the phone itself, not as a crosvm guest, and each log names its mode (ledger 959).
 
 ## What the customer does in M0
 
