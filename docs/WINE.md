@@ -467,21 +467,23 @@ gateway (a lease from `udhcpc` first), the payload on a btrfs volume, the
 prefix on tmpfs, 8 GiB. The launcher draws its first screen there too,
 with the news and pictures fetched over TLS by its web view; its window is
 titled `GRYPHLINK` and floats at 1312 by 754, wider than the 1024 by 768
-screen. Two things are wrong on the way: the first is yserver's, and the
-second was the kernel's and is fixed:
+screen. Two things were wrong on the way, one yserver's and one the
+kernel's; both are fixed:
 
-* **`XF86VidModeSetGamma` ends the launcher.** yserver serves XVidMode's
-  reads and refuses every write with `ClientNotLocal`, and still gives a
-  local client (all of its clients are on a Unix socket) the write
-  permission in `GetPermissions`. Wine's X driver sets the gamma through
-  `XF86VidModeSetGamma` with no error handler when the gamma ramp is
-  smaller than 256 entries (`X11DRV_XF86VM_SetGammaRamp`,
+* **`XF86VidModeSetGamma` ended the launcher (fixed 2026-10-13).** yserver
+  served XVidMode's reads and refused every write with `ClientNotLocal`,
+  while it gave a local client (all of its clients are on a Unix socket)
+  the write permission in `GetPermissions`. Wine's X driver sets the gamma
+  through `XF86VidModeSetGamma` with no error handler when the gamma ramp
+  is not 256 entries (`X11DRV_XF86VM_SetGammaRamp`,
   `dlls/winex11.drv/xvidmode.c`), so the X error went to Xlib's default
-  handler and `Games.exe` ended. With `UseXVidMode=N` in the prefix's
-  `X11 Driver` key it starts; that is a workaround. The fix is yserver's:
-  either answer the write as Xwayland is understood to (success, not
-  applied; to be checked in `xwayland-vidmode.c`) or stop offering a local
-  client the write permission and a ramp Wine takes the unguarded way for.
+  handler and `Games.exe` ended; `UseXVidMode=N` in the prefix was the
+  workaround. The fork now answers a local client as Xwayland's vidmode
+  hooks do (`hw/xwayland/xwayland-vidmode.c`): `SetGamma` and
+  `LockModeSwitch` succeed and apply nothing, so `GetGamma` still reads
+  1.0, and `SetGammaRamp` is `BadValue`; mode setting stays RandR's
+  (fork commit 1a8752e8, which `fetch-yserver.sh` pins). The launcher
+  starts with no Wine setting added.
 * **The launcher's own queries never connected.** Its Qt side resolved
   `launcher.gryphline.com` and `game-config.gryphline.com` again and again
   in one thread and never opened a socket; `games.log` said `qehr OnError

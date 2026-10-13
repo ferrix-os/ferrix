@@ -385,11 +385,12 @@ logged into and nothing of the game was downloaded.
   runtime. The installer needs E1.6 (landed since); the launcher does not,
   and the branch lays the payload out as the installer does, unpacked on
   the host with 7-Zip.
-* *Found, not fixed:* yserver refuses `XF86VidModeSetGamma` with
-  `ClientNotLocal` while it gives local clients the write permission, and
-  Wine's X driver makes that call with no error handler, so the X error
-  ended `Games.exe`; the branch turns Wine's XVidMode off in the prefix
-  (`UseXVidMode=N`), a workaround.
+* *Found and fixed (yserver 1a8752e8, 2026-10-13):* yserver refused
+  `XF86VidModeSetGamma` with `ClientNotLocal` while it gave local clients
+  the write permission, and Wine's X driver makes that call with no error
+  handler, so the X error ended `Games.exe`. It now answers as Xwayland
+  does (success, nothing applied), and the launcher starts with no Wine
+  setting added (`docs/WINE.md` §8).
 * *Found and fixed (branch `endfield-mmsg`):* the launcher's own queries
   to Gryphline (`launcher.gryphline.com`, `game-config.gryphline.com`)
   never connected, because their name lookups failed on Ferrix. Wine's
@@ -402,7 +403,7 @@ logged into and nothing of the game was downloaded.
   reached its server on Ferrix: Gryphline answered its version query with
   200 (`test-endfield-launcher`, still on the branch `endfield-s4`).
 * *Still to do, when Ferrix runs on the machine:* E4.1, the installer
-  itself (E4.2), yserver's XVidMode refusal, the launcher's gate landed
+  itself (E4.2), the launcher's gate landed
   from `endfield-s4`, then E4.4 to E4.6.
 
 ### Step 5: past the anti-cheat  ·  29 points as a guess; unknown

@@ -377,7 +377,9 @@ Still open:
 ## 9. Where it stands
 
 2026-10-12: **what Wine's X driver needed** (stage 23, E1.5;
-`docs/WINE.md` §5). `fetch-yserver.sh` pins the fork at 662c61f3. The
+`docs/WINE.md` §5). `fetch-yserver.sh` pins the fork at 1a8752e8, which
+since 2026-10-13 also answers a local client's XVidMode gamma writes as
+Xwayland does (`docs/WINE.md` §8). The
 Wayland backend lists no RandR provider, as Xwayland does: its Vulkan
 renderer, listed with no CRTC and no output, made Wine find no monitor and
 wineserver divide by a DPI of zero; Wine now reads `WAYLAND-1` from the
