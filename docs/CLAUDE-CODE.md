@@ -26,7 +26,7 @@ an API xtask serves itself (§4), in about two seconds of the guest's time.
 | A developer's session, by hand: onboarding, a ten-step turn with Bash, Write, Read, Grep, Glob, Edit and `cargo test`, permission prompts, Esc and Ctrl-C, resizes, `/exit`, in term and over `ssh -tt` | **works** 2026-10-11; two fixes, rustdoc on `PATH` and term's glyphs (§5.1) |
 | A real account | the network, TLS and the browser hand-off work up to the sign-in page; the sign-in itself is the customer's (§5.2) |
 | AVX state in a 32-bit program's signal frame | a first attempt backed out; what it takes is in §3 |
-| On AArch64 with the linux-arm64 build | not started (§6) |
+| On AArch64 with the linux-arm64 build | **done** 2026-10-15, under QEMU TCG: `cargo xtask test-claude-code --arch aarch64`, both halves, with no kernel change (§6) |
 | The Claude desktop app | **assessed** 2026-10-14. Anthropic now publishes a Linux build, a beta, 2.37337.1 on Electron 44.7.0. Running it natively is recommended over Wine and over repackaging. 12–18 points, first guesses, to run it with sign-in by hand; 21–33 with a saved sign-in and notifications (§7) |
 
 **Certification review (consultant, 2026-09-30): OK**, on b0db74ef, after a
@@ -403,8 +403,31 @@ What is left:
 
 * **ferrousli in glibc's place**: done on the `--everything` desktop,
   2026-10-01 (§5). The plain gate stays on the volume's glibc.
-* **AArch64**: Anthropic publishes linux-arm64, for the Pixel 7's VM; its
-  Bun build needs no AVX.
+* **AArch64**: done 2026-10-15, under QEMU TCG. Anthropic publishes
+  linux-arm64, the same 2.1.280; its Bun build needs no AVX.
+  `fetch-claude-code.sh arm64` makes a volume of its own,
+  `~/.local/share/ferrix/claude-code-arm64` (or
+  `FERRIX_CLAUDE_CODE_ARM64_VOLUME`), from that build -- checked against
+  the SHA-256 the release's `manifest.json` gives -- and Debian 13's
+  arm64 `libc6`, `libgcc-s1`, `bash`, `libtinfo6`, `ripgrep` and
+  `libpcre2-8-0`. The program is a non-PIE executable for
+  `/lib/ld-linux-aarch64.so.1`, its LOADs aligned to 64 KiB, with a
+  writable segment of about 140 MiB backed by the file.
+  `cargo xtask test-claude-code --arch aarch64` boots that volume with the
+  same script, API and verdict as x86-64 (§4, §5): `--version`, a turn of
+  `claude -p` whose Bash call runs on Ferrix, and the TUI typed at on the
+  console up to `/exit`. The initramfs links the arm64 loader and glibc's
+  directories into the volume (`claude_code::ARM64_LINKS`, Chromium's
+  AArch64 links less the fonts). Nothing in the kernel had to change: the
+  dynamic loading, signals, timers, vDSO and FP/SIMD Chromium's AArch64
+  port already needed were enough, and the first boot passed (gate
+  `ca2-cc-a64-1`, 370 s on the host, the turn about 33 s of the guest's
+  time under TCG). `--everything` and `--interpreter` stay x86-64's: there
+  is no AArch64 `--everything` desktop, and ferrousli is not tried here.
+  The negative control withholds the loader's link: `/bin/claude` cannot
+  start Claude Code, the script exits 3 at `claude --version`, and the
+  gate fails (`ca2-cc-a64-ctl2`). Not tried yet: the Pixel 7's VM under
+  KVM, and the linux-arm64 build in a desktop's terminal.
 
 ## 7. The desktop app (assessed 2026-10-14)
 

@@ -62,6 +62,21 @@ pub(crate) const LINKS: &[(&str, &str)] = &[
     ("usr/lib/x86_64-linux-gnu", "/data/usr/lib/x86_64-linux-gnu"),
 ];
 
+/// [`LINKS`] for AArch64's volume, Debian's arm64: the loader where the
+/// linux-arm64 build's and bash's `PT_INTERP` name it,
+/// `/lib/ld-linux-aarch64.so.1`, and the directories it searches.
+pub(crate) const ARM64_LINKS: &[(&str, &str)] = &[
+    (
+        "lib/ld-linux-aarch64.so.1",
+        "/data/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1",
+    ),
+    ("lib/aarch64-linux-gnu", "/data/usr/lib/aarch64-linux-gnu"),
+    (
+        "usr/lib/aarch64-linux-gnu",
+        "/data/usr/lib/aarch64-linux-gnu",
+    ),
+];
+
 /// The script: a lease for `eth0`, the version, and one prompt. `@PORT@` is
 /// [`Api`]'s, `@KEY@` is [`KEY`], and `@PROMPT@` is [`PROMPT`].
 ///
@@ -203,6 +218,40 @@ pub(crate) fn volume() -> Result<std::path::PathBuf> {
         )));
     }
     Ok(image)
+}
+
+/// Where `tools/common/fetch/fetch-claude-code.sh arm64` writes, unless
+/// `FERRIX_CLAUDE_CODE_ARM64_VOLUME` names another directory: Claude Code's
+/// linux-arm64 build on Debian's arm64 glibc and bash.
+///
+/// # Errors
+///
+/// The volume has not been fetched.
+pub(crate) fn arm64_volume() -> Result<std::path::PathBuf> {
+    let directory = match std::env::var_os("FERRIX_CLAUDE_CODE_ARM64_VOLUME") {
+        Some(directory) => std::path::PathBuf::from(directory),
+        None => crate::paths::volume_directory("claude-code-arm64")?,
+    };
+    let image = directory.join("claude-code.img");
+    if !image.is_file() {
+        return Err(Error::new(format!(
+            "{} is not there: tools/common/fetch/fetch-claude-code.sh arm64 makes it",
+            image.display()
+        )));
+    }
+    Ok(image)
+}
+
+/// What an AArch64 image carries for Claude Code: [`ARM64_LINKS`] and
+/// [`WRAPPER`] as `/bin/claude`. There is no desktop to merge into there.
+fn arm64_files() -> Vec<crate::ports::File> {
+    let mut files = rustc::files(ARM64_LINKS);
+    files.push(crate::ports::File {
+        path: "bin/claude".to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(WRAPPER.as_bytes().to_vec()),
+    });
+    files
 }
 
 /// The script, for [`Api`] listening on `port`.
@@ -356,12 +405,21 @@ fn screen_text(lines: &[String]) -> String {
 pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
     let arch = match args.arches()?.as_slice() {
         [Arch::X86_64] => Arch::X86_64,
+        [Arch::AArch64] => Arch::AArch64,
         _ => {
             return Err(Error::new(
-                "test-claude-code runs on x86-64: the volume carries Claude Code's linux-x64 build",
+                "test-claude-code runs on x86-64 (Claude Code's linux-x64 build) or AArch64 \
+                 (its linux-arm64 build), one at a time",
             ));
         }
     };
+    let arm64 = arch == Arch::AArch64;
+    if arm64 && (args.everything || args.interpreter.is_some()) {
+        return Err(Error::new(
+            "test-claude-code on AArch64 boots its own volume on Debian's glibc: \
+             --everything and --interpreter are x86-64's",
+        ));
+    }
     let mut args = args.clone();
     // Only the desktop's volume, and its release build, from what
     // `--everything` stands for: this boot has a console and no screen.
@@ -369,7 +427,9 @@ pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
     args.gl = false;
     args.clipboard = false;
     args.chrome = false;
-    args.data_image = Some(if args.everything {
+    args.data_image = Some(if arm64 {
+        arm64_volume()?
+    } else if args.everything {
         // Only there to say so when Claude Code has not been fetched, rather
         // than boot a desktop's volume without it.
         let _ = volume()?;
@@ -401,8 +461,8 @@ pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
     }
 
     let api = Api::start()?;
-    let shell =
-        zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
+    let shell = zinc::built(arch)?
+        .ok_or_else(|| Error::new(format!("zinc could not be built for {arch}")))?;
     let on = if args.everything {
         "the --everything desktop's volume"
     } else {
@@ -423,7 +483,11 @@ pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
     // The project's busybox for `udhcpc` and the `ip` its lease script runs;
     // zinc stays the shell.
     let busybox = busybox::program(arch)?;
-    let mut files = desktop_files(&carried);
+    let mut files = if arm64 {
+        arm64_files()
+    } else {
+        desktop_files(&carried)
+    };
     files.extend(carried);
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
@@ -1029,6 +1093,22 @@ mod tests {
         assert!(!with_loader.iter().any(|file| file.path == "lib64"));
         assert!(WRAPPER.contains("SHELL=/data/usr/bin/bash"));
         assert!(WRAPPER.contains("exec /data/claude-code/claude \"$@\""));
+    }
+
+    #[test]
+    fn the_arm64_image_carries_the_wrapper_and_arm64_links_only() {
+        let files = arm64_files();
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert!(paths.contains(&"bin/claude"));
+        assert!(paths.contains(&"lib/ld-linux-aarch64.so.1"));
+        assert!(paths.contains(&"lib/aarch64-linux-gnu"));
+        assert!(paths.contains(&"usr/lib/aarch64-linux-gnu"));
+        assert!(
+            !paths
+                .iter()
+                .any(|path| path.contains("x86_64") || *path == "lib64")
+        );
+        assert!(!paths.contains(&"usr/share/applications/claude.desktop"));
     }
 
     #[test]

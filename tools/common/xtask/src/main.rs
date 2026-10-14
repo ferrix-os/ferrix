@@ -328,7 +328,8 @@ COMMANDS:
     test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
                   against a stub Messages API xtask serves, run a Bash command on Ferrix for its model
                   (--everything: as `claude` on run-compositor --everything's merged volume, on ferrousli's
-                  loader and libc.so.6 as that desktop runs it, unless --interpreter glibc)
+                  loader and libc.so.6 as that desktop runs it, unless --interpreter glibc; --arch aarch64:
+                  the linux-arm64 build on fetch-claude-code.sh arm64's volume)
     test-steamcmd Attach the volume tools/common/fetch/fetch-steamcmd.sh makes, and require Valve's 32-bit steamcmd to update itself
                   and log in to Steam anonymously, over the network
     test-steam-bootstrap  Attach the volume tools/common/fetch/fetch-steam.sh makes, and require Valve's steam.sh to update the

@@ -42,13 +42,17 @@ resizes and `/exit`, as on the host. It found `rustdoc` missing from the
 desktop's `PATH` and ten of the TUI's characters drawn as boxes by term;
 both are fixed (§5.1).
 
+**Done (2026-10-15).** linux-arm64 on AArch64, under QEMU TCG: `cargo
+xtask test-claude-code --arch aarch64` runs the same script, turn and TUI
+on Claude Code's linux-arm64 build from a volume of its own
+(`fetch-claude-code.sh arm64`), with no kernel change (§6).
+
 **Still to do:**
 
 * A real account: the network, TLS and the browser hand-off are measured
   up to the sign-in page, which is the customer's own step (§5.2).
 * An i386 signal frame with the `XSAVE` area: a first attempt backed out,
   what it takes in §3 (`docs/BACKLOG.md`).
-* linux-arm64 on AArch64 (§6).
 * The Claude desktop app, the Electron application the customer chose on
   2026-09-30. Assessed on 2026-10-14 (§7). Anthropic now publishes a Linux
   build (a beta, 2.37337.1 on Electron 44.7.0), and the recommendation is
