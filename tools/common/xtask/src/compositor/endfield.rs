@@ -215,6 +215,18 @@ const OWN_END: &str = "> /tmp/wine/launcher.log &\n";
 const GRYPHLINK_START: &str = "mkdir -p /tmp/wine\necho \"endfield: gryphlink from the merged volume\"\n\
      /data/usr/bin/gryphlink 2>&1 | grep -E 'err:' > /tmp/wine/launcher.log &\n";
 
+/// The command file of a parity session (scratch, not for main): set
+/// FERRIX_PARITY_CMDS to a file the hook follows once the window is up --
+/// `click X Y`, `dclick X Y`, `move X Y`, `key a+b`, `shot NAME`, `wait S`,
+/// `quit` -- and FERRIX_PARITY_OUT to the directory its shots and the
+/// serial lines go to.
+fn parity() -> Option<(PathBuf, PathBuf)> {
+    Some((
+        PathBuf::from(std::env::var_os("FERRIX_PARITY_CMDS")?),
+        PathBuf::from(std::env::var_os("FERRIX_PARITY_OUT")?),
+    ))
+}
+
 /// [`SCRIPT`] after the lines that name `wine`'s loader and server; with
 /// `gryphlink`, its own start of the launcher replaced by
 /// [`GRYPHLINK_START`].
@@ -227,7 +239,48 @@ fn script(wine: Wine, gryphlink: bool) -> String {
         })
         .filter(|_| gryphlink);
     let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
-    format!("{}{body}", wine.prelude())
+    let script = format!("{}{body}", wine.prelude());
+    if parity().is_none() {
+        return script;
+    }
+    script
+    .replace(
+        "sleep 240\n",
+        r#"n=0
+e=0
+round=0
+while :; do
+    sleep 5
+    round=$((round + 1))
+    if [ $((round % 4)) -eq 0 ]; then
+        top -b -n 1 | head -n 14 | sed 's/^/endfield: top: /'
+    fi
+    total=$(wc -l < /tmp/wine/launcher.log)
+    if [ "$total" -gt "$e" ]; then
+        tail -n +$((e + 1)) /tmp/wine/launcher.log | grep -v ':fixme:' | cut -c1-300 | sed 's/^/endfield: wine: /'
+        e=$total
+    fi
+    logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
+    if [ -f "$logs/games.log" ]; then
+        total=$(wc -l < "$logs/games.log")
+        if [ "$total" -gt "$n" ]; then
+            tail -n +$((n + 1)) "$logs/games.log" | cut -c1-400 | sed 's/^/endfield: games.log: /'
+            n=$total
+        fi
+    fi
+    mkdir -p /tmp/offs
+    find "$logs" /data/GRYPHLINK/games -name '*.log' -type f 2>/dev/null | grep -v '/games.log$' | while read -r f; do
+        key=/tmp/offs/$(echo "$f" | tr '/ ' '__')
+        was=$(cat "$key" 2>/dev/null || echo 0)
+        now=$(wc -c < "$f")
+        if [ "$now" -gt "$was" ]; then
+            tail -c +$((was + 1)) "$f" | tr -d '\r' | cut -c1-400 | sed "s|^|endfield: log ${f##*/}: |"
+            echo "$now" > "$key"
+        fi
+    done
+done
+"#,
+    )
 }
 
 /// The launcher version `fetch-endfield-launcher.sh` pins.
@@ -405,6 +458,8 @@ fn boot_args(args: &Args, wine: Wine) -> Result<(Args, bool)> {
     let mut args = args.clone();
     args.gl = false;
     args.net = true;
+    // SCRATCH: FERRIX_ENDFIELD_KEEP keeps what the guest writes (the game's install).
+    args.data_image_kept = std::env::var_os("FERRIX_ENDFIELD_KEEP").is_some();
     args.data_image = Some(if gryphlink {
         let _ = proton_volume()?;
         crate::everything::volume()?
@@ -415,6 +470,68 @@ fn boot_args(args: &Args, wine: Wine) -> Result<(Args, bool)> {
         args.memory = MEMORY;
     }
     Ok((args, gryphlink))
+}
+
+/// Follow a parity session's command file until `quit`.
+fn follow(qmp: &mut Qmp, watching: &mut Watching<'_>, cmds: &Path, out: &Path) -> Result<()> {
+    let pause = |millis| std::thread::sleep(Duration::from_millis(millis));
+    let (width, height) = (1024usize, 768usize);
+    let tablet = |at: usize, across: usize| i32::try_from(at * 0x7FFF / across).unwrap_or(0);
+    let point = |qmp: &mut Qmp, x: usize, y: usize| -> Result<()> {
+        qmp.input_send_event(&[
+            super::boot::absolute("x", tablet(x, width)),
+            super::boot::absolute("y", tablet(y, height)),
+        ])
+    };
+    let click = |qmp: &mut Qmp| -> Result<()> {
+        qmp.input_send_event(&[super::boot::button_event("left", true)])?;
+        pause(60);
+        qmp.input_send_event(&[super::boot::button_event("left", false)])
+    };
+    std::fs::create_dir_all(out).map_err(|e| Error::new(format!("{e}")))?;
+    let mut done = 0;
+    loop {
+        let _ = watching.read_more(Instant::now() + Duration::from_millis(500), |_| false)?;
+        let lines: Vec<String> = watching.lines().iter().chain(watching.after()).cloned().collect();
+        let _ = std::fs::write(out.join("serial.log"), lines.join("\n"));
+        let text = std::fs::read_to_string(cmds).unwrap_or_default();
+        let all: Vec<&str> = text.lines().collect();
+        while done < all.len() {
+            let words: Vec<&str> = all[done].split_whitespace().collect();
+            done += 1;
+            let num = |i: usize| words.get(i).and_then(|w| w.parse::<usize>().ok()).unwrap_or(0);
+            match words.first().copied() {
+                Some("move") => point(qmp, num(1), num(2))?,
+                Some("click") => {
+                    point(qmp, num(1), num(2))?;
+                    pause(300);
+                    click(qmp)?;
+                }
+                Some("dclick") => {
+                    point(qmp, num(1), num(2))?;
+                    pause(300);
+                    click(qmp)?;
+                    pause(80);
+                    click(qmp)?;
+                }
+                Some("key") => {
+                    let keys: Vec<&str> = words.get(1).map(|k| k.split('+').collect()).unwrap_or_default();
+                    super::boot::press(qmp, &keys)?;
+                }
+                Some("shot") => {
+                    let name = words.get(1).copied().unwrap_or("shot");
+                    qmp.screendump(Some(DEVICE_ID), &out.join(format!("{name}.ppm")))?;
+                }
+                Some("wait") => pause(u64::try_from(num(1)).unwrap_or(0) * 1000),
+                Some("quit") => {
+                    watching.stop_when_done();
+                    return Ok(());
+                }
+                _ => {}
+            }
+            let _ = std::fs::write(out.join("done"), format!("{done}\n"));
+        }
+    }
 }
 
 /// Boot hyprix with yserver, the network and [`SCRIPT`], and require the
@@ -485,6 +602,9 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
             }
         };
         let window = watching.read_more(Instant::now() + PATIENCE, reached(WINDOW))?;
+        if let (true, Some((cmds, out))) = (window, parity()) {
+            return follow(&mut qmp, watching, &cmds, &out);
+        }
         if window {
             let deadline = Instant::now() + DRAWN;
             loop {
