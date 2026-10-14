@@ -59,6 +59,13 @@
       "branch": "gap-kill-reaped",
       "date": "2026-10-12",
       "purpose": "A reaped process is found by no pid: the pid table's unlist, find and listed (BACKLOG P1 kill(pid, 0) after wait4; consultant gkr-cert, ledger 2026-10-12 line 754, B1)"
+    },
+    {
+      "ids": ["L.user.130"],
+      "owner": "s13f-timens",
+      "branch": "s13f/timens",
+      "date": "2026-10-14",
+      "purpose": "Time namespaces: AddressSpace::replace_shared_code and map_shared_code_near, the vDSO view swapped in place for a space entering a time namespace, split from L.user.76 (consultant's T1, ledger 2026-10-14 line 966)"
     }
   ]
 }
