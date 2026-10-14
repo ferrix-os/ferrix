@@ -170,7 +170,14 @@ fn busy(lines: &[String]) -> Option<(u32, f64)> {
 /// processor was busy under the load; the rig's figures printed either way.
 fn judge(arch: Arch, smp: u32, lines: &[String]) -> Result<()> {
     for line in lines.iter().map(|line| line.trim()) {
-        let shown = ["wake: ", "busy: ", "hold: ", "write: ", "load: "];
+        let shown = [
+            "wake: ",
+            "busy: ",
+            "hold: ",
+            "write: ",
+            "load: ",
+            "compile: ",
+        ];
         if shown.iter().any(|prefix| line.starts_with(prefix)) {
             println!("  {arch}: {line}");
         }
