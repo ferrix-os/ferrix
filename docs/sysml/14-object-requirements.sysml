@@ -1490,6 +1490,37 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
+        requirement <'L.object.188'> reclaimTakesOnlyCleanPages : ItemLowLevel {
+            attribute :>> statement = "reclaim shall give back a page of a disk
+                file only through reclaim_clean, which hands it the pages its
+                file's source holds as the cache does -- for a writable file
+                none written and not yet written back, and none a write is
+                copying into, a truncation cutting or a writeback reading --
+                and calls decommit_range on them while the source holds them
+                still; a page it was not handed shall stay.";
+            attribute :>> criterion = "On a writable btrfs mount a file synced
+                and then written again in one page loses its clean pages to a
+                reclaim of the whole cache, keeps the written one, and reads
+                back as it was last written, every page.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::take_from", "user::vmo::Vmo::reclaim_clean",
+                "user::vmo::Filler::reclaim_clean");
+        }
+        requirement <'L.object.189'> theWholeCacheIsCounted : ItemLowLevel {
+            attribute :>> statement = "totals shall count every live cached
+                file's pages, whoever they are charged to: a disk file's, a
+                memory filesystem's, of the first those written and not yet
+                written back, and those reclaim may take now -- a reclaimable
+                object's pages less its dirty ones -- each from the object's own
+                count of its pages, for /proc/meminfo's Cached, Shmem, Dirty and
+                MemAvailable.";
+            attribute :>> criterion = "A file written on a writable mount is in
+                Cached, a page of it written and not synced is in Dirty, and
+                reclaim leaves Dirty as it was.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::totals", "user::vmo::Vmo::dirty_pages",
+                "user::vmo::Filler::dirty_pages", "user::vmo::Vmo::committed");
+        }
     }
 
     package SpeculationDomains {

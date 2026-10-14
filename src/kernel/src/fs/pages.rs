@@ -183,6 +183,41 @@ fn allocate_reclaiming() -> Option<Frame> {
     })
 }
 
+/// Commit page `index` of `vmo` for a write, reclaiming when there is no
+/// frame for it as a fill does ([`allocate_reclaiming`]): clean cache inside
+/// the job whose `memory.max` refused it, or anywhere when the machine is out,
+/// tried again while a reclaim gives some back, at most [`WRITE_RECLAIMS`]
+/// times. Without it a write found the machine full of clean cache and
+/// answered `ENOSPC` (docs/WINE.md §10). Called with no lock held, as a write
+/// into a store is: the writing file holds only the pages it writes still.
+///
+/// # Errors
+///
+/// As [`refused`]: `ENOSPC` when nothing more could be given back.
+fn commit_reclaiming(vmo: &Vmo, index: u64) -> Result<Frame> {
+    let mut tries = 0;
+    loop {
+        match vmo.commit(index) {
+            Ok(frame) => return Ok(frame),
+            Err(VmoError::OutOfMemory) if tries < WRITE_RECLAIMS => {
+                tries += 1;
+                let group = crate::sched::running_group();
+                let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
+                    .unwrap_or(quota::NONE);
+                if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+                    return Err(Errno::ENOSPC);
+                }
+            }
+            Err(error) => return Err(refused(error)),
+        }
+    }
+}
+
+/// How many reclaims one page of a write tries before it answers `ENOSPC`:
+/// each gives back up to a fill's run, and another task may take the room
+/// between a reclaim and the retry.
+const WRITE_RECLAIMS: u32 = 8;
+
 /// Give back frames no page kept.
 fn release_all(frames: impl IntoIterator<Item = Frame>) {
     for frame in frames {
@@ -239,6 +274,15 @@ impl VmoPages {
 impl Filler for Fill {
     fn reclaimable(&self) -> bool {
         self.source.reclaimable()
+    }
+
+    /// The source's own answer: a writable file keeps the pages it wrote.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        self.source.reclaim_clean(pages, drop)
+    }
+
+    fn dirty_pages(&self) -> u64 {
+        self.source.dirty_pages()
     }
 
     fn is_sourced(&self, index: u64) -> bool {
@@ -462,7 +506,7 @@ impl Pages for VmoPages {
                 self.fill_from(index, index)?;
             }
             let bytes = data.get(done..done + take).ok_or(Errno::EIO)?;
-            let frame = self.vmo.commit(index).map_err(refused)?;
+            let frame = commit_reclaiming(&self.vmo, index)?;
             // SAFETY: the frame is committed in this object; the filesystem
             // serialises writes against truncation (see the module), so
             // nothing releases it meanwhile; `bytes` fits in the page because

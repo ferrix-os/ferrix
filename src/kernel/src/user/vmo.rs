@@ -184,17 +184,40 @@ pub(crate) trait Filler: Send + Sync + fmt::Debug {
     /// As [`Filler::fill`].
     fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
 
-    /// Whether every page this object holds can be dropped and filled again
-    /// from the source, as it is: the file has no newer copy in memory. False
-    /// unless a source says so (`user::cache`).
+    /// Whether pages this object holds may be dropped and filled again from
+    /// the source, as they are: every page, for a read-only file; the clean
+    /// ones, for a writable file, which [`Filler::reclaim_clean`] names.
+    /// False unless a source says so (`user::cache`).
     fn reclaimable(&self) -> bool {
         false
+    }
+
+    /// Keep in `pages` those the source holds as the object does, and call
+    /// `drop` with them while the file holds them still: no write copies into
+    /// one and no writeback reads one until `drop` returns. What `drop` gave
+    /// back. The default, for a source whose every page is clean whenever
+    /// [`Filler::reclaimable`] says so, drops them all; never with none.
+    ///
+    /// Called with no spin lock held, as `drop`, which is
+    /// [`Vmo::decommit_range`]'s caller, must be.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        if self.reclaimable() && !pages.is_empty() {
+            drop(pages)
+        } else {
+            0
+        }
     }
 
     /// Whether page `index`, if the object lacks it, is the source's to
     /// fill: it is not a hole the file was cut to, which reads as zeros.
     fn is_sourced(&self, _index: u64) -> bool {
         false
+    }
+
+    /// How many of the object's pages the file has written and not yet
+    /// written back, for `/proc/meminfo`'s `Dirty`. None by default.
+    fn dirty_pages(&self) -> u64 {
+        0
     }
 }
 
@@ -486,6 +509,41 @@ impl Vmo {
             .is_some_and(|filler| filler.reclaimable())
             && !self.writably_mapped()
             && !self.mapped_written.load(Ordering::SeqCst)
+    }
+
+    /// How many of this object's pages its file has written and not yet
+    /// written back ([`Filler::dirty_pages`]); none for an object that is not
+    /// a disk file's.
+    pub(crate) fn dirty_pages(&self) -> u64 {
+        self.filler.as_ref().map_or(0, |filler| filler.dirty_pages())
+    }
+
+    /// Give back those of `picked` (page indices, lowest first) the source
+    /// still holds clean, as [`Filler::reclaim_clean`] says, each run of them
+    /// by [`Vmo::decommit_range`] while the source holds them still. How many
+    /// pages went; none for an object that is not [`Vmo::reclaimable`] now,
+    /// which a shared mapping that may write can have become since the pick.
+    ///
+    /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
+    pub(crate) fn reclaim_clean(&self, picked: &mut Vec<u64>) -> u64 {
+        if !self.reclaimable() {
+            return 0;
+        }
+        let Some(filler) = self.filler.as_ref() else {
+            return 0;
+        };
+        filler.reclaim_clean(picked, &mut |clean| {
+            let mut stolen = 0_u64;
+            let mut runs = clean.iter().copied().peekable();
+            while let Some(first) = runs.next() {
+                let mut length = 1;
+                while runs.next_if_eq(&(first + length)).is_some() {
+                    length += 1;
+                }
+                stolen += self.decommit_range(first, length) as u64;
+            }
+            stolen
+        })
     }
 
     /// Note, in `out`, the index of each committed page from `from` whose

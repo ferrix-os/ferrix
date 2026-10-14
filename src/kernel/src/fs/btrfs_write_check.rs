@@ -350,7 +350,65 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     crate::console::println!(
         "  btrfs-rw vdc filled with {filled} bytes until ENOSPC, synced, emptied and written again"
     );
+    let (given, dirty) = reclaim_written()?;
+    crate::console::println!(
+        "  reclaim  btrfs-rw: {given} clean pages of a writable mount given back, {dirty} written and          not written back kept and counted in Dirty; every page read back as it was last written"
+    );
     Ok(report)
+}
+
+/// A writable mount's clean pages are reclaim's to take and its dirty ones
+/// are not (`docs/CGROUPS.md` §10, `user::cache`): a file written and synced,
+/// one page of it written again and not synced, the whole cache reclaimed,
+/// and then every page must read as it was last written -- the one written
+/// again included, which reclaim would have refilled from the disk's older
+/// copy. `/proc/meminfo`'s figures come from the same count (`user::cache::
+/// totals`): the file's pages must be in it, and the dirty one in `Dirty`.
+/// Answers the pages reclaim gave back and the dirty pages it left.
+///
+/// Verifies: L.object.188, L.object.189
+fn reclaim_written() -> Result<(u64, u64), &'static str> {
+    const FILE: &[u8] = b"/mnt-rw/reclaim";
+    const PAGES: usize = 64;
+    const PAGE: usize = 4096;
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let sync = || {
+        ns.resolve(&ctx, None, MOUNT_POINT, true)
+            .map_err(|_| "the mount point could not be resolved")?
+            .mount
+            .filesystem()
+            .sync()
+            .map_err(|_| "the volume could not be synced before reclaim")
+    };
+    write_file(FILE, &pattern(23, 0, PAGES * PAGE))?;
+    sync()?;
+    // Page 1 written again, and not written back.
+    write_at(FILE, PAGE as u64, &pattern(29, 0, PAGE))?;
+    let before = crate::user::cache::totals();
+    if before.disk < PAGES as u64 {
+        return Err("Cached does not count a written file's pages");
+    }
+    if before.dirty == 0 {
+        return Err("Dirty does not count a page written and not written back");
+    }
+    let given = crate::user::cache::reclaim(crate::object::quota::NONE, before.disk).stolen;
+    let after = crate::user::cache::totals();
+    if given < (PAGES - 1) as u64 || after.disk > before.disk.saturating_sub(PAGES as u64 - 1) {
+        return Err("reclaim gave back no clean page of a writable mount");
+    }
+    if after.dirty < before.dirty {
+        return Err("reclaim gave back a page written and not written back");
+    }
+    let mut want = pattern(23, 0, PAGES * PAGE);
+    want.get_mut(PAGE..2 * PAGE)
+        .ok_or("the page written again is past the file")?
+        .copy_from_slice(&pattern(29, 0, PAGE));
+    if read_pattern(FILE)? != (want.len(), crc32c(&want)) {
+        return Err("a page of a writable mount read back otherwise than last written after reclaim");
+    }
+    sync()?;
+    Ok((given, before.dirty))
 }
 
 /// Fill the volume until a write answers `ENOSPC`, then require it whole:

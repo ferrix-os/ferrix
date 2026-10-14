@@ -39,6 +39,10 @@ pub struct Meminfo {
     pub swap_total: u64,
     /// `SwapFree`.
     pub swap_free: u64,
+    /// `Dirty`: file pages written and not yet written back.
+    pub dirty: u64,
+    /// `Shmem`: the pages of memory filesystems, which `Cached` counts too.
+    pub shmem: u64,
     /// `Slab`: the kernel's own small-object allocator.
     pub slab: u64,
 }
@@ -54,6 +58,8 @@ pub fn render(out: &mut Vec<u8>, info: &Meminfo) {
         ("SwapCached", info.swap_cached),
         ("SwapTotal", info.swap_total),
         ("SwapFree", info.swap_free),
+        ("Dirty", info.dirty),
+        ("Shmem", info.shmem),
         ("Slab", info.slab),
     ];
     for (label, kib) in lines {

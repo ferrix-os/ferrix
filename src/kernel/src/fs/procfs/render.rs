@@ -181,24 +181,31 @@ pub(super) fn loadavg(_: &Kernel) -> Result<Vec<u8>> {
 
 /// `/proc/meminfo`.
 ///
-/// Free memory is honestly all that is available, because nothing the kernel
-/// holds can be reclaimed on demand: there is no page cache to shrink and no
-/// swap. tmpfs file pages, which Linux reports under `Cached` and `Shmem`,
-/// are held by VMOs here and are simply not free, so `Cached` is zero rather
-/// than a figure that could be given back. `Slab` is the kernel heap's pages,
-/// which is the same thing by another allocator.
+/// `Cached` is every file's pages in the page cache (`user::cache::totals`):
+/// a disk file's and a memory filesystem's -- tmpfs, the initramfs, `memfd`
+/// -- which Linux counts there too, and shows again under `Shmem`. `Dirty`
+/// is the disk pages written and not yet written back. `MemAvailable` is
+/// what is free and what reclaim could give back of the cache: a disk file's
+/// clean pages, which it drops and fills again. A memory filesystem's pages
+/// have nowhere to go, as there is no swap, and are not available. `Buffers`
+/// is zero: no block device has a page cache of its own here, and btrfs's
+/// metadata cache is kernel heap, which `Slab` counts, the kernel heap's
+/// pages being the same thing by another allocator.
 pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
     let kib = |frames: u64| frames.saturating_mul(PAGE_SIZE / 1024);
     let free = kib(mm::free_frames());
+    let cache = crate::user::cache::totals();
     let info = Meminfo {
         total: kib(mm::managed_frames()),
         free,
-        available: free,
+        available: free.saturating_add(kib(cache.reclaimable)),
         buffers: 0,
-        cached: 0,
+        cached: kib(cache.disk.saturating_add(cache.memory)),
         swap_cached: 0,
         swap_total: 0,
         swap_free: 0,
+        dirty: kib(cache.dirty),
+        shmem: kib(cache.memory),
         slab: kib(mm::heap_pages() as u64),
     };
     let mut out = Vec::new();

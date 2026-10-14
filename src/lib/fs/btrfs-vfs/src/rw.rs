@@ -44,6 +44,35 @@
 //! without a word to the mount, until a writeback finds no mapping left that
 //! may: a linker writes its output through one.
 //!
+//! # Clean pages may be reclaimed
+//!
+//! A page written back, and not written since, holds what the volume holds,
+//! and the kernel's reclaim may drop it and fill it again from here as it
+//! does a read-only mount's (`PageSource::reclaim_clean`). A dirty page is
+//! never handed over; nor is one a write is copying into, a truncation is
+//! cutting or a writeback is reading, each of which names its pages in the
+//! inode's `still` list for as long as it touches them. While reclaim drops
+//! the pages it was handed it sets `reclaiming`, and a write that would
+//! start then waits for it, so a write never copies into a frame that is
+//! being given back, and a writeback never reads a page that went between
+//! taking the dirty set and reading it -- which would fill it through the
+//! volume lock the writeback holds. Reclaim never waits for a write: it
+//! leaves what is held.
+//!
+//! # A writeback lets the lock go between slices
+//!
+//! Every read of a page the cache does not hold takes the volume lock, and a
+//! commit holds it while it writes every dirty page back. A program writing
+//! steadily commits every [`COMMIT_THRESHOLD`] bytes, and so held the lock
+//! most of the time: four compilers started cold beside a writer on the
+//! same mount waited for it for nearly all of a minute and built nothing
+//! (`docs/GAME-PATH.md` §12, R3, 2026-10-14). So a commit first writes the
+//! dirty pages back a slice of [`WRITEBACK_PAGES`] at a time, each slice
+//! under a hold of its own, and between slices lets in whoever was waiting
+//! for the lock then (`Shared::give_way`), since the lock lets a newcomer
+//! take it ahead of a woken waiter. Only the last slice and the commit
+//! itself are done under one hold, as before.
+//!
 //! # Room is taken at the write
 //!
 //! Since a write's extents are made at the commit, a volume that has run
@@ -82,18 +111,20 @@
 //! for good. A crash before that leaves the orphan item, and the next mount
 //! cleans it up.
 
+use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::items::Timespec as BtrfsTime;
 use ferrix_btrfs_write::fs::NewInode;
 use ferrix_btrfs_write::{Error as WriteError, Unsupported, WriteDevice, WriteVolume};
-use ferrix_sync::{Parker, SleepLock, SleepLockGuard};
+use ferrix_sync::{Parker, Parking, SleepLock, SleepLockGuard};
 use ferrix_vfs::tmpfs::{PAGE_SIZE, PageSource, Pages, Storage};
 use ferrix_vfs::{
     Clock, DirEntry, Errno, FIRST_CURSOR, FileSystem, FileType, Inode, Metadata, NewNode, Result,
@@ -159,6 +190,14 @@ struct Shared<D> {
     unreadable: SpinLock<bool>,
     /// Where the mount says that it went read-only, and why.
     notice: fn(fmt::Arguments<'_>),
+    /// Where a writeback waits for the lock's waiters to have had their turn
+    /// (`give_way`), and a write for reclaim to be done with a file's pages
+    /// (`Node::hold_still`); `None` with no memory for one, when both spin.
+    turn: Option<Box<dyn Parking>>,
+    /// Callers that have asked for the volume lock, and of those, the ones
+    /// that have had it: their difference is how many wait for it now.
+    arrived: AtomicU64,
+    admitted: AtomicU64,
 }
 
 impl<D> fmt::Debug for Shared<D> {
@@ -219,6 +258,9 @@ impl<D: WriteHandle> RwBtrfs<D> {
             freed: SpinLock::new(false),
             unreadable: SpinLock::new(false),
             notice,
+            turn: parker.new_parking(),
+            arrived: AtomicU64::new(0),
+            admitted: AtomicU64::new(0),
         });
         // The open may have evicted orphans left by a crash; commit that
         // before anything else changes, so a second crash has less to redo.
@@ -241,7 +283,11 @@ impl<D: WriteHandle> Shared<D> {
     /// aborted is reloaded read-only from its last commit first: see "After
     /// an aborted transaction".
     fn lock(&self) -> SleepLockGuard<'_, WriteVolume<D>> {
+        let _ = self.arrived.fetch_add(1, Ordering::SeqCst);
         let mut volume = self.volume.lock();
+        let _ = self.admitted.fetch_add(1, Ordering::SeqCst);
+        // A writeback between slices may be waiting for this one's turn.
+        self.wake();
         if let Some(cause) = volume.aborted()
             && !*self.unreadable.lock()
         {
@@ -301,6 +347,53 @@ impl<D: WriteHandle> Shared<D> {
         *reserved = reserved.saturating_sub(pages.saturating_mul(PAGE_SIZE));
     }
 
+    /// Wake whatever waits on [`Shared::turn`] to look again.
+    fn wake(&self) {
+        if let Some(turn) = &self.turn {
+            turn.unpark_all();
+        }
+    }
+
+    /// Wait, with no lock held, until `ready` says so: parked on
+    /// [`Shared::turn`], or spinning without one.
+    fn wait_until(&self, ready: &mut dyn FnMut() -> bool) {
+        while !ready() {
+            match &self.turn {
+                Some(turn) => turn.park_until(ready),
+                None => core::hint::spin_loop(),
+            }
+        }
+    }
+
+    /// Let everyone waiting for the volume lock now have it before going on:
+    /// called by a writeback between two slices, holding no lock, so that a
+    /// read that needs a page is not kept out until the whole commit is done
+    /// (see "A writeback lets the lock go between slices"). Only those
+    /// waiting already: one that comes later waits for the next slice, so a
+    /// stream of readers cannot hold the writeback off for good.
+    fn give_way(&self) {
+        let waiting = self.arrived.load(Ordering::SeqCst);
+        self.wait_until(&mut || self.admitted.load(Ordering::SeqCst) >= waiting);
+    }
+
+    /// Write every live inode's dirty pages back a slice at a time, each
+    /// under a hold of the lock of its own, letting waiters in between; the
+    /// last slice of each is left to the writeback that commits. Failures
+    /// are left to it too: it meets them again and answers for them.
+    fn write_back_in_slices(&self) {
+        let live: Vec<Arc<Node<D>>> = self
+            .nodes
+            .lock()
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for node in &live {
+            if !node.write_back_in_slices() {
+                return;
+            }
+        }
+    }
+
     /// Run `op` with the volume, translating its error. Evictions queued by
     /// dropped inodes are done first, so they never pile up.
     fn with<T>(
@@ -350,6 +443,7 @@ impl<D: WriteHandle> Shared<D> {
     /// rest are written back and committed all the same, so what fit is
     /// kept; the answer is then `ENOSPC`.
     fn sync_all(&self) -> Result<()> {
+        self.write_back_in_slices();
         let live: Vec<Arc<Node<D>>> = self
             .nodes
             .lock()
@@ -418,8 +512,70 @@ struct Node<D> {
     meta: SpinLock<Metadata>,
     /// The page cache, made at first use.
     pages: SpinLock<Option<Arc<dyn Pages>>>,
-    /// Pages written and not yet turned into extents.
-    dirty: SpinLock<BTreeSet<u64>>,
+    /// Pages written and not yet turned into extents. Shared with the page
+    /// cache's source, which answers reclaim from it.
+    dirty: Arc<SpinLock<BTreeSet<u64>>>,
+    /// The pages being written into, cut or written back, which reclaim
+    /// leaves; see "Clean pages may be reclaimed". Taken after `dirty`, never
+    /// around it.
+    still: Arc<SpinLock<Still>>,
+}
+
+/// What a writable file holds still against reclaim.
+#[derive(Debug, Default)]
+struct Still {
+    /// The pages, first and last, each write, truncation and writeback is
+    /// touching now.
+    busy: Vec<(u64, u64)>,
+    /// Set while reclaim gives back pages of this file: a write waits for it
+    /// to go before it touches one.
+    reclaiming: bool,
+}
+
+impl Still {
+    /// Whether a write, truncation or writeback touches page `index` now.
+    fn holds(&self, index: u64) -> bool {
+        self.busy
+            .iter()
+            .any(|&(first, last)| first <= index && index <= last)
+    }
+}
+
+/// Pages `first` to `last` of one file held still, until this is dropped.
+struct StillGuard<'a> {
+    still: &'a SpinLock<Still>,
+    range: (u64, u64),
+}
+
+impl StillGuard<'_> {
+    /// Note `first` to `last` in `still`, which the caller holds locked and
+    /// has seen no reclaim in.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` with no room to note them; nothing is noted.
+    fn note<'a>(
+        still: &'a SpinLock<Still>,
+        held: &mut Still,
+        first: u64,
+        last: u64,
+    ) -> Result<StillGuard<'a>> {
+        held.busy.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+        held.busy.push((first, last));
+        Ok(StillGuard {
+            still,
+            range: (first, last),
+        })
+    }
+}
+
+impl Drop for StillGuard<'_> {
+    fn drop(&mut self) {
+        let mut still = self.still.lock();
+        if let Some(at) = still.busy.iter().position(|&range| range == self.range) {
+            let _ = still.busy.swap_remove(at);
+        }
+    }
 }
 
 impl<D> fmt::Debug for Node<D> {
@@ -448,7 +604,8 @@ impl<D: WriteHandle> Node<D> {
             kind: meta.kind,
             meta: SpinLock::new(meta),
             pages: SpinLock::new(None),
-            dirty: SpinLock::new(BTreeSet::new()),
+            dirty: Arc::new(SpinLock::new(BTreeSet::new())),
+            still: Arc::new(SpinLock::new(Still::default())),
         });
         let mut nodes = shared.nodes.lock();
         if let Some(alive) = nodes.get(&ino).and_then(Weak::upgrade) {
@@ -466,6 +623,8 @@ impl<D: WriteHandle> Node<D> {
         let source: Arc<dyn PageSource> = Arc::new(Source {
             shared: Arc::clone(&self.shared),
             ino: self.ino,
+            dirty: Arc::clone(&self.dirty),
+            still: Arc::clone(&self.still),
         });
         let made: Arc<dyn Pages> = Arc::from(self.shared.storage.allocate_with(source)?);
         made.resize(self.meta.lock().size);
@@ -497,6 +656,91 @@ impl<D: WriteHandle> Node<D> {
         }
     }
 
+    /// Hold pages `first` to `last` still against reclaim while a write or a
+    /// truncation touches them, waiting first for a reclaim of this file's
+    /// pages under way to be done.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` with no room to note them.
+    fn hold_still(&self, first: u64, last: u64) -> Result<StillGuard<'_>> {
+        loop {
+            {
+                let mut still = self.still.lock();
+                if !still.reclaiming {
+                    return StillGuard::note(&self.still, &mut still, first, last);
+                }
+            }
+            self.shared
+                .wait_until(&mut || !self.still.lock().reclaiming);
+        }
+    }
+
+    /// Write this inode's dirty pages back a slice at a time, each under its
+    /// own hold of the volume lock, letting the lock's waiters in between,
+    /// until one slice or less is left for the writeback that commits.
+    /// Whether to go on to the next inode: not after a failure, or on a
+    /// volume that takes no more writes.
+    fn write_back_in_slices(&self) -> bool {
+        loop {
+            let more = {
+                let mut volume = self.shared.lock();
+                if volume.is_read_only() {
+                    return false;
+                }
+                match self.write_back_slice(&mut volume, WRITEBACK_PAGES) {
+                    Ok(more) => more,
+                    Err(_) => return false,
+                }
+            };
+            self.shared.give_way();
+            if !more {
+                return true;
+            }
+        }
+    }
+
+    /// Write back the lowest `most` dirty pages if more than that many are
+    /// dirty, under the lock the caller holds; whether it did. What shared
+    /// mappings wrote and the mount's hold of the object are left to
+    /// [`Node::write_back`], as is a last slice.
+    fn write_back_slice(&self, volume: &mut WriteVolume<D>, most: usize) -> Result<bool> {
+        let Some(pages) = self.pages.lock().clone() else {
+            return Ok(false);
+        };
+        let (part, still) = {
+            let mut dirty = self.dirty.lock();
+            let Some(&rest) = dirty.iter().nth(most) else {
+                return Ok(false);
+            };
+            let first = dirty.first().copied().unwrap_or(rest);
+            // Held still from before they leave the dirty set, which reclaim
+            // looks at under the same lock.
+            let still = {
+                let mut held = self.still.lock();
+                StillGuard::note(&self.still, &mut held, first, rest)?
+            };
+            let tail = dirty.split_off(&rest);
+            let part = core::mem::replace(&mut *dirty, tail);
+            self.shared.release(part.len() as u64);
+            (part, still)
+        };
+        let size = self.meta.lock().size;
+        let written = self.write_runs(volume, &pages, &part, size);
+        self.shared.note_room(volume);
+        if let Err((error, first)) = written {
+            let mut again = self.dirty.lock();
+            let before = again.len();
+            again.extend(part.range(first..));
+            self.shared
+                .reserve_anyway(again.len().saturating_sub(before) as u64);
+            return Err(error);
+        }
+        drop(still);
+        self.refresh(volume)?;
+        Ok(true)
+    }
+
     /// Refresh what `stat` answers from the volume.
     ///
     /// What the volume holds is behind what this object does while pages
@@ -523,8 +767,14 @@ impl<D: WriteHandle> Node<D> {
     /// page is, because something wrote it.
     fn write_back(&self, volume: &mut WriteVolume<D>) -> Result<()> {
         let store = self.pages.lock().clone();
-        let (dirty, held) = {
+        let (dirty, held, _still) = {
             let mut dirty = self.dirty.lock();
+            // Held still before they leave the dirty set: every page this
+            // writeback may read, which reclaim must not take meanwhile.
+            let _still = {
+                let mut still = self.still.lock();
+                StillGuard::note(&self.still, &mut still, 0, u64::MAX)?
+            };
             // Every page dirty now took its room; the ones taken out below
             // give it back, and the ones put back take it again.
             self.shared.release(dirty.len() as u64);
@@ -542,7 +792,7 @@ impl<D: WriteHandle> Node<D> {
             } else {
                 self.shared.held.lock().remove(&self.ino)
             };
-            (core::mem::take(&mut *dirty), held)
+            (core::mem::take(&mut *dirty), held, _still)
         };
         // Never the last reference: whoever called this holds one.
         drop(held);
@@ -701,6 +951,10 @@ impl<D> Drop for Node<D> {
 struct Source<D> {
     shared: Arc<Shared<D>>,
     ino: u64,
+    /// The inode's dirty set and what it holds still, which say which pages
+    /// reclaim may have.
+    dirty: Arc<SpinLock<BTreeSet<u64>>>,
+    still: Arc<SpinLock<Still>>,
 }
 
 impl<D> fmt::Debug for Source<D> {
@@ -714,6 +968,38 @@ impl<D> fmt::Debug for Source<D> {
 impl<D: WriteHandle> PageSource for Source<D> {
     fn reads_disk(&self) -> bool {
         true
+    }
+
+    /// The clean pages are; [`PageSource::reclaim_clean`] says which.
+    fn reclaimable(&self) -> bool {
+        true
+    }
+
+    /// Those of `pages` neither dirty nor held still, handed to `drop` with
+    /// `reclaiming` set, so that no write starts on the file until they are
+    /// gone. A reclaim of this file already under way is left to finish: its
+    /// pages are not handed over twice.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        {
+            let dirty = self.dirty.lock();
+            let mut still = self.still.lock();
+            if still.reclaiming {
+                return 0;
+            }
+            pages.retain(|&page| !dirty.contains(&page) && !still.holds(page));
+            if pages.is_empty() {
+                return 0;
+            }
+            still.reclaiming = true;
+        }
+        let stolen = drop(pages);
+        self.still.lock().reclaiming = false;
+        self.shared.wake();
+        stolen
+    }
+
+    fn dirty_pages(&self) -> u64 {
+        self.dirty.lock().len() as u64
     }
 
     fn fill_range(&self, first: u64, pages: &mut [&mut [u8]]) -> Result<usize> {
@@ -871,6 +1157,9 @@ impl<D: WriteHandle> Inode for Node<D> {
         }
         let (data, took) = self.take_room(at, data)?;
         let end = at.saturating_add(data.len() as u64);
+        // From the copy to the dirty mark, which reclaim must not come
+        // between: see "Clean pages may be reclaimed".
+        let still = self.hold_still(at / PAGE_SIZE, end.saturating_sub(1) / PAGE_SIZE)?;
         pages.write(at, data)?;
         {
             // The clock and the store's length are words the kernel reads
@@ -903,6 +1192,8 @@ impl<D: WriteHandle> Inode for Node<D> {
                 self.shared.release(took - added);
             }
         }
+        // Before a commit, whose writeback holds what it writes still itself.
+        drop(still);
         self.maybe_commit(data.len())?;
         // The offset just past the write, which a `write` moves the file's
         // position to: the kernel copies a large write in pieces, and a start
@@ -920,6 +1211,9 @@ impl<D: WriteHandle> Inode for Node<D> {
         }
         *self.shared.freed.lock() = true;
         let pages = self.pages()?;
+        // The page the cut falls in is zeroed past it in place, so reclaim
+        // must not give its frame back meanwhile.
+        let still = self.hold_still(len / PAGE_SIZE, u64::MAX)?;
         // Cut the cache first, so a page past the new end cannot be written
         // back over what the truncation removed.
         pages.resize(len);
@@ -930,6 +1224,7 @@ impl<D: WriteHandle> Inode for Node<D> {
             dirty.retain(|&page| page * PAGE_SIZE < len);
             self.shared.release((before - dirty.len()) as u64);
         }
+        drop(still);
         let ino = self.ino;
         let now = self.shared.now();
         self.with_written_back(|volume| {
@@ -1112,6 +1407,9 @@ impl<D: WriteHandle> Inode for Node<D> {
     /// carries no names; Linux falls back the same way.
     fn fsync(&self, data_only: bool) -> Result<()> {
         let _ = data_only;
+        // Slices first, as a commit's writeback goes; what fails is met again
+        // below.
+        let _ = self.write_back_in_slices();
         let mut volume = self.shared.lock();
         self.write_back(&mut volume)?;
         if *self.shared.structural.lock() {
