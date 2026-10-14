@@ -18,7 +18,9 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   on 2026-10-14 (`docs/CLAUDE-CODE.md` §7). Anthropic now publishes a
   Linux build, and running it natively is 12–18 points as first guesses,
   ordered by the customer the same day (C1 to C4; C5 to C7 are not ordered,
-  and C6's Secret Service will be served by `authd`).
+  and C6's Secret Service will be served by `authd`). C1 to C4 were built
+  on 2026-10-15: the app shows its sign-in screen on the `--everything`
+  desktop (`cargo xtask test-claude-desktop`, §7.8).
 
 * **The trip to ring 3 is being cut** (2026-09-30, `docs/OPAQUE-KERNEL.md`
   § 8). The customer's direction is Linux software beside safety functions
