@@ -1952,7 +1952,13 @@ listing with one delay -- 300 us, then 20 ms -- did not fire
 rarely fell in that window. s1 now also delays 5 ms before the
 thread-list lock in `with_live_threads`, which opens the window to every
 look, and fires (`s13fs-s1d` on 173e40ffc, `s13fs-s1e` on 4cd46c706,
-`s13fs-s1-f` on 816efdf58).
+`s13fs-s1-f` on 816efdf58). The batch: 20261014T172957Z, stack tip
+9af2935f6 on `main` c0bded3c7, every gate `run: PASSED` -- check, the
+release build, `test-boot` on x86-64 under KVM and TCG, AArch64, ARMv7-A
+and ARMv7-A `--smp 2`, `test-threads --arch all`, `test-seccomp --arch
+all`, `test-init --arch all`, `test-shell` on x86-64 (zinc, ferrousli, the
+musl and the glibc busybox) and `test-vfs` on x86-64 (ferrousli and the
+musl busybox) (tags `batch-20261014T172957Z-1` to `-16`).
 
 **S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
 test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
